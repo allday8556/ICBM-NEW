@@ -148,7 +148,13 @@ class ConnectService:
         key = definition.profile.supplier_key
         stored = self._credentials.stored(key)
         state = S(row.state) if row else S.DISCONNECTED
-        session_file = self._sessions.exists(key)
+        # "Usable" means the persisted session exists and decrypts; an unreadable blob is
+        # discarded by this read, so it is never reported as STORED or as backing READY.
+        usable = self._session_usable(key)
+        if state is S.READY and not usable:
+            # A READY row without a usable session never reports READY; heal it when possible.
+            self._demote_unbacked_ready(definition)
+            state = S.DISCONNECTED
         if state is S.PAUSED:
             auth_state = "PAUSED"
         elif state is S.READY:
@@ -166,7 +172,7 @@ class ConnectService:
         elif state in (S.AUTH_EXPIRED, S.REAUTHENTICATING):
             session_state = "EXPIRED"
         else:
-            session_state = "STORED" if session_file else "NONE"
+            session_state = "STORED" if usable else "NONE"
         return SupplierConnectionSummary(
             connection_id=row.connection_id if row else None,
             supplier_key=key,
@@ -358,7 +364,7 @@ class ConnectService:
         password = password or None
         if not username:
             raise InputValidationError("SUPPLIER_CREDENTIALS_INVALID", "an ID is required")
-        if password is not None and password.strip() in _PASSWORD_SENTINELS:
+        if password is not None and password in _PASSWORD_SENTINELS:
             raise InputValidationError(
                 "SUPPLIER_PASSWORD_MASK_REJECTED",
                 "the stored-password indicator is not a password; choose 비밀번호 변경",
@@ -398,9 +404,15 @@ class ConnectService:
         self._record_credentials_update(definition, actor=actor, state_from=state_from)
 
     def _invalidate_session(self, definition: SupplierDefinition) -> ConnectionState:
-        """Step 1: the session belongs to the account that created it, so it goes first."""
+        """Step 1, itself fail-closed (re-audit 5655076870): the canonical state leaves READY
+        before the session is deleted. If the DB write fails, nothing has changed; if deleting
+        the session then fails, nothing reports READY and the old login is still intact."""
+        state_from = self._demote_for_replacement(definition)
+        self._sessions.clear(definition.profile.supplier_key)
+        return state_from
+
+    def _demote_for_replacement(self, definition: SupplierDefinition) -> ConnectionState:
         supplier_key = definition.profile.supplier_key
-        self._sessions.clear(supplier_key)
         with self._db.write() as session:
             row = self._row(session, supplier_key)
             if row is None:
@@ -412,6 +424,36 @@ class ConnectService:
                 self._move(row, S.DISCONNECTED, trigger="credentials_replacing")
             row.updated_at = self._clock.now()
         return source
+
+    def _session_usable(self, supplier_key: str) -> bool:
+        """The persisted session exists and decrypts (an unreadable blob is discarded)."""
+        return self._sessions.load(supplier_key) is not None
+
+    def _demote_unbacked_ready(self, definition: SupplierDefinition) -> None:
+        """Self-healing invariant (comment 5655122594): READY is reported only while its
+        persisted session is usable. Best effort and non-blocking — a flight in progress sets
+        the state itself — and never needs the lock to stop reporting READY."""
+        key = definition.profile.supplier_key
+        lock = self._flights.lifecycle(key)
+        if not lock.acquire(blocking=False):
+            return
+        try:
+            with self._db.write() as session:
+                row = self._row(session, key)
+                if row is None or S(row.state) is not S.READY or self._session_usable(key):
+                    return
+                self._move(row, S.DISCONNECTED, trigger="session_unusable")
+                self._audit_entry(
+                    session,
+                    row,
+                    AuditEventType.SUPPLIER_CONNECTION_DEMOTED,
+                    action="SELF_HEAL",
+                    reason_code="SESSION_MISSING_OR_UNREADABLE",
+                    state_from=S.READY,
+                    state_to=S.DISCONNECTED,
+                )
+        finally:
+            lock.release()
 
     def _record_credentials_update(
         self, definition: SupplierDefinition, *, actor: str, state_from: ConnectionState

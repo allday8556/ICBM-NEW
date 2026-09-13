@@ -132,24 +132,111 @@ def test_an_interrupted_replacement_never_leaves_the_old_session_able_to_prove_r
         assert gateway.requests[-2:] == [RequestKind.CONTROL_READ, RequestKind.PROTECTED_READ]
 
 
-def test_a_failure_before_the_session_is_invalidated_changes_nothing(
+def _ready_with_old_login(app: Container, config: AppConfig) -> None:
+    app.connect.save_credentials(
+        FAKE_KEY, username=OLD.username, password=OLD.password, actor=OPERATOR
+    )
+    assert app.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True).proven
+    assert app.connect.supplier_connection(FAKE_KEY).state is S.READY
+    assert _session_file(config)
+
+
+def test_a_failed_state_demotion_leaves_the_old_identity_whole(
     config: AppConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Invalidation is the first step: if it fails, the old identity stays whole and consistent.
+    # Inside step 1 the canonical state leaves READY first. If that DB write fails, nothing has
+    # changed: old login, old session, and a READY that the session still backs (re-audit
+    # 5655076870 / 5655122594).
     gateway = FakeGateway()
     secrets = FlakySecretStore()
     with _process(config, gateway, secrets) as app:
-        app.connect.save_credentials(
-            FAKE_KEY, username=OLD.username, password=OLD.password, actor=OPERATOR
-        )
-        app.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True)
-        monkeypatch.setattr(app.connect._sessions, "clear", _boom)
+        _ready_with_old_login(app, config)
+        monkeypatch.setattr(app.connect, "_demote_for_replacement", _boom)
         with pytest.raises(OSError):
             app.connect.save_credentials(
                 FAKE_KEY, username=NEW.username, password=NEW.password, actor=OPERATOR
             )
         assert SupplierCredentialStore(secrets).load(FAKE_KEY) == OLD
         assert _session_file(config)
+        summary = app.connect.supplier_connection(FAKE_KEY)
+        assert (summary.state, summary.capability_status) == (S.READY, CapabilityStatus.READY)
+
+
+def test_a_failed_session_deletion_after_demotion_cannot_make_readiness_lie(
+    config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The DB left READY, then deleting the old session fails: the replacement stops, the old
+    # login stays, and nothing reports READY until a new protected-read proof.
+    gateway = FakeGateway()
+    secrets = FlakySecretStore()
+    with _process(config, gateway, secrets) as app:
+        _ready_with_old_login(app, config)
+        monkeypatch.setattr(app.connect._sessions, "clear", _boom)
+        with pytest.raises(OSError):
+            app.connect.save_credentials(
+                FAKE_KEY, username=NEW.username, password=NEW.password, actor=OPERATOR
+            )
+        assert SupplierCredentialStore(secrets).load(FAKE_KEY) == OLD
+        summary = app.connect.supplier_connection(FAKE_KEY)
+        assert summary.state is S.DISCONNECTED
+        assert summary.capability_status is not CapabilityStatus.READY
+        ready = {c.key: c.status for c in app.connect.capabilities()}
+        assert ready[f"supplier:{FAKE_KEY}"] is not CapabilityStatus.READY
+    monkeypatch.undo()
+    with _process(config, gateway, secrets) as restarted:
+        assert restarted.connect.supplier_connection(FAKE_KEY).state is S.DISCONNECTED
+        assert restarted.connect.verify(
+            FAKE_KEY, trigger="operator_test", allow_login=True
+        ).proven, "READY again only through a new proof (the old login is consistent)"
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt"])
+def test_ready_without_a_usable_session_heals_itself_and_needs_a_fresh_proof(
+    config: AppConfig, damage: str
+) -> None:
+    # Self-healing invariant (comment 5655122594 §1): READY is reported only while the persisted
+    # session is actually usable; otherwise it is demoted, audited, and proven afresh.
+    gateway = FakeGateway()
+    secrets = FlakySecretStore()
+    with _process(config, gateway, secrets) as app:
+        _ready_with_old_login(app, config)
+        path = config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc"
+        if damage == "missing":
+            path.unlink()
+        else:
+            path.write_bytes(b"ICBMSESS1" + b"\0" * 40)
+        summary = app.connect.supplier_connection(FAKE_KEY)
+        assert (summary.state, summary.capability_status, summary.session_state) == (
+            S.DISCONNECTED,
+            CapabilityStatus.DISCONNECTED,
+            "NONE",
+        )
+        demoted = [
+            e
+            for e in app.audit.list_events(limit=50)
+            if e.event_type == "SUPPLIER_CONNECTION_DEMOTED"
+        ]
+        assert len(demoted) == 1
+        assert demoted[0].details | {"state_from": "READY", "state_to": "DISCONNECTED"} == (
+            demoted[0].details
+        )
+        logins = gateway.logins
+        assert app.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True).proven
+        assert gateway.logins == logins + 1, "a fresh login and proof, not the lost session"
+
+
+def test_a_restart_never_carries_ready_over_a_damaged_session(config: AppConfig) -> None:
+    gateway = FakeGateway()
+    secrets = FlakySecretStore()
+    with _process(config, gateway, secrets) as app:
+        _ready_with_old_login(app, config)
+    (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").write_bytes(b"not a session")
+    with _process(config, gateway, secrets) as restarted:
+        summary = restarted.connect.supplier_connection(FAKE_KEY)
+        assert (summary.state, summary.session_state) == (S.DISCONNECTED, "NONE")
+        logins = gateway.logins
+        assert restarted.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True).proven
+        assert gateway.logins == logins + 1
 
 
 def test_partial_or_legacy_credentials_never_drive_a_login(config: AppConfig) -> None:
@@ -178,3 +265,14 @@ def test_a_real_password_containing_the_mask_character_is_accepted(config: AppCo
         )
         stored = SupplierCredentialStore(secrets).load(FAKE_KEY)
         assert stored is not None and stored.password == "real•pass•word"
+
+
+@pytest.mark.parametrize("password", [" •••••••• ", "••••••••x", "•••••••• · 저장됨 "])
+def test_only_the_exact_sentinels_are_refused(config: AppConfig, password: str) -> None:
+    # Raw comparison: a password that merely resembles a sentinel is a real password.
+    gateway = FakeGateway()
+    secrets = FlakySecretStore()
+    with _process(config, gateway, secrets) as app:
+        app.connect.save_credentials(FAKE_KEY, username=USERNAME, password=password, actor=OPERATOR)
+        stored = SupplierCredentialStore(secrets).load(FAKE_KEY)
+        assert stored is not None and stored.password == password

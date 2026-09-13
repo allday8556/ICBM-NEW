@@ -24,6 +24,8 @@ class AuditEventType(StrEnum):
     SUPPLIER_AUTH_PAUSED = "SUPPLIER_AUTH_PAUSED"
     SUPPLIER_AUTH_RESUMED = "SUPPLIER_AUTH_RESUMED"
     SUPPLIER_AUTO_CONNECT_CHANGED = "SUPPLIER_AUTO_CONNECT_CHANGED"
+    # READY demoted because its persisted session is missing or unreadable (self-healing).
+    SUPPLIER_CONNECTION_DEMOTED = "SUPPLIER_CONNECTION_DEMOTED"
 
 
 class AuditOutcome(StrEnum):
