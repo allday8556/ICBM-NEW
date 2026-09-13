@@ -66,6 +66,6 @@ def container(config: AppConfig, clock: FakeClock) -> Iterator[Container]:
 @pytest.fixture
 def client(config: AppConfig) -> Iterator[TestClient]:
     """The real application (system clock, real worker) on a migrated database."""
-    app = create_app(container=build_container(config, extra_jobs=TEST_JOBS))
+    app = create_app(config, extra_jobs=TEST_JOBS)
     with TestClient(app, base_url=LOCAL) as test_client:
         yield test_client

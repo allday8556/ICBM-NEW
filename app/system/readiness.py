@@ -10,6 +10,7 @@ from app import MILESTONE, __version__
 from app.core.clock import Clock
 from app.core.egress import EgressGuard
 from app.core.execution import ExecutionMode
+from app.core.ownership import DataDirLease
 from app.core.secrets import SecretStore
 from app.db.database import Database
 from app.db.migrate import current_revision
@@ -47,8 +48,10 @@ class ReadinessService:
         execution_mode: ExecutionModeService,
         clock: Clock,
         head_revision: str | None,
+        ownership: DataDirLease | None = None,
         heartbeat_max_age_s: float = 60.0,
     ) -> None:
+        self._ownership = ownership
         self._db = db
         self._worker = worker
         self._secrets = secrets
@@ -63,6 +66,7 @@ class ReadinessService:
 
     def check(self) -> ReadinessReport:
         probes: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
+            ("data_dir_owner", self._data_dir_owner),
             ("database", self._database),
             ("sqlite_wal", self._wal),
             ("schema", self._schema),
@@ -94,6 +98,12 @@ class ReadinessService:
             checked_at=self._clock.now(),
             checks=checks,
         )
+
+    def _data_dir_owner(self) -> tuple[bool, str]:
+        # PASS only while this process holds the OS lock on the data directory (ADR-0006).
+        if self._ownership is None:
+            return False, "data-directory ownership was never acquired"
+        return self._ownership.verify()
 
     def _database(self) -> tuple[bool, str]:
         self._db.ping()

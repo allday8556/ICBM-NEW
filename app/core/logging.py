@@ -33,6 +33,7 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
+            "pid": record.process,
             "msg": record.getMessage(),
             "correlation_id": getattr(record, "correlation_id", None),
         }

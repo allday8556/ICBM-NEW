@@ -10,6 +10,7 @@ from app.config import AppConfig
 from app.connect.service import ConnectService
 from app.core.clock import Clock, SystemClock
 from app.core.egress import EGRESS
+from app.core.ownership import DataDirLease
 from app.core.secrets import SecretStore, build_secret_store
 from app.db.database import Database
 from app.db.migrate import head_revision
@@ -45,11 +46,13 @@ class Container:
     diagnostics: DiagnosticsService
     readiness: ReadinessService
     screens: ScreenService
+    ownership: DataDirLease | None
 
 
 def build_container(
     config: AppConfig,
     *,
+    ownership: DataDirLease | None = None,
     clock: Clock | None = None,
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
@@ -96,6 +99,7 @@ def build_container(
         execution_mode=execution_mode,
         clock=clock,
         head_revision=head_revision(),
+        ownership=ownership,
     )
 
     products = ProductsService()
@@ -125,4 +129,5 @@ def build_container(
         diagnostics=diagnostics,
         readiness=readiness,
         screens=screens,
+        ownership=ownership,
     )
