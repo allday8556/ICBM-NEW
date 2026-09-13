@@ -337,7 +337,7 @@ Acceptance evidence belongs under `docs/acceptance/`, not in chat.
 ## 15. First vertical
 
 ```text
-Supplier      K홀세일
+Supplier      KM통상 (supplier_key kmretail)
 Marketplace   Naver SmartStore
 Currency      KRW
 Accounts      schema supports many; first run may use one

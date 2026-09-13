@@ -5,7 +5,7 @@ Decision owner: Architect (ChatGPT). Sources: Issue #7 body; freeze `5653533064`
 Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-13
 Related: ADR-0001 (stack, secrets row, Playwright via jobs), ADR-0002 (in-process worker), ADR-0005 (job states, only TRANSIENT/RATE_LIMITED retry), ADR-0006 (single data-directory owner, mutation-target invariant)
-Supplier name: **KM통상** (`https://kmretail.co.kr`, `supplier_key = kmretail`) is the canonical display name per Issue #7 addendum `5654634584` (the user's decision of 2026-09-14). ROADMAP and the Issue #7 body call this supplier "K홀세일". The key and package identity stay `kmretail`.
+Supplier name: **KM통상** (`https://kmretail.co.kr`, `supplier_key = kmretail`) is the canonical supplier name per Issue #7 addendum `5654634584` (the user's decision of 2026-09-14). The key and package identity stay `kmretail`.
 
 ---
 
@@ -65,7 +65,7 @@ rejected logins → PAUSED  (left only by an audited operator resume)
 
 ### 3. Secret boundary
 
-- **Credentials** are stored in the OS secret store only (`supplier:<key>:username` / `:password`).
+- **Credentials** are stored in the OS secret store only, as **one record** holding the username and password together (`supplier:<key>:credentials`). A half-written pair therefore cannot exist. Anything that is not a complete, well-formed record reads as "no credentials" and can never drive a login; this covers the split entries an earlier build wrote.
 - **The authenticated session is credential-equivalent.** It is stored as an AES-256-GCM blob at `<ICBM_DATA_DIR>/sessions/<key>.enc`.
   - The 256-bit key lives in the OS secret store.
   - The supplier key is bound into the authenticated data, so one supplier's blob cannot be replayed as another's.
@@ -110,6 +110,12 @@ Neither outcome is ever READY. A login submission never marks READY by itself.
 - **Lazy by default.** Startup loads metadata only and makes zero supplier requests.
 - **Reuse first.** A protected operation reuses the stored session. Only a missing or expired session leads to **one** authentication per operation, followed by the same proof.
 - **Single flight.** `SingleFlightAuth` makes callers that arrive while a flight is in progress wait for it and share its **outcome, whether a proof or a failure** (PR #9 review `5191372031`). A burst with a rejected password therefore submits exactly one login and counts exactly one failure.
+- **Fail-closed credential replacement** (PR #9 comments `5654839475` and `5654916026`) runs in three steps:
+  1. invalidate the old session and any READY state;
+  2. write the new login as one secret-store record;
+  3. record the update.
+
+  A failure or crash at any step leaves at worst "no reusable session; re-authentication required". The pre-replacement session can never prove READY under new or partial credentials, and a restarted process needs a fresh protected-read proof.
 - **Serialised credential replacement.** The flight runs under a per-supplier lifecycle lock. Credential replacement, resume and the auto-connect switch take the same lock. A login still using the old credentials completes first, and replacement then discards its session, so an old-account session can never be the READY connection after new credentials are saved.
 - **Auto-connect setting.** `auto_connect` is a per-supplier operator setting, on by default. It governs automatic operations only; the manual connection test stays available. No startup auto-connect exists.
 - **Loop guard.** Each rejected login counts toward `RequestPolicy.auth_retry_limit`. So does a login the protected read shows was not effective. Reaching the limit moves the connection to `PAUSED`:

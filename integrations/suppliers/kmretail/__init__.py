@@ -1,6 +1,6 @@
 """KM통상 (https://kmretail.co.kr) — site knowledge only (Issue #7, ADR-0007).
 
-Display name KM통상 (Issue #7 addendum 5654634584); ROADMAP and the Issue #7 body call it K홀세일.
+Canonical supplier name KM통상 (Issue #7 addendum 5654634584); the key stays ``kmretail``.
 
 This package describes the supplier; it cannot make a request. It holds no client, page or
 transport: the common CONNECT layer fetches and logs in, and hands these predicates nothing but an

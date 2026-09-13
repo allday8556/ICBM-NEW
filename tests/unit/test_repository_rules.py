@@ -157,7 +157,7 @@ def test_roadmap_milestone_chain_is_the_accepted_sequence() -> None:
         _section(_read(ROADMAP_MD), r"Development sequence"),
         [
             "M0 Foundation",
-            "M1 K홀세일 CONNECT",
+            "M1 KM통상 CONNECT",
             "M2 SmartStore CONNECT",
             "M3 one-product COLLECT",
             "ProductFactsRevision",
