@@ -59,7 +59,7 @@ Forbidden shortcuts:
 ## 4. Core boundaries
 
 ### CONNECT
-Owns supplier and marketplace connectivity only.
+Owns supplier and marketplace connectivity only. Supplier CONNECT is supplier-generic: suppliers are site-knowledge definitions behind a policy-enforcing common transport, and READY is proven only by a protected read with its unauthenticated control (`docs/adr/0007-supplier-generic-connect.md`).
 
 - supplier credentials/session/auth state
 - marketplace accounts/API credentials/capabilities
