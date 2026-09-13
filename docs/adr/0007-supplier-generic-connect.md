@@ -116,6 +116,15 @@ Neither outcome is ever READY. A login submission never marks READY by itself.
   3. record the update.
 
   A failure or crash at any step leaves at worst "no reusable session; re-authentication required". The pre-replacement session can never prove READY under new or partial credentials, and a restarted process needs a fresh protected-read proof.
+
+  Step 1 is itself fail-closed (re-audit `5655076870`): the canonical state leaves READY **before** the session is deleted.
+  - If that DB write fails, nothing has changed.
+  - If deleting the session then fails, nothing reports READY and the old login is still intact.
+- **Self-healing READY** (comment `5655122594`): a connection is reported READY only while its persisted session exists and decrypts.
+  - A READY row whose session is missing or unreadable is reported as not READY on every read.
+  - It is demoted to `DISCONNECTED` with a `SUPPLIER_CONNECTION_DEMOTED` audit event. The demotion is best effort and never blocks behind a flight in progress.
+  - Process start demotes every READY anyway.
+  - READY returns only through a fresh protected-read proof.
 - **Serialised credential replacement.** The flight runs under a per-supplier lifecycle lock. Credential replacement, resume and the auto-connect switch take the same lock. A login still using the old credentials completes first, and replacement then discards its session, so an old-account session can never be the READY connection after new credentials are saved.
 - **Auto-connect setting.** `auto_connect` is a per-supplier operator setting, on by default. It governs automatic operations only; the manual connection test stays available. No startup auto-connect exists.
 - **Loop guard.** Each rejected login counts toward `RequestPolicy.auth_retry_limit`. So does a login the protected read shows was not effective. Reaching the limit moves the connection to `PAUSED`:
