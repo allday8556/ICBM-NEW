@@ -2,7 +2,7 @@
 
 > Status: NEW CANONICAL PROJECT
 > Legacy repository: `allday8556/ICBM-PROJECT` = archive/reference only
-> Development rule: **no legacy code, owner, DB schema, patch chain, test harness, marketplace ID, or runtime behavior is automatically inherited.**
+> Development rule: **no legacy code, owner, DB schema, patch chain, test harness, marketplace ID, runtime behavior, or previously wired UI functionality is automatically inherited.**
 
 ## 0. Product goal
 
@@ -31,6 +31,7 @@ Everything else — AI, OCR, learning, category matching, pricing, alerts, analy
 - Legacy integrated-DB rows are not imported.
 - Legacy collection results are not imported.
 - Legacy runtime state, patch numbers, T0/R2/CP tracks, old owner maps, and old test assumptions are not inherited.
+- Existing functional UI builds are not inherited.
 - Old repository code may be inspected only when the architect explicitly approves a narrow reference case. Default is **do not reuse**.
 
 ### 1.2 Roles
@@ -44,15 +45,50 @@ User         = product decisions and protected/destructive approvals
 
 Chat is not the durable work log. Plans, implementation directives, reviews, evidence, and acceptance state belong in this repository.
 
-### 1.3 UI rule
+### 1.3 UI Source of Truth
 
-The current UI rebuild is the visual/product shell. Functional implementation is built fresh underneath it.
+The canonical visual/product shell for ICBM-NEW is the standalone prototype supplied by the user:
 
 ```text
-UI action → application contract → service → adapter/integration → read-back → UI state
+icbm_redesign_test_v27_global_help_tooltips.html
 ```
 
-The UI must not reproduce business rules independently.
+This HTML is treated as a **fresh UI specification**, not as a legacy-runtime integration target.
+
+Rules:
+
+- The current #86 UI rebuild is **not** the ICBM-NEW implementation baseline because it already contains legacy functional wiring.
+- #86 may be viewed only as a historical/reference implementation when the architect explicitly allows it.
+- No #86 adapter, hidden legacy DOM, old route owner, old service call, old state object, or old business-rule wiring is carried into ICBM-NEW by default.
+- The standalone HTML is recreated as the new UI shell first.
+- Each visible action is then connected to a newly defined ICBM-NEW application contract.
+- Business rules live in services/contracts, never as duplicated UI logic.
+
+Canonical direction:
+
+```text
+Standalone HTML UI
+        ↓
+NEW application contract
+        ↓
+NEW service
+        ↓
+NEW adapter / integration
+        ↓
+NEW canonical DB / external read-back
+        ↓
+UI state
+```
+
+Not allowed:
+
+```text
+#86 / ICBM-PROJECT functional owner
+        ↓
+copy / transplant / adapter-wrap
+        ↓
+ICBM-NEW
+```
 
 ---
 
@@ -103,6 +139,7 @@ Goal: create a small, explicit application skeleton before any marketplace-speci
 
 ## Deliverables
 
+- standalone HTML prototype reproduced as the fresh UI shell
 - application/runtime skeleton
 - configuration system
 - database bootstrap/migrations
@@ -135,8 +172,10 @@ docs/
 
 ## Acceptance
 
+- standalone HTML visual structure is reproduced without importing legacy functional wiring
 - clean install starts with an empty DB
 - no dependency on ICBM-PROJECT runtime files
+- no dependency on #86 functional adapters/owners
 - no legacy DB migration required
 - one deterministic health check passes
 
@@ -545,7 +584,7 @@ Insight recommendations should be able to enter the normal collection pipeline i
 
 # 11. UI mapping
 
-The rebuilt UI maps to the architecture as follows:
+The standalone HTML prototype maps to the architecture as follows:
 
 | UI | Runtime responsibility |
 |---|---|
@@ -569,7 +608,7 @@ The screen structure does not define business ownership. Services/contracts do.
 Do not parallelize the core before the first vertical closes.
 
 ```text
-M0 Foundation
+M0 Reproduce standalone HTML as fresh UI shell + Foundation
    ↓
 M1 K홀세일 CONNECT
    ↓
@@ -632,11 +671,12 @@ Only then is the architecture considered proven.
 
 # 14. Immediate next work
 
-1. Finalize/migrate the approved new UI shell into ICBM-NEW without importing legacy functional owners.
-2. Write `docs/ARCHITECTURE.md` with the new service/adapter contracts.
-3. Implement Phase 0 foundation.
-4. Implement K홀세일 CONNECT only.
-5. Verify it in a fresh real browser/session.
-6. Continue to SmartStore CONNECT and the first single-product vertical.
+1. Put the user-supplied standalone HTML prototype into ICBM-NEW as the visual Source of Truth.
+2. Rebuild that HTML as the fresh application UI shell **without importing #86 or ICBM-PROJECT functional wiring**.
+3. Write `docs/ARCHITECTURE.md` with the new service/adapter contracts.
+4. Implement Phase 0 foundation.
+5. Implement K홀세일 CONNECT only.
+6. Verify it in a fresh real browser/session.
+7. Continue to SmartStore CONNECT and the first single-product vertical.
 
-**No legacy patch recovery work is part of this roadmap.**
+**No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
