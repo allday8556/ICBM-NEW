@@ -1,21 +1,53 @@
 # CLAUDE.md — ICBM-NEW implementation rules
 
-This file is mandatory context for every Claude Code implementation session.
+Operating rules for ICBM-NEW. Read this before doing any work in this repository.
+
+This file is the enforcement layer for `ROADMAP.md` and `docs/ARCHITECTURE.md`.
+The roadmap says what to build; architecture defines the approved contracts and stack;
+this file defines how implementation work is performed and recorded.
+
+If documents conflict, stop and request architect resolution in GitHub instead of guessing.
+
+---
 
 ## 1. Roles
 
 ```text
 GitHub       = single durable work hub / Source of Truth
-ChatGPT      = architecture, contracts, audit, review, acceptance
-Claude Code  = implementation, tests, commits, PR updates
+ChatGPT      = architecture, contracts, audit, review, acceptance decisions
+Claude Code  = implementation, tests, commits, PR updates, implementation drafts
 User         = product decisions and explicit protected/destructive approvals
 ```
 
 Claude implements approved architecture. Claude does not redefine product architecture inside code.
+Chat is not the durable work log. Anything that must survive a session belongs in this repository.
+
+### 1.1 Repository exchange protocol
+
+ChatGPT and Claude do not rely on direct AI-to-AI conversation. GitHub is the exchange channel.
+
+| Location | Primary author | Purpose | Expected response |
+| --- | --- | --- | --- |
+| `docs/adr/NNNN-*.md` | Architect | Binding architecture/product decision | Implement against it |
+| `docs/review/*-BY-CLAUDE.md` | Claude | Proposal or implementation question | Architect review / ADR / issue decision |
+| `docs/acceptance/*.md` | Claude | Acceptance evidence | Architect accept / reject |
+| GitHub Issues | Either | Open question, one topic per issue | Commented resolution |
+| Pull requests | Claude | Implementation for review | Review comments / acceptance |
+
+Rules:
+
+- Proposal/review documents written by an AI must identify their author and status: `PROPOSAL`, `UNDER REVIEW`, `ACCEPTED`, or `SUPERSEDED`.
+- Canonical documents such as `ROADMAP.md` and `docs/ARCHITECTURE.md` do not need author suffixes once accepted.
+- A contract/architecture decision becomes binding only when reflected in an ADR or canonical document.
+- If an implementation question changes architecture, Claude must stop implementation and open a GitHub issue for architect resolution.
+
+---
 
 ## 2. Absolute no-legacy rule
 
-`allday8556/ICBM-PROJECT` is legacy/archive only.
+**No legacy code, owner, DB schema, patch chain, test harness, marketplace ID, runtime behavior, or previously wired UI functionality is inherited from `allday8556/ICBM-PROJECT` or from the #86 UI rebuild.**
+
+This is unconditional. It is not relaxed because copying appears faster or because a legacy component already works.
 
 Do not copy or transplant:
 
@@ -30,6 +62,8 @@ Do not copy or transplant:
 
 Legacy may be inspected only when the architect explicitly authorizes a narrow reference case in GitHub. Default: **do not inspect and do not reuse**.
 
+---
+
 ## 3. UI source rule
 
 The approved standalone HTML prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md` is the visual/product shell.
@@ -42,55 +76,85 @@ Use it for:
 - labels/status surfaces
 - modal/drawer/empty-state interaction shapes
 
-Do not treat its demo data or prototype JavaScript as runtime business truth.
+Do not treat its demo data, mock counts, or prototype JavaScript as runtime business truth.
 
-## 4. Contract-first implementation
+---
 
-Every feature must follow:
+## 4. Pinned runtime stack
+
+The authoritative stack is `docs/ARCHITECTURE.md` §2. Current v1:
+
+| Item | Decision |
+| --- | --- |
+| Language / runtime | Python 3.12 |
+| Web / app framework | FastAPI + Uvicorn |
+| Database | SQLite WAL — local single-user v1 |
+| Migration tool | Alembic |
+| ORM | SQLAlchemy 2.x |
+| HTTP | httpx |
+| Browser automation | Playwright Chromium when required |
+| Job runner | Durable DB-backed queue/scheduler; one worker owner initially |
+| Process model | Local single-user Windows application, loopback-only by default |
+| Secret storage | OS-native secure credential storage via keyring / Windows protection |
+| Test framework | pytest + contract/integration/E2E gates |
+| CI | GitHub Actions |
+
+No major stack component may be changed casually. A change requires an architect-approved ADR before implementation.
+
+---
+
+## 5. Architectural rules
+
+### 5.1 Direction of dependency
 
 ```text
-UI → application contract → service/domain owner → adapter → external system → read-back → canonical DB → UI
+Approved standalone HTML UI
+    ↓
+NEW application contract
+    ↓
+NEW service/domain owner
+    ↓
+NEW adapter/integration
+    ↓
+external system + read-back
+    ↓
+NEW canonical DB state
+    ↓
+UI state
 ```
 
-Forbidden:
+- Business rules live in services/contracts, never duplicated in the UI.
+- The UI displays server-owned state. It does not re-decide pricing, readiness, compliance, or stock.
+- The canonical ICBM product ID is the spine. Collection, registration, orders, stock, inquiries, analytics, and fulfillment resolve back to it.
+- No downstream screen owns a second copy of product truth.
 
-- UI calling supplier/marketplace integrations directly
-- duplicate pricing/category/stock truth in UI
-- platform payload fields inside ProductFacts
-- supplier selectors leaking into global product logic
-- AI inventing facts
-- silent fallbacks that convert UNKNOWN/REVIEW_REQUIRED into PASS
-
-## 5. Canonical product spine
+### 5.2 Canonical product spine
 
 ```text
 CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE
 ```
 
-Fulfillment is inside OPERATE. AI/OCR/learning/jobs/compliance/pricing are supporting owners, not parallel applications.
+Fulfillment is inside OPERATE. AI, OCR, learning, pricing, compliance, jobs, audit, and analytics are supporting capabilities, not parallel top-level systems.
 
-## 6. Pinned runtime stack
+### 5.3 Adapter rule
 
-Use `docs/ARCHITECTURE.md` as canonical. Current v1 stack:
+Core product logic stays platform-neutral. A supplier or marketplace implements the approved adapter contract.
 
-```text
-Python 3.12
-FastAPI + Uvicorn
-SQLAlchemy 2.x + Alembic
-SQLite WAL
-httpx
-Playwright Chromium when browser automation is required
-DB-backed durable Job queue/scheduler
-OS-native secret storage via keyring/Windows protection
-pytest
-GitHub Actions
-```
+Site-specific extraction belongs inside that supplier adapter/profile. Marketplace payload specifics belong inside that marketplace adapter.
 
-Changing any major stack component requires an ADR approved by the architect before implementation.
+**A new adapter may not change canonical Product / Pricing / Operation contracts merely to accommodate one site.** Contract changes require architecture review first.
 
-## 7. Core immutable rules
+### 5.4 Facts vs enrichment
 
-### Pricing
+Raw source facts and evidence stay separate from AI enrichment.
+
+AI may validate or propose enrichment, but it never fabricates source facts. Ambiguous evidence becomes `REVIEW_REQUIRED`, never a confident guess.
+
+---
+
+## 6. Immutable domain rules
+
+### 6.1 Pricing
 
 ```text
 if minimum_sale_price exists:
@@ -98,67 +162,179 @@ if minimum_sale_price exists:
     price_basis = MINIMUM_SALE_PRICE
 else:
     final_sale_price = target_margin_price
+    price_basis = TARGET_MARGIN
 ```
 
 Never reintroduce `max(target_margin_price, minimum_sale_price)`.
 
-Preserve source quantity tiers as `(quantity, total_price)` facts. Do not infer/flatten source prices.
+Preserve supplier quantity tiers as original `(quantity, total_price)` facts. Do not infer or flatten source totals.
 
-### Options/SKU
+### 6.2 Options / SKU
 
-Preserve atomic source SKU identity. Same weight does not justify flattening different count/grade/options.
+Preserve atomic source SKU identity. Same weight does not justify flattening different count, grade, or option identity.
 
-### Stock
+### 6.3 Stock
 
 ```text
-BUY/CART active                         → ON_SALE
-SOLD OUT + no active purchase path     → SOLD_OUT
-mixed/insufficient evidence            → REVIEW_REQUIRED
+BUY/CART active                     → ON_SALE
+SOLD OUT + no active purchase path → SOLD_OUT
+mixed/insufficient evidence        → REVIEW_REQUIRED
 ```
 
-### AI
+### 6.4 ProductFacts revisions
 
-AI may propose enrichment/validation. It cannot manufacture source facts or directly bypass review/compliance gates.
+Collection writes append-oriented/revisioned `ProductFactsRevision` records. Never silently mutate historical source facts in place.
 
-## 8. ProductFacts revision rule
+`Product` references the current accepted revision.
 
-Collection writes immutable/revisioned `ProductFactsRevision` records. Do not silently mutate old source facts in place.
+### 6.5 Marketplace CREATE
 
-`Product` points to the current accepted revision.
+Real CREATE uses `RegistrationAttempt` and deterministic reconciliation.
 
-## 9. Marketplace CREATE rule
-
-Real CREATE must use `RegistrationAttempt` and deterministic reconciliation.
-
-If a request outcome is unknown:
+If a CREATE result is unknown:
 
 - do not blindly retry CREATE
-- reconcile by deterministic seller product code/read-back
+- reconcile using the deterministic seller product code / marketplace read-back
 - only retry after proving no marketplace product was created
 
-## 10. Execution modes
+---
 
-Default external-write mode: **DRY_RUN**.
+## 7. Execution safety
 
-`LIVE` requires the intended verification scope to be explicit in GitHub. Marketplace delete/deactivate, bulk destructive changes, compliance resolution, credential mutation, and destructive DB migrations require user approval and audit evidence.
+### 7.1 Execution mode
 
-## 11. Branch / PR discipline
+Global external-write mode is:
 
-- Never implement directly from chat-only instructions if GitHub canonical docs differ.
-- One focused feature/contract per branch where practical.
-- PR description states: contract touched, schema touched, external writes touched, tests/evidence.
-- No merge based only on unit/mock PASS when the roadmap requires E2E/read-back.
-- Do not claim DONE without required acceptance evidence.
+```text
+DRY_RUN | LIVE
+```
 
-## 12. Decision records
+Default during development is `DRY_RUN`.
 
-Architecture changes go to `docs/adr/`.
+Marketplace sandbox/test accounts, where available, are environment/account configuration — not a third global execution mode.
 
-Acceptance evidence goes to `docs/acceptance/`.
+`LIVE` requires the intended verification scope to be explicit in GitHub and user approval when the action is protected/destructive.
 
-Canonical terminology belongs in `docs/GLOSSARY.md` once introduced.
+### 7.2 Requires user approval before execution
 
-## 13. First vertical
+- any destructive marketplace action: delete/deactivate or equivalent
+- any real supplier order (발주)
+- bulk live writes or bulk destructive operations
+- destructive migrations, table/row drops, irreversible rewrites
+- compliance gate override
+- credential changes that replace/delete active credentials
+- deleting branches or force-pushing
+
+For first-time real marketplace CREATE/UPDATE verification, use the explicit LIVE acceptance scope defined in GitHub and obtain user approval before the run.
+
+Approval is per action/scope and does not automatically generalize to future actions.
+
+### 7.3 Never do
+
+- commit credentials, tokens, cookies, or session state
+- commit real customer/order personal data in tests or fixtures
+- spin repeated failed supplier logins
+- retry an unknown-result marketplace CREATE without reconciliation
+- bypass the compliance gate
+- turn `UNKNOWN` or `REVIEW_REQUIRED` into PASS through a silent fallback
+
+---
+
+## 8. Git conventions
+
+### 8.1 Branches
+
+```text
+main                         always releasable / green
+feat/<area>-<short-desc>
+fix/<area>-<short-desc>
+docs/<short-desc>
+chore/<short-desc>
+```
+
+`<area>` is one of:
+
+```text
+connect | collect | products | register | operate | ui | infra
+```
+
+Fulfillment work uses the `operate` area because fulfillment belongs inside OPERATE.
+
+### 8.2 Commits
+
+Use conventional-commit style and one logical change per commit.
+
+Examples:
+
+```text
+feat(collect): add K홀세일 detail fact extraction
+fix(register): reconcile unknown create before retry
+docs(adr): record database choice
+```
+
+Do not mix broad refactoring with unrelated behavior changes in the same commit.
+
+### 8.3 Pull requests
+
+Every PR states:
+
+1. what changed
+2. which contract it implements or modifies
+3. whether schema changed
+4. whether external writes are involved
+5. how it was verified — commands and observed evidence
+6. what it explicitly does not do
+
+A PR that changes an approved contract links the ADR authorizing it. No ADR, no contract change.
+
+No merge based only on unit/mock PASS when the roadmap requires real E2E/read-back evidence.
+
+---
+
+## 9. Definition of Done
+
+A feature is not done because a function exists or a test is green.
+
+1. UI action reaches the intended service.
+2. Service uses the canonical contract.
+3. Integration performs the real read/write where permitted.
+4. Result is read back from the external system when applicable.
+5. Canonical DB reflects the read-back.
+6. UI reflects canonical state after reload.
+7. The same flow succeeds again in a fresh session.
+8. No unrelated flow regresses.
+
+Acceptance evidence belongs in `docs/acceptance/`, not chat. It records correlation IDs, external IDs, timestamps, read-back evidence, and the fresh-session condition.
+
+---
+
+## 10. Working style expected of Claude
+
+- Read the canonical documents before starting; do not ask the user to re-explain rules already written here.
+- Implement the current milestone only. Do not horizontally expand before the first vertical closes.
+- When the roadmap or architecture is ambiguous, do not pick a convenient interpretation and proceed.
+- Raise blockers early and plainly.
+- Report what was actually verified separately from what was assumed.
+- Never describe an untested path as working.
+- Prefer deleting a wrong abstraction over wrapping it.
+
+---
+
+## 11. Current milestone
+
+```text
+M0 — reproduce v28 standalone HTML as the fresh UI shell + Phase 0 foundation
+```
+
+Current approved visual source:
+
+`ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html`
+
+Do not begin horizontal supplier/marketplace expansion during M0.
+
+---
+
+## 12. First vertical
 
 Do not horizontally expand before this closes:
 
@@ -176,14 +352,27 @@ K홀세일 CONNECT
 
 Required: two consecutive complete passes in fresh sessions.
 
-## 14. Current architecture authority
+---
+
+## 13. Canonical file index and read order
 
 Read in this order before coding:
 
-1. `ROADMAP.md`
-2. `docs/ARCHITECTURE.md`
-3. `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md`
-4. `docs/UI_SOURCE_OF_TRUTH.md`
-5. relevant ADRs
+1. `ROADMAP.md` — product/phase plan
+2. `docs/ARCHITECTURE.md` — canonical contracts and stack
+3. `CLAUDE.md` — implementation/process rules
+4. `docs/UI_SOURCE_OF_TRUTH.md` — approved visual shell
+5. relevant `docs/adr/` decisions
+6. `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` when context on reviewed proposals is needed
 
-If documents conflict, stop implementation and request architect resolution in GitHub instead of guessing.
+Additional locations:
+
+| Path | Purpose |
+| --- | --- |
+| `ROADMAP-ADDITIONS-BY-CLAUDE.md` | Claude review proposal; not binding by itself |
+| `docs/review/` | Claude drafts/proposals awaiting architecture review |
+| `docs/acceptance/` | Durable acceptance evidence |
+| `docs/GLOSSARY.md` | Canonical field and concept names |
+| `ui/prototypes/` | Approved standalone UI prototypes |
+
+If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing.
