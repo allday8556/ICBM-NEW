@@ -1,4 +1,4 @@
-"""The common proof procedure applied to KM리테일's probe, on synthetic pages only."""
+"""The common proof procedure applied to KM통상's probe, on synthetic pages only."""
 
 import inspect
 

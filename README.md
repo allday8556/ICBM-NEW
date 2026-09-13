@@ -11,10 +11,10 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 
 - **M0** — fresh v29 UI shell + Phase 0 foundation: **ACCEPTED** 2026-09-13 ([`docs/acceptance/M0.md`](docs/acceptance/M0.md)).
 - **Issue #4** — one ICBM process per data directory: **ACCEPTED** and merged ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)).
-- **Current milestone:** M1 — KM리테일 (K홀세일 in ROADMAP) CONNECT only (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md)), in progress; not accepted yet.
+- **Current milestone:** M1 — KM통상 (K홀세일 in ROADMAP) CONNECT only (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md)), in progress; not accepted yet.
 - **Next:** M2 — SmartStore CONNECT ([`ROADMAP.md`](ROADMAP.md) §12).
 
-The application performs **zero supplier/marketplace calls and zero external writes**; every screen renders the empty state reported by its application contract.
+Supplier calls are limited to M1 CONNECT: the application authenticates to exactly one supplier (KM통상) and reads its protected 마이쇼핑 page, only through the common, allowlisted supplier transport, and only when the operator runs a connection test (no call at startup). It makes **zero marketplace calls and zero external business writes**, and every other screen renders the empty state reported by its application contract.
 
 ## Quick start (Windows, Python 3.12)
 

@@ -1,1 +1,1 @@
-"""Supplier definitions (first: KM리테일 — "K홀세일" in the canonical documents — M1)."""
+"""Supplier definitions (first: KM통상 — "K홀세일" in ROADMAP — M1)."""

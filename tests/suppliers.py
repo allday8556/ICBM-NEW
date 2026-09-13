@@ -33,7 +33,7 @@ FAKE_PAGES = SitePages(
     logged_out='<div class="state-logoff"></div>',
     logged_in='<div class="state-logon"></div><a href="/logout">',
 )
-# Synthetic pages carrying only the markers KM리테일's predicates look for — no real page content.
+# Synthetic pages carrying only the markers KM통상's predicates look for — no real page content.
 # Both carry the myshop page skeleton, which a signed-out visitor also receives.
 KMRETAIL_PAGES = SitePages(
     logged_out=(
