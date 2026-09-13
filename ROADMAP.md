@@ -627,7 +627,7 @@ Do not parallelize the core before the first vertical closes.
 
 ```text
 M0 Foundation                                   ACCEPTED 2026-09-13
-→ M1 KM통상 CONNECT
+→ M1 KM통상 CONNECT                              ACCEPTED 2026-09-13
 → M2 SmartStore CONNECT
 → M3 one-product COLLECT → ProductFactsRevision
 → M4 canonical Product DB + image pipeline + pricing/readiness foundations
@@ -684,10 +684,14 @@ Only then is the architecture considered proven.
 
 # 14. Immediate next work
 
-M0 is accepted (Issue #1, `docs/acceptance/M0.md`). Next, in order:
+Accepted so far:
 
-1. Close the post-M0 canonical sync (Issue #3) with green CI.
-2. M1 — KM통상 CONNECT only (§4.1), verified in a fresh real browser/session.
-3. M2 — SmartStore CONNECT, then the first single-product vertical (M3 → M6.5, §12).
+- M0 — fresh UI shell + Phase 0 foundation (Issue #1, `docs/acceptance/M0.md`).
+- M1 — KM통상 CONNECT only (§4.1; Issue #7, ADR-0007, `docs/acceptance/M1.md`), verified against the real supplier in fresh sessions.
+
+Next, in order:
+
+1. M2 — SmartStore CONNECT.
+2. The first single-product vertical (M3 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**

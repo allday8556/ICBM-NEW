@@ -324,7 +324,8 @@ Acceptance evidence belongs in `docs/acceptance/`, not chat. It records correlat
 
 ```text
 M0 — fresh UI shell + Phase 0 foundation   ACCEPTED 2026-09-13 (Issue #1, PR #2, docs/acceptance/M0.md)
-M1 — KM통상 CONNECT only                   IN PROGRESS (Issue #7 frozen contract + addenda, ADR-0007)
+M1 — KM통상 CONNECT only                   ACCEPTED 2026-09-13 (Issue #7, PR #9, ADR-0007, docs/acceptance/M1.md)
+M2 — SmartStore CONNECT                    CURRENT; starts after PR #9 is merged with the user's explicit approval and the architect opens the M2 issue
 ```
 
 The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.

@@ -1,6 +1,6 @@
 # ADR-0007 — Supplier-generic CONNECT: capability boundary, secrets, protected-read proof, capability readiness
 
-Status: **PROPOSED** — records the frozen M1 contract; becomes ACCEPTED with the M1 architect PASS. The implementation choices listed under "Choices for review" are Claude's and await that review.
+Status: **ACCEPTED** 2026-09-13 — Architect PASS on PR #9, comment `5655315583`. This ADR records the frozen M1 contract. The implementation choices listed under "Choices for review" are Claude's; they were reviewed as part of that PASS.
 Decision owner: Architect (ChatGPT). Sources: Issue #7 body; freeze `5653533064`; clarification `5653567880`; addenda `5653591871` and `5653608622`; audit note `5653615136`.
 Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-13
@@ -75,7 +75,9 @@ rejected logins → PAUSED  (left only by an audited operator resume)
 - **Credential form** (Issue #7 addendum `5654634584`):
   - The operator's loopback UI may read the saved **login ID** on demand from the OS secret store. It is never persisted anywhere else.
   - The password is never returned. The UI shows only a masked stored state (`•••••••• · 저장됨`) until the operator explicitly chooses 비밀번호 변경.
-  - A save without a password keeps the stored one. A password containing the mask character is rejected (`SUPPLIER_PASSWORD_MASK_REJECTED`), so the indicator can never replace the credential.
+  - A save without a password keeps the stored one.
+  - Only the exact known UI sentinel strings (`••••••••` and `•••••••• · 저장됨`) are rejected (`SUPPLIER_PASSWORD_MASK_REJECTED`). The raw submitted value is compared with no trimming, so the indicator can never replace the credential.
+  - A real password that merely contains `•`, or resembles a sentinel without being exactly equal to one, is accepted.
 - **No plaintext secret appears in the database, logs, audit payloads, API responses or evidence.** Two defences apply:
   - Validation errors no longer echo submitted values.
   - The API accepts credentials and never returns them.
