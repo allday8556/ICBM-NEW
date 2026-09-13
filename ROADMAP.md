@@ -188,7 +188,7 @@ Goal: reliably connect one supplier and one marketplace before expanding anythin
 
 ## 4.1 Supplier connection
 
-First vertical target: **K홀세일**.
+First vertical target: **KM통상** (`supplier_key = kmretail`).
 
 Functions:
 
@@ -207,6 +207,7 @@ Contract:
 ```text
 SupplierConnection
   supplier_key
+  display_name
   base_url
   auth_required
   auth_state
@@ -233,7 +234,7 @@ Functions:
 ## Phase 1 acceptance
 
 ```text
-K홀세일 protected page read = PASS
+KM통상 protected page read = PASS
 SmartStore account/API read-back = PASS
 fresh restart/session reconnect = PASS
 ```
@@ -300,7 +301,7 @@ AI must not fabricate source facts.
 
 ## Phase 2 acceptance
 
-For the first K홀세일 test product:
+For the first KM통상 test product:
 
 - same page collected repeatedly produces stable identity
 - price/shipping/options/images/stock evidence are read back from DB
@@ -432,7 +433,7 @@ Adding a marketplace must not require rewriting supplier collection or canonical
 First complete vertical:
 
 ```text
-K홀세일
+KM통상
 → collect 1 real product
 → integrated DB
 → SmartStore readiness PASS
@@ -528,13 +529,12 @@ Expansion happens only after the first vertical is fully accepted.
 
 ## Supplier order
 
-1. K홀세일
+1. KM통상
 2. U-PICK
-3. KM통상
-4. 건강산
-5. 업푸르트
-6. 1688
-7. Rakuten / future suppliers
+3. 건강산
+4. 업푸르트
+5. 1688
+6. Rakuten / future suppliers
 
 Each supplier implements the same supplier-adapter contract. Site-specific extraction belongs inside that adapter/profile, not in global product logic.
 
@@ -627,7 +627,7 @@ Do not parallelize the core before the first vertical closes.
 
 ```text
 M0 Foundation                                   ACCEPTED 2026-09-13
-→ M1 K홀세일 CONNECT
+→ M1 KM통상 CONNECT
 → M2 SmartStore CONNECT
 → M3 one-product COLLECT → ProductFactsRevision
 → M4 canonical Product DB + image pipeline + pricing/readiness foundations
@@ -667,7 +667,7 @@ For a vertical to be accepted:
 For the first production vertical:
 
 ```text
-K홀세일 CONNECT
+KM통상 CONNECT
 → real product COLLECT
 → canonical PRODUCT DB
 → SmartStore REGISTER
@@ -687,7 +687,7 @@ Only then is the architecture considered proven.
 M0 is accepted (Issue #1, `docs/acceptance/M0.md`). Next, in order:
 
 1. Close the post-M0 canonical sync (Issue #3) with green CI.
-2. M1 — K홀세일 CONNECT only (§4.1), verified in a fresh real browser/session.
+2. M1 — KM통상 CONNECT only (§4.1), verified in a fresh real browser/session.
 3. M2 — SmartStore CONNECT, then the first single-product vertical (M3 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
