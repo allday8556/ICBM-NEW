@@ -13,11 +13,11 @@
 | Runtime verification | `PENDING` |
 | Fallback review due | `2026-10-14` |
 
-This file is the source index for the SmartStore integration contracts under this directory.
+This file indexes the SmartStore integration evidence used by ICBM.
 
 It deliberately uses the **index model**, not the single-source model.
 
-The contract documents remain self-contained and keep their own provenance blocks:
+The owning contracts remain self-contained and keep their own provenance blocks:
 
 - `ACCOUNT_IDENTITY.md`
 - `AUTH.md`
@@ -26,24 +26,27 @@ The contract documents remain self-contained and keep their own provenance block
 - `ENDPOINT_MATRIX.md`
 - `CAPABILITY_MAPPING.md` when added
 
-`SOURCES.md` does **not** replace those provenance blocks.
+`SOURCES.md` does **not** replace those blocks.
 
-Its job is to answer:
+Its responsibilities are:
 
-1. Which upstream source supports a contract claim?
-2. What authority and artifact kind does that source have?
-3. Which ICBM documents depend on it?
-4. What event makes the source stale enough to require review?
-5. Are the duplicated provenance fields across the self-contained contracts still consistent?
-6. Has the claim merely been documented, or has it been measured at runtime?
+1. identify the upstream/runtime evidence supporting a contract claim;
+2. classify source authority and artifact kind;
+3. preserve the limited observation actually relied upon;
+4. show which contracts depend on each source;
+5. detect provenance drift between otherwise self-contained documents;
+6. distinguish documentation evidence from measured runtime evidence;
+7. expose claims that currently depend on provider support because normative documentation is silent.
 
 Core rules:
 
 `source documented != runtime verified`
 
+`support discussion != immutable provider contract`
+
 `SOURCES.md = reverse index + drift detector, not a replacement provenance block`
 
-No source row in this file may populate a contract's `verified_at` field by itself.
+No source row in this file may populate an owning contract's `verified_at` field by itself.
 
 ---
 
@@ -56,8 +59,8 @@ Each SmartStore contract must remain understandable and auditable when read by i
 A reviewer reading only `AUTH.md`, for example, must still be able to see:
 
 - the upstream URLs used by that contract;
-- the upstream version reviewed;
-- when the source was retrieved;
+- the provider version reviewed;
+- when the sources were retrieved;
 - whether runtime verification has happened;
 - when or why review becomes due.
 
@@ -65,18 +68,18 @@ Therefore ICBM MUST NOT replace each contract's provenance block with only a poi
 
 The duplication is intentional.
 
-`SOURCES.md` exists to make that intentional duplication auditable.
+`SOURCES.md` exists to make that duplication auditable.
 
 ### 1.2 Consequence
 
-When a source/version/freshness value changes, the reviewed change must update:
+When source/version/freshness information changes, the reviewed change must update:
 
 1. every affected self-contained contract; and
-2. the matching row or baseline in `SOURCES.md`.
+2. the corresponding row/baseline in `SOURCES.md`.
 
 Updating only this ledger does not update an owning contract.
 
-Updating only one owning contract while leaving this ledger inconsistent is provenance drift and must be caught before merge once repository enforcement is implemented.
+Updating only one owning contract while leaving this ledger inconsistent is provenance drift.
 
 ---
 
@@ -84,61 +87,84 @@ Updating only one owning contract while leaving this ledger inconsistent is prov
 
 ICBM SHALL distinguish both **authority class** and **artifact kind**.
 
-| Rank | Source class | Artifact kind | Meaning | May establish provider contract? |
+| Rank | Source class | Artifact kind | Meaning | Contract role |
 | --- | --- | --- | --- | --- |
-| `P0` | `PROVIDER_NORMATIVE` | `OFFICIAL_DOC` | Current official NAVER Commerce API documentation / provider contract | Yes |
-| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | `SUPPORT_DISCUSSION` | NAVER-maintained official technical-support repository/discussion | Supporting/clarifying evidence only |
-| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | `NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Yes, within protocol scope |
-| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | `LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Only for implementation behavior, never provider semantics |
-| `R0` | `MEASURED_RUNTIME_EVIDENCE` | `RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time scope |
+| `P0` | `PROVIDER_NORMATIVE` | `OFFICIAL_DOC` | Current official NAVER Commerce API documentation | Primary provider contract evidence |
+| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | `SUPPORT_DISCUSSION` | NAVER-maintained official Commerce API technical-support discussion | Supporting/clarifying evidence; may temporarily fill a P0 gap when explicitly marked |
+| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | `NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Governs only the protocol scope actually adopted by NAVER |
+| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | `LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Implementation behavior only; never NAVER semantics |
+| `R0` | `MEASURED_RUNTIME_EVIDENCE` | `RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time/application scope |
 
 ### 2.1 Conflict rule
 
 When sources disagree:
 
-1. current `P0` provider documentation wins over older support commentary for provider contract semantics;
+1. current `P0` provider documentation wins over older contradictory support commentary for provider contract semantics;
 2. `P1` may clarify ambiguity but MUST NOT silently override a later contradictory `P0` contract;
-3. `S0` governs protocol semantics only where the provider claims conformance to that protocol;
+3. `S0` governs protocol semantics only where NAVER adopts that protocol/profile;
 4. `L0` never defines NAVER behavior;
-5. `R0` may prove that measured runtime behavior differs from documentation, but such a conflict triggers review rather than silently rewriting the documented contract.
+5. `R0` may prove that measured behavior differs from documentation, but that conflict triggers review rather than silently rewriting the documented contract.
 
-A conflict that affects a READY/safety invariant SHALL fail closed until reviewed.
+A conflict affecting a safety or READY invariant must fail closed until reviewed.
 
-### 2.2 No evidence laundering
+### 2.2 P0-silent / P1-only claims
+
+Some current SmartStore contracts rely on an official provider-support answer because the reviewed P0 documentation does not state the needed behavior.
+
+Those claims are not ordinary "supporting" claims. They SHALL be marked:
+
+`evidence_basis = P1_ONLY`
+
+A `P1_ONLY` claim means:
+
+- no reviewed P0 source currently establishes that exact claim;
+- the provider's official support answer is the best available upstream evidence;
+- the claim MUST NOT be generalized beyond the limited observation recorded here and in the owning contract;
+- the claim has lower durability than an equivalent P0 contract;
+- R0 measurement SHOULD be collected when the behavior is practically measurable;
+- if the P1 source becomes unavailable, materially edited, or contradicted, the dependent claim enters re-review immediately.
+
+Examples in the current set include:
+
+- the 180-day own-store application re-authentication lifecycle;
+- immediate invalidation of an old `client_secret` after provider secret reissue;
+- observed cases where missing API-group permission produced `GW.AUTHN`.
+
+`P1_ONLY` does **not** mean false or unusable. It makes the evidence limitation explicit.
+
+### 2.3 No evidence laundering
 
 The following are forbidden:
 
 - turning a support anecdote into a universal provider guarantee;
-- turning a portal screenshot/operator statement into machine-verified provider truth;
+- turning an operator screenshot/statement into machine-verified provider truth;
 - turning a library default into a provider contract;
 - turning a documentation retrieval timestamp into runtime verification;
-- citing this `SOURCES.md` ledger as if it were the original upstream source.
+- citing this ledger as though it were the original upstream source.
 
-Contract documents SHOULD refer to the original upstream URL and MAY additionally use the stable source ID from this ledger.
+Owning contracts SHOULD keep the original upstream URL and MAY additionally record the stable source ID defined here.
 
 ---
 
 ## 3. Provenance timestamps
-
-The timestamp fields have separate meanings.
 
 | Field | Meaning |
 | --- | --- |
 | `retrieved_at` / `last_checked` | ICBM inspected the source at that time |
 | `upstream_version` | Provider documentation release/version associated with the reviewed contract |
 | `review_due` | Fallback calendar bound if change detection is absent or broken |
-| `verified_at` | Real runtime evidence was measured and accepted; documentation review alone cannot set this |
+| `verified_at` | Real runtime evidence required by the owning contract was measured and accepted |
 
 For the current M2 document set:
 
 - `upstream_version = 2.88.0`
 - `retrieved_at = 2026-09-14`
-- `verified_at = null` until real M2 runtime acceptance succeeds
-- `review_due = 2026-10-14` in the current contracts
+- `verified_at = null`
+- `review_due = 2026-10-14`
 
 A version/contract change takes precedence over the fallback calendar date.
 
-`review_due` is not required to remain globally identical forever. A contract may adopt a stricter freshness bound. If it does, both the owning contract and the consistency matrix below must change together.
+`review_due` is not required to remain globally identical forever. An owning contract may adopt a stricter freshness bound; if it does, the owning contract and the consistency matrix below must change together.
 
 ---
 
@@ -146,7 +172,7 @@ A version/contract change takes precedence over the fallback calendar date.
 
 This matrix mirrors the self-contained provenance values. It is an audit index, not their source of truth.
 
-| Contract | Upstream version | Retrieved at | Verified at | Review due | Consistency status |
+| Contract | Upstream version | Retrieved at | Verified at | Review due | Consistency |
 | --- | --- | --- | --- | --- | --- |
 | `ACCOUNT_IDENTITY.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
 | `AUTH.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
@@ -158,12 +184,12 @@ This matrix mirrors the self-contained provenance values. It is an audit index, 
 
 For the active M2 SmartStore contract set:
 
-- every contract MUST expose machine-readable-or-parseable `upstream_version`, `retrieved_at`, `verified_at`, and `review_due` provenance values;
-- `upstream_version` MUST match this ledger's current provider baseline unless a reviewed explicit version-scope exception is recorded;
-- the value shown in this matrix MUST exactly mirror the owning contract;
-- a targeted re-review MAY legitimately change `retrieved_at` or `review_due` for one contract, but the corresponding matrix row MUST change in the same reviewed change;
-- `verified_at` MUST NOT become non-null merely because documentation or a support discussion was re-read;
-- if one contract moves to a new provider version baseline, all affected active contracts must be impact-reviewed before the SmartStore integration set may be considered fully current.
+- every contract MUST expose parseable `upstream_version`, `retrieved_at`, `verified_at`, and `review_due` provenance values;
+- `upstream_version` MUST match the current SmartStore provider baseline unless a reviewed version-scope exception exists;
+- each matrix value MUST exactly mirror the owning contract;
+- a targeted re-review MAY legitimately change one contract's `retrieved_at` or `review_due`, but the matching row must change in the same reviewed change;
+- `verified_at` MUST NOT become non-null merely because documentation/support was re-read;
+- moving any contract to a new provider-version baseline requires impact review of the affected active contract set.
 
 ### 4.2 Repository/CI enforcement target
 
@@ -171,17 +197,17 @@ This is a required repository invariant, but its implementation is **not part of
 
 Claude Code implementation should extend `test_repository_rules.py` or an equivalent repository-rule test so CI verifies at minimum:
 
-1. the active SmartStore contract set contains the required provenance fields;
-2. each active contract's `upstream_version` equals the current baseline recorded by `SOURCES.md`, unless a reviewed exception exists;
-3. each contract's provenance values exactly match its row in this consistency matrix;
-4. a new active SmartStore contract cannot silently omit provenance;
-5. a `SUPPORT_DISCUSSION` ledger row cannot omit its summarized observation and dependent contract list.
+1. every active SmartStore contract exposes required provenance fields;
+2. each active contract's `upstream_version` matches the current baseline unless a reviewed exception exists;
+3. each contract's provenance values match its `SOURCES.md` consistency row;
+4. a new active SmartStore contract cannot omit provenance;
+5. a `SUPPORT_DISCUSSION` row cannot omit its summarized observation, dependency list, or P1-only marker when applicable.
 
-The test SHOULD parse the actual provenance representation used by each document rather than requiring all documents to have identical Markdown formatting.
+The parser SHOULD tolerate the current Markdown representation differences rather than forcing unrelated formatting changes.
 
-The test MUST NOT impose a permanent rule that every contract's `review_due` is identical. A stricter contract-specific review window is valid when explicitly recorded.
+The test MUST NOT permanently require every `review_due` value to be identical.
 
-Until this repository rule is implemented, reviewers MUST treat this matrix as a manual drift check.
+Until implemented, reviewers must treat this matrix as a manual drift check.
 
 ---
 
@@ -190,97 +216,68 @@ Until this repository rule is implemented, reviewers MUST treat this matrix as a
 | Source ID | Upstream source | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
 | `NAVER-P0-CURRENT` | https://apicenter.commerce.naver.com/docs/commerce-api/current | Current Commerce API version and API catalog | all SmartStore contracts | Commerce API version changes from `2.88.0` |
-| `NAVER-P0-AUTH` | https://apicenter.commerce.naver.com/docs/auth | OAuth2 Client Credentials, token URL, Bearer auth, scopes N/A, auth fallback/signature rules | `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `ENDPOINT_MATRIX.md` | authentication/token/signature/scopes contract changes |
-| `NAVER-P0-RESTRICTION` | https://apicenter.commerce.naver.com/docs/restriction | TLS constraints, API-group permission model, request limits | `PERMISSIONS_SCOPES.md`, `ERRORS.md` | API-group/TLS/rate-limit model changes |
+| `NAVER-P0-AUTH` | https://apicenter.commerce.naver.com/docs/auth | OAuth2 Client Credentials, token URL, Bearer auth, scopes N/A, auth/signature rules | `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `ENDPOINT_MATRIX.md` | auth/token/signature/scopes contract changes |
+| `NAVER-P0-RESTRICTION` | https://apicenter.commerce.naver.com/docs/restriction | TLS constraints, API-group model, request limits | `PERMISSIONS_SCOPES.md`, `ERRORS.md` | API-group/TLS/rate-limit model changes |
 | `NAVER-P0-TROUBLESHOOTING` | https://apicenter.commerce.naver.com/docs/trouble-shooting | gateway error format, Trace ID, gateway code table | `ERRORS.md` | gateway status/code/meaning changes |
 | `NAVER-P0-REST` | https://apicenter.commerce.naver.com/docs/restful-api | common REST/request/response conventions | `ERRORS.md`, `ENDPOINT_MATRIX.md` | common REST/error contract changes |
-| `NAVER-P0-TOKEN` | https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth | token issuance request/response endpoint contract | `AUTH.md`, `ENDPOINT_MATRIX.md` | method/path/request/response/token lifetime contract changes |
-| `NAVER-P0-SELLER-ACCOUNT` | https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers | protected seller-account read, response identity fields, endpoint domain errors | `ACCOUNT_IDENTITY.md`, `PERMISSIONS_SCOPES.md`, `ENDPOINT_MATRIX.md` | method/path/response/error/permission mapping changes |
-| `NAVER-P0-BASIC-INTEGRATION` | https://apicenter.commerce.naver.com/docs/solution-doc/3000/%EA%B8%B0%EB%B3%B8-%EC%97%B0%EB%8F%99-%EC%9A%94%EC%86%8C-%EA%B0%80%EC%9D%B4%EB%93%9C | solution/account mapping guidance, account UID integration context | `ACCOUNT_IDENTITY.md`, `AUTH.md` | account mapping or solution-integration guidance changes |
-| `NAVER-P0-PRODUCT-CREATE` | https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product | product endpoint/error examples and future M5 planning | `PERMISSIONS_SCOPES.md`, `ERRORS.md`; M5 planning only | product create contract changes before M5 adoption |
-| `NAVER-P0-PRODUCT-READ` | https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product | product read/error examples and future reconciliation planning | `ERRORS.md`; M5 planning only | product read contract changes before M5 adoption |
+| `NAVER-P0-TOKEN` | https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth | token issuance request/response endpoint contract | `AUTH.md`, `ENDPOINT_MATRIX.md` | method/path/request/response/token-lifetime contract changes |
+| `NAVER-P0-SELLER-ACCOUNT` | https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers | protected seller-account read, identity fields, endpoint errors | `ACCOUNT_IDENTITY.md`, `PERMISSIONS_SCOPES.md`, `ENDPOINT_MATRIX.md` | method/path/response/error/permission mapping changes |
+| `NAVER-P0-BASIC-INTEGRATION` | https://apicenter.commerce.naver.com/docs/solution-doc/3000/%EA%B8%B0%EB%B3%B8-%EC%97%B0%EB%8F%99-%EC%9A%94%EC%86%8C-%EA%B0%80%EC%9D%B4%EB%93%9C | solution/account mapping guidance and account UID context | `ACCOUNT_IDENTITY.md`, `AUTH.md` | account mapping or solution guidance changes |
+| `NAVER-P0-PRODUCT-CREATE` | https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product | product errors and future M5 planning | `PERMISSIONS_SCOPES.md`, `ERRORS.md`; M5 planning only | product-create contract changes before M5 adoption |
+| `NAVER-P0-PRODUCT-READ` | https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product | product read/error examples and future reconciliation | `ERRORS.md`; M5 planning only | product-read contract changes before M5 adoption |
 
-### 5.1 Current provider-version observation
-
-At consolidation time, the official current Commerce API page reports:
+At consolidation time the official current Commerce API page reports:
 
 `2.88.0 (2026-09-07)`
 
-This is documentation provenance, not proof that ICBM runtime behavior has been verified against that version.
-
-### 5.2 Current provider authentication observation
-
-At consolidation time, the official authentication documentation states:
-
-- OAuth 2.0 Client Credentials;
-- token URL `https://api.commerce.naver.com/external/v1/oauth2/token`;
-- protected requests use `Authorization: Bearer {token}`;
-- Commerce API does not provide an OAuth `scopes` specification.
-
-These claims remain subject to the contract-specific runtime acceptance requirements.
+This is documentation provenance, not runtime verification.
 
 ---
 
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
-These sources come from NAVER's official Commerce API technical-support repository/discussions.
+These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.
 
-They are useful for cases where the normative documentation is incomplete, ambiguous, or where observed failure modes require provider clarification.
-
-They are **point-in-time support evidence, not immutable provider contracts**. A discussion may later be edited, hidden, deleted, or superseded.
-
-They MUST remain supporting evidence rather than being silently promoted above newer normative documentation.
-
-| Source ID | URL | Supported observation preserved by ICBM | Dependent contract(s) |
-| --- | --- | --- | --- |
-| `NAVER-P1-ACCOUNT-UID-2425` | https://github.com/commerce-api-naver/commerce-api/discussions/2425 | `accountUid`/`accountId` uniqueness guidance; `accountUid` integration use | `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md` |
-| `NAVER-P1-SELF-ACCOUNT-3339` | https://github.com/commerce-api-naver/commerce-api/discussions/3339 | own-store `SELF`; token response does not itself provide seller identity | `AUTH.md` |
-| `NAVER-P1-APP-REAUTH-3557` | https://github.com/commerce-api-naver/commerce-api/discussions/3557 | own-store application manual/web re-authentication; 180-day application validity guidance | `AUTH.md` |
-| `NAVER-P1-SECRET-REISSUE-1564` | https://github.com/commerce-api-naver/commerce-api/discussions/1564 | reissued application secret invalidates prior secret | `AUTH.md` |
-| `NAVER-P1-TIMESTAMP-357` | https://github.com/commerce-api-naver/commerce-api/discussions/357 | millisecond timestamp/window and clock synchronization guidance | `AUTH.md` |
-| `NAVER-P1-SELF-BODY-3751` | https://github.com/commerce-api-naver/commerce-api/discussions/3751 | `SELF` request body rules; no `account_id`; client_credentials requirement | `AUTH.md`, `ENDPOINT_MATRIX.md` |
-| `NAVER-P1-OWN-STORE-780` | https://github.com/commerce-api-naver/commerce-api/discussions/780 | own-store application/SELF integration context | `ENDPOINT_MATRIX.md` |
-| `NAVER-P1-GW-AUTHN-GROUP-1013` | https://github.com/commerce-api-naver/commerce-api/discussions/1013 | `GW.AUTHN` can accompany missing API-group permission; provider-admin group inspection | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
-| `NAVER-P1-PRODUCT-GROUP-1835` | https://github.com/commerce-api-naver/commerce-api/discussions/1835 | product API authorization tied to `상품` API group; observed `GW.AUTHN` case | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
-| `NAVER-P1-SELLERINFO-GROUP-1895` | https://github.com/commerce-api-naver/commerce-api/discussions/1895 | seller-information calls require `판매자정보` group | `PERMISSIONS_SCOPES.md` |
-| `NAVER-P1-ORDERSELLER-GROUP-1093` | https://github.com/commerce-api-naver/commerce-api/discussions/1093 | order-seller API group requirement | `PERMISSIONS_SCOPES.md` |
-| `NAVER-P1-GW-AUTHN-HEADER-3676` | https://github.com/commerce-api-naver/commerce-api/discussions/3676 | malformed Authorization header can produce `GW.AUTHN` | `ERRORS.md` |
-| `NAVER-P1-GW-AUTHN-EXPIRED-3762` | https://github.com/commerce-api-naver/commerce-api/discussions/3762 | expired access token can produce `401/GW.AUTHN` | `ERRORS.md` |
-| `NAVER-P1-IP-TEMPORARY-3428` | https://github.com/commerce-api-naver/commerce-api/discussions/3428 | intermittent `GW.IP_NOT_ALLOWED` can reflect temporary provider-side behavior despite same outbound IP | `ERRORS.md` |
-| `NAVER-P1-BADREQ-NOTICE-1649` | https://github.com/commerce-api-naver/commerce-api/discussions/1649 | structured `BAD_REQUEST`/`invalidInputs` example for missing product notice field | `ERRORS.md` |
-| `NAVER-P1-BADREQ-POLICY-3529` | https://github.com/commerce-api-naver/commerce-api/discussions/3529 | `BAD_REQUEST` can also represent provider policy restriction, e.g. seller tag restriction | `ERRORS.md` |
+| Source ID | URL | Observation preserved by ICBM | Basis | Dependent contract(s) |
+| --- | --- | --- | --- | --- |
+| `NAVER-P1-ACCOUNT-UID-2425` | https://github.com/commerce-api-naver/commerce-api/discussions/2425 | `accountUid`/`accountId` uniqueness guidance; `accountUid` Commerce API integration use | `SUPPORTING` | `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md` |
+| `NAVER-P1-SELF-ACCOUNT-3339` | https://github.com/commerce-api-naver/commerce-api/discussions/3339 | own-store application uses `SELF`; token response does not itself provide seller identity | `SUPPORTING` | `AUTH.md` |
+| `NAVER-P1-APP-REAUTH-3557` | https://github.com/commerce-api-naver/commerce-api/discussions/3557 | own-store application re-authentication is a web/manual action; authentication validity guidance is 180 days from authentication | `P1_ONLY` | `AUTH.md` |
+| `NAVER-P1-SECRET-REISSUE-1564` | https://github.com/commerce-api-naver/commerce-api/discussions/1564 | provider application-secret reissue makes the previous secret unusable immediately | `P1_ONLY` | `AUTH.md` |
+| `NAVER-P1-TIMESTAMP-357` | https://github.com/commerce-api-naver/commerce-api/discussions/357 | token-signature timestamp is millisecond Unix time; documented validity window/clock-sync guidance | `SUPPORTING` | `AUTH.md` |
+| `NAVER-P1-SELF-BODY-3751` | https://github.com/commerce-api-naver/commerce-api/discussions/3751 | own-store `SELF`; no `account_id`; `grant_type=client_credentials`; strict body shape | `SUPPORTING` | `AUTH.md`, `ENDPOINT_MATRIX.md` |
+| `NAVER-P1-OWN-STORE-780` | https://github.com/commerce-api-naver/commerce-api/discussions/780 | `내스토어 애플리케이션` uses `type=SELF`; one own-store application is connected to one SmartStore account under the cited provider guidance | `P1_ONLY_FOR_1_TO_1_CLAIM` | `ENDPOINT_MATRIX.md`; identity/binding design context |
+| `NAVER-P1-GW-AUTHN-GROUP-1013` | https://github.com/commerce-api-naver/commerce-api/discussions/1013 | missing required API-group permission can produce `GW.AUTHN`; provider guidance points to the application's API-group configuration | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
+| `NAVER-P1-PRODUCT-GROUP-1835` | https://github.com/commerce-api-naver/commerce-api/discussions/1835 | product API authorization tied to the `상품` API group; observed missing-group `GW.AUTHN` case | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
+| `NAVER-P1-SELLERINFO-GROUP-1895` | https://github.com/commerce-api-naver/commerce-api/discussions/1895 | seller-information API calls require `판매자정보` group | `SUPPORTING` | `PERMISSIONS_SCOPES.md` |
+| `NAVER-P1-ORDERSELLER-GROUP-1093` | https://github.com/commerce-api-naver/commerce-api/discussions/1093 | order-seller APIs require `주문 판매자` group | `SUPPORTING` | `PERMISSIONS_SCOPES.md` |
+| `NAVER-P1-GW-AUTHN-HEADER-3676` | https://github.com/commerce-api-naver/commerce-api/discussions/3676 | malformed Authorization header can produce `GW.AUTHN` | `P1_ONLY_FOR_OBSERVED_CAUSE` | `ERRORS.md` |
+| `NAVER-P1-GW-AUTHN-EXPIRED-3762` | https://github.com/commerce-api-naver/commerce-api/discussions/3762 | expired access token can produce `401/GW.AUTHN` | `SUPPORTING` | `ERRORS.md` |
+| `NAVER-P1-IP-TEMPORARY-3428` | https://github.com/commerce-api-naver/commerce-api/discussions/3428 | same outbound IP intermittently received `GW.IP_NOT_ALLOWED` and success; NAVER later identified a temporary provider-side condition | `P1_ONLY_FOR_OBSERVED_EXCEPTION` | `ERRORS.md` |
+| `NAVER-P1-BADREQ-NOTICE-1649` | https://github.com/commerce-api-naver/commerce-api/discussions/1649 | structured `BAD_REQUEST` / `invalidInputs` example caused by a missing required product-notice field | `SUPPORTING_EXAMPLE` | `ERRORS.md` |
+| `NAVER-P1-BADREQ-POLICY-3529` | https://github.com/commerce-api-naver/commerce-api/discussions/3529 | `BAD_REQUEST` can also represent a provider policy restriction such as restricted seller tags | `P1_ONLY_FOR_OBSERVED_EXAMPLE` | `ERRORS.md` |
 
 ### 6.1 Support-discussion survivability rule
 
 A `SUPPORT_DISCUSSION` URL by itself is insufficient durable provenance.
 
-Every P1 entry MUST preserve, in repository-controlled text:
+Every P1 entry MUST preserve in repository-controlled text:
 
 - the limited observation actually relied upon;
-- the owning/dependent contract(s);
-- enough wording to understand the historical rationale if the external thread later becomes unavailable.
+- the dependent contract(s);
+- whether the claim is ordinary supporting evidence or `P1_ONLY`/claim-specific P1-only evidence;
+- enough wording to reconstruct the historical rationale if the external thread becomes unavailable.
 
-For an important P1 claim, the owning contract SHOULD also summarize the claim near its use instead of relying on a bare link.
+For important P1 claims the owning contract SHOULD also summarize the claim near its use.
 
-The summary is an audit record of what ICBM relied upon at review time. It is **not** a substitute for current upstream evidence.
+The repository summary is historical rationale, not current provider verification.
 
-If a support discussion later disappears or becomes inaccessible:
+If a materially required P1 source disappears or changes incompatibly:
 
-- do not pretend the historical summary re-verifies current provider behavior;
 - retain the summary as historical rationale;
-- mark current freshness as needing review when that P1 evidence is materially required;
+- mark the dependent claim/contract freshness for review;
+- do not treat the cached summary as fresh upstream proof;
 - seek current P0, replacement P1, or R0 evidence before making a new or expanded claim.
-
-### 6.2 Support-source freshness
-
-Support discussions do not share the Commerce API documentation version number.
-
-For a `P1` source:
-
-- `last_checked` defaults to this ledger's consolidation date unless the dependent contract records a newer check;
-- any contradictory/newer `P0` provider contract invalidates the old interpretation immediately;
-- a provider support reply MUST NOT be generalized beyond the facts it actually establishes;
-- runtime behavior that conflicts with the support guidance triggers review rather than automatic remapping.
 
 ---
 
@@ -288,70 +285,62 @@ For a `P1` source:
 
 | Source ID | Source | Scope in ICBM | Dependent contract(s) | Freshness |
 | --- | --- | --- | --- | --- |
-| `OAUTH-S0-RFC6749` | https://www.rfc-editor.org/rfc/rfc6749 | OAuth 2.0 Client Credentials/access-token response/token-type semantics | `AUTH.md`, `ENDPOINT_MATRIX.md` | Re-review if provider changes OAuth protocol/version/profile |
+| `OAUTH-S0-RFC6749` | https://www.rfc-editor.org/rfc/rfc6749 | OAuth 2.0 Client Credentials/access-token response/token-type semantics | `AUTH.md`, `ENDPOINT_MATRIX.md` | re-review if provider changes OAuth protocol/profile |
 
-The current M2 token contract uses RFC 6749 only for protocol semantics that NAVER explicitly adopts through OAuth 2.0 Client Credentials.
+ICBM uses RFC 6749 only for OAuth semantics NAVER actually adopts.
 
-Notably, `token_type` is a required access-token response field and the client must not use an access token whose token type it does not understand.
-
-ICBM currently understands/implements `Bearer` for SmartStore.
-
-Therefore a non-Bearer token type is contract drift and fails closed rather than being silently forced into a Bearer request.
+`token_type` is required by the OAuth access-token response contract; ICBM currently understands SmartStore `Bearer`. Unsupported token types fail closed.
 
 ---
 
 ## 8. Conditional implementation-library sources (`L0` / `LIBRARY_REFERENCE`)
 
-These sources become implementation-relevant only if the corresponding library is actually adopted/pinned by ICBM.
-
-They do not define NAVER behavior.
-
-| Source ID | Source | Conditional use | Current status |
+| Source ID | Source | Conditional use | Status |
 | --- | --- | --- | --- |
-| `HTTPX-L0-QUICKSTART` | https://www.python-httpx.org/quickstart/ | HTTPX redirect/default client behavior | `CONDITIONAL` |
-| `HTTPX-L0-CLIENT-SOURCE` | https://github.com/encode/httpx/blob/master/httpx/_client.py | HTTPX redirect method/body behavior, including 307/308 | `CONDITIONAL` |
+| `HTTPX-L0-QUICKSTART` | https://www.python-httpx.org/quickstart/ | HTTPX redirect/default-client behavior | `CONDITIONAL` |
+| `HTTPX-L0-CLIENT-SOURCE` | https://github.com/encode/httpx/blob/master/httpx/_client.py | HTTPX redirect method/body behavior including 307/308 | `CONDITIONAL` |
 
-If HTTPX is adopted, these source references MUST be bound to the actual pinned version/commit used by ICBM rather than relying indefinitely on `master` or a moving documentation page.
+If HTTPX is adopted, these references must be bound to the actual pinned version/commit used by ICBM rather than relying indefinitely on a moving page or `master`.
 
 `library behavior != provider contract`
 
 ---
 
-## 9. Contract-to-source dependency matrix
+## 9. Contract-to-source and runtime-evidence dependency matrix
 
-This table is the fast audit view.
+This table connects documentation provenance to the concrete R0 slots required before an owning contract may set `verified_at`.
 
-| Contract | Primary source IDs | Supporting source IDs | Runtime evidence required before `verified_at` |
+| Contract | Primary source IDs | Supporting / P1-only source IDs | Required R0 slot(s) before `verified_at` |
 | --- | --- | --- | --- |
-| `ACCOUNT_IDENTITY.md` | `NAVER-P0-CURRENT`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-BASIC-INTEGRATION` | `NAVER-P1-ACCOUNT-UID-2425` | real authenticated `/v1/seller/account` identity read and comparison |
-| `AUTH.md` | `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-BASIC-INTEGRATION`, `OAUTH-S0-RFC6749` | `NAVER-P1-SELF-ACCOUNT-3339`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-SECRET-REISSUE-1564`, `NAVER-P1-TIMESTAMP-357`, `NAVER-P1-SELF-BODY-3751` | real token lifecycle, restart/crash, generation, and re-auth behavior acceptance |
-| `PERMISSIONS_SCOPES.md` | `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-CURRENT`, `NAVER-P0-PRODUCT-CREATE` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895`, `NAVER-P1-ORDERSELLER-GROUP-1093` | current permission evidence with provenance; actual write remains separate M5 proof |
-| `ERRORS.md` | `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-REST`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-PRODUCT-CREATE`, `NAVER-P0-PRODUCT-READ` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-GW-AUTHN-HEADER-3676`, `NAVER-P1-GW-AUTHN-EXPIRED-3762`, `NAVER-P1-IP-TEMPORARY-3428`, `NAVER-P1-BADREQ-NOTICE-1649`, `NAVER-P1-BADREQ-POLICY-3529` | measured failure fixtures/real traces for adopted endpoints; unknown behavior remains UNKNOWN |
-| `ENDPOINT_MATRIX.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-REST`, `OAUTH-S0-RFC6749` | `NAVER-P1-OWN-STORE-780`, `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-SELF-BODY-3751` | real M2 calls for the two ADOPTED endpoints and allow-list enforcement evidence |
+| `ACCOUNT_IDENTITY.md` | `NAVER-P0-CURRENT`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-BASIC-INTEGRATION` | `NAVER-P1-ACCOUNT-UID-2425` | `SMARTSTORE-R0-SELLER-ACCOUNT` |
+| `AUTH.md` | `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-BASIC-INTEGRATION`, `OAUTH-S0-RFC6749` | `NAVER-P1-SELF-ACCOUNT-3339`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-SECRET-REISSUE-1564`, `NAVER-P1-TIMESTAMP-357`, `NAVER-P1-SELF-BODY-3751` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT`, `SMARTSTORE-R0-FIRST-TOKEN-CRASH`, `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`; plus accepted evidence for the 180-day application re-auth lifecycle per `AUTH.md` |
+| `PERMISSIONS_SCOPES.md` | `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-CURRENT`, `NAVER-P0-PRODUCT-CREATE` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895`, `NAVER-P1-ORDERSELLER-GROUP-1093` | `SMARTSTORE-R0-PERMISSION` for the permission-evidence layer; actual write remains separate M5 proof |
+| `ERRORS.md` | `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-REST`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-PRODUCT-CREATE`, `NAVER-P0-PRODUCT-READ` | error-related P1 rows above | adopted-endpoint measured error/ambiguity evidence required by `ERRORS.md`; no blanket `verified_at` from documentation fixtures alone |
+| `ENDPOINT_MATRIX.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-REST`, `OAUTH-S0-RFC6749` | `NAVER-P1-OWN-STORE-780`, `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-SELF-BODY-3751` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT` plus allow-list/no-redirect repository/runtime acceptance evidence |
 
-A future `CAPABILITY_MAPPING.md` SHALL use these stable source IDs rather than creating another independent source taxonomy.
+A future `CAPABILITY_MAPPING.md` SHALL reuse these IDs and SHALL NOT create a competing provenance taxonomy.
+
+The owning contract remains authoritative for the exact acceptance set. This table is a dependency index; it MUST be updated if that exact set changes.
 
 ---
 
-## 10. Runtime evidence registry (`R0` / `RUNTIME_EVIDENCE`) — currently pending
-
-Runtime evidence is intentionally separate from documentation evidence.
-
-The following M2 evidence slots exist but are not yet verified:
+## 10. Runtime evidence registry (`R0` / `RUNTIME_EVIDENCE`) — pending
 
 | Evidence ID | Target | Required minimum proof | Status |
 | --- | --- | --- | --- |
-| `SMARTSTORE-R0-TOKEN` | `SMARTSTORE_AUTH_TOKEN` | real authorized token call, request shape, response success predicate, observed latency/lifetime, sanitized trace reference | `PENDING` |
-| `SMARTSTORE-R0-SELLER-ACCOUNT` | `SMARTSTORE_SELLER_ACCOUNT` | real protected GET, current session generation, observed `accountUid`, identity comparison, sanitized trace reference | `PENDING` |
-| `SMARTSTORE-R0-FIRST-TOKEN-CRASH` | AUTH first-token uncertainty | measured behavior for remote token success followed by lost/uncommitted local result and bounded recovery | `PENDING` |
-| `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW` | token persistence/reissue decision | behavior with >30 min remaining, <30 min remaining, restart, and old-token validity | `PENDING` |
-| `SMARTSTORE-R0-PERMISSION` | permission evidence | provider-admin attestation or future official introspection bound to current application fingerprint; provenance/strength retained | `PENDING` |
+| `SMARTSTORE-R0-TOKEN` | `SMARTSTORE_AUTH_TOKEN` | real authorized token call, request shape, success predicate, observed latency/lifetime, sanitized trace | `PENDING` |
+| `SMARTSTORE-R0-SELLER-ACCOUNT` | `SMARTSTORE_SELLER_ACCOUNT` | real protected GET using current committed session, observed `accountUid`, identity comparison, sanitized trace | `PENDING` |
+| `SMARTSTORE-R0-FIRST-TOKEN-CRASH` | AUTH Case E | measured bounded recovery behavior for remote token success followed by lost/uncommitted local result | `PENDING` |
+| `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW` | token persistence/reissue decision | >30m, <30m, restart, old-token validity, and reissue behavior | `PENDING` |
+| `SMARTSTORE-R0-PERMISSION` | permission evidence | provider-admin attestation or future official introspection bound to current application fingerprint, retaining source/strength | `PENDING` |
 
 `PENDING` is not failure.
 
-It means the contract is documented but the corresponding runtime fact has not yet been measured and accepted.
+It means the documented contract exists but the corresponding runtime fact has not yet been measured and accepted.
 
-When runtime evidence is collected, it MUST include generation/time/application bindings required by the owning contract.
+An owning contract's `verified_at` may become non-null only after **its own complete required R0/acceptance set** has been accepted. Completing one shared slot does not automatically verify every dependent contract.
+
+All R0 evidence must carry the generation/time/application bindings required by the owning contract.
 
 ---
 
@@ -359,35 +348,79 @@ When runtime evidence is collected, it MUST include generation/time/application 
 
 ### 11.1 Immediate review triggers
 
-Re-review affected SmartStore contracts immediately when any of the following occurs:
+Re-review affected SmartStore contracts when any of the following occurs:
 
 - official Commerce API version changes from `2.88.0`;
-- token endpoint method/path/request/response or lifetime contract changes;
-- seller-account endpoint identity schema changes;
+- token endpoint method/path/request/response/lifetime contract changes;
+- seller-account identity schema changes;
 - NAVER changes `accountUid` / `accountId` guidance;
-- OAuth/authentication mode or `SELF`/`SELLER` behavior changes;
+- OAuth/auth mode or `SELF`/`SELLER` behavior changes;
 - API-group permission model or endpoint/group mapping changes;
 - gateway/domain error semantics change;
-- redirect behavior or documented endpoint responses change;
+- redirect behavior or adopted endpoint responses change;
 - own-store application re-authentication policy changes;
-- NAVER introduces a machine-readable permission introspection endpoint;
+- NAVER introduces machine-readable permission introspection;
 - an adopted implementation library changes behavior relied on by a safety invariant;
-- measured runtime evidence contradicts a currently adopted contract.
+- measured R0 evidence contradicts an adopted contract;
+- a materially required `P1_ONLY` source disappears, changes incompatibly, or is superseded.
 
 ### 11.2 Calendar fallback
 
-If automated source/version change detection is absent or broken, the owning contract's `review_due` applies.
+If automated change detection is absent or broken, the owning contract's `review_due` applies.
 
-Calendar review is a fallback, not the primary change-detection mechanism.
+Calendar review is a fallback, not the primary change detector.
 
-### 11.3 Unknown beats invention
+### 11.3 Contract freshness is separate from runtime capability
+
+Documentation/source freshness describes **how current ICBM's understanding of the provider contract is**.
+
+It is not automatically the same thing as runtime capability state.
+
+Therefore:
+
+`contract_freshness in {CURRENT, STALE, REVIEW_REQUIRED}`
+
+is a separate conceptual axis from runtime states such as:
+
+- `auth=READY/non-READY`;
+- `write_scope=READY/MISSING/UNKNOWN`;
+- `write=READY/BLOCKED/UNVERIFIED`.
+
+A calendar/source freshness failure by itself MUST NOT blindly demote a still-valid runtime-proven capability.
+
+Example:
+
+- current committed token/session remains valid;
+- fresh protected account read still proves the intended `accountUid`;
+- documentation `review_due` passes.
+
+In that case the runtime proof does not become false merely because the documentation review is overdue.
+
+However stale contract understanding MUST block decisions that require trusting or extending that stale contract, including as applicable:
+
+- adopting a new endpoint;
+- widening an allow-list;
+- promoting a new permission/capability claim;
+- changing retry/replay semantics;
+- using a stale P1-only claim to justify new automation;
+- declaring a newly measured capability READY when its required contract is not current.
+
+The exact state-transition/operation gates are owned by `CAPABILITY_MAPPING.md`.
+
+### 11.4 Unknown beats invention
 
 When a source is stale, unavailable, contradictory, or insufficient:
 
 - do not infer a favorable provider guarantee;
-- do not preserve READY merely because the previous documentation once said so;
-- mark the affected evidence/state as stale or UNKNOWN according to the owning contract;
-- require review or fresh measurement before restoring trust.
+- do not preserve a documentation-derived READY claim merely because an older source once supported it;
+- mark the affected **contract/evidence freshness** stale or review-required;
+- let the owning contract determine whether any specific runtime evidence must become UNKNOWN;
+- require review/fresh measurement before making a new trust or expansion decision.
+
+This prevents both failure modes:
+
+1. `review_due` mechanically killing valid CONNECT runtime proof; and
+2. freshness becoming decorative and never constraining future decisions.
 
 ---
 
@@ -396,17 +429,18 @@ When a source is stale, unavailable, contradictory, or insufficient:
 A new SmartStore source entry MUST record at least:
 
 - stable `source_id`;
-- source class/authority (`P0`, `P1`, `S0`, `L0`, or `R0`);
-- artifact kind (`OFFICIAL_DOC`, `SUPPORT_DISCUSSION`, `NORMATIVE_STANDARD`, `LIBRARY_REFERENCE`, or `RUNTIME_EVIDENCE`);
-- canonical URL or evidence locator;
+- source class (`P0`, `P1`, `S0`, `L0`, `R0`);
+- artifact kind;
+- canonical URL/evidence locator;
 - exact claim(s) it supports;
 - dependent contract(s);
+- `P1_ONLY` basis when normative P0 is silent and the claim materially depends on P1;
 - retrieval/measurement time;
 - upstream version when applicable;
 - freshness/review trigger;
 - whether it is documentation, operator attestation, or measured runtime evidence.
 
-Before using a new source to change a contract:
+Before using a new source to change behavior:
 
 `source -> claim -> impacted contract -> tests/evidence -> review`
 
@@ -418,15 +452,13 @@ A source addition alone does not authorize implementation behavior.
 
 Do not silently delete a source that previously supported an adopted contract.
 
-When a source becomes obsolete, inaccessible, edited incompatibly, or contradicted:
+When a source becomes obsolete, inaccessible, materially edited, or contradicted:
 
-1. mark it superseded/unavailable in the ledger or remove it only in the same reviewed change that records the replacement;
-2. identify every dependent contract;
+1. mark it superseded/unavailable or replace it in the same reviewed change;
+2. identify every dependent contract and `P1_ONLY` claim;
 3. re-evaluate affected invariants;
 4. update tests/evidence requirements;
-5. preserve enough repository-controlled summary/history to explain why the prior decision existed and why it changed.
-
-Historical support evidence may remain in the ledger when useful for audit, but MUST be clearly distinguished from current normative truth.
+5. preserve enough repository-controlled history to explain why the prior decision existed and why it changed.
 
 A cached summary of an unavailable discussion is historical rationale, not current provider verification.
 
@@ -434,13 +466,13 @@ A cached summary of an unavailable discussion is historical rationale, not curre
 
 ## 14. Final provenance invariants
 
-`self-contained contract provenance remains in each owning document`
+`self-contained provenance remains in each owning contract`
 
 `SOURCES.md = reverse index + consistency audit, not single provenance source`
 
 `provider documentation != runtime verification`
 
-`support discussion != universal provider guarantee`
+`P1_ONLY = explicit evidence limitation, not hidden normative truth`
 
 `support URL alone != durable rationale`
 
@@ -450,8 +482,12 @@ A cached summary of an unavailable discussion is historical rationale, not curre
 
 `retrieved_at != verified_at`
 
-`cross-document provenance drift must be detectable and later CI-enforced`
+`owning contract verified_at requires its complete accepted R0/acceptance set`
 
-`source freshness failure -> re-review / UNKNOWN, not invented certainty`
+`contract freshness != runtime capability truth`
+
+`stale contract understanding blocks unsafe expansion/new trust decisions`
+
+`cross-document provenance drift must be detectable and later CI-enforced`
 
 `runtime contradiction -> investigate and fail closed before rewriting canonical truth`
