@@ -87,13 +87,19 @@ Updating only one owning contract while leaving this ledger inconsistent is prov
 
 ICBM SHALL distinguish both **authority class** and **artifact kind**.
 
-| Rank | Source class | Artifact kind | Meaning | Contract role |
-| --- | --- | --- | --- | --- |
-| `P0` | `PROVIDER_NORMATIVE` | `OFFICIAL_DOC` | Current official NAVER Commerce API documentation | Primary provider contract evidence |
-| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | `SUPPORT_DISCUSSION` | NAVER-maintained official Commerce API technical-support discussion | Supporting/clarifying evidence; may temporarily fill a P0 gap when explicitly marked |
-| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | `NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Governs only the protocol scope actually adopted by NAVER |
-| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | `LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Implementation behavior only; never NAVER semantics |
-| `R0` | `MEASURED_RUNTIME_EVIDENCE` | `RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time/application scope |
+| Rank | Source class | Artifact kind | Meaning | Contract role | May establish provider contract? |
+| --- | --- | --- | --- | --- | --- |
+| `P0` | `PROVIDER_NORMATIVE` | `OFFICIAL_DOC` | Current official NAVER Commerce API documentation | Primary provider contract evidence | `YES` — within the reviewed provider documentation scope |
+| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | `SUPPORT_DISCUSSION` | NAVER-maintained official Commerce API technical-support discussion | Supporting/clarifying evidence; may temporarily fill a P0 gap when explicitly marked | `LIMITED` — never silently overrides later P0; claim scope must stay explicit |
+| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | `NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Governs only the protocol scope actually adopted by NAVER | `LIMITED` — only for the protocol/profile NAVER actually adopts |
+| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | `LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Implementation behavior only; never NAVER semantics | `NO` |
+| `R0` | `MEASURED_RUNTIME_EVIDENCE` | `RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time/application scope | `NO` — a contradiction triggers review; R0 does not silently rewrite the provider contract |
+| `A0` | `OPERATOR_ATTESTED_EVIDENCE` | `ATTESTATION_EVIDENCE` | Operator-supplied observation/attestation, including provider-admin UI evidence, bound to the recorded application/context | Evidence that ICBM received and handled an attestation at the recorded strength; never machine/provider runtime truth | `NO` — A0 can never establish NAVER/provider contract semantics |
+
+`R0` and `A0` are intentionally different evidence classes:
+
+- `R0 = MEASURED_RUNTIME_EVIDENCE` — ICBM measured a real provider interaction/case;
+- `A0 = OPERATOR_ATTESTED_EVIDENCE` — ICBM records and handles a human/operator attestation without converting it into provider runtime truth.
 
 ### 2.1 Conflict rule
 
@@ -103,7 +109,8 @@ When sources disagree:
 2. `P1` may clarify ambiguity but MUST NOT silently override a later contradictory `P0` contract;
 3. `S0` governs protocol semantics only where NAVER adopts that protocol/profile;
 4. `L0` never defines NAVER behavior;
-5. `R0` may prove that measured behavior differs from documentation, but that conflict triggers review rather than silently rewriting the documented contract.
+5. `R0` may prove that measured behavior differs from documentation, but that conflict triggers review rather than silently rewriting the documented contract;
+6. `A0` never establishes provider behavior and therefore cannot resolve a provider-contract conflict by itself.
 
 A conflict affecting a safety or READY invariant must fail closed until reviewed.
 
@@ -138,6 +145,8 @@ The following are forbidden:
 
 - turning a support anecdote into a universal provider guarantee;
 - turning an operator screenshot/statement into machine-verified provider truth;
+- promoting `A0` operator-attested evidence into `R0` measured-runtime evidence without a separate real provider measurement;
+- treating `A0` as proof of NAVER/provider contract semantics merely because the attestation came from a provider-admin UI;
 - turning a library default into a provider contract;
 - turning a documentation retrieval timestamp into runtime verification;
 - citing this ledger as though it were the original upstream source.
@@ -294,22 +303,26 @@ If HTTPX is adopted, these references must be bound to the actual pinned version
 
 ---
 
-## 9. Contract-to-source and runtime-evidence dependency matrix
+## 9. Contract-to-source and evidence dependency matrix
 
-| Contract | Primary source IDs | Supporting / P1-only source IDs | Required R0 slot(s) before `verified_at` |
+| Contract | Primary source IDs | Supporting / P1-only source IDs | Required evidence before `verified_at` |
 | --- | --- | --- | --- |
 | `ACCOUNT_IDENTITY.md` | `NAVER-P0-CURRENT`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-BASIC-INTEGRATION` | `NAVER-P1-ACCOUNT-UID-2425` | `SMARTSTORE-R0-SELLER-ACCOUNT` |
 | `AUTH.md` | `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-BASIC-INTEGRATION`, `OAUTH-S0-RFC6749` | `NAVER-P1-SELF-ACCOUNT-3339`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-SECRET-REISSUE-1564`, `NAVER-P1-TIMESTAMP-357`, `NAVER-P1-SELF-BODY-3751` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT`, `SMARTSTORE-R0-FIRST-TOKEN-CRASH`, `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`, `SMARTSTORE-R0-APP-REAUTH` |
-| `PERMISSIONS_SCOPES.md` | `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-CURRENT`, `NAVER-P0-PRODUCT-CREATE` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895`, `NAVER-P1-ORDERSELLER-GROUP-1093` | `SMARTSTORE-R0-PERMISSION` for the permission-evidence layer; actual write remains separate M5 proof |
+| `PERMISSIONS_SCOPES.md` | `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-CURRENT`, `NAVER-P0-PRODUCT-CREATE` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895`, `NAVER-P1-ORDERSELLER-GROUP-1093` | `SMARTSTORE-A0-PERMISSION` validates attestation handling only. It MUST NOT make `PERMISSIONS_SCOPES.md verified_at` non-null. Full permission-contract `verified_at` remains `null` until a machine-readable provider permission source or a separately reviewed provider-measured equivalent can verify the provider permission model. Reason while unavailable: `NO_MACHINE_READABLE_PERMISSION_SOURCE`. Actual write proof remains separate. |
 | `ERRORS.md` | `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-REST`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-PRODUCT-CREATE`, `NAVER-P0-PRODUCT-READ` | error-related P1 rows above | adopted-endpoint measured error/ambiguity evidence required by `ERRORS.md`; no blanket `verified_at` from documentation fixtures alone |
 | `ENDPOINT_MATRIX.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-REST`, `OAUTH-S0-RFC6749` | `NAVER-P1-OWN-STORE-780`, `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-SELF-BODY-3751` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT` plus allow-list/no-redirect repository/runtime acceptance evidence |
-| `CAPABILITY_MAPPING.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `OAUTH-S0-RFC6749` | `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT`, `SMARTSTORE-R0-FIRST-TOKEN-CRASH`, `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`, `SMARTSTORE-R0-PERMISSION`, `SMARTSTORE-R0-APP-REAUTH`; plus capability-state/UI/state-transition acceptance per `CAPABILITY_MAPPING.md` |
+| `CAPABILITY_MAPPING.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `OAUTH-S0-RFC6749` | `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT`, `SMARTSTORE-R0-FIRST-TOKEN-CRASH`, `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`, `SMARTSTORE-A0-PERMISSION`, `SMARTSTORE-R0-APP-REAUTH`; plus capability-state/UI/state-transition acceptance per `CAPABILITY_MAPPING.md` |
 
 The owning contract remains authoritative for its exact acceptance set.
 
+`SMARTSTORE-A0-PERMISSION=ACCEPTED` does not satisfy full runtime verification of the NAVER permission model. Until machine-readable provider permission introspection or an explicitly reviewed provider-measured equivalent exists, `PERMISSIONS_SCOPES.md verified_at` remains `null` even when the A0 handling slot is accepted.
+
 ---
 
-## 10. Runtime evidence registry (`R0` / `RUNTIME_EVIDENCE`) — pending
+## 10. Evidence registries — pending
+
+### 10.1 Runtime evidence registry (`R0` / `RUNTIME_EVIDENCE`)
 
 | Evidence ID | Target | Required minimum proof | Status |
 | --- | --- | --- | --- |
@@ -317,16 +330,29 @@ The owning contract remains authoritative for its exact acceptance set.
 | `SMARTSTORE-R0-SELLER-ACCOUNT` | `SMARTSTORE_SELLER_ACCOUNT` | real protected GET using current committed session, observed `accountUid`, identity comparison, sanitized trace | `PENDING` |
 | `SMARTSTORE-R0-FIRST-TOKEN-CRASH` | AUTH Case E | measured bounded recovery behavior for remote token success followed by lost/uncommitted local result | `PENDING` |
 | `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW` | token persistence/reissue decision | >30m, <30m, restart, old-token validity, and reissue behavior | `PENDING` |
-| `SMARTSTORE-R0-PERMISSION` | permission evidence | provider-admin attestation or future official introspection bound to current application fingerprint, retaining source/strength | `PENDING` |
 | `SMARTSTORE-R0-APP-REAUTH` | application re-authentication detection | observe or obtain provider-supported evidence for the machine-visible condition that distinguishes application re-authentication required from generic auth failure; record safe recovery behavior | `PENDING` |
+
+All R0 slots use `evidence_kind=PROVIDER_MEASURED`.
 
 `PENDING` is not failure.
 
-An owning contract's `verified_at` may become non-null only after its own complete required R0/acceptance set has been accepted. One shared slot never automatically verifies every dependent contract.
+### 10.2 Operator-attested evidence registry (`A0` / `ATTESTATION_EVIDENCE`)
+
+| Evidence ID | Target | Required minimum proof | Status |
+| --- | --- | --- | --- |
+| `SMARTSTORE-A0-PERMISSION` | permission-attestation handling | operator/provider-admin attestation stored with `evidence_strength=OPERATOR_ATTESTED`, current application fingerprint, required/observed groups, mapping revision, freshness, and zero-network handling proof | `PENDING` |
+
+`SMARTSTORE-A0-PERMISSION` proves only that ICBM handles operator-attested permission evidence correctly. It does **not** prove that NAVER machine-reports those permissions, that a provider API confirms them, or that product write is READY.
+
+All A0 slots use `evidence_kind=OPERATOR_ATTESTED`.
+
+A0 evidence MUST NOT be promoted to R0 without a distinct provider-measured observation satisfying an R0 contract.
+
+An owning contract's `verified_at` may become non-null only after its own complete required evidence/acceptance set has been accepted. One shared slot never automatically verifies every dependent contract.
 
 Until `SMARTSTORE-R0-APP-REAUTH` is accepted, `APPLICATION_REAUTH_REQUIRED` remains a schema-reserved remediation reason but MUST NOT be automatically inferred from generic token/auth failures.
 
-All R0 evidence must carry generation/time/application bindings required by the owning contract.
+All R0 evidence must carry generation/time/application bindings required by the owning contract. A0 evidence must carry the application/mapping/freshness bindings required by the owning permission contract.
 
 ---
 
@@ -427,13 +453,23 @@ A cached support summary is historical rationale, not current verification.
 
 `support URL alone != durable rationale`
 
+`R0 = provider-measured runtime evidence only`
+
+`A0 = operator-attested evidence only`
+
+`A0 cannot establish provider contract or provider runtime truth`
+
+`A0 -> R0 promotion without distinct provider measurement is forbidden`
+
 `operator attestation != machine verification`
 
 `library behavior != provider behavior`
 
 `retrieved_at != verified_at`
 
-`owning contract verified_at requires its complete accepted R0/acceptance set`
+`owning contract verified_at requires its complete accepted evidence/acceptance set`
+
+`PERMISSIONS_SCOPES.md verified_at remains null while no machine-readable permission source or reviewed provider-measured equivalent exists`
 
 `contract freshness != runtime capability truth`
 
