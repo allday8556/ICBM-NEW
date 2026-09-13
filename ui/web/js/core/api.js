@@ -11,9 +11,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function getJson(path) {
+async function request(method, path, payload) {
+  const headers = { Accept: 'application/json', [CLIENT_HEADER]: 'icbm-web' };
+  if (payload !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {
-    headers: { Accept: 'application/json', [CLIENT_HEADER]: 'icbm-web' },
+    method,
+    headers,
+    body: payload === undefined ? undefined : JSON.stringify(payload),
     cache: 'no-store',
   });
   let body = null;
@@ -26,4 +30,13 @@ export async function getJson(path) {
     throw new ApiError(response.status, body?.error ?? null, response.headers.get('X-Correlation-ID'));
   }
   return body;
+}
+
+export function getJson(path) {
+  return request('GET', path);
+}
+
+// State-changing calls to this origin's own contracts (the client header is the CSRF guard).
+export function sendJson(method, path, payload) {
+  return request(method, path, payload);
 }

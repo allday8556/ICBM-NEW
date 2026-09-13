@@ -6,3 +6,9 @@ export function dotDate(value) {
   const date = new Date(value);
   return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`;
 }
+
+// ISO timestamp -> 'YYYY.MM.DD HH:MM' in the operator's local time.
+export function dotDateTime(value) {
+  const date = new Date(value);
+  return `${dotDate(value)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
