@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -c constraints.txt -e ".[dev]"
-      - run: pytest
+      - run: pytest -v
 
   migrations:
     name: Migration check
