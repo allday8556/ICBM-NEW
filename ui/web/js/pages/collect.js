@@ -246,7 +246,7 @@ function suppliersView(view, ctx) {
       markInert(h('button', { type: 'button', class: 'btn blue' }, '+ 공급처 추가')),
     ),
   );
-  // New suppliers need their own site definition; M1 ships K홀세일 only.
+  // New suppliers need their own site definition; M1 ships KM리테일 only.
   const addCard = markInert(
     h(
       'button',

@@ -1,4 +1,6 @@
-"""K홀세일 (KM통상, https://kmretail.co.kr) — site knowledge only (Issue #7, ADR-0007).
+"""KM리테일 (KM통상, https://kmretail.co.kr) — site knowledge only (Issue #7, ADR-0007).
+
+The canonical documents (ROADMAP, Issue #7) call this first supplier K홀세일.
 
 This package describes the supplier; it cannot make a request. It holds no client, page or
 transport: the common CONNECT layer fetches and logs in, and hands these predicates nothing but an
@@ -66,7 +68,7 @@ def authenticated(response: ProbeResponse) -> Verdict:
 
 PROFILE = SupplierProfile(
     supplier_key="kmretail",
-    display_name="K홀세일",
+    display_name="KM리테일",
     base_url="https://kmretail.co.kr",
     auth_required=True,
     # The storefront itself, and Cafe24's secure-login host that encrypts the login form.

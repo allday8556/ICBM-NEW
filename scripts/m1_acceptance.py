@@ -1,6 +1,6 @@
-"""M1 acceptance: K홀세일 CONNECT against the real supplier (Issue #7).
+"""M1 acceptance: KM리테일 CONNECT against the real supplier (Issue #7; "K홀세일" in ROADMAP).
 
-Prerequisite: the operator has saved the K홀세일 login through the ICBM UI (공급처 관리 → 로그인
+Prerequisite: the operator has saved the KM리테일 login through the ICBM UI (공급처 관리 → 로그인
 정보), which puts it in the OS secret store. This script never accepts, prints or stores a
 credential; it reads secrets only in memory, to prove they appear nowhere in the artifacts.
 
@@ -193,7 +193,7 @@ def _run_1(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
         ready = server.wait_ready()
         cap = _capability(ready)
         ev.check(
-            "run 1: core READY; K홀세일 is a DISCONNECTED capability until proven",
+            "run 1: core READY; KM리테일 is a DISCONNECTED capability until proven",
             cap["http_status"] == 200
             and cap["core"] == "PASS"
             and cap["capability"] == "DISCONNECTED"
@@ -399,7 +399,7 @@ def main() -> int:
     keyring = KeyringSecretStore()
     if not (keyring.get(f"supplier:{KEY}:username") and keyring.get(f"supplier:{KEY}:password")):
         print(
-            "save the K홀세일 login in the ICBM UI first (공급처 관리 → 로그인 정보)",
+            "save the KM리테일 login in the ICBM UI first (공급처 관리 → 로그인 정보)",
             file=sys.stderr,
         )
         return 2

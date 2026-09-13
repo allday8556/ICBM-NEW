@@ -5,19 +5,20 @@ Decision owner: Architect (ChatGPT). Sources: Issue #7 body; freeze `5653533064`
 Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-13
 Related: ADR-0001 (stack, secrets row, Playwright via jobs), ADR-0002 (in-process worker), ADR-0005 (job states, only TRANSIENT/RATE_LIMITED retry), ADR-0006 (single data-directory owner, mutation-target invariant)
+Supplier name: **KM리테일** (operator KM통상, `https://kmretail.co.kr`, `supplier_key = kmretail`) — the supplier the canonical documents and Issue #7 call "K홀세일". The display name follows the v29 UI source and the user's decision of 2026-09-14.
 
 ---
 
 ## Context
 
-M1 is the first milestone with real supplier-account egress. It has to prove that ICBM can authenticate to K홀세일 and keep that connection safe:
+M1 is the first milestone with real supplier-account egress. It has to prove that ICBM can authenticate to KM리테일 and keep that connection safe:
 
 - no plaintext secret at rest;
 - no login storm;
 - no unattributed egress;
 - a connection is proven, not badged.
 
-M1 must also avoid designing the core around one site. K홀세일 is the first adapter, not the model.
+M1 must also avoid designing the core around one site. KM리테일 is the first adapter, not the model.
 
 ## Decision
 
@@ -86,7 +87,7 @@ The common procedure (`app/connect/proof.py`) applies to every supplier.
 1. **Unauthenticated control request** against target P. It must satisfy the unauthenticated expectation and must not look authenticated.
 2. **Authenticated request** against the same P. It must satisfy the authenticated predicate and must not look unauthenticated.
 
-HTTP status is never proof. For K홀세일, the unauthenticated control of `/myshop/index.html` answers **200**. Its `xans-myshop` page skeleton is present anyway, so status and skeleton prove nothing.
+HTTP status is never proof. For KM리테일, the unauthenticated control of `/myshop/index.html` answers **200**. Its `xans-myshop` page skeleton is present anyway, so status and skeleton prove nothing.
 
 Only the following results are accepted:
 
@@ -146,7 +147,7 @@ The global egress guard stays installed and blocking.
 
 **Browser login.** The browser runs out of process, so every browser request is routed through the same host allowlist. Blocked browser requests are counted on the request record.
 
-K홀세일's hosts are `kmretail.co.kr` and `login2.cafe24ssl.com`, the Cafe24 secure-login encryption host. On 2026-09-13 the login page's form and encryption scripts were verified to load under exactly these two hosts, without any credential.
+KM리테일's hosts are `kmretail.co.kr` and `login2.cafe24ssl.com`, the Cafe24 secure-login encryption host. On 2026-09-13 the login page's form and encryption scripts were verified to load under exactly these two hosts, without any credential.
 
 ### 8. Observability and safe payloads
 
@@ -174,9 +175,9 @@ M1 contains no ProductFacts, product list or detail collection, AI, SmartStore o
 These are implementation choices within the contract, recorded for the architect's review:
 
 1. **The `cryptography` dependency** (AES-256-GCM) is added for the session blob, pinned in `constraints.txt`. The alternative was Windows DPAPI via ctypes, which is Windows-only and would leave CI's Ubuntu leg without a real cipher.
-2. **Browser login, HTTP protected reads.** K홀세일's login form is encrypted client-side by Cafe24 AuthSSL, so authentication runs in the browser. The resulting supplier-host cookies are then replayed over HTTP for the protected reads, which keeps every read inside the egress grant. If a supplier binds sessions to the browser, a browser-side read belongs in the common transport, not in the adapter.
+2. **Browser login, HTTP protected reads.** KM리테일's login form is encrypted client-side by Cafe24 AuthSSL, so authentication runs in the browser. The resulting supplier-host cookies are then replayed over HTTP for the protected reads, which keeps every read inside the egress grant. If a supplier binds sessions to the browser, a browser-side read belongs in the common transport, not in the adapter.
 3. **The browser channel defaults to the locally installed Edge** (`ICBM_BROWSER_CHANNEL=msedge`): a Chromium engine, with nothing downloaded.
-4. **K홀세일's authenticated predicate** (logged-on module plus logout action) matches the Cafe24 storefront convention. It must be confirmed by the first real login.
+4. **KM리테일's authenticated predicate** (logged-on module plus logout action) matches the Cafe24 storefront convention. It must be confirmed by the first real login.
    - A mismatch fails safe as `UNRECOGNIZED`, never READY.
    - Informational signals (`logout_text`, `member_modify_link`) are recorded, as marker names only, so the page can be diagnosed without storing content.
 

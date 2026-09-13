@@ -11,7 +11,7 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 
 - **M0** — fresh v29 UI shell + Phase 0 foundation: **ACCEPTED** 2026-09-13 ([`docs/acceptance/M0.md`](docs/acceptance/M0.md)).
 - **Issue #4** — one ICBM process per data directory: **ACCEPTED** and merged ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)).
-- **Current milestone:** M1 — K홀세일 CONNECT only (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md)), in progress; not accepted yet.
+- **Current milestone:** M1 — KM리테일 (K홀세일 in ROADMAP) CONNECT only (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md)), in progress; not accepted yet.
 - **Next:** M2 — SmartStore CONNECT ([`ROADMAP.md`](ROADMAP.md) §12).
 
 The application performs **zero supplier/marketplace calls and zero external writes**; every screen renders the empty state reported by its application contract.

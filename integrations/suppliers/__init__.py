@@ -1,1 +1,1 @@
-"""Supplier adapters (first implementation: K홀세일, M1)."""
+"""Supplier definitions (first: KM리테일 — "K홀세일" in the canonical documents — M1)."""
