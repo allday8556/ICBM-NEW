@@ -57,7 +57,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
 class AppConfig:
     data_dir: Path = DEFAULT_DATA_DIR
     host: str = "127.0.0.1"
-    # Not 8765: legacy ICBM-PROJECT clients poll that port on operator machines.
+    # Not 8765: legacy clients still poll that port on operator machines.
     port: int = 8790
     execution_mode: ExecutionMode = ExecutionMode.DRY_RUN
     log_level: str = "INFO"

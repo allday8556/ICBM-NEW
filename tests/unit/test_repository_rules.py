@@ -61,8 +61,9 @@ def test_every_top_level_screen_has_a_page_module_bound_to_its_contract(screen: 
     assert f"/api/v1/screens/{screen}" in module.read_text("utf-8")
 
 
-def test_no_code_references_the_legacy_project() -> None:
-    roots = [REPO_ROOT / "app", REPO_ROOT / "integrations", UI_DIR, REPO_ROOT / "scripts"]
+def test_no_runtime_code_references_the_legacy_project() -> None:
+    # Runtime code only: the acceptance tooling names the legacy project to prove its absence.
+    roots = [REPO_ROOT / "app", REPO_ROOT / "integrations", UI_DIR]
     offenders = [
         str(p.relative_to(REPO_ROOT))
         for root in roots
