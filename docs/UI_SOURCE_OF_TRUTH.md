@@ -4,13 +4,15 @@
 
 The current approved visual prototype is:
 
-`icbm_redesign_test_v28_icbm_new_gaps.html`
+`ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html`
 
-Attached prototype fingerprint:
+Verified prototype fingerprint:
 
 - SHA-256: `3689b86c8c06fb10c5337ab661e8eae8712e1f04bb5afbaa0b1896e9729eba63`
 - Size: `298398` bytes
+- Git blob SHA: `bf09d841ef963557ee19abeac8a1740e9abbf8c3`
 - Revision: `v28 ICBM-NEW required UI gaps`
+- Repository copy: **VERIFIED PRESENT on `main`**
 
 This revision supersedes `icbm_redesign_test_v27_global_help_tooltips.html` as the visual source of truth.
 
@@ -62,4 +64,8 @@ The UI controls presentation and interaction shape. Runtime truth belongs to the
 
 ## Repository copy status
 
-The canonical filename/hash are now registered here. The raw HTML file itself should be placed under `ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html` when copied into the repository; implementation must verify its SHA-256 matches the value above before using it as the shell.
+The canonical v28 file is now present and verified at:
+
+`ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html`
+
+Implementation may use this repository copy as the visual shell, subject to the no-legacy and contract-first rules in `CLAUDE.md` and `docs/ARCHITECTURE.md`.
