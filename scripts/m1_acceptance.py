@@ -1,6 +1,6 @@
-"""M1 acceptance: KM리테일 CONNECT against the real supplier (Issue #7; "K홀세일" in ROADMAP).
+"""M1 acceptance: KM통상 CONNECT against the real supplier (Issue #7; "K홀세일" in ROADMAP).
 
-Prerequisite: the operator has saved the KM리테일 login through the ICBM UI (공급처 관리 → 로그인
+Prerequisite: the operator has saved the KM통상 login through the ICBM UI (공급처 관리 → 로그인
 정보), which puts it in the OS secret store. This script never accepts, prints or stores a
 credential; it reads secrets only in memory, to prove they appear nowhere in the artifacts.
 
@@ -8,16 +8,24 @@ Real-account traffic is minimised and bounded (Issue #7 comment 5653567880): exa
 logins are expected — the first connection and one forced-expiry refresh. Everything else reuses
 the encrypted session. The run stops at the first failed step rather than retrying a login.
 
-    run 1 (fresh data dir)  readiness, zero startup requests, connection test → real login #1,
-                            protected-read proof with the unauthenticated control on the same
-                            target, second test reuses the session, a second owner is refused
-    run 2 (restart)         no proof carried over, zero startup requests, reuse without login
-    expiry (no server)      the stored session is invalidated under the ownership lease
-    run 3 (restart)         expired session → one bounded re-authentication (real login #2)
-    after                   multi-encoding secret scan (counts only), schema/scope checks
+    run 1 (fresh data dir)  readiness, zero startup requests, connection test → real login #1
+                            (session generation A), protected-read proof with the unauthenticated
+                            control on the same target, second test reuses A, a second owner is
+                            refused
+    run 2 (restart)         no proof carried over, zero startup requests, reuse of A, no login
+    expiry (no server)      A's values are kept in memory for the scan, then the stored session
+                            is invalidated under the ownership lease
+    run 3 (restart)         expired session → one bounded re-authentication (real login #2,
+                            session generation B)
+    after                   ID, password and every value of BOTH generations A and B are scanned
+                            across every artifact — data dir (DB/WAL/SHM, logs, session files)
+                            and output dir (all server logs, the evidence file itself) — in five
+                            encodings; counts only (PR #9 review 5191372031, comment 5654655305)
 
 Evidence (``evidence.json``) holds classifications, marker names, counters and counts — never
-page content, cookies, headers or account data. Browser tracing/HAR/video stay disabled.
+page content, cookies, headers or account data. Browser tracing/HAR/video stay disabled. Secret
+values exist only in this process's memory and are dropped at the end; a failing scan reports
+only the exception type, never a value.
 """
 
 import argparse
@@ -26,6 +34,7 @@ import json
 import os
 import platform
 import secrets as random_secrets
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -44,7 +53,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore  # noqa: E402
 from app.core.ownership import acquire_data_dir  # noqa: E402
 from app.core.secrets import KeyringSecretStore  # noqa: E402
-from app.system.secret_scan import scan  # noqa: E402
+from app.system.secret_scan import VARIANTS, scan  # noqa: E402
 from integrations.suppliers import kmretail  # noqa: E402
 from integrations.suppliers.transport.session_payload import (  # noqa: E402
     decode_session,
@@ -60,6 +69,9 @@ EXPECTED_TABLES = {
     "audit_events",
     "supplier_connections",
 }
+# Cookie values shorter than this are flags, too short to identify a session; scanning them
+# would only produce false positives.
+MIN_COOKIE_VALUE = 6
 
 
 class StepFailed(RuntimeError):
@@ -118,8 +130,6 @@ class Server:
         raise StepFailed("server never answered readiness")
 
     def stop(self) -> None:
-        import signal
-
         self.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
         self.proc.wait(60)
         self.http.close()
@@ -132,7 +142,9 @@ class Server:
     def connection_test(self) -> dict[str, Any]:
         queued = self.http.post(f"/api/v1/connect/suppliers/{KEY}/test", headers=CLIENT)
         if queued.status_code != 202:
-            raise StepFailed(f"connection test refused: {queued.json().get('error')}")
+            raise StepFailed(
+                f"connection test refused: {queued.json().get('error', {}).get('code')}"
+            )
         job_id = queued.json()["job_id"]
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
@@ -187,13 +199,22 @@ def _proof(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _session_values(payload: bytes, generation: str) -> dict[str, str]:
+    """Security-bearing values of one session generation, labelled by cookie name only."""
+    cookies, _ = decode_session(payload)
+    return {
+        f"session_{generation}:{c['name']}": c["value"]
+        for c in cookies
+        if len(c["value"]) >= MIN_COOKIE_VALUE
+    }
+
+
 def _run_1(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None:
     server = Server(env, out / "run1.server.log")
     try:
-        ready = server.wait_ready()
-        cap = _capability(ready)
+        cap = _capability(server.wait_ready())
         ev.check(
-            "run 1: core READY; KM리테일 is a DISCONNECTED capability until proven",
+            "run 1: core READY; KM통상 is a DISCONNECTED capability until proven",
             cap["http_status"] == 200
             and cap["core"] == "PASS"
             and cap["capability"] == "DISCONNECTED"
@@ -212,6 +233,7 @@ def _run_1(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
             "run 1: first connection — one real login, protected read proven on the same target",
             job["state"] == "SUCCEEDED"
             and supplier["state"] == "READY"
+            and supplier["display_name"] == "KM통상"
             and supplier["real_login_attempts"] == 1
             and proof.get("control_result") == "LOGIN_REQUIRED"
             and proof.get("authenticated_result") == "AUTHENTICATED",
@@ -219,14 +241,17 @@ def _run_1(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
                 k: job[k] for k in ("state", "attempt_count", "last_error_class", "last_error_code")
             },
             proof=proof,
-            audit=[(e["event_type"], e["outcome"]) for e in events],
+            audit=[[e["event_type"], e["outcome"]] for e in events],
             counters={
                 k: supplier[k]
                 for k in ("real_login_attempts", "session_reuse_count", "reauth_count")
             },
         )
-        requests = _supplier_requests(_log_lines(data_dir))
-        control = [r for r in requests if r["request_kind"] == "CONTROL_READ"]
+        control = [
+            r
+            for r in _supplier_requests(_log_lines(data_dir))
+            if r["request_kind"] == "CONTROL_READ"
+        ]
         ev.check(
             "run 1: negative control — unauthenticated read of the same target answered "
             "HTTP 200 yet classified LOGIN_REQUIRED",
@@ -246,7 +271,7 @@ def _run_1(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
             job["state"] == "SUCCEEDED"
             and supplier["real_login_attempts"] == 1
             and supplier["session_reuse_count"] == 1,
-            audit=[(e["event_type"], e["outcome"]) for e in server.audit(job["correlation_id"])],
+            audit=[[e["event_type"], e["outcome"]] for e in server.audit(job["correlation_id"])],
         )
         contender = subprocess.run(
             [sys.executable, "-m", "app", "serve"],
@@ -302,13 +327,15 @@ def _run_2(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
         server.stop()
 
 
-def _expire_session(ev: Evidence, data_dir: Path) -> None:
-    """Invalidate the stored session the way a supplier-side expiry would, under ownership."""
+def _expire_session(ev: Evidence, data_dir: Path) -> dict[str, str]:
+    """Keep generation A's values for the final scan, then invalidate the stored session the way
+    a supplier-side expiry would — under the ownership lease, with no server running."""
     with acquire_data_dir(data_dir, app_version="m1-acceptance"):
         store = SupplierSessionStore(data_dir / SESSIONS_DIR_NAME, KeyringSecretStore())
         payload = store.load(KEY)
         if payload is None:
             raise StepFailed("no stored session to expire")
+        generation_a = _session_values(payload, "A")
         cookies, user_agent = decode_session(payload)
         stale = [c | {"value": random_secrets.token_hex(16)} for c in cookies]
         store.save(
@@ -316,11 +343,15 @@ def _expire_session(ev: Evidence, data_dir: Path) -> None:
             encode_session(stale, user_agent=user_agent, hosts=kmretail.PROFILE.egress_hosts),
         )
     ev.check(
-        "expiry: stored session invalidated (cookie values replaced)", True, cookies=len(stale)
+        "expiry: session A retained in memory for the scan, then invalidated at rest",
+        bool(generation_a),
+        cookies=len(stale),
+        generation_a_values=len(generation_a),
     )
+    return generation_a
 
 
-def _run_3(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None:
+def _run_3(ev: Evidence, env: dict[str, str], out: Path) -> None:
     server = Server(env, out / "run3.server.log")
     try:
         server.wait_ready()
@@ -336,29 +367,51 @@ def _run_3(ev: Evidence, env: dict[str, str], data_dir: Path, out: Path) -> None
             and supplier["reauth_count"] == 1
             and "SUPPLIER_SESSION_REFRESHED" in types,
             proof=_proof(events),
-            audit=[(e["event_type"], e["outcome"]) for e in events],
+            audit=[[e["event_type"], e["outcome"]] for e in events],
         )
     finally:
         server.stop()
 
 
-def _after(ev: Evidence, data_dir: Path, out: Path) -> None:
+def _scan_secrets(data_dir: Path, generation_a: dict[str, str]) -> dict[str, str]:
+    """Every value the scan must not find: the login, and both session generations."""
     keyring = KeyringSecretStore()
-    username = keyring.get(f"supplier:{KEY}:username") or ""
-    password = keyring.get(f"supplier:{KEY}:password") or ""
     with acquire_data_dir(data_dir, app_version="m1-acceptance"):
         payload = SupplierSessionStore(data_dir / SESSIONS_DIR_NAME, keyring).load(KEY)
-    cookies, _ = decode_session(payload) if payload else ([], "")
-    secrets = {"username": username, "password": password} | {
-        f"cookie:{c['name']}": c["value"] for c in cookies if len(c["value"]) >= 6
-    }
-    report = scan([data_dir, out], secrets)
+    if payload is None:
+        raise StepFailed("no session generation B to scan")
+    return (
+        {
+            "username": keyring.get(f"supplier:{KEY}:username") or "",
+            "password": keyring.get(f"supplier:{KEY}:password") or "",
+        }
+        | generation_a
+        | _session_values(payload, "B")
+    )
+
+
+def _scan_step(ev: Evidence, name: str, paths: list[Path], secrets: dict[str, str]) -> None:
+    try:
+        report = scan(paths, secrets)
+    except Exception as exc:  # fail closed; never let a message carry a value
+        ev.check(name, False, error=type(exc).__name__)
+        return
+    hits: dict[str, dict[str, int]] = report["hits"]  # type: ignore[assignment]
     ev.check(
-        "secret scan: no credential or session value in any artifact, in any of 5 encodings",
+        name,
         report["total_hits"] == 0,
         files_scanned=report["files_scanned"],
-        hits=report["hits"],
+        encodings=list(VARIANTS),
+        values_scanned={
+            "login": 2,
+            "session_A": sum(1 for label in hits if label.startswith("session_A:")),
+            "session_B": sum(1 for label in hits if label.startswith("session_B:")),
+        },
+        hits=hits,
     )
+
+
+def _scope(ev: Evidence, data_dir: Path) -> None:
     with contextlib.closing(
         sqlite3.connect(f"{(data_dir / 'icbm.db').as_uri()}?mode=ro", uri=True)
     ) as db:
@@ -373,9 +426,8 @@ def _after(ev: Evidence, data_dir: Path, out: Path) -> None:
     requests = _supplier_requests(_log_lines(data_dir))
     kinds: dict[str, int] = {}
     for r in requests:
-        kinds[f"{r['request_kind']}/{r['transport']}"] = (
-            kinds.get(f"{r['request_kind']}/{r['transport']}", 0) + 1
-        )
+        label = f"{r['request_kind']}/{r['transport']}"
+        kinds[label] = kinds.get(label, 0) + 1
     ev.check(
         "external-call scope: only the protected target and the login page were requested",
         {r["target"] for r in requests} <= {kmretail.PROTECTED_TARGET, kmretail.LOGIN_PATH}
@@ -383,6 +435,30 @@ def _after(ev: Evidence, data_dir: Path, out: Path) -> None:
         requests_by_kind=kinds,
         requests=requests,
     )
+
+
+def _write_evidence(path: Path, result: str, started: datetime, channel: str, ev: Evidence) -> None:
+    evidence = {
+        "result": result,
+        "started_at": started.isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
+        "environment": {
+            "git_commit": _git("rev-parse", "HEAD"),
+            "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+            "git_worktree_clean": _git("status", "--porcelain") == "",
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "browser_channel": channel,
+            "supplier": {
+                "key": KEY,
+                "display_name": kmretail.PROFILE.display_name,
+                "base_url": kmretail.PROFILE.base_url,
+            },
+            "tracing_har_video": "disabled",
+        },
+        "steps": ev.steps,
+    }
+    path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2), "utf-8")
 
 
 def main() -> int:
@@ -399,7 +475,7 @@ def main() -> int:
     keyring = KeyringSecretStore()
     if not (keyring.get(f"supplier:{KEY}:username") and keyring.get(f"supplier:{KEY}:password")):
         print(
-            "save the KM리테일 login in the ICBM UI first (공급처 관리 → 로그인 정보)",
+            "save the KM통상 login in the ICBM UI first (공급처 관리 → 로그인 정보)",
             file=sys.stderr,
         )
         return 2
@@ -412,7 +488,9 @@ def main() -> int:
         "PYTHONIOENCODING": "utf-8",
     }
     ev = Evidence()
+    evidence_path = out / "evidence.json"
     started = datetime.now(UTC)
+    secrets: dict[str, str] = {}
     result = "FAIL"
     try:
         upgrade = subprocess.run(
@@ -426,34 +504,38 @@ def main() -> int:
         ev.check("fresh data directory migrated to head", upgrade.returncode == 0)
         _run_1(ev, env, data_dir, out)
         _run_2(ev, env, data_dir, out)
-        _expire_session(ev, data_dir)
-        _run_3(ev, env, data_dir, out)
-        _after(ev, data_dir, out)
+        generation_a = _expire_session(ev, data_dir)
+        _run_3(ev, env, out)
+        secrets = _scan_secrets(data_dir, generation_a)
+        generation_a.clear()
+        # Write the evidence first so the scan covers it together with every other artifact.
+        _write_evidence(evidence_path, "IN_PROGRESS", started, args.channel, ev)
+        _scan_step(
+            ev,
+            "secret scan: login and session generations A and B absent from every artifact, "
+            "in all five encodings",
+            [data_dir, out],
+            secrets,
+        )
+        _scope(ev, data_dir)
         result = "PASS"
     except StepFailed as exc:
         print(f"stopped at: {exc}", file=sys.stderr)
     finally:
-        evidence = {
-            "result": result,
-            "started_at": started.isoformat(),
-            "finished_at": datetime.now(UTC).isoformat(),
-            "environment": {
-                "git_commit": _git("rev-parse", "HEAD"),
-                "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-                "git_worktree_clean": _git("status", "--porcelain") == "",
-                "python": platform.python_version(),
-                "platform": platform.platform(),
-                "browser_channel": args.channel,
-                "supplier": {"key": KEY, "base_url": kmretail.PROFILE.base_url},
-                "tracing_har_video": "disabled",
-            },
-            "steps": ev.steps,
-        }
-        (out / "evidence.json").write_text(
-            json.dumps(evidence, ensure_ascii=False, indent=2), "utf-8"
-        )
+        _write_evidence(evidence_path, result, started, args.channel, ev)
+        if secrets:
+            # The final evidence file itself must disclose nothing either.
+            try:
+                clean = scan([evidence_path], secrets)["total_hits"] == 0
+            except Exception:
+                clean = False
+            if not clean:
+                result = "FAIL"
+                ev.steps.append({"step": "final evidence file scan", "result": "FAIL"})
+                _write_evidence(evidence_path, result, started, args.channel, ev)
+            secrets.clear()
     passed = sum(1 for s in ev.steps if s["result"] == "PASS")
-    print(f"M1 acceptance: {result} ({passed}/{len(ev.steps)} checks) — {out / 'evidence.json'}")
+    print(f"M1 acceptance: {result} ({passed}/{len(ev.steps)} checks) — {evidence_path}")
     return 0 if result == "PASS" else 1
 
 

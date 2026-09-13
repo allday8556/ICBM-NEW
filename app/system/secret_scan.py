@@ -86,4 +86,11 @@ def scan(paths: Iterable[Path], secrets: Mapping[str, str]) -> dict[str, object]
             for variant in VARIANTS
         }
     total = sum(count for per_variant in hits.values() for count in per_variant.values())
-    return {"files_scanned": len(files), "hits": hits, "total_hits": total}
+    report: dict[str, object] = {"files_scanned": len(files), "hits": hits, "total_hits": total}
+    # The scanner obeys the rule it tests: a report that would carry a secret in any encoding
+    # (e.g. a caller used a value as its label) is refused, and the refusal names no value.
+    rendered = json.dumps(report, ensure_ascii=False).encode("utf-8")
+    for secret in secrets.values():
+        if any(form in rendered for family in variants(secret).values() for form in family):
+            raise ValueError("scan report would disclose a scanned value; use neutral labels")
+    return report

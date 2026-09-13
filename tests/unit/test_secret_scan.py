@@ -47,3 +47,11 @@ def test_clean_artifacts_report_zero_and_never_the_value(tmp_path: Path) -> None
 def test_empty_secrets_are_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         scan([tmp_path], {"password": ""})
+
+
+def test_the_scanner_refuses_to_emit_a_value_even_through_its_labels(tmp_path: Path) -> None:
+    (tmp_path / "artifact.txt").write_text("unrelated", "utf-8")
+    with pytest.raises(ValueError) as caught:
+        scan([tmp_path], {PASSWORD: PASSWORD})
+    assert PASSWORD not in str(caught.value)
+    assert PASSWORD not in repr(caught.value.args)
