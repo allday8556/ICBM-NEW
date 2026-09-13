@@ -5,7 +5,8 @@
 | Field | Value |
 | --- | --- |
 | Provider | NAVER SmartStore / Commerce API |
-| Purpose | Integration source provenance and freshness ledger |
+| Purpose | Reverse source index, authority ledger, and provenance-drift audit view |
+| Operating model | `INDEX_NOT_SINGLE_SOURCE` |
 | Current upstream Commerce API version | `2.88.0` |
 | Upstream version date | `2026-09-07` |
 | Retrieved / last consolidated | `2026-09-14` |
@@ -14,7 +15,9 @@
 
 This file is the source index for the SmartStore integration contracts under this directory.
 
-It does **not** replace the contracts in:
+It deliberately uses the **index model**, not the single-source model.
+
+The contract documents remain self-contained and keep their own provenance blocks:
 
 - `ACCOUNT_IDENTITY.md`
 - `AUTH.md`
@@ -23,35 +26,73 @@ It does **not** replace the contracts in:
 - `ENDPOINT_MATRIX.md`
 - `CAPABILITY_MAPPING.md` when added
 
+`SOURCES.md` does **not** replace those provenance blocks.
+
 Its job is to answer:
 
 1. Which upstream source supports a contract claim?
-2. What authority does that source have?
+2. What authority and artifact kind does that source have?
 3. Which ICBM documents depend on it?
 4. What event makes the source stale enough to require review?
-5. Has the claim merely been documented, or has it been measured at runtime?
+5. Are the duplicated provenance fields across the self-contained contracts still consistent?
+6. Has the claim merely been documented, or has it been measured at runtime?
 
-Core rule:
+Core rules:
 
 `source documented != runtime verified`
+
+`SOURCES.md = reverse index + drift detector, not a replacement provenance block`
 
 No source row in this file may populate a contract's `verified_at` field by itself.
 
 ---
 
-## 1. Authority hierarchy
+## 1. Operating model: self-contained contracts plus reverse index
 
-ICBM SHALL use the following source authority order for SmartStore integration work.
+### 1.1 Why the index model is adopted
 
-| Rank | Source class | Meaning | May establish provider contract? |
-| --- | --- | --- | --- |
-| `P0` | `PROVIDER_NORMATIVE` | Current official NAVER Commerce API documentation / provider contract | Yes |
-| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | NAVER-maintained official technical-support repository/discussion | Supporting/clarifying evidence |
-| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Yes, within protocol scope |
-| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Only for implementation behavior, never provider semantics |
-| `R0` | `MEASURED_RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time scope |
+Each SmartStore contract must remain understandable and auditable when read by itself.
 
-### 1.1 Conflict rule
+A reviewer reading only `AUTH.md`, for example, must still be able to see:
+
+- the upstream URLs used by that contract;
+- the upstream version reviewed;
+- when the source was retrieved;
+- whether runtime verification has happened;
+- when or why review becomes due.
+
+Therefore ICBM MUST NOT replace each contract's provenance block with only a pointer to `SOURCES.md`.
+
+The duplication is intentional.
+
+`SOURCES.md` exists to make that intentional duplication auditable.
+
+### 1.2 Consequence
+
+When a source/version/freshness value changes, the reviewed change must update:
+
+1. every affected self-contained contract; and
+2. the matching row or baseline in `SOURCES.md`.
+
+Updating only this ledger does not update an owning contract.
+
+Updating only one owning contract while leaving this ledger inconsistent is provenance drift and must be caught before merge once repository enforcement is implemented.
+
+---
+
+## 2. Authority hierarchy and artifact kinds
+
+ICBM SHALL distinguish both **authority class** and **artifact kind**.
+
+| Rank | Source class | Artifact kind | Meaning | May establish provider contract? |
+| --- | --- | --- | --- | --- |
+| `P0` | `PROVIDER_NORMATIVE` | `OFFICIAL_DOC` | Current official NAVER Commerce API documentation / provider contract | Yes |
+| `P1` | `PROVIDER_OFFICIAL_SUPPORT` | `SUPPORT_DISCUSSION` | NAVER-maintained official technical-support repository/discussion | Supporting/clarifying evidence only |
+| `S0` | `EXTERNAL_NORMATIVE_STANDARD` | `NORMATIVE_STANDARD` | Normative protocol standard adopted by the provider contract | Yes, within protocol scope |
+| `L0` | `IMPLEMENTATION_LIBRARY_REFERENCE` | `LIBRARY_REFERENCE` | Documentation/source for a client library ICBM may adopt | Only for implementation behavior, never provider semantics |
+| `R0` | `MEASURED_RUNTIME_EVIDENCE` | `RUNTIME_EVIDENCE` | Sanitized evidence measured by ICBM against an authorized real account | Runtime truth for the measured case, subject to generation/time scope |
+
+### 2.1 Conflict rule
 
 When sources disagree:
 
@@ -63,7 +104,7 @@ When sources disagree:
 
 A conflict that affects a READY/safety invariant SHALL fail closed until reviewed.
 
-### 1.2 No evidence laundering
+### 2.2 No evidence laundering
 
 The following are forbidden:
 
@@ -77,7 +118,7 @@ Contract documents SHOULD refer to the original upstream URL and MAY additionall
 
 ---
 
-## 2. Provenance timestamps
+## 3. Provenance timestamps
 
 The timestamp fields have separate meanings.
 
@@ -93,13 +134,58 @@ For the current M2 document set:
 - `upstream_version = 2.88.0`
 - `retrieved_at = 2026-09-14`
 - `verified_at = null` until real M2 runtime acceptance succeeds
-- `review_due = 2026-10-14` as fallback where the individual contract does not define a stricter bound
+- `review_due = 2026-10-14` in the current contracts
 
 A version/contract change takes precedence over the fallback calendar date.
 
+`review_due` is not required to remain globally identical forever. A contract may adopt a stricter freshness bound. If it does, both the owning contract and the consistency matrix below must change together.
+
 ---
 
-## 3. Primary NAVER provider sources (`P0`)
+## 4. Cross-document provenance consistency matrix
+
+This matrix mirrors the self-contained provenance values. It is an audit index, not their source of truth.
+
+| Contract | Upstream version | Retrieved at | Verified at | Review due | Consistency status |
+| --- | --- | --- | --- | --- | --- |
+| `ACCOUNT_IDENTITY.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+| `AUTH.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+| `PERMISSIONS_SCOPES.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+| `ERRORS.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+| `ENDPOINT_MATRIX.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+
+### 4.1 Drift rules
+
+For the active M2 SmartStore contract set:
+
+- every contract MUST expose machine-readable-or-parseable `upstream_version`, `retrieved_at`, `verified_at`, and `review_due` provenance values;
+- `upstream_version` MUST match this ledger's current provider baseline unless a reviewed explicit version-scope exception is recorded;
+- the value shown in this matrix MUST exactly mirror the owning contract;
+- a targeted re-review MAY legitimately change `retrieved_at` or `review_due` for one contract, but the corresponding matrix row MUST change in the same reviewed change;
+- `verified_at` MUST NOT become non-null merely because documentation or a support discussion was re-read;
+- if one contract moves to a new provider version baseline, all affected active contracts must be impact-reviewed before the SmartStore integration set may be considered fully current.
+
+### 4.2 Repository/CI enforcement target
+
+This is a required repository invariant, but its implementation is **not part of this documentation-only PR**.
+
+Claude Code implementation should extend `test_repository_rules.py` or an equivalent repository-rule test so CI verifies at minimum:
+
+1. the active SmartStore contract set contains the required provenance fields;
+2. each active contract's `upstream_version` equals the current baseline recorded by `SOURCES.md`, unless a reviewed exception exists;
+3. each contract's provenance values exactly match its row in this consistency matrix;
+4. a new active SmartStore contract cannot silently omit provenance;
+5. a `SUPPORT_DISCUSSION` ledger row cannot omit its summarized observation and dependent contract list.
+
+The test SHOULD parse the actual provenance representation used by each document rather than requiring all documents to have identical Markdown formatting.
+
+The test MUST NOT impose a permanent rule that every contract's `review_due` is identical. A stricter contract-specific review window is valid when explicitly recorded.
+
+Until this repository rule is implemented, reviewers MUST treat this matrix as a manual drift check.
+
+---
+
+## 5. Primary NAVER provider sources (`P0` / `OFFICIAL_DOC`)
 
 | Source ID | Upstream source | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
@@ -114,7 +200,7 @@ A version/contract change takes precedence over the fallback calendar date.
 | `NAVER-P0-PRODUCT-CREATE` | https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product | product endpoint/error examples and future M5 planning | `PERMISSIONS_SCOPES.md`, `ERRORS.md`; M5 planning only | product create contract changes before M5 adoption |
 | `NAVER-P0-PRODUCT-READ` | https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product | product read/error examples and future reconciliation planning | `ERRORS.md`; M5 planning only | product read contract changes before M5 adoption |
 
-### 3.1 Current provider-version observation
+### 5.1 Current provider-version observation
 
 At consolidation time, the official current Commerce API page reports:
 
@@ -122,7 +208,7 @@ At consolidation time, the official current Commerce API page reports:
 
 This is documentation provenance, not proof that ICBM runtime behavior has been verified against that version.
 
-### 3.2 Current provider authentication observation
+### 5.2 Current provider authentication observation
 
 At consolidation time, the official authentication documentation states:
 
@@ -135,15 +221,17 @@ These claims remain subject to the contract-specific runtime acceptance requirem
 
 ---
 
-## 4. NAVER official technical-support sources (`P1`)
+## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources come from NAVER's official Commerce API technical-support repository/discussions.
 
 They are useful for cases where the normative documentation is incomplete, ambiguous, or where observed failure modes require provider clarification.
 
+They are **point-in-time support evidence, not immutable provider contracts**. A discussion may later be edited, hidden, deleted, or superseded.
+
 They MUST remain supporting evidence rather than being silently promoted above newer normative documentation.
 
-| Source ID | URL | Supported observation | Dependent contract(s) |
+| Source ID | URL | Supported observation preserved by ICBM | Dependent contract(s) |
 | --- | --- | --- | --- |
 | `NAVER-P1-ACCOUNT-UID-2425` | https://github.com/commerce-api-naver/commerce-api/discussions/2425 | `accountUid`/`accountId` uniqueness guidance; `accountUid` integration use | `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md` |
 | `NAVER-P1-SELF-ACCOUNT-3339` | https://github.com/commerce-api-naver/commerce-api/discussions/3339 | own-store `SELF`; token response does not itself provide seller identity | `AUTH.md` |
@@ -162,7 +250,28 @@ They MUST remain supporting evidence rather than being silently promoted above n
 | `NAVER-P1-BADREQ-NOTICE-1649` | https://github.com/commerce-api-naver/commerce-api/discussions/1649 | structured `BAD_REQUEST`/`invalidInputs` example for missing product notice field | `ERRORS.md` |
 | `NAVER-P1-BADREQ-POLICY-3529` | https://github.com/commerce-api-naver/commerce-api/discussions/3529 | `BAD_REQUEST` can also represent provider policy restriction, e.g. seller tag restriction | `ERRORS.md` |
 
-### 4.1 Support-source freshness
+### 6.1 Support-discussion survivability rule
+
+A `SUPPORT_DISCUSSION` URL by itself is insufficient durable provenance.
+
+Every P1 entry MUST preserve, in repository-controlled text:
+
+- the limited observation actually relied upon;
+- the owning/dependent contract(s);
+- enough wording to understand the historical rationale if the external thread later becomes unavailable.
+
+For an important P1 claim, the owning contract SHOULD also summarize the claim near its use instead of relying on a bare link.
+
+The summary is an audit record of what ICBM relied upon at review time. It is **not** a substitute for current upstream evidence.
+
+If a support discussion later disappears or becomes inaccessible:
+
+- do not pretend the historical summary re-verifies current provider behavior;
+- retain the summary as historical rationale;
+- mark current freshness as needing review when that P1 evidence is materially required;
+- seek current P0, replacement P1, or R0 evidence before making a new or expanded claim.
+
+### 6.2 Support-source freshness
 
 Support discussions do not share the Commerce API documentation version number.
 
@@ -175,7 +284,7 @@ For a `P1` source:
 
 ---
 
-## 5. External normative standards (`S0`)
+## 7. External normative standards (`S0` / `NORMATIVE_STANDARD`)
 
 | Source ID | Source | Scope in ICBM | Dependent contract(s) | Freshness |
 | --- | --- | --- | --- | --- |
@@ -191,7 +300,7 @@ Therefore a non-Bearer token type is contract drift and fails closed rather than
 
 ---
 
-## 6. Conditional implementation-library sources (`L0`)
+## 8. Conditional implementation-library sources (`L0` / `LIBRARY_REFERENCE`)
 
 These sources become implementation-relevant only if the corresponding library is actually adopted/pinned by ICBM.
 
@@ -208,7 +317,7 @@ If HTTPX is adopted, these source references MUST be bound to the actual pinned 
 
 ---
 
-## 7. Contract-to-source dependency matrix
+## 9. Contract-to-source dependency matrix
 
 This table is the fast audit view.
 
@@ -224,7 +333,7 @@ A future `CAPABILITY_MAPPING.md` SHALL use these stable source IDs rather than c
 
 ---
 
-## 8. Runtime evidence registry (`R0`) — currently pending
+## 10. Runtime evidence registry (`R0` / `RUNTIME_EVIDENCE`) — currently pending
 
 Runtime evidence is intentionally separate from documentation evidence.
 
@@ -246,9 +355,9 @@ When runtime evidence is collected, it MUST include generation/time/application 
 
 ---
 
-## 9. Freshness and invalidation rules
+## 11. Freshness and invalidation rules
 
-### 9.1 Immediate review triggers
+### 11.1 Immediate review triggers
 
 Re-review affected SmartStore contracts immediately when any of the following occurs:
 
@@ -265,13 +374,13 @@ Re-review affected SmartStore contracts immediately when any of the following oc
 - an adopted implementation library changes behavior relied on by a safety invariant;
 - measured runtime evidence contradicts a currently adopted contract.
 
-### 9.2 Calendar fallback
+### 11.2 Calendar fallback
 
 If automated source/version change detection is absent or broken, the owning contract's `review_due` applies.
 
 Calendar review is a fallback, not the primary change-detection mechanism.
 
-### 9.3 Unknown beats invention
+### 11.3 Unknown beats invention
 
 When a source is stale, unavailable, contradictory, or insufficient:
 
@@ -282,12 +391,13 @@ When a source is stale, unavailable, contradictory, or insufficient:
 
 ---
 
-## 10. Adding a new source
+## 12. Adding a new source
 
 A new SmartStore source entry MUST record at least:
 
 - stable `source_id`;
 - source class/authority (`P0`, `P1`, `S0`, `L0`, or `R0`);
+- artifact kind (`OFFICIAL_DOC`, `SUPPORT_DISCUSSION`, `NORMATIVE_STANDARD`, `LIBRARY_REFERENCE`, or `RUNTIME_EVIDENCE`);
 - canonical URL or evidence locator;
 - exact claim(s) it supports;
 - dependent contract(s);
@@ -304,27 +414,35 @@ A source addition alone does not authorize implementation behavior.
 
 ---
 
-## 11. Source removal / supersession
+## 13. Source removal / supersession
 
 Do not silently delete a source that previously supported an adopted contract.
 
-When a source becomes obsolete or contradicted:
+When a source becomes obsolete, inaccessible, edited incompatibly, or contradicted:
 
-1. mark it superseded in the ledger or remove it only in the same reviewed change that records the replacement;
+1. mark it superseded/unavailable in the ledger or remove it only in the same reviewed change that records the replacement;
 2. identify every dependent contract;
 3. re-evaluate affected invariants;
 4. update tests/evidence requirements;
-5. preserve enough history to explain why the prior decision changed.
+5. preserve enough repository-controlled summary/history to explain why the prior decision existed and why it changed.
 
 Historical support evidence may remain in the ledger when useful for audit, but MUST be clearly distinguished from current normative truth.
 
+A cached summary of an unavailable discussion is historical rationale, not current provider verification.
+
 ---
 
-## 12. Final provenance invariants
+## 14. Final provenance invariants
+
+`self-contained contract provenance remains in each owning document`
+
+`SOURCES.md = reverse index + consistency audit, not single provenance source`
 
 `provider documentation != runtime verification`
 
 `support discussion != universal provider guarantee`
+
+`support URL alone != durable rationale`
 
 `operator attestation != machine verification`
 
@@ -332,8 +450,8 @@ Historical support evidence may remain in the ledger when useful for audit, but 
 
 `retrieved_at != verified_at`
 
+`cross-document provenance drift must be detectable and later CI-enforced`
+
 `source freshness failure -> re-review / UNKNOWN, not invented certainty`
 
 `runtime contradiction -> investigate and fail closed before rewriting canonical truth`
-
-`SOURCES.md = provenance index, not an alternate provider specification`
