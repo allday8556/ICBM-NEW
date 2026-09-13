@@ -326,6 +326,127 @@ def test_lease_coverage_is_decided_only_by_require_ownership() -> None:
     assert deciders <= {"app/core/ownership.py"}
 
 
+# ---------------------------------------------------------------- supplier CONNECT boundary
+
+# Issue #7 comments 5653608622 §6/§9 and 5653615136: supplier-specific code is site knowledge
+# only, raw clients live in the common transport, and payloads come from the allowlist builder.
+SITE_KNOWLEDGE_IMPORTS = {"integrations.suppliers.base", "__future__", "re", "dataclasses", "enum"}
+RAW_CLIENTS = {
+    "httpx",
+    "requests",
+    "aiohttp",
+    "urllib3",
+    "urllib.request",
+    "http.client",
+    "websockets",
+    "playwright",
+    "selenium",
+    "socket",
+}
+# Production modules allowed a raw client, and why.
+RAW_CLIENT_OWNERS = {
+    "integrations/suppliers/transport/gateway.py": "the common policy-enforcing supplier transport",
+    "app/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
+    "app/core/ownership.py": "hostname for the diagnostic owner metadata (socket)",
+}
+_COMMON_SUPPLIER_MODULES = {
+    "integrations/suppliers/__init__.py",
+    "integrations/suppliers/base.py",
+    "integrations/suppliers/registry.py",
+}
+
+
+def _imported_modules(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+    return names
+
+
+def _keyword(call: ast.Call, name: str) -> ast.expr | None:
+    return next((k.value for k in call.keywords if k.arg == name), None)
+
+
+def _is_safe_payload(value: ast.expr | None) -> bool:
+    return value is None or (isinstance(value, ast.Call) and _callee(value) == "safe_payload")
+
+
+def test_supplier_packages_hold_site_knowledge_only() -> None:
+    packages = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith("integrations/suppliers/")
+        and not path.startswith("integrations/suppliers/transport/")
+        and path not in _COMMON_SUPPLIER_MODULES
+    }
+    assert "integrations/suppliers/kmretail/__init__.py" in packages
+    for path, tree in packages.items():
+        assert _imported_modules(tree) <= SITE_KNOWLEDGE_IMPORTS, path
+        attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        assert not attributes & {"_raw", "client", "page", "context", "request", "grant"}, path
+
+
+def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> None:
+    importers = {
+        path
+        for path, tree in _production_modules().items()
+        if any(
+            m == raw or m.startswith(f"{raw}.")
+            for m in _imported_modules(tree)
+            for raw in RAW_CLIENTS
+        )
+    }
+    assert importers == set(RAW_CLIENT_OWNERS)
+
+
+def test_only_the_common_transport_opens_egress_grants() -> None:
+    openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
+    assert openers == {"integrations/suppliers/transport/gateway.py"}
+
+
+def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
+    scoped = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith(("app/connect/", "integrations/suppliers/"))
+    }
+    checked = 0
+    for path, tree in scoped.items():
+        for call in _calls(tree):
+            where = f"{path}:{call.lineno}"
+            func = call.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "logger"
+            ):
+                checked += 1
+                # A constant message and an allowlisted ``extra`` — nothing else reaches a log.
+                assert len(call.args) == 1 and isinstance(call.args[0], ast.Constant), where
+                assert _is_safe_payload(_keyword(call, "extra")), where
+            if _callee(call) == "AuditEntry":
+                checked += 1
+                for field in ("details", "before", "after"):
+                    assert _is_safe_payload(_keyword(call, field)), f"{where} {field}"
+    assert checked >= 5
+
+
+def test_m1_adds_no_product_facts_or_product_schema() -> None:
+    from app.db.metadata import metadata
+
+    assert set(metadata.tables) == {"jobs", "job_attempts", "audit_events", "supplier_connections"}
+    offenders = [
+        path
+        for path in _production_modules()
+        if path.startswith(("app/connect/", "integrations/suppliers/"))
+        and re.search(r"ProductFacts", (REPO_ROOT / path).read_text("utf-8"))
+    ]
+    assert offenders == []
+
+
 def test_readme_does_not_present_m0_as_the_current_milestone() -> None:
     readme = _read(README_MD)
     assert not re.search(r"^#+\s*Current milestone:\s*M0", readme, re.M)
