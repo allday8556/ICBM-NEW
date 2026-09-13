@@ -44,6 +44,7 @@ Freshness rule:
 - Any upstream Commerce API version change, API-group model change, endpoint-to-group mapping change, application-management change, permission-introspection API introduction, or authorization error-contract change SHALL trigger immediate review.
 - `review_due` is a fallback calendar bound when automated change detection is absent or broken.
 - Reading documentation or viewing a portal setting is not the same as proving a write works.
+- A portal observation is a point-in-time operator attestation. It is not machine-verifiable proof that the provider configuration remained unchanged after observation.
 
 ---
 
@@ -51,16 +52,12 @@ Freshness rule:
 
 ICBM models marketplace capability in three separate layers:
 
-`auth`
-
-`-> write_scope`
-
-`-> write`
+`auth -> write_scope -> write`
 
 For SmartStore these layers MUST remain independent.
 
 - `auth` proves that the current committed authentication session represents the intended seller account.
-- `write_scope` represents whether the provider-side application permission configuration is known to contain the permission set required for the intended write capability.
+- `write_scope` represents ICBM's evidence-backed knowledge of the provider-side permission configuration required for the intended write capability.
 - `write` proves that the intended mutation actually succeeds and can be read back correctly.
 
 The following equivalences are forbidden:
@@ -72,6 +69,8 @@ The following equivalences are forbidden:
 `token issued == permission granted`
 
 `permission granted == mutation works`
+
+A `write_scope` status without its evidence provenance is incomplete information.
 
 ---
 
@@ -92,7 +91,7 @@ Therefore ICBM MUST NOT expect, parse, persist, compare, or gate SmartStore perm
 
 The cross-platform ICBM field name `write_scope` is retained as a canonical capability concept.
 
-For SmartStore, however:
+For SmartStore:
 
 `write_scope = required provider API-group permission state`
 
@@ -108,7 +107,7 @@ Official NAVER guidance states that an API call requires permission for the API 
 
 The application obtains API-group permissions when the application is registered or modified in Commerce API Center.
 
-Therefore the authoritative provider-side permission object for the M2 SmartStore integration is the application's API-group configuration.
+Therefore the authoritative provider-side permission object for M2 is the application's API-group configuration.
 
 Permission is application-level provider configuration.
 
@@ -125,15 +124,13 @@ It is not inferred from:
 
 ## 4. M2 permission groups
 
-The exact endpoint-to-permission mapping will be maintained in `ENDPOINT_MATRIX.md`.
-
-This document defines the permission categories needed to reason safely about M2.
+The exact endpoint-to-permission mapping SHALL be maintained in `ENDPOINT_MATRIX.md`.
 
 ### 4.1 `판매자정보`
 
 Purpose in M2:
 
-- required for seller-account protected reads used by `ACCOUNT_IDENTITY.md`;
+- seller-account protected reads used by `ACCOUNT_IDENTITY.md`;
 - specifically relevant to `GET /v1/seller/account` and other seller-information APIs.
 
 This group supports the `auth` proof path rather than product-write capability itself.
@@ -146,15 +143,15 @@ Purpose in M2:
 
 - product reads needed by registration/read-back workflows;
 - product registration, modification, and related product-management operations;
-- primary provider permission group for the SmartStore product-write capability.
+- primary provider permission group for SmartStore product-write capability.
 
 Official technical support has explicitly tied product API authorization failures to absence of the `상품` API group.
 
-For M2 product registration:
+For the current M2 product-registration baseline:
 
 `required_write_permission_group = 상품`
 
-subject to endpoint-specific additions captured later in `ENDPOINT_MATRIX.md`.
+subject to endpoint-specific additions in `ENDPOINT_MATRIX.md`.
 
 ### 4.3 `주문 판매자`
 
@@ -162,9 +159,7 @@ Purpose:
 
 - order-seller APIs and later order-management capability.
 
-This group is not automatically required merely to prove M2 product registration capability.
-
-It becomes required when an enabled ICBM capability uses endpoints mapped to this group.
+It is not automatically required merely to prove M2 product registration capability.
 
 ### 4.4 `문의`
 
@@ -172,42 +167,58 @@ Purpose:
 
 - inquiry/Q&A capabilities.
 
-The provider FAQ documents that some inquiry APIs additionally require `주문 판매자` permission.
+Provider guidance demonstrates that some inquiry endpoints additionally require `주문 판매자` permission.
 
-Therefore ICBM MUST NOT assume:
+Therefore:
 
-`endpoint domain == exactly one API group`
+`endpoint domain != exactly one API group`
 
 An endpoint may require multiple permission groups or additional provider conditions.
 
-The endpoint matrix is the final per-endpoint permission truth adopted by ICBM.
-
 ---
 
-## 5. `write_scope` state model
+## 5. `write_scope` state model and evidence envelope
 
 For SmartStore:
 
-`write_scope in {READY, MISSING, UNKNOWN}`
+`write_scope.status in {READY, MISSING, UNKNOWN}`
 
-These values describe knowledge of the provider permission configuration.
+The status describes evidence-backed knowledge of declared provider permissions. It does NOT describe actual mutation success.
 
-They do NOT describe actual mutation success.
+Because current SmartStore M2 has no documented machine-readable API-group introspection endpoint, a status value MUST NOT be presented without evidence provenance.
+
+The permission state SHALL be treated as an envelope conceptually equivalent to:
+
+```text
+write_scope = {
+  status: READY | MISSING | UNKNOWN,
+  evidence_source,
+  evidence_strength,
+  observed_at,
+  application_fingerprint,
+  required_groups,
+  observed_groups,
+  endpoint_mapping_revision,
+  freshness_status
+}
+```
+
+A bare `READY` label is forbidden in UI, audit evidence, or diagnostic output when it would hide whether the evidence was machine-verified or operator-attested.
 
 ### 5.1 `READY`
 
-`write_scope=READY` means:
+`write_scope.status=READY` means:
 
-1. the complete required permission set for the target write capability is known;
-2. positive evidence exists that the exact SmartStore application currently has every required API group;
-3. the evidence applies to the current provider application identity;
-4. the evidence is fresh under this document's freshness rules.
+1. the complete required permission set for the target capability is known;
+2. positive evidence says the identified SmartStore application contains every required API group;
+3. the evidence is bound to the current provider application fingerprint;
+4. the endpoint/group mapping revision used by the evidence is current;
+5. the evidence has not crossed its configured freshness bound and no known invalidation event occurred;
+6. the evidence provenance is surfaced with the status.
 
-For the M2 product-registration baseline, the minimum write permission set is currently:
+For the M2 product-registration baseline, the minimum required set is currently:
 
 `{상품}`
-
-If `ENDPOINT_MATRIX.md` later establishes additional required groups for any endpoint used by the registration transaction, the required set expands accordingly.
 
 `READY` MUST NOT be assigned merely because:
 
@@ -218,45 +229,48 @@ If `ENDPOINT_MATRIX.md` later establishes additional required groups for any end
 - an ICBM config file lists `상품` as desired;
 - a write once succeeded under an unversioned historical application configuration.
 
+When READY comes from manual portal inspection, the evidence MUST remain explicitly classified as operator-attested. It MUST NOT be presented as machine-verified current provider truth.
+
 ### 5.2 `MISSING`
 
-`write_scope=MISSING` means there is positive evidence that at least one required provider permission is absent.
+`write_scope.status=MISSING` means positive evidence identifies at least one required provider permission as absent.
 
-Examples of acceptable evidence:
+Acceptable evidence classes include:
 
-- current provider application settings visibly omit a required API group;
-- a future provider permission-introspection API explicitly reports the required group absent;
-- a future provider error contract uniquely and explicitly identifies the missing permission group.
+- an operator-attested current provider-admin observation that visibly omits a required API group;
+- a future official permission-introspection API explicitly reporting the group absent;
+- a future provider error contract that uniquely identifies the missing permission group.
 
-Current generic `GW.AUTHN`, `UNAUTHORIZED`, or `FORBIDDEN` responses are NOT by themselves sufficient to prove `MISSING`.
+The same provenance requirements apply to MISSING. A manually observed absence is still operator-attested, not machine-verified.
+
+Generic `GW.AUTHN`, `UNAUTHORIZED`, or `FORBIDDEN` alone are NOT sufficient to prove MISSING.
 
 ### 5.3 `UNKNOWN`
 
-`write_scope=UNKNOWN` is required when ICBM cannot prove either READY or MISSING.
+`write_scope.status=UNKNOWN` is required when ICBM cannot prove either READY or MISSING under the adopted evidence policy.
 
 Examples:
 
-- no current provider-side permission read-back evidence exists;
-- the provider application settings cannot be inspected programmatically;
+- no provider-side permission evidence exists;
+- the operator cannot or did not attest the provider-admin configuration;
+- evidence provenance is missing;
+- the application fingerprint does not match the current application;
 - only a generic authorization failure such as `GW.AUTHN` is available;
-- endpoint/path correctness is not yet established;
+- endpoint/path correctness is not established;
 - auth/session validity is uncertain;
-- permission evidence belongs to a different application;
-- required endpoint-to-group mapping changed after the evidence was recorded;
-- evidence exceeded its freshness bound;
-- provider behavior conflicts with recorded permission evidence.
+- required endpoint-to-group mapping changed;
+- evidence exceeded its configured freshness bound;
+- provider behavior materially contradicts the evidence.
 
-`UNKNOWN` is not an error synonym.
-
-It is an explicit statement that the evidence is insufficient.
+`UNKNOWN` is an explicit statement of insufficient evidence, not an error synonym.
 
 ---
 
 ## 6. Current permission-introspection limitation
 
-The current published Commerce API surface reviewed for M2 does not expose a documented endpoint that returns the calling application's configured API-group list.
+The published Commerce API surface reviewed for M2 does not expose a documented endpoint that returns the calling application's configured API-group list.
 
-Therefore SmartStore currently has no documented machine-readable equivalent of:
+No documented machine-readable equivalent was found for:
 
 `GET /oauth/scopes`
 
@@ -266,48 +280,114 @@ or:
 
 for the M2 own-store integration.
 
-This is a documentation finding, not a permanent provider guarantee.
+This is a current documentation finding, not a permanent provider guarantee.
 
-If NAVER later introduces an official introspection endpoint, this contract MUST be reviewed before ICBM adopts it.
+If NAVER later introduces an official introspection endpoint, this contract MUST be reviewed before adoption.
 
-Until then, the strongest direct provider-declaration evidence is application configuration read-back in Commerce API Center.
+Until then, Commerce API Center can provide an operator-visible provider declaration, but that observation remains an operator attestation rather than a machine read-back.
 
 ---
 
-## 7. Provider-admin permission read-back
+## 7. Operator-attested provider-admin observation
 
-A provider-admin read-back MAY be used as positive permission evidence.
+The previous shorthand `PROVIDER_ADMIN_READBACK` is deliberately rejected for the current manual flow because it could imply machine measurement.
 
-The evidence MUST identify the application without leaking sensitive authentication data.
+When a human inspects Commerce API Center and records the configured API groups, ICBM SHALL classify the evidence as:
 
-A sanitized permission-evidence record SHOULD contain at least:
+`evidence_source = OPERATOR_ATTESTED_PROVIDER_ADMIN`
+
+and:
+
+`evidence_strength = OPERATOR_ATTESTED`
+
+not:
+
+`MACHINE_VERIFIED`
+
+A screenshot MAY support the audit trail, but it does not prove that the provider configuration remained unchanged after capture.
+
+A sanitized evidence record SHOULD contain at least:
 
 - internal `marketplace_account_id`;
 - provider=`SMARTSTORE`;
 - auth mode=`SELF`;
-- internal application reference or non-reversible application fingerprint;
+- `application_fingerprint`;
 - required API-group set;
 - observed API-group set;
 - observation timestamp;
-- upstream documentation version used for endpoint/group mapping;
-- evidence source=`PROVIDER_ADMIN_READBACK`;
+- internal operator/audit actor reference when available;
+- endpoint-mapping revision;
+- upstream documentation version;
+- `evidence_source=OPERATOR_ATTESTED_PROVIDER_ADMIN`;
+- `evidence_strength=OPERATOR_ATTESTED`;
+- freshness-policy identifier / bound;
 - sanitized evidence reference when retained.
 
-The record MUST NOT contain plaintext:
+The evidence MUST NOT contain plaintext:
 
 - `client_secret`;
 - bearer tokens;
 - complete `client_id` in logs, screenshots, or exported evidence.
 
-A masked or non-reversible application identifier may be shown when needed to avoid confusing two applications.
+### 7.1 Application fingerprint
 
-Portal read-back proves provider-declared permission configuration.
+Requirement 5.1(3) MUST be mechanically checkable.
 
-It does not prove a write transaction works.
+Permission evidence SHALL bind to a non-reversible keyed fingerprint derived from the canonical provider application identity, including the normalized `client_id`, provider, and auth mode.
+
+Conceptually:
+
+`application_fingerprint = keyed_fingerprint(provider | auth_mode | client_id)`
+
+The exact cryptographic construction is an implementation detail, but it MUST:
+
+- avoid storing the complete `client_id` in exported evidence;
+- allow ICBM to determine whether permission evidence belongs to the currently configured application;
+- fail closed to `UNKNOWN` if the fingerprint cannot be validated;
+- not be treated as an authentication secret or account identity substitute.
+
+If current application fingerprint differs from the evidence fingerprint:
+
+`write_scope.status -> UNKNOWN`
+
+### 7.2 UI and audit presentation
+
+When evidence is operator-attested, UI and audit surfaces MUST expose that fact.
+
+Examples:
+
+- acceptable: `권한 확인됨 (관리자 화면 확인)`
+- acceptable: `write_scope=READY / evidence=OPERATOR_ATTESTED`
+- forbidden: a generic `READY` badge that is visually indistinguishable from machine-verified provider introspection.
+
+If a future official introspection API exists, machine evidence may use a distinct strength such as `MACHINE_VERIFIED`.
+
+This distinction prevents human report from silently becoming equivalent to measured API proof.
 
 ---
 
-## 8. Runtime probes are not the same as declared scope
+## 8. Freshness semantics for manual permission evidence
+
+An operator-attested portal observation is a point-in-time snapshot.
+
+ICBM cannot prove that the provider configuration was unchanged after that observation unless NAVER exposes a machine-verifiable revision/introspection mechanism.
+
+Therefore `fresh` means only:
+
+- the observation is within the configured evidence-age policy;
+- it belongs to the current application fingerprint;
+- the endpoint/group mapping revision remains current;
+- no known invalidation event occurred.
+
+It MUST NOT be described as proof of continuous unchanged provider state.
+
+The exact maximum age for operator-attested scope evidence is an ICBM operational policy to be frozen with the M2 state contract. If no bounded age policy is configured, operator-attested evidence MUST NOT remain READY indefinitely; it converges to UNKNOWN when its validity cannot be established.
+
+Known external-edit detection is necessarily incomplete while no provider introspection/change-feed exists. The UI and audit model MUST state this limitation rather than implying perfect change detection.
+
+---
+
+## 9. Runtime probes are not the same as declared scope
 
 A successful non-mutating API call can prove that a specific authenticated request was effectively allowed.
 
@@ -322,62 +402,54 @@ Reasons include:
 - agreement/provision requirements;
 - an endpoint's permission set differing from another endpoint in the same broad domain.
 
-Therefore ICBM MAY record a separate effective-access observation such as:
+ICBM MAY record:
 
 `effective_access = PROVEN_FOR(endpoint, session_generation)`
 
-but MUST NOT silently convert that observation into:
+but MUST NOT silently convert it into:
 
-`write_scope=READY`
+`write_scope.status=READY`
 
-unless the adopted endpoint/permission contract proves that the observation is equivalent to the complete required provider permission set.
+unless the adopted endpoint/permission contract proves equivalence to the complete required permission set.
 
 No such generic equivalence is assumed for M2.
 
 ---
 
-## 9. `GW.AUTHN` is ambiguous
+## 10. `GW.AUTHN` is ambiguous
 
 NAVER's authentication documentation explains that `401 / GW.AUTHN` can indicate an expired token.
 
-Official provider support also documents cases where the same `GW.AUTHN` response occurs because the application's required API-group permission is absent.
+Official provider support also documents cases where the same `GW.AUTHN` occurs because the application lacks a required API-group permission.
 
-Provider support additionally directs users to verify:
-
-- API-group permission;
-- request path;
-- presence and validity of the authentication token.
+Provider support also directs users to verify API-group permission, request path, and token validity.
 
 Therefore:
 
 `GW.AUTHN != proven token expiry`
 
-and:
-
 `GW.AUTHN != proven permission missing`
 
-A single `GW.AUTHN` response MUST NOT cause ICBM to rewrite durable truth as either:
+A single `GW.AUTHN` response MUST NOT rewrite durable truth as either:
 
 - `credentials invalid`; or
-- `write_scope=MISSING`.
+- `write_scope.status=MISSING`.
 
 It is an evidence-classification problem first.
 
 ---
 
-## 10. Permission-failure diagnosis order
+## 11. Permission-failure diagnosis order
 
 When a target API returns an authorization-like failure, ICBM SHALL diagnose in this order.
 
 ### Step 1: establish current authentication truth
 
-Re-evaluate the `AUTH.md` invariants.
+Re-evaluate `AUTH.md` invariants using the current committed session generation and account identity proof.
 
-Use the current committed session generation and account identity proof.
+If auth cannot be proven READY, resolve authentication first.
 
-If `auth` cannot be proven READY, resolve authentication first.
-
-### Step 2: verify the endpoint contract
+### Step 2: verify endpoint contract
 
 Confirm against current `ENDPOINT_MATRIX.md` / upstream docs:
 
@@ -388,133 +460,113 @@ Confirm against current `ENDPOINT_MATRIX.md` / upstream docs:
 - intended resource;
 - required permission groups.
 
-A wrong route or wrong method is not a scope failure.
+A wrong route or method is not a scope failure.
 
-### Step 3: inspect provider permission evidence
+### Step 3: inspect permission evidence and provenance
 
-If current provider-admin evidence explicitly shows a required group missing:
+If valid current evidence explicitly shows a required group absent:
 
-`write_scope -> MISSING`
+`write_scope.status -> MISSING`
 
-If it explicitly shows all required groups present:
+If valid current evidence shows every required group present:
 
-`write_scope -> READY`
+`write_scope.status -> READY`
 
-subject to evidence freshness.
+The resulting state MUST retain and surface its evidence source/strength.
 
 ### Step 4: classify runtime denial separately
 
-If scope is READY but the call is still denied, do NOT erase the permission evidence automatically.
+If scope status is READY but the call is still denied, do NOT automatically erase or invert the permission declaration.
 
-Investigate endpoint/resource/provider-state causes such as:
+Investigate:
 
 - account/store/channel state;
 - role/provision/agreement conditions;
 - resource ownership;
 - unsupported API for the application type;
 - undocumented provider restriction;
-- endpoint mapping drift.
+- endpoint mapping drift;
+- stale operator-attested evidence.
 
-The operation capability may become `BLOCKED` or `REVIEW_REQUIRED` while provider-declared scope remains READY.
+Operation capability may become `BLOCKED` or `REVIEW_REQUIRED` while the last permission declaration remains recorded with its provenance.
+
+If runtime behavior materially contradicts operator-attested permission evidence, the active scope status SHOULD converge to UNKNOWN pending review rather than continuing to advertise an unqualified READY.
 
 ### Step 5: preserve uncertainty
 
-If no evidence cleanly separates auth, route, permission, and provider-state causes:
+If evidence cannot separate auth, route, permission, and provider-state causes:
 
-`write_scope = UNKNOWN`
-
-not a guessed MISSING/READY value.
+`write_scope.status = UNKNOWN`
 
 ---
 
-## 11. Relationship between `auth`, `write_scope`, and `write`
+## 12. Relationship between `auth`, `write_scope`, and `write`
 
 ### Case A
 
 `auth=READY`
 
-`write_scope=READY`
+`write_scope.status=READY`
+
+`write_scope.evidence_strength=OPERATOR_ATTESTED | MACHINE_VERIFIED`
 
 `write=UNVERIFIED`
 
-Meaning:
-
-- intended account is proven;
-- declared permission set is positively evidenced;
-- actual mutation has not yet been proven.
-
-This is the normal pre-canary state.
+Meaning: intended account is proven; declared permission set has positive evidence with explicit provenance; mutation has not been proven.
 
 ### Case B
 
 `auth=READY`
 
-`write_scope=MISSING`
+`write_scope.status=MISSING`
 
 `write=BLOCKED`
 
-Meaning:
-
-- correct account is authenticated;
-- at least one required provider permission is known absent;
-- ICBM MUST NOT attempt a production mutation merely to reconfirm the missing permission.
+Meaning: at least one required permission is evidenced absent. ICBM MUST NOT perform a production mutation merely to reconfirm absence.
 
 ### Case C
 
 `auth=READY`
 
-`write_scope=UNKNOWN`
+`write_scope.status=UNKNOWN`
 
 `write=UNVERIFIED`
 
-Meaning:
+Meaning: account proof succeeded but provider permission configuration is not sufficiently evidenced.
 
-- account proof succeeded;
-- provider permission configuration is not positively known;
-- ICBM MUST NOT display or persist a false READY scope state.
-
-A bounded write proof MAY be considered later only under the explicit approval/safety contract for the M5 canary.
+A bounded write proof MAY be considered later only under the explicit M5 approval/safety contract.
 
 ### Case D
 
 `auth=READY`
 
-`write_scope=READY`
+`write_scope.status=READY`
 
 `write=BLOCKED`
 
-Meaning:
-
-- the declared permission set exists;
-- actual write is blocked by another condition or by measured runtime behavior.
-
-Scope MUST NOT be rewritten to MISSING without evidence that a required permission was actually removed.
+Meaning: declaration evidence says required groups exist, but measured write is blocked by another condition or runtime behavior.
 
 ### Case E
 
 `auth=READY`
 
-`write_scope=UNKNOWN`
+`write_scope.status=UNKNOWN`
 
 `write=READY`
 
-This state is logically possible if a bounded write and read-back later succeed while provider-declared group configuration still cannot be read back.
+This is logically valid if a bounded write and read-back later succeed while provider-declared group configuration remains unproven.
 
-A successful write proves effective write capability for that tested transaction.
-
-It does not retroactively manufacture provider-declaration evidence.
-
-Therefore the layers remain separate.
+A successful write proves effective write capability for that tested transaction. It does not manufacture provider-declaration evidence retroactively.
 
 ---
 
-## 12. M5 bounded canary relationship
+## 13. M5 bounded canary relationship
 
-M2 permission work MUST NOT perform a mutation merely to determine scope.
+M2 permission work MUST NOT mutate merely to discover scope.
 
 The first bounded product CREATE belongs to the later M5 write-capability proof.
 
-The M5 canary is the formal transition candidate for:
+The M5 canary may transition:
 
 `write: UNVERIFIED -> READY`
 
@@ -522,28 +574,28 @@ only after:
 
 1. explicit operational approval;
 2. current `auth=READY`;
-3. `write_scope != MISSING`;
+3. `write_scope.status != MISSING`;
 4. bounded CREATE;
-5. external read-back of the created listing/resource;
+5. external read-back;
 6. expected-vs-observed comparison;
 7. durable evidence commit;
 8. safe cleanup policy where applicable.
 
-If `write_scope=UNKNOWN`, the M5 canary requires explicit acknowledgement that provider permission configuration is not positively introspected.
+If scope is UNKNOWN, the canary requires explicit acknowledgement that provider permission configuration is not positively introspected.
 
 The canary MUST NOT be silently used as a permission-discovery trick during ordinary M2 CONNECT.
 
 ---
 
-## 13. Permission evidence lifecycle
+## 14. Permission evidence lifecycle
 
-Permission evidence belongs to a provider application configuration, not to a bearer token string.
+Permission evidence belongs to a provider application configuration, not to a bearer-token string.
 
-The evidence MUST be invalidated or re-reviewed when at least one of the following occurs:
+Evidence MUST be invalidated or re-reviewed when at least one of the following occurs:
 
-- `client_id` / provider application identity changes;
+- current `application_fingerprint` differs;
 - application type or auth mode changes;
-- operator reports editing the API-group configuration;
+- an operator reports editing API-group configuration;
 - required endpoint set changes;
 - endpoint-to-group mapping changes;
 - upstream permission model changes;
@@ -552,87 +604,79 @@ The evidence MUST be invalidated or re-reviewed when at least one of the followi
 
 A normal bearer-token renewal does NOT by itself invalidate application-level permission evidence.
 
-A `client_secret` rotation for the same provider application also does not automatically prove the API groups changed.
+A `client_secret` rotation for the same provider application also does not by itself prove API groups changed, but auth still must satisfy the new credential/session generation contract before operations resume.
 
-However auth must still satisfy the new credential/session generation contract before permission evidence is used for an operation.
-
----
-
-## 14. Application edits and state convergence
-
-Provider API-group configuration can be edited outside ICBM.
-
-Therefore persisted `write_scope=READY` is not eternal truth.
-
-After a known application permission edit:
-
-`write_scope -> UNKNOWN`
-
-until fresh provider-declaration evidence is obtained.
-
-If fresh read-back shows a required group removed:
-
-`write_scope -> MISSING`
-
-If fresh read-back shows all required groups present:
-
-`write_scope -> READY`
-
-ICBM MUST NOT preserve READY solely because the previous evidence was once valid.
+Because external edit detection is incomplete without provider introspection/change-feed, absence of a known edit is not proof that no edit occurred.
 
 ---
 
-## 15. Endpoint-specific additional permissions
+## 15. Known permission edits force a new auth session
 
-Official provider guidance demonstrates that some inquiry endpoints can require `주문 판매자` in addition to inquiry-related permission.
+Open question Q2 remains unresolved: current documentation does not establish whether an API-group edit affects an already-issued token immediately or only a later token/session.
 
-Therefore `PERMISSIONS_SCOPES.md` defines permission semantics, while `ENDPOINT_MATRIX.md` MUST define the exact required group set per adopted endpoint.
+ICBM MUST NOT depend on either behavior.
+
+After a known API-group edit, the conservative convergence policy is:
+
+1. `write_scope.status -> UNKNOWN`;
+2. invalidate the previous permission evidence for active gating;
+3. mark the existing bearer session as stale-for-permission-change for operational use;
+4. obtain and atomically commit a new token session generation when provider token policy allows;
+5. re-run current account identity proof under that session;
+6. obtain fresh permission evidence/attestation;
+7. only then allow scope to return to READY or MISSING.
+
+A known permission edit does NOT increment `credential_generation` merely because API groups changed; the client credential bundle may be unchanged.
+
+It does require a fresh `session_generation` before ICBM treats the new permission configuration as operationally adopted.
+
+If provider token issuance timing prevents immediate new-session acquisition, ICBM remains fail-closed for operations that depend on the edited permissions rather than assuming the old session adopted them.
+
+---
+
+## 16. Endpoint-specific additional permissions
 
 The required permission set for an operation is:
 
 `union(required_groups(endpoint_i) for every endpoint_i in the operation transaction)`
 
-For example, a registration flow may use:
+A registration flow may use:
 
 - metadata/category reads;
 - image-related APIs;
 - product CREATE;
 - product read-back.
 
-The write-scope requirement is the union of the adopted endpoint requirements, not merely the HTTP method of the final CREATE.
+The write-scope requirement is the union of adopted endpoint requirements, not merely the final CREATE endpoint.
+
+`ENDPOINT_MATRIX.md` is responsible for freezing that union.
 
 ---
 
-## 16. Unsupported or restricted API groups
+## 17. Unsupported or restricted API groups
 
-NAVER documents that some API groups/endpoints are unavailable to certain application types, including APIs reserved for Commerce Solution or other programs.
+Some APIs are unavailable to certain application types, including APIs reserved for Commerce Solution or other programs.
 
-Therefore ICBM MUST NOT infer that an API appearing in the overall Commerce API documentation is automatically usable by `OWN_STORE_SELF`.
+ICBM MUST NOT infer that an API appearing in Commerce API documentation is automatically usable by `OWN_STORE_SELF`.
 
-`ENDPOINT_MATRIX.md` must record application-mode eligibility for every endpoint ICBM adopts.
+`ENDPOINT_MATRIX.md` MUST record application-mode eligibility for every adopted endpoint.
 
-If an endpoint is unavailable to the M2 application type:
-
-- this is not a missing local checkbox;
-- this is not an authentication failure;
-- it is a provider capability restriction.
-
-The capability must be marked unsupported/blocked under the final state contract rather than causing retry loops.
+If an endpoint is unavailable to M2 application mode, this is a provider capability restriction, not a missing local checkbox or authentication failure.
 
 ---
 
-## 17. Evidence safety
+## 18. Evidence safety
 
 Permission evidence MAY include:
 
 - API-group names;
 - timestamps;
-- documentation version;
-- masked/non-reversible application reference;
+- documentation/mapping revision;
+- non-reversible application fingerprint;
 - provider trace ID from a failed probe;
 - HTTP status/error code;
 - target endpoint identifier;
-- operator/admin read-back confirmation.
+- operator-attestation metadata.
 
 Permission evidence MUST NOT expose:
 
@@ -641,110 +685,120 @@ Permission evidence MUST NOT expose:
 - complete `client_secret_sign`;
 - decrypted credential blob;
 - complete `client_id` in logs/exported diagnostics;
-- customer/order PII unrelated to proving permission state.
-
-Permission review must prove configuration without turning audit artifacts into credentials.
+- unrelated customer/order PII.
 
 ---
 
-## 18. Acceptance requirements
+## 19. Acceptance requirements
 
-M2 SmartStore permission acceptance MUST include at least the following.
+M2 SmartStore permission acceptance MUST include at least:
 
-### 18.1 No OAuth-scope assumption
+### 19.1 No OAuth-scope assumption
 
-Verify that SmartStore integration code/state does not require a token `scope` field and does not invent OAuth scope strings.
+Verify integration code/state does not require a token `scope` field or invent OAuth scope strings.
 
-### 18.2 Seller-information permission path
+### 19.2 Seller-information permission path
 
-With current valid auth material:
+With valid auth material, prove account identity via the seller-information protected read. Failure prevents auth READY but is not automatically product scope MISSING.
 
-- prove account identity via the seller-information protected read;
-- confirm that failure of this path prevents AUTH READY;
-- do not misclassify it as product `write_scope=MISSING` without product-permission evidence.
+### 19.3 Operator-attested product permission present
 
-### 18.3 Product permission present
-
-Using sanitized current provider-admin evidence:
+Using a current provider-admin observation:
 
 - observed application includes `상품`;
-- required M2 product-write permission set is satisfied;
-- `write_scope -> READY`;
-- `write` remains `UNVERIFIED` until the bounded canary.
+- current application fingerprint matches evidence;
+- evidence is recorded as `OPERATOR_ATTESTED`, not `MACHINE_VERIFIED`;
+- `write_scope.status -> READY` only under the configured bounded evidence policy;
+- UI/audit surfaces show the attested evidence source;
+- `write` remains UNVERIFIED.
 
-### 18.4 Product permission absent
+### 19.4 Operator-attested product permission absent
 
-Using sanitized current provider-admin evidence:
+Using a current provider-admin observation:
 
 - observed application omits `상품`;
-- `write_scope -> MISSING`;
+- evidence provenance remains operator-attested;
+- `write_scope.status -> MISSING`;
 - no product mutation is attempted merely to reconfirm absence.
 
-### 18.5 No fresh provider permission evidence
+### 19.5 No usable permission evidence
 
-- auth and identity proof succeed;
-- application API-group configuration cannot be positively read back;
-- `write_scope -> UNKNOWN`;
+- auth succeeds;
+- no valid provider permission evidence is available;
+- `write_scope.status -> UNKNOWN`;
 - ICBM does not fabricate READY from token success.
 
-### 18.6 Ambiguous `GW.AUTHN`
+### 19.6 Ambiguous `GW.AUTHN`
 
 Using a controlled harness or safe provider condition:
 
 - receive `401/GW.AUTHN`;
-- verify ICBM does not immediately label credentials invalid;
-- verify ICBM does not immediately label write scope MISSING;
-- diagnosis checks auth, endpoint contract, and permission evidence separately.
+- do not immediately label credentials invalid;
+- do not immediately label scope MISSING;
+- diagnose auth, endpoint contract, and permission evidence separately.
 
-### 18.7 Permission evidence invalidation
+### 19.7 Application-fingerprint mismatch
 
-- begin with fresh `write_scope=READY` evidence;
-- simulate/record known API-group configuration edit or provider application change;
-- previous READY becomes non-authoritative;
-- converge to `UNKNOWN` until fresh read-back.
+- begin with READY/MISSING evidence for application fingerprint A;
+- configure application identity B;
+- old evidence MUST NOT apply;
+- active scope converges to UNKNOWN.
 
-### 18.8 Additional-group endpoint
+### 19.8 Evidence-age expiry
 
-At least one adopted endpoint with multiple/extra group requirements, if present in the M2 endpoint set, must be represented by the union rule and tested against the endpoint matrix.
+- begin with operator-attested evidence inside its configured age bound;
+- advance beyond the bound in a controlled test;
+- evidence ceases to authorize READY/MISSING gating as current truth;
+- scope converges according to policy, normally UNKNOWN pending fresh observation.
 
-### 18.9 Scope READY does not imply write READY
+### 19.9 Known permission edit
 
-- set scope evidence to READY;
-- do not perform a mutation;
-- verify `write` remains `UNVERIFIED`.
+- begin with valid auth and scope evidence;
+- record a known API-group configuration edit;
+- invalidate prior scope evidence;
+- mark old session stale-for-permission-change;
+- force a new session generation when token policy permits;
+- re-prove account identity;
+- require fresh permission evidence before scope convergence.
 
-### 18.10 Write success does not rewrite declared-scope history
+### 19.10 Additional-group endpoint
 
-If a later bounded canary succeeds while scope evidence is UNKNOWN:
+At least one adopted endpoint with extra/multiple group requirements, if present in M2, must obey the union rule and endpoint matrix.
 
-- `write` may become READY under the canary contract;
-- `write_scope` remains UNKNOWN until provider-declaration evidence is obtained.
+### 19.11 Scope READY does not imply write READY
+
+Set scope READY with provenance, perform no mutation, and verify write remains UNVERIFIED.
+
+### 19.12 Write success does not rewrite declared-scope history
+
+If a later bounded canary succeeds while scope is UNKNOWN, write may become READY while write_scope remains UNKNOWN until declaration evidence exists.
 
 ---
 
-## 19. Runtime evidence required before `verified_at`
+## 20. Runtime evidence required before `verified_at`
 
-`verified_at` MUST remain null until measured evidence covers at least:
+`verified_at` MUST remain null until evidence covers at least:
 
 - current application mode (`SELF`);
-- real seller-information identity proof path;
-- current provider-admin API-group read-back method;
-- `상품` group presence/absence behavior;
+- seller-information identity proof path;
+- actual M2 provider-admin observation/attestation workflow;
+- application-fingerprint binding behavior;
+- `상품` group present/absent handling;
 - one controlled missing-group or equivalent permission-denial case without damaging credentials;
 - observed `GW.AUTHN` classification behavior;
-- permission-evidence freshness/invalidation flow;
+- evidence freshness/invalidation flow;
 - confirmation that token responses provide no OAuth scope list;
 - endpoint permission mapping used by the M2 registration path.
 
-A real product CREATE is not required to verify this document and belongs to the later bounded write proof.
+A real product CREATE is not required to verify this document; that belongs to the later bounded write proof.
 
 ---
 
-## 20. Open questions
+## 21. Open questions
 
 ### Q1. Programmatic API-group introspection
 
-Does NAVER provide or plan an official API that returns the configured API groups for the calling own-store application?
+Does NAVER provide or plan an official API that returns configured API groups for the calling own-store application?
 
 Current status:
 
@@ -754,23 +808,17 @@ ICBM MUST NOT invent one or scrape undocumented internal endpoints.
 
 ### Q2. Permission-change propagation to already issued tokens
 
-If an operator adds/removes an API group while a bearer token is still valid, does the change affect that token immediately or only a subsequently issued token/session?
+If an operator adds/removes an API group while a bearer token is valid, does the change affect that token immediately or only a later token/session?
 
 Current status:
 
 `UNKNOWN`
 
-M2 MUST NOT depend on either behavior until measured or documented.
-
-After a known permission edit, the conservative policy is:
-
-- invalidate permission evidence;
-- re-establish current auth/session proof as needed;
-- obtain fresh permission read-back before claiming scope READY.
+M2 does not depend on either behavior. A known permission edit forces scope invalidation and a fresh session generation before the changed permission configuration is operationally adopted.
 
 ### Q3. Error-code specificity for missing API groups
 
-Current provider documentation/support demonstrates that generic `GW.AUTHN` can represent missing group permission, but it is not unique to that cause.
+Generic `GW.AUTHN` can represent missing group permission but is not unique to that cause.
 
 Current status:
 
@@ -780,7 +828,7 @@ M2 MUST NOT map generic `GW.AUTHN` directly to `SCOPE_INSUFFICIENT` without corr
 
 ### Q4. Exact M2 endpoint permission union
 
-The final required group set depends on the exact endpoints adopted in `ENDPOINT_MATRIX.md`.
+The final required group set depends on `ENDPOINT_MATRIX.md`.
 
 Current product-write baseline:
 
@@ -790,9 +838,19 @@ Current status:
 
 `BASELINE_DEFINED / FINAL_UNION_PENDING_ENDPOINT_MATRIX`
 
+### Q5. Operator-attestation maximum age
+
+What maximum age should M2 allow for operator-attested provider-admin permission evidence before it becomes stale?
+
+Current status:
+
+`POLICY_TO_FREEZE_WITH_M2_STATE_CONTRACT`
+
+Until a bounded policy exists, the implementation MUST NOT silently treat manual evidence as eternally READY.
+
 ---
 
-## 21. Final M2 permission contract
+## 22. Final M2 permission contract
 
 For SmartStore `OWN_STORE_SELF`:
 
@@ -804,11 +862,15 @@ For SmartStore `OWN_STORE_SELF`:
 
 `account identity proof != product write-scope proof`
 
-`write_scope READY = fresh positive evidence that the current provider application contains the complete required API-group set`
+`manual provider-admin observation = OPERATOR_ATTESTED, not MACHINE_VERIFIED`
 
-`write_scope MISSING = positive evidence that at least one required group is absent`
+`bare write_scope READY without evidence provenance = forbidden`
 
-`write_scope UNKNOWN = insufficient evidence to prove READY or MISSING`
+`write_scope READY = positive permission evidence + current application fingerprint + current mapping + bounded freshness + explicit evidence provenance`
+
+`write_scope MISSING = positive absence evidence + explicit evidence provenance`
+
+`write_scope UNKNOWN = insufficient or stale evidence`
 
 `GW.AUTHN != automatically auth failure`
 
@@ -816,10 +878,10 @@ For SmartStore `OWN_STORE_SELF`:
 
 `provider permission READY != actual write READY`
 
+`known permission edit -> scope UNKNOWN + fresh session generation required`
+
 `actual write READY requires bounded mutation + external read-back under the later write-capability contract`
 
 `persisted write_scope READY != eternal truth`
 
-`provider/admin evidence + current endpoint mapping wins over stale persisted state`
-
-Unknown provider behavior remains UNKNOWN until measured or officially documented.
+`unknown provider behavior remains UNKNOWN until measured or officially documented`
