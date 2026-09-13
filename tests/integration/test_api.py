@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.container import build_container
 from app.core.logging import LOG_FILE_NAME
 from app.main import create_app
 from tests.conftest import LOCAL, make_config
@@ -47,6 +46,7 @@ def test_health_and_readiness_pass(client: TestClient) -> None:
     assert first.status_code == second.status_code == 200
     checks = {c["name"]: c["status"] for c in first.json()["checks"]}
     assert checks == {
+        "data_dir_owner": "PASS",
         "database": "PASS",
         "sqlite_wal": "PASS",
         "schema": "PASS",
@@ -165,7 +165,7 @@ def test_diagnostics_are_disabled_by_default(client: TestClient) -> None:
 
 def test_failing_job_dead_letters_and_is_traceable(data_dir: Path) -> None:
     config = make_config(data_dir, diagnostics_enabled=True)
-    app = create_app(container=build_container(config, extra_jobs=TEST_JOBS))
+    app = create_app(config, extra_jobs=TEST_JOBS)
     trace = "trace-deadletter-01"
     with TestClient(app, base_url=LOCAL) as client:
         created = client.post(
@@ -197,7 +197,7 @@ def test_failing_job_dead_letters_and_is_traceable(data_dir: Path) -> None:
 
 
 def test_unmigrated_database_is_not_ready(tmp_path: Path) -> None:
-    app = create_app(container=build_container(make_config(tmp_path)))
+    app = create_app(make_config(tmp_path))
     with TestClient(app, base_url=LOCAL) as client:
         response = client.get("/api/ready")
         assert response.status_code == 503
@@ -210,13 +210,13 @@ def test_restart_preserves_queued_and_dead_letter_state(data_dir: Path) -> None:
     config = make_config(
         data_dir, diagnostics_enabled=True, job_backoff_base_s=0.5, job_backoff_max_s=1.0
     )
-    with TestClient(create_app(container=build_container(config)), base_url=LOCAL) as client:
+    with TestClient(create_app(config), base_url=LOCAL) as client:
         job_id = client.post("/api/v1/diagnostics/failing-job", headers=CLIENT).json()["job_id"]
         _wait_for(
             lambda: client.get(f"/api/v1/system/jobs/{job_id}").json()["state"] == "RETRY_SCHEDULED"
         )
     # Process stopped while the job waits for its retry.
-    with TestClient(create_app(container=build_container(config)), base_url=LOCAL) as client:
+    with TestClient(create_app(config), base_url=LOCAL) as client:
         pending = client.get(f"/api/v1/system/jobs/{job_id}").json()
         assert pending["state"] in {"RETRY_SCHEDULED", "RUNNING", "DEAD"}
         assert pending["attempt_count"] >= 1

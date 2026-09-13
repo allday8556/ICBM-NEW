@@ -94,7 +94,7 @@ The authoritative stack is `docs/ARCHITECTURE.md` §2. Current v1:
 | HTTP | httpx |
 | Browser automation | Playwright Chromium when required |
 | Job runner | Durable DB-backed queue/scheduler; one worker owner initially |
-| Process model | Local single-user Windows application, loopback-only by default |
+| Process model | Local single-user Windows application, loopback-only by default; one ICBM process per data directory (ADR-0006) |
 | Secret storage | OS-native secure credential storage via keyring / Windows protection |
 | Test framework | pytest + contract/integration/E2E gates |
 | CI | GitHub Actions |

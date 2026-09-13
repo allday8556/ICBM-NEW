@@ -1,3 +1,4 @@
+import os
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Response
@@ -20,6 +21,8 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
     milestone: str
+    # The serving interpreter's pid: diagnostics, and the id recorded in the ownership lock.
+    pid: int
 
 
 class ExecutionModeChangeRequest(BaseModel):
@@ -30,7 +33,7 @@ class ExecutionModeChangeRequest(BaseModel):
 @router.get("/api/health")
 def health() -> HealthResponse:
     """Liveness: the process is up and serving HTTP."""
-    return HealthResponse(status="ok", version=__version__, milestone=MILESTONE)
+    return HealthResponse(status="ok", version=__version__, milestone=MILESTONE, pid=os.getpid())
 
 
 @router.get("/api/ready")

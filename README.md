@@ -7,10 +7,13 @@ Read [`CLAUDE.md`](CLAUDE.md), [`ROADMAP.md`](ROADMAP.md) and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing anything.
 The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOURCE_OF_TRUTH.md).
 
-## Current milestone: M0 — UI shell + foundation
+## Status
 
-M0 performs **zero supplier/marketplace calls and zero external writes**. Every screen renders
-the empty state reported by its application contract. Evidence: [`docs/acceptance/M0.md`](docs/acceptance/M0.md).
+- **M0** — fresh v29 UI shell + Phase 0 foundation: **ACCEPTED** 2026-09-13 ([`docs/acceptance/M0.md`](docs/acceptance/M0.md)).
+- **Current gate:** Issue #4 — one ICBM process per data directory ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)).
+- **Next:** M1 — K홀세일 CONNECT only, after Issue #4 closes ([`ROADMAP.md`](ROADMAP.md) §12).
+
+The application performs **zero supplier/marketplace calls and zero external writes**; every screen renders the empty state reported by its application contract.
 
 ## Quick start (Windows, Python 3.12)
 
@@ -24,13 +27,21 @@ py -3.12 -m venv .venv
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/health` | liveness |
-| `GET /api/ready` | deterministic readiness (DB, WAL, schema head, worker, secret store, DRY_RUN, egress) |
+| `GET /api/ready` | deterministic readiness (data-directory owner, DB, WAL, schema head, worker, secret store, DRY_RUN, egress) |
 | `GET /api/v1/shell`, `GET /api/v1/screens/{screen}` | UI application contracts |
-| `POST /api/v1/system/execution-mode` | protected action (audited; always denied in M0) |
-| `POST /api/v1/diagnostics/failing-job` | M0 retry/dead-letter demonstration (`ICBM_DIAGNOSTICS=1` only) |
+| `POST /api/v1/system/execution-mode` | protected action (audited; LIVE is always denied for now) |
+| `POST /api/v1/diagnostics/failing-job` | retry/dead-letter demonstration (`ICBM_DIAGNOSTICS=1` only) |
 
 Configuration is read from `ICBM_*` environment variables (`app/config.py`). The server binds
-loopback only and refuses `ICBM_EXECUTION_MODE=LIVE` during M0.
+loopback only and refuses `ICBM_EXECUTION_MODE=LIVE`.
+
+### One process per data directory
+
+`icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<ICBM_DATA_DIR>/.icbm-owner.lock`
+([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)). A second owner exits with
+status 3 and `DATA_DIR_IN_USE`; stop the server before running `icbm db upgrade`. `icbm db current`
+is read-only and takes no lock. After a crash the next start recovers on its own — never delete the
+lock file.
 
 ## Checks
 

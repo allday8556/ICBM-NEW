@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.container import Container, build_container
+from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore
 from app.db.migrate import upgrade_to_head
 from app.main import create_app
@@ -56,16 +57,24 @@ def clock() -> FakeClock:
 
 @pytest.fixture
 def container(config: AppConfig, clock: FakeClock) -> Iterator[Container]:
-    built = build_container(
-        config, clock=clock, secret_store=MemorySecretStore(), extra_jobs=TEST_JOBS
-    )
-    yield built
-    built.db.dispose()
+    """The composed services, owning the test data directory like any production process."""
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            secret_store=MemorySecretStore(),
+            extra_jobs=TEST_JOBS,
+        )
+        try:
+            yield built
+        finally:
+            built.db.dispose()
 
 
 @pytest.fixture
 def client(config: AppConfig) -> Iterator[TestClient]:
     """The real application (system clock, real worker) on a migrated database."""
-    app = create_app(container=build_container(config, extra_jobs=TEST_JOBS))
+    app = create_app(config, extra_jobs=TEST_JOBS)
     with TestClient(app, base_url=LOCAL) as test_client:
         yield test_client

@@ -10,8 +10,9 @@ from app.config import AppConfig
 from app.connect.service import ConnectService
 from app.core.clock import Clock, SystemClock
 from app.core.egress import EGRESS
+from app.core.ownership import DataDirLease, require_ownership
 from app.core.secrets import SecretStore, build_secret_store
-from app.db.database import Database
+from app.db.database import Database, sqlite_database_dir
 from app.db.migrate import head_revision
 from app.jobs.diagnostic import FAILING_JOB
 from app.jobs.policy import RetryPolicy
@@ -45,17 +46,25 @@ class Container:
     diagnostics: DiagnosticsService
     readiness: ReadinessService
     screens: ScreenService
+    ownership: DataDirLease
 
 
 def build_container(
     config: AppConfig,
     *,
+    ownership: DataDirLease,
     clock: Clock | None = None,
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
 ) -> Container:
+    """Compose the application for one data directory.
+
+    This opens the application database for writing, so the lease must cover that database's own
+    directory before anything is opened (ADR-0006). It never acquires the lock itself and never
+    creates the directory; acquisition belongs to the process entry point.
+    """
+    require_ownership(ownership, sqlite_database_dir(config.database_url))
     clock = clock or SystemClock()
-    config.data_dir.mkdir(parents=True, exist_ok=True)
     db = Database(config.database_url)
     audit = AuditLog(db, clock)
 
@@ -96,6 +105,7 @@ def build_container(
         execution_mode=execution_mode,
         clock=clock,
         head_revision=head_revision(),
+        ownership=ownership,
     )
 
     products = ProductsService()
@@ -125,4 +135,5 @@ def build_container(
         diagnostics=diagnostics,
         readiness=readiness,
         screens=screens,
+        ownership=ownership,
     )

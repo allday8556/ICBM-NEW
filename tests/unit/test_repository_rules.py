@@ -5,12 +5,15 @@ accepted milestone chain, recorded decisions — rather than banning historical 
 revision-history and review documents legitimately keep older prototype names.
 """
 
+import argparse
+import ast
 import hashlib
 import re
 from pathlib import Path
 
 import pytest
 
+from app import cli
 from app.jobs.models import AttemptOutcome, JobState
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +28,22 @@ ROADMAP_MD = REPO_ROOT / "ROADMAP.md"
 PROTOTYPE_README = REPO_ROOT / "ui" / "prototypes" / "README.md"
 M0_ACCEPTANCE = DOCS / "acceptance" / "M0.md"
 JOB_STATE_ADR = DOCS / "adr" / "0005-durable-job-state-and-attempt-history.md"
+OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
+README_MD = REPO_ROOT / "README.md"
 PROTOTYPE_FILE = re.compile(r"icbm_redesign_test_\w+\.html")
+PRODUCTION_ROOTS = [REPO_ROOT / "app", REPO_ROOT / "integrations"]
+
+# Production modules that open the SQLite database themselves (ADR-0006 mutation-target
+# invariant). Everything else reaches the database through the Container. A new direct opener
+# fails the rules below until it is gated and listed here. scripts/ and tests/ are not production:
+# the M0 acceptance script is deliberately independent evidence.
+DATABASE_OPENERS = {
+    "app/db/database.py": "engine factory",  # defines Database / create_sqlite_engine
+    "app/container.py": "require_ownership",  # the application Database
+    "app/db/migrations/env.py": "require_ownership",  # schema migrations
+    "app/db/migrate.py": "read-only",  # `icbm db current` (mode=ro)
+}
+_OPENING_CALLS = {"Database", "create_sqlite_engine", "create_engine"}
 
 SCREENS = [
     "dashboard",
@@ -194,6 +212,126 @@ def test_job_state_adr_matches_the_code() -> None:
     outcomes = re.search(r"outcome \(([A-Z_ |]+)\)", adr)
     assert outcomes, "ADR must list the attempt outcomes"
     assert outcomes.group(1).split(" | ") == [outcome.value for outcome in AttemptOutcome]
+
+
+def _leaf_commands(
+    parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
+) -> set[tuple[str, ...]]:
+    subparsers = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+    if not subparsers:
+        return {prefix}
+    found: set[tuple[str, ...]] = set()
+    for action in subparsers:
+        for name, child in action.choices.items():
+            found |= _leaf_commands(child, (*prefix, name))
+    return found
+
+
+def test_every_cli_command_is_classified_for_data_dir_ownership() -> None:
+    owning, read_only = set(cli.OWNING_COMMANDS), set(cli.READ_ONLY_COMMANDS)
+    assert _leaf_commands(cli.build_parser()) == owning | read_only
+    assert not owning & read_only
+
+
+def test_ownership_adr_lists_exactly_the_read_only_commands() -> None:
+    adr = _read(OWNERSHIP_ADR)
+    assert "Status: **ACCEPTED**" in adr
+    rows = [line for line in adr.splitlines() if line.startswith("| `icbm ")]
+    listed = {
+        tuple(match.group(1).split())
+        for row in rows
+        if "read-only" in row.split("|")[2] and (match := re.search(r"`icbm ([^`]+)`", row))
+    }
+    assert listed == set(cli.READ_ONLY_COMMANDS)
+
+
+def _production_modules() -> dict[str, ast.Module]:
+    return {
+        path.relative_to(REPO_ROOT).as_posix(): ast.parse(path.read_text("utf-8"))
+        for root in PRODUCTION_ROOTS
+        if root.exists()
+        for path in root.rglob("*.py")
+    }
+
+
+def _calls(node: ast.AST, name: str | None = None) -> list[ast.Call]:
+    calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+    if name is None:
+        return calls
+    return [c for c in calls if isinstance(c.func, ast.Name | ast.Attribute) and _callee(c) == name]
+
+
+def _callee(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _opening_calls(tree: ast.Module) -> list[ast.Call]:
+    def opens(call: ast.Call) -> bool:
+        func = call.func
+        if _callee(call) in _OPENING_CALLS:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == "connect":
+            return isinstance(func.value, ast.Name) and func.value.id == "sqlite3"
+        return isinstance(func, ast.Name) and func.id == "connect"
+
+    return [call for call in _calls(tree) if opens(call)]
+
+
+def _enclosing_function(tree: ast.Module, node: ast.AST) -> ast.AST | None:
+    line = getattr(node, "lineno", 0)
+    functions = [
+        f
+        for f in ast.walk(tree)
+        if isinstance(f, ast.FunctionDef | ast.AsyncFunctionDef)
+        and f.lineno <= line <= (f.end_lineno or f.lineno)
+    ]
+    return max(functions, key=lambda f: f.lineno, default=None)
+
+
+def test_only_listed_production_modules_open_the_database() -> None:
+    openers = {path for path, tree in _production_modules().items() if _opening_calls(tree)}
+    assert openers == set(DATABASE_OPENERS)
+
+
+def test_production_database_openers_are_gated() -> None:
+    # production mutation target T + supplied/active lease L => L covers T before any side effect.
+    modules = _production_modules()
+    for path, gate in DATABASE_OPENERS.items():
+        tree = modules[path]
+        for call in _opening_calls(tree):
+            where = f"{path}:{call.lineno}"
+            function = _enclosing_function(tree, call)
+            if gate == "engine factory":
+                continue
+            assert function is not None, f"{where} opens the database outside a function"
+            if gate == "require_ownership":
+                gates = [c.lineno for c in _calls(function, "require_ownership")]
+                assert gates and min(gates) < call.lineno, f"{where} opens before require_ownership"
+            else:
+                texts = [
+                    n.value
+                    for n in ast.walk(function)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                ]
+                assert any("mode=ro" in text for text in texts), f"{where} is not read-only"
+
+
+def test_lease_coverage_is_decided_only_by_require_ownership() -> None:
+    deciders = {path for path, tree in _production_modules().items() if _calls(tree, "covers")}
+    assert deciders <= {"app/core/ownership.py"}
+
+
+def test_readme_does_not_present_m0_as_the_current_milestone() -> None:
+    readme = _read(README_MD)
+    assert not re.search(r"^#+\s*Current milestone:\s*M0", readme, re.M)
+    status = _section(readme, r"^Status$")
+    assert "**ACCEPTED**" in status
+    assert "M1" in status
 
 
 # ---------------------------------------------------------------- UI and runtime code
