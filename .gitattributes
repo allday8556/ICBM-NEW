@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+
+# Approved UI prototypes are fingerprinted byte-for-byte (docs/UI_SOURCE_OF_TRUTH.md).
+# Never convert their line endings on checkout.
+ui/prototypes/*.html -text
