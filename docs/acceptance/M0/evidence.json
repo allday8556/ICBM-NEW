@@ -1,0 +1,639 @@
+{
+  "result": "PASS",
+  "started_at": "2026-09-13T10:54:29.610+00:00",
+  "environment": {
+    "run_id": "20260913T105429Z",
+    "python": "3.13.15",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "git_commit": "2c2c6713d62a819ed9dabc57bd269824a92a5cd5",
+    "git_branch": "feat/infra-m0-foundation",
+    "git_worktree_clean": true,
+    "port": 49611,
+    "data_dir": "C:\\Users\\user\\AppData\\Local\\Temp\\claude\\C--Users-user-Desktop-ICBM-NEW\\7db363e9-1da4-406b-8962-20b7027eed57\\scratchpad\\final2-run\\data",
+    "installed_distributions": [
+      "alembic==1.20.0",
+      "annotated-doc==0.0.5",
+      "annotated-types==0.8.0",
+      "anyio==4.15.1",
+      "ast_serialize==0.11.1",
+      "certifi==2026.7.22",
+      "click==8.5.0",
+      "colorama==0.4.6",
+      "fastapi==0.141.1",
+      "greenlet==3.5.5",
+      "h11==0.16.0",
+      "httpcore==1.0.9",
+      "httpx==0.28.1",
+      "-e git+https://github.com/allday8556/ICBM-NEW.git@2c2c6713d62a819ed9dabc57bd269824a92a5cd5#egg=icbm_new",
+      "idna==3.19",
+      "iniconfig==2.3.0",
+      "jaraco.classes==3.4.0",
+      "jaraco.context==6.1.2",
+      "jaraco.functools==4.6.0",
+      "keyring==25.7.0",
+      "librt==0.15.0",
+      "Mako==1.4.1",
+      "MarkupSafe==3.0.3",
+      "more-itertools==11.1.0",
+      "mypy==2.3.1",
+      "mypy_extensions==1.1.0",
+      "packaging==26.3",
+      "pathspec==1.1.1",
+      "playwright==1.62.0",
+      "pluggy==1.6.0",
+      "pydantic==2.13.5",
+      "pydantic_core==2.46.5",
+      "pyee==13.0.1",
+      "Pygments==2.21.0",
+      "pytest==9.1.1",
+      "pywin32-ctypes==0.2.3",
+      "ruff==0.16.7",
+      "SQLAlchemy==2.0.52",
+      "starlette==1.6.0",
+      "typing-inspection==0.4.4",
+      "typing_extensions==4.16.0",
+      "uvicorn==0.52.4"
+    ]
+  },
+  "finished_at": "2026-09-13T10:55:45.505+00:00",
+  "steps": [
+    {
+      "step": "no runtime dependency on ICBM-PROJECT / #86",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:30.724+00:00",
+      "legacy_distributions": [],
+      "distributions": 42
+    },
+    {
+      "step": "clean database migrated to head (SQLite WAL), canonical tables empty",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:31.395+00:00",
+      "revision": "0001_m0_foundation",
+      "journal_mode": "wal",
+      "tables": [
+        "alembic_version",
+        "audit_events",
+        "job_attempts",
+        "jobs"
+      ],
+      "triggers": [
+        "trg_audit_events_no_delete",
+        "trg_audit_events_no_update"
+      ],
+      "row_counts": {
+        "jobs": 0,
+        "job_attempts": 0,
+        "audit_events": 0
+      }
+    },
+    {
+      "step": "run 1: application process started and healthy",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:32.754+00:00",
+      "pid": 12468,
+      "health": {
+        "status": "ok",
+        "version": "0.1.0",
+        "milestone": "M0"
+      }
+    },
+    {
+      "step": "run 1: readiness PASS, identical on repeat",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:32.807+00:00",
+      "checks": [
+        {
+          "name": "database",
+          "status": "PASS",
+          "detail": "SELECT 1 succeeded"
+        },
+        {
+          "name": "sqlite_wal",
+          "status": "PASS",
+          "detail": "journal_mode=wal"
+        },
+        {
+          "name": "schema",
+          "status": "PASS",
+          "detail": "at head 0001_m0_foundation"
+        },
+        {
+          "name": "job_worker",
+          "status": "PASS",
+          "detail": "running; heartbeat 0.0s ago"
+        },
+        {
+          "name": "secret_store",
+          "status": "PASS",
+          "detail": "keyring.backends.Windows.WinVaultKeyring (OS credential store)"
+        },
+        {
+          "name": "execution_mode",
+          "status": "PASS",
+          "detail": "DRY_RUN (external writes disabled)"
+        },
+        {
+          "name": "egress_guard",
+          "status": "PASS",
+          "detail": "BLOCK_EXTERNAL; installed=True; external_attempts=0"
+        }
+      ]
+    },
+    {
+      "step": "run 1: all ten screen contracts EMPTY; UI shell served with self-only CSP",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:32.915+00:00",
+      "screens": {
+        "dashboard": {
+          "state": "EMPTY",
+          "empty_reason": "NO_CONNECTIONS"
+        },
+        "collect": {
+          "state": "EMPTY",
+          "empty_reason": "NO_COLLECTION_JOBS"
+        },
+        "db": {
+          "state": "EMPTY",
+          "empty_reason": "NO_PRODUCTS"
+        },
+        "register": {
+          "state": "EMPTY",
+          "empty_reason": "NO_REGISTRATION_CANDIDATES"
+        },
+        "orders": {
+          "state": "EMPTY",
+          "empty_reason": "NO_ORDERS"
+        },
+        "inquiry": {
+          "state": "EMPTY",
+          "empty_reason": "NO_INQUIRIES"
+        },
+        "soldout": {
+          "state": "EMPTY",
+          "empty_reason": "NO_STOCK_REVIEW_ITEMS"
+        },
+        "ai-insight": {
+          "state": "EMPTY",
+          "empty_reason": "NO_INTERNAL_HISTORY"
+        },
+        "analytics": {
+          "state": "EMPTY",
+          "empty_reason": "NO_OPERATING_DATA"
+        },
+        "settings": {
+          "state": "EMPTY",
+          "empty_reason": "NO_SETTINGS_SAVED"
+        }
+      },
+      "marketplace_identities": [
+        "smartstore",
+        "coupang",
+        "st11",
+        "gmarket",
+        "auction"
+      ],
+      "execution_mode": "DRY_RUN"
+    },
+    {
+      "step": "deliberately failing job retries on schedule and reaches dead-letter at the cap",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:40.058+00:00",
+      "job_id": "c6760460-a0b1-4b2f-9b58-86cdc3b82893",
+      "correlation_id": "m0-acc-20260913T105429Z-deadletter",
+      "configured": {
+        "max_attempts": 4,
+        "expected_delays_s": [
+          1.0,
+          2.0,
+          4.0
+        ]
+      },
+      "job": {
+        "state": "DEAD",
+        "attempt_count": 4,
+        "max_attempts": 4,
+        "last_error_class": "TRANSIENT",
+        "last_error_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+        "created_at": "2026-09-13 10:54:32.916423",
+        "finished_at": "2026-09-13 10:54:39.948304"
+      },
+      "attempts": [
+        {
+          "attempt_no": 1,
+          "scheduled_for": "2026-09-13 10:54:32.916423",
+          "started_at": "2026-09-13 10:54:32.920103",
+          "finished_at": "2026-09-13 10:54:32.922613",
+          "outcome": "FAILED",
+          "error_class": "TRANSIENT",
+          "error_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+          "retry_at": "2026-09-13 10:54:33.922613"
+        },
+        {
+          "attempt_no": 2,
+          "scheduled_for": "2026-09-13 10:54:33.922613",
+          "started_at": "2026-09-13 10:54:33.928584",
+          "finished_at": "2026-09-13 10:54:33.930150",
+          "outcome": "FAILED",
+          "error_class": "TRANSIENT",
+          "error_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+          "retry_at": "2026-09-13 10:54:35.930150"
+        },
+        {
+          "attempt_no": 3,
+          "scheduled_for": "2026-09-13 10:54:35.930150",
+          "started_at": "2026-09-13 10:54:35.932359",
+          "finished_at": "2026-09-13 10:54:35.933701",
+          "outcome": "FAILED",
+          "error_class": "TRANSIENT",
+          "error_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+          "retry_at": "2026-09-13 10:54:39.933701"
+        },
+        {
+          "attempt_no": 4,
+          "scheduled_for": "2026-09-13 10:54:39.933701",
+          "started_at": "2026-09-13 10:54:39.946909",
+          "finished_at": "2026-09-13 10:54:39.948304",
+          "outcome": "FAILED",
+          "error_class": "TRANSIENT",
+          "error_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+          "retry_at": null
+        }
+      ],
+      "schedule": [
+        {
+          "attempt_no": 2,
+          "planned_delay_s": 1.0,
+          "start_lag_s": 0.006
+        },
+        {
+          "attempt_no": 3,
+          "planned_delay_s": 2.0,
+          "start_lag_s": 0.002
+        },
+        {
+          "attempt_no": 4,
+          "planned_delay_s": 4.0,
+          "start_lag_s": 0.013
+        }
+      ]
+    },
+    {
+      "step": "API stays responsive while the in-process worker runs the job",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:40.058+00:00",
+      "health_probes": 36,
+      "max_latency_ms": 3.5,
+      "median_latency_ms": 1.4
+    },
+    {
+      "step": "one correlation_id traced across log output, Job record and AuditEvent",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:40.068+00:00",
+      "correlation_id": "m0-acc-20260913T105429Z-deadletter",
+      "log_file": "logs/icbm.jsonl",
+      "log_lines_with_id": 16,
+      "log_messages": [
+        "audit.appended",
+        "diagnostic.failing_job.executing",
+        "http.request",
+        "job.attempt.failed",
+        "job.attempt.started",
+        "job.dead_lettered",
+        "job.enqueued"
+      ],
+      "job_correlation_id": "m0-acc-20260913T105429Z-deadletter",
+      "audit_events": [
+        {
+          "seq": 1,
+          "event_id": "ab64f374-f7cb-4955-a1f5-76aeb3436276",
+          "occurred_at": "2026-09-13 10:54:32.917990",
+          "actor": "operator:local",
+          "event_type": "DIAGNOSTIC_REQUEST",
+          "action": "ENQUEUE_FAILING_JOB",
+          "outcome": "ALLOWED",
+          "reason_code": null,
+          "target_ref": "job:c6760460-a0b1-4b2f-9b58-86cdc3b82893"
+        },
+        {
+          "seq": 2,
+          "event_id": "47d75f7b-5bc3-40f4-a7a0-4940f94b6da5",
+          "occurred_at": "2026-09-13 10:54:39.948846",
+          "actor": "system:job-worker",
+          "event_type": "JOB_DEAD_LETTERED",
+          "action": "JOB_DEAD_LETTER",
+          "outcome": "RECORDED",
+          "reason_code": "M0_DIAGNOSTIC_FORCED_FAILURE",
+          "target_ref": "job:c6760460-a0b1-4b2f-9b58-86cdc3b82893"
+        }
+      ],
+      "excerpt": "trace-deadletter.jsonl"
+    },
+    {
+      "step": "protected action denied; AuditEvent persisted and append-only",
+      "result": "PASS",
+      "at": "2026-09-13T10:54:40.081+00:00",
+      "correlation_id": "m0-acc-20260913T105429Z-protected",
+      "http_status": 403,
+      "error": {
+        "class": "POLICY_BLOCKED",
+        "code": "M0_LIVE_FORBIDDEN",
+        "message": "M0 permits DRY_RUN only; LIVE requires an explicit GitHub verification scope and user approval.",
+        "retryable": false,
+        "correlation_id": "m0-acc-20260913T105429Z-protected",
+        "details": {
+          "audit_event_id": "a7f22e45-f647-484b-8a72-a65f6111625d",
+          "requested_mode": "LIVE"
+        }
+      },
+      "audit_event": {
+        "seq": 3,
+        "event_id": "a7f22e45-f647-484b-8a72-a65f6111625d",
+        "occurred_at": "2026-09-13 10:54:40.069845",
+        "correlation_id": "m0-acc-20260913T105429Z-protected",
+        "actor": "operator:local",
+        "event_type": "PROTECTED_ACTION",
+        "action": "EXECUTION_MODE_CHANGE",
+        "target_ref": "system:execution_mode",
+        "outcome": "DENIED",
+        "reason_code": "M0_LIVE_FORBIDDEN",
+        "before_json": "{\"mode\": \"DRY_RUN\"}",
+        "after_json": "{\"mode\": \"DRY_RUN\"}",
+        "details_json": "{\"policy\": \"M0_DRY_RUN_ONLY\", \"reason\": \"M0 acceptance: protected-action audit demonstration\", \"requested_mode\": \"LIVE\"}"
+      },
+      "database_refusals": {
+        "update": "audit_events is append-only",
+        "delete": "audit_events is append-only"
+      },
+      "execution_mode_after": "DRY_RUN"
+    },
+    {
+      "step": "UI renders all ten screens (landscape + portrait) with no external request or error",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:35.920+00:00",
+      "report": "visual/visual-report.json",
+      "failures": [],
+      "browser": "msedge 153.0.4234.32"
+    },
+    {
+      "step": "run 1: zero external connection attempts (process-wide egress guard)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:35.948+00:00",
+      "egress": {
+        "policy": "BLOCK_EXTERNAL",
+        "installed": true,
+        "external_attempts": 0,
+        "recent": []
+      }
+    },
+    {
+      "step": "run 1: stopped gracefully (lifespan shutdown ran)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:36.161+00:00",
+      "stop": "graceful",
+      "app_stopped_log_lines": 1
+    },
+    {
+      "step": "queued work is durable across the stop",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:36.164+00:00",
+      "job_id": "c4b819d5-6d33-40ff-92be-6aa5082d8792",
+      "correlation_id": "m0-acc-20260913T105429Z-restart",
+      "job_at_stop": {
+        "state": "RETRY_SCHEDULED",
+        "attempt_count": 1,
+        "next_attempt_at": "2026-09-13 10:55:36.952371"
+      }
+    },
+    {
+      "step": "run 2 (restart): application process started and healthy",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:37.482+00:00",
+      "pid": 25676,
+      "health": {
+        "status": "ok",
+        "version": "0.1.0",
+        "milestone": "M0"
+      }
+    },
+    {
+      "step": "run 2 (restart): readiness PASS, identical on repeat",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:37.531+00:00",
+      "checks": [
+        {
+          "name": "database",
+          "status": "PASS",
+          "detail": "SELECT 1 succeeded"
+        },
+        {
+          "name": "sqlite_wal",
+          "status": "PASS",
+          "detail": "journal_mode=wal"
+        },
+        {
+          "name": "schema",
+          "status": "PASS",
+          "detail": "at head 0001_m0_foundation"
+        },
+        {
+          "name": "job_worker",
+          "status": "PASS",
+          "detail": "running; heartbeat 0.0s ago"
+        },
+        {
+          "name": "secret_store",
+          "status": "PASS",
+          "detail": "keyring.backends.Windows.WinVaultKeyring (OS credential store)"
+        },
+        {
+          "name": "execution_mode",
+          "status": "PASS",
+          "detail": "DRY_RUN (external writes disabled)"
+        },
+        {
+          "name": "egress_guard",
+          "status": "PASS",
+          "detail": "BLOCK_EXTERNAL; installed=True; external_attempts=0"
+        }
+      ]
+    },
+    {
+      "step": "after restart the pending job resumes and dead-letters; earlier dead-letter unchanged",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:43.599+00:00",
+      "resumed_job": {
+        "state": "DEAD",
+        "attempt_count": 4,
+        "finished_at": "2026-09-13 10:55:43.394254"
+      },
+      "earlier_dead_job": {
+        "state": "DEAD",
+        "attempt_count": 4,
+        "finished_at": "2026-09-13 10:54:39.948304"
+      }
+    },
+    {
+      "step": "run 2 (restart): zero external connection attempts (process-wide egress guard)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:43.622+00:00",
+      "egress": {
+        "policy": "BLOCK_EXTERNAL",
+        "installed": true,
+        "external_attempts": 0,
+        "recent": []
+      }
+    },
+    {
+      "step": "run 2 (restart): stopped gracefully (lifespan shutdown ran)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:43.774+00:00",
+      "stop": "graceful",
+      "app_stopped_log_lines": 2
+    },
+    {
+      "step": "run 3 (second restart): application process started and healthy",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.096+00:00",
+      "pid": 36460,
+      "health": {
+        "status": "ok",
+        "version": "0.1.0",
+        "milestone": "M0"
+      }
+    },
+    {
+      "step": "run 3 (second restart): readiness PASS, identical on repeat",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.148+00:00",
+      "checks": [
+        {
+          "name": "database",
+          "status": "PASS",
+          "detail": "SELECT 1 succeeded"
+        },
+        {
+          "name": "sqlite_wal",
+          "status": "PASS",
+          "detail": "journal_mode=wal"
+        },
+        {
+          "name": "schema",
+          "status": "PASS",
+          "detail": "at head 0001_m0_foundation"
+        },
+        {
+          "name": "job_worker",
+          "status": "PASS",
+          "detail": "running; heartbeat 0.0s ago"
+        },
+        {
+          "name": "secret_store",
+          "status": "PASS",
+          "detail": "keyring.backends.Windows.WinVaultKeyring (OS credential store)"
+        },
+        {
+          "name": "execution_mode",
+          "status": "PASS",
+          "detail": "DRY_RUN (external writes disabled)"
+        },
+        {
+          "name": "egress_guard",
+          "status": "PASS",
+          "detail": "BLOCK_EXTERNAL; installed=True; external_attempts=0"
+        }
+      ]
+    },
+    {
+      "step": "run 3 (second restart): all ten screen contracts EMPTY; UI shell served with self-only CSP",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.268+00:00",
+      "screens": {
+        "dashboard": {
+          "state": "EMPTY",
+          "empty_reason": "NO_CONNECTIONS"
+        },
+        "collect": {
+          "state": "EMPTY",
+          "empty_reason": "NO_COLLECTION_JOBS"
+        },
+        "db": {
+          "state": "EMPTY",
+          "empty_reason": "NO_PRODUCTS"
+        },
+        "register": {
+          "state": "EMPTY",
+          "empty_reason": "NO_REGISTRATION_CANDIDATES"
+        },
+        "orders": {
+          "state": "EMPTY",
+          "empty_reason": "NO_ORDERS"
+        },
+        "inquiry": {
+          "state": "EMPTY",
+          "empty_reason": "NO_INQUIRIES"
+        },
+        "soldout": {
+          "state": "EMPTY",
+          "empty_reason": "NO_STOCK_REVIEW_ITEMS"
+        },
+        "ai-insight": {
+          "state": "EMPTY",
+          "empty_reason": "NO_INTERNAL_HISTORY"
+        },
+        "analytics": {
+          "state": "EMPTY",
+          "empty_reason": "NO_OPERATING_DATA"
+        },
+        "settings": {
+          "state": "EMPTY",
+          "empty_reason": "NO_SETTINGS_SAVED"
+        }
+      },
+      "marketplace_identities": [
+        "smartstore",
+        "coupang",
+        "st11",
+        "gmarket",
+        "auction"
+      ],
+      "execution_mode": "DRY_RUN"
+    },
+    {
+      "step": "full restart repeats successfully with canonical state unchanged",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.275+00:00",
+      "state_before": {
+        "jobs_by_state": {
+          "DEAD": 2
+        },
+        "job_attempts": 8,
+        "audit_events": 5
+      },
+      "state_after": {
+        "jobs_by_state": {
+          "DEAD": 2
+        },
+        "job_attempts": 8,
+        "audit_events": 5
+      }
+    },
+    {
+      "step": "run 3 (second restart): zero external connection attempts (process-wide egress guard)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.279+00:00",
+      "egress": {
+        "policy": "BLOCK_EXTERNAL",
+        "installed": true,
+        "external_attempts": 0,
+        "recent": []
+      }
+    },
+    {
+      "step": "run 3 (second restart): stopped gracefully (lifespan shutdown ran)",
+      "result": "PASS",
+      "at": "2026-09-13T10:55:45.505+00:00",
+      "stop": "graceful",
+      "app_stopped_log_lines": 3
+    }
+  ]
+}

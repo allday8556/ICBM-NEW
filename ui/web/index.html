@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ICBM</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/shell.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/settings.css">
+<script type="module" src="/js/main.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="주 메뉴">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-text"><div class="brand-title">ICBM</div><div class="brand-sub">I Can Best Manager</div></div>
+    </div>
+    <nav class="nav" id="nav" aria-label="화면"></nav>
+    <div class="side-card"><span aria-hidden="true">👑</span><br><br>더 나은 비즈니스를<br>만드는 관리자 도구<br><b>ICBM</b></div>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="command" role="search">
+        <span aria-hidden="true">⌕</span>
+        <input id="commandInput" type="text" placeholder="상품명, URL, 주문번호, 브랜드 등 검색하세요..." aria-label="통합 검색" autocomplete="off">
+        <kbd>⌘ K</kbd>
+      </div>
+      <div class="top-icons">
+        <span aria-hidden="true">🔔</span>
+        <span aria-hidden="true">?</span>
+        <span class="avatar" id="operatorInitial" aria-hidden="true"></span>
+        <span class="user" id="operatorName"></span>
+        <span aria-hidden="true">⌄</span>
+      </div>
+    </header>
+    <div class="content" id="content" tabindex="-1"></div>
+  </main>
+</div>
+<div id="helpTooltip" class="help-tooltip" role="tooltip" hidden></div>
+<div id="toastStack" class="toast-stack" aria-live="polite"></div>
+</body>
+</html>
