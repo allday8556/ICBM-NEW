@@ -1,0 +1,640 @@
+/* Shared components. One owner per UI concern (ADR-0003). */
+
+/* ---------- Page head ---------- */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: var(--space-7);
+}
+
+.page-title {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 4px;
+  color: var(--color-text-strong);
+  font-size: var(--fs-page);
+  line-height: 1.18;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-page);
+}
+
+.page-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@media (max-width: 1280px), (orientation: portrait) {
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .page-head {
+    margin-bottom: var(--space-5);
+  }
+  .page-title {
+    font-size: 24px;
+  }
+}
+
+/* ---------- Buttons and pills ---------- */
+.btn,
+.date-pill {
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  color: var(--color-text-control);
+  font-size: var(--fs-md);
+  line-height: 1.2;
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-body);
+}
+
+.btn {
+  cursor: pointer;
+}
+
+.date-pill {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.btn.blue {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.btn.dark {
+  background: var(--color-dark);
+  border-color: var(--color-dark);
+  color: #fff;
+}
+
+.btn.ai {
+  background: var(--color-ai-bg);
+  border-color: var(--color-ai-border);
+  color: var(--color-accent);
+  font-weight: var(--fw-heavy);
+}
+
+.btn.ai:hover {
+  background: var(--color-ai-bg-hover);
+}
+
+[data-inert] {
+  cursor: not-allowed;
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .btn,
+  .date-pill {
+    font-size: 10.8px;
+    padding: 8px 10px;
+  }
+}
+
+/* ---------- Status chips ---------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 5px 9px;
+  background: var(--color-neutral-bg);
+  color: var(--color-neutral);
+  font-size: 9.5px;
+  line-height: 1;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.chip.good {
+  background: var(--color-good-bg);
+  color: var(--color-good);
+}
+
+.chip.warn {
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+}
+
+.chip.bad {
+  background: var(--color-bad-bg);
+  color: var(--color-bad);
+}
+
+.chip.info {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .chip {
+    padding: 4px 8px;
+  }
+}
+
+/* ---------- Text helpers ---------- */
+.mini {
+  color: var(--color-text-sub);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  font-weight: var(--fw-regular);
+}
+
+.note {
+  background: var(--color-note-bg);
+  border: 1px solid var(--color-note-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  color: var(--color-note-text);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+.note b {
+  color: #2d3944;
+  font-weight: var(--fw-bold);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .note {
+    padding: var(--space-3);
+  }
+}
+
+/* ---------- Panels ---------- */
+.panel {
+  min-width: 0;
+  overflow: auto;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-panel);
+  padding: var(--space-7);
+}
+
+.panel-title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-heading);
+  line-height: 1.3;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-heading);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .panel {
+    padding: 13px;
+    border-radius: 12px;
+  }
+}
+
+/* ---------- Empty / unsupported / error states (v28 runtime-ready zero-data surface) ---------- */
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  padding: 34px;
+  text-align: center;
+  border: 1px dashed var(--color-empty-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-panel-subtle);
+}
+
+.empty-icon {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto var(--space-5);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xl);
+  background: var(--color-empty-icon-bg);
+  color: var(--color-empty-icon);
+  font-size: 22px;
+}
+
+.empty-state h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-title);
+  font-weight: 700;
+}
+
+.empty-state .mini {
+  max-width: 420px;
+  margin: 0 auto var(--space-6);
+}
+
+.state-error .empty-icon {
+  background: var(--color-bad-bg);
+  color: var(--color-bad);
+}
+
+.state-unsupported .empty-icon {
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+}
+
+/* ---------- Help tooltip: the single help system ---------- */
+.help-anchor {
+  display: inline-flex;
+  align-items: center;
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  border: 1px solid rgba(90, 100, 110, 0.2);
+  border-radius: 50%;
+  background: rgba(150, 158, 165, 0.12);
+  color: #5a6672;
+  font-size: 10.5px;
+  font-style: normal;
+  line-height: 1;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0;
+  cursor: help;
+  user-select: none;
+}
+
+.help-icon:hover,
+.help-icon:focus-visible {
+  background: rgba(125, 135, 145, 0.24);
+  color: #38434c;
+  border-color: rgba(70, 80, 90, 0.28);
+}
+
+.help-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9000;
+  max-width: 340px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(128, 128, 128, 0.4);
+  color: #111;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-tooltip);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  font-size: var(--fs-sm);
+  line-height: 1.48;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+  pointer-events: none;
+  white-space: normal;
+}
+
+/* ---------- Toasts ---------- */
+.toast-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 8000;
+  display: grid;
+  gap: var(--space-3);
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 260px;
+  max-width: 390px;
+  background: var(--color-text-strong);
+  color: #f6f8fa;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow-toast);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  animation: toast-in 0.18s ease;
+}
+
+.toast b {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .toast-stack {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+  .toast {
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+/* ---------- Modal (v28 work-modal shape) ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  display: grid;
+  place-items: center;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 18, 26, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.modal-card {
+  position: relative;
+  width: min(1180px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-panel);
+  border: 1px solid #dce3e9;
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-dialog);
+}
+
+.modal-card.narrow {
+  width: min(720px, 92vw);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.modal-head h2 {
+  margin: 2px 0 3px;
+  font-size: var(--fs-dialog);
+  color: var(--color-text-strong);
+}
+
+.modal-body {
+  padding: var(--space-6);
+  overflow: auto;
+  background: #f6f8fa;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: 11px 14px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
+
+.editor-card {
+  min-width: 0;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: 13px;
+}
+
+.editor-card .note {
+  margin-top: var(--space-5);
+}
+
+@media (max-width: 760px) {
+  .modal-card {
+    width: 96vw;
+    max-height: 94vh;
+  }
+}
+
+/* ---------- Form rows and key/value rows ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--space-4);
+  align-items: center;
+  margin-top: var(--space-4);
+}
+
+.form-row input {
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: 9px;
+  background: var(--color-input);
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 4px 0;
+  color: var(--color-text-kv);
+  font-size: 10.6px;
+  line-height: 1.4;
+}
+
+.kv b {
+  color: var(--color-text-kv-value);
+  font-weight: var(--fw-semibold);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .form-row {
+    grid-template-columns: 100px 1fr;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    font-size: 11px;
+  }
+  .form-row input {
+    padding: 8px;
+  }
+  .kv {
+    padding: 3px 0;
+  }
+}
+
+/* ---------- Tables ---------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #3a4651;
+  font-size: 11.2px;
+  line-height: 1.35;
+}
+
+.table th {
+  background: #f5f7f9;
+  color: #64717d;
+  text-align: left;
+  font-size: 9.8px;
+  font-weight: var(--fw-bold);
+  border-bottom: 1px solid var(--color-line);
+  padding: 9px 8px;
+}
+
+.table td {
+  border-bottom: 1px solid #eef1f3;
+  padding: 8px;
+  vertical-align: middle;
+}
+
+.table .table-empty {
+  color: var(--color-text-sub);
+  text-align: center;
+  padding: 14px 8px;
+}
+
+/* ---------- Inner view tabs (e.g. 수집 / 공급처 관리) ---------- */
+.inner-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 7px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-control-subtle);
+}
+
+.inner-tabs button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-tab);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.inner-tabs button[aria-selected="true"] {
+  background: var(--color-panel);
+  color: #1e2b36;
+  border-color: var(--color-line-strong);
+  box-shadow: var(--shadow-tab);
+}
+
+/* ---------- Supplier management (CONNECT surface) ---------- */
+.supplier-head {
+  margin-bottom: var(--space-4);
+}
+
+.supplier-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.supplier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.supplier-card {
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: var(--space-6);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.supplier-add-card {
+  min-height: 190px;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  border: 1px dashed #bac7d2;
+  background: var(--color-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.supplier-add-card b {
+  font-size: 13px;
+  color: var(--color-text-body);
+}
+
+.supplier-add-card .mini {
+  max-width: 220px;
+  margin: 6px auto 0;
+}
+
+@media (max-width: 1180px) {
+  .supplier-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .supplier-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Marketplace identity (single renderer) ---------- */
+.pf {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.pf-logo {
+  display: block;
+  flex: none;
+  width: 72px;
+  height: 18px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.pf-name {
+  white-space: nowrap;
+}
+
+.pf-mono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 18px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
+}
