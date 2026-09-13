@@ -5,12 +5,14 @@ accepted milestone chain, recorded decisions — rather than banning historical 
 revision-history and review documents legitimately keep older prototype names.
 """
 
+import argparse
 import hashlib
 import re
 from pathlib import Path
 
 import pytest
 
+from app import cli
 from app.jobs.models import AttemptOutcome, JobState
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +27,8 @@ ROADMAP_MD = REPO_ROOT / "ROADMAP.md"
 PROTOTYPE_README = REPO_ROOT / "ui" / "prototypes" / "README.md"
 M0_ACCEPTANCE = DOCS / "acceptance" / "M0.md"
 JOB_STATE_ADR = DOCS / "adr" / "0005-durable-job-state-and-attempt-history.md"
+OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
+README_MD = REPO_ROOT / "README.md"
 PROTOTYPE_FILE = re.compile(r"icbm_redesign_test_\w+\.html")
 
 SCREENS = [
@@ -194,6 +198,45 @@ def test_job_state_adr_matches_the_code() -> None:
     outcomes = re.search(r"outcome \(([A-Z_ |]+)\)", adr)
     assert outcomes, "ADR must list the attempt outcomes"
     assert outcomes.group(1).split(" | ") == [outcome.value for outcome in AttemptOutcome]
+
+
+def _leaf_commands(
+    parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
+) -> set[tuple[str, ...]]:
+    subparsers = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+    if not subparsers:
+        return {prefix}
+    found: set[tuple[str, ...]] = set()
+    for action in subparsers:
+        for name, child in action.choices.items():
+            found |= _leaf_commands(child, (*prefix, name))
+    return found
+
+
+def test_every_cli_command_is_classified_for_data_dir_ownership() -> None:
+    owning, read_only = set(cli.OWNING_COMMANDS), set(cli.READ_ONLY_COMMANDS)
+    assert _leaf_commands(cli.build_parser()) == owning | read_only
+    assert not owning & read_only
+
+
+def test_ownership_adr_lists_exactly_the_read_only_commands() -> None:
+    adr = _read(OWNERSHIP_ADR)
+    assert "Status: **ACCEPTED**" in adr
+    rows = [line for line in adr.splitlines() if line.startswith("| `icbm ")]
+    listed = {
+        tuple(match.group(1).split())
+        for row in rows
+        if "read-only" in row.split("|")[2] and (match := re.search(r"`icbm ([^`]+)`", row))
+    }
+    assert listed == set(cli.READ_ONLY_COMMANDS)
+
+
+def test_readme_does_not_present_m0_as_the_current_milestone() -> None:
+    readme = _read(README_MD)
+    assert not re.search(r"^#+\s*Current milestone:\s*M0", readme, re.M)
+    status = _section(readme, r"^Status$")
+    assert "**ACCEPTED**" in status
+    assert "M1" in status
 
 
 # ---------------------------------------------------------------- UI and runtime code

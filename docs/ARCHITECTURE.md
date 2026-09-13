@@ -31,6 +31,8 @@ CI                    GitHub Actions
 
 No framework, DB engine, browser driver, secret store or queue may be swapped casually. A change requires an ADR.
 
+Exactly one ICBM process owns a data directory at a time, through an OS lock on `<ICBM_DATA_DIR>/.icbm-owner.lock` (`docs/adr/0006-single-data-directory-process-ownership.md`).
+
 ## 3. Layering rule
 
 Every functional path follows:
