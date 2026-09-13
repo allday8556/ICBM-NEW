@@ -2,7 +2,7 @@
 
 Basis: `icbm_redesign_test_v28_icbm_new_gaps.html`
 
-Status: **P0 UI GAPS CLOSED BY v28 PROTOTYPE**
+Status: **P0 UI GAPS CLOSED BY v28 PROTOTYPE** — historical record. The current approved prototype is the one recorded in `docs/UI_SOURCE_OF_TRUTH.md` (v29 keeps every v28 surface listed here).
 
 The v28 prototype now contains the visual/interaction surfaces that were previously missing for the clean implementation.
 
@@ -65,11 +65,11 @@ Claude's roadmap review introduced additional backend contracts. They do not req
 - Audit/Job internals: no developer console UI required for first vertical; user-facing failures surface through existing failure/history patterns.
 - FX details: only when a non-KRW supplier is introduced.
 
-## Current conclusion
+## Conclusion at the time (v28)
 
-The user does **not** need to build more P0 UI before Claude starts the fresh implementation skeleton.
+The user did **not** need to build more P0 UI before Claude started the fresh implementation skeleton.
 
-The current v28 HTML is sufficient to begin:
+The v28 HTML was sufficient to begin (M0 was then built from v29, which superseded it):
 
 ```text
 M0 Foundation
