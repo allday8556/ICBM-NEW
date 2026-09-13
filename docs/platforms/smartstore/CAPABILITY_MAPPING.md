@@ -228,6 +228,8 @@ At minimum distinguish:
 - `OPERATOR_ATTESTED`;
 - `MACHINE_VERIFIED` if an official machine introspection mechanism exists later.
 
+Operator-attested evidence is classified as `A0 / OPERATOR_ATTESTED_EVIDENCE` in `SOURCES.md`. It is not R0 measured-runtime evidence and cannot be promoted to R0 without a separate provider measurement.
+
 ### S2. Positive missing evidence blocks the affected write
 
 If product-registration permission evidence positively proves a required group absent:
@@ -726,24 +728,30 @@ Tests must cover at least:
 14. before accepted `SMARTSTORE-R0-APP-REAUTH`, suspected app re-auth maps to REVIEW_REQUIRED, not PAUSED;
 15. after accepted app-reauth detection contract, recovery requires provider re-auth + fresh session + fresh identity proof;
 16. UI/API keeps auth, permission, write, evidence strength, workflow state/scope, and freshness as separate fields;
-17. persisted READY loses to current evidence after restart.
+17. persisted READY loses to current evidence after restart;
+18. `SMARTSTORE-A0-PERMISSION` handling performs zero SmartStore network calls and cannot promote operator attestation into R0/MACHINE_VERIFIED evidence.
 
 Business/state decisions belong server/domain-side, not duplicated in frontend JavaScript.
 
 ---
 
-## 18. Runtime verification and `verified_at`
+## 18. Runtime and attested evidence required before `verified_at`
 
 Documentation completion does not verify this contract.
 
-Required runtime/evidence slots from `SOURCES.md` are:
+Required provider-measured R0 slots from `SOURCES.md` are:
 
 - `SMARTSTORE-R0-TOKEN`;
 - `SMARTSTORE-R0-SELLER-ACCOUNT`;
 - `SMARTSTORE-R0-FIRST-TOKEN-CRASH`;
 - `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`;
-- `SMARTSTORE-R0-PERMISSION`;
 - `SMARTSTORE-R0-APP-REAUTH`.
+
+Required operator-attested A0 handling slot is:
+
+- `SMARTSTORE-A0-PERMISSION`.
+
+`SMARTSTORE-A0-PERMISSION` proves only that ICBM correctly stores, projects, invalidates, and limits operator-attested permission evidence. It does not establish NAVER/provider permission truth, machine introspection, or write readiness.
 
 `SMARTSTORE-R0-APP-REAUTH` must establish the trustworthy machine-observable condition, or an explicit provider-supported equivalent, that permits durable `APPLICATION_REAUTH_REQUIRED` convergence. Until then the reason remains schema-reserved but automatic detection is disabled.
 
@@ -754,6 +762,7 @@ Local/runtime acceptance must also demonstrate:
 - controlled AUTH_MISMATCH fail-closed behavior;
 - bounded auth recovery and `AUTH_RETRY_LIMIT`;
 - permission READY/MISSING/UNKNOWN with provenance;
+- operator-attested permission storage/projection/invalidation with zero network calls;
 - typed workflow_scope routing;
 - M2 write UNVERIFIED enforcement;
 - NOT_ADOPTED no-network invariant;
@@ -761,7 +770,7 @@ Local/runtime acceptance must also demonstrate:
 - visually distinct operator-attested vs machine-verified permission presentation;
 - no secret/bearer leakage.
 
-One completed slot does not automatically verify this document or another owning contract.
+One completed R0 or A0 slot does not automatically verify this document or another owning contract.
 
 ---
 
@@ -788,6 +797,8 @@ One completed slot does not automatically verify this document or another owning
 `REVIEW_REQUIRED = safe next action cannot be determined automatically`
 
 `APPLICATION_REAUTH_REQUIRED automatic mapping disabled until SMARTSTORE-R0-APP-REAUTH is accepted`
+
+`SMARTSTORE-A0-PERMISSION = operator-attested permission handling evidence, never provider runtime truth`
 
 `error_class != workflow_state != reason_code`
 
