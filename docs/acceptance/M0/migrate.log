@@ -1,0 +1,4 @@
+{"ts": "2026-09-13T10:54:31.330+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "msg": "Context impl SQLiteImpl.", "correlation_id": null}
+{"ts": "2026-09-13T10:54:31.330+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "msg": "Will assume non-transactional DDL.", "correlation_id": null}
+{"ts": "2026-09-13T10:54:31.333+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "msg": "Running upgrade  -> 0001_m0_foundation, M0 foundation: durable jobs, job attempts, append-only audit events.", "correlation_id": null}
+database at head 0001_m0_foundation: C:\Users\user\AppData\Local\Temp\claude\C--Users-user-Desktop-ICBM-NEW\7db363e9-1da4-406b-8962-20b7027eed57\scratchpad\final2-run\data\icbm.db

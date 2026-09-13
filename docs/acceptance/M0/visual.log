@@ -1,0 +1,28 @@
+
+## landscape-1920x1080
+  dashboard          match
+  collect            differs: empty_state_box
+  db                 match
+  register           match
+  orders             match
+  inquiry            match
+  soldout            match
+  ai-insight         match
+  analytics          match
+  settings           match
+  collect-suppliers  match
+
+## portrait-1080x1920
+  dashboard          match
+  collect            differs: empty_state_box
+  db                 match
+  register           match
+  orders             match
+  inquiry            match
+  soldout            match
+  ai-insight         match
+  analytics          match
+  settings           match
+  collect-suppliers  match
+
+failures: none
