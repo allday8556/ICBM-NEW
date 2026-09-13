@@ -271,7 +271,7 @@ It MUST NOT be misclassified as `AUTH_MISMATCH`.
 
 It also MUST NOT be mislabeled `ACCOUNT_RESTRICTED` unless the provider actually reports an account restriction.
 
-The exact final `PAUSED reason_code` for application re-authentication is intentionally deferred to the M2 state-contract freeze so it can be reviewed together with all provider failure classes.
+The frozen human-remediation reason is `APPLICATION_REAUTH_REQUIRED` as defined by `CAPABILITY_MAPPING.md`. However, until `SMARTSTORE-R0-APP-REAUTH` is accepted and establishes a trustworthy machine-observable detection contract, automatic assignment of that reason remains disabled; unresolved suspected application re-authentication must fail closed without fabricating the reason.
 
 ---
 
