@@ -748,7 +748,11 @@ Only current-session identity proof closes that gap.
 
 ## 24. Acceptance requirements
 
-M2 SmartStore auth acceptance MUST include at least the following measured cases.
+M2 SmartStore auth acceptance MUST include the short-horizon CONNECT cases in this section. Long-horizon provider observations are also recorded here, but §24.3 and §24.16 are explicitly non-gating for the M2 milestone when their real provider conditions are not yet practically observable.
+
+`M2 acceptance requirements != full AUTH contract verification requirements`
+
+Passing the M2-gating cases in §24 does not imply that §25 has been satisfied or that this contract's `verified_at` may be populated.
 
 ### 24.1 Initial happy path
 
@@ -772,7 +776,7 @@ Record from the real response:
 
 Confirm runtime behavior is consistent with current documented policy.
 
-### 24.3 Renewal-window behavior and persistence-policy review
+### 24.3 Long-horizon renewal-window behavior and persistence-policy review
 
 Measure:
 
@@ -784,6 +788,10 @@ Measure:
 - whether an immediate safe session can be re-established after restart at representative points in the token lifetime.
 
 ICBM MUST NOT assume undocumented behavior here.
+
+This measurement is required for full AUTH contract verification and for deciding whether the provisional persistence baseline in §12 should change. It MAY be executed in a separate long-horizon observation session and is not, by itself, a blocker for `M2 ACCEPTED`.
+
+Until the measurement and review are complete, secure bearer-token persistence remains the provisional M2 baseline and the renewal-window behavior remains documentation-derived rather than runtime-verified.
 
 The results of this measurement MUST trigger an explicit review of the provisional bearer-token persistence baseline in §12.
 
@@ -881,20 +889,35 @@ Use a controlled test boundary rather than changing the workstation's real syste
 
 Verify timestamp errors are diagnosed and bounded rather than causing retry storms.
 
-### 24.16 Application re-authentication lifecycle
+### 24.16 Long-horizon application re-authentication lifecycle
 
-Before M2 is considered operationally complete, capture evidence of:
+The application re-authentication lifecycle is a required long-horizon AUTH evidence target, but observing the real 180-day condition is not a blocker for the M2 CONNECT milestone while that condition is not practically observable.
+
+`SMARTSTORE-R0-APP-REAUTH` MAY therefore remain `BLOCKED_BY_TIME` after `M2 ACCEPTED`.
+
+Until that slot is accepted:
+
+- `APPLICATION_REAUTH_REQUIRED` remains schema-reserved;
+- automatic detection of that durable reason remains disabled;
+- generic `401`, `GW.AUTHN`, token failure, or application age MUST NOT be promoted into `APPLICATION_REAUTH_REQUIRED`;
+- unresolved suspected application re-authentication remains fail-closed under the capability/state contract.
+
+When a trustworthy real/provider-supported condition later becomes available, capture evidence of:
 
 - where the provider displays application authentication validity/deadline;
 - current 180-day behavior;
-- what API error/state appears when re-authentication is actually required;
-- the correct ICBM human-action state transition.
+- what machine-visible API error/state appears when re-authentication is actually required;
+- the correct ICBM human-action state transition and safe recovery path.
 
-Do not wait for production expiry without a monitoring/reminder strategy.
+Do not manufacture the condition merely to close M2. Do not wait for production expiry without a monitoring/reminder strategy.
 
 ---
 
-## 25. Runtime evidence required before `verified_at`
+## 25. Runtime evidence required before full-contract `verified_at`
+
+§24 defines M2 acceptance cases and identifies the long-horizon observations that may be deferred from the milestone. This section defines the stricter **full AUTH contract verification** boundary.
+
+`M2 ACCEPTED does not imply AUTH.md verified_at != null.`
 
 `verified_at` MUST remain null until real SmartStore measurements cover at least:
 
@@ -903,10 +926,20 @@ Do not wait for production expiry without a monitoring/reminder strategy.
 - actual `expires_in`;
 - current M2 token mode (`SELF`);
 - restart reuse of a committed token under the provisional persistence baseline;
-- renewal-window behavior and recorded persistence-policy review;
+- renewal-window behavior and recorded persistence-policy review (`SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`);
 - account identity proof under the committed session generation;
 - bounded recovery from a safe auth-failure condition;
-- first-token uncertain-commit behavior or an explicitly documented unresolved limitation.
+- first-token uncertain-commit behavior or an explicitly documented unresolved limitation;
+- application re-authentication's trustworthy machine-visible condition and safe recovery behavior (`SMARTSTORE-R0-APP-REAUTH`).
+
+Therefore the following may be a valid, honest post-M2 state:
+
+```text
+M2 status = ACCEPTED
+AUTH.md verified_at = null
+SMARTSTORE-R0-TOKEN-REISSUE-WINDOW = PENDING/DEFERRED
+SMARTSTORE-R0-APP-REAUTH = BLOCKED_BY_TIME
+```
 
 Evidence must be sanitized and must not expose credential material.
 
