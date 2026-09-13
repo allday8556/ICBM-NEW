@@ -129,19 +129,63 @@ function autoConnectToggle(supplier) {
   return control;
 }
 
-function openCredentialModal(supplier, ctx) {
-  const stored = supplier.credentials_stored;
-  const username = field('ID', { placeholder: stored ? '저장됨 · 변경할 때만 입력' : '공급처 로그인 ID' });
-  const password = field('Password', {
-    type: 'password',
-    autocomplete: 'new-password',
-    placeholder: stored ? '저장됨 · 변경할 때만 새 비밀번호 입력' : '공급처 비밀번호',
-  });
+// The stored password is only ever represented by this UI-only indicator. It is not an input
+// value, is never sent, and the server rejects it if it ever arrives as a password.
+const STORED_PASSWORD_MASK = '•••••••• · 저장됨';
+
+async function storedLogin(supplier) {
+  try {
+    return await getJson(`${CONNECT}/${supplier.supplier_key}/credentials`);
+  } catch {
+    return { username: null, password_stored: false };
+  }
+}
+
+function passwordControl(passwordStored) {
+  // Until the operator chooses to change it, the stored password is left untouched.
+  const state = { changing: !passwordStored, input: null };
+  const row = h('div', { class: 'form-row' });
+  const render = () => {
+    fieldSequence += 1;
+    const id = `supplier-field-${fieldSequence}`;
+    state.input = state.changing
+      ? h('input', { id, type: 'password', autocomplete: 'new-password', placeholder: passwordStored ? '새 비밀번호' : '공급처 비밀번호' })
+      : null;
+    const control = state.changing
+      ? [
+          state.input,
+          passwordStored
+            ? h('button', { type: 'button', class: 'btn', onclick: () => { state.changing = false; render(); } }, '변경 취소')
+            : null,
+        ]
+      : [
+          h('span', { class: 'chip good', 'data-password-state': 'stored' }, STORED_PASSWORD_MASK),
+          h('button', { type: 'button', class: 'btn', onclick: () => { state.changing = true; render(); state.input?.focus(); } }, '비밀번호 변경'),
+        ];
+    row.replaceChildren(h('label', { for: id }, 'Password'), h('div', { class: 'password-control' }, control));
+  };
+  render();
+  return { row, state };
+}
+
+async function openCredentialModal(supplier, ctx) {
+  const saved = await storedLogin(supplier);
+  const stored = saved.password_stored;
+  const username = field('ID', { value: saved.username ?? '', placeholder: '공급처 로그인 ID' });
+  const password = passwordControl(stored);
   const save = async () => {
-    const values = { username: username.input.value.trim(), password: password.input.value };
-    password.input.value = '';
-    if (!values.username || !values.password) {
-      toast('로그인 정보', 'ID와 비밀번호를 모두 입력하세요.');
+    const values = { username: username.input.value.trim() };
+    if (password.state.changing) {
+      const replacement = password.state.input?.value ?? '';
+      if (password.state.input) password.state.input.value = '';
+      if (!replacement) {
+        toast('로그인 정보', stored ? '새 비밀번호를 입력하거나 변경을 취소하세요.' : '비밀번호를 입력하세요.');
+        return;
+      }
+      values.password = replacement;
+    }
+    if (!values.username) {
+      toast('로그인 정보', 'ID를 입력하세요.');
       return;
     }
     try {
@@ -246,7 +290,7 @@ function suppliersView(view, ctx) {
       markInert(h('button', { type: 'button', class: 'btn blue' }, '+ 공급처 추가')),
     ),
   );
-  // New suppliers need their own site definition; M1 ships KM리테일 only.
+  // New suppliers need their own site definition; M1 ships KM통상 only.
   const addCard = markInert(
     h(
       'button',

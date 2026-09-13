@@ -38,6 +38,17 @@ class SupplierConnectionSummary(BaseModel):
     last_error_code: str | None
 
 
+class StoredLoginView(BaseModel):
+    """What the operator's loopback credential form may show (Issue #7 addendum 5654634584).
+
+    The login ID is read from the OS secret store on demand and is never persisted anywhere
+    else. The password is never returned — only whether one is stored.
+    """
+
+    username: str | None
+    password_stored: bool
+
+
 class CapabilityReport(BaseModel):
     """One capability in readiness, e.g. ``supplier:kmretail``. Never affects core readiness."""
 

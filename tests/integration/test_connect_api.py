@@ -172,6 +172,50 @@ def test_unknown_suppliers_are_not_found(api: TestClient) -> None:
     assert response.json()["error"]["code"] == "SUPPLIER_UNKNOWN"
 
 
+def test_reopening_the_login_form_shows_the_saved_id_and_never_the_password(
+    api: TestClient, config: AppConfig
+) -> None:
+    # Issue #7 addendum 5654634584: save → close → reopen shows the same ID and a stored state.
+    _save(api)
+    reopened = api.get(f"{BASE}/credentials")
+    assert reopened.status_code == 200
+    assert reopened.json() == {"username": USERNAME, "password_stored": True}
+    assert PASSWORD not in reopened.text
+    assert reopened.headers["cache-control"] == "no-store"
+    report = scan([config.data_dir], {"username": USERNAME, "password": PASSWORD})
+    assert report["total_hits"] == 0, "the ID is served on demand, never persisted"
+
+
+def test_saving_without_a_new_password_keeps_the_stored_one(
+    api: TestClient, gateway: FakeGateway
+) -> None:
+    _save(api)
+    kept = api.put(f"{BASE}/credentials", json={"username": USERNAME}, headers=CLIENT)
+    assert kept.status_code == 200
+    assert _wait_job(api, _test(api)["job_id"], "SUCCEEDED", "DEAD")["state"] == "SUCCEEDED"
+    assert gateway.logins == 1, "the real stored password still authenticates"
+
+
+def test_the_masked_state_is_rejected_as_a_password(api: TestClient, gateway: FakeGateway) -> None:
+    _save(api)
+    masked = api.put(
+        f"{BASE}/credentials",
+        json={"username": USERNAME, "password": "•••••••• · 저장됨"},
+        headers=CLIENT,
+    )
+    assert masked.status_code == 422
+    assert masked.json()["error"]["code"] == "SUPPLIER_PASSWORD_MASK_REJECTED"
+    assert USERNAME not in masked.text
+    assert _wait_job(api, _test(api)["job_id"], "SUCCEEDED", "DEAD")["state"] == "SUCCEEDED"
+
+
+def test_an_unconfigured_supplier_reports_no_stored_login(api: TestClient) -> None:
+    assert api.get(f"{BASE}/credentials").json() == {"username": None, "password_stored": False}
+    first = api.put(f"{BASE}/credentials", json={"username": USERNAME}, headers=CLIENT)
+    assert first.status_code == 422
+    assert first.json()["error"]["code"] == "SUPPLIER_PASSWORD_REQUIRED"
+
+
 def test_auto_connect_can_be_switched_off_by_the_operator(api: TestClient) -> None:
     _save(api)
     response = api.put(f"{BASE}/auto-connect", json={"enabled": False}, headers=CLIENT)

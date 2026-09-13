@@ -1,10 +1,10 @@
-"""Supplier CONNECT API (Issue #7). Credentials go in; they never come back out."""
+"""Supplier CONNECT API (Issue #7). A password goes in; it never comes back out."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.api.deps import ContainerDep
-from app.connect.contracts import SupplierConnectionSummary
+from app.connect.contracts import StoredLoginView, SupplierConnectionSummary
 from app.jobs.records import JobRecord
 
 router = APIRouter(tags=["connect"])
@@ -15,7 +15,9 @@ class CredentialsRequest(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     username: str
-    password: SecretStr
+    # Omitted: keep the stored password. The form shows a stored password only as a masked
+    # state and sends a password only after the operator chooses to change it.
+    password: SecretStr | None = None
 
 
 class AutoConnectRequest(BaseModel):
@@ -27,6 +29,12 @@ def list_suppliers(container: ContainerDep) -> list[SupplierConnectionSummary]:
     return container.connect.supplier_connections()
 
 
+@router.get("/api/v1/connect/suppliers/{supplier_key}/credentials")
+def stored_login(supplier_key: str, container: ContainerDep) -> StoredLoginView:
+    """The saved login ID and whether a password is stored — never the password itself."""
+    return container.connect.stored_login(supplier_key)
+
+
 @router.put("/api/v1/connect/suppliers/{supplier_key}/credentials")
 def save_credentials(
     supplier_key: str, body: CredentialsRequest, container: ContainerDep
@@ -35,7 +43,7 @@ def save_credentials(
     return container.connect.save_credentials(
         supplier_key,
         username=body.username,
-        password=body.password.get_secret_value(),
+        password=body.password.get_secret_value() if body.password is not None else None,
         actor=container.config.operator_actor,
     )
 

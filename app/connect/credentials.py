@@ -33,3 +33,7 @@ class SupplierCredentialStore:
 
     def stored(self, supplier_key: str) -> bool:
         return self.load(supplier_key) is not None
+
+    def username(self, supplier_key: str) -> str | None:
+        """The saved login ID, read on demand for the operator's own loopback UI only."""
+        return self._secrets.get(_name(supplier_key, "username")) or None

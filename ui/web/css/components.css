@@ -628,6 +628,17 @@
   margin-top: 10px;
 }
 
+.password-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.password-control input {
+  flex: 1 1 160px;
+}
+
 .supplier-add-card {
   min-height: 190px;
   width: 100%;
