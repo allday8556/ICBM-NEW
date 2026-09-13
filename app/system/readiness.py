@@ -48,7 +48,7 @@ class ReadinessService:
         execution_mode: ExecutionModeService,
         clock: Clock,
         head_revision: str | None,
-        ownership: DataDirLease | None = None,
+        ownership: DataDirLease,
         heartbeat_max_age_s: float = 60.0,
     ) -> None:
         self._ownership = ownership
@@ -101,8 +101,6 @@ class ReadinessService:
 
     def _data_dir_owner(self) -> tuple[bool, str]:
         # PASS only while this process holds the OS lock on the data directory (ADR-0006).
-        if self._ownership is None:
-            return False, "data-directory ownership was never acquired"
         return self._ownership.verify()
 
     def _database(self) -> tuple[bool, str]:

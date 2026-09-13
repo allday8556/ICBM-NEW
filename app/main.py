@@ -16,7 +16,7 @@ from app.config import AppConfig
 from app.container import build_container
 from app.core.egress import EGRESS
 from app.core.logging import configure_logging
-from app.core.ownership import DataDirLease, acquire_data_dir
+from app.core.ownership import DataDirLease, acquire_data_dir, require_ownership
 from app.jobs.registry import JobDefinition
 
 logger = logging.getLogger("icbm.app")
@@ -34,14 +34,15 @@ def create_app(
 
     Without an injected ``ownership`` lease the factory acquires the data-directory lock itself,
     before any per-directory side effect, and releases it when the application stops. Any
-    launcher therefore owns the directory; none can bypass the lock.
+    launcher therefore owns the directory; none can bypass the lock. An injected lease must cover
+    ``config.data_dir`` itself.
     """
     config = config or AppConfig.from_env()
     owns_lease = ownership is None
     lease = ownership or acquire_data_dir(config.data_dir, app_version=__version__)
-    if not owns_lease and not lease.covers(config.data_dir):
-        raise ValueError(f"ownership lease for {lease.data_dir} does not cover {config.data_dir}")
     try:
+        # Before the log file, the database and the worker (ADR-0006).
+        require_ownership(lease, config.data_dir)
         log_file = configure_logging(config.log_level, config.log_dir)
         EGRESS.install()
         services = build_container(config, ownership=lease, extra_jobs=extra_jobs)

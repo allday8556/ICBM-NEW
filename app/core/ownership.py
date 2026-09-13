@@ -12,6 +12,9 @@ of a path that reaches the same directory (relative, ``..``, symlink, junction) 
 same lock; nothing keys ownership on a path string. Process death releases the lock. The lock file
 is never deleted and its JSON contents are diagnostic only. Without an OS locking primitive,
 acquisition fails closed.
+
+Code handed a lease checks it with ``require_ownership`` before its first side effect on a
+target directory, so a lease for one directory can never authorise a mutation of another.
 """
 
 import errno
@@ -27,6 +30,7 @@ LOCK_FILE_NAME = ".icbm-owner.lock"
 DATA_DIR_IN_USE = "DATA_DIR_IN_USE"
 DATA_DIR_LOCK_UNSUPPORTED = "DATA_DIR_LOCK_UNSUPPORTED"
 DATA_DIR_LOCK_FAILED = "DATA_DIR_LOCK_FAILED"
+DATA_DIR_NOT_OWNED = "DATA_DIR_NOT_OWNED"
 
 _WINDOWS_LOCK_OFFSET = 1 << 20
 _METADATA_LIMIT = 4096
@@ -54,6 +58,10 @@ class DataDirInUseError(DataDirOwnershipError):
 
 class OwnershipUnavailableError(DataDirOwnershipError):
     """No usable OS lock: refuse to run rather than run without single-owner protection."""
+
+
+class OwnershipMismatchError(DataDirOwnershipError):
+    """A mutation target is not covered by an active lease on that very directory."""
 
 
 class _LockPrimitive(Protocol):
@@ -250,3 +258,24 @@ def acquire_data_dir(data_dir: Path, *, app_version: str) -> DataDirLease:
     return DataDirLease(
         data_dir=resolved, lock_path=lock_path, fd=fd, primitive=primitive, metadata=metadata
     )
+
+
+def require_ownership(lease: DataDirLease | None, target_dir: Path) -> DataDirLease:
+    """The single ADR-0006 gate for production mutation targets.
+
+    ``lease`` must be active and lock ``target_dir`` itself (compared as files, so every spelling
+    of the directory is accepted). Call it before the first side effect on ``target_dir``:
+    creating it, opening a database engine, configuring a log file or migrating. It never acquires
+    a lock and never creates anything, so a missing or mismatched lease fails closed.
+    """
+    if lease is None or not lease.active:
+        raise OwnershipMismatchError(
+            DATA_DIR_NOT_OWNED, f"no active ownership lease for {target_dir}", data_dir=target_dir
+        )
+    if not lease.covers(target_dir):
+        raise OwnershipMismatchError(
+            DATA_DIR_NOT_OWNED,
+            f"ownership lease for {lease.data_dir} does not cover {target_dir}",
+            data_dir=target_dir,
+        )
+    return lease

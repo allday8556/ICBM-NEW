@@ -3,10 +3,22 @@
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Engine, create_engine, event, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
+
+
+def sqlite_database_dir(database_url: str) -> Path:
+    """Directory holding a file-backed SQLite database: the data directory whose ownership a
+    writer must hold (ADR-0006). Any other URL fails closed, since ICBM v1 keeps its state in one
+    SQLite file (ADR-0001)."""
+    url = make_url(database_url)
+    database = url.database
+    if url.get_backend_name() != "sqlite" or not database or database == ":memory:":
+        raise ValueError(f"not a file-backed SQLite database: {database_url}")
+    return Path(database).parent
 
 
 def create_sqlite_engine(database_url: str) -> Engine:

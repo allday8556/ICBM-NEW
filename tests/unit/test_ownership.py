@@ -13,12 +13,16 @@ from app.core import ownership
 from app.core.ownership import (
     DATA_DIR_IN_USE,
     DATA_DIR_LOCK_UNSUPPORTED,
+    DATA_DIR_NOT_OWNED,
     LOCK_FILE_NAME,
     DataDirInUseError,
+    OwnershipMismatchError,
     OwnershipUnavailableError,
     acquire_data_dir,
     read_owner_metadata,
+    require_ownership,
 )
+from app.db.database import sqlite_database_dir
 
 
 def test_acquisition_writes_diagnostic_metadata(tmp_path: Path) -> None:
@@ -109,3 +113,31 @@ def test_lease_covers_only_its_own_directory(tmp_path: Path) -> None:
     with acquire_data_dir(tmp_path / "a", app_version="t") as lease:
         assert lease.covers(tmp_path / "a" / "sub" / "..")
         assert not lease.covers(tmp_path / "b")
+
+
+def test_require_ownership_accepts_only_an_active_lease_on_that_directory(tmp_path: Path) -> None:
+    (tmp_path / "a" / "sub").mkdir(parents=True)
+    (tmp_path / "b").mkdir()
+    with pytest.raises(OwnershipMismatchError, match="no active ownership lease"):
+        require_ownership(None, tmp_path / "a")
+    lease = acquire_data_dir(tmp_path / "a", app_version="t")
+    try:
+        assert require_ownership(lease, tmp_path / "a" / "sub" / "..") is lease
+        with pytest.raises(OwnershipMismatchError, match="does not cover") as caught:
+            require_ownership(lease, tmp_path / "b")
+        assert caught.value.reason_code == DATA_DIR_NOT_OWNED
+    finally:
+        lease.release()
+    with pytest.raises(OwnershipMismatchError, match="no active ownership lease"):
+        require_ownership(lease, tmp_path / "a")
+    assert list((tmp_path / "b").iterdir()) == [], "checking a target creates nothing in it"
+
+
+def test_the_database_mutation_target_is_its_directory(tmp_path: Path) -> None:
+    assert sqlite_database_dir(f"sqlite:///{(tmp_path / 'icbm.db').as_posix()}") == tmp_path
+
+
+@pytest.mark.parametrize("url", ["sqlite://", "sqlite:///:memory:", "postgresql://host/icbm"])
+def test_a_database_without_a_data_directory_fails_closed(url: str) -> None:
+    with pytest.raises(ValueError, match="not a file-backed SQLite database"):
+        sqlite_database_dir(url)
