@@ -8,6 +8,7 @@
 - Canonical error classes: existing ICBM classes only
 - Runtime verification: `PENDING`
 - Endpoint-specific domain mapping: `PARTIAL / PENDING ENDPOINT_MATRIX`
+- Mutation outcome model: `APPLIED_PROVEN / NOT_APPLIED_PROVEN / UNKNOWN`
 
 ## Provenance
 
@@ -42,9 +43,16 @@ Secondary official technical-support evidence:
 - https://github.com/commerce-api-naver/commerce-api/discussions/3529
   - a restricted seller tag was rejected as `BAD_REQUEST`, showing that one HTTP/code family can represent provider policy as well as structural validation.
 
+Implementation-library reference, only if ICBM adopts HTTPX:
+
+- https://www.python-httpx.org/quickstart/
+  - redirects are not followed by default;
+- https://github.com/encode/httpx/blob/master/httpx/_client.py
+  - current redirect implementation preserves the method/body for 307/308 while 301/302/303 may change method under defined conditions.
+
 Freshness rule:
 
-- Any upstream Commerce API version change, gateway error-table change, endpoint response-schema change, error-code semantic change, permission-error change, retry guidance change, or redirect behavior change SHALL trigger immediate review.
+- Any upstream Commerce API version change, gateway error-table change, endpoint response-schema change, error-code semantic change, permission-error change, retry guidance change, redirect behavior change, or adopted HTTP-client redirect behavior change SHALL trigger immediate review.
 - `review_due` is a fallback calendar bound when automated change detection is absent or broken.
 - Provider documentation describes known error shapes; it does not prove that every real failure will match a known mapping.
 - Unknown or contradictory behavior remains `UNKNOWN` until measured or officially documented.
@@ -72,23 +80,25 @@ This document does not redefine those classes.
 
 It defines the evidence required to select one of them for SmartStore.
 
-The core safety rule is:
+The core safety rules are:
 
 `provider code != root cause`
 
-and:
+`HTTP status != canonical error class`
 
 `error class != replay permission`
+
+`retry-budget exhaustion != automatic error-class reclassification`
 
 A correct classification does not by itself authorize a retry of a mutating request.
 
 ---
 
-## 2. Two independent questions
+## 2. Independent axes: cause, remote outcome, workflow action
 
-Every failed or ambiguous SmartStore operation SHALL answer two separate questions.
+Every failed or ambiguous SmartStore operation SHALL keep three concepts separate.
 
-### 2.1 What kind of failure is this?
+### 2.1 Cause classification
 
 Represented by:
 
@@ -96,7 +106,7 @@ Represented by:
 
 using the canonical ICBM classes above.
 
-### 2.2 What is known about the remote mutation outcome?
+### 2.2 Remote mutation outcome
 
 For mutating operations ICBM SHALL separately track:
 
@@ -104,12 +114,12 @@ For mutating operations ICBM SHALL separately track:
 
 These are not new `error_class` values.
 
-They describe operation-outcome evidence.
+They describe evidence about whether the remote mutation happened.
 
 Examples:
 
 - a network timeout after a POST may be `error_class=TRANSIENT` while `remote_outcome=UNKNOWN`;
-- a deterministic pre-submit local validation failure may be `error_class=VALIDATION` with `remote_outcome=NOT_APPLIED_PROVEN`;
+- a deterministic local validation failure before transport handoff may be `error_class=VALIDATION` with `remote_outcome=NOT_APPLIED_PROVEN`;
 - a successful CREATE followed by matching external read-back may establish `remote_outcome=APPLIED_PROVEN`.
 
 ICBM MUST NOT infer:
@@ -122,13 +132,70 @@ or:
 
 without operation-specific evidence.
 
+### 2.3 Workflow/action state
+
+Workflow state describes what automation may do next.
+
+Examples include continuing automatically, pausing, reconciling, or escalating to human review.
+
+Workflow state MUST NOT be treated as a synonym for `error_class`.
+
+The following is a normal combination:
+
+`error_class=UNKNOWN`
+
+`workflow_state=REVIEW_REQUIRED`
+
+It means the root cause remains unknown while automation has safely stopped for human review.
+
+### 2.4 Meaning of canonical `error_class=REVIEW_REQUIRED`
+
+The canonical class name `REVIEW_REQUIRED` also exists on the cause axis and can therefore be confused with the workflow state of the same name.
+
+For this document:
+
+- `error_class=REVIEW_REQUIRED` is reserved for a provider/domain/endpoint condition whose semantics themselves positively establish that human judgment or manual resolution is required and no narrower canonical cause class applies;
+- `workflow_state=REVIEW_REQUIRED` means automation has stopped and escalated to a human, regardless of the underlying cause class.
+
+M2 currently has **no generic SmartStore wire-code baseline that is automatically mapped to `error_class=REVIEW_REQUIRED`**.
+
+Therefore unresolved diagnostics normally preserve the measured class, often `UNKNOWN` or `TRANSIENT`, while workflow state may become `REVIEW_REQUIRED`.
+
+Do not manufacture `error_class=REVIEW_REQUIRED` merely because a retry budget was exhausted or a person needs to look at the problem.
+
 ---
 
-## 3. Why code-to-cause tables are insufficient
+## 3. Relationship to `RegistrationAttempt.ambiguous_result`
+
+Canonical registration state already contains `RegistrationAttempt.ambiguous_result`.
+
+M2 SHALL treat that boolean as a compatibility projection of the richer `remote_outcome` evidence axis, not as an independent truth field.
+
+Until the canonical schema is explicitly revised:
+
+`RegistrationAttempt.ambiguous_result = (remote_outcome == UNKNOWN)`
+
+Therefore:
+
+- `APPLIED_PROVEN` -> `ambiguous_result=false`;
+- `NOT_APPLIED_PROVEN` -> `ambiguous_result=false`;
+- `UNKNOWN` -> `ambiguous_result=true`.
+
+The boolean intentionally cannot distinguish applied from proven-not-applied; `remote_outcome` carries that distinction.
+
+Implementations MUST NOT update `ambiguous_result` and `remote_outcome` independently in ways that can disagree.
+
+If a later ADR promotes `remote_outcome` into the canonical persisted registration schema, it should supersede or derive the boolean rather than creating two writable sources of truth.
+
+This document does not itself modify the canonical schema.
+
+---
+
+## 4. Why code-to-cause tables are insufficient
 
 SmartStore error handling is many-to-many.
 
-### 3.1 One provider code can represent multiple causes
+### 4.1 One provider code can represent multiple causes
 
 `GW.AUTHN` is the clearest example.
 
@@ -154,7 +221,7 @@ Therefore:
 
 without corroborating current IP/configuration evidence.
 
-### 3.2 One root cause can surface through different codes/statuses
+### 4.2 One root cause can surface through different codes/statuses
 
 Permission denial is not guaranteed to use one wire representation.
 
@@ -172,7 +239,7 @@ The same principle applies to:
 - validation/policy failures;
 - conflict/duplicate conditions.
 
-### 3.3 One HTTP/code family can contain different ICBM classes
+### 4.3 One HTTP/code family can contain different ICBM classes
 
 Product APIs use `400/BAD_REQUEST` broadly.
 
@@ -186,7 +253,7 @@ Therefore:
 
 `BAD_REQUEST != always VALIDATION`
 
-### 3.4 HTTP success does not always equal operation success
+### 4.4 HTTP success does not equal semantic success
 
 Some Commerce API operations can return per-item failures or asynchronous acceptance semantics.
 
@@ -194,37 +261,54 @@ Therefore generic infrastructure MUST NOT assume:
 
 `2xx -> semantic success`
 
-The endpoint contract must define whether success means:
+Every endpoint adopted by ICBM MUST define a machine-checkable `success_predicate` in `ENDPOINT_MATRIX.md` or an endpoint-specific contract referenced by that matrix.
+
+The predicate must define whether success means:
 
 - completed operation;
 - accepted/queued operation;
 - partially successful batch;
-- response requiring a later result/read-back check.
+- response requiring a later result/read-back check;
+- another explicit endpoint-specific condition.
 
-The later `ENDPOINT_MATRIX.md` SHALL record this per adopted endpoint.
+**An endpoint with no frozen success predicate is not eligible for M2/M5 adoption.**
+
+For every response, including 2xx:
+
+1. parse the endpoint response under the frozen schema;
+2. evaluate the endpoint `success_predicate`;
+3. only then declare semantic operation success.
+
+If the response cannot be parsed/evaluated safely:
+
+- do not treat HTTP success as business success;
+- classify the schema/contract uncertainty under the evidence rules below;
+- for a mutation, preserve `remote_outcome=UNKNOWN` unless read-back proves otherwise.
+
+This makes `OPERATION_RESULT` evaluation a mandatory success gate, not an optional error-handling afterthought.
 
 ---
 
-## 4. Response/failure layers
+## 5. Response/failure layers
 
 ICBM SHALL identify the layer before assigning a final error class.
 
-### 4.1 `TRANSPORT`
+### 5.1 `TRANSPORT`
 
 No trustworthy provider response was obtained.
 
 Examples:
 
-- DNS failure;
-- TCP connection failure;
-- TLS failure;
+- DNS resolution failure;
+- TCP connection-establishment failure;
+- TLS handshake failure;
 - client-side timeout;
 - connection reset before a complete provider response;
 - malformed/truncated response that cannot be safely interpreted.
 
 Transport failures are often `TRANSIENT` candidates, but write outcome may still be `UNKNOWN` if the request could have reached NAVER.
 
-### 4.2 `GATEWAY`
+### 5.2 `GATEWAY`
 
 Provider error code begins with `GW.`.
 
@@ -244,7 +328,7 @@ Official gateway examples include:
 
 Gateway responses usually include a `traceId` and should be preserved as sanitized evidence.
 
-### 4.3 `API_SERVER_STANDARD`
+### 5.3 `API_SERVER_STANDARD`
 
 The target Commerce API server returned a normal endpoint error shape such as:
 
@@ -257,31 +341,21 @@ The target Commerce API server returned a normal endpoint error shape such as:
 
 These names are still not sufficient by themselves for all final ICBM classification decisions.
 
-### 4.4 `API_SERVER_DOMAIN`
+### 5.4 `API_SERVER_DOMAIN`
 
 The endpoint returned a documented domain-specific error code.
-
-Examples from other Commerce API domains include explicit codes for:
-
-- account status;
-- role/authorization;
-- invalid state;
-- duplicate resource;
-- changed conditions;
-- payment/solution eligibility;
-- per-item order failures.
 
 Endpoint-specific domain codes can provide stronger evidence than generic HTTP status.
 
 M2 SHALL adopt only domain codes belonging to endpoints actually present in `ENDPOINT_MATRIX.md`.
 
-### 4.5 `OPERATION_RESULT`
+### 5.5 `OPERATION_RESULT`
 
-A transport/HTTP request succeeded but the operation result contains nested, item-level, asynchronous, or read-back failure information.
+A transport/HTTP request succeeded but the parsed operation result contains nested, item-level, asynchronous, partial, or read-back failure information.
 
-This layer prevents a `2xx` status from erasing semantic failures.
+This layer participates in the mandatory endpoint `success_predicate` evaluation for every response, including 2xx.
 
-### 4.6 `LOCAL_CONTRACT`
+### 5.6 `LOCAL_CONTRACT`
 
 ICBM detected a local protocol or invariant failure before provider truth could be trusted.
 
@@ -292,13 +366,16 @@ Examples:
 - malformed authorization header constructed locally;
 - response schema drift that the parser cannot safely interpret;
 - mismatched credential/session generation;
-- forbidden automatic redirect/replay path.
+- forbidden automatic redirect/replay path;
+- an adopted endpoint missing a success predicate.
 
-This layer often results in `FATAL`, `REVIEW_REQUIRED`, or `UNKNOWN`, depending on whether the defect is proven.
+This layer often results in `FATAL` or `UNKNOWN`, depending on whether the defect is proven.
+
+Human escalation is represented separately by workflow state.
 
 ---
 
-## 5. Required error evidence record
+## 6. Required error evidence record
 
 Every material provider/transport failure SHOULD produce a sanitized evidence record sufficient to reproduce the classification decision.
 
@@ -310,6 +387,7 @@ At minimum record:
 - HTTP method;
 - whether the operation is mutating;
 - local attempt/request ID;
+- registration attempt reference when applicable;
 - credential generation;
 - session generation;
 - observation timestamp;
@@ -321,10 +399,13 @@ At minimum record:
 - provider timestamp when available;
 - provider `traceId` / `GNCP-GW-Trace-ID` when available;
 - rate-limit/quota response headers when relevant;
+- endpoint success-predicate revision;
 - `error_class`;
 - classification basis;
 - `remote_outcome` for mutating operations;
+- derived `ambiguous_result` when applicable;
 - retry/reconciliation decision;
+- workflow/action state when escalated;
 - evidence reference.
 
 The error record MUST NOT contain plaintext:
@@ -341,7 +422,7 @@ Trace ID is valuable diagnostic evidence and SHOULD be retained when present.
 
 ---
 
-## 6. Classification basis
+## 7. Classification basis
 
 Error classification SHALL carry provenance/strength metadata separate from `error_class`.
 
@@ -353,6 +434,8 @@ Recommended values:
   - official documentation/support establishes the mapping only after additional evidence is considered.
 - `ENDPOINT_SPECIFIC`
   - the adopted endpoint contract supplies the mapping.
+- `MEASURED_RECONCILIATION`
+  - external read-back/reconciliation supplies stronger operation-outcome evidence.
 - `HEURISTIC`
   - a non-authoritative diagnostic hint exists but is not sufficient for durable truth.
 - `UNKNOWN`
@@ -364,25 +447,47 @@ A heuristic MUST NOT silently become durable provider truth.
 
 ---
 
-## 7. Default classification algorithm
+## 8. Default response/classification algorithm
 
-For every non-successful or semantically ambiguous operation:
+The algorithm runs for **every provider response**, including 2xx, and for transport failures.
+
+### Step 0: require an adopted endpoint contract
+
+Before sending or interpreting the request, the endpoint MUST have in `ENDPOINT_MATRIX.md`:
+
+- method/path;
+- mutability;
+- auth mode;
+- required API groups;
+- application-mode eligibility;
+- response schema/reference;
+- success predicate;
+- redirect policy;
+- idempotency/replay policy;
+- reconciliation/read-back strategy for mutations where applicable.
+
+If required contract data is absent, the endpoint is not eligible for automatic execution.
 
 ### Step 1: determine whether a trustworthy provider response exists
 
 If no:
 
 - classify the failure layer as `TRANSPORT`;
-- preserve transmission-phase evidence when the HTTP client can provide it;
+- preserve transport-phase evidence when trustworthy;
 - for writes, do not assume non-execution merely because no response arrived.
 
-### Step 2: identify gateway vs API-server vs operation-result error
+### Step 2: parse and evaluate semantic success
 
-- `GW.*` -> `GATEWAY`;
-- endpoint response schema -> `API_SERVER_STANDARD` or `API_SERVER_DOMAIN`;
-- nested/async/per-item result -> `OPERATION_RESULT`.
+If a response exists:
 
-### Step 3: validate the endpoint contract
+- identify gateway vs API-server response;
+- parse under the endpoint contract;
+- evaluate the endpoint `success_predicate` even when HTTP status is 2xx;
+- inspect nested/async/per-item operation result when defined.
+
+Only a passed predicate may become semantic success.
+
+### Step 3: validate the request/endpoint contract
 
 Before blaming authentication, permissions, or provider state, verify:
 
@@ -400,11 +505,13 @@ A local request-contract defect is not provider credential failure.
 
 Use the narrowest current rule available from:
 
-1. endpoint-specific documented code;
-2. gateway documented code;
-3. structured fields such as `invalidInputs.type`;
-4. current `AUTH.md` evidence;
-5. current `PERMISSIONS_SCOPES.md` evidence.
+1. measured endpoint-specific remote/read-back fact;
+2. endpoint-specific documented code/semantic result;
+3. gateway documented code;
+4. structured fields such as `invalidInputs.type`;
+5. current `AUTH.md` evidence;
+6. current `PERMISSIONS_SCOPES.md` evidence;
+7. provider message only as supporting diagnostic evidence.
 
 ### Step 5: resolve conflicts conservatively
 
@@ -424,24 +531,33 @@ For mutating requests establish one of:
 
 Provider error classification alone is insufficient to prove this axis.
 
-### Step 7: select retry/reconciliation action
+### Step 7: derive compatibility ambiguity state
 
-Retry decisions depend on:
+When a `RegistrationAttempt` exists:
+
+`ambiguous_result = (remote_outcome == UNKNOWN)`
+
+No independent conflicting write to the boolean is permitted.
+
+### Step 8: select retry/reconciliation/workflow action
+
+The action depends on:
 
 - operation mutability;
 - error class;
 - remote outcome;
 - endpoint idempotency/read-back contract;
 - retry budget;
-- provider rate-limit guidance.
+- provider rate-limit guidance;
+- current auth/scope invariants.
 
 ---
 
-## 8. Gateway baseline mappings
+## 9. Gateway baseline mappings
 
 The following are M2 baseline rules, subject to endpoint/context evidence.
 
-### 8.1 `GW.AUTHN`
+### 9.1 `GW.AUTHN`
 
 Default:
 
@@ -464,7 +580,7 @@ Generic auth recovery follows `AUTH.md` and MUST remain bounded.
 
 A `GW.AUTHN` from a write does not authorize blind replay after token recovery.
 
-### 8.2 `GW.IP_NOT_ALLOWED`
+### 9.2 `GW.IP_NOT_ALLOWED`
 
 If current observed outbound IP is positively known to be absent from the provider allow list:
 
@@ -478,9 +594,7 @@ or `TRANSIENT` only when current provider evidence establishes a temporary condi
 
 Do not rewrite application IP configuration automatically from the error response.
 
-### 8.3 `GW.NOT_FOUND`
-
-This means the gateway did not find a registered API for the requested route.
+### 9.3 `GW.NOT_FOUND`
 
 If ICBM generated a route that contradicts the current adopted endpoint contract:
 
@@ -494,15 +608,13 @@ pending contract/provider drift investigation.
 
 This is different from an API-server `NOT_FOUND` for a domain resource.
 
-### 8.4 `GW.RATE_LIMIT`
+### 9.4 `GW.RATE_LIMIT`
 
 `error_class = RATE_LIMIT`
 
-The current provider documents per-API/application token-bucket limits and rate-limit response headers.
-
 Retry must be scheduled/backed off; hot-loop retry is forbidden.
 
-### 8.5 `GW.QUOTA_LIMIT`
+### 9.5 `GW.QUOTA_LIMIT`
 
 `error_class = RATE_LIMIT`
 
@@ -510,21 +622,29 @@ Quota exhaustion is distinct from per-second rate limiting but belongs to the sa
 
 The retry horizon may be much longer and must use provider quota-period evidence when available rather than the short rate-limit backoff policy.
 
-### 8.6 `GW.PROXY.*`, `GW.INTERNAL_SERVER_ERROR`, `GW.BLOCK.*`, `GW.TIMEOUT.*`
+### 9.6 `GW.PROXY.*`, `GW.INTERNAL_SERVER_ERROR`, `GW.BLOCK.*`, `GW.TIMEOUT.*`
 
 These are `TRANSIENT` candidates because the documented causes include gateway/service/network failure, circuit open, maintenance, and timeout.
 
 However:
 
-- repeated deterministic behavior may require reclassification/escalation;
 - a mutating request may have `remote_outcome=UNKNOWN`;
-- `TRANSIENT` MUST NOT trigger blind write replay.
+- `TRANSIENT` MUST NOT trigger blind write replay;
+- repeated failure consumes the bounded retry budget but **does not by count alone change the error class**.
+
+If retry budget is exhausted with no new causal evidence:
+
+- keep `error_class=TRANSIENT`;
+- stop automatic retry;
+- surface the final workflow state defined by the M2 state contract, commonly human review/pause.
+
+Reclassification to `FATAL`, `POLICY`, or another class requires new evidence proving that class; frequency alone is not proof.
 
 ---
 
-## 9. API-server baseline mappings
+## 10. API-server baseline mappings
 
-### 9.1 `BAD_REQUEST`
+### 10.1 `BAD_REQUEST`
 
 Do not classify from the code alone.
 
@@ -549,7 +669,7 @@ ICBM MAY use provider message text as diagnostic input.
 
 ICBM MUST NOT use unversioned free-form Korean text alone as a high-confidence durable mapping unless the endpoint contract adopts that exact provider behavior.
 
-### 9.2 `UNAUTHORIZED`
+### 10.2 `UNAUTHORIZED`
 
 Candidate class:
 
@@ -561,7 +681,7 @@ If permission or application-state causes remain plausible:
 
 `UNKNOWN`
 
-### 9.3 `FORBIDDEN`
+### 10.3 `FORBIDDEN`
 
 Candidate class:
 
@@ -573,7 +693,7 @@ Generic `FORBIDDEN` without enough evidence remains:
 
 `UNKNOWN`
 
-### 9.4 `NOT_FOUND`
+### 10.4 `NOT_FOUND`
 
 API-server `NOT_FOUND` is domain/resource context, not the same as `GW.NOT_FOUND`.
 
@@ -581,11 +701,13 @@ Examples:
 
 - caller supplied a nonexistent resource ID -> usually `VALIDATION` at the operation boundary;
 - a previously known resource disappeared due to concurrent/external change -> potentially `CONFLICT`;
-- a required post-CREATE read-back resource is unexpectedly absent -> `REVIEW_REQUIRED` or `UNKNOWN` until reconciliation completes.
+- a required post-CREATE read-back resource is unexpectedly absent -> keep cause/outcome uncertain until reconciliation completes.
+
+A missing read-back resource does not by itself prove `NOT_APPLIED_PROVEN`; consistency timing must be handled by the M5 reconciliation contract.
 
 No global `NOT_FOUND -> one class` mapping is allowed.
 
-### 9.5 `INTERNAL_SERVER_ERROR`
+### 10.5 `INTERNAL_SERVER_ERROR`
 
 Candidate class:
 
@@ -593,11 +715,15 @@ Candidate class:
 
 but mutating requests retain independent remote-outcome uncertainty.
 
-Repeated deterministic failure with the same valid request must be escalated rather than retried indefinitely.
+Repeated deterministic failure stops at the bounded retry budget.
 
-### 9.6 `PERMANENT_REDIRECT` / HTTP 308
+It becomes another class only if new evidence proves a different cause.
+
+### 10.6 `PERMANENT_REDIRECT` / HTTP 308
 
 Current product API documentation includes `308/PERMANENT_REDIRECT` in endpoint response sets.
+
+HTTP 308 is materially dangerous for mutations because redirect semantics preserve the original HTTP method and request body. An automatic redirect can therefore transmit the same CREATE/UPDATE request body to the redirect target.
 
 Generic SmartStore infrastructure MUST NOT blindly auto-follow redirects for mutating requests.
 
@@ -607,12 +733,20 @@ For reads:
 
 For writes:
 
-- automatic redirect/replay is forbidden unless the adopted endpoint contract explicitly proves the redirect semantics safe for that endpoint;
-- otherwise classify as `REVIEW_REQUIRED` or `FATAL` depending on whether this is expected provider migration vs proven local endpoint drift.
+- generic automatic redirect is forbidden;
+- same-origin target alone is not sufficient to make replay safe;
+- endpoint contract must explicitly define whether the 308 is expected, the exact allowed target pattern, and whether replay preserves operation safety;
+- absent that explicit contract, preserve `remote_outcome=UNKNOWN` if prior application cannot be excluded and stop for reconciliation/review.
 
 Redirect handling belongs in `ENDPOINT_MATRIX.md`, not in a permissive global HTTP-client switch.
 
-### 9.7 HTTP 405 / 415 and equivalent request-contract failures
+Implementation guard:
+
+- the SmartStore adapter/client configuration MUST keep automatic redirect following disabled for mutating requests;
+- repository/static tests SHOULD reject a generic redirect-following configuration in the SmartStore mutation path;
+- if ICBM uses HTTPX, `follow_redirects=True` MUST NOT be enabled for the generic SmartStore mutation client; any endpoint-specific redirect handling must occur in explicit adapter logic after target validation.
+
+### 10.7 HTTP 405 / 415 and equivalent request-contract failures
 
 When ICBM itself generated an unsupported method or media type contrary to the frozen endpoint contract:
 
@@ -620,7 +754,7 @@ When ICBM itself generated an unsupported method or media type contrary to the f
 
 because retrying the same request cannot succeed without a code/configuration correction.
 
-### 9.8 HTTP 409 and domain conflicts
+### 10.8 HTTP 409 and domain conflicts
 
 Generic 409 with documented conflict semantics maps to:
 
@@ -636,7 +770,7 @@ Duplicate classification requires positive evidence; do not infer duplicate mere
 
 ---
 
-## 10. Product `BAD_REQUEST` structured evidence
+## 11. Product `BAD_REQUEST` structured evidence
 
 For product registration/modification, `invalidInputs` is high-value evidence when present.
 
@@ -674,7 +808,7 @@ That ownership mapping will be completed with the product endpoint/capability co
 
 ---
 
-## 11. Authentication and permission interaction
+## 12. Authentication and permission interaction
 
 `ERRORS.md` MUST NOT override the stronger contracts in:
 
@@ -682,7 +816,7 @@ That ownership mapping will be completed with the product endpoint/capability co
 - `ACCOUNT_IDENTITY.md`;
 - `PERMISSIONS_SCOPES.md`.
 
-### 11.1 Auth recovery
+### 12.1 Auth recovery
 
 If evidence proves an expired/invalid bearer token:
 
@@ -695,7 +829,7 @@ For a protected read, the read may then be retried within the bounded policy.
 
 For a write, successful auth recovery does NOT authorize automatic operation replay.
 
-### 11.2 Permission failure
+### 12.2 Permission failure
 
 If current evidence positively proves a required API group is absent:
 
@@ -708,23 +842,24 @@ If `GW.AUTHN`/`FORBIDDEN` occurs but permission evidence is insufficient:
 - preserve `write_scope=UNKNOWN` when appropriate;
 - classify the failure as `UNKNOWN` until cause is separated.
 
-### 11.3 Account mismatch
+### 12.3 Account mismatch
 
 If the authenticated protected read proves a different `accountUid` than the canonical binding:
 
-- this is the `AUTH_MISMATCH -> REVIEW_REQUIRED` contract from `ACCOUNT_IDENTITY.md`;
-- do not reduce it to generic provider `AUTH`.
+- this is the `AUTH_MISMATCH -> REVIEW_REQUIRED` workflow contract from `ACCOUNT_IDENTITY.md`;
+- do not reduce it to generic provider `AUTH`;
+- do not infer that the canonical `error_class` must also equal `REVIEW_REQUIRED` unless the state contract explicitly establishes that mapping.
 
 ---
 
-## 12. Retry policy for non-mutating reads
+## 13. Retry policy for non-mutating reads
 
 Reads can be retried more aggressively because they do not create marketplace mutations, but retries remain bounded.
 
 Baseline:
 
 - `TRANSIENT`
-  - bounded retry with exponential/backoff policy and jitter;
+  - bounded retry with backoff and jitter;
 - `RATE_LIMIT`
   - schedule according to rate/quota evidence; do not hot-loop;
 - `AUTH`
@@ -738,7 +873,7 @@ Baseline:
 - `DUPLICATE`
   - reconcile identities; no blind retry;
 - `REVIEW_REQUIRED`
-  - stop automatic execution;
+  - only when this is genuinely the cause class under an endpoint/domain contract; automatic execution stops;
 - `FATAL`
   - stop until integration/configuration defect is corrected;
 - `UNKNOWN`
@@ -746,21 +881,23 @@ Baseline:
 
 Every automatic path has a finite retry budget.
 
+Budget exhaustion stops automation but does not itself rewrite the error class.
+
 ---
 
-## 13. Retry/replay policy for mutating requests
+## 14. Retry/replay policy for mutating requests
 
 Mutating requests are governed by a stricter rule:
 
 `error_class alone never authorizes replay`
 
-### 13.1 When `remote_outcome=APPLIED_PROVEN`
+### 14.1 When `remote_outcome=APPLIED_PROVEN`
 
 Do not replay.
 
 Proceed from the confirmed remote state.
 
-### 13.2 When `remote_outcome=NOT_APPLIED_PROVEN`
+### 14.2 When `remote_outcome=NOT_APPLIED_PROVEN`
 
 A retry MAY be considered only if:
 
@@ -769,7 +906,9 @@ A retry MAY be considered only if:
 - the retry budget permits it;
 - all current auth/scope invariants still hold.
 
-### 13.3 When `remote_outcome=UNKNOWN`
+`NOT_APPLIED_PROVEN` itself does not mean the request should automatically be retried.
+
+### 14.3 When `remote_outcome=UNKNOWN`
 
 Generic automatic replay is forbidden.
 
@@ -779,41 +918,93 @@ Required sequence:
 2. search for the expected resource using stable request/business identity where the provider contract permits;
 3. compare expected vs observed remote state;
 4. if applied, mark `APPLIED_PROVEN` and continue without replay;
-5. if non-application can be proven, mark `NOT_APPLIED_PROVEN` and apply the endpoint retry contract;
-6. if still unresolved, escalate to safe human review.
+5. if non-application can be positively proven, mark `NOT_APPLIED_PROVEN` and apply the endpoint retry contract;
+6. if still unresolved, keep `error_class` unchanged and escalate workflow state safely.
 
 A second CREATE issued only because the first timed out is specifically forbidden unless the write contract proves replay safety.
 
 ---
 
-## 14. Transport-phase rules
+## 15. `NOT_APPLIED_PROVEN` is whitelist-only
 
-Transport libraries may provide evidence about how far a request progressed.
+`NOT_APPLIED_PROVEN` is a high-confidence safety claim.
 
-ICBM SHOULD distinguish when observable:
+It MUST NOT be assigned merely because an exception name sounds like a connection failure.
 
-- failure before connection/request transmission;
-- failure while sending;
-- failure after request transmission but before complete response;
-- complete provider response received.
+The runtime may assign `NOT_APPLIED_PROVEN` only through an explicitly reviewed whitelist whose instrumentation proves the request could not have reached the provider application layer.
 
-A connection/DNS/TLS failure that proves no request bytes reached the provider may support:
+### 15.1 Baseline whitelist
 
-`remote_outcome=NOT_APPLIED_PROVEN`
+The following may support `NOT_APPLIED_PROVEN` when the stated boundary is positively observed:
 
-for a write.
+1. **Local pre-submit rejection**
+   - request failed local schema/invariant validation before being handed to the network transport.
 
-A timeout/reset after transmission begins must default to:
+2. **DNS resolution failure**
+   - provider host was not resolved and no connection to the provider/proxy path was established for this attempt.
+
+3. **TCP connect failure before connection establishment**
+   - a new connection attempt failed before TCP establishment;
+   - no existing/reused connection was involved.
+
+4. **TLS handshake failure before HTTP request transmission**
+   - a new connection completed TCP but failed TLS negotiation before application HTTP request bytes could be sent;
+   - instrumentation must positively identify this phase.
+
+A proxy/tunnel topology requires equivalent evidence about the provider-bound application request, not merely a generic client exception name.
+
+### 15.2 Explicit non-whitelist / UNKNOWN cases
+
+The following default to:
 
 `remote_outcome=UNKNOWN`
 
-unless endpoint/provider evidence proves otherwise.
+for mutating requests unless stronger endpoint/read-back evidence later proves otherwise:
 
-Do not fabricate certainty when the HTTP client cannot expose the transmission boundary.
+- any read timeout;
+- any write timeout after transport handoff;
+- generic request timeout with unknown phase;
+- `ConnectionResetError` or equivalent reset after a connection exists;
+- send/write exception where partial transmission cannot be excluded;
+- response-read failure after sending;
+- truncated/malformed provider response;
+- any failure on a pooled/reused connection where the library does not prove the current request transmitted zero bytes;
+- HTTP/2 stream reset after request initiation;
+- proxy error after the provider-bound request may have been forwarded;
+- cancellation after transport handoff;
+- any unfamiliar transport exception not explicitly in the reviewed whitelist.
+
+**A pooled-connection failure is never promoted to `NOT_APPLIED_PROVEN` from the exception type alone.**
+
+### 15.3 Harness evidence vs production observability
+
+A test harness can prove a no-send condition by construction.
+
+That does not mean the production HTTP stack exposes the same boundary.
+
+Acceptance therefore has two separate obligations:
+
+- test the logical whitelist with controlled fixtures;
+- verify which whitelist predicates the actual production transport can observe reliably.
+
+If production instrumentation cannot establish a whitelist predicate:
+
+`remote_outcome=UNKNOWN`
+
+is mandatory.
+
+### 15.4 Reconciliation can strengthen outcome later
+
+A transport failure initially marked `UNKNOWN` may later become:
+
+- `APPLIED_PROVEN` through positive external read-back; or
+- `NOT_APPLIED_PROVEN` only through an endpoint-specific reconciliation rule that positively proves non-application.
+
+Simple immediate absence is insufficient unless M5 has already frozen the endpoint's bounded consistency/read-back window.
 
 ---
 
-## 15. Rate-limit and quota handling
+## 16. Rate-limit and quota handling
 
 NAVER documents:
 
@@ -834,26 +1025,56 @@ For writes, rate-limit classification still does not bypass the remote-outcome/r
 
 ---
 
-## 16. Redirect safety
+## 17. Redirect safety
 
-ICBM SHALL disable or constrain generic automatic redirect behavior so that endpoint movement cannot silently change mutation targets.
+ICBM SHALL disable generic automatic redirect behavior for SmartStore mutation paths so endpoint movement cannot silently replay mutation bodies.
+
+### 17.1 Why HTTP 308 is specifically dangerous
+
+HTTP 308 preserves the original HTTP method and request body when the redirect is followed.
+
+Therefore a redirected product CREATE can remain a product CREATE with the same body.
+
+This differs from redirect cases where some clients convert methods to GET.
+
+The danger is not merely credential forwarding; it is duplicate mutation replay.
+
+### 17.2 Required contract
 
 A redirect target must be checked against:
 
 - allowed NAVER host;
 - adopted endpoint path/version;
 - expected method preservation;
-- endpoint-specific redirect policy.
+- endpoint-specific redirect policy;
+- remote-outcome/idempotency safety.
 
 Unexpected redirect on a mutating endpoint is a contract event, not merely an HTTP convenience.
 
 A redirect response MUST NOT cause credentials or bodies to be forwarded to an unapproved host.
 
+Same-origin redirect does not by itself make a repeated mutation safe.
+
+### 17.3 Implementation guard
+
+Repository/static acceptance MUST verify that the generic SmartStore mutation adapter cannot silently follow redirects.
+
+If the selected HTTP library provides a global `follow_redirects`/equivalent option, the mutation adapter MUST keep it disabled.
+
+If HTTPX is selected, current behavior is:
+
+- redirect following is disabled by default;
+- when redirect following is enabled, 308 retains the original method and body.
+
+Therefore `follow_redirects=True` is forbidden on the generic SmartStore mutation client.
+
+Any permitted redirect must be processed by explicit endpoint-aware adapter logic after validating the target and replay semantics.
+
 ---
 
-## 17. Unknown-code default
+## 18. Unknown-code default
 
-An unmapped provider code, undocumented status/code combination, malformed error body, or contradictory evidence SHALL default to:
+An unmapped provider code, undocumented status/code combination, malformed error body, missing success predicate, or contradictory evidence SHALL default to:
 
 `error_class = UNKNOWN`
 
@@ -867,15 +1088,15 @@ For UNKNOWN:
 - do not mutate durable auth/scope truth without corroboration;
 - do not blindly retry destructive/mutating operations;
 - attempt safe read-only diagnostics/read-back when available;
-- escalate to `REVIEW_REQUIRED` operational handling if bounded diagnostics cannot resolve the cause.
+- escalate workflow state to `REVIEW_REQUIRED` if bounded diagnostics cannot resolve the cause.
 
-The `error_class` may remain `UNKNOWN` while the workflow/action state becomes `REVIEW_REQUIRED`.
+The `error_class` remains `UNKNOWN` unless new evidence proves another canonical class.
 
 This distinction prevents human escalation from falsely claiming a root cause.
 
 ---
 
-## 18. Classification changes require new evidence
+## 19. Classification changes require new evidence
 
 ICBM MAY reclassify an error when new evidence arrives.
 
@@ -889,9 +1110,21 @@ Examples:
 
 Reclassification MUST append/retain the evidence trail rather than rewriting history as though the original uncertainty never existed.
 
+Retry-count growth or budget exhaustion alone is not new causal evidence.
+
+Therefore:
+
+`TRANSIENT + retry_budget_exhausted`
+
+normally remains:
+
+`error_class=TRANSIENT`
+
+while the workflow state changes to stop automation/escalate.
+
 ---
 
-## 19. Mapping priority and ownership
+## 20. Mapping priority and ownership
 
 When multiple signals disagree, use this priority:
 
@@ -920,22 +1153,22 @@ This prevents a central error mapper from silently patching unrelated business d
 
 ---
 
-## 20. State convergence implications
+## 21. State convergence implications
 
 The error mapper supplies evidence to capability/workflow state machines; it does not invent new state enums.
-
-Baseline effects:
 
 ### `TRANSIENT`
 
 - may remain automatically recoverable within retry budget;
-- budget exhaustion must stop automatic retry and surface a safe human-visible state under the final M2 state contract.
+- budget exhaustion stops automatic retry;
+- do not change class merely because the count reached a threshold;
+- workflow may pause/escalate while class remains `TRANSIENT`.
 
 ### `RATE_LIMIT`
 
 - schedule for later execution;
 - do not mark auth/scope invalid;
-- persistent unexpected quota behavior may require review.
+- persistent unexpected quota behavior may require workflow review without falsifying the class.
 
 ### `AUTH`
 
@@ -961,27 +1194,28 @@ Baseline effects:
 - identify existing remote resource and use duplicate-conflict/reconciliation policy;
 - never create another copy merely because the first attempt was uncertain.
 
-### `REVIEW_REQUIRED`
+### `REVIEW_REQUIRED` as error class
 
-- stop automatic mutation and preserve evidence for human decision.
+- use only when the provider/domain/endpoint semantics positively establish human judgment/manual resolution as the cause category and no narrower class applies;
+- no generic SmartStore baseline wire code is assigned here yet.
 
 ### `FATAL`
 
 - stop the affected capability until code/config/contract correction;
-- do not burn retry budget on a deterministic integration defect.
+- do not burn retry budget on a proven deterministic integration defect.
 
 ### `UNKNOWN`
 
 - preserve uncertainty;
 - no destructive retry by default;
 - use safe diagnostics/reconciliation;
-- escalate if unresolved.
+- workflow may become `REVIEW_REQUIRED` while class remains `UNKNOWN`.
 
 Final `PAUSED` reason-code mapping remains part of the M2 state-contract freeze rather than being invented here.
 
 ---
 
-## 21. Evidence and logging safety
+## 22. Evidence and logging safety
 
 Provider errors can echo request-derived values.
 
@@ -1010,17 +1244,19 @@ Safe diagnostics MAY include:
 - canonical error class;
 - classification basis;
 - remote outcome;
-- retry/reconciliation decision.
+- derived ambiguity flag;
+- retry/reconciliation decision;
+- workflow state.
 
 Debugging must not turn failure evidence into a credential or PII leak.
 
 ---
 
-## 22. Acceptance requirements
+## 23. Acceptance requirements
 
 M2 SmartStore error handling acceptance MUST include at least the following.
 
-### 22.1 `GW.AUTHN` — expired token
+### 23.1 `GW.AUTHN` — expired token
 
 Using a safe expired/invalid token condition without corrupting durable credentials:
 
@@ -1031,7 +1267,7 @@ Using a safe expired/invalid token condition without corrupting durable credenti
 - for a protected read, retry only within the auth contract;
 - do not generalize the mapping to every future `GW.AUTHN`.
 
-### 22.2 `GW.AUTHN` — missing permission
+### 23.2 `GW.AUTHN` — missing permission
 
 Using controlled permission evidence or a safe harness:
 
@@ -1041,7 +1277,7 @@ Using controlled permission evidence or a safe harness:
 - update scope state under `PERMISSIONS_SCOPES.md`;
 - do not mislabel credentials invalid.
 
-### 22.3 `GW.AUTHN` — malformed authorization header
+### 23.3 `GW.AUTHN` — malformed authorization header
 
 Using a local/mocked request boundary rather than damaging real credentials:
 
@@ -1050,7 +1286,7 @@ Using a local/mocked request boundary rather than damaging real credentials:
 - if provider behavior is exercised safely, verify the failure is not persisted as credential invalidity;
 - classify proven request-builder defect as `FATAL`.
 
-### 22.4 Same cause / different wire representation
+### 23.4 Same cause / different wire representation
 
 Test at least one permission-denial scenario represented as two different wire families in a controlled contract fixture, for example:
 
@@ -1059,14 +1295,14 @@ Test at least one permission-denial scenario represented as two different wire f
 
 Verify both can converge to the same canonical `POLICY` class only when permission cause is positively evidenced.
 
-### 22.5 `GW.IP_NOT_ALLOWED` evidence conflict
+### 23.5 `GW.IP_NOT_ALLOWED` evidence conflict
 
 Test both:
 
 - proven outbound-IP mismatch -> `POLICY`;
 - current allow-list evidence matches but provider response contradicts it -> `UNKNOWN` rather than overwriting config truth.
 
-### 22.6 Product structural validation
+### 23.6 Product structural validation
 
 Use representative documented `BAD_REQUEST/invalidInputs` fixtures such as:
 
@@ -1081,7 +1317,7 @@ Verify classification:
 
 and no unchanged automatic retry.
 
-### 22.7 Product policy restriction through `BAD_REQUEST`
+### 23.7 Product policy restriction through `BAD_REQUEST`
 
 Use a controlled restricted-value fixture such as restricted seller-tag semantics.
 
@@ -1093,7 +1329,7 @@ provider policy evidence maps to:
 
 `POLICY`.
 
-### 22.8 Unknown provider code
+### 23.8 Unknown provider code
 
 Inject an unrecognized provider code/status combination.
 
@@ -1104,31 +1340,31 @@ Verify:
 - no durable auth/scope rewrite;
 - no automatic mutating replay.
 
-### 22.9 Rate limit
+### 23.9 Rate limit and quota
 
-Use a controlled 429 fixture and, when safe, measured provider behavior.
+Use controlled fixtures and safe measured behavior when available.
 
 Verify:
 
 - `RATE_LIMIT` classification;
-- rate headers captured when present;
+- rate/quota headers captured when present;
 - bounded/scheduled retry;
 - no token refresh merely because of 429;
-- no hot loop.
+- no hot loop;
+- long-period quota is not treated like a one-second rate limit.
 
-### 22.10 Quota limit
-
-Use a controlled `GW.QUOTA_LIMIT` fixture.
-
-Verify longer-period quota semantics are not treated like a one-second rate limit.
-
-### 22.11 Read transient recovery
+### 23.10 Read transient recovery
 
 Inject gateway/server timeout/5xx for a protected read.
 
 Verify bounded `TRANSIENT` retry and retry-budget enforcement.
 
-### 22.12 Write timeout uncertainty
+When budget is exhausted without new causal evidence:
+
+- class remains `TRANSIENT`;
+- workflow leaves automatic retry.
+
+### 23.11 Write timeout uncertainty
 
 For a mutating request, inject timeout/connection loss after request transmission may have occurred.
 
@@ -1136,21 +1372,53 @@ Verify:
 
 - `error_class=TRANSIENT` may be retained;
 - `remote_outcome=UNKNOWN`;
+- `ambiguous_result=true` when a RegistrationAttempt exists;
 - no blind replay;
 - read-back/reconciliation executes first;
-- unresolved result escalates safely.
+- unresolved result escalates workflow safely without changing the cause merely for convenience.
 
-### 22.13 Proven pre-send transport failure
+### 23.12 Whitelisted pre-send non-application
 
-Inject a transport failure where the harness proves no request was transmitted.
+Test separately:
 
-Verify a mutating attempt may establish:
+- local pre-submit rejection;
+- DNS resolution failure;
+- new TCP connect failure before establishment;
+- new-connection TLS handshake failure before HTTP request transmission.
+
+For each case, the harness/transport instrumentation must prove the corresponding whitelist predicate before allowing:
 
 `remote_outcome=NOT_APPLIED_PROVEN`
 
-without falsely claiming provider rejection.
+and:
 
-### 22.14 Conflict vs duplicate
+`ambiguous_result=false`.
+
+### 23.13 Non-whitelisted transport uncertainty
+
+Test at least:
+
+- pooled/reused connection reset;
+- generic timeout with unknown phase;
+- send failure after transport handoff.
+
+Verify all default to:
+
+`remote_outcome=UNKNOWN`
+
+for writes, even if the exception name contains `Connection` or `Connect` language.
+
+### 23.14 Production transport observability
+
+Verify the actual HTTP stack exposes enough phase information to satisfy every production whitelist predicate used by ICBM.
+
+A fixture proving a no-send path is not sufficient by itself.
+
+If the production client cannot positively establish the predicate, production behavior must remain:
+
+`remote_outcome=UNKNOWN`.
+
+### 23.15 Conflict vs duplicate
 
 Use fixtures for:
 
@@ -1163,7 +1431,7 @@ Verify:
 - explicit duplicate -> `DUPLICATE`;
 - duplicate is not inferred solely from prior timeout/retry history.
 
-### 22.15 Resource not found contexts
+### 23.16 Resource not found contexts
 
 Verify distinct handling for:
 
@@ -1173,38 +1441,80 @@ Verify distinct handling for:
 
 They MUST NOT share one unconditional mapping.
 
-### 22.16 Redirect safety
+Immediate read-back absence MUST NOT become `NOT_APPLIED_PROVEN` until the M5 consistency window proves that inference safe.
+
+### 23.17 Redirect safety / 308 mutation preservation
 
 For a mutating request receiving 308:
 
-- generic client does not silently follow/replay;
+- generic client does not silently follow;
+- method/body preservation is treated as duplicate-mutation risk;
 - redirect target is validated against endpoint policy;
-- no credentials/body forwarded to an unapproved host.
+- no credentials/body are forwarded to an unapproved host;
+- same-origin redirect alone does not authorize replay;
+- repository/static guard catches an accidental generic auto-follow configuration.
 
-### 22.17 2xx semantic failure/partial result
+If HTTPX is used, acceptance SHALL include a guard against `follow_redirects=True` on the generic mutation client.
 
-Use a fixture representing an endpoint where HTTP success does not mean every item/async operation succeeded.
+### 23.18 Mandatory success predicate / 2xx semantic failure
 
-Verify endpoint result parsing can still produce canonical failures and does not stop at HTTP status.
+For every adopted endpoint fixture:
 
-### 22.18 Trace/evidence capture
+- prove an endpoint success predicate exists;
+- reject automatic adoption/execution if the predicate is missing.
+
+Use at least one 2xx fixture containing partial/per-item/asynchronous failure semantics.
+
+Verify:
+
+- HTTP 2xx alone does not mark success;
+- response is parsed;
+- success predicate is evaluated;
+- semantic failure produces the appropriate canonical class/evidence;
+- mutating outcome remains independent until read-back/result contract proves it.
+
+### 23.19 `RegistrationAttempt.ambiguous_result` compatibility
+
+For each remote outcome verify:
+
+- `APPLIED_PROVEN -> ambiguous_result=false`;
+- `NOT_APPLIED_PROVEN -> ambiguous_result=false`;
+- `UNKNOWN -> ambiguous_result=true`.
+
+Verify the two fields cannot be independently persisted in contradictory forms.
+
+### 23.20 Error class vs workflow `REVIEW_REQUIRED`
+
+Exercise an unresolved unknown provider code.
+
+Verify:
+
+- `error_class=UNKNOWN` remains unchanged;
+- workflow state may become `REVIEW_REQUIRED` after bounded diagnostics;
+- no fake `error_class=REVIEW_REQUIRED` is written merely because a human is needed.
+
+If an endpoint-specific provider condition is later mapped to canonical `error_class=REVIEW_REQUIRED`, add a separate fixture proving those provider semantics.
+
+### 23.21 Trace/evidence capture
 
 For gateway and API-server error fixtures:
 
 - capture trace ID when present;
 - preserve provider timestamp/code/status;
 - sanitize sensitive values;
-- link the evidence to the correct session generation and operation attempt.
+- link evidence to correct session generation and operation attempt.
 
-### 22.19 Classification re-evaluation
+### 23.22 Classification re-evaluation
 
 Begin with `UNKNOWN`, then add corroborating evidence.
 
 Verify reclassification appends evidence and preserves the original uncertainty event rather than rewriting history.
 
+Also verify retry-count growth by itself cannot reclassify `TRANSIENT` to `FATAL`.
+
 ---
 
-## 23. Runtime evidence required before `verified_at`
+## 24. Runtime evidence required before `verified_at`
 
 `verified_at` MUST remain null until measured evidence covers at least:
 
@@ -1215,9 +1525,12 @@ Verify reclassification appends evidence and preserves the original uncertainty 
 - `GW.AUTHN` ambiguity handling;
 - current `GW.IP_NOT_ALLOWED` behavior or an explicitly documented unmeasured limitation;
 - mutating timeout/reconciliation behavior in a controlled boundary;
+- actual production transport observability for every enabled `NOT_APPLIED_PROVEN` whitelist predicate;
 - unknown-code default behavior;
 - sensitive-data sanitization;
-- current product endpoint redirect behavior or an explicitly documented unresolved limitation.
+- current product endpoint redirect behavior or an explicitly documented unresolved limitation;
+- endpoint success-predicate enforcement for all adopted M2 endpoints;
+- `RegistrationAttempt.ambiguous_result` derivation consistency.
 
 Live destructive errors MUST NOT be manufactured merely to complete this document.
 
@@ -1225,7 +1538,7 @@ Controlled harnesses/mocks are preferred for unsafe failure injection.
 
 ---
 
-## 24. Open questions
+## 25. Open questions
 
 ### Q1. Exact API error when the 180-day own-store application re-authentication expires
 
@@ -1255,6 +1568,8 @@ Current status:
 
 `PENDING_ENDPOINT_MATRIX_AND_RUNTIME_EVIDENCE`
 
+Generic mutation auto-follow remains forbidden regardless.
+
 ### Q4. Endpoint-specific product/domain error catalog
 
 Generic `BAD_REQUEST/UNAUTHORIZED/FORBIDDEN/NOT_FOUND/INTERNAL_SERVER_ERROR` is insufficient for a complete registration diagnosis.
@@ -1283,9 +1598,31 @@ Current status:
 
 `POLICY_PENDING`
 
+Budget exhaustion changes automation/workflow behavior, not the error class by itself.
+
+### Q7. Which production transport exceptions satisfy the `NOT_APPLIED_PROVEN` whitelist?
+
+Logical whitelist categories are defined in this document, but the selected production HTTP transport must prove which exact exception/telemetry combinations reliably establish those pre-send boundaries.
+
+Current status:
+
+`IMPLEMENTATION_MEASUREMENT_REQUIRED`
+
+Do not map exception class names directly without that verification.
+
+### Q8. Canonical schema evolution from `ambiguous_result` to `remote_outcome`
+
+Current compatibility rule derives the canonical boolean from `remote_outcome`.
+
+A future ADR may choose to persist the richer enum directly in `RegistrationAttempt`.
+
+Current status:
+
+`COMPATIBILITY_MAPPING_DEFINED / SCHEMA_CHANGE_NOT_REQUIRED_FOR_THIS_DOC`
+
 ---
 
-## 25. Final M2 error contract
+## 26. Final M2 error contract
 
 For SmartStore:
 
@@ -1297,7 +1634,9 @@ For SmartStore:
 
 `same root cause may arrive through different provider codes/statuses`
 
-`2xx != always semantic operation success`
+`every adopted endpoint requires a success predicate`
+
+`2xx != semantic success until success_predicate passes`
 
 `BAD_REQUEST != always VALIDATION`
 
@@ -1311,15 +1650,33 @@ For SmartStore:
 
 `UNKNOWN != permission to guess`
 
+`error_class != workflow_state`
+
+`error_class=UNKNOWN + workflow_state=REVIEW_REQUIRED is valid`
+
+`error_class=REVIEW_REQUIRED is reserved for positively established provider/domain human-judgment semantics`
+
 `error_class != replay permission`
 
+`retry-budget exhaustion != automatic reclassification`
+
 `TRANSIENT write failure + remote_outcome UNKNOWN != safe retry`
+
+`NOT_APPLIED_PROVEN = whitelist-only or positive endpoint reconciliation proof`
+
+`pooled/reused connection failure != NOT_APPLIED_PROVEN by exception name`
+
+`RegistrationAttempt.ambiguous_result = (remote_outcome == UNKNOWN)` until a later canonical schema ADR changes it`
+
+`HTTP 308 can preserve method/body and therefore can replay a mutation`
+
+`generic mutation redirect following = forbidden`
 
 `mutating replay requires endpoint-specific idempotency/read-back proof`
 
 `provider trace/evidence must be preserved safely`
 
-`classification may strengthen only when new evidence arrives`
+`classification may strengthen only when new causal evidence arrives`
 
 `final write truth comes from bounded mutation + external read-back, not from error-code optimism`
 
