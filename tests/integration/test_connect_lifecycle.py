@@ -2,7 +2,7 @@
 
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -17,11 +17,11 @@ from app.connect.proof import ProtectedReadProof
 from app.connect.sessions import SESSIONS_DIR_NAME
 from app.connect.state import CapabilityStatus, ConnectionState
 from app.container import Container, build_container
-from app.core.errors import AuthError, PolicyBlockedError, TransientError
+from app.core.errors import AuthError, InputValidationError, PolicyBlockedError, TransientError
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore
 from app.system.secret_scan import scan
-from integrations.suppliers.base import RequestKind
+from integrations.suppliers.base import Credentials, RequestKind
 from tests.suppliers import (
     FAKE_KEY,
     PASSWORD,
@@ -269,30 +269,147 @@ def test_a_transient_login_failure_is_not_an_auth_failure(
     assert _verify(app).proven
 
 
-def test_concurrent_callers_share_one_real_login(app: Container, gateway: FakeGateway) -> None:
-    _save(app)
+def _until(predicate: Callable[[], bool], what: str, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError(f"timed out waiting for {what}")
+        time.sleep(0.01)
+
+
+def _burst(app: Container, gateway: FakeGateway, callers: int = 4) -> list[object]:
+    """``callers`` concurrent connections while the first login is held open; the login is
+    released only once every other caller is waiting on that flight."""
     gateway.login_gate = threading.Event()
-    proofs: list[ProtectedReadProof] = []
-    errors: list[BaseException] = []
+    outcomes: list[object] = []
+    guard = threading.Lock()
 
     def call() -> None:
         try:
-            proofs.append(_verify(app))
+            outcome: object = _verify(app)
         except BaseException as exc:
-            errors.append(exc)
+            outcome = exc
+        with guard:
+            outcomes.append(outcome)
 
-    threads = [threading.Thread(target=call) for _ in range(4)]
+    threads = [threading.Thread(target=call) for _ in range(callers)]
     for thread in threads:
         thread.start()
-    deadline = time.monotonic() + 5
-    while gateway.logins == 0 and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _until(
+        lambda: gateway.logins == 1 and app.connect._flights.waiters(FAKE_KEY) == callers - 1,
+        "every caller to join the flight",
+    )
     gateway.login_gate.set()
     for thread in threads:
         thread.join(10)
-    assert not errors
-    assert len(proofs) == 4 and all(p.proven for p in proofs)
+    gateway.login_gate = None
+    assert len(outcomes) == callers
+    return outcomes
+
+
+def test_concurrent_callers_share_one_real_login(app: Container, gateway: FakeGateway) -> None:
+    _save(app)
+    outcomes = _burst(app, gateway)
+    assert all(isinstance(o, ProtectedReadProof) and o.proven for o in outcomes)
     assert gateway.logins == 1
+
+
+def test_concurrent_callers_share_one_rejected_login(app: Container, gateway: FakeGateway) -> None:
+    # PR #9 review 5191372031 blocker 1: a burst with a wrong password is one submission.
+    _save(app, password="wrong-password")
+    outcomes = _burst(app, gateway)
+    assert all(isinstance(o, AuthError) and o.code == "SUPPLIER_LOGIN_REJECTED" for o in outcomes)
+    assert gateway.logins == 1
+    assert _summary(app).consecutive_auth_failures == 1
+    assert _events(app).count(E.SUPPLIER_AUTH_FAILED) == 1
+
+
+def test_concurrent_callers_share_one_failed_verification(
+    app: Container, gateway: FakeGateway
+) -> None:
+    _save(app)
+    gateway.unrecognized = True
+    outcomes = _burst(app, gateway)
+    assert all(isinstance(o, TransientError) for o in outcomes)
+    assert gateway.logins == 1
+    assert _summary(app).state is S.DEGRADED
+
+
+def test_credential_replacement_waits_for_the_login_in_flight(
+    app: Container, gateway: FakeGateway, secrets: MemorySecretStore, config: AppConfig
+) -> None:
+    # PR #9 review 5191372031 blocker 2: an old-account login still in flight must never leave
+    # its session as the READY connection once new credentials are saved.
+    _save(app)
+    gateway.login_gate = threading.Event()
+    connecting = threading.Thread(target=lambda: _verify(app))
+    connecting.start()
+    _until(lambda: gateway.logins == 1, "the old-credential login to start")
+    replacing = threading.Thread(target=lambda: _save(app, password="rotated-password"))
+    replacing.start()
+    replacing.join(0.3)
+    assert replacing.is_alive(), "credential replacement must wait for the flight"
+    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+    gateway.login_gate.set()
+    connecting.join(10)
+    replacing.join(10)
+    gateway.login_gate = None
+
+    summary = _summary(app)
+    assert (summary.state, summary.session_state) == (S.DISCONNECTED, "NONE")
+    assert secrets.get(f"supplier:{FAKE_KEY}:password") == "rotated-password"
+    assert not (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
+    gateway.accepted = Credentials(username=USERNAME, password="rotated-password")
+    assert _verify(app).proven
+    assert gateway.logins == 2
+
+
+def test_saving_the_same_login_again_changes_nothing(app: Container, gateway: FakeGateway) -> None:
+    _save(app)
+    _verify(app)
+    app.connect.save_credentials(FAKE_KEY, username=USERNAME, password=None, actor=OPERATOR)
+    assert (_summary(app).state, _summary(app).session_state) == (S.READY, "VERIFIED")
+    assert _events(app).count(E.SUPPLIER_CREDENTIALS_UPDATED) == 1
+    assert _verify(app).proven and gateway.logins == 1
+
+
+def test_a_new_login_id_keeps_the_stored_password_but_starts_clean(
+    app: Container, secrets: MemorySecretStore
+) -> None:
+    _save(app)
+    _verify(app)
+    app.connect.save_credentials(
+        FAKE_KEY, username="another-operator", password=None, actor=OPERATOR
+    )
+    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+    assert app.connect.stored_login(FAKE_KEY).username == "another-operator"
+    assert (_summary(app).state, _summary(app).session_state) == (S.DISCONNECTED, "NONE")
+
+
+def test_the_masked_stored_state_can_never_become_the_password(
+    app: Container, secrets: MemorySecretStore
+) -> None:
+    _save(app)
+    for masked in ("••••••••", "•••••••• · 저장됨"):
+        with pytest.raises(InputValidationError) as caught:
+            app.connect.save_credentials(
+                FAKE_KEY, username=USERNAME, password=masked, actor=OPERATOR
+            )
+        assert caught.value.code == "SUPPLIER_PASSWORD_MASK_REJECTED"
+    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+
+
+def test_a_first_save_needs_a_password(app: Container) -> None:
+    with pytest.raises(InputValidationError) as caught:
+        app.connect.save_credentials(FAKE_KEY, username=USERNAME, password=None, actor=OPERATOR)
+    assert caught.value.code == "SUPPLIER_PASSWORD_REQUIRED"
+
+
+def test_the_stored_login_view_never_contains_the_password(app: Container) -> None:
+    _save(app)
+    view = app.connect.stored_login(FAKE_KEY)
+    assert (view.username, view.password_stored) == (USERNAME, True)
+    assert PASSWORD not in view.model_dump_json()
 
 
 def test_a_restart_holds_no_proof_but_reuses_the_encrypted_session(

@@ -26,6 +26,7 @@ from app.connect.contracts import (
     CapabilityReport,
     MarketplaceConnectionState,
     MarketplaceConnectionSummary,
+    StoredLoginView,
     SupplierConnectionSummary,
 )
 from app.connect.credentials import SupplierCredentialStore
@@ -76,6 +77,8 @@ SYSTEM_ACTOR = "system:connect"
 OPERATOR_TEST = "operator_test"
 AUTO_CONNECT = "auto_connect"
 _MAX_SECRET_LENGTH = 500
+# The UI shows a stored password only as "•••••••• · 저장됨"; that indicator is never a password.
+_PASSWORD_MASK = "•"
 
 S = ConnectionState
 Mutation = Callable[[Session, SupplierConnection], None]
@@ -114,7 +117,6 @@ class ConnectService:
             self._definitions[key] = definition
         self._marketplaces = tuple(marketplaces)
         self._flights = SingleFlightAuth()
-        self._last_proof: dict[str, ProtectedReadProof] = {}
 
     def job_definition(self) -> JobDefinition:
         return JobDefinition(
@@ -331,18 +333,58 @@ class ConnectService:
 
     # ------------------------------------------------------------------ operator actions
 
+    def stored_login(self, supplier_key: str) -> StoredLoginView:
+        """The saved login ID (read from the OS secret store on demand) and whether a password is
+        stored. The password itself is never returned."""
+        self._definition(supplier_key)
+        return StoredLoginView(
+            username=self._credentials.username(supplier_key),
+            password_stored=self._credentials.stored(supplier_key),
+        )
+
     def save_credentials(
-        self, supplier_key: str, *, username: str, password: str, actor: str
+        self, supplier_key: str, *, username: str, password: str | None, actor: str
     ) -> SupplierConnectionSummary:
+        """Replace the stored login; ``password=None`` keeps the stored password.
+
+        Serialised with the supplier's connection flight (PR #9 review 5191372031): a login still
+        using the old credentials completes first, and its session is discarded here, so an
+        old-account session can never be the READY connection after new credentials are saved.
+        """
         definition = self._definition(supplier_key)
-        if not username.strip() or not password:
-            raise InputValidationError("SUPPLIER_CREDENTIALS_INVALID", "ID and password required")
-        if len(username) > _MAX_SECRET_LENGTH or len(password) > _MAX_SECRET_LENGTH:
+        username = username.strip()
+        password = password or None
+        if not username:
+            raise InputValidationError("SUPPLIER_CREDENTIALS_INVALID", "an ID is required")
+        if password is not None and _PASSWORD_MASK in password:
+            raise InputValidationError(
+                "SUPPLIER_PASSWORD_MASK_REJECTED",
+                "the stored-password indicator is not a password; choose 비밀번호 변경",
+            )
+        if len(username) > _MAX_SECRET_LENGTH or len(password or "") > _MAX_SECRET_LENGTH:
             raise InputValidationError("SUPPLIER_CREDENTIALS_INVALID", "credential is too long")
-        self._credentials.save(supplier_key, Credentials(username=username, password=password))
+        with self._flights.lifecycle(supplier_key):
+            current = self._credentials.load(supplier_key)
+            if password is None:
+                if current is None:
+                    raise InputValidationError(
+                        "SUPPLIER_PASSWORD_REQUIRED", "a password is required for the first save"
+                    )
+                if current.username == username:
+                    return self.supplier_connection(supplier_key)  # nothing changed
+                password = current.password
+            self._replace_credentials(
+                definition, Credentials(username=username, password=password), actor=actor
+            )
+        return self.supplier_connection(supplier_key)
+
+    def _replace_credentials(
+        self, definition: SupplierDefinition, credentials: Credentials, *, actor: str
+    ) -> None:
+        supplier_key = definition.profile.supplier_key
+        self._credentials.save(supplier_key, credentials)
         # A session belongs to the account that created it; new credentials start clean.
         self._sessions.clear(supplier_key)
-        self._last_proof.pop(supplier_key, None)
         with self._db.write() as session:
             row = self._row(session, supplier_key)
             if row is None:
@@ -366,7 +408,6 @@ class ConnectService:
                 state_from=source,
                 state_to=row.state,
             )
-        return self.supplier_connection(supplier_key)
 
     def set_auto_connect(
         self, supplier_key: str, *, enabled: bool, actor: str
@@ -386,7 +427,8 @@ class ConnectService:
                 auto_connect=enabled,
             )
 
-        self._update(supplier_key, mutate)
+        with self._flights.lifecycle(supplier_key):
+            self._update(supplier_key, mutate)
         return self.supplier_connection(supplier_key)
 
     def resume(self, supplier_key: str, *, actor: str) -> SupplierConnectionSummary:
@@ -416,7 +458,8 @@ class ConnectService:
                 resumed_at=now,
             )
 
-        self._update(supplier_key, mutate)
+        with self._flights.lifecycle(supplier_key):
+            self._update(supplier_key, mutate)
         return self.supplier_connection(supplier_key)
 
     def request_connection_test(self, supplier_key: str, *, actor: str) -> JobRecord:
@@ -425,7 +468,8 @@ class ConnectService:
             raise InputValidationError(
                 "SUPPLIER_CREDENTIALS_MISSING", "save the supplier login before testing"
             )
-        self._ensure_row(definition)
+        with self._flights.lifecycle(supplier_key):
+            self._ensure_row(definition)
         denied = False
         with self._db.write() as session:
             row = self._row(session, supplier_key)
@@ -511,25 +555,32 @@ class ConnectService:
         return self.verify(supplier_key, trigger=AUTO_CONNECT, allow_login=allow_login)
 
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
+        """Establish or reuse the connection through the supplier's single flight.
+
+        Concurrent callers share the one flight in progress and receive its outcome — the proof
+        or the failure — so a burst never turns into several real logins (review 5191372031).
+        """
         definition = self._definition(supplier_key)
+        return self._flights.run(
+            supplier_key,
+            lambda: self._verify_in_flight(definition, trigger=trigger, allow_login=allow_login),
+        )
+
+    def _verify_in_flight(
+        self, definition: SupplierDefinition, *, trigger: str, allow_login: bool
+    ) -> ProtectedReadProof:
+        key = definition.profile.supplier_key
         self._ensure_row(definition)
-        with self._flights.flight(supplier_key) as flight:
-            state = self._state(supplier_key)
-            if state is None:
-                raise InputValidationError(
-                    "SUPPLIER_CREDENTIALS_MISSING", "save the supplier login before connecting"
-                )
-            last = self._last_proof.get(supplier_key)
-            if flight.superseded and state is S.READY and last is not None:
-                return last  # another caller proved the connection while this one waited
-            if state is S.PAUSED:
-                raise PolicyBlockedError(
-                    "SUPPLIER_AUTH_PAUSED", "authentication is paused; an operator must resume it"
-                )
-            proof = self._verify(definition, trigger=trigger, allow_login=allow_login)
-            flight.completed()
-            self._last_proof[supplier_key] = proof
-            return proof
+        state = self._state(key)
+        if state is None:
+            raise InputValidationError(
+                "SUPPLIER_CREDENTIALS_MISSING", "save the supplier login before connecting"
+            )
+        if state is S.PAUSED:
+            raise PolicyBlockedError(
+                "SUPPLIER_AUTH_PAUSED", "authentication is paused; an operator must resume it"
+            )
+        return self._verify(definition, trigger=trigger, allow_login=allow_login)
 
     def _verify(
         self, definition: SupplierDefinition, *, trigger: str, allow_login: bool
