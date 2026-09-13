@@ -5,20 +5,20 @@ Decision owner: Architect (ChatGPT). Sources: Issue #7 body; freeze `5653533064`
 Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-13
 Related: ADR-0001 (stack, secrets row, Playwright via jobs), ADR-0002 (in-process worker), ADR-0005 (job states, only TRANSIENT/RATE_LIMITED retry), ADR-0006 (single data-directory owner, mutation-target invariant)
-Supplier name: **KM리테일** (operator KM통상, `https://kmretail.co.kr`, `supplier_key = kmretail`) — the supplier the canonical documents and Issue #7 call "K홀세일". The display name follows the v29 UI source and the user's decision of 2026-09-14.
+Supplier name: **KM통상** (`https://kmretail.co.kr`, `supplier_key = kmretail`) is the canonical display name per Issue #7 addendum `5654634584` (the user's decision of 2026-09-14). ROADMAP and the Issue #7 body call this supplier "K홀세일". The key and package identity stay `kmretail`.
 
 ---
 
 ## Context
 
-M1 is the first milestone with real supplier-account egress. It has to prove that ICBM can authenticate to KM리테일 and keep that connection safe:
+M1 is the first milestone with real supplier-account egress. It has to prove that ICBM can authenticate to KM통상 and keep that connection safe:
 
 - no plaintext secret at rest;
 - no login storm;
 - no unattributed egress;
 - a connection is proven, not badged.
 
-M1 must also avoid designing the core around one site. KM리테일 is the first adapter, not the model.
+M1 must also avoid designing the core around one site. KM통상 is the first adapter, not the model.
 
 ## Decision
 
@@ -72,6 +72,10 @@ rejected logins → PAUSED  (left only by an audited operator resume)
   - Replacement is atomic: encrypted temp file, then fsync, then rename.
   - A blob that cannot be authenticated or decrypted is discarded, never partially reused.
 - **Only cookies for the supplier's own hosts** are kept in the session payload.
+- **Credential form** (Issue #7 addendum `5654634584`):
+  - The operator's loopback UI may read the saved **login ID** on demand from the OS secret store. It is never persisted anywhere else.
+  - The password is never returned. The UI shows only a masked stored state (`•••••••• · 저장됨`) until the operator explicitly chooses 비밀번호 변경.
+  - A save without a password keeps the stored one. A password containing the mask character is rejected (`SUPPLIER_PASSWORD_MASK_REJECTED`), so the indicator can never replace the credential.
 - **No plaintext secret appears in the database, logs, audit payloads, API responses or evidence.** Two defences apply:
   - Validation errors no longer echo submitted values.
   - The API accepts credentials and never returns them.
@@ -87,7 +91,7 @@ The common procedure (`app/connect/proof.py`) applies to every supplier.
 1. **Unauthenticated control request** against target P. It must satisfy the unauthenticated expectation and must not look authenticated.
 2. **Authenticated request** against the same P. It must satisfy the authenticated predicate and must not look unauthenticated.
 
-HTTP status is never proof. For KM리테일, the unauthenticated control of `/myshop/index.html` answers **200**. Its `xans-myshop` page skeleton is present anyway, so status and skeleton prove nothing.
+HTTP status is never proof. For KM통상, the unauthenticated control of `/myshop/index.html` answers **200**. Its `xans-myshop` page skeleton is present anyway, so status and skeleton prove nothing.
 
 Only the following results are accepted:
 
@@ -105,7 +109,8 @@ Neither outcome is ever READY. A login submission never marks READY by itself.
 
 - **Lazy by default.** Startup loads metadata only and makes zero supplier requests.
 - **Reuse first.** A protected operation reuses the stored session. Only a missing or expired session leads to **one** authentication per operation, followed by the same proof.
-- **Single flight.** `SingleFlightAuth` collapses concurrent callers per supplier into one real login. A waiter that finds a completed flight reuses its result.
+- **Single flight.** `SingleFlightAuth` makes callers that arrive while a flight is in progress wait for it and share its **outcome, whether a proof or a failure** (PR #9 review `5191372031`). A burst with a rejected password therefore submits exactly one login and counts exactly one failure.
+- **Serialised credential replacement.** The flight runs under a per-supplier lifecycle lock. Credential replacement, resume and the auto-connect switch take the same lock. A login still using the old credentials completes first, and replacement then discards its session, so an old-account session can never be the READY connection after new credentials are saved.
 - **Auto-connect setting.** `auto_connect` is a per-supplier operator setting, on by default. It governs automatic operations only; the manual connection test stays available. No startup auto-connect exists.
 - **Loop guard.** Each rejected login counts toward `RequestPolicy.auth_retry_limit`. So does a login the protected read shows was not effective. Reaching the limit moves the connection to `PAUSED`:
   - no further automatic or manual authentication reaches the supplier;
@@ -147,7 +152,7 @@ The global egress guard stays installed and blocking.
 
 **Browser login.** The browser runs out of process, so every browser request is routed through the same host allowlist. Blocked browser requests are counted on the request record.
 
-KM리테일's hosts are `kmretail.co.kr` and `login2.cafe24ssl.com`, the Cafe24 secure-login encryption host. On 2026-09-13 the login page's form and encryption scripts were verified to load under exactly these two hosts, without any credential.
+KM통상's hosts are `kmretail.co.kr` and `login2.cafe24ssl.com`, the Cafe24 secure-login encryption host. On 2026-09-13 the login page's form and encryption scripts were verified to load under exactly these two hosts, without any credential.
 
 ### 8. Observability and safe payloads
 
@@ -175,9 +180,9 @@ M1 contains no ProductFacts, product list or detail collection, AI, SmartStore o
 These are implementation choices within the contract, recorded for the architect's review:
 
 1. **The `cryptography` dependency** (AES-256-GCM) is added for the session blob, pinned in `constraints.txt`. The alternative was Windows DPAPI via ctypes, which is Windows-only and would leave CI's Ubuntu leg without a real cipher.
-2. **Browser login, HTTP protected reads.** KM리테일's login form is encrypted client-side by Cafe24 AuthSSL, so authentication runs in the browser. The resulting supplier-host cookies are then replayed over HTTP for the protected reads, which keeps every read inside the egress grant. If a supplier binds sessions to the browser, a browser-side read belongs in the common transport, not in the adapter.
+2. **Browser login, HTTP protected reads.** KM통상's login form is encrypted client-side by Cafe24 AuthSSL, so authentication runs in the browser. The resulting supplier-host cookies are then replayed over HTTP for the protected reads, which keeps every read inside the egress grant. If a supplier binds sessions to the browser, a browser-side read belongs in the common transport, not in the adapter.
 3. **The browser channel defaults to the locally installed Edge** (`ICBM_BROWSER_CHANNEL=msedge`): a Chromium engine, with nothing downloaded.
-4. **KM리테일's authenticated predicate** (logged-on module plus logout action) matches the Cafe24 storefront convention. It must be confirmed by the first real login.
+4. **KM통상's authenticated predicate** (logged-on module plus logout action) matches the Cafe24 storefront convention. It must be confirmed by the first real login.
    - A mismatch fails safe as `UNRECOGNIZED`, never READY.
    - Informational signals (`logout_text`, `member_modify_link`) are recorded, as marker names only, so the page can be diagnosed without storing content.
 
