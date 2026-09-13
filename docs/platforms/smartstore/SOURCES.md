@@ -24,7 +24,7 @@ The owning contracts remain self-contained and keep their own provenance blocks:
 - `PERMISSIONS_SCOPES.md`
 - `ERRORS.md`
 - `ENDPOINT_MATRIX.md`
-- `CAPABILITY_MAPPING.md` when added
+- `CAPABILITY_MAPPING.md`
 
 `SOURCES.md` does **not** replace those blocks.
 
@@ -179,6 +179,7 @@ This matrix mirrors the self-contained provenance values. It is an audit index, 
 | `PERMISSIONS_SCOPES.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
 | `ERRORS.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
 | `ENDPOINT_MATRIX.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
+| `CAPABILITY_MAPPING.md` | `2.88.0` | `2026-09-14` | `null` | `2026-10-14` | `MATCHED` |
 
 ### 4.1 Drift rules
 
@@ -216,12 +217,12 @@ Until implemented, reviewers must treat this matrix as a manual drift check.
 | Source ID | Upstream source | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
 | `NAVER-P0-CURRENT` | https://apicenter.commerce.naver.com/docs/commerce-api/current | Current Commerce API version and API catalog | all SmartStore contracts | Commerce API version changes from `2.88.0` |
-| `NAVER-P0-AUTH` | https://apicenter.commerce.naver.com/docs/auth | OAuth2 Client Credentials, token URL, Bearer auth, scopes N/A, auth/signature rules | `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `ENDPOINT_MATRIX.md` | auth/token/signature/scopes contract changes |
-| `NAVER-P0-RESTRICTION` | https://apicenter.commerce.naver.com/docs/restriction | TLS constraints, API-group model, request limits | `PERMISSIONS_SCOPES.md`, `ERRORS.md` | API-group/TLS/rate-limit model changes |
-| `NAVER-P0-TROUBLESHOOTING` | https://apicenter.commerce.naver.com/docs/trouble-shooting | gateway error format, Trace ID, gateway code table | `ERRORS.md` | gateway status/code/meaning changes |
+| `NAVER-P0-AUTH` | https://apicenter.commerce.naver.com/docs/auth | OAuth2 Client Credentials, token URL, Bearer auth, scopes N/A, auth/signature rules | `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `ENDPOINT_MATRIX.md`, `CAPABILITY_MAPPING.md` | auth/token/signature/scopes contract changes |
+| `NAVER-P0-RESTRICTION` | https://apicenter.commerce.naver.com/docs/restriction | TLS constraints, API-group model, request limits | `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `CAPABILITY_MAPPING.md` | API-group/TLS/rate-limit model changes |
+| `NAVER-P0-TROUBLESHOOTING` | https://apicenter.commerce.naver.com/docs/trouble-shooting | gateway error format, Trace ID, gateway code table | `ERRORS.md`, `CAPABILITY_MAPPING.md` | gateway status/code/meaning changes |
 | `NAVER-P0-REST` | https://apicenter.commerce.naver.com/docs/restful-api | common REST/request/response conventions | `ERRORS.md`, `ENDPOINT_MATRIX.md` | common REST/error contract changes |
-| `NAVER-P0-TOKEN` | https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth | token issuance request/response endpoint contract | `AUTH.md`, `ENDPOINT_MATRIX.md` | method/path/request/response/token-lifetime contract changes |
-| `NAVER-P0-SELLER-ACCOUNT` | https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers | protected seller-account read, identity fields, endpoint errors | `ACCOUNT_IDENTITY.md`, `PERMISSIONS_SCOPES.md`, `ENDPOINT_MATRIX.md` | method/path/response/error/permission mapping changes |
+| `NAVER-P0-TOKEN` | https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth | token issuance request/response endpoint contract | `AUTH.md`, `ENDPOINT_MATRIX.md`, `CAPABILITY_MAPPING.md` | method/path/request/response/token-lifetime contract changes |
+| `NAVER-P0-SELLER-ACCOUNT` | https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers | protected seller-account read, identity fields, endpoint errors | `ACCOUNT_IDENTITY.md`, `PERMISSIONS_SCOPES.md`, `ENDPOINT_MATRIX.md`, `CAPABILITY_MAPPING.md` | method/path/response/error/permission mapping changes |
 | `NAVER-P0-BASIC-INTEGRATION` | https://apicenter.commerce.naver.com/docs/solution-doc/3000/%EA%B8%B0%EB%B3%B8-%EC%97%B0%EB%8F%99-%EC%9A%94%EC%86%8C-%EA%B0%80%EC%9D%B4%EB%93%9C | solution/account mapping guidance and account UID context | `ACCOUNT_IDENTITY.md`, `AUTH.md` | account mapping or solution guidance changes |
 | `NAVER-P0-PRODUCT-CREATE` | https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product | product errors and future M5 planning | `PERMISSIONS_SCOPES.md`, `ERRORS.md`; M5 planning only | product-create contract changes before M5 adoption |
 | `NAVER-P0-PRODUCT-READ` | https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product | product read/error examples and future reconciliation | `ERRORS.md`; M5 planning only | product-read contract changes before M5 adoption |
@@ -240,16 +241,16 @@ These sources are point-in-time official support evidence. They may later be edi
 
 | Source ID | URL | Observation preserved by ICBM | Basis | Dependent contract(s) |
 | --- | --- | --- | --- | --- |
-| `NAVER-P1-ACCOUNT-UID-2425` | https://github.com/commerce-api-naver/commerce-api/discussions/2425 | `accountUid`/`accountId` uniqueness guidance; `accountUid` Commerce API integration use | `SUPPORTING` | `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md` |
+| `NAVER-P1-ACCOUNT-UID-2425` | https://github.com/commerce-api-naver/commerce-api/discussions/2425 | `accountUid`/`accountId` uniqueness guidance; `accountUid` Commerce API integration use | `SUPPORTING` | `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md`, `CAPABILITY_MAPPING.md` |
 | `NAVER-P1-SELF-ACCOUNT-3339` | https://github.com/commerce-api-naver/commerce-api/discussions/3339 | own-store application uses `SELF`; token response does not itself provide seller identity | `SUPPORTING` | `AUTH.md` |
-| `NAVER-P1-APP-REAUTH-3557` | https://github.com/commerce-api-naver/commerce-api/discussions/3557 | own-store application re-authentication is a web/manual action; authentication validity guidance is 180 days from authentication | `P1_ONLY` | `AUTH.md` |
+| `NAVER-P1-APP-REAUTH-3557` | https://github.com/commerce-api-naver/commerce-api/discussions/3557 | own-store application re-authentication is a web/manual action; authentication validity guidance is 180 days from authentication | `P1_ONLY` | `AUTH.md`, `CAPABILITY_MAPPING.md` |
 | `NAVER-P1-SECRET-REISSUE-1564` | https://github.com/commerce-api-naver/commerce-api/discussions/1564 | provider application-secret reissue makes the previous secret unusable immediately | `P1_ONLY` | `AUTH.md` |
 | `NAVER-P1-TIMESTAMP-357` | https://github.com/commerce-api-naver/commerce-api/discussions/357 | token-signature timestamp is millisecond Unix time; documented validity window/clock-sync guidance | `SUPPORTING` | `AUTH.md` |
 | `NAVER-P1-SELF-BODY-3751` | https://github.com/commerce-api-naver/commerce-api/discussions/3751 | own-store `SELF`; no `account_id`; `grant_type=client_credentials`; strict body shape | `SUPPORTING` | `AUTH.md`, `ENDPOINT_MATRIX.md` |
 | `NAVER-P1-OWN-STORE-780` | https://github.com/commerce-api-naver/commerce-api/discussions/780 | `내스토어 애플리케이션` uses `type=SELF`; one own-store application is connected to one SmartStore account under the cited provider guidance | `P1_ONLY_FOR_1_TO_1_CLAIM` | `ENDPOINT_MATRIX.md`; identity/binding design context |
-| `NAVER-P1-GW-AUTHN-GROUP-1013` | https://github.com/commerce-api-naver/commerce-api/discussions/1013 | missing required API-group permission can produce `GW.AUTHN`; provider guidance points to the application's API-group configuration | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
-| `NAVER-P1-PRODUCT-GROUP-1835` | https://github.com/commerce-api-naver/commerce-api/discussions/1835 | product API authorization tied to the `상품` API group; observed missing-group `GW.AUTHN` case | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md` |
-| `NAVER-P1-SELLERINFO-GROUP-1895` | https://github.com/commerce-api-naver/commerce-api/discussions/1895 | seller-information API calls require `판매자정보` group | `SUPPORTING` | `PERMISSIONS_SCOPES.md` |
+| `NAVER-P1-GW-AUTHN-GROUP-1013` | https://github.com/commerce-api-naver/commerce-api/discussions/1013 | missing required API-group permission can produce `GW.AUTHN`; provider guidance points to the application's API-group configuration | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `CAPABILITY_MAPPING.md` |
+| `NAVER-P1-PRODUCT-GROUP-1835` | https://github.com/commerce-api-naver/commerce-api/discussions/1835 | product API authorization tied to the `상품` API group; observed missing-group `GW.AUTHN` case | `P1_ONLY_FOR_PERMISSION_CAUSE` | `PERMISSIONS_SCOPES.md`, `ERRORS.md`, `CAPABILITY_MAPPING.md` |
+| `NAVER-P1-SELLERINFO-GROUP-1895` | https://github.com/commerce-api-naver/commerce-api/discussions/1895 | seller-information API calls require `판매자정보` group | `SUPPORTING` | `PERMISSIONS_SCOPES.md`, `CAPABILITY_MAPPING.md` |
 | `NAVER-P1-ORDERSELLER-GROUP-1093` | https://github.com/commerce-api-naver/commerce-api/discussions/1093 | order-seller APIs require `주문 판매자` group | `SUPPORTING` | `PERMISSIONS_SCOPES.md` |
 | `NAVER-P1-GW-AUTHN-HEADER-3676` | https://github.com/commerce-api-naver/commerce-api/discussions/3676 | malformed Authorization header can produce `GW.AUTHN` | `P1_ONLY_FOR_OBSERVED_CAUSE` | `ERRORS.md` |
 | `NAVER-P1-GW-AUTHN-EXPIRED-3762` | https://github.com/commerce-api-naver/commerce-api/discussions/3762 | expired access token can produce `401/GW.AUTHN` | `SUPPORTING` | `ERRORS.md` |
@@ -285,7 +286,7 @@ If a materially required P1 source disappears or changes incompatibly:
 
 | Source ID | Source | Scope in ICBM | Dependent contract(s) | Freshness |
 | --- | --- | --- | --- | --- |
-| `OAUTH-S0-RFC6749` | https://www.rfc-editor.org/rfc/rfc6749 | OAuth 2.0 Client Credentials/access-token response/token-type semantics | `AUTH.md`, `ENDPOINT_MATRIX.md` | re-review if provider changes OAuth protocol/profile |
+| `OAUTH-S0-RFC6749` | https://www.rfc-editor.org/rfc/rfc6749 | OAuth 2.0 Client Credentials/access-token response/token-type semantics | `AUTH.md`, `ENDPOINT_MATRIX.md`, `CAPABILITY_MAPPING.md` | re-review if provider changes OAuth protocol/profile |
 
 ICBM uses RFC 6749 only for OAuth semantics NAVER actually adopts.
 
@@ -317,8 +318,9 @@ This table connects documentation provenance to the concrete R0 slots required b
 | `PERMISSIONS_SCOPES.md` | `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-CURRENT`, `NAVER-P0-PRODUCT-CREATE` | `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895`, `NAVER-P1-ORDERSELLER-GROUP-1093` | `SMARTSTORE-R0-PERMISSION` for the permission-evidence layer; actual write remains separate M5 proof |
 | `ERRORS.md` | `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-REST`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-PRODUCT-CREATE`, `NAVER-P0-PRODUCT-READ` | error-related P1 rows above | adopted-endpoint measured error/ambiguity evidence required by `ERRORS.md`; no blanket `verified_at` from documentation fixtures alone |
 | `ENDPOINT_MATRIX.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `NAVER-P0-REST`, `OAUTH-S0-RFC6749` | `NAVER-P1-OWN-STORE-780`, `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-SELF-BODY-3751` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT` plus allow-list/no-redirect repository/runtime acceptance evidence |
+| `CAPABILITY_MAPPING.md` | `NAVER-P0-CURRENT`, `NAVER-P0-AUTH`, `NAVER-P0-RESTRICTION`, `NAVER-P0-TROUBLESHOOTING`, `NAVER-P0-TOKEN`, `NAVER-P0-SELLER-ACCOUNT`, `OAUTH-S0-RFC6749` | `NAVER-P1-ACCOUNT-UID-2425`, `NAVER-P1-APP-REAUTH-3557`, `NAVER-P1-GW-AUTHN-GROUP-1013`, `NAVER-P1-PRODUCT-GROUP-1835`, `NAVER-P1-SELLERINFO-GROUP-1895` | `SMARTSTORE-R0-TOKEN`, `SMARTSTORE-R0-SELLER-ACCOUNT`, `SMARTSTORE-R0-FIRST-TOKEN-CRASH`, `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`, `SMARTSTORE-R0-PERMISSION`; plus capability-state/UI/state-transition acceptance per `CAPABILITY_MAPPING.md` |
 
-A future `CAPABILITY_MAPPING.md` SHALL reuse these IDs and SHALL NOT create a competing provenance taxonomy.
+`CAPABILITY_MAPPING.md` reuses these stable IDs and does not create a competing provenance taxonomy.
 
 The owning contract remains authoritative for the exact acceptance set. This table is a dependency index; it MUST be updated if that exact set changes.
 
