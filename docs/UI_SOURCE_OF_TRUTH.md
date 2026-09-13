@@ -4,21 +4,42 @@
 
 The current approved visual prototype is:
 
-`icbm_redesign_test_v27_global_help_tooltips.html`
+`icbm_redesign_test_v28_icbm_new_gaps.html`
 
 Attached prototype fingerprint:
 
-- SHA-256: `2ca7413faa44a248c04d5e5dae3fb22b738b0011a23bb0412788f8f1ab90895e`
-- Size: `258116` bytes
+- SHA-256: `3689b86c8c06fb10c5337ab661e8eae8712e1f04bb5afbaa0b1896e9729eba63`
+- Size: `298398` bytes
+- Revision: `v28 ICBM-NEW required UI gaps`
+
+This revision supersedes `icbm_redesign_test_v27_global_help_tooltips.html` as the visual source of truth.
+
+## What v28 adds
+
+v28 closes the UI gaps required to begin fresh implementation:
+
+- runtime-ready zero-data/empty states
+- Collection Management `수집 / 공급처 관리` split
+- supplier connection cards and credential/add-supplier surface
+- product detail editor modal
+- source-evidence/product-facts presentation
+- option/SKU and image/detail editing surfaces
+- registration preflight/readiness checklist + marketplace preview
+- registered SmartStore read-back detail surface
+- collection/registration failure detail drawer
+- operation/history modal wiring
+
+The prototype is a visual/interaction contract only. Demo numbers, mock statuses and prototype JS are not runtime truth.
 
 ## Rules
 
 - This HTML prototype is the visual/product UI reference for ICBM-NEW.
-- Legacy repository UI implementations, including the old `ICBM-PROJECT` UI rebuild work, are **not** implementation sources for ICBM-NEW.
+- Legacy repository UI implementations, including old `ICBM-PROJECT` / #86 functional implementation, are **not** implementation sources for ICBM-NEW.
 - Do not copy legacy functional owners, API bindings, DB assumptions, handlers, or runtime state from old UI code.
-- The new implementation may reproduce the approved visual structure, spacing, navigation, responsive behavior, tooltip behavior, and screen hierarchy from this prototype.
+- The new implementation may reproduce the approved visual structure, spacing, navigation, responsive behavior, tooltip behavior, modal/drawer behavior and screen hierarchy from this prototype.
 - Functional behavior must be connected fresh to the new ICBM-NEW contracts.
-- When the user uploads a revised approved HTML, that approved revision replaces this prototype as the visual source of truth. Record its filename/hash before implementation.
+- If prototype JavaScript conflicts with `ROADMAP.md` / `docs/ARCHITECTURE.md`, architecture wins. The JS is demo interaction only.
+- When the user uploads a revised approved HTML, that approved revision replaces this prototype as the visual source of truth. Record filename/hash before implementation.
 
 ## Current visual top-level IA
 
@@ -38,3 +59,7 @@ Attached prototype fingerprint:
 `visual source of truth != runtime source of truth`
 
 The UI controls presentation and interaction shape. Runtime truth belongs to the new services/contracts defined in ICBM-NEW.
+
+## Repository copy status
+
+The canonical filename/hash are now registered here. The raw HTML file itself should be placed under `ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html` when copied into the repository; implementation must verify its SHA-256 matches the value above before using it as the shell.
