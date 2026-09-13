@@ -236,6 +236,8 @@ UNKNOWN
 
 UNKNOWN destructive/write outcomes are not automatically retried.
 
+Job states, transitions and the per-attempt history are fixed by `docs/adr/0005-durable-job-state-and-attempt-history.md`.
+
 ## 9. Review queue
 
 One ReviewItem model handles all human-required work:
