@@ -19,6 +19,9 @@
 - retrieved_at: `2026-09-14`
 - verified_at: `null`
 - review_due: `2026-10-14`
+- review_trigger: re-review immediately if the documented upstream version changes from `2.88.0`, the `/v1/seller/account` contract changes, or NAVER changes guidance for `accountUid` / `accountId` identity semantics.
+
+`review_due` is a fallback calendar freshness bound for periods where automated upstream-change detection is not available. An upstream-version or contract change takes precedence and triggers review earlier.
 
 `verified_at` MUST remain unset until ICBM performs a real authenticated API call against an authorized SmartStore account and records the measured response.
 
@@ -118,6 +121,24 @@ Result:
 
 `AUTH_MISMATCH -> REVIEW_REQUIRED`
 
+At mismatch-detection time ICBM MUST NOT claim to know whether the cause is:
+
+1. authentication against a different SmartStore account; or
+2. a provider-side identity change affecting what appears to be the same business/store.
+
+Those causes are operationally different but are not safely distinguishable from `accountUid` inequality alone.
+
+The review surface SHOULD therefore show expected and observed identity evidence side-by-side, for example:
+
+- expected `provider_account_uid` and `provider_account_id` when available;
+- observed `accountUid` and `accountId`;
+- weak corroborating fields such as store/channel name and channel URL for both sides when available;
+- timestamp and evidence/session generation for the observation.
+
+Weak corroborating fields are review context only. A visual or textual match in those fields MUST NOT automatically authorize rebinding.
+
+Any rebinding after `AUTH_MISMATCH` requires an explicit human action and a fresh authenticated protected read. The old and new provider identities and the evidence used for the decision SHOULD be retained for audit.
+
 ---
 
 ## 5. First binding
@@ -132,11 +153,35 @@ After the binding is persisted, subsequent authentication must compare the obser
 
 Store name or other weak display data MUST NOT be used as a substitute when `accountUid` is unavailable.
 
+### First-binding atomicity
+
+First binding is a state transition, not a collection of independently trustworthy field writes.
+
+The canonical binding unit MUST include enough data to prove one completed account association, including at minimum:
+
+- `marketplace_account_id`;
+- `provider_account_uid`;
+- `provider_account_id` when available;
+- the evidence/session generation used for the binding;
+- binding completion state or equivalent transaction proof.
+
+ICBM MUST persist that binding atomically, or provide an equivalent transaction mechanism with the same externally observable guarantee.
+
+If a crash or partial failure occurs before the completed binding commit can be proven, the account MUST be treated logically as `NOT_BOUND` after restart, even if one or more partial fields are physically present.
+
+An incomplete or orphaned binding record MUST NOT be sufficient for `AUTH_READY` and MUST NOT be silently completed from stale evidence.
+
+Recovery MAY quarantine, clean up, or overwrite incomplete storage as an implementation detail, but the safety invariant is:
+
+`binding_commit_not_proven -> NOT_BOUND`
+
+A retry must obtain current authenticated identity evidence again before establishing the binding.
+
 ---
 
 ## 6. Weak identity fields
 
-The following MAY be stored for display, diagnostics, or corroboration but MUST NOT independently prove account identity:
+The following MAY be stored for display, diagnostics, corroboration, and human mismatch review but MUST NOT independently prove account identity:
 
 - store/channel name
 - representative channel name
@@ -147,6 +192,8 @@ The following MAY be stored for display, diagnostics, or corroboration but MUST 
 - seller grade
 
 These values may change while the underlying marketplace account remains the same.
+
+Their intended use in `AUTH_MISMATCH` is to help a human understand whether the observed account appears operationally related to the expected account. They MUST NOT be promoted into a canonical identity key and MUST NOT drive automatic rebinding or READY convergence.
 
 ---
 
@@ -179,7 +226,7 @@ After restart, ICBM MUST NOT trust `AUTH_READY` merely because it was previously
 
 The system must verify that the evidence required by the current session/account contract is still valid.
 
-If required runtime proof is absent, expired, corrupt, or mismatched, the state must converge away from READY.
+If required runtime proof is absent, expired, corrupt, mismatched, or belongs to an incomplete first binding, the state must converge away from READY.
 
 Examples:
 
@@ -194,6 +241,10 @@ non-READY
 ### Persisted READY + authenticated account differs
 
 `AUTH_MISMATCH -> REVIEW_REQUIRED`
+
+### Incomplete first binding after restart
+
+`NOT_BOUND`
 
 ### Authentication temporarily unavailable
 
@@ -220,7 +271,10 @@ M2 account-identity acceptance MUST include at least:
 - authenticated response reports `accountUid = B`;
 - AUTH MUST NOT become READY;
 - result MUST be `AUTH_MISMATCH`;
-- no automatic rebinding.
+- no automatic rebinding;
+- expected and observed strong identity values are available to the review flow;
+- available weak corroborating fields are presented as review context only;
+- matching weak fields MUST NOT auto-resolve the mismatch.
 
 ### Partial failure
 
@@ -228,7 +282,27 @@ M2 account-identity acceptance MUST include at least:
 - protected account read fails or has unusable identity data;
 - AUTH MUST remain non-READY.
 
-### Crash/restart
+### First binding success
+
+- account starts with no canonical provider binding;
+- current authenticated protected read returns usable `accountUid`;
+- explicit binding action completes;
+- the binding unit is committed atomically;
+- restart preserves one complete binding;
+- later auth proof compares against that committed identity.
+
+### First binding crash/restart
+
+Acceptance MUST simulate failure at least after identity read but before completed binding commit, and SHOULD also simulate any implementation-specific partial-write boundary.
+
+After restart:
+
+- an incomplete binding MUST be treated as `NOT_BOUND`;
+- no partial `provider_account_uid` or other orphan field may establish trust;
+- AUTH MUST NOT become READY from the incomplete binding;
+- retry MUST use fresh authenticated identity evidence.
+
+### Auth proof crash/restart
 
 - persist state;
 - restart;
@@ -275,6 +349,8 @@ For SmartStore:
 `token issuance success != AUTH_READY`
 
 `store name match != account identity proof`
+
+`incomplete first binding != trusted binding`
 
 `GET /v1/seller/account + accountUid match = account identity proof`
 
