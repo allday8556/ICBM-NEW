@@ -23,14 +23,20 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0001_m0_foundation"
+        assert current_revision(engine) == head_revision() == "0002_m1_supplier_connections"
         tables = set(inspect(engine).get_table_names())
-        assert tables == {"alembic_version", "jobs", "job_attempts", "audit_events"}
+        assert tables == {
+            "alembic_version",
+            "jobs",
+            "job_attempts",
+            "audit_events",
+            "supplier_connections",
+        }
     finally:
         engine.dispose()
     with sqlite3.connect(database) as raw:
         assert raw.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        for table in ("jobs", "job_attempts", "audit_events"):
+        for table in ("jobs", "job_attempts", "audit_events", "supplier_connections"):
             assert raw.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
 

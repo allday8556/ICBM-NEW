@@ -221,6 +221,20 @@ def step_environment(ev: Evidence, run_id: str, port: int, data_dir: Path) -> No
     )
 
 
+def _repository_head() -> str | None:
+    """Head revision of the repository's migration scripts, read by Alembic itself.
+
+    The M0 check originally hard-coded ``0001_m0_foundation``; later milestones add migrations
+    (M1: ``0002_m1_supplier_connections``), so "migrated to head" means the scripts' own head.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config()
+    config.set_main_option("script_location", str(REPO_ROOT / "app" / "db" / "migrations"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
 def step_migrate(ev: Evidence, env: dict[str, str], db: Database, out: Path) -> None:
     completed = subprocess.run(
         [sys.executable, "-m", "app", "db", "upgrade"],
@@ -238,19 +252,21 @@ def step_migrate(ev: Evidence, env: dict[str, str], db: Database, out: Path) -> 
     triggers = sorted(
         r["name"] for r in db.rows("SELECT name FROM sqlite_master WHERE type = 'trigger'")
     )
-    counts = {
-        t: db.value(f"SELECT COUNT(*) FROM {t}") for t in ("jobs", "job_attempts", "audit_events")
-    }
+    # Every canonical table, including those later milestones add, must start empty.
+    counts = {t: db.value(f"SELECT COUNT(*) FROM {t}") for t in tables if t != "alembic_version"}
     revision = db.value("SELECT version_num FROM alembic_version")
+    head = _repository_head()
     journal = db.value("PRAGMA journal_mode")
     ev.check(
         "clean database migrated to head (SQLite WAL), canonical tables empty",
         completed.returncode == 0
-        and revision == "0001_m0_foundation"
+        and head is not None
+        and revision == head
         and journal == "wal"
         and {"jobs", "job_attempts", "audit_events", "alembic_version"} <= set(tables)
         and all(v == 0 for v in counts.values()),
         revision=revision,
+        repository_head=head,
         journal_mode=journal,
         tables=tables,
         triggers=triggers,

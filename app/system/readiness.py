@@ -3,10 +3,13 @@
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel
 
 from app import MILESTONE, __version__
+from app.connect.contracts import CapabilityReport
+from app.connect.state import CapabilityStatus
 from app.core.clock import Clock
 from app.core.egress import EgressGuard
 from app.core.execution import ExecutionMode
@@ -30,11 +33,21 @@ class ReadinessCheck(BaseModel):
 
 
 class ReadinessReport(BaseModel):
+    """Core readiness (``status``/``checks``) plus capability readiness (Issue #7 §7).
+
+    A capability such as ``supplier:kmretail`` never fails core readiness: with a healthy core the
+    report is ``overall = READY`` (HTTP 200) and lists every non-READY capability in
+    ``degraded_capabilities``. Only a core failure answers 503.
+    """
+
     status: CheckStatus
+    overall: Literal["READY", "NOT_READY"]
     version: str
     milestone: str
     checked_at: datetime
     checks: list[ReadinessCheck]
+    capabilities: list[CapabilityReport]
+    degraded_capabilities: list[str]
 
 
 class ReadinessService:
@@ -49,9 +62,11 @@ class ReadinessService:
         clock: Clock,
         head_revision: str | None,
         ownership: DataDirLease,
+        capabilities: Callable[[], list[CapabilityReport]] = list,
         heartbeat_max_age_s: float = 60.0,
     ) -> None:
         self._ownership = ownership
+        self._capabilities = capabilities
         self._db = db
         self._worker = worker
         self._secrets = secrets
@@ -86,17 +101,23 @@ class ReadinessService:
                     name=name, status=CheckStatus.PASS if ok else CheckStatus.FAIL, detail=detail
                 )
             )
-        overall = (
+        core = (
             CheckStatus.PASS
             if all(c.status is CheckStatus.PASS for c in checks)
             else CheckStatus.FAIL
         )
+        capabilities = self._capabilities()
         return ReadinessReport(
-            status=overall,
+            status=core,
+            overall="READY" if core is CheckStatus.PASS else "NOT_READY",
             version=__version__,
             milestone=MILESTONE,
             checked_at=self._clock.now(),
             checks=checks,
+            capabilities=capabilities,
+            degraded_capabilities=[
+                c.key for c in capabilities if c.status is not CapabilityStatus.READY
+            ],
         )
 
     def _data_dir_owner(self) -> tuple[bool, str]:

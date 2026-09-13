@@ -64,21 +64,25 @@ def test_every_screen_contract_reports_empty(client: TestClient, screen: str, re
     assert response.status_code == 200
     meta = response.json()["meta"]
     assert meta == meta | {"screen": screen, "state": "EMPTY", "empty_reason": reason}
-    assert meta["milestone"] == "M0"
+    assert meta["milestone"] == "M1"
 
 
 def test_settings_contract_has_no_connections_and_is_read_only(client: TestClient) -> None:
     body = client.get("/api/v1/screens/settings").json()
     assert body["execution_mode"] == "DRY_RUN"
     assert body["editable"] is False
-    assert body["supplier_connections"] == []
+    # The registered supplier appears unconfigured: no credentials, no session, not connected.
+    assert [
+        (s["supplier_key"], s["state"], s["capability_status"], s["credentials_stored"])
+        for s in body["supplier_connections"]
+    ] == [("kmretail", "DISCONNECTED", "NOT_CONFIGURED", False)]
     assert body["policy_values"] == {}
     assert {c["connection_state"] for c in body["marketplace_connections"]} == {"NOT_CONNECTED"}
 
 
 def test_shell_contract_serves_marketplace_identity_assets(client: TestClient) -> None:
     shell = client.get("/api/v1/shell").json()
-    assert shell["milestone"] == "M0"
+    assert shell["milestone"] == "M1"
     assert shell["execution_mode"] == "DRY_RUN"
     keys = [m["key"] for m in shell["marketplaces"]]
     assert keys == ["smartstore", "coupang", "st11", "gmarket", "auction"]

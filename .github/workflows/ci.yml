@@ -60,7 +60,7 @@ jobs:
           ICBM_DATA_DIR: ${{ runner.temp }}/migration-check
         run: |
           icbm db upgrade
-          test "$(icbm db current)" = "0001_m0_foundation"
+          test "$(icbm db current)" = "$(alembic heads | cut -d ' ' -f 1)"
           alembic check
           alembic downgrade base
           alembic upgrade head

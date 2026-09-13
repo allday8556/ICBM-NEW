@@ -73,7 +73,7 @@ The v28 HTML was sufficient to begin (M0 was then built from v29, which supersed
 
 ```text
 M0 Foundation
-→ M1 K홀세일 CONNECT
+→ M1 KM통상 CONNECT
 → M2 SmartStore CONNECT
 → M3 one-product COLLECT
 ```

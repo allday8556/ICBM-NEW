@@ -569,6 +569,76 @@
   box-shadow: var(--shadow-panel);
 }
 
+.supplier-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.supplier-card-head b {
+  font-size: 13px;
+  color: var(--color-text-strong);
+}
+
+.supplier-domain {
+  font-size: 9.5px;
+  color: var(--color-text-sub);
+  margin-top: 3px;
+}
+
+.supplier-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  padding: 9px 0;
+  border-top: 1px solid #edf1f4;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.supplier-status-grid .kv,
+.supplier-status-grid .kv span,
+.supplier-status-grid .kv b {
+  display: block;
+}
+
+.supplier-status-grid .kv span {
+  font-size: 9px;
+  color: var(--color-text-sub);
+}
+
+.supplier-status-grid .kv b {
+  font-size: 10.5px;
+  margin-top: 3px;
+}
+
+.supplier-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.supplier-actions .btn {
+  padding: 7px 9px;
+}
+
+.supplier-card .note {
+  margin-top: 10px;
+}
+
+.password-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.password-control input {
+  flex: 1 1 160px;
+}
+
 .supplier-add-card {
   min-height: 190px;
   width: 100%;
