@@ -9,18 +9,18 @@ The current approved visual prototype is:
 
 `ui/prototypes/icbm_redesign_test_v29_final.html`
 
-Verified attachment fingerprint:
+Verified prototype fingerprint:
 
 - SHA-256: `896ad87011b8615b8a6a9cd3e790ca04f52e908e4ff7b6a26ea4bf5372dfeb82`
 - Size: `323751` bytes
+- Git blob SHA: `2dea109fa819123601e23581d7b8b88e52507713`
 - Revision: `v29 — defect fixes + unified platform identity`
 - Architect review source: `docs/review/V29-CHANGES-BY-CLAUDE.md`
+- Repository copy: **VERIFIED PRESENT on `main`**
 
 v29 supersedes v28. v28 superseded v27.
 
-The uploaded v29 attachment was independently re-hashed before approval and matched the fingerprint above exactly.
-
-> Repository-copy status: **PENDING** until the exact HTML file is present at the path above and its SHA-256 is verified again from the repository copy. Approval of the revision is complete; only the raw-file copy remains.
+The uploaded v29 attachment and the repository copy were independently verified. The local uploaded file has SHA-256 `896ad87011b8615b8a6a9cd3e790ca04f52e908e4ff7b6a26ea4bf5372dfeb82`, size `323751` bytes, and Git blob SHA `2dea109fa819123601e23581d7b8b88e52507713`; the GitHub repository copy reports the same Git blob SHA. Therefore the repository copy is byte-identical to the approved attachment.
 
 ## Revision history
 
