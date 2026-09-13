@@ -36,12 +36,17 @@ async def _app_error(request: Request, exc: Exception) -> JSONResponse:
 
 async def _validation_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RequestValidationError)
+    # Only where and why a field failed — never the submitted value, which may be a secret.
+    errors = [
+        {"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")}
+        for e in exc.errors()
+    ]
     body = error_envelope(
         ErrorClass.VALIDATION,
         "REQUEST_INVALID",
         "request failed validation",
         get_correlation_id(),
-        details={"errors": jsonable_encoder(exc.errors())},
+        details={"errors": jsonable_encoder(errors)},
     )
     return JSONResponse(body, status_code=HTTP_STATUS[ErrorClass.VALIDATION])
 
