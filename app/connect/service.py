@@ -77,8 +77,9 @@ SYSTEM_ACTOR = "system:connect"
 OPERATOR_TEST = "operator_test"
 AUTO_CONNECT = "auto_connect"
 _MAX_SECRET_LENGTH = 500
-# The UI shows a stored password only as "•••••••• · 저장됨"; that indicator is never a password.
-_PASSWORD_MASK = "•"
+# The UI's stored-password indicators (display only). Exactly these are refused as a password;
+# a real password that merely contains "•" is accepted (PR #9 comment 5654916026 §4).
+_PASSWORD_SENTINELS = frozenset({"••••••••", "•••••••• · 저장됨"})
 
 S = ConnectionState
 Mutation = Callable[[Session, SupplierConnection], None]
@@ -350,13 +351,14 @@ class ConnectService:
         Serialised with the supplier's connection flight (PR #9 review 5191372031): a login still
         using the old credentials completes first, and its session is discarded here, so an
         old-account session can never be the READY connection after new credentials are saved.
+        The replacement itself fails closed at every step (see ``_replace_credentials``).
         """
         definition = self._definition(supplier_key)
         username = username.strip()
         password = password or None
         if not username:
             raise InputValidationError("SUPPLIER_CREDENTIALS_INVALID", "an ID is required")
-        if password is not None and _PASSWORD_MASK in password:
+        if password is not None and password.strip() in _PASSWORD_SENTINELS:
             raise InputValidationError(
                 "SUPPLIER_PASSWORD_MASK_REJECTED",
                 "the stored-password indicator is not a password; choose 비밀번호 변경",
@@ -381,9 +383,23 @@ class ConnectService:
     def _replace_credentials(
         self, definition: SupplierDefinition, credentials: Credentials, *, actor: str
     ) -> None:
+        """Fail-closed replacement (PR #9 comments 5654839475, 5654916026).
+
+        1. invalidate the old session and any READY state;
+        2. write the new login as one secret-store record;
+        3. record the update (counters and audit).
+
+        Whatever fails, the worst state is "no reusable session; re-authentication required":
+        new or partial credentials can never coexist with a session that could prove READY.
+        """
         supplier_key = definition.profile.supplier_key
+        state_from = self._invalidate_session(definition)
         self._credentials.save(supplier_key, credentials)
-        # A session belongs to the account that created it; new credentials start clean.
+        self._record_credentials_update(definition, actor=actor, state_from=state_from)
+
+    def _invalidate_session(self, definition: SupplierDefinition) -> ConnectionState:
+        """Step 1: the session belongs to the account that created it, so it goes first."""
+        supplier_key = definition.profile.supplier_key
         self._sessions.clear(supplier_key)
         with self._db.write() as session:
             row = self._row(session, supplier_key)
@@ -393,8 +409,17 @@ class ConnectService:
                 session.flush()
             source = S(row.state)
             if source in (S.READY, S.AUTH_EXPIRED, S.DEGRADED):
-                self._move(row, S.DISCONNECTED, trigger="credentials_updated")
-            if source is not S.PAUSED:
+                self._move(row, S.DISCONNECTED, trigger="credentials_replacing")
+            row.updated_at = self._clock.now()
+        return source
+
+    def _record_credentials_update(
+        self, definition: SupplierDefinition, *, actor: str, state_from: ConnectionState
+    ) -> None:
+        """Step 3: counters and the audit record, once the new login is safely stored."""
+
+        def mutate(session: Session, row: SupplierConnection) -> None:
+            if S(row.state) is not S.PAUSED:
                 row.consecutive_auth_failures = 0
             row.updated_at = self._clock.now()
             self._audit_entry(
@@ -405,9 +430,11 @@ class ConnectService:
                 outcome=AuditOutcome.ALLOWED,
                 actor=actor,
                 credentials_stored=True,
-                state_from=source,
+                state_from=state_from,
                 state_to=row.state,
             )
+
+        self._update(definition.profile.supplier_key, mutate)
 
     def set_auto_connect(
         self, supplier_key: str, *, enabled: bool, actor: str

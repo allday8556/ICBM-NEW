@@ -1,4 +1,4 @@
-"""M1 acceptance: KM통상 CONNECT against the real supplier (Issue #7; "K홀세일" in ROADMAP).
+"""M1 acceptance: KM통상 CONNECT against the real supplier (Issue #7).
 
 Prerequisite: the operator has saved the KM통상 login through the ICBM UI (공급처 관리 → 로그인
 정보), which puts it in the OS secret store. This script never accepts, prints or stores a
@@ -50,6 +50,7 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from app.connect.credentials import SupplierCredentialStore  # noqa: E402
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore  # noqa: E402
 from app.core.ownership import acquire_data_dir  # noqa: E402
 from app.core.secrets import KeyringSecretStore  # noqa: E402
@@ -380,11 +381,11 @@ def _scan_secrets(data_dir: Path, generation_a: dict[str, str]) -> dict[str, str
         payload = SupplierSessionStore(data_dir / SESSIONS_DIR_NAME, keyring).load(KEY)
     if payload is None:
         raise StepFailed("no session generation B to scan")
+    login = SupplierCredentialStore(keyring).load(KEY)
+    if login is None:
+        raise StepFailed("no complete stored login to scan")
     return (
-        {
-            "username": keyring.get(f"supplier:{KEY}:username") or "",
-            "password": keyring.get(f"supplier:{KEY}:password") or "",
-        }
+        {"username": login.username, "password": login.password}
         | generation_a
         | _session_values(payload, "B")
     )
@@ -473,7 +474,7 @@ def main() -> int:
         return 2
     out.mkdir(parents=True, exist_ok=True)
     keyring = KeyringSecretStore()
-    if not (keyring.get(f"supplier:{KEY}:username") and keyring.get(f"supplier:{KEY}:password")):
+    if not SupplierCredentialStore(keyring).stored(KEY):
         print(
             "save the KM통상 login in the ICBM UI first (공급처 관리 → 로그인 정보)",
             file=sys.stderr,

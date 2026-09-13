@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.audit.models import AuditEventType
 from app.config import AppConfig
 from app.connect.contracts import SupplierConnectionSummary
+from app.connect.credentials import SupplierCredentialStore
 from app.connect.proof import ProtectedReadProof
 from app.connect.sessions import SESSIONS_DIR_NAME
 from app.connect.state import CapabilityStatus, ConnectionState
@@ -90,6 +91,11 @@ def _summary(app: Container) -> SupplierConnectionSummary:
 
 def _events(app: Container) -> list[str]:
     return [e.event_type for e in reversed(app.audit.list_events(limit=500))]
+
+
+def _stored_password(secrets: MemorySecretStore) -> str | None:
+    credentials = SupplierCredentialStore(secrets).load(FAKE_KEY)
+    return credentials.password if credentials else None
 
 
 def test_a_first_connection_logs_in_once_and_is_proven_by_both_reads(
@@ -349,7 +355,7 @@ def test_credential_replacement_waits_for_the_login_in_flight(
     replacing.start()
     replacing.join(0.3)
     assert replacing.is_alive(), "credential replacement must wait for the flight"
-    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+    assert _stored_password(secrets) == PASSWORD
     gateway.login_gate.set()
     connecting.join(10)
     replacing.join(10)
@@ -357,7 +363,7 @@ def test_credential_replacement_waits_for_the_login_in_flight(
 
     summary = _summary(app)
     assert (summary.state, summary.session_state) == (S.DISCONNECTED, "NONE")
-    assert secrets.get(f"supplier:{FAKE_KEY}:password") == "rotated-password"
+    assert _stored_password(secrets) == "rotated-password"
     assert not (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
     gateway.accepted = Credentials(username=USERNAME, password="rotated-password")
     assert _verify(app).proven
@@ -381,7 +387,7 @@ def test_a_new_login_id_keeps_the_stored_password_but_starts_clean(
     app.connect.save_credentials(
         FAKE_KEY, username="another-operator", password=None, actor=OPERATOR
     )
-    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+    assert _stored_password(secrets) == PASSWORD
     assert app.connect.stored_login(FAKE_KEY).username == "another-operator"
     assert (_summary(app).state, _summary(app).session_state) == (S.DISCONNECTED, "NONE")
 
@@ -396,7 +402,7 @@ def test_the_masked_stored_state_can_never_become_the_password(
                 FAKE_KEY, username=USERNAME, password=masked, actor=OPERATOR
             )
         assert caught.value.code == "SUPPLIER_PASSWORD_MASK_REJECTED"
-    assert secrets.get(f"supplier:{FAKE_KEY}:password") == PASSWORD
+    assert _stored_password(secrets) == PASSWORD
 
 
 def test_a_first_save_needs_a_password(app: Container) -> None:
@@ -463,8 +469,9 @@ def test_automatic_connection_reuses_the_session_first(
 def test_a_fresh_data_directory_adopts_credentials_already_in_the_os_store(
     app: Container, gateway: FakeGateway, secrets: MemorySecretStore
 ) -> None:
-    secrets.set(f"supplier:{FAKE_KEY}:username", USERNAME)
-    secrets.set(f"supplier:{FAKE_KEY}:password", PASSWORD)
+    SupplierCredentialStore(secrets).save(
+        FAKE_KEY, Credentials(username=USERNAME, password=PASSWORD)
+    )
     assert _summary(app).capability_status is CapabilityStatus.DISCONNECTED
     app.connect.request_connection_test(FAKE_KEY, actor=OPERATOR)
     assert _summary(app).connection_id is not None
