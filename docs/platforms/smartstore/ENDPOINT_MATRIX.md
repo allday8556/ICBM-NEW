@@ -24,6 +24,8 @@ Primary upstream documentation:
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers
 - https://apicenter.commerce.naver.com/docs/restful-api
+- https://www.rfc-editor.org/rfc/rfc6749
+- https://www.rfc-editor.org/rfc/rfc6750
 
 Secondary official technical-support evidence:
 
@@ -76,7 +78,7 @@ Product registration, images, categories, attributes, options, and product read-
 | `ADOPTED` | Required contract fields are frozen for the current milestone. | Callable only through the adopted endpoint contract. |
 | `NOT_ADOPTED` | Known/planned endpoint whose operational contract is not frozen. | Must fail locally before network I/O. |
 
-Changing `NOT_ADOPTED -> ADOPTED` requires review of method/path, app-mode eligibility, required groups, success predicate, error contract, redirects, and — for writes — idempotency/read-back/reconciliation.
+Changing `NOT_ADOPTED -> ADOPTED` requires review of method/path, app-mode eligibility, required groups, timeout policy, success predicate, error contract, redirects, and — for writes — idempotency/read-back/reconciliation.
 
 ---
 
@@ -91,8 +93,10 @@ Documented endpoint paths are modeled separately from the base URL.
 | Field | Example |
 | --- | --- |
 | `base_url` | `https://api.commerce.naver.com/external` |
-| `path` | `/v1/seller/account` |
+| `path_relative_to_base_url` | `/v1/seller/account` |
 | wire URL | `https://api.commerce.naver.com/external/v1/seller/account` |
+
+Every registry `Path` value in this document is relative to `base_url` unless explicitly stated otherwise.
 
 ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or produce `/external/external`.
 
@@ -100,7 +104,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 
 ## 4. Master registry
 
-| Endpoint ID | Adoption | Milestone | Method | Path | Purpose | App mode | Required group | Mutation |
+| Endpoint ID | Adoption | Milestone | Method | Path (relative to `base_url`) | Purpose | App mode | Required group | Mutation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
@@ -155,6 +159,8 @@ That does **not** make a product endpoint part of M2.
 
 M2 MUST NOT issue a product request merely to discover or reconfirm product permission.
 
+M2 `write_scope` is populated, when evidence exists, from the non-network provider-admin attestation/introspection contract in `PERMISSIONS_SCOPES.md`; `ENDPOINT_MATRIX.md` does not add a product network call for that purpose.
+
 ---
 
 ## 6. `SMARTSTORE_AUTH_TOKEN`
@@ -165,15 +171,19 @@ M2 MUST NOT issue a product request merely to discover or reconfirm product perm
 | --- | --- |
 | Adoption | `ADOPTED` |
 | Method | `POST` |
-| Path | `/v1/oauth2/token` |
+| Path relative to `base_url` | `/v1/oauth2/token` |
 | Wire URL | `https://api.commerce.naver.com/external/v1/oauth2/token` |
 | App mode | `OWN_STORE_SELF` |
 | Grant | Client Credentials |
 | Content-Type | `application/x-www-form-urlencoded` |
 | Bearer required | No |
 | Required API group | `N/A` |
+| Connect timeout | `5s` |
+| Read timeout | `30s` |
 | Redirect policy | `NO_FOLLOW` |
 | Lifecycle owner | `AUTH.md` |
+
+The timeout values are ICBM M2 policy, not provider guarantees. They are intentionally asymmetric with the seller-account read because an avoidably short token read timeout creates expensive issuance uncertainty. Runtime acceptance SHALL record observed latency and may propose a reviewed policy change; implementation MUST NOT silently substitute arbitrary library defaults.
 
 ### Request predicate
 
@@ -203,6 +213,12 @@ A locally detectable violation should fail before network I/O.
 `AND expires_in is positive integer`
 
 `AND token_type equals Bearer case-insensitively`
+
+`token_type` remains part of the success predicate deliberately.
+
+OAuth 2.0 defines `token_type` as a required token-response field and states that a client MUST NOT use an access token when it does not understand the token type. ICBM M2 implements the Bearer token scheme only, and NAVER documents protected calls as `Authorization: Bearer {access_token}`. Therefore a non-Bearer token type is provider/contract drift, not a warning that ICBM may ignore.
+
+Case changes such as `bearer` vs `Bearer` are accepted by the case-insensitive comparison.
 
 If a 200 response fails this predicate:
 
@@ -256,6 +272,8 @@ This POST is an authentication-control operation, not a marketplace CREATE.
 
 Retry/reissue semantics are owned by `AUTH.md`, including bounded issuance, atomic session commit, lifecycle rules, and first-token crash uncertainty.
 
+A read timeout after the request may have reached NAVER does not prove token issuance failed. It remains an authentication-session uncertainty owned by `AUTH.md`; it MUST NOT be translated into user re-approval without evidence.
+
 ---
 
 ## 7. `SMARTSTORE_SELLER_ACCOUNT`
@@ -266,14 +284,18 @@ Retry/reissue semantics are owned by `AUTH.md`, including bounded issuance, atom
 | --- | --- |
 | Adoption | `ADOPTED` |
 | Method | `GET` |
-| Path | `/v1/seller/account` |
+| Path relative to `base_url` | `/v1/seller/account` |
 | Wire URL | `https://api.commerce.naver.com/external/v1/seller/account` |
 | App mode | `OWN_STORE_SELF` |
 | Authentication | `Authorization: Bearer {access_token}` |
 | Required API group | `판매자정보` |
 | Mutation | No |
+| Connect timeout | `5s` |
+| Read timeout | `10s` |
 | Redirect policy | `NO_FOLLOW` |
 | Identity owner | `ACCOUNT_IDENTITY.md` |
+
+The timeout values are ICBM M2 policy, not provider guarantees. This read may use the shorter read timeout because it is non-mutating and already has bounded retry/re-auth rules. Runtime acceptance SHALL measure observed latency before any future timeout-policy change.
 
 ### Request predicate
 
@@ -447,7 +469,27 @@ This closes the `ERRORS.md` OPERATION_RESULT gap: HTTP success is never the fina
 
 ---
 
-## 10. Redirect policy
+## 10. Timeout policy
+
+Timeouts are endpoint-contract fields, not incidental HTTP-library defaults.
+
+M2 baseline:
+
+| Endpoint ID | Connect timeout | Read timeout | Reason |
+| --- | ---: | ---: | --- |
+| `SMARTSTORE_AUTH_TOKEN` | `5s` | `30s` | Favor avoiding avoidable token-issuance uncertainty. |
+| `SMARTSTORE_SELLER_ACCOUNT` | `5s` | `10s` | Read-only operation with bounded retry/re-auth paths. |
+
+Rules:
+
+- timeout expiry is classified under `ERRORS.md`/`AUTH.md`; it is not proof of provider rejection;
+- token timeout after possible transmission MUST preserve issuance uncertainty rather than invent credential failure;
+- values are reviewed from measured M2 latency evidence, not silently tuned per call site;
+- implementation SHALL expose the endpoint policy to tests so accidental fallback to client defaults is detectable.
+
+---
+
+## 11. Redirect policy
 
 Generic automatic redirect following is forbidden for SmartStore integration clients unless an adopted endpoint explicitly permits it.
 
@@ -467,12 +509,13 @@ This is mandatory before any mutating endpoint with possible 308 behavior can be
 
 ---
 
-## 11. M5 rows are intentionally incomplete
+## 12. M5 rows are intentionally incomplete
 
 M5 candidate rows do not freeze:
 
 - required groups;
 - app-mode eligibility;
+- timeout policy;
 - success predicate;
 - domain errors;
 - redirect behavior;
@@ -489,9 +532,23 @@ No code may substitute guessed defaults for `TBD_AT_ADOPTION`.
 
 ---
 
-## 12. Static/repository enforcement
+## 13. Static/repository enforcement
 
 M2 implementation SHALL make the matrix enforceable, not documentary only.
+
+The SmartStore integration layer MUST NOT directly own a raw/general-purpose HTTP client in adapters, services, or feature code.
+
+All provider network calls MUST pass through one registry-gated SmartStore endpoint caller (for example, an abstraction equivalent to `caller.call(endpoint_id, request_data)`) that:
+
+- resolves only an `ADOPTED` endpoint ID;
+- owns/receives the raw HTTP transport internally;
+- composes `base_url + path_relative_to_base_url` exactly once;
+- applies the endpoint method, timeout, redirect, auth, and success-predicate policy;
+- rejects `NOT_ADOPTED` before transport handoff.
+
+The illustrative class/function name above is not frozen; the ownership boundary is.
+
+SmartStore feature/adaptor code MUST NOT receive a raw HTTP client that permits arbitrary URL construction or direct `get/post/request` calls around the registry.
 
 Acceptance must prove at least:
 
@@ -500,19 +557,21 @@ Acceptance must prove at least:
 3. base URL/method/path come from one provider endpoint contract, not duplicated raw strings;
 4. token requests enforce form encoding, `type=SELF`, and absent `account_id`;
 5. account reads require the current committed bearer session;
-6. generic auto-redirect is disabled;
-7. every adopted endpoint has a success predicate;
-8. malformed 2xx responses fail closed;
-9. evidence records contain the endpoint ID and relevant generation IDs;
-10. raw SmartStore URLs outside the adopted registry are rejected by static/repository tests where feasible.
+6. endpoint-specific connect/read timeouts are applied and library defaults cannot silently replace them;
+7. generic auto-redirect is disabled;
+8. every adopted endpoint has a success predicate;
+9. malformed 2xx responses fail closed;
+10. evidence records contain the endpoint ID and relevant generation IDs;
+11. static/repository tests reject SmartStore adapter/service code that constructs or owns a raw HTTP client outside the approved registry-gated caller boundary;
+12. raw SmartStore URL literals and dynamic URL assembly outside the approved caller boundary are rejected to the extent enforceable by repository checks, with the raw-client ownership rule as the primary control rather than string matching alone.
 
-The implementation mechanism is not frozen here; the observable invariants are.
+The implementation mechanism is not frozen here; the observable ownership and call-path invariants are.
 
 ---
 
-## 13. M2 acceptance requirements
+## 14. M2 acceptance requirements
 
-### 13.1 Allow-list
+### 14.1 Allow-list
 
 Runtime M2 endpoint set must be exactly:
 
@@ -521,7 +580,7 @@ Runtime M2 endpoint set must be exactly:
 
 No M5 candidate call is allowed.
 
-### 13.2 Token request
+### 14.2 Token request
 
 Verify:
 
@@ -533,23 +592,33 @@ Verify:
 - `account_id` absent;
 - no credentials/signatures leak to logs.
 
-### 13.3 Token success predicate
+### 14.3 Token timeout policy
+
+Verify:
+
+- connect timeout is `5s`;
+- read timeout is `30s`;
+- a post-transmission read timeout does not get rewritten as credential invalidity or automatic user re-approval;
+- timeout evidence is preserved for `AUTH.md` recovery/measurement.
+
+### 14.4 Token success predicate
 
 Fixtures must include:
 
-- valid token body -> pass;
+- valid Bearer token body -> pass;
 - 200 missing/empty `access_token` -> fail;
 - nonpositive/invalid `expires_in` -> fail;
-- unexpected `token_type` -> fail;
+- case variants of `Bearer` -> pass;
+- unsupported/non-Bearer `token_type` -> fail closed as token-type/contract drift;
 - predicate failure does not advance `session_generation`.
 
-### 13.4 Session boundary
+### 14.5 Session boundary
 
 Provider 200 alone does not make the session current.
 
 Only durable local commit may advance `session_generation`.
 
-### 13.5 Seller account request
+### 14.6 Seller account request
 
 Verify:
 
@@ -557,7 +626,15 @@ Verify:
 - bearer belongs to current committed session generation;
 - no mutation occurs.
 
-### 13.6 Seller account success predicate
+### 14.7 Seller account timeout policy
+
+Verify:
+
+- connect timeout is `5s`;
+- read timeout is `10s`;
+- timeout uses bounded read/auth recovery rules and does not preserve READY solely from persistence.
+
+### 14.8 Seller account success predicate
 
 Fixtures must include:
 
@@ -566,7 +643,7 @@ Fixtures must include:
 - malformed 200 schema -> fail closed;
 - `accountId` is retained as secondary evidence when available but is not substituted for missing `accountUid`.
 
-### 13.7 Identity comparison
+### 14.9 Identity comparison
 
 For a bound account:
 
@@ -574,7 +651,7 @@ For a bound account:
 - mismatching `accountUid` -> `AUTH_MISMATCH -> REVIEW_REQUIRED`;
 - weak fields and `accountId` do not auto-resolve mismatch.
 
-### 13.8 Permission union
+### 14.10 Permission union and write-scope source
 
 Verify:
 
@@ -582,17 +659,22 @@ Verify:
 
 and that separate `상품` permission evidence does not make product endpoints callable.
 
-### 13.9 NOT_ADOPTED fail-closed
+If M2 records `write_scope`, its permission evidence comes from the `PERMISSIONS_SCOPES.md` provider-admin attestation/introspection path, not from a hidden product API probe.
+
+### 14.11 NOT_ADOPTED fail-closed
 
 Attempt to resolve a candidate M5 endpoint through M2 runtime configuration.
+
+Also attempt a direct/raw SmartStore URL call from feature/adaptor code in a controlled static/test fixture.
 
 Expected:
 
 - local rejection;
 - zero provider network calls;
-- no raw-URL fallback.
+- no raw-URL fallback;
+- no raw HTTP client available to ordinary SmartStore feature/adaptor code.
 
-### 13.10 Redirect fail-closed
+### 14.12 Redirect fail-closed
 
 Inject 3xx/308 for each adopted endpoint.
 
@@ -604,18 +686,19 @@ Expected:
 
 ---
 
-## 14. Runtime evidence before `verified_at`
+## 15. Runtime evidence before `verified_at`
 
 `verified_at` remains null until real authorized M2 evidence covers both adopted endpoints.
 
 | Endpoint | Minimum measured evidence |
 | --- | --- |
-| `SMARTSTORE_AUTH_TOKEN` | method/wire URL, content type, SELF body shape, absent `account_id`, HTTP status, token result fields, observed `expires_in`, sanitized trace/evidence reference |
-| `SMARTSTORE_SELLER_ACCOUNT` | method/wire URL, current session generation, HTTP status, observed `accountUid`, `accountId` when available, expected identity, comparison result, sanitized trace/evidence reference |
+| `SMARTSTORE_AUTH_TOKEN` | method/wire URL, content type, SELF body shape, absent `account_id`, applied timeout policy, HTTP status, token result fields, observed `expires_in`, sanitized trace/evidence reference |
+| `SMARTSTORE_SELLER_ACCOUNT` | method/wire URL, applied timeout policy, current session generation, HTTP status, observed `accountUid`, `accountId` when available, expected identity, comparison result, sanitized trace/evidence reference |
 
 Also prove:
 
 - no `NOT_ADOPTED` M5 endpoint was called;
+- ordinary SmartStore integration code did not bypass the registry through a raw HTTP client;
 - redirects were not automatically followed;
 - success predicates executed before READY transitions;
 - evidence belongs to the correct credential/session generations;
@@ -623,37 +706,39 @@ Also prove:
 
 ---
 
-## 15. Change control
+## 16. Change control
 
 Before any endpoint becomes `ADOPTED`:
 
 1. confirm current official method/path/schema;
 2. confirm application-mode eligibility;
 3. confirm required groups;
-4. freeze a machine-checkable success predicate;
-5. freeze endpoint/domain error behavior;
-6. freeze redirect behavior;
-7. for writes, freeze idempotency/replay and `remote_outcome` reconciliation;
-8. freeze read-back/consistency rules;
-9. add acceptance tests/evidence requirements;
-10. independently audit before implementation use.
+4. freeze connect/read timeout policy;
+5. freeze a machine-checkable success predicate;
+6. freeze endpoint/domain error behavior;
+7. freeze redirect behavior;
+8. for writes, freeze idempotency/replay and `remote_outcome` reconciliation;
+9. freeze read-back/consistency rules;
+10. add acceptance tests/evidence requirements;
+11. independently audit before implementation use.
 
 Upstream changes do not silently rewrite this matrix.
 
 ---
 
-## 16. Open questions
+## 17. Open questions
 
 | Question | Status |
 | --- | --- |
-| Real runtime behavior of both M2 adopted endpoints | `PENDING M2 ACCEPTANCE` |
+| Real runtime behavior and latency of both M2 adopted endpoints | `PENDING M2 ACCEPTANCE` |
+| Whether M2 timeout values need adjustment after measured latency | `MEASURE, THEN REVIEW` |
 | Token remote-success/local-commit-unknown behavior | `OWNED BY AUTH.md / MEASUREMENT REQUIRED` |
 | Exact M5 registration endpoint set | `NOT_ADOPTED / M5 DESIGN REQUIRED` |
 | Exact M5 required API-group union | `NOT FROZEN` |
 
 ---
 
-## 17. Final M2 contract
+## 18. Final M2 contract
 
 `ADOPTED_ENDPOINTS = {SMARTSTORE_AUTH_TOKEN, SMARTSTORE_SELLER_ACCOUNT}`
 
@@ -661,13 +746,23 @@ Upstream changes do not silently rewrite this matrix.
 
 `GET /external/v1/seller/account = ADOPTED`
 
+`registry path = relative to base_url`
+
 `product/category/image endpoints = NOT_ADOPTED for M2`
 
 `M2 adopted group union = {판매자정보}`
 
 `상품 permission observation != endpoint adoption`
 
+`M2 write_scope evidence != hidden product network probe`
+
+`token connect/read timeout = 5s/30s`
+
+`seller-account connect/read timeout = 5s/10s`
+
 `2xx != semantic success until success_predicate passes`
+
+`unsupported token_type != usable token`
 
 `token success != session commit`
 
@@ -677,8 +772,12 @@ Upstream changes do not silently rewrite this matrix.
 
 `accountId = secondary evidence when available`
 
+`SmartStore feature/adaptor code != raw HTTP client owner`
+
+`all provider calls -> adopted endpoint registry caller`
+
 `NOT_ADOPTED = no network call`
 
-`future mutation adoption requires idempotency + read-back + remote-outcome contract before use`
+`future mutation adoption requires timeout + idempotency + read-back + remote-outcome contract before use`
 
 Unknown or unfrozen endpoint behavior remains unavailable until explicitly adopted.
