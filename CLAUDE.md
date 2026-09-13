@@ -323,14 +323,13 @@ Acceptance evidence belongs in `docs/acceptance/`, not chat. It records correlat
 ## 11. Current milestone
 
 ```text
-M0 — reproduce v28 standalone HTML as the fresh UI shell + Phase 0 foundation
+M0 — fresh UI shell + Phase 0 foundation   ACCEPTED 2026-09-13 (Issue #1, PR #2, docs/acceptance/M0.md)
+M1 — K홀세일 CONNECT only                  next; starts after the post-M0 canonical sync (Issue #3) closes with green CI
 ```
 
-Current approved visual source:
+The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.
 
-`ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html`
-
-Do not begin horizontal supplier/marketplace expansion during M0.
+The accepted milestone sequence is `ROADMAP.md` §12. Implement one milestone at a time, and do not begin horizontal supplier/marketplace expansion before the first vertical (§12 below) closes.
 
 ---
 
@@ -356,14 +355,15 @@ Required: two consecutive complete passes in fresh sessions.
 
 ## 13. Canonical file index and read order
 
-Read in this order before coding:
+Read in this order before coding (the order Issue #1 mandated for M0):
 
-1. `ROADMAP.md` — product/phase plan
-2. `docs/ARCHITECTURE.md` — canonical contracts and stack
-3. `CLAUDE.md` — implementation/process rules
-4. `docs/UI_SOURCE_OF_TRUTH.md` — approved visual shell
-5. relevant `docs/adr/` decisions
-6. `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` when context on reviewed proposals is needed
+1. `CLAUDE.md` — implementation/process rules (this file)
+2. `ROADMAP.md` — product/phase plan and milestone sequence
+3. `docs/ARCHITECTURE.md` — canonical contracts and stack
+4. relevant `docs/adr/` decisions
+5. `docs/UI_SOURCE_OF_TRUTH.md` — which prototype is the approved visual shell, with its fingerprint
+6. the current milestone's GitHub issue and its acceptance criteria
+7. `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` when context on reviewed proposals is needed
 
 Additional locations:
 
@@ -372,7 +372,7 @@ Additional locations:
 | `ROADMAP-ADDITIONS-BY-CLAUDE.md` | Claude review proposal; not binding by itself |
 | `docs/review/` | Claude drafts/proposals awaiting architecture review |
 | `docs/acceptance/` | Durable acceptance evidence |
-| `docs/GLOSSARY.md` | Canonical field and concept names |
-| `ui/prototypes/` | Approved standalone UI prototypes |
+| `docs/GLOSSARY.md` | Canonical field and concept names (accepted in ARCHITECT_REVIEW D3; not created yet) |
+| `ui/prototypes/` | Standalone UI prototypes; only `docs/UI_SOURCE_OF_TRUTH.md` names the current one |
 
 If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing.

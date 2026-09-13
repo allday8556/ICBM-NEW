@@ -47,13 +47,9 @@ Chat is not the durable work log. Plans, implementation directives, reviews, evi
 
 ### 1.3 UI Source of Truth
 
-The canonical visual/product shell for ICBM-NEW is the standalone prototype supplied by the user:
+The canonical visual/product shell for ICBM-NEW is the approved standalone prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. That document is the single authority for which prototype revision is current and for its fingerprint; this roadmap deliberately names no prototype file.
 
-```text
-icbm_redesign_test_v27_global_help_tooltips.html
-```
-
-This HTML is treated as a **fresh UI specification**, not as a legacy-runtime integration target.
+The approved prototype is treated as a **fresh UI specification**, not as a legacy-runtime integration target.
 
 Rules:
 
@@ -124,7 +120,8 @@ Operation Sync
    ├─ stock / sold-out
    ├─ orders
    ├─ inquiries
-   └─ claims
+   ├─ claims
+   └─ fulfillment (supplier order → tracking → shipment update)
         ↓
 Dashboard / Analytics / Insight
 ```
@@ -172,12 +169,16 @@ docs/
 
 ## Acceptance
 
-- standalone HTML visual structure is reproduced without importing legacy functional wiring
-- clean install starts with an empty DB
-- no dependency on ICBM-PROJECT runtime files
-- no dependency on #86 functional adapters/owners
-- no legacy DB migration required
-- one deterministic health check passes
+Authority: **Issue #1 and `docs/acceptance/M0.md`** — M0 **ACCEPTED** on 2026-09-13 (PR #2). The gate was demonstrated from a clean checkout, not asserted:
+
+- install → Alembic migration → application start on an empty SQLite WAL database, with no legacy DB migration
+- deterministic readiness (database, WAL, schema head, job worker, secret store, DRY_RUN, egress guard)
+- a deliberately failing durable job retrying on schedule into dead-letter at the configured cap
+- one `correlation_id` traced across log output, Job record and AuditEvent
+- a persisted, append-only protected-action AuditEvent
+- all ten top-level screens rendering their EMPTY state from new application contracts, visually checked against the approved prototype without importing legacy functional wiring
+- full restart, zero supplier/marketplace external calls, no dependency on ICBM-PROJECT runtime files or #86 adapters/owners
+- green CI (lint/format, type check, tests, migration check, clean-checkout acceptance)
 
 ---
 
@@ -493,6 +494,22 @@ Connected marketplace events feed:
 
 They remain linked to order and canonical product identity.
 
+## 8.5 Fulfillment (inside OPERATE)
+
+Fulfillment is an OPERATE subflow, not a new top-level system:
+
+```text
+Order
+→ Product/SKU
+→ SupplierOrder / supplier order reference
+→ tracking
+→ marketplace shipment update
+→ delivery read-back
+→ settlement/read model where applicable
+```
+
+The first vertical uses a manual supplier order with a canonical `SupplierOrder` record (ARCHITECT_REVIEW A1). Supplier-order automation is a later adapter capability.
+
 ## Phase 5 acceptance
 
 For the first registered SmartStore product:
@@ -500,6 +517,7 @@ For the first registered SmartStore product:
 - published status read-back works
 - supplier stock recheck resolves to the same product
 - test order/read-only order retrieval maps to the same canonical product when available
+- when an order exists, its fulfillment record (supplier order reference → tracking → marketplace shipment update → delivery read-back) resolves to the same canonical product and SKU
 - no duplicate product identity is created by operation sync
 
 ---
@@ -608,31 +626,25 @@ The screen structure does not define business ownership. Services/contracts do.
 Do not parallelize the core before the first vertical closes.
 
 ```text
-M0 Reproduce standalone HTML as fresh UI shell + Foundation
-   ↓
-M1 K홀세일 CONNECT
-   ↓
-M2 SmartStore CONNECT
-   ↓
-M3 K홀세일 single-product COLLECT
-   ↓
-M4 Canonical PRODUCT DB + pricing
-   ↓
-M5 SmartStore REGISTER + read-back
-   ↓
-M6 OPERATE read-back / stock / orders
-   ↓
-FIRST VERTICAL ACCEPTED
-   ↓
+M0 Foundation                                   ACCEPTED 2026-09-13
+→ M1 K홀세일 CONNECT
+→ M2 SmartStore CONNECT
+→ M3 one-product COLLECT → ProductFactsRevision
+→ M4 canonical Product DB + image pipeline + pricing/readiness foundations
+→ M5 SmartStore REGISTER idempotency/reconcile/read-back
+→ M6 OPERATE read-back + stock + order ingest
+→ M6.5 fulfillment record + tracking
+→ FIRST VERTICAL two consecutive passes in fresh sessions
+```
+
+Only after the first vertical is accepted:
+
+```text
 Add suppliers one by one
-   ↓
-Add Coupang
-   ↓
-Add 11st
-   ↓
-Bulk registration / automation
-   ↓
-AI insight / analytics expansion
+→ Add Coupang
+→ Add 11st
+→ Bulk registration / automation
+→ AI insight / analytics expansion
 ```
 
 ---
@@ -661,6 +673,7 @@ K홀세일 CONNECT
 → SmartStore REGISTER
 → marketplace READ-BACK
 → OPERATE state sync
+→ fulfillment record/tracking path when an order exists
 
 2 consecutive complete PASS
 ```
@@ -671,12 +684,10 @@ Only then is the architecture considered proven.
 
 # 14. Immediate next work
 
-1. Put the user-supplied standalone HTML prototype into ICBM-NEW as the visual Source of Truth.
-2. Rebuild that HTML as the fresh application UI shell **without importing #86 or ICBM-PROJECT functional wiring**.
-3. Write `docs/ARCHITECTURE.md` with the new service/adapter contracts.
-4. Implement Phase 0 foundation.
-5. Implement K홀세일 CONNECT only.
-6. Verify it in a fresh real browser/session.
-7. Continue to SmartStore CONNECT and the first single-product vertical.
+M0 is accepted (Issue #1, `docs/acceptance/M0.md`). Next, in order:
+
+1. Close the post-M0 canonical sync (Issue #3) with green CI.
+2. M1 — K홀세일 CONNECT only (§4.1), verified in a fresh real browser/session.
+3. M2 — SmartStore CONNECT, then the first single-product vertical (M3 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
