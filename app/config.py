@@ -50,6 +50,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "job_backoff_factor": ("ICBM_JOB_BACKOFF_FACTOR", float),
     "job_backoff_max_s": ("ICBM_JOB_BACKOFF_MAX_S", float),
     "job_lease_s": ("ICBM_JOB_LEASE_S", float),
+    "browser_channel": ("ICBM_BROWSER_CHANNEL", str),
 }
 
 
@@ -72,6 +73,9 @@ class AppConfig:
     job_backoff_factor: float = 2.0
     job_backoff_max_s: float = 300.0
     job_lease_s: float = 300.0
+    # Playwright channel for supplier browser logins: the locally installed Edge, so nothing is
+    # downloaded (ADR-0001 Chromium engine).
+    browser_channel: str = "msedge"
 
     def __post_init__(self) -> None:
         if not is_loopback_host(self.host):

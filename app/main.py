@@ -11,13 +11,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app import MILESTONE, __version__
 from app.api.errors import install_error_handlers
 from app.api.middleware import ClientHeaderGuard, RequestContextMiddleware
-from app.api.routes import diagnostics, screens, system
+from app.api.routes import connect, diagnostics, screens, system
 from app.config import AppConfig
 from app.container import build_container
 from app.core.egress import EGRESS
 from app.core.logging import configure_logging
 from app.core.ownership import DataDirLease, acquire_data_dir, require_ownership
 from app.jobs.registry import JobDefinition
+from integrations.suppliers.base import SupplierGateway
 
 logger = logging.getLogger("icbm.app")
 
@@ -29,6 +30,7 @@ def create_app(
     *,
     ownership: DataDirLease | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
+    supplier_gateway: SupplierGateway | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -45,7 +47,9 @@ def create_app(
         require_ownership(lease, config.data_dir)
         log_file = configure_logging(config.log_level, config.log_dir)
         EGRESS.install()
-        services = build_container(config, ownership=lease, extra_jobs=extra_jobs)
+        services = build_container(
+            config, ownership=lease, extra_jobs=extra_jobs, supplier_gateway=supplier_gateway
+        )
     except BaseException:
         if owns_lease:
             lease.release()
@@ -67,6 +71,9 @@ def create_app(
             },
         )
         if services.readiness.schema_at_head():
+            # Metadata only: a new process holds no connection proof and makes no supplier
+            # request until a supplier capability is first needed (lazy connection).
+            services.connect.normalize_on_startup()
             await services.worker.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})
@@ -93,6 +100,7 @@ def create_app(
     app.include_router(system.router)
     app.include_router(diagnostics.router)
     app.include_router(screens.router)
+    app.include_router(connect.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.
     app.add_middleware(ClientHeaderGuard)

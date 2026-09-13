@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from app.audit.service import AuditLog
 from app.collect.service import CollectService
 from app.config import AppConfig
+from app.connect.credentials import SupplierCredentialStore
 from app.connect.service import ConnectService
+from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
 from app.core.clock import Clock, SystemClock
 from app.core.egress import EGRESS
 from app.core.ownership import DataDirLease, require_ownership
@@ -29,6 +31,9 @@ from app.system.diagnostics import DiagnosticsService
 from app.system.execution_mode import ExecutionModeService
 from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
+from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.registry import SUPPLIERS
+from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
 
 @dataclass
@@ -46,6 +51,7 @@ class Container:
     diagnostics: DiagnosticsService
     readiness: ReadinessService
     screens: ScreenService
+    connect: ConnectService
     ownership: DataDirLease
 
 
@@ -56,6 +62,8 @@ def build_container(
     clock: Clock | None = None,
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
+    supplier_gateway: SupplierGateway | None = None,
+    suppliers: Sequence[SupplierDefinition] = SUPPLIERS,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -93,6 +101,18 @@ def build_container(
     jobs.set_worker_notifier(worker.notify)
 
     secrets = secret_store or build_secret_store(config.secret_backend)
+    connect = ConnectService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        jobs=jobs,
+        credentials=SupplierCredentialStore(secrets),
+        sessions=SupplierSessionStore(config.data_dir / SESSIONS_DIR_NAME, secrets),
+        gateway=supplier_gateway or PolicedSupplierGateway(browser_channel=config.browser_channel),
+        suppliers=suppliers,
+        marketplaces=MARKETPLACE_IDENTITIES,
+    )
+    registry.register(connect.job_definition())
     execution_mode = ExecutionModeService(config.execution_mode, audit)
     diagnostics = DiagnosticsService(
         enabled=config.diagnostics_enabled, db=db, jobs=jobs, audit=audit
@@ -106,6 +126,7 @@ def build_container(
         clock=clock,
         head_revision=head_revision(),
         ownership=ownership,
+        capabilities=connect.capabilities,
     )
 
     products = ProductsService()
@@ -113,7 +134,7 @@ def build_container(
         clock=clock,
         operator_name=config.operator_name,
         marketplaces=MARKETPLACE_IDENTITIES,
-        connect=ConnectService(MARKETPLACE_IDENTITIES),
+        connect=connect,
         collect=CollectService(jobs),
         products=products,
         register=RegisterService(products),
@@ -135,5 +156,6 @@ def build_container(
         diagnostics=diagnostics,
         readiness=readiness,
         screens=screens,
+        connect=connect,
         ownership=ownership,
     )

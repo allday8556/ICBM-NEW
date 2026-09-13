@@ -18,7 +18,9 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.8,<3",
     "keyring>=25",
-    # Available per ADR-0001; M0 performs no supplier/marketplace browser work.
+    # Supplier session blobs at rest: AES-256-GCM, key in the OS secret store (ADR-0007).
+    "cryptography>=43",
+    # Browser authentication where a supplier requires it (ADR-0001, ADR-0007).
     "playwright>=1.47",
 ]
 
