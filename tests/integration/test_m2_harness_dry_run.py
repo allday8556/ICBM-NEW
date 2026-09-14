@@ -11,6 +11,7 @@ resumed invocations.
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any
 import pytest
 
 from app.system.secret_scan import scan
-from scripts.m2harness.campaign import resume_dry, run_dry
+from scripts.m2harness.campaign import DECLINE, TerminalOperator, resume_dry, run_dry
 from scripts.m2harness.evidence import validate
 from scripts.m2harness.fake_provider import Scenario
 from scripts.m2harness.ledger import SELLER, TOKEN, Ledger, LedgerError, State
@@ -172,3 +173,73 @@ def test_the_seller_cap_refuses_the_seventh_read_before_send(tmp_path: Path) -> 
     assert [(call["endpoint_id"], call["remote_outcome"]) for call in blocked] == [
         (SELLER, "NOT_APPLIED_PROVEN")
     ]
+
+
+# ---------------------------------------------------------------- operator confirmation slips
+# Issue #46 comment 5671016749: a malformed confirmation is asked again locally. It never becomes
+# a decline, never moves the ledger and never spends provider budget.
+
+
+class Typist:
+    """The operator at the real TerminalOperator prompt. Types the scripted answers, then either
+    the phrase the prompt asks for or a final answer, and snapshots the ledger at every prompt."""
+
+    def __init__(self, out: Path, *slips: str, final: str | None = None) -> None:
+        self.paths = CampaignPaths(out.resolve())
+        self.slips = list(slips)
+        self.final = final
+        self.snapshots: list[tuple[dict[str, int], State]] = []
+
+    def read(self, prompt: str) -> str:
+        ledger = Ledger.open(self.paths.ledger)
+        self.snapshots.append((ledger.counts(), ledger.campaign().state))
+        if self.slips:
+            return self.slips.pop(0)
+        if self.final is not None:
+            return self.final
+        expected = re.search(r"Type '([^']+)'", prompt)
+        assert expected is not None
+        return expected.group(1)
+
+    def operator(self) -> TerminalOperator:
+        return TerminalOperator(read=self.read, write=lambda message: None)
+
+
+def test_slips_at_the_binding_prompt_are_asked_again_and_spend_nothing(tmp_path: Path) -> None:
+    out = tmp_path / "dry"
+    # The bare four-character suffix that ended m2-campaign-01, then other slips.
+    scenario = Scenario.fixture()
+    typist = Typist(out, scenario.account_uid[-4:], "bind", "yes", "decline")
+    state, paths = run_dry(out, scenario=scenario, operator=typist.operator())
+    assert state is State.COMPLETED
+    # Five prompts, the ledger unchanged at each: T1 and A1 spent, still RUNNING, nothing else.
+    assert typist.snapshots == [({TOKEN: 1, SELLER: 1}, State.RUNNING)] * 5
+    document = _evidence(paths)
+    assert document["budget"]["used"] == {TOKEN: 3, SELLER: 4, "OTHER": 0}
+    assert [row["label"] for row in document["requests"]][:3] == ["T1", "A1", "A1b"]
+
+
+def test_only_an_explicit_decline_ends_the_campaign(tmp_path: Path) -> None:
+    out = tmp_path / "dry"
+    typist = Typist(out, "abcd", final=DECLINE)
+    state, paths = run_dry(out, operator=typist.operator())
+    assert state is State.STOPPED_OPERATOR_DECLINED
+    assert len(typist.snapshots) == 2
+    ledger = Ledger.open(paths.ledger)
+    assert ledger.counts() == {TOKEN: 1, SELLER: 1}  # A1b was never sent
+    assert "BASELINE_BIND" not in {row["phase"] for row in ledger.rows("phases")}
+
+
+def test_ctrl_c_during_slips_stops_resumably_without_spending(tmp_path: Path) -> None:
+    out = tmp_path / "dry"
+    typist = Typist(out, "abcd", "abcd")
+
+    def read(prompt: str) -> str:
+        if not typist.slips:
+            raise KeyboardInterrupt
+        return typist.read(prompt)
+
+    operator = TerminalOperator(read=read, write=lambda message: None)
+    state, paths = run_dry(out, operator=operator)
+    assert state is State.STOPPED_INTERRUPTED  # resumable, never a terminal decline
+    assert Ledger.open(paths.ledger).counts() == {TOKEN: 1, SELLER: 1}

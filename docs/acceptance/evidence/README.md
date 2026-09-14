@@ -66,8 +66,16 @@ the architect audit have passed, and, for step 6, the user has given an explicit
    Type `APPROVE <ID> <sha12>` at the prompt. The approval is valid for 2 hours and is consumed
    by one run.
 6. `python scripts/m2_acceptance.py real --campaign-dir <DIR> --campaign-id <ID> --approved-sha <SHA> --acknowledge <ID> --real-provider`
-   Every gate is printed. The run then goes T1/A1 → the operator types `BIND <last 4>` → A1b →
-   A2 after a restart → recheck → T4a (T4b only after typing `SPEND T4B`) → T5/A3 → closeout.
+   Every gate is printed. The run then goes T1/A1 → operator confirmation → A1b → A2 after a
+   restart → recheck → T4a (T4b only after confirmation) → T5/A3 → closeout.
+
+   Each confirmation takes exactly one of two answers:
+   * the **whole line** shown in the prompt, for example `BIND 1a2b` (not just `1a2b`), or `SPEND T4B`;
+   * `DECLINE`, which stops the campaign for good (`STOPPED_OPERATOR_DECLINED`).
+
+   Any other input is treated as a typing slip. The prompt is asked again, nothing is sent and the
+   ledger does not change. Ctrl+C stops the run resumably (`STOPPED_INTERRUPTED`); use it when the
+   identity is uncertain.
    The observed account is shown on this terminal only. Do not tee it into a file.
 7. On any stop, nothing is retried. `status` shows the ledger. Resuming repeats an
    already-planned operation, so it needs the architect to authorize that bounded recovery, and a
