@@ -2,10 +2,12 @@
 // Commerce API Center shows. The server supplies the required groups, the application binding,
 // the mapping revision, the time and the age bound; this form sends only the observed groups. It
 // reports whether the stored evidence counted, and says so when it expired rather than letting a
-// lifted block look like a grant (PERMISSIONS_SCOPES §8.2). The strength glyphs of the
-// three-layer view belong to PR-D.
+// lifted block look like a grant (PERMISSIONS_SCOPES §8.2). Its current-truth chip carries the
+// evidence-strength marker of the capability's write_scope (M2 PR-D, CAPABILITY_MAPPING §14.11
+// surface 3); the input semantics are PR-C's and unchanged.
 
 import { getJson, sendJson } from '../core/api.js';
+import { permissionLine, statusChip } from '../core/capability.js';
 import { h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { toast } from '../core/toast.js';
@@ -99,6 +101,9 @@ function render(root, key, view) {
     }
   });
   const [chipLabel, tone] = promotionChip(view);
+  // The marker and, once the evidence counts, the tone come from current capability truth.
+  const current = permissionLine(view.capability_write_scope);
+  const chip = statusChip('permission', { ...current, text: chipLabel, tone: view.promotion === 'APPLIED' ? current.tone : tone });
   const invalid = view.evaluation?.invalidations ?? [];
   const record = view.attestation;
   // Unlike h(), replaceChildren() would render a null child as the text "null".
@@ -108,7 +113,7 @@ function render(root, key, view) {
     ...checks.map((check) => check.row),
     kv('확인 일시', record ? dotDateTime(record.observed_at) : '저장 시 자동 기록'),
     kv('확인 유효기간', validity(view)),
-    h('div', { class: 'kv' }, h('span', {}, '현재 상태'), h('span', { class: tone ? `chip ${tone}` : 'chip' }, chipLabel)),
+    h('div', { class: 'kv' }, h('span', {}, '현재 상태'), chip),
     invalid.length ? kv('미반영 사유', invalid.map((reason) => INVALIDATION[reason] ?? reason).join(', ')) : null,
     view.recording_available ? null : h('div', { class: 'note' }, REFUSAL[view.recording_refusal] ?? view.recording_refusal),
     h('div', { class: 'api-action-row' }, save),
