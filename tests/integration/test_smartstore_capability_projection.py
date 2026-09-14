@@ -145,6 +145,19 @@ def _projection(browser: Browser, client: TestClient) -> tuple[list[Row], list[s
     return rows, methods
 
 
+@contextmanager
+def _no_egress() -> Iterator[None]:
+    """Ownership registry §3.2: every named §17 6/7/16 rendering test asserts zero egress. The
+    process-wide guard's blocked attempts and granted events are unchanged across the block."""
+    before = EGRESS.snapshot()
+    yield
+    after = EGRESS.snapshot()
+    assert (after["external_attempts"], after["granted_events"]) == (
+        before["external_attempts"],
+        before["granted_events"],
+    )
+
+
 # ---------------------------------------------------------------- seeds (real services)
 
 
@@ -203,15 +216,18 @@ CONTRACT_UNRECORDED: Row = ("API 계약", None, "API 계약 상태 미확인", N
 def test_s17_06_operator_attested_permission_renders_the_limited_marker_never_strong(
     browser: Browser, client: TestClient
 ) -> None:
-    _seed(client, _current, _attest(ApiGroup.PRODUCT), _auth())
-    rows, methods = _projection(browser, client)
+    with _no_egress():
+        _seed(client, _current, _attest(ApiGroup.PRODUCT), _auth())
+        rows, methods = _projection(browser, client)
+        # The A0 card's current-truth chip carries the same limited marker.
+        with _page(browser, client, methods) as page:
+            page.goto(API_TAB)
+            page.wait_for_selector(
+                '.permission-attestation [data-axis="permission"]', timeout=15_000
+            )
+            (chip,) = _rows(page, '.permission-attestation .kv:has([data-axis="permission"])')
+            strong = page.locator('[data-axis="permission"] [data-strength="strong"]').count()
     assert rows[:4] == [AUTH_READY, PERMISSION_ATTESTED, WRITE_UNVERIFIED, CONTRACT_CURRENT]
-    # The A0 card's current-truth chip carries the same limited marker.
-    with _page(browser, client, methods) as page:
-        page.goto(API_TAB)
-        page.wait_for_selector('.permission-attestation [data-axis="permission"]', timeout=15_000)
-        (chip,) = _rows(page, '.permission-attestation .kv:has([data-axis="permission"])')
-        strong = page.locator('[data-axis="permission"] [data-strength="strong"]').count()
     assert (chip["glyph"], chip["strength"]) == ("◐", "limited")
     assert chip["text"] == "권한 확인됨 (관리자 화면 확인) · 반영됨"
     assert strong == 0  # operator evidence is never drawn with the strong marker
@@ -221,8 +237,9 @@ def test_s17_06_operator_attested_permission_renders_the_limited_marker_never_st
 def test_s17_07_machine_verified_permission_renders_the_distinct_strong_marker(
     browser: Browser, client: TestClient
 ) -> None:
-    _seed(client, _current, _auth(), _machine_verified)
-    rows, methods = _projection(browser, client)
+    with _no_egress():
+        _seed(client, _current, _auth(), _machine_verified)
+        rows, methods = _projection(browser, client)
     assert rows[1] == ("등록 권한", "●", "권한 확인됨 (자동 확인)", "good")
     # Distinct from the limited operator-attested line in marker, wording and tone.
     assert rows[1] != PERMISSION_ATTESTED
@@ -354,16 +371,11 @@ STATES: dict[str, tuple[tuple[Seed, ...], list[Row]]] = {
 def test_s17_16_the_ui_keeps_every_axis_on_its_own_line(
     browser: Browser, client: TestClient, seeds: tuple[Seed, ...], expected: list[Row]
 ) -> None:
-    before = EGRESS.snapshot()
-    _seed(client, *seeds)
-    rows, methods = _projection(browser, client)
+    with _no_egress():
+        _seed(client, *seeds)
+        rows, methods = _projection(browser, client)
     assert rows == expected
     assert set(methods) == {"GET"}  # read-only: PR-D adds no mutating request
-    after = EGRESS.snapshot()
-    assert (after["external_attempts"], after["granted_events"]) == (
-        before["external_attempts"],
-        before["granted_events"],
-    )
 
 
 def test_s17_16_the_common_summary_takes_smartstore_from_its_capability(
@@ -371,18 +383,19 @@ def test_s17_16_the_common_summary_takes_smartstore_from_its_capability(
 ) -> None:
     # §14.11 surface 2: the SmartStore row is the authentication line, never a hard-coded
     # 미연동; marketplaces without a capability contract are unchanged.
-    _seed(client, _current, _auth())
     methods: list[str] = []
-    with _page(browser, client, methods) as page:
-        page.goto(COMMON_TAB)
-        page.wait_for_selector(
-            '.alert-row[data-marketplace="smartstore"] .cap-status', timeout=15_000
-        )
-        (smartstore,) = _rows(page, '.alert-row[data-marketplace="smartstore"]')
-        others = {
-            key: page.locator(f'.alert-row[data-marketplace="{key}"] .chip').inner_text()
-            for key in ("coupang", "st11")
-        }
+    with _no_egress():
+        _seed(client, _current, _auth())
+        with _page(browser, client, methods) as page:
+            page.goto(COMMON_TAB)
+            page.wait_for_selector(
+                '.alert-row[data-marketplace="smartstore"] .cap-status', timeout=15_000
+            )
+            (smartstore,) = _rows(page, '.alert-row[data-marketplace="smartstore"]')
+            others = {
+                key: page.locator(f'.alert-row[data-marketplace="{key}"] .chip').inner_text()
+                for key in ("coupang", "st11")
+            }
     assert (smartstore["glyph"], smartstore["text"], smartstore["tone"]) == ("●", "연결됨", "good")
     assert others == {"coupang": "미연동", "st11": "미연동"}
     assert set(methods) == {"GET"}
