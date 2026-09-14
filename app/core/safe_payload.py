@@ -68,6 +68,24 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "freshness_policy_max_age_days",
         # why permission evidence stopped supporting write_scope, e.g. EXPIRED (S7)
         "invalidations",
+        # SmartStore endpoint evidence (M2 PR-A; ERRORS.md §6, §22): identifiers, generations,
+        # the applied policy and the classification decision — never a secret, token, signature,
+        # client_id, provider account identifier or response body
+        "endpoint_id",
+        "method",
+        "credential_generation",
+        "session_generation",
+        "session_expires_at",
+        "connect_timeout_s",
+        "read_timeout_s",
+        "redirect_policy",
+        "predicate_revision",
+        "provider_code",
+        "provider_trace_id",
+        "failure_layer",
+        "classification_basis",
+        "transmission_phase",
+        "transmission_events",
     }
 )
 

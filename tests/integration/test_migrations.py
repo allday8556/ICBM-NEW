@@ -23,6 +23,7 @@ CANONICAL_TABLES = (
     "marketplace_capabilities",
     "marketplace_workflow_overlays",
     "marketplace_permission_attestations",
+    "marketplace_connections",
 )
 
 
@@ -35,7 +36,7 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0005_error_class_taxonomy"
+        assert current_revision(engine) == head_revision() == "0006_m2_marketplace_connections"
         tables = set(inspect(engine).get_table_names())
         assert tables == {"alembic_version", *CANONICAL_TABLES}
     finally:
@@ -71,6 +72,7 @@ def test_audit_events_reject_update_and_delete(data_dir: Path) -> None:
 
 
 BEFORE_0005 = "0004_m2_permission_attestations"
+AT_0005 = "0005_error_class_taxonomy"
 CAPABILITY_ROW = (
     "INSERT INTO marketplace_capabilities VALUES ('{key}', 'NOT_BOUND', NULL, 'MISSING',"
     " 'OPERATOR_ATTESTED', 'BLOCKED', 'UNRECORDED', NULL, {error_class}, NULL, NULL,"
@@ -136,11 +138,12 @@ def test_0005_downgrade_never_rewrites_a_stored_class(tmp_path: Path) -> None:
         raw.execute(_capability("smartstore", "FATAL"))
         raw.execute(OVERLAY_ROW.format(key="smartstore"))
         raw.commit()
+    command.downgrade(alembic_config(url), AT_0005)  # later revisions step down first
     with pytest.raises(RuntimeError, match="never rewritten"):
         command.downgrade(alembic_config(url), BEFORE_0005)
     engine = create_sqlite_engine(url)
     try:
-        assert current_revision(engine) == head_revision()
+        assert current_revision(engine) == AT_0005
     finally:
         engine.dispose()
     with contextlib.closing(_enforcing(database)) as raw:
