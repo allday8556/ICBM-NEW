@@ -42,6 +42,8 @@ Rules:
 | 16 | UI/API keeps auth, permission, write, evidence strength, workflow state/scope, and freshness separate | **PR-B + PR-D** | PR-B: independent domain/persistence/read-API fields; PR-D: UI projection does not collapse them |
 | 17 | persisted READY loses to current evidence after restart | **PR-B** | repository/restart convergence test |
 | 18 | `SMARTSTORE-A0-PERMISSION` handling performs zero SmartStore calls and never promotes A0 to R0/MACHINE_VERIFIED | **PR-C** | A0 save/read/invalidate/render transport-spy tests; PR-B MUST NOT fake this coverage |
+| 19 | new capability bootstrap is `UNRECORDED`; the four-state freshness behavior matrix, closed/non-reentrant transition graph, same-value reviewed re-recording provenance, and prohibition on PR-A fabricating `CURRENT` are enforced | **PR-B** | named domain/persistence/service/API tests for `UNRECORDED`, allowed/forbidden transitions, `freshness_recorded_at`, actor audit, same-value re-recording, and local operator recording entry point with zero provider calls |
+| 20 | same-scope workflow convergence promotes `REVIEW_REQUIRED` to a positively proven frozen `PAUSED` reason while ambiguity never erases an existing proven `PAUSED` reason | **PR-B** | named domain transition tests covering promotion and preservation in both directions |
 
 ## 3. PR-B implementation boundary
 
@@ -60,6 +62,8 @@ notes / deferred owner when split or later-owned
 For target 8 and target 18, PR-B records the canonical later owner and performs no substitute implementation.
 
 For targets 6, 7 and 16, PR-B implements only the domain/API semantic portion. PR-D later proves the visual/projection portion.
+
+For target 19, PR-B owns a local operator-authorized freshness-recording entry point, persistence/audit provenance, and transition enforcement. It MUST make zero SmartStore/provider calls. PR-A consumes recorded freshness but MUST NOT author, infer, seed, or fabricate `CURRENT`. PR-D may later surface the operator UI without becoming the source of truth.
 
 PR-B provider/network calls remain exactly zero.
 

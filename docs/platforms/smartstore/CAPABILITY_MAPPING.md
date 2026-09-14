@@ -105,11 +105,16 @@ For product registration this belongs to M5, not M2.
 
 Values:
 
+- `UNRECORDED`
 - `CURRENT`
 - `STALE`
 - `REVIEW_REQUIRED`
 
 This axis describes the freshness of ICBM's adopted provider contract understanding, not runtime capability truth.
+
+`UNRECORDED` is bootstrap-only and means no freshness determination has yet been recorded for this adopted contract. It asserts neither currency, expiry, nor contradiction. Once a state leaves `UNRECORDED`, it MUST NOT return to `UNRECORDED`.
+
+A recorded freshness determination also carries durable `freshness_recorded_at`. The actor who made the determination MUST remain traceable through the append-only audit record; duplicating `recorded_by` in the capability row is optional.
 
 The combination below is valid:
 
@@ -339,9 +344,27 @@ Calendar/source age alone does not mechanically invalidate a still-current runti
 
 `contract_freshness=STALE` does not by itself imply `auth!=READY` or `write!=READY`.
 
-### F2. STALE has deterministic behavior
+Freshness records the state of ICBM's adopted-contract understanding. It is not provider evidence and therefore does not use A0/R0-style `evidence_strength`.
 
-`STALE` means freshness has expired without a known material contradiction.
+### F2. UNRECORDED is bootstrap-only
+
+`UNRECORDED` means no freshness determination has yet been recorded for this adopted contract.
+
+It explicitly asserts **none** of the following:
+
+- that the contract is current;
+- that a prior freshness determination expired;
+- that a material contradiction or evidence conflict exists.
+
+A newly created capability state MUST begin `UNRECORDED`.
+
+`UNRECORDED` blocks every expansion/new-trust decision that requires a current contract, while already-proven behavior may continue unless another independent axis blocks it.
+
+`UNRECORDED` is non-reentrant: after the first reviewed freshness determination, no transition back to `UNRECORDED` is valid.
+
+### F3. STALE has deterministic behavior
+
+`STALE` means a freshness determination existed and has expired, or the adopted upstream version changed so that the existing determination no longer covers the current upstream contract, without a known material contradiction.
 
 Therefore existing runtime-proven behavior may continue under its existing runtime proof.
 
@@ -357,20 +380,90 @@ While STALE, ICBM MUST block expansion/new-trust decisions that depend on the st
 
 `STALE` itself does not require an extra human safety judgment for already-proven behavior.
 
-### F3. REVIEW_REQUIRED freshness is stronger
+### F4. REVIEW_REQUIRED freshness is stronger
 
 `contract_freshness=REVIEW_REQUIRED` means a material contradiction, incompatible upstream change, or evidence conflict exists.
 
 Automatic operations that depend on the disputed invariant MUST stop until review resolves it.
 
-Thus:
+### F5. Freshness behavior matrix
 
-- `STALE -> existing proven behavior continues; expansion blocked`
-- `REVIEW_REQUIRED -> affected behavior depending on disputed invariant stops`
+The behavior is normative:
 
-### F4. Freshness never invents provider truth
+| `contract_freshness` | Expansion / new trust | Existing proven behavior | Behavior depending on disputed invariant |
+| --- | --- | --- | --- |
+| `CURRENT` | allow | allow | allow |
+| `UNRECORDED` | block | allow | allow |
+| `STALE` | block | allow | allow |
+| `REVIEW_REQUIRED` | block | allow | block |
 
-A stale or disputed source cannot be converted into a favorable guarantee merely to preserve capability.
+`UNRECORDED` and `STALE` intentionally have the same execution gate. They remain distinct because their claims are different: `UNRECORDED` means no determination has ever been recorded; `STALE` means a prior determination exists but is no longer current.
+
+### F6. Freshness transition graph is closed
+
+Allowed state-changing transitions are exactly:
+
+```text
+UNRECORDED -> CURRENT
+CURRENT -> STALE
+CURRENT -> REVIEW_REQUIRED
+STALE -> CURRENT
+STALE -> REVIEW_REQUIRED
+REVIEW_REQUIRED -> CURRENT
+```
+
+Meaning:
+
+- `UNRECORDED -> CURRENT` requires an explicit reviewed freshness recording;
+- `CURRENT -> STALE` is used for actual review expiry or upstream-version change;
+- `CURRENT/STALE -> REVIEW_REQUIRED` requires a real contradiction, incompatible upstream change, or evidence conflict;
+- `STALE/REVIEW_REQUIRED -> CURRENT` requires reviewed revalidation.
+
+Forbidden transitions include:
+
+```text
+UNRECORDED -> STALE
+UNRECORDED -> REVIEW_REQUIRED
+CURRENT/STALE/REVIEW_REQUIRED -> UNRECORDED
+REVIEW_REQUIRED -> STALE
+```
+
+A state MUST NOT be moved merely to the "closest" enum value.
+
+### F7. Same-value reviewed recordings are events, not silent no-ops
+
+The following reviewed re-recordings are allowed:
+
+```text
+CURRENT -> CURRENT
+STALE -> STALE
+REVIEW_REQUIRED -> REVIEW_REQUIRED
+```
+
+They MUST update `freshness_recorded_at` and MUST append an audit record with the actor, even though the enum value is unchanged.
+
+`UNRECORDED -> UNRECORDED` is forbidden because a successful freshness-recording action cannot truthfully record "not recorded".
+
+The service/action path therefore MUST NOT rely only on `after != before` to decide whether a freshness recording is persisted and audited.
+
+### F8. CURRENT recording owner and provenance
+
+A transition to `CURRENT` is a reviewed statement about ICBM's adopted-contract understanding. It is not a machine measurement of NAVER.
+
+Requirements:
+
+- PR-B owns the typed transition, persistence semantics, and a local operator-authorized recording entry point that performs no SmartStore/provider call;
+- the recording action MUST retain `freshness_recorded_at` and append audit provenance containing the actor;
+- an operator action records that reviewed contract validation was completed; it MUST NOT be presented as provider-measured evidence;
+- PR-A may consume the resulting freshness state but MUST NOT set, infer, seed, or fabricate `CURRENT`;
+- PR-D may later provide the UI surface for the PR-B recording action, but PR-D is not required for PR-A to consume an already recorded value;
+- no production caller may derive `CURRENT` merely from today's date being before `review_due`;
+- no runtime Markdown parsing may establish freshness;
+- automatic review-due or provider-drift detection remains a separately owned feature.
+
+### F9. Freshness never invents provider truth
+
+A stale, unrecorded, or disputed source cannot be converted into a favorable guarantee merely to preserve capability.
 
 If runtime proof itself becomes invalid under its owning contract, that capability independently converges away from READY.
 
@@ -443,6 +536,36 @@ The underlying `error_class`, provider code, trace ID, and evidence remain indep
 
 `error_class=REVIEW_REQUIRED` and `workflow_state=REVIEW_REQUIRED` remain independent axes.
 
+### 10.1 Same-scope overlay convergence
+
+A human-action overlay converges toward the strongest positively established remediation state for the same `workflow_scope`.
+
+For the same scope:
+
+```text
+existing REVIEW_REQUIRED
++ later positive evidence proving one frozen PAUSED reason
+=> replace with PAUSED/<proven reason>
+```
+
+Example:
+
+```text
+REVIEW_REQUIRED/AUTHENTICATION
++ AUTH_RECOVERY_EXHAUSTED
+=> PAUSED/AUTHENTICATION/AUTH_RETRY_LIMIT
+```
+
+The reverse is not automatic:
+
+```text
+existing PAUSED/<proven reason>
++ later ambiguous evidence proposing REVIEW_REQUIRED
+=> keep the existing PAUSED/<proven reason>
+```
+
+Ambiguity MUST NOT erase a previously proven human-remediable reason. This convergence rule does not authorize replacing one proven `PAUSED` reason with another without the owning evidence/remediation contract.
+
 ---
 
 ## 11. Default error-to-workflow behavior
@@ -481,9 +604,19 @@ The underlying `error_class`, provider code, trace ID, and evidence remain indep
 
 `M2 product endpoints NOT_ADOPTED -> product write=UNVERIFIED`
 
+`contract_freshness=UNRECORDED -> existing runtime truth may remain; expansion blocked; no expiry/contradiction claim`
+
 `contract_freshness=STALE -> existing runtime truth may remain; expansion blocked`
 
 `contract_freshness=REVIEW_REQUIRED -> disputed-dependent operations stop`
+
+`UNRECORDED -> CURRENT` is the only valid transition out of bootstrap
+
+`* -> UNRECORDED` is forbidden after bootstrap
+
+same-scope `REVIEW_REQUIRED + proven PAUSED reason -> PAUSED/<reason>`
+
+same-scope proven `PAUSED` is not erased by later ambiguity
 
 `PAUSED -> frozen reason_code + frozen workflow_scope required`
 
@@ -582,9 +715,13 @@ During M2 product registration MUST show `○ 미확인`, never `검증됨`.
 
 ### 14.6 Freshness warning
 
-STALE/REVIEW_REQUIRED freshness is shown separately, e.g. `API 계약 재검토 필요`.
+Freshness is shown separately from capability truth.
 
-It MUST NOT overwrite a still-valid `인증: ● 연결됨` unless runtime auth proof itself becomes invalid.
+- `UNRECORDED` is an unreviewed-contract state such as `API 계약 상태 미확인`;
+- `STALE` is a review-expired/outdated-contract state such as `API 계약 재검토 필요`;
+- `REVIEW_REQUIRED` is a contradiction/conflict review state and MUST use stronger review treatment.
+
+Freshness presentation MUST NOT overwrite a still-valid `인증: ● 연결됨` unless runtime auth proof itself becomes invalid.
 
 ### 14.7 PAUSED reason labels
 
@@ -610,6 +747,17 @@ M2 leaves product `write=UNVERIFIED` until M5 adopts the required mutation/read-
 ---
 
 ## 16. State-convergence examples
+
+### Case 0 — brand-new capability state
+
+```text
+contract_freshness=UNRECORDED
+auth=NOT_BOUND
+write_scope=UNKNOWN
+write=UNVERIFIED
+```
+
+No expiry or contradiction is claimed. Expansion/new trust remains blocked until an explicit reviewed freshness recording establishes `CURRENT`.
 
 ### Case 1 — healthy M2 + operator-attested permission
 
@@ -730,6 +878,8 @@ Tests must cover at least:
 16. UI/API keeps auth, permission, write, evidence strength, workflow state/scope, and freshness as separate fields;
 17. persisted READY loses to current evidence after restart;
 18. `SMARTSTORE-A0-PERMISSION` handling performs zero SmartStore network calls and cannot promote operator attestation into R0/MACHINE_VERIFIED evidence.
+19. a new capability state starts `contract_freshness=UNRECORDED`; the four-state behavior matrix and closed transition graph are enforced in code, same-value reviewed recordings update `freshness_recorded_at` and audit provenance, and PR-A cannot fabricate `CURRENT`;
+20. same-scope workflow convergence promotes `REVIEW_REQUIRED` to a positively proven frozen `PAUSED` reason while later ambiguity cannot erase an existing proven `PAUSED` reason.
 
 Business/state decisions belong server/domain-side, not duplicated in frontend JavaScript.
 
@@ -766,7 +916,10 @@ Local/runtime acceptance must also demonstrate:
 - typed workflow_scope routing;
 - M2 write UNVERIFIED enforcement;
 - NOT_ADOPTED no-network invariant;
+- `UNRECORDED` bootstrap/non-reentrancy and freshness transition enforcement;
+- same-value freshness re-recording provenance including `freshness_recorded_at` and actor audit;
 - STALE expansion gate and REVIEW_REQUIRED contradiction gate;
+- same-scope REVIEW_REQUIRED -> proven PAUSED convergence without ambiguity erasing a proven PAUSED reason;
 - visually distinct operator-attested vs machine-verified permission presentation;
 - no secret/bearer leakage.
 
@@ -788,9 +941,15 @@ One completed R0 or A0 slot does not automatically verify this document or anoth
 
 `workflow_scope in {AUTHENTICATION, PRODUCT_REGISTRATION}`
 
-`contract_freshness STALE = keep existing proven behavior; block expansion`
+`contract_freshness UNRECORDED = bootstrap only; no currency/expiry/contradiction claim; keep proven behavior; block expansion`
 
-`contract_freshness REVIEW_REQUIRED = stop behavior depending on disputed invariant`
+`contract_freshness STALE = prior determination no longer current; keep existing proven behavior; block expansion`
+
+`contract_freshness REVIEW_REQUIRED = material contradiction/conflict; stop behavior depending on disputed invariant`
+
+`UNRECORDED -> CURRENT only; no transition returns to UNRECORDED`
+
+`freshness_recorded_at + actor audit provenance = required for every reviewed freshness recording, including same-value re-recording`
 
 `PAUSED = known scoped human-remediable blocker + frozen reason_code + frozen workflow_scope`
 
