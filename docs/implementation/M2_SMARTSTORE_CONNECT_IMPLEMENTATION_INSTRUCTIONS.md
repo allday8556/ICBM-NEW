@@ -297,10 +297,10 @@ OPERATOR_ATTESTED_EVIDENCE
 
 It does NOT establish provider runtime truth, R0, MACHINE_VERIFIED permission, or `write=READY`.
 
-Persist at least:
+Persist at least, in an append-only evidence record (Issue #32):
 
 ```text
-status
+attested_status                READY | MISSING, consistent with required/observed groups
 evidence_source
 evidence_strength
 observed_at
@@ -308,8 +308,12 @@ application_fingerprint
 required_groups
 observed_groups
 endpoint_mapping_revision
-freshness_status
+freshness_policy_max_age_days  the evidence-age bound in effect at recording
 ```
+
+Do not persist current `freshness_status` or current `write_scope.status` in the evidence record. Both are derived at evaluation/read time from the stored record, the current context and `now` from the injected `Clock` (`PERMISSIONS_SCOPES.md` §5, §8.1).
+
+Evidence age: canonical maximum 30 days; production default 30 days; an operational override may only tighten it (1..30 days); any other value is invalid configuration (`PERMISSIONS_SCOPES.md` §8.1).
 
 Invalidation inputs include application fingerprint mismatch, required-group change, mapping-revision change, freshness expiry, and malformed/incomplete evidence. Fail closed to:
 
@@ -318,6 +322,8 @@ write_scope = UNKNOWN
 ```
 
 Do not fabricate `MISSING` without positive evidence.
+
+Expiry converges both `READY` and `MISSING` evidence to `UNKNOWN` and releases an evidence-dependent `SCOPE_INSUFFICIENT` pause without promoting `write`. Time-driven convergence reuses the existing read path, with no scheduler, and audits only a durable change, exactly once (`CAPABILITY_MAPPING.md` S6, S7; §17 targets 21–23).
 
 A0 PASS does not populate `PERMISSIONS_SCOPES.md verified_at`; `NO_MACHINE_READABLE_PERMISSION_SOURCE` remains applicable until the owning contract's verification path exists.
 
