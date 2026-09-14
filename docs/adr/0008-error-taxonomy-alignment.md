@@ -1,6 +1,6 @@
 # ADR-0008 — Error taxonomy alignment: runtime v1 `ErrorClass` and Canonical v3.1 §11.3
 
-Status: **PROPOSED** — awaiting the Architect audit of this PR (Issue #25). It becomes ACCEPTED only with an Architect PASS. Until then nothing here is binding, and the runtime keeps its 7-value `ErrorClass`.
+Status: **ACCEPTED** 2026-09-14 — Architect Stage-0 audit on PR #35, review `5197614709`. Stage 1 is not implemented yet; until it merges, the runtime keeps its 7-value `ErrorClass` (see Staging).
 Decision owner: Architect (ChatGPT). Sources:
 - Issue #25 body;
 - architect comment `5657613795` (the first decision);
