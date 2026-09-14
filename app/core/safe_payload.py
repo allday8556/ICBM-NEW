@@ -46,6 +46,17 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "browser_blocked_requests",
         "minimum_request_interval_s",
         "max_concurrency",
+        # marketplace capability (M2 PR-B): enum values and overlay markers only
+        "marketplace_key",
+        "event",
+        "auth",
+        "write_scope_status",
+        "evidence_strength",
+        "write_status",
+        "contract_freshness",
+        "workflow",
+        "remote_outcome",
+        "resolution",
     }
 )
 

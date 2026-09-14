@@ -74,6 +74,8 @@ def create_app(
             # Metadata only: a new process holds no connection proof and makes no supplier
             # request until a supplier capability is first needed (lazy connection).
             services.connect.normalize_on_startup()
+            # Likewise a persisted marketplace auth READY is never trusted (M2 PR-B, §17 #17).
+            services.marketplace_capability.normalize_on_startup()
             await services.worker.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})

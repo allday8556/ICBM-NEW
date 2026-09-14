@@ -1,10 +1,12 @@
-"""Supplier CONNECT API (Issue #7). A password goes in; it never comes back out."""
+"""CONNECT API. Supplier (Issue #7): a password goes in; it never comes back out. Marketplace
+capability (M2 PR-B): read only, every axis as its own field."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.api.deps import ContainerDep
 from app.connect.contracts import StoredLoginView, SupplierConnectionSummary
+from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.jobs.records import JobRecord
 
 router = APIRouter(tags=["connect"])
@@ -69,3 +71,16 @@ def set_auto_connect(
     return container.connect.set_auto_connect(
         supplier_key, enabled=body.enabled, actor=container.config.operator_actor
     )
+
+
+@router.get("/api/v1/connect/marketplaces/capabilities")
+def marketplace_capabilities(container: ContainerDep) -> list[MarketplaceCapabilityView]:
+    """Capability truth of every marketplace with an adopted capability contract."""
+    return container.marketplace_capability.capabilities()
+
+
+@router.get("/api/v1/connect/marketplaces/{marketplace_key}/capability")
+def marketplace_capability(
+    marketplace_key: str, container: ContainerDep
+) -> MarketplaceCapabilityView:
+    return container.marketplace_capability.capability(marketplace_key)
