@@ -199,9 +199,18 @@ write_scope = {
   required_groups,
   observed_groups,
   endpoint_mapping_revision,
+  attested_status,
+  freshness_policy_max_age_days,
   freshness_status
 }
 ```
+
+The envelope mixes facts fixed when the evidence was recorded with one value that only exists at evaluation time (Issue #32):
+
+- `attested_status` (`READY | MISSING`) is the stable classification made when the evidence was recorded. It is persisted with the evidence record and MUST be consistent with the stored `required_groups` / `observed_groups` (`READY` iff every required group was observed). It is history, not current truth; current truth is `status`, re-derived on every evaluation.
+- `freshness_policy_max_age_days` is the evidence-age bound (§8.1) in effect when the evidence was recorded. It is persisted so a later audit can explain the decision.
+- `freshness_status` is **derived at evaluation/read time** from `observed_at`, `now` from the injected clock, and the applicable bound (§8.1). It MUST NOT be persisted as authoritative current truth: a stored `FRESH` would become false merely because time passed.
+- Evidence records are append-only. Expiry or invalidation never mutates a stored record; it changes only the evaluated `status`.
 
 A bare `READY` label is forbidden in UI, audit evidence, or diagnostic output when it would hide whether the evidence was machine-verified or operator-attested.
 
@@ -320,7 +329,8 @@ A sanitized evidence record SHOULD contain at least:
 - upstream documentation version;
 - `evidence_source=OPERATOR_ATTESTED_PROVIDER_ADMIN`;
 - `evidence_strength=OPERATOR_ATTESTED`;
-- freshness-policy identifier / bound;
+- `attested_status` (`READY | MISSING`), consistent with the required and observed groups (§5);
+- freshness-policy identifier / bound in effect at recording (`freshness_policy_max_age_days`, §8.1);
 - sanitized evidence reference when retained.
 
 The evidence MUST NOT contain plaintext:
@@ -381,9 +391,49 @@ Therefore `fresh` means only:
 
 It MUST NOT be described as proof of continuous unchanged provider state.
 
-The exact maximum age for operator-attested scope evidence is an ICBM operational policy to be frozen with the M2 state contract. If no bounded age policy is configured, operator-attested evidence MUST NOT remain READY indefinitely; it converges to UNKNOWN when its validity cannot be established.
-
 Known external-edit detection is necessarily incomplete while no provider introspection/change-feed exists. The UI and audit model MUST state this limitation rather than implying perfect change detection.
+
+### 8.1 M2 maximum evidence age (frozen, Issue #32)
+
+The M2 canonical maximum age for operator-attested permission evidence is **30 days**.
+
+```text
+canonical A0 max age          = 30 days
+production default            = 30 days
+optional operational override = 1..30 days (may only tighten)
+override < 1 or > 30 days     = invalid configuration, rejected at startup
+```
+
+An override may tighten the bound but never extend it beyond the canonical maximum. No configuration keeps operator-attested evidence current indefinitely.
+
+The bound in effect when evidence is recorded is persisted with it (`freshness_policy_max_age_days`, §5). At evaluation the applicable bound is the stricter of the recorded bound and the currently configured bound: tightening the policy applies to existing evidence immediately, and loosening it never extends evidence beyond the bound it was recorded under.
+
+Boundary semantics, with `age = now - observed_at` and `bound` the applicable bound:
+
+```text
+age <  bound => FRESH
+age =  bound => FRESH
+age >  bound => EXPIRED
+```
+
+The observation stays valid through the exact bound and expires only after crossing it.
+
+`now` comes from the injected application `Clock` that the capability services already use. The evaluation path MUST NOT read wall-clock time directly (`datetime.now()`, `datetime.utcnow()` or equivalent): the service obtains `now` from the clock and passes it to the pure evaluation function, so expiry is deterministic and testable.
+
+Known invalidation events (§14: application-fingerprint change, required-group change, endpoint-mapping revision change, malformed evidence) still invalidate immediately; they never wait for age expiry.
+
+### 8.2 Expiry converges both READY and MISSING to UNKNOWN
+
+`attested_status` is record-time history; current truth needs current evidence. Once evidence is expired or otherwise invalidated:
+
+```text
+attested_status=READY   + EXPIRED -> write_scope.status=UNKNOWN
+attested_status=MISSING + EXPIRED -> write_scope.status=UNKNOWN
+```
+
+A positively observed absence is not kept as `MISSING` once it is no longer current. When expired `MISSING` evidence converges to `UNKNOWN`, the evidence-dependent `PAUSED/PRODUCT_REGISTRATION/SCOPE_INSUFFICIENT` overlay is removed (`CAPABILITY_MAPPING.md` S6). This does not grant the permission: `write_scope=UNKNOWN`, and `write` is never promoted by it.
+
+The operator-facing A0 surface MUST distinguish expired or invalidated evidence from never-recorded evidence, and MUST NOT present a block that disappeared through expiry as newly granted permission. It communicates the equivalent of `저장된 권한 확인이 만료되어 현재 권한 상태를 확인할 수 없음`, and the API keeps the reason (for example `EXPIRED`) in the evaluation.
 
 ---
 
@@ -746,10 +796,14 @@ Using a controlled harness or safe provider condition:
 
 ### 19.8 Evidence-age expiry
 
-- begin with operator-attested evidence inside its configured age bound;
-- advance beyond the bound in a controlled test;
-- evidence ceases to authorize READY/MISSING gating as current truth;
-- scope converges according to policy, normally UNKNOWN pending fresh observation.
+Using the injected clock (no sleep, no wall-clock dependence) and the canonical 30-day bound, once for evidence recorded with `attested_status=READY` and once for `attested_status=MISSING`:
+
+- `observed_at + 30 days - ε` -> `FRESH`;
+- `observed_at + 30 days` -> `FRESH`;
+- `observed_at + 30 days + ε` -> `EXPIRED` -> `write_scope.status=UNKNOWN`;
+- for `MISSING`: the evidence-dependent `SCOPE_INSUFFICIENT` pause is removed and `write` is not promoted;
+- the expired evidence record remains stored unchanged;
+- the first read after crossing the bound produces exactly one durable capability change and one audit event; later reads produce none.
 
 ### 19.9 Known permission edit
 
@@ -844,9 +898,9 @@ What maximum age should M2 allow for operator-attested provider-admin permission
 
 Current status:
 
-`POLICY_TO_FREEZE_WITH_M2_STATE_CONTRACT`
+`FROZEN_FOR_M2 = 30 days` (Issue #32; §8.1)
 
-Until a bounded policy exists, the implementation MUST NOT silently treat manual evidence as eternally READY.
+The production default is 30 days; an operational override may only tighten it (1..30 days). Manual evidence is never treated as eternally READY.
 
 ---
 
@@ -883,5 +937,11 @@ For SmartStore `OWN_STORE_SELF`:
 `actual write READY requires bounded mutation + external read-back under the later write-capability contract`
 
 `persisted write_scope READY != eternal truth`
+
+`attested_status = persisted record-time history; freshness_status = derived at evaluation from the injected clock, never persisted`
+
+`M2 operator-attestation max age = 30 days; an override may only tighten it (1..30)`
+
+`expired READY or MISSING attestation -> write_scope UNKNOWN; expired MISSING also releases SCOPE_INSUFFICIENT; write is never promoted`
 
 `unknown provider behavior remains UNKNOWN until measured or officially documented`
