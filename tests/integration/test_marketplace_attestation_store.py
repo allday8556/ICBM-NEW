@@ -679,7 +679,8 @@ def test_s17_18_positive_absence_applies_even_before_the_contract_is_recorded(
 def test_s17_18_without_an_application_or_a_mapping_revision_nothing_is_recorded(
     config: AppConfig,
 ) -> None:
-    # Production wiring before PR-A: no seam is implemented, so recording is refused outright.
+    # Production wiring (PR-A): the application comes from the committed SmartStore credential
+    # bundle, so with none saved recording is refused outright.
     with TestClient(create_app(config), base_url=LOCAL) as client:
         view = client.get(URL).json()
         assert (view["recording_available"], view["recording_refusal"]) == (
@@ -691,8 +692,12 @@ def test_s17_18_without_an_application_or_a_mapping_revision_nothing_is_recorded
     assert refused.status_code == 403
     assert refused.json()["error"]["code"] == "MARKETPLACE_ATTESTATION_REFUSED"
     assert refused.json()["error"]["details"] == {"reason": "APPLICATION_NOT_CONFIGURED"}
+    # A revision source that yields no revision refuses too; no temporary value stands in.
     with TestClient(
-        create_app(config, application_identity=FixtureIdentity()), base_url=LOCAL
+        create_app(
+            config, application_identity=FixtureIdentity(), mapping_revision=FixtureRevision("")
+        ),
+        base_url=LOCAL,
     ) as client:
         refused = client.post(URL, json={"observed_groups": ["PRODUCT"]}, headers=CLIENT)
     assert refused.json()["error"]["details"] == {"reason": "MAPPING_REVISION_UNAVAILABLE"}

@@ -346,6 +346,10 @@ RAW_CLIENTS = {
 # Production modules allowed a raw client, and why.
 RAW_CLIENT_OWNERS = {
     "integrations/suppliers/transport/gateway.py": "the common policy-enforcing supplier transport",
+    # ENDPOINT_MATRIX §13: the one registry-gated SmartStore endpoint caller (M2 PR-A).
+    "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
+    # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
+    "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
     "app/core/ownership.py": "hostname for the diagnostic owner metadata (socket)",
 }
@@ -403,15 +407,22 @@ def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> 
 
 
 def test_only_the_common_transport_opens_egress_grants() -> None:
+    # The supplier transport for supplier profile hosts (M1) and the SmartStore caller for the
+    # SmartStore provider host (M2 PR-A). No other code can open a grant.
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
-    assert openers == {"integrations/suppliers/transport/gateway.py"}
+    assert openers == {
+        "integrations/suppliers/transport/gateway.py",
+        "integrations/marketplaces/smartstore/caller.py",
+    }
 
 
 def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
     scoped = {
         path: tree
         for path, tree in _production_modules().items()
-        if path.startswith(("app/connect/", "integrations/suppliers/"))
+        if path.startswith(
+            ("app/connect/", "integrations/suppliers/", "integrations/marketplaces/")
+        )
     }
     checked = 0
     for path, tree in scoped.items():
@@ -432,6 +443,69 @@ def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
                 for field in ("details", "before", "after"):
                     assert _is_safe_payload(_keyword(call, field)), f"{where} {field}"
     assert checked >= 5
+
+
+# ---------------------------------------------------------------- SmartStore endpoint boundary
+
+# ENDPOINT_MATRIX §13 #3/#11/#12: the registry is the only source of the SmartStore host, base
+# URL and paths, and the caller is the only code that composes a URL from them.
+SMARTSTORE_REGISTRY = "integrations/marketplaces/smartstore/registry.py"
+SMARTSTORE_CALLER = "integrations/marketplaces/smartstore/caller.py"
+_SMARTSTORE_WIRE = re.compile(r"commerce\.naver\.com|/external\b|^/v\d+/|/oauth2/|/seller/", re.I)
+
+
+def _code_strings(tree: ast.Module) -> list[ast.Constant]:
+    """String literals that are code, not documentation: standalone string statements
+    (docstrings) are skipped; f-string fragments are included."""
+    statements = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in statements
+    ]
+
+
+def test_smartstore_wire_literals_live_only_in_the_endpoint_registry() -> None:
+    holders = {
+        path
+        for path, tree in _production_modules().items()
+        if any(_SMARTSTORE_WIRE.search(node.value) for node in _code_strings(tree))
+    }
+    assert holders == {SMARTSTORE_REGISTRY}
+
+
+def test_only_the_caller_composes_a_smartstore_url() -> None:
+    wire_names = {"BASE_URL", "PROVIDER_HOST"}
+    users = set()
+    for path, tree in _production_modules().items():
+        for node in ast.walk(tree):
+            named = (
+                (isinstance(node, ast.Name) and node.id in wire_names)
+                or (isinstance(node, ast.Attribute) and node.attr in wire_names)
+                or (isinstance(node, ast.alias) and node.name in wire_names)
+            )
+            if named:
+                users.add(path)
+    assert users == {SMARTSTORE_REGISTRY, SMARTSTORE_CALLER}
+
+
+def test_no_production_client_follows_redirects() -> None:
+    # ENDPOINT_MATRIX §11, ERRORS §17.3: redirect following is off everywhere, explicitly.
+    settings = [
+        (path, call.lineno, _keyword(call, "follow_redirects"))
+        for path, tree in _production_modules().items()
+        for call in _calls(tree)
+        if _keyword(call, "follow_redirects") is not None
+    ]
+    assert {path for path, _, _ in settings} >= {SMARTSTORE_CALLER}
+    for path, line, value in settings:
+        assert isinstance(value, ast.Constant) and value.value is False, f"{path}:{line}"
 
 
 def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
@@ -487,13 +561,13 @@ def test_s17_19_only_the_operator_entry_point_records_contract_freshness() -> No
     }
 
 
-def test_s17_18_no_production_code_supplies_a_mapping_revision_or_application_identity() -> None:
-    # M2 instructions §5.1/§6.7: A0 consumes the endpoint-mapping revision and the application
-    # identity through seams, and PR-A supplies their one authoritative implementation. Until then
-    # no production module may implement either — no hardcoded "v1"-style revision and no typed-in
-    # identity; only test fixtures implement them. PR-A updates this rule with its registry.
-    # The seams are class methods; a module-level function of the same name (the Alembic schema
-    # revision in app/db/migrate.py) is not one.
+def test_s17_18_only_pr_a_supplies_the_mapping_revision_and_the_application_identity() -> None:
+    # M2 instructions §5.1/§5.2/§6.7: A0 consumes the endpoint-mapping revision and the
+    # application identity through seams, and PR-A supplies their one authoritative
+    # implementation each: the endpoint registry's revision and the committed SmartStore
+    # credential bundle. No other production module may implement either — no hardcoded
+    # "v1"-style revision and no typed-in identity. The seams are class methods; a module-level
+    # function of the same name (the Alembic schema revision in app/db/migrate.py) is not one.
     declared, implementers = set(), set()
     for path, tree in _production_modules().items():
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
@@ -513,7 +587,10 @@ def test_s17_18_no_production_code_supplies_a_mapping_revision_or_application_id
         "app/connect/marketplace/revision.py:EndpointMappingRevisionProvider.current_revision",
         "app/connect/marketplace/sources.py:ApplicationIdentitySource.current_identity",
     }
-    assert implementers == set()
+    assert implementers == {
+        "integrations/marketplaces/smartstore/registry.py:RegistryMappingRevision.current_revision",
+        "app/connect/smartstore/service.py:SmartStoreConnectService.current_identity",
+    }
 
 
 def test_s17_22_marketplace_evidence_never_reads_the_wall_clock() -> None:
@@ -570,6 +647,7 @@ def test_connect_adds_no_product_facts_or_product_schema() -> None:
         "marketplace_capabilities",
         "marketplace_workflow_overlays",
         "marketplace_permission_attestations",
+        "marketplace_connections",
     }
     offenders = [
         path

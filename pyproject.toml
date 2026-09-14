@@ -22,6 +22,9 @@ dependencies = [
     "cryptography>=43",
     # Browser authentication where a supplier requires it (ADR-0001, ADR-0007).
     "playwright>=1.47",
+    # SmartStore token request signature: bcrypt over client_id_timestamp with the client
+    # secret as the salt (docs/platforms/smartstore/AUTH.md §4). Added for M2 PR-A.
+    "bcrypt>=5.0",
 ]
 
 [project.optional-dependencies]

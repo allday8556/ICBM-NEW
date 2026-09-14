@@ -3,6 +3,7 @@
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.service import CollectService
@@ -13,7 +14,12 @@ from app.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.connect.marketplace.service import MarketplaceCapabilityService
 from app.connect.marketplace.sources import ApplicationIdentitySource
 from app.connect.service import ConnectService
-from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
+from app.connect.sessions import (
+    MARKETPLACE_SESSIONS_DIR_NAME,
+    SESSIONS_DIR_NAME,
+    SupplierSessionStore,
+)
+from app.connect.smartstore.service import SmartStoreConnectService
 from app.core.clock import Clock, SystemClock
 from app.core.egress import EGRESS
 from app.core.ownership import DataDirLease, require_ownership
@@ -35,6 +41,8 @@ from app.system.diagnostics import DiagnosticsService
 from app.system.execution_mode import ExecutionModeService
 from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
+from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.registry import SUPPLIERS
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
@@ -58,6 +66,7 @@ class Container:
     connect: ConnectService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
+    smartstore: SmartStoreConnectService
     ownership: DataDirLease
 
 
@@ -72,6 +81,7 @@ def build_container(
     suppliers: Sequence[SupplierDefinition] = SUPPLIERS,
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
+    smartstore_caller: SmartStoreEndpointCaller | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -123,17 +133,35 @@ def build_container(
     registry.register(connect.job_definition())
     # Marketplace capability truth: typed evidence in, no provider access (M2 PR-B).
     marketplace_capability = MarketplaceCapabilityService(db=db, clock=clock, audit=audit)
-    # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity and the endpoint-mapping
-    # revision come from the SmartStore adapter (PR-A); until it exists nothing is injected in
-    # production, so no attestation can be recorded and no temporary value stands in (§5.1).
+    # SmartStore CONNECT (M2 PR-A): every provider call goes through the registry-gated caller.
+    smartstore = SmartStoreConnectService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        secrets=secrets,
+        sessions=SupplierSessionStore(
+            config.data_dir / MARKETPLACE_SESSIONS_DIR_NAME, secrets, namespace="marketplace"
+        ),
+        capability=marketplace_capability,
+        caller=smartstore_caller or SmartStoreEndpointCaller(),
+        # AUTH §15: from validated configuration only; unset, CONNECT refuses.
+        renewal_margin=(
+            timedelta(seconds=config.smartstore_renewal_margin_s)
+            if config.smartstore_renewal_margin_s is not None
+            else None
+        ),
+    )
+    # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity comes from the committed
+    # SmartStore credential bundle and the endpoint-mapping revision from the endpoint registry
+    # (§5.1, §5.2); test fixtures may stand in for either.
     permission_attestation = PermissionAttestationService(
         db=db,
         clock=clock,
         audit=audit,
         secrets=secrets,
         capability=marketplace_capability,
-        identity=application_identity,
-        revision=mapping_revision,
+        identity=application_identity or smartstore,
+        revision=mapping_revision or RegistryMappingRevision(),
         max_age_days=config.smartstore_a0_max_age_days,
     )
     marketplace_capability.set_permission_evidence(permission_attestation)
@@ -183,5 +211,6 @@ def build_container(
         connect=connect,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
+        smartstore=smartstore,
         ownership=ownership,
     )

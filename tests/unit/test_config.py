@@ -79,3 +79,29 @@ def test_s17_22_a0_evidence_age_override_can_never_extend_past_30_days(
     env = {"ICBM_DATA_DIR": str(tmp_path), "ICBM_SMARTSTORE_A0_MAX_AGE_DAYS": str(days)}
     with pytest.raises(ConfigError, match=r"1\.\.30"):
         AppConfig.from_env(env)
+
+
+def test_the_smartstore_renewal_margin_has_no_code_default(tmp_path: Path) -> None:
+    # AUTH.md §15: configured operational policy, never a hard-coded value.
+    assert AppConfig(data_dir=tmp_path).smartstore_renewal_margin_s is None
+    env = {"ICBM_DATA_DIR": str(tmp_path), "ICBM_SMARTSTORE_RENEWAL_MARGIN_S": "900"}
+    assert AppConfig.from_env(env).smartstore_renewal_margin_s == 900
+
+
+@pytest.mark.parametrize("seconds", [1, 600, 1799])
+def test_the_renewal_margin_lies_inside_the_provider_window(tmp_path: Path, seconds: int) -> None:
+    config = AppConfig(data_dir=tmp_path, smartstore_renewal_margin_s=seconds)
+    assert config.smartstore_renewal_margin_s == seconds
+
+
+@pytest.mark.parametrize("seconds", [0, -60, 1800, 3600, True])
+def test_a_renewal_margin_outside_the_window_is_refused(tmp_path: Path, seconds: int) -> None:
+    with pytest.raises(ConfigError, match=r"1\.\.1799"):
+        AppConfig(data_dir=tmp_path, smartstore_renewal_margin_s=seconds)
+
+
+@pytest.mark.parametrize("raw", ["1800", "0", "ten minutes", "600.5"])
+def test_a_renewal_margin_from_the_environment_is_validated(tmp_path: Path, raw: str) -> None:
+    env = {"ICBM_DATA_DIR": str(tmp_path), "ICBM_SMARTSTORE_RENEWAL_MARGIN_S": raw}
+    with pytest.raises(ConfigError):
+        AppConfig.from_env(env)

@@ -74,6 +74,8 @@ EXPECTED_TABLES = {
     "marketplace_workflow_overlays",
     # M2 PR-C: SMARTSTORE-A0-PERMISSION evidence (still no product table)
     "marketplace_permission_attestations",
+    # M2 PR-A: SmartStore generations and account binding (still no product table)
+    "marketplace_connections",
 }
 # Cookie values shorter than this are flags, too short to identify a session; scanning them
 # would only produce false positives.
