@@ -44,6 +44,9 @@ Rules:
 | 18 | `SMARTSTORE-A0-PERMISSION` handling performs zero SmartStore calls and never promotes A0 to R0/MACHINE_VERIFIED | **PR-C** | A0 save/read/invalidate/render transport-spy tests; PR-B MUST NOT fake this coverage |
 | 19 | new capability bootstrap is `UNRECORDED`; the four-state freshness behavior matrix, closed/non-reentrant transition graph, same-value reviewed re-recording provenance, and prohibition on PR-A fabricating `CURRENT` are enforced | **PR-B** | named domain/persistence/service/API tests for `UNRECORDED`, allowed/forbidden transitions, `freshness_recorded_at`, actor audit, same-value re-recording, and local operator recording entry point with zero provider calls |
 | 20 | same-scope workflow convergence promotes `REVIEW_REQUIRED` to a positively proven frozen `PAUSED` reason while ambiguity never erases an existing proven `PAUSED` reason | **PR-B** | named domain transition tests covering promotion and preservation in both directions |
+| 21 | operator-attested evidence persists `attested_status` (consistent with required/observed groups) and the freshness-policy bound in effect at recording; current `freshness_status` is never persisted | **PR-C** | migration/model/domain tests: DB and domain consistency of `attested_status`, the stored bound, and no current-freshness column |
+| 22 | canonical 30-day bound on the injected clock: `FRESH` just before and exactly at the bound, `EXPIRED` just after; `READY` and `MISSING` both converge to `UNKNOWN`; expired `MISSING` removes the evidence-dependent `SCOPE_INSUFFICIENT` pause without promoting `write` | **PR-C** | named deterministic boundary tests for `READY` and for `MISSING`; named integration test for the pause release; config tests for default 30 and override 1..30 only |
+| 23 | time-driven expiry converges through the existing read path; the first read after the bound produces exactly one durable change and one audit event, repeated reads none; the attestation record is never mutated | **PR-C** | named integration test counting state writes and `MARKETPLACE_CAPABILITY_CHANGED` events across repeated reads; no scheduler |
 
 ## 3. PR-B implementation boundary
 
@@ -66,6 +69,14 @@ For targets 6, 7 and 16, PR-B implements only the domain/API semantic portion. P
 For target 19, PR-B owns a local operator-authorized freshness-recording entry point, persistence/audit provenance, and transition enforcement. It MUST make zero SmartStore/provider calls. PR-A consumes recorded freshness but MUST NOT author, infer, seed, or fabricate `CURRENT`. PR-D may later surface the operator UI without becoming the source of truth.
 
 PR-B provider/network calls remain exactly zero.
+
+## 3.1 PR-C boundary for targets 18 and 21–23
+
+PR-C owns operator-attested permission evidence at the domain, persistence, service, API and A0 input-UI layers, with zero SmartStore/provider calls.
+
+For targets 22 and 23, PR-C may adjust the permission convergence path it consumes from PR-B (the permission transition and the service convergence) so that expired `MISSING` evidence releases the evidence-dependent `SCOPE_INSUFFICIENT` overlay (`CAPABILITY_MAPPING.md` S6). This transfers no PR-B target. PR-B's named tests for targets 3, 4, 12 and 20 remain required; if one of them encodes behaviour that S6 changes, PR-C updates it explicitly and cites S6 in its PR body.
+
+PR-C MUST NOT add a periodic scheduler for expiry (target 23, S7). PR-D later owns the read-only projection of the expired state.
 
 ## 4. Repository-rule follow-up
 

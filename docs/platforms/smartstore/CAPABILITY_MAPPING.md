@@ -87,7 +87,9 @@ Its evidence envelope includes at least:
 - `required_groups`;
 - `observed_groups`;
 - `endpoint_mapping_revision`;
-- `freshness_status`.
+- `attested_status` — persisted record-time classification (`READY | MISSING`);
+- the freshness-policy bound in effect at recording — persisted;
+- `freshness_status` — derived at evaluation from the injected clock, never persisted (`PERMISSIONS_SCOPES.md` §5, §8.1).
 
 ### 2.3 `write`
 
@@ -264,6 +266,34 @@ After M5 this combination may be valid:
 `auth=READY / write_scope=UNKNOWN / write=READY`
 
 when bounded mutation/read-back proof succeeds while provider-declared permission evidence remains unavailable.
+
+### S6. Expired or invalidated permission evidence converges to UNKNOWN
+
+Permission evidence supports the current `write_scope` only while it is current (`PERMISSIONS_SCOPES.md` §8). Once it expires or is otherwise invalidated:
+
+- `write_scope=UNKNOWN`, whether the evidence originally said `READY` or `MISSING`;
+- if the capability held `MISSING` on that evidence, the `PAUSED/PRODUCT_REGISTRATION/SCOPE_INSUFFICIENT` overlay that S2 derived from it is removed in the same convergence;
+- `write` is not promoted: the transition means ICBM no longer has current evidence that the permission is absent, not that it became available;
+- the stored evidence record is not mutated.
+
+Removing this overlay is not ambiguity erasing a proven reason (§10.1): the reason's positive basis no longer exists. S3 still holds: `UNKNOWN` never produces `SCOPE_INSUFFICIENT`.
+
+### S7. Time-driven convergence reuses the read-path convergence
+
+Evidence expiry is the first capability transition that elapsed time alone can require. M2 adds no periodic scheduler or job for it.
+
+```text
+read / projection / attestation read
+-> service obtains now from the injected Clock
+-> pure evaluation derives current freshness + invalidations
+-> converge capability if the derived write_scope differs from the persisted one
+-> persist and audit only when durable capability/workflow state actually changes
+```
+
+- A read path may therefore cause a convergence write; the read itself is not audited.
+- A durable change appends the canonical capability-change event (`MARKETPLACE_CAPABILITY_CHANGED`) through the normal service path, with safe detail sufficient to reconstruct the prior and resulting `write_scope` status/strength, the invalidation reason (for example `EXPIRED`), any overlay removed or added, and the transition time from the injected clock.
+- Repeated reads after convergence are idempotent: no further state write and no duplicate transition event.
+- A proactive scheduler that surfaces expiry before any read MAY be added later under a separate review; M2 does not require it.
 
 ---
 
@@ -566,6 +596,8 @@ existing PAUSED/<proven reason>
 
 Ambiguity MUST NOT erase a previously proven human-remediable reason. This convergence rule does not authorize replacing one proven `PAUSED` reason with another without the owning evidence/remediation contract.
 
+Expiry or invalidation of the evidence a `PAUSED` reason depends on is not ambiguity: S6 governs removal of an evidence-dependent `SCOPE_INSUFFICIENT` overlay.
+
 ---
 
 ## 11. Default error-to-workflow behavior
@@ -800,6 +832,19 @@ reason_code=SCOPE_INSUFFICIENT
 
 Authentication remains connected.
 
+### Case 3a — the missing-permission evidence expires
+
+The Case 3 attestation crosses its age bound (`PERMISSIONS_SCOPES.md` §8.1) and the first read converges (S6, S7):
+
+```text
+auth=READY
+write_scope=UNKNOWN
+write=UNVERIFIED
+SCOPE_INSUFFICIENT pause removed
+```
+
+The permission is not shown as granted: the A0 surface says the stored confirmation expired and the current permission state is unknown (`○`).
+
 ### Case 4 — identity mismatch
 
 ```text
@@ -879,7 +924,10 @@ Tests must cover at least:
 17. persisted READY loses to current evidence after restart;
 18. `SMARTSTORE-A0-PERMISSION` handling performs zero SmartStore network calls and cannot promote operator attestation into R0/MACHINE_VERIFIED evidence.
 19. a new capability state starts `contract_freshness=UNRECORDED`; the four-state behavior matrix and closed transition graph are enforced in code, same-value reviewed recordings update `freshness_recorded_at` and audit provenance, and PR-A cannot fabricate `CURRENT`;
-20. same-scope workflow convergence promotes `REVIEW_REQUIRED` to a positively proven frozen `PAUSED` reason while later ambiguity cannot erase an existing proven `PAUSED` reason.
+20. same-scope workflow convergence promotes `REVIEW_REQUIRED` to a positively proven frozen `PAUSED` reason while later ambiguity cannot erase an existing proven `PAUSED` reason;
+21. operator-attested permission evidence persists `attested_status` consistent with its required/observed groups and the freshness-policy bound in effect at recording, and never persists current `freshness_status`;
+22. with the injected clock and the canonical 30-day bound, evidence is `FRESH` just before and exactly at the bound and `EXPIRED` just after it; both `READY` and `MISSING` attestations then converge to `write_scope=UNKNOWN`, and expired `MISSING` removes the evidence-dependent `SCOPE_INSUFFICIENT` pause without promoting `write`;
+23. time-driven expiry converges through the existing read path: the first read after the bound produces exactly one durable capability change and one audit event, repeated reads produce none, and the attestation record is never mutated.
 
 Business/state decisions belong server/domain-side, not duplicated in frontend JavaScript.
 
@@ -913,6 +961,7 @@ Local/runtime acceptance must also demonstrate:
 - bounded auth recovery and `AUTH_RETRY_LIMIT`;
 - permission READY/MISSING/UNKNOWN with provenance;
 - operator-attested permission storage/projection/invalidation with zero network calls;
+- operator-attested evidence expiry at the 30-day bound for both READY and MISSING, including `SCOPE_INSUFFICIENT` release and idempotent convergence audit;
 - typed workflow_scope routing;
 - M2 write UNVERIFIED enforcement;
 - NOT_ADOPTED no-network invariant;
@@ -958,6 +1007,10 @@ One completed R0 or A0 slot does not automatically verify this document or anoth
 `APPLICATION_REAUTH_REQUIRED automatic mapping disabled until SMARTSTORE-R0-APP-REAUTH is accepted`
 
 `SMARTSTORE-A0-PERMISSION = operator-attested permission handling evidence, never provider runtime truth`
+
+`expired or invalidated READY/MISSING permission evidence -> write_scope UNKNOWN; evidence-dependent SCOPE_INSUFFICIENT released; write never promoted`
+
+`time-driven convergence = existing read path + injected Clock; only durable changes are audited, exactly once`
 
 `error_class != workflow_state != reason_code`
 
