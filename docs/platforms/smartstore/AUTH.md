@@ -204,13 +204,22 @@ Current upstream guidance documents:
 
 - base token lifetime: 180 minutes / 10,800 seconds;
 - an expired token cannot be used for API calls;
-- a new token may be issued when the remaining lifetime is below 30 minutes;
+- for the same resource, while the existing token still has 30 minutes or more of remaining lifetime, a token request returns that existing token (NAVER-P0-AUTH / NAVER-P0-TOKEN; this documented rule was previously omitted from this contract);
+- inside the documented less-than-30-minute window, a new token may be issued;
 - the previous token remains valid until its own expiry when a new token is issued;
 - SELLER token lifetime is tracked separately per seller account in SELLER mode.
 
 ICBM MUST derive each token's local expiry from the actual returned `expires_in` value rather than hard-coding exactly 10,800 seconds.
 
 The 180-minute value is provider policy context, while `expires_in` is the per-response runtime fact.
+
+A token response's `expires_in` is therefore the remaining lifetime of whichever token the provider returned. It can be far below 10,800 seconds when an existing token is returned. ICBM keeps deriving local expiry from that returned value.
+
+This clarification changes no runtime behavior:
+
+- a replacement is still requested only inside the documented window (§15);
+- bearer persistence stays the provisional baseline (§12);
+- the less-than-30-minute side of the rule stays pending in §24.3 (`SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`).
 
 ---
 
@@ -789,6 +798,13 @@ Measure:
 
 ICBM MUST NOT assume undocumented behavior here.
 
+**Supporting observation (M2 closeout; does not complete this section).** On 2026-09-14, four token responses arrived between 21:15Z and 22:27Z, each with more than 30 minutes of lifetime remaining:
+
+- one from the terminal campaign `m2-campaign-01` (history only);
+- three from `m2-campaign-02` (T1, T4a, T5).
+
+Their `expires_in` values decreased (10799, 6757, 6485, 6483), and their computed expiries fall at essentially one absolute instant (00:15:18Z, within 0.5 s). This is consistent with the §7 rule that the existing token is returned while 30 minutes or more remain. The harness records no token-derived value, so byte-identity of the returned material is not measured. The observation covers only the more-than-30-minutes side. It does not complete this section or `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW`: the separately reviewed long-horizon session must still measure the less-than-30-minute side and old-token validity, and record the persistence-policy review. Record: `docs/acceptance/evidence/M2-CLOSEOUT.md`.
+
 This measurement is required for full AUTH contract verification and for deciding whether the provisional persistence baseline in §12 should change. It MAY be executed in a separate long-horizon observation session and is not, by itself, a blocker for `M2 ACCEPTED`.
 
 Until the measurement and review are complete, secure bearer-token persistence remains the provisional M2 baseline and the renewal-window behavior remains documentation-derived rather than runtime-verified.
@@ -953,7 +969,13 @@ The following MUST remain explicit unknowns until measured or documented by upst
 
 If NAVER accepted the first token issuance but ICBM crashed before persisting it, what does an immediate second token request return while the first remote token is still early in its lifetime?
 
-Current contract status: `UNKNOWN`.
+Current contract status: `MEASURED`. This is one observation, from `SMARTSTORE-R0-FIRST-TOKEN-CRASH` in campaign `m2-campaign-02`:
+
+- the crash child died after T4a's full response and before any local commit;
+- after the restart, the immediate T5 request returned HTTP 200 with `expires_in` 6483;
+- T5's computed expiry equals that of the uncommitted T4a response, which carried 6485 two seconds earlier.
+
+This is consistent with the §7 existing-token rule. It is one trustworthy observation, not a provider guarantee, and byte-identity is not measured.
 
 This affects unattended crash recovery availability, not account-integrity safety.
 

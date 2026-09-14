@@ -1,0 +1,755 @@
+{
+  "schema_version": "m2-campaign-evidence/v1",
+  "campaign_id": "m2-campaign-02",
+  "mode": "REAL",
+  "generated_at": "2026-09-14T22:31:30.741+00:00",
+  "git": {
+    "head": "011e6fdcf2398e7ddae2db2f2e1a7a660a53789f",
+    "approved_sha": "011e6fdcf2398e7ddae2db2f2e1a7a660a53789f",
+    "tree_clean": true
+  },
+  "observed_range": {
+    "started_at": "2026-09-14T22:22:39.876+00:00",
+    "finished_at": "2026-09-14T22:31:30.741+00:00"
+  },
+  "campaign_state": "COMPLETED",
+  "campaign_outcome": "COMPLETED",
+  "renewal_margin_s": 600,
+  "budget": {
+    "caps": {
+      "SMARTSTORE_AUTH_TOKEN": 8,
+      "SMARTSTORE_SELLER_ACCOUNT": 6,
+      "OTHER": 0
+    },
+    "used": {
+      "SMARTSTORE_AUTH_TOKEN": 3,
+      "SMARTSTORE_SELLER_ACCOUNT": 4,
+      "OTHER": 0
+    },
+    "crash_attempt_cap": 2,
+    "crash_attempts_used": 1,
+    "blocked_before_send": []
+  },
+  "requests": [
+    {
+      "seq": 1,
+      "label": "T1",
+      "phase": "BASELINE_CONNECT",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "reserved_at": "2026-09-14T22:22:41.337+00:00",
+      "finished_at": "2026-09-14T22:22:41.752+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 409.1
+    },
+    {
+      "seq": 2,
+      "label": "A1",
+      "phase": "BASELINE_CONNECT",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "reserved_at": "2026-09-14T22:22:41.792+00:00",
+      "finished_at": "2026-09-14T22:22:42.150+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 353.4
+    },
+    {
+      "seq": 3,
+      "label": "A1b",
+      "phase": "BASELINE_BIND",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "reserved_at": "2026-09-14T22:22:55.682+00:00",
+      "finished_at": "2026-09-14T22:22:56.039+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 353.1
+    },
+    {
+      "seq": 4,
+      "label": "A2",
+      "phase": "BASELINE_RESTART",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "reserved_at": "2026-09-14T22:22:57.592+00:00",
+      "finished_at": "2026-09-14T22:22:58.037+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 439.3
+    },
+    {
+      "seq": 5,
+      "label": "T4a",
+      "phase": "CRASH_T4A",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "reserved_at": "2026-09-14T22:27:13.220+00:00",
+      "finished_at": "2026-09-14T22:27:13.624+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 399.5
+    },
+    {
+      "seq": 6,
+      "label": "T5",
+      "phase": "CRASH_RECOVERY",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "reserved_at": "2026-09-14T22:27:15.146+00:00",
+      "finished_at": "2026-09-14T22:27:15.512+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 360.7
+    },
+    {
+      "seq": 7,
+      "label": "A3",
+      "phase": "CRASH_RECOVERY",
+      "phase_attempt": 1,
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "reserved_at": "2026-09-14T22:27:15.529+00:00",
+      "finished_at": "2026-09-14T22:27:15.891+00:00",
+      "outcome": "RESPONDED",
+      "http_status": 200,
+      "latency_ms": 357.6
+    }
+  ],
+  "calls": [
+    {
+      "data_dir": "baseline",
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 419.4,
+      "started_at": "2026-09-14T22:22:41.336+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": null,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em6-token-r1"
+    },
+    {
+      "data_dir": "baseline",
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 361.7,
+      "started_at": "2026-09-14T22:22:41.792+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": 1,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em7-account-r1"
+    },
+    {
+      "data_dir": "baseline",
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 360.9,
+      "started_at": "2026-09-14T22:22:55.681+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": 1,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em7-account-r1"
+    },
+    {
+      "data_dir": "baseline",
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 448.5,
+      "started_at": "2026-09-14T22:22:57.591+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": 1,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em7-account-r1"
+    },
+    {
+      "data_dir": "crash",
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 408.0,
+      "started_at": "2026-09-14T22:27:13.219+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": null,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em6-token-r1"
+    },
+    {
+      "data_dir": "crash",
+      "endpoint_id": "SMARTSTORE_AUTH_TOKEN",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 369.7,
+      "started_at": "2026-09-14T22:27:15.145+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": null,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em6-token-r1"
+    },
+    {
+      "data_dir": "crash",
+      "endpoint_id": "SMARTSTORE_SELLER_ACCOUNT",
+      "result_class": "SUCCEEDED",
+      "http_status": 200,
+      "latency_ms": 366.0,
+      "started_at": "2026-09-14T22:27:15.528+00:00",
+      "provider_trace_id": null,
+      "credential_generation": 1,
+      "session_generation": 1,
+      "transmission_phase": null,
+      "remote_outcome": null,
+      "predicate_revision": "em7-account-r1"
+    }
+  ],
+  "phases": [
+    {
+      "phase": "BASELINE_CONNECT",
+      "attempt": 1,
+      "opened_at": "2026-09-14T22:22:41.332+00:00",
+      "closed_at": "2026-09-14T22:22:42.161+00:00",
+      "result": "PASS"
+    },
+    {
+      "phase": "BASELINE_BIND",
+      "attempt": 1,
+      "opened_at": "2026-09-14T22:22:55.649+00:00",
+      "closed_at": "2026-09-14T22:22:56.057+00:00",
+      "result": "PASS"
+    },
+    {
+      "phase": "BASELINE_RESTART",
+      "attempt": 1,
+      "opened_at": "2026-09-14T22:22:57.586+00:00",
+      "closed_at": "2026-09-14T22:22:58.053+00:00",
+      "result": "PASS"
+    },
+    {
+      "phase": "CRASH_T4A",
+      "attempt": 1,
+      "opened_at": "2026-09-14T22:27:11.803+00:00",
+      "closed_at": "2026-09-14T22:27:13.683+00:00",
+      "result": "BOUNDARY_EXERCISED"
+    },
+    {
+      "phase": "CRASH_RECOVERY",
+      "attempt": 1,
+      "opened_at": "2026-09-14T22:27:15.141+00:00",
+      "closed_at": "2026-09-14T22:27:16.133+00:00",
+      "result": "PASS"
+    }
+  ],
+  "sessions": [
+    {
+      "data_dir": "baseline",
+      "token_type": "Bearer",
+      "expires_in": 6757,
+      "expires_at": "2026-09-15T00:15:18.756+00:00",
+      "credential_generation": 1,
+      "session_generation": 1,
+      "committed_at": "2026-09-14T22:22:41.756+00:00"
+    },
+    {
+      "data_dir": "crash",
+      "token_type": "Bearer",
+      "expires_in": 6483,
+      "expires_at": "2026-09-15T00:15:18.515+00:00",
+      "credential_generation": 1,
+      "session_generation": 1,
+      "committed_at": "2026-09-14T22:27:15.515+00:00"
+    }
+  ],
+  "identity": {
+    "application_fingerprint": "fc40be8bae9e4832a298f915ba92d81bcfc8dbf7f32f4c64fcc08e5c52173253",
+    "credential_generation": 1,
+    "baseline_account_fingerprint": "6a971e099875fb4bbde842e0a2fe1a8e691f0783ed3c076cd38ddc487e72d495",
+    "observations": [
+      {
+        "account_fingerprint": "6a971e099875fb4bbde842e0a2fe1a8e691f0783ed3c076cd38ddc487e72d495",
+        "auth": "NOT_BOUND",
+        "bound": false,
+        "data_dir": "baseline",
+        "label": "A1",
+        "matches_baseline": true
+      },
+      {
+        "account_fingerprint": "6a971e099875fb4bbde842e0a2fe1a8e691f0783ed3c076cd38ddc487e72d495",
+        "auth": "READY",
+        "bound": true,
+        "data_dir": "baseline",
+        "label": "A1b",
+        "matches_baseline": true
+      },
+      {
+        "account_fingerprint": "6a971e099875fb4bbde842e0a2fe1a8e691f0783ed3c076cd38ddc487e72d495",
+        "auth": "READY",
+        "bound": true,
+        "data_dir": "baseline",
+        "label": "A2",
+        "matches_baseline": true
+      },
+      {
+        "account_fingerprint": "6a971e099875fb4bbde842e0a2fe1a8e691f0783ed3c076cd38ddc487e72d495",
+        "auth": "NOT_BOUND",
+        "bound": false,
+        "data_dir": "crash",
+        "label": "A3",
+        "matches_baseline": true
+      }
+    ],
+    "a3_comparison": "MATCH",
+    "a3_reason": "SAME_ACCOUNT"
+  },
+  "crash": {
+    "attempts": [
+      {
+        "connect_result": null,
+        "crash_attempt": 1,
+        "exit_code": 86,
+        "label": "T4a",
+        "marker": {
+          "at": "2026-09-14T22:27:13.651+00:00",
+          "campaign_id": "m2-campaign-02",
+          "candidate_scan": {
+            "files_scanned": 13,
+            "total_hits": 0
+          },
+          "crash_attempt": 1,
+          "credential_generation": 1,
+          "expires_in": 6485,
+          "label": "T4a",
+          "marker": "CRASH_BOUNDARY_REACHED",
+          "phase": "CRASH_T4A",
+          "pid": 42240,
+          "reservation_seq": 5,
+          "token_type": "Bearer"
+        },
+        "reasons": [],
+        "reservation_seq": 5,
+        "verdict": "BOUNDARY_EXERCISED"
+      }
+    ],
+    "recovery": {
+      "a3_http_status": 200,
+      "connect_result": "HTTP_200",
+      "crash_dir_bound": false,
+      "crash_dir_session_generation": 1,
+      "t5_http_status": 200
+    }
+  },
+  "slots": [
+    {
+      "evidence_id": "SMARTSTORE-R0-TOKEN",
+      "evidence_kind": "PROVIDER_MEASURED",
+      "status": "PASS",
+      "required_for_m2_acceptance": true,
+      "observed_at": {
+        "started_at": "2026-09-14T22:22:41.337+00:00",
+        "finished_at": "2026-09-14T22:22:41.752+00:00"
+      },
+      "application_fingerprint": "fc40be8bae9e4832a298f915ba92d81bcfc8dbf7f32f4c64fcc08e5c52173253",
+      "credential_generation": 1,
+      "session_generation": 1,
+      "endpoint_ids": [
+        "SMARTSTORE_AUTH_TOKEN"
+      ],
+      "request_count": {
+        "SMARTSTORE_AUTH_TOKEN": 1
+      },
+      "evidence_ref": "requests(T1),sessions(baseline)",
+      "result_summary": "T1 issued a Bearer token, expires_in 6757; it became current only as committed session generation 1",
+      "contract_impact": "NONE"
+    },
+    {
+      "evidence_id": "SMARTSTORE-R0-SELLER-ACCOUNT",
+      "evidence_kind": "PROVIDER_MEASURED",
+      "status": "PASS",
+      "required_for_m2_acceptance": true,
+      "observed_at": {
+        "started_at": "2026-09-14T22:22:41.792+00:00",
+        "finished_at": "2026-09-14T22:22:58.037+00:00"
+      },
+      "application_fingerprint": "fc40be8bae9e4832a298f915ba92d81bcfc8dbf7f32f4c64fcc08e5c52173253",
+      "credential_generation": 1,
+      "session_generation": null,
+      "endpoint_ids": [
+        "SMARTSTORE_SELLER_ACCOUNT"
+      ],
+      "request_count": {
+        "SMARTSTORE_SELLER_ACCOUNT": 3
+      },
+      "evidence_ref": "requests(A1,A1b,A2),identity",
+      "result_summary": "A1 observed the account unbound, A1b bound the operator-confirmed account on a fresh read, A2 proved it after a restart; one account fingerprint throughout",
+      "contract_impact": "NONE"
+    },
+    {
+      "evidence_id": "SMARTSTORE-R0-FIRST-TOKEN-CRASH",
+      "evidence_kind": "PROVIDER_MEASURED",
+      "status": "PASS",
+      "required_for_m2_acceptance": true,
+      "observed_at": {
+        "started_at": "2026-09-14T22:27:13.220+00:00",
+        "finished_at": "2026-09-14T22:27:15.891+00:00"
+      },
+      "application_fingerprint": "fc40be8bae9e4832a298f915ba92d81bcfc8dbf7f32f4c64fcc08e5c52173253",
+      "credential_generation": 1,
+      "session_generation": null,
+      "endpoint_ids": [
+        "SMARTSTORE_AUTH_TOKEN",
+        "SMARTSTORE_SELLER_ACCOUNT"
+      ],
+      "request_count": {
+        "SMARTSTORE_AUTH_TOKEN": 2,
+        "SMARTSTORE_SELLER_ACCOUNT": 1
+      },
+      "evidence_ref": "crash,identity",
+      "result_summary": "the child died at the post-response, pre-commit boundary; T5 and A3 ran after the restart; A3 matched the baseline account fingerprint",
+      "contract_impact": "NONE"
+    },
+    {
+      "evidence_id": "SMARTSTORE-A0-PERMISSION",
+      "evidence_kind": "OPERATOR_ATTESTED",
+      "status": "PASS",
+      "required_for_m2_acceptance": true,
+      "observed_at": null,
+      "application_fingerprint": "fc40be8bae9e4832a298f915ba92d81bcfc8dbf7f32f4c64fcc08e5c52173253",
+      "credential_generation": 1,
+      "session_generation": null,
+      "endpoint_ids": [],
+      "request_count": {},
+      "evidence_ref": "preflight/status.json",
+      "result_summary": "operator-attested API groups persisted across a restart as LIMITED, never machine-verified; 0 provider requests",
+      "contract_impact": "NONE"
+    },
+    {
+      "evidence_id": "SMARTSTORE-R0-TOKEN-REISSUE-WINDOW",
+      "evidence_kind": "PROVIDER_MEASURED",
+      "status": "DEFERRED_LONG_HORIZON",
+      "required_for_m2_acceptance": false,
+      "observed_at": null,
+      "application_fingerprint": null,
+      "credential_generation": null,
+      "session_generation": null,
+      "endpoint_ids": [],
+      "request_count": {},
+      "evidence_ref": "M2.md#5.3",
+      "result_summary": "separate long-horizon session; not part of the main campaign",
+      "contract_impact": "NONE"
+    },
+    {
+      "evidence_id": "SMARTSTORE-R0-APP-REAUTH",
+      "evidence_kind": "PROVIDER_MEASURED",
+      "status": "BLOCKED_BY_TIME",
+      "required_for_m2_acceptance": false,
+      "observed_at": null,
+      "application_fingerprint": null,
+      "credential_generation": null,
+      "session_generation": null,
+      "endpoint_ids": [],
+      "request_count": {},
+      "evidence_ref": "M2.md#5.5",
+      "result_summary": "not practically observable; never manufactured",
+      "contract_impact": "NONE"
+    }
+  ],
+  "scan": {
+    "stage": "final",
+    "local": {
+      "files_scanned": 202,
+      "hits": {
+        "client_secret": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "client_id": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "bearer_baseline": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "bearer_crash": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        }
+      },
+      "total_hits": 0
+    },
+    "evidence": {
+      "files_scanned": 1,
+      "hits": {
+        "client_secret": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "client_id": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "bearer_baseline": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "bearer_crash": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "account_0": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        },
+        "account_1": {
+          "raw": 0,
+          "url": 0,
+          "json": 0,
+          "base64": 0,
+          "html": 0
+        }
+      },
+      "total_hits": 0
+    }
+  },
+  "reconcile": {
+    "match": true,
+    "ledger": {
+      "SMARTSTORE_AUTH_TOKEN": 3,
+      "SMARTSTORE_SELLER_ACCOUNT": 4
+    },
+    "caller_log": {
+      "SMARTSTORE_AUTH_TOKEN": 3,
+      "SMARTSTORE_SELLER_ACCOUNT": 4
+    },
+    "refused_ledger": 0,
+    "refused_caller_log": 0
+  },
+  "regression": [
+    {
+      "stage": "recheck",
+      "name": "pytest",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "recheck",
+      "name": "ruff_check",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "recheck",
+      "name": "ruff_format",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "recheck",
+      "name": "mypy",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "recheck",
+      "name": "m0_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": "24/24 checks"
+    },
+    {
+      "stage": "final",
+      "name": "pytest",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "final",
+      "name": "ruff_check",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "final",
+      "name": "ruff_format",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "final",
+      "name": "mypy",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "final",
+      "name": "m0_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": "24/24 checks"
+    }
+  ],
+  "steps": [
+    {
+      "name": "baseline.not_ready_before_proof",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:41.331+00:00",
+      "detail": "NOT_BOUND"
+    },
+    {
+      "name": "a1.observation_never_binds",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:42.157+00:00",
+      "detail": "bound=False auth=NOT_BOUND"
+    },
+    {
+      "name": "a1.operator_confirms_account",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:55.648+00:00",
+      "detail": null
+    },
+    {
+      "name": "a1b.binds_the_confirmed_account",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:56.050+00:00",
+      "detail": "bound=True auth=READY"
+    },
+    {
+      "name": "a2.persisted_ready_not_trusted",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:57.585+00:00",
+      "detail": "NOT_READY"
+    },
+    {
+      "name": "a2.ready_only_after_fresh_proof",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:58.052+00:00",
+      "detail": "auth=READY"
+    },
+    {
+      "name": "a2.committed_session_reused",
+      "result": "PASS",
+      "at": "2026-09-14T22:22:58.053+00:00",
+      "detail": "A2"
+    },
+    {
+      "name": "recheck.regression_floor",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:11.275+00:00",
+      "detail": "pytest=PASS, ruff_check=PASS, ruff_format=PASS, mypy=PASS, m0_acceptance=PASS"
+    },
+    {
+      "name": "recheck.artifact_scan_clean",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:11.790+00:00",
+      "detail": "local 0 hits, evidence 0 hits"
+    },
+    {
+      "name": "recheck.ledger_matches_caller_log",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:11.792+00:00",
+      "detail": "ledger __SMARTSTORE_AUTH_TOKEN_: 1, _SMARTSTORE_SELLER_ACCOUNT_: 3_ caller __SMARTSTORE_AUTH_TOKEN_: 1, _SMARTSTORE_SELLER_ACCOUNT_: 3_ refused 0/0"
+    },
+    {
+      "name": "crash_dir.fresh_without_session",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:11.801+00:00",
+      "detail": "session_generation_hwm=0"
+    },
+    {
+      "name": "t4a.crash_boundary",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:13.685+00:00",
+      "detail": "BOUNDARY_EXERCISED"
+    },
+    {
+      "name": "t5.nothing_trusted_after_crash",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:15.138+00:00",
+      "detail": "NOT_BOUND"
+    },
+    {
+      "name": "a3.crash_dir_not_promoted",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:15.901+00:00",
+      "detail": "bound=False auth=NOT_BOUND"
+    },
+    {
+      "name": "a3.no_binding_in_crash_dir",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:16.127+00:00",
+      "detail": "bound=False"
+    },
+    {
+      "name": "a3.identity_comparison",
+      "result": "PASS",
+      "at": "2026-09-14T22:27:16.131+00:00",
+      "detail": "MATCH SAME_ACCOUNT"
+    },
+    {
+      "name": "final.regression_floor",
+      "result": "PASS",
+      "at": "2026-09-14T22:31:30.344+00:00",
+      "detail": "pytest=PASS, ruff_check=PASS, ruff_format=PASS, mypy=PASS, m0_acceptance=PASS"
+    },
+    {
+      "name": "final.artifact_scan_clean",
+      "result": "PASS",
+      "at": "2026-09-14T22:31:30.699+00:00",
+      "detail": "local 0 hits, evidence 0 hits"
+    },
+    {
+      "name": "final.ledger_matches_caller_log",
+      "result": "PASS",
+      "at": "2026-09-14T22:31:30.701+00:00",
+      "detail": "ledger __SMARTSTORE_AUTH_TOKEN_: 3, _SMARTSTORE_SELLER_ACCOUNT_: 4_ caller __SMARTSTORE_AUTH_TOKEN_: 3, _SMARTSTORE_SELLER_ACCOUNT_: 4_ refused 0/0"
+    }
+  ]
+}

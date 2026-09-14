@@ -1,6 +1,6 @@
 # M2 acceptance harness and evidence contract
 
-Author: Claude Code · Status: **UNDER REVIEW** (Issue #46 §2 harness PR; architect audit pending)
+Author: Claude Code · Status: harness **ACCEPTED** (PR #49, #50); M2 closeout evidence **ACCEPTED** (closeout PR #51, Issue #46)
 
 This directory holds the evidence contract for the M2 SmartStore CONNECT acceptance campaign, and
 the runbook of the harness that produces the evidence (`scripts/m2_acceptance.py`,
@@ -11,9 +11,14 @@ here changes it, and nothing here changes product runtime behavior.
 | --- | --- |
 | `m2-campaign-evidence.schema.json` | The only shape campaign evidence may take. Every object is closed, every string is an enum, a fixed pattern or bounded text, and no field exists for a secret or a raw account identity. `scripts/m2harness/evidence.py` enforces it. |
 | `M2-EVIDENCE-TEMPLATE.md` | The closeout record (M2.md §7) that the evidence PR fills in. |
+| `M2-CLOSEOUT.md` | The filled closeout record of the main campaign `m2-campaign-02`. |
+| `m2-campaign-02.json` | That campaign's sanitized evidence, byte-for-byte as the harness wrote it. |
+| `m2-campaign-02-preflight.json` | That campaign's zero-provider preflight status file. |
 
-Campaign evidence files are committed here only by the evidence/closeout PR (Issue #46 §5). The
-harness PR commits none, and **no real SmartStore request was made for it**.
+Campaign evidence files are committed here only by an evidence/closeout PR. The accepted M2
+closeout (campaign `m2-campaign-02`) was committed by closeout PR #51 (Issue #46 §5). Its
+artifacts are copied byte-for-byte from the campaign directory, and that directory's absolute
+path is never committed.
 
 ## 1. What the harness guarantees, and where
 
@@ -31,10 +36,10 @@ harness PR commits none, and **no real SmartStore request was made for it**.
 | Evidence rejects secrets | A closed schema, plus a writer guard over every encoding the artifact scanner knows. A refused document is not written. | `test_m2_harness_evidence.py` |
 | The crash marker cannot be fabricated | The child writes it only in place of `_commit`, after the ledger shows its own completed HTTP 200 token response. It is authenticated with a nonce passed on stdin and never stored. The parent also requires exit code 86, a data directory with no committed session, and zero candidate hits on disk. | `test_m2_harness_crash.py` |
 
-## 2. Runbook (only after this PR is merged and audited)
+## 2. Runbook
 
-Do this only after this PR is merged with the user's approval, the independent cross-audit and
-the architect audit have passed, and, for step 6, the user has given an explicit go-ahead.
+The harness was merged and audited in PR #49 and #50. A REAL run (step 6) still needs the
+user's explicit go-ahead for that campaign.
 
 0. Check out the approved `main` SHA with nothing changed or untracked (`git status` is empty).
    Pick a campaign directory **outside** the repository and outside every ordinary ICBM data
@@ -123,3 +128,6 @@ The observed account is shown to the operator on the terminal and exists only in
 * **`APPROVAL_MAX_AGE` = 2 hours** is a harness choice, open to review.
 * **Contingency calls** are reachable only through a new approved invocation. The harness never
   retries automatically, because PR-A's retry budgets are policy-pending (ERRORS §25 Q6).
+* **Preflight display.** A gate that passes can still print its failure hint as its detail, for
+  example `campaign_registered … no matching registration`. The `result` field is authoritative.
+  This is display-only and non-gating.
