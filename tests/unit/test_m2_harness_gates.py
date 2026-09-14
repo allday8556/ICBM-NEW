@@ -27,6 +27,7 @@ from scripts.m2harness.gates import (
     issue_approval,
     real_mode_gates,
 )
+from scripts.m2harness.keyrings import SCOPE_ENV, SCOPED_BACKEND
 from scripts.m2harness.ledger import Ledger, Mode, Phase, ReservationRefused, State
 from scripts.m2harness.paths import CampaignPaths
 
@@ -333,6 +334,8 @@ def test_a_real_campaign_process_never_builds_the_live_transport_under_ci_or_tes
     blocked = ("PYTEST_CURRENT_TEST", "CI", "GITHUB_ACTIONS")
     env = {name: value for name, value in os.environ.items() if name not in blocked}
     env |= marker | ENV | {"PYTHONIOENCODING": "utf-8"}
+    # The campaign's own secret store, as the harness starts it: CI or pytest is the only obstacle.
+    env |= {"PYTHON_KEYRING_BACKEND": SCOPED_BACKEND, SCOPE_ENV: CAMPAIGN}
     completed = subprocess.run(
         [
             sys.executable,
@@ -349,9 +352,50 @@ def test_a_real_campaign_process_never_builds_the_live_transport_under_ci_or_tes
         env=env,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=60,
     )
     assert completed.returncode != 0
     assert "LiveProviderRefused" in completed.stderr
     # Refused before it owned, opened or served anything.
+    assert not paths.data_dir("baseline").exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "keyring_env"),
+    [
+        (Mode.DRY, {}),
+        (Mode.REAL, {}),
+        (Mode.REAL, {"PYTHON_KEYRING_BACKEND": SCOPED_BACKEND, SCOPE_ENV: "m2-another-campaign"}),
+    ],
+)
+def test_an_application_process_runs_only_with_the_campaigns_secret_store(
+    tmp_path: Path, mode: Mode, keyring_env: dict[str, str]
+) -> None:
+    """Started by hand, without the campaign's keyring backend, an application process of the
+    campaign refuses before it reads a secret, owns a data directory or builds a transport. CI
+    stays set, so a broken check would still meet the live-transport refusal (exit 1, not 2)."""
+    paths = _campaign(tmp_path, mode=mode)
+    blocked = ("PYTEST_CURRENT_TEST", "GITHUB_ACTIONS", "PYTHON_KEYRING_BACKEND", SCOPE_ENV)
+    env = {name: value for name, value in os.environ.items() if name not in blocked}
+    env |= keyring_env | ENV | {"CI": "true", "PYTHONIOENCODING": "utf-8"}
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "m2_acceptance.py"),
+            "_serve",
+            "--campaign-dir",
+            str(paths.root),
+            "--role",
+            "baseline",
+            "--port",
+            "9",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 2
+    assert "REFUSED" in completed.stdout
     assert not paths.data_dir("baseline").exists()

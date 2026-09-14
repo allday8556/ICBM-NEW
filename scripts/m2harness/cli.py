@@ -41,8 +41,10 @@ from scripts.m2harness.gates import (
     issue_approval,
     real_mode_gates,
 )
+from scripts.m2harness.keyrings import DRY_BACKEND, DRY_FILE_ENV, SCOPE_ENV, SCOPED_BACKEND
 from scripts.m2harness.ledger import (
     PHASE_ROLES,
+    Campaign,
     Ledger,
     LedgerError,
     Mode,
@@ -281,6 +283,21 @@ def _status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _campaign_secret_store(paths: CampaignPaths, campaign: Campaign) -> bool:
+    """Whether this process was started with the campaign's own keyring backend (see
+    ``campaign.child_env``), so the application can never read or write the operator's
+    ordinary ICBM secrets."""
+    backend = os.environ.get("PYTHON_KEYRING_BACKEND")
+    if campaign.mode is Mode.DRY:
+        location = os.environ.get(DRY_FILE_ENV, "")
+        return (
+            backend == DRY_BACKEND
+            and bool(location)
+            and Path(location).resolve() == paths.dry_keyring.resolve()
+        )
+    return backend == SCOPED_BACKEND and os.environ.get(SCOPE_ENV) == campaign.campaign_id
+
+
 def _serve_child(args: argparse.Namespace) -> int:
     """One application process of the campaign (started by the harness, never by hand)."""
     import uvicorn
@@ -291,6 +308,9 @@ def _serve_child(args: argparse.Namespace) -> int:
     paths = CampaignPaths(args.campaign_dir)
     ledger = Ledger.open(paths.ledger)
     campaign = ledger.campaign()
+    if not _campaign_secret_store(paths, campaign):
+        print("REFUSED: a campaign application process runs only with the campaign's secret store")
+        return 2
     phases = frozenset(Phase(value) for value in args.phases.split(",") if value)
     if any(PHASE_ROLES[phase] != args.role for phase in phases):
         print("REFUSED: a phase of the other data directory")

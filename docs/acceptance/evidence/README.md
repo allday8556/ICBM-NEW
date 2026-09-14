@@ -21,6 +21,7 @@ harness PR commits none, and **no real SmartStore request was made for it**.
 | --- | --- | --- |
 | Default and CI runs cannot reach SmartStore | The default command is `dry`: a fake provider stands behind the real caller. The live inner transport exists only in an application process of a **REAL** ledger, and its factory refuses under `CI`, `GITHUB_ACTIONS`, `PYTEST_CURRENT_TEST` or a loaded pytest, both when it is created and when it builds. | `test_m2_harness_transport.py`, `test_m2_harness_gates.py::test_a_real_campaign_process_never_builds_the_live_transport_under_ci_or_tests`, `test_m2_harness_static.py` |
 | No second SmartStore client; nothing bypasses the registry or egress ownership | The harness only passes a transport to the real `SmartStoreEndpointCaller`. The caller still resolves the adopted endpoint, composes the request, opens the egress grant and applies the timeouts, the success predicate and NO_FOLLOW. The gate recognizes only the registry's exact scheme, host, port, method and path. | `test_m2_harness_static.py`, `test_a_forbidden_target_never_reaches_a_transport`, `test_an_unadopted_endpoint_fails_in_the_caller_before_the_gate` |
+| Application processes use only the campaign's secret store | An application process of a campaign refuses to start unless it runs with the campaign's own keyring backend: the scoped OS store for REAL, the fixture file for DRY. This is checked before it reads a secret, owns a data directory or builds a transport. | `test_an_application_process_runs_only_with_the_campaigns_secret_store` |
 | Durable reservation **before** the transport handoff | `BudgetedTransport` reserves in the campaign ledger (SQLite, `synchronous=FULL`) before the inner transport is even built. The response only completes the reservation. | `test_the_caller_request_is_reserved_before_the_transport_receives_it`, `test_a_request_is_durably_reserved_before_its_response_exists` |
 | Hard caps: token 8, seller 6, anything else 0; over-cap → `BUDGET_EXHAUSTED`, nothing sent | Checked in the reservation transaction, and again by SQLite triggers. | `test_each_cap_refuses_…`, `test_every_other_endpoint_has_a_cap_of_zero`, `test_an_over_cap_request_never_reaches_the_transport`, `test_the_seller_cap_refuses_the_seventh_read_before_send` |
 | Nothing exploratory | A request is accepted only as an unused step of the open phase's frozen plan (M2.md §6.1). | `test_only_the_open_phases_frozen_plan_can_be_sent` |
@@ -102,8 +103,10 @@ The observed account is shown to the operator on the terminal and exists only in
 
 ## 4. Known limits, for the audit
 
-* **Operator discipline outside the harness.** `icbm serve` on a campaign directory would use the
-  product's unscoped keyring and the default, ungated caller. The scoped keyring means that app
+* **Operator discipline outside the harness.** The harness's own application processes refuse to
+  start without the campaign's keyring backend. `icbm serve`, the unchanged product entry point,
+  run on a campaign directory would still use the product's unscoped keyring and the default,
+  ungated caller. The scoped keyring means that app
   would not see the campaign's credentials. Reconciliation also flags any call that the ledger did
   not reserve: it checks every caller log line of both data directories against the ledger.
 * **The T4a candidate token** is scanned for only inside the crash child, at the boundary, and
