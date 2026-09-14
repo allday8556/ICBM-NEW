@@ -1,0 +1,144 @@
+{
+  "kind": "M2_PREFLIGHT_STATUS",
+  "campaign_id": "m2-campaign-02",
+  "mode": "REAL",
+  "head": "011e6fdcf2398e7ddae2db2f2e1a7a660a53789f",
+  "tree_clean": true,
+  "generated_at": "2026-09-14T22:18:18.518+00:00",
+  "result": "PASS",
+  "gates": [
+    {
+      "name": "ledger_state",
+      "result": "PASS",
+      "detail": "INITIALIZED"
+    },
+    {
+      "name": "provider_requests_zero_before",
+      "result": "PASS",
+      "detail": "token 0/8, seller 0/6, other 0/0"
+    },
+    {
+      "name": "head_recorded",
+      "result": "PASS",
+      "detail": "011e6fdcf239"
+    },
+    {
+      "name": "tree_clean",
+      "result": "PASS",
+      "detail": "0 changed or untracked path(s)"
+    },
+    {
+      "name": "renewal_margin_600",
+      "result": "PASS",
+      "detail": "ICBM_SMARTSTORE_RENEWAL_MARGIN_S=600"
+    },
+    {
+      "name": "dedicated_campaign_dir",
+      "result": "PASS",
+      "detail": null
+    },
+    {
+      "name": "campaign_registered",
+      "result": "PASS",
+      "detail": "no matching registration"
+    },
+    {
+      "name": "ci_required_checks",
+      "result": "PASS",
+      "detail": "5/5 required checks green at HEAD"
+    },
+    {
+      "name": "regression_floor",
+      "result": "PASS",
+      "detail": "pytest=PASS, ruff_check=PASS, ruff_format=PASS, mypy=PASS, m0_acceptance=PASS"
+    },
+    {
+      "name": "dry_rehearsal",
+      "result": "PASS",
+      "detail": "exit 0"
+    },
+    {
+      "name": "credentials_committed",
+      "result": "PASS",
+      "detail": "configured=True"
+    },
+    {
+      "name": "contract_freshness_current",
+      "result": "PASS",
+      "detail": "contract_freshness=CURRENT"
+    },
+    {
+      "name": "auth_not_ready_without_proof",
+      "result": "PASS",
+      "detail": "auth=NOT_BOUND"
+    },
+    {
+      "name": "a0_operator_attested_limited",
+      "result": "PASS",
+      "detail": "strength=OPERATOR_ATTESTED grade=LIMITED"
+    },
+    {
+      "name": "write_not_ready",
+      "result": "PASS",
+      "detail": "write=UNVERIFIED"
+    },
+    {
+      "name": "a0_survives_restart",
+      "result": "PASS",
+      "detail": "identical=True"
+    },
+    {
+      "name": "zero_provider_egress",
+      "result": "PASS",
+      "detail": "external_attempts=0 smartstore_grants=0"
+    },
+    {
+      "name": "provider_requests_zero_after",
+      "result": "PASS",
+      "detail": "token 0/8, seller 0/6, other 0/0"
+    }
+  ],
+  "regression": [
+    {
+      "stage": "preflight",
+      "name": "pytest",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "preflight",
+      "name": "ruff_check",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "preflight",
+      "name": "ruff_format",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "preflight",
+      "name": "mypy",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": null
+    },
+    {
+      "stage": "preflight",
+      "name": "m0_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "detail": "24/24 checks"
+    }
+  ],
+  "budget": {
+    "SMARTSTORE_AUTH_TOKEN": 0,
+    "SMARTSTORE_SELLER_ACCOUNT": 0,
+    "OTHER": 0
+  },
+  "refusals": 0
+}

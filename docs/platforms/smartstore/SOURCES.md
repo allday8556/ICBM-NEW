@@ -326,11 +326,11 @@ The owning contract remains authoritative for its exact acceptance set.
 
 | Evidence ID | Target | Required minimum proof | Status |
 | --- | --- | --- | --- |
-| `SMARTSTORE-R0-TOKEN` | `SMARTSTORE_AUTH_TOKEN` | real authorized token call, request shape, success predicate, observed latency/lifetime, sanitized trace | `PENDING` |
-| `SMARTSTORE-R0-SELLER-ACCOUNT` | `SMARTSTORE_SELLER_ACCOUNT` | real protected GET using current committed session, observed `accountUid`, identity comparison, sanitized trace | `PENDING` |
-| `SMARTSTORE-R0-FIRST-TOKEN-CRASH` | AUTH Case E | measured bounded recovery behavior for remote token success followed by lost/uncommitted local result | `PENDING` |
-| `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW` | token persistence/reissue decision | >30m, <30m, restart, old-token validity, and reissue behavior | `PENDING` |
-| `SMARTSTORE-R0-APP-REAUTH` | application re-authentication detection | observe or obtain provider-supported evidence for the machine-visible condition that distinguishes application re-authentication required from generic auth failure; record safe recovery behavior | `PENDING` |
+| `SMARTSTORE-R0-TOKEN` | `SMARTSTORE_AUTH_TOKEN` | real authorized token call, request shape, success predicate, observed latency/lifetime, sanitized trace | `PASS` (M2 closeout `m2-campaign-02`; final on the closeout merge) |
+| `SMARTSTORE-R0-SELLER-ACCOUNT` | `SMARTSTORE_SELLER_ACCOUNT` | real protected GET using current committed session, observed `accountUid`, identity comparison, sanitized trace | `PASS` (M2 closeout `m2-campaign-02`; final on the closeout merge) |
+| `SMARTSTORE-R0-FIRST-TOKEN-CRASH` | AUTH Case E | measured bounded recovery behavior for remote token success followed by lost/uncommitted local result | `PASS` (M2 closeout `m2-campaign-02`; final on the closeout merge) |
+| `SMARTSTORE-R0-TOKEN-REISSUE-WINDOW` | token persistence/reissue decision | >30m, <30m, restart, old-token validity, and reissue behavior | `DEFERRED_LONG_HORIZON` (non-gating for M2; a supporting more-than-30-minutes observation is recorded in `AUTH.md` §24.3) |
+| `SMARTSTORE-R0-APP-REAUTH` | application re-authentication detection | observe or obtain provider-supported evidence for the machine-visible condition that distinguishes application re-authentication required from generic auth failure; record safe recovery behavior | `BLOCKED_BY_TIME` (non-gating for M2) |
 
 All R0 slots use `evidence_kind=PROVIDER_MEASURED`.
 
@@ -340,7 +340,7 @@ All R0 slots use `evidence_kind=PROVIDER_MEASURED`.
 
 | Evidence ID | Target | Required minimum proof | Status |
 | --- | --- | --- | --- |
-| `SMARTSTORE-A0-PERMISSION` | permission-attestation handling | operator/provider-admin attestation stored with `evidence_strength=OPERATOR_ATTESTED`, current application fingerprint, required/observed groups, mapping revision, freshness, and zero-network handling proof | `PENDING` |
+| `SMARTSTORE-A0-PERMISSION` | permission-attestation handling | operator/provider-admin attestation stored with `evidence_strength=OPERATOR_ATTESTED`, current application fingerprint, required/observed groups, mapping revision, freshness, and zero-network handling proof | `PASS` (OPERATOR_ATTESTED, limited strength; M2 closeout `m2-campaign-02`; final on the closeout merge) |
 
 `SMARTSTORE-A0-PERMISSION` proves only that ICBM handles operator-attested permission evidence correctly. It does **not** prove that NAVER machine-reports those permissions, that a provider API confirms them, or that product write is READY.
 

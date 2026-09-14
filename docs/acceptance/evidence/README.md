@@ -1,6 +1,6 @@
 # M2 acceptance harness and evidence contract
 
-Author: Claude Code · Status: **UNDER REVIEW** (Issue #46 §2 harness PR; architect audit pending)
+Author: Claude Code · Status: harness **ACCEPTED** (PR #49, #50); the M2 closeout evidence is added by the closeout PR (under review)
 
 This directory holds the evidence contract for the M2 SmartStore CONNECT acceptance campaign, and
 the runbook of the harness that produces the evidence (`scripts/m2_acceptance.py`,
@@ -11,9 +11,13 @@ here changes it, and nothing here changes product runtime behavior.
 | --- | --- |
 | `m2-campaign-evidence.schema.json` | The only shape campaign evidence may take. Every object is closed, every string is an enum, a fixed pattern or bounded text, and no field exists for a secret or a raw account identity. `scripts/m2harness/evidence.py` enforces it. |
 | `M2-EVIDENCE-TEMPLATE.md` | The closeout record (M2.md §7) that the evidence PR fills in. |
+| `M2-CLOSEOUT.md` | The filled closeout record of the main campaign `m2-campaign-02`. |
+| `m2-campaign-02.json` | That campaign's sanitized evidence, byte-for-byte as the harness wrote it. |
+| `m2-campaign-02-preflight.json` | That campaign's zero-provider preflight status file. |
 
 Campaign evidence files are committed here only by the evidence/closeout PR (Issue #46 §5). The
-harness PR commits none, and **no real SmartStore request was made for it**.
+closing campaign is `m2-campaign-02`. Its artifacts are copied byte-for-byte from the campaign
+directory, and that directory's absolute path is never committed.
 
 ## 1. What the harness guarantees, and where
 
@@ -123,3 +127,6 @@ The observed account is shown to the operator on the terminal and exists only in
 * **`APPROVAL_MAX_AGE` = 2 hours** is a harness choice, open to review.
 * **Contingency calls** are reachable only through a new approved invocation. The harness never
   retries automatically, because PR-A's retry budgets are policy-pending (ERRORS §25 Q6).
+* **Preflight display.** A gate that passes can still print its failure hint as its detail, for
+  example `campaign_registered … no matching registration`. The `result` field is authoritative.
+  This is display-only and non-gating.
