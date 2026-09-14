@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from app.core.errors import InputValidationError
+from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.jobs.registry import JobContext, JobDefinition
 
 
@@ -32,4 +32,27 @@ VALIDATION_JOB = JobDefinition("test.reject", _reject, "raises VALIDATION")
 CRASHING_JOB = JobDefinition("test.crash", _crash, "raises a non-contract exception")
 NON_IDEMPOTENT_JOB = JobDefinition("test.write_once", _succeed, "external write", idempotent=False)
 
-TEST_JOBS = (SUCCEEDING_JOB, VALIDATION_JOB, CRASHING_JOB, NON_IDEMPOTENT_JOB)
+
+def _always_failing(error_class: ErrorClass) -> JobDefinition:
+    """A job whose every attempt fails with ``error_class``. The ADR-0008 classes have no
+    exception subclass in the application yet, so the test builds one."""
+    failure = type(f"{error_class.title()}Error", (AppError,), {"error_class": error_class})
+
+    def run(ctx: JobContext) -> None:
+        raise failure(f"TEST_{error_class}", f"always fails with {error_class}")
+
+    return JobDefinition(f"test.fail.{error_class.lower()}", run, f"raises {error_class}")
+
+
+# ADR-0008 Stage 1: one job per class that the aligned taxonomy added.
+ADR_0008_JOBS = tuple(
+    _always_failing(c)
+    for c in (
+        ErrorClass.CONFLICT,
+        ErrorClass.DUPLICATE,
+        ErrorClass.REVIEW_REQUIRED,
+        ErrorClass.FATAL,
+    )
+)
+
+TEST_JOBS = (SUCCEEDING_JOB, VALIDATION_JOB, CRASHING_JOB, NON_IDEMPOTENT_JOB, *ADR_0008_JOBS)

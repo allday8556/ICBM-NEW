@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
 
+from app.core.errors import ErrorClass
 from app.db.database import create_sqlite_engine
 from app.db.metadata import metadata
 from app.db.migrate import alembic_config, current_revision, head_revision, upgrade_to_head
@@ -33,7 +35,7 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0004_m2_permission_attestations"
+        assert current_revision(engine) == head_revision() == "0005_error_class_taxonomy"
         tables = set(inspect(engine).get_table_names())
         assert tables == {"alembic_version", *CANONICAL_TABLES}
     finally:
@@ -66,6 +68,95 @@ def test_audit_events_reject_update_and_delete(data_dir: Path) -> None:
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             raw.execute("DELETE FROM audit_events")
         assert raw.execute("SELECT outcome FROM audit_events").fetchall() == [("DENIED",)]
+
+
+BEFORE_0005 = "0004_m2_permission_attestations"
+CAPABILITY_ROW = (
+    "INSERT INTO marketplace_capabilities VALUES ('{key}', 'NOT_BOUND', NULL, 'MISSING',"
+    " 'OPERATOR_ATTESTED', 'BLOCKED', 'UNRECORDED', NULL, {error_class}, NULL, NULL,"
+    " '2026-09-14 00:00:00', '2026-09-14 00:00:00')"
+)
+OVERLAY_ROW = (
+    "INSERT INTO marketplace_workflow_overlays VALUES ('{key}', 'PRODUCT_REGISTRATION',"
+    " 'PAUSED', 'SCOPE_INSUFFICIENT', NULL, '2026-09-14 00:00:00')"
+)
+
+
+def _capability(key: str, error_class: str | None) -> str:
+    return CAPABILITY_ROW.format(
+        key=key, error_class="NULL" if error_class is None else f"'{error_class}'"
+    )
+
+
+def _enforcing(database: Path) -> sqlite3.Connection:
+    """A raw connection that enforces foreign keys, like every application connection."""
+    raw = sqlite3.connect(database)
+    raw.execute("PRAGMA foreign_keys=ON")
+    return raw
+
+
+def _rows(raw: sqlite3.Connection) -> tuple[list[tuple[object, ...]], ...]:
+    return tuple(
+        raw.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+        for table in ("marketplace_capabilities", "marketplace_workflow_overlays")
+    )
+
+
+def test_0005_widens_the_error_class_check_and_keeps_every_row(tmp_path: Path) -> None:
+    # ADR-0008 Stage 1: an existing database with a capability row and an overlay that references
+    # it is upgraded with foreign keys enforced; nothing stored changes.
+    database = tmp_path / "icbm.db"
+    command.upgrade(alembic_config(_url(database)), BEFORE_0005)
+    with contextlib.closing(_enforcing(database)) as raw:
+        raw.execute(_capability("smartstore", "AUTH"))
+        raw.execute(OVERLAY_ROW.format(key="smartstore"))
+        raw.commit()
+        before = _rows(raw)
+        with pytest.raises(sqlite3.IntegrityError):  # the 0004 schema still has the v1 list
+            raw.execute(_capability("x", "FATAL"))
+    upgrade_to_head(_url(database))
+    with contextlib.closing(_enforcing(database)) as raw:
+        assert _rows(raw) == before
+        assert raw.execute("PRAGMA foreign_key_check").fetchall() == []
+        # The migrated CHECK accepts exactly the enum: every member, and nothing else.
+        for index, member in enumerate(ErrorClass):
+            raw.execute(_capability(f"k{index}", member.value))
+        with pytest.raises(sqlite3.IntegrityError):
+            raw.execute(_capability("bad", "GW.AUTHN"))
+        # The overlay's foreign key to the rebuilt table is still enforced.
+        with pytest.raises(sqlite3.IntegrityError):
+            raw.execute(OVERLAY_ROW.format(key="no-such-marketplace"))
+
+
+def test_0005_downgrade_never_rewrites_a_stored_class(tmp_path: Path) -> None:
+    database = tmp_path / "icbm.db"
+    url = _url(database)
+    upgrade_to_head(url)
+    with contextlib.closing(_enforcing(database)) as raw:
+        raw.execute(_capability("smartstore", "FATAL"))
+        raw.execute(OVERLAY_ROW.format(key="smartstore"))
+        raw.commit()
+    with pytest.raises(RuntimeError, match="never rewritten"):
+        command.downgrade(alembic_config(url), BEFORE_0005)
+    engine = create_sqlite_engine(url)
+    try:
+        assert current_revision(engine) == head_revision()
+    finally:
+        engine.dispose()
+    with contextlib.closing(_enforcing(database)) as raw:
+        assert raw.execute("SELECT error_class FROM marketplace_capabilities").fetchall() == [
+            ("FATAL",)
+        ]
+        raw.execute("UPDATE marketplace_capabilities SET error_class = 'AUTH'")
+        raw.commit()
+    command.downgrade(alembic_config(url), BEFORE_0005)  # nothing holds an added class now
+    with contextlib.closing(_enforcing(database)) as raw:
+        assert raw.execute("SELECT error_class FROM marketplace_capabilities").fetchall() == [
+            ("AUTH",)
+        ]
+        assert len(raw.execute("SELECT * FROM marketplace_workflow_overlays").fetchall()) == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            raw.execute(_capability("x", "FATAL"))
 
 
 def test_downgrade_and_upgrade_round_trip(tmp_path: Path) -> None:

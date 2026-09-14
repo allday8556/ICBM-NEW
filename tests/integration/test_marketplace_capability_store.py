@@ -403,6 +403,23 @@ def test_the_database_refuses_forbidden_values_and_combinations(
         raw.execute(statement)
 
 
+@pytest.mark.parametrize("error_class", list(ErrorClass), ids=str)
+def test_every_canonical_error_class_round_trips_through_the_store_and_the_read_api(
+    config: AppConfig, clock: FakeClock, error_class: ErrorClass
+) -> None:
+    # ADR-0008 Stage 1: the widened CHECK, the strict reader and the typed view accept every member.
+    failure = FailureEvidence(WorkflowScope.AUTHENTICATION, error_class, Finding.UNRESOLVED)
+    with _process(config, clock) as process:
+        observed = process.marketplace_capability.observe_failure(KEY, failure)
+        reread = process.marketplace_capability.capability(KEY)
+    assert observed.error_class is error_class
+    assert reread.error_class is error_class
+    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+        assert raw.execute("SELECT error_class FROM marketplace_capabilities").fetchall() == [
+            (error_class.value,)
+        ]
+
+
 # ---------------------------------------------------------------- service behaviour
 
 
