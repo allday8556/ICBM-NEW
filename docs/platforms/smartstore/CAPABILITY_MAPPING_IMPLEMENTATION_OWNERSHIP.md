@@ -78,6 +78,12 @@ For targets 22 and 23, PR-C may adjust the permission convergence path it consum
 
 PR-C MUST NOT add a periodic scheduler for expiry (target 23, S7). PR-D later owns the read-only projection of the expired state.
 
+## 3.2 PR-D and PR-E boundary (Issue #41, decision 5667551746)
+
+PR-D proves the UI halves of targets 6, 7 and 16 with real-browser tests that reuse the existing in-process harness (the installed browser; every request answered in-process). The tests are named `test_s17_06_*`, `test_s17_07_*` and `test_s17_16_*`. Each asserts zero SmartStore/provider calls and zero egress while rendering. PR-D is read-only projection, following `CAPABILITY_MAPPING.md` §14, including §14.8–§14.11.
+
+PR-E (M2 operator actions) owns no §17 target. It adds the mutating operator entry points under the instructions' PR-E section. It MUST NOT be used to claim any PR-D projection coverage.
+
 ## 4. Repository-rule follow-up
 
 The stale `15/15` incident that triggered issue #23 is evidence that ownership/cardinality consistency should become machine-checked repository policy.

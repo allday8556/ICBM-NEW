@@ -680,6 +680,8 @@ The second state is still a connected account.
 
 The UI exposes authentication, registration permission, and actual registration separately.
 
+§14.3, §14.5, §14.6 and §14.8–§14.11 were completed by the architect's decision on Issue #41 (comment 5667551746). §14.8 is the owning contract home of Issue #34. Every rule here is presentation of server-owned truth. The UI routes on enum values from the read API, never on localized labels or string matching (§2.6).
+
 ### 14.1 Visual evidence-strength markers
 
 Permission strength MUST remain visible even if text truncates.
@@ -716,12 +718,27 @@ Thus UI does not flatten `OPERATOR_ATTESTED` and `MACHINE_VERIFIED` into the sam
 | Internal condition | UI status |
 | --- | --- |
 | `auth=READY` | `● 연결됨` |
+| `auth=NOT_READY` with no AUTHENTICATION overlay | `○ 연결 확인 전`: non-success; never `연결됨` |
 | `auth=NOT_BOUND` | `○ 연결 필요` |
 | `auth=AUTH_MISMATCH` | `계정 확인 필요` |
 | `PAUSED/AUTHENTICATION/APPLICATION_REAUTH_REQUIRED` | `재인증 필요` |
 | `PAUSED/AUTHENTICATION/AUTH_RETRY_LIMIT` | `인증 확인 필요` |
+| `PAUSED/AUTHENTICATION/ACCOUNT_RESTRICTED` | `계정 제한 확인 필요` (warning treatment) |
 | auth `REVIEW_REQUIRED` | `확인 필요` |
 | automatic recovery in progress | non-success `연결 확인 중`; never `연결됨` |
+
+`auth=NOT_READY` without an overlay is a bound account whose current session holds no identity proof yet: after a restart, after a credential rotation, or after an operator resolved a review. It MUST never render as connected.
+
+M2 has no automatic-recovery runtime path; retry budgets are policy-pending (ERRORS.md §25 Q6). An M2 UI therefore never shows `연결 확인 중`, and it MUST NOT invent a recovery state that no runtime path produces.
+
+When several conditions hold, the authentication line shows the first match:
+
+1. `auth=AUTH_MISMATCH`;
+2. a typed `PAUSED/AUTHENTICATION` reason;
+3. `REVIEW_REQUIRED/AUTHENTICATION`;
+4. the raw `auth` axis (`READY`, `NOT_READY` or `NOT_BOUND`).
+
+The PR-B domain invariants already reject `auth=READY` together with an open AUTHENTICATION overlay, so rules 1–3 never compete with `● 연결됨`.
 
 ### 14.4 Registration-permission line
 
@@ -741,17 +758,28 @@ A generic positive marker/text that hides evidence strength is forbidden.
 | `write=UNVERIFIED` | `○ 미확인` |
 | `write=READY` | `● 검증됨` |
 | `write=BLOCKED` | `차단됨` |
-| product-registration `REVIEW_REQUIRED` | `확인 필요` when action state is more important than the underlying write label |
+
+The actual-registration line always projects the `write` axis itself. A `REVIEW_REQUIRED` or `PAUSED` overlay on `PRODUCT_REGISTRATION` never overwrites this label. The human action renders on its own `조치 필요` row (§14.9). This preserves the independent axes of §17 target 16 at the presentation layer.
 
 During M2 product registration MUST show `○ 미확인`, never `검증됨`.
 
 ### 14.6 Freshness warning
 
-Freshness is shown separately from capability truth.
+Freshness is shown separately from capability truth, on its own row.
 
-- `UNRECORDED` is an unreviewed-contract state such as `API 계약 상태 미확인`;
-- `STALE` is a review-expired/outdated-contract state such as `API 계약 재검토 필요`;
-- `REVIEW_REQUIRED` is a contradiction/conflict review state and MUST use stronger review treatment.
+| `contract_freshness` | UI label | Treatment |
+| --- | --- | --- |
+| `UNRECORDED` | `API 계약 상태 미확인` | neutral |
+| `STALE` | `API 계약 재검토 필요` | warning |
+| `REVIEW_REQUIRED` | `API 계약 검토 필요` | error (the stronger review treatment) |
+| `CURRENT` | `API 계약 확인됨 (운영자 기록 · YYYY.MM.DD)` | neutral |
+
+- **`UNRECORDED`**: an unreviewed-contract state.
+- **`STALE`**: a review-expired or outdated-contract state.
+- **`REVIEW_REQUIRED`**: a contradiction or conflict review state.
+- **`CURRENT`**: an operator-recorded reviewed state (F8). The date is `freshness_recorded_at`. The label MUST read as an operator recording and never as provider-measured evidence.
+
+No freshness value uses an evidence-strength marker (`●`, `◐`, `○`): freshness is contract governance, not provider evidence (F1).
 
 Freshness presentation MUST NOT overwrite a still-valid `인증: ● 연결됨` unless runtime auth proof itself becomes invalid.
 
@@ -765,6 +793,55 @@ Freshness presentation MUST NOT overwrite a still-valid `인증: ● 연결됨` 
 | `ACCOUNT_RESTRICTED` | `계정 제한 확인 필요` |
 
 Localized labels are presentation only; durable truth uses enum values.
+
+### 14.8 Derived-value primacy (Issue #34)
+
+When displaying a derived decision value, the value actually used by the current decision MUST be the primary displayed value. Inputs or historical/configuration values MAY be shown as secondary context, but MUST NOT replace the derived value in a way that makes the current result appear more permissive, more trusted, fresher, or otherwise more favorable than the decision actually is.
+
+The rule is general, not A0-specific. It covers at least:
+
+- the applicable A0 evidence age bound, `applicable_max_age_days = min(recorded bound, configured bound)` (PERMISSIONS_SCOPES §8.1): the effective bound is primary, and the recorded and configured bounds are secondary context;
+- evidence strength (S1): a positive permission is never shown without its strength marker;
+- the derived A0 `freshness_status`: the current evaluation is primary, never merely the stored observation time or one freshness input;
+- each capability axis: every line projects its own server field (§14.3–§14.6), and no line borrows another line's value;
+- any future derived capability or policy value with more than one input.
+
+### 14.9 Human-action (`조치 필요`) rows
+
+Each workflow overlay renders on its own `조치 필요` row, scoped by `workflow_scope`:
+
+| Overlay | Row label |
+| --- | --- |
+| `REVIEW_REQUIRED/<scope>` | `<scope label> · 확인 필요` |
+| `PAUSED/<scope>/<reason_code>` | `<scope label> · <§14.7 reason label>` |
+
+- The scope labels are `AUTHENTICATION` → `인증` and `PRODUCT_REGISTRATION` → `상품 등록`.
+- With no overlay, no `조치 필요` row is shown.
+- An action row never replaces the authentication, registration-permission or actual-registration line. The authentication line applies its own precedence (§14.3).
+
+### 14.10 Diagnostic context
+
+`error_class` and `remote_outcome` are diagnostic context only:
+
+- each is shown only while non-null, as its enum value; a Korean gloss MAY accompany the value;
+- neither drives, softens or overwrites any other line;
+- the UI never fabricates provider codes, trace ids or other evidence that the read API does not expose.
+
+`remote_outcome` describes mutations. M2 has none, so an M2 UI normally never shows it.
+
+### 14.11 M2 surfaces
+
+The M2 projection appears on these surfaces only. All of them read the capability and attestation read APIs.
+
+1. **설정 › 스마트스토어 › API 관리.** The three-layer projection replaces the prototype's demo status values. Its rows are:
+   - 인증, 등록 권한, 실제 등록;
+   - API 계약 (§14.6);
+   - `조치 필요` (§14.9);
+   - diagnostic context (§14.10).
+2. **설정 › 공통 › 플랫폼 연동 현황.** The SmartStore row shows the authentication-line label derived from capability truth (§14.3). It never shows a hard-coded `NOT_CONNECTED` projection. Marketplaces without an adopted capability contract, such as Coupang and 11번가, stay unchanged until they adopt one.
+3. **The A0 permission card (PR-C).** Its current-truth projection carries the §14.4 evidence-strength marker. PR-C's input semantics do not change.
+
+Displaying any of these surfaces performs zero SmartStore network calls.
 
 ---
 
