@@ -79,8 +79,12 @@ def _evidence(
     )
 
 
+# A state whose current contract freshness has been recorded explicitly; it is never assumed.
+RECORDED = record_freshness(INITIAL, ContractFreshness.CURRENT)
+
+
 def _ready() -> CapabilityState:
-    state = observe_auth(INITIAL, _evidence())
+    state = observe_auth(RECORDED, _evidence())
     assert state.auth is AuthStatus.READY
     return state
 
@@ -169,6 +173,21 @@ def test_free_text_never_stands_in_for_an_axis_value() -> None:
         WriteScope("UNKNOWN")  # type: ignore[arg-type]
 
 
+def test_a_new_state_never_assumes_a_current_contract() -> None:
+    # PR #26 audit 5657617043 (F4): freshness comes from an owning source, never a default.
+    assert INITIAL.contract_freshness is ContractFreshness.REVIEW_REQUIRED
+    assert CapabilityState().contract_freshness is ContractFreshness.REVIEW_REQUIRED
+    # Until it is recorded there is no new trust: no first proof, no permission promotion ...
+    with pytest.raises(ExpansionBlockedError):
+        observe_auth(INITIAL, _evidence())
+    with pytest.raises(ExpansionBlockedError):
+        observe_permission(INITIAL, ATTESTED)
+    # ... while fail-closed evidence still converges as usual.
+    assert observe_permission(INITIAL, MISSING).write is WriteStatus.BLOCKED
+    recorded = record_freshness(INITIAL, ContractFreshness.CURRENT)
+    assert observe_auth(recorded, _evidence()).auth is AuthStatus.READY
+
+
 # ---------------------------------------------------------------- §17, PR-B-owned targets
 
 
@@ -180,7 +199,7 @@ def test_s17_01_auth_not_ready_can_never_produce_write_ready() -> None:
             CapabilityState(auth=auth, write=WriteStatus.READY)
     not_ready = [
         INITIAL,
-        observe_permission(INITIAL, MACHINE),
+        observe_permission(RECORDED, MACHINE),
         observe_auth(_ready(), _evidence(OTHER)),
         observe_auth(_ready(), _evidence(current_session=2)),
         observe_failure(

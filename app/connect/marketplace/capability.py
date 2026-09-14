@@ -231,7 +231,10 @@ class CapabilityState:
     auth: AuthStatus = AuthStatus.NOT_BOUND
     write_scope: WriteScope = PERMISSION_UNKNOWN
     write: WriteStatus = WriteStatus.UNVERIFIED
-    contract_freshness: ContractFreshness = ContractFreshness.CURRENT
+    # F4: freshness is never assumed. A new state starts REVIEW_REQUIRED, so no new-trust decision
+    # can happen until the current freshness is recorded from an owning source (PR #26 audit
+    # 5657617043); proven behaviour that depends on no disputed invariant still continues.
+    contract_freshness: ContractFreshness = ContractFreshness.REVIEW_REQUIRED
     overlays: tuple[WorkflowOverlay, ...] = ()
     error_class: ErrorClass | None = None
     remote_outcome: RemoteOutcome | None = None

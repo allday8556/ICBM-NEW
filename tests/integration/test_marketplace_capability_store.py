@@ -171,6 +171,9 @@ def test_s17_17_persisted_ready_loses_to_current_evidence_after_restart(
     config: AppConfig, clock: FakeClock
 ) -> None:
     with _process(config, clock) as first:
+        first.marketplace_capability.record_contract_freshness(
+            KEY, ContractFreshness.CURRENT, actor="operator:review"
+        )
         assert first.marketplace_capability.observe_auth(KEY, _evidence()).auth is AuthStatus.READY
         first.marketplace_capability.observe_permission(KEY, ATTESTED)
     assert _rows(config, "SELECT auth FROM marketplace_capabilities WHERE marketplace_key = ?") == [
@@ -275,12 +278,15 @@ def test_the_database_refuses_forbidden_values_and_combinations(
 # ---------------------------------------------------------------- service behaviour
 
 
-def test_an_unconnected_marketplace_starts_unbound_and_unverified(client: TestClient) -> None:
+def test_an_unconnected_marketplace_starts_unbound_unverified_and_unreviewed(
+    client: TestClient,
+) -> None:
     body = client.get(f"{BASE}/{KEY}/capability").json()
+    # F4: a fresh install never asserts that the adopted contract is CURRENT.
     assert (body["auth"], body["write"], body["contract_freshness"]) == (
         "NOT_BOUND",
         {"status": "UNVERIFIED"},
-        "CURRENT",
+        "REVIEW_REQUIRED",
     )
     assert body["write_scope"] == {
         "status": "UNKNOWN",
@@ -293,9 +299,41 @@ def test_an_unconnected_marketplace_starts_unbound_and_unverified(client: TestCl
     assert missing.json()["error"]["code"] == "MARKETPLACE_CAPABILITY_UNKNOWN"
 
 
+def test_a_fresh_install_needs_recorded_freshness_before_any_new_trust(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # PR #26 audit 5657617043 (F4): a clean install never starts CURRENT by default.
+    with _process(config, clock) as process:
+        capability = process.marketplace_capability
+        assert capability.capability(KEY).contract_freshness is ContractFreshness.REVIEW_REQUIRED
+        with pytest.raises(PolicyBlockedError):
+            capability.observe_auth(KEY, _evidence())
+        with pytest.raises(PolicyBlockedError):
+            capability.observe_permission(KEY, ATTESTED)
+        # Fail-closed evidence still converges while freshness is unrecorded.
+        assert capability.observe_permission(KEY, MISSING).write.status == "BLOCKED"
+        # The explicit, audited recording is what unlocks new trust.
+        capability.record_contract_freshness(
+            KEY, ContractFreshness.CURRENT, actor="operator:review"
+        )
+        assert capability.observe_auth(KEY, _evidence()).auth is AuthStatus.READY
+        recorded = [
+            e
+            for e in process.audit.list_events(limit=20)
+            if e.action == "RECORD_CONTRACT_FRESHNESS"
+        ]
+    assert [(e.actor, e.outcome) for e in recorded] == [("operator:review", "ALLOWED")]
+    assert recorded[0].before is not None and recorded[0].after is not None
+    assert (recorded[0].before["contract_freshness"], recorded[0].after["contract_freshness"]) == (
+        "REVIEW_REQUIRED",
+        "CURRENT",
+    )
+
+
 def test_every_change_is_audited_with_axis_values_only(config: AppConfig, clock: FakeClock) -> None:
     with _process(config, clock) as process:
         capability = process.marketplace_capability
+        capability.record_contract_freshness(KEY, ContractFreshness.CURRENT, actor="operator:x")
         capability.observe_auth(KEY, _evidence())
         capability.observe_failure(
             KEY,
@@ -322,6 +360,7 @@ def test_every_change_is_audited_with_axis_values_only(config: AppConfig, clock:
             if e.event_type == "MARKETPLACE_CAPABILITY_CHANGED"
         ]
     assert [e.action for e in reversed(events)] == [
+        "RECORD_CONTRACT_FRESHNESS",
         "OBSERVE_AUTH",
         "OBSERVE_FAILURE",
         "RESOLVE_WORKFLOW",
@@ -360,6 +399,7 @@ def test_capability_handling_makes_no_network_call(config: AppConfig, clock: Fak
     before = EGRESS.snapshot()
     with _process(config, clock) as process:
         capability = process.marketplace_capability
+        capability.record_contract_freshness(KEY, ContractFreshness.CURRENT, actor="operator:test")
         capability.observe_auth(KEY, _evidence())
         capability.observe_permission(KEY, MISSING)
         capability.observe_failure(
