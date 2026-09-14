@@ -565,6 +565,23 @@ def observe_auth(state: CapabilityState, evidence: AuthEvidence) -> CapabilitySt
     )
 
 
+def observe_first_binding(state: CapabilityState, evidence: AuthEvidence) -> CapabilityState:
+    """Converge on the evidence of a first account binding (ACCOUNT_IDENTITY §5, F5).
+
+    Binding an account is new trust in its own right, so it is gated on the contract freshness
+    whatever the proof then converges ``auth`` to, an open AUTHENTICATION overlay included. The
+    caller commits the binding in the same transaction as this transition, so the freshness
+    decision that authorizes the binding is the one it commits under.
+    """
+    _require(isinstance(evidence, AuthEvidence), "evidence must be AuthEvidence")
+    _require(
+        evidence.binding_committed and bool(evidence.expected_account_uid),
+        "a first binding carries the identity it binds",
+    )
+    _gate(state.contract_freshness, ContractDecision.PROMOTE_UNVERIFIED_CAPABILITY)
+    return observe_auth(state, evidence)
+
+
 def observe_permission(state: CapabilityState, write_scope: WriteScope) -> CapabilityState:
     """Converge on new permission evidence (S1–S4). Authentication is untouched (S2)."""
     _require(isinstance(write_scope, WriteScope), "write_scope must be a WriteScope")

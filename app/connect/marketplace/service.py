@@ -40,6 +40,7 @@ from app.connect.marketplace.capability import (
     WriteStatus,
     observe_auth,
     observe_failure,
+    observe_first_binding,
     observe_permission,
     on_process_start,
     record_freshness,
@@ -214,6 +215,27 @@ class MarketplaceCapabilityService:
     ) -> MarketplaceCapabilityView:
         return self._apply(marketplace_key, "OBSERVE_AUTH", lambda s: observe_auth(s, evidence))
 
+    def observe_first_binding(
+        self,
+        marketplace_key: str,
+        evidence: AuthEvidence,
+        *,
+        commit_binding: Callable[[Session], None],
+    ) -> MarketplaceCapabilityView:
+        """Apply a first binding's evidence and commit the binding itself in one transaction.
+
+        The freshness gate is decided on the state loaded inside the write transaction, and
+        ``commit_binding`` runs in that transaction only after the gate accepted it. A refused
+        gate writes nothing, and a failed binding write or save leaves the transition unapplied,
+        so no caller-visible failure can leave a new binding behind (ACCOUNT_IDENTITY §5).
+        """
+        return self._apply(
+            marketplace_key,
+            "OBSERVE_FIRST_BINDING",
+            lambda s: observe_first_binding(s, evidence),
+            within=commit_binding,
+        )
+
     def observe_permission(
         self, marketplace_key: str, write_scope: WriteScope
     ) -> MarketplaceCapabilityView:
@@ -273,6 +295,7 @@ class MarketplaceCapabilityService:
         actor: str = SYSTEM_ACTOR,
         outcome: AuditOutcome = AuditOutcome.RECORDED,
         always_record: bool = False,
+        within: Callable[[Session], None] | None = None,
         **details: object,
     ) -> MarketplaceCapabilityView:
         self._known(marketplace_key)
@@ -289,6 +312,9 @@ class MarketplaceCapabilityService:
                 ) from exc
             except CapabilityInvariantError as exc:
                 raise InputValidationError("MARKETPLACE_CAPABILITY_INVARIANT", str(exc)) from exc
+            if within is not None:
+                # A write that commits with this accepted transition or not at all.
+                within(session)
             if always_record or after != before:
                 row = self._save(session, marketplace_key, row, overlays, after)
                 self._audit.append(

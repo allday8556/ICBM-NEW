@@ -15,6 +15,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from app.audit.models import AuditEventType
+from app.audit.service import AuditEntry, AuditLog
 from app.config import AppConfig
 from app.connect.marketplace.attestation import ApplicationIdentity, Invalidation
 from app.connect.marketplace.capability import (
@@ -23,8 +25,9 @@ from app.connect.marketplace.capability import (
     WorkflowScope,
     WorkflowState,
 )
+from app.connect.marketplace.service import MarketplaceCapabilityService
 from app.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME, SupplierSessionStore
-from app.connect.smartstore.service import KEY, RENEWAL_MARGIN, CommittedSession
+from app.connect.smartstore.service import KEY, CommittedSession
 from app.container import Container, build_container
 from app.core.egress import EGRESS
 from app.core.errors import ErrorClass, InputValidationError, PolicyBlockedError
@@ -47,6 +50,8 @@ OTHER_CLIENT_ID = "fixture-client-id-c3d4"
 UID_A = "uid-fixture-A"
 UID_B = "uid-fixture-B"
 ACTOR = "operator:test"
+# The renewal margin the test configuration sets (AUTH §15: configured policy, no code default).
+MARGIN_S = 600
 TOKEN_PATH = "/external/v1/oauth2/token"
 ACCOUNT_PATH = "/external/v1/seller/account"
 CONNECTION = (
@@ -105,11 +110,16 @@ def provider(config: AppConfig, secrets: MemorySecretStore) -> Provider:
 
 @contextmanager
 def _process(
-    config: AppConfig, clock: FakeClock, secrets: MemorySecretStore, provider: Provider
+    config: AppConfig,
+    clock: FakeClock,
+    secrets: MemorySecretStore,
+    provider: Provider,
+    *,
+    margin_s: int | None = MARGIN_S,
 ) -> Iterator[Container]:
     with acquire_data_dir(config.data_dir, app_version="test") as lease:
         built = build_container(
-            config,
+            config.with_overrides(smartstore_renewal_margin_s=margin_s),
             ownership=lease,
             clock=clock,
             secret_store=secrets,
@@ -138,6 +148,14 @@ def _connection(config: AppConfig) -> tuple[object, ...]:
         rows = raw.execute(CONNECTION).fetchall()
     assert len(rows) == 1
     return tuple(rows[0])
+
+
+def _bound_audits(config: AppConfig) -> int:
+    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+        (count,) = raw.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'MARKETPLACE_ACCOUNT_BOUND'"
+        ).fetchone()
+    return int(count)
 
 
 def _session_file(config: AppConfig) -> Path:
@@ -212,20 +230,87 @@ def test_the_first_binding_is_explicit_fresh_and_atomic(
     assert '"session_generation": 1' in details and UID_A not in details
 
 
-def test_the_first_ready_still_waits_for_a_current_contract(
-    p: Container, config: AppConfig
+def test_a_first_binding_waits_for_a_current_contract_and_binds_nothing(
+    p: Container, provider: Provider, config: AppConfig
 ) -> None:
+    # Blocker 2 (review 5200019078): refused before any provider call, nothing bound, and a
+    # retry after the contract is CURRENT binds normally (it is not ALREADY_BOUND).
     p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
     with pytest.raises(PolicyBlockedError) as caught:
         p.smartstore.bind_account(UID_A, actor=ACTOR)
     assert caught.value.code == "MARKETPLACE_CONTRACT_NOT_CURRENT"
-    assert p.marketplace_capability.capability(KEY).auth is not AuthStatus.READY
-    assert _connection(config)[2] == UID_A  # the binding itself was proven and committed
+    assert provider.calls == []
+    assert _connection(config)[2:] == UNBOUND
+    assert _bound_audits(config) == 0
+    assert p.marketplace_capability.capability(KEY).auth is AuthStatus.NOT_BOUND
     _current(p)
-    assert p.smartstore.connect().capability.auth is AuthStatus.READY
+    assert p.smartstore.bind_account(UID_A, actor=ACTOR).capability.auth is AuthStatus.READY
+    assert _connection(config)[2] == UID_A
+
+
+def test_a_contract_change_during_the_bind_refuses_it_and_binds_nothing(
+    p: Container, provider: Provider, config: AppConfig
+) -> None:
+    # The early check passes; then the contract goes STALE while the fresh read is in flight.
+    # The decision taken inside the commit transaction refuses, and nothing is left bound.
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+
+    def stale_during_the_read() -> httpx.Response:
+        p.marketplace_capability.record_contract_freshness(
+            KEY, ContractFreshness.STALE, actor=ACTOR
+        )
+        return httpx.Response(200, json={"accountUid": UID_A, "accountId": f"id-{UID_A}"})
+
+    provider.account_response = stale_during_the_read
+    with pytest.raises(PolicyBlockedError) as caught:
+        p.smartstore.bind_account(UID_A, actor=ACTOR)
+    assert caught.value.code == "MARKETPLACE_CONTRACT_NOT_CURRENT"
+    assert provider.calls == ["TOKEN", "ACCOUNT"]
+    assert _connection(config)[2:] == UNBOUND
+    assert _bound_audits(config) == 0
+    view = p.marketplace_capability.capability(KEY)
+    assert (view.auth, view.auth_verified_at) == (AuthStatus.NOT_BOUND, None)
+
+
+@pytest.mark.parametrize("crash", ["binding-audit", "capability-save"])
+def test_a_failure_inside_the_commit_boundary_leaves_nothing_bound(
+    p: Container,
+    config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    crash: str,
+) -> None:
+    # The gate has accepted and the binding row is written in the transaction, then the commit
+    # boundary fails: the caller sees the failure and nothing is bound or promoted.
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+    if crash == "binding-audit":
+        append = AuditLog.append
+
+        def failing_append(self: AuditLog, entry: AuditEntry, **kwargs: object) -> object:
+            if entry.event_type is AuditEventType.MARKETPLACE_ACCOUNT_BOUND:
+                raise RuntimeError("failed while committing the binding")
+            return append(self, entry, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(AuditLog, "append", failing_append)
+    else:
+
+        def failing_save(self: MarketplaceCapabilityService, *args: object) -> object:
+            raise RuntimeError("failed after the binding row was written")
+
+        monkeypatch.setattr(MarketplaceCapabilityService, "_save", failing_save)
+    with pytest.raises(RuntimeError):
+        p.smartstore.bind_account(UID_A, actor=ACTOR)
+    monkeypatch.undo()
+    assert _connection(config)[2:] == UNBOUND
+    assert _bound_audits(config) == 0
+    view = p.marketplace_capability.capability(KEY)
+    assert (view.auth, view.auth_verified_at) == (AuthStatus.NOT_BOUND, None)
+    assert p.smartstore.bind_account(UID_A, actor=ACTOR).capability.auth is AuthStatus.READY
 
 
 def test_an_unconfirmed_binding_binds_nothing(p: Container, config: AppConfig) -> None:
+    _current(p)
     p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
     with pytest.raises(InputValidationError) as caught:
         p.smartstore.bind_account(UID_B, actor=ACTOR)
@@ -322,7 +407,7 @@ def test_a_committed_session_is_reused_until_the_renewal_margin(
 ) -> None:
     p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
     p.smartstore.connect()
-    clock.advance(10800 - RENEWAL_MARGIN.total_seconds() - 1)
+    clock.advance(10800 - MARGIN_S - 1)
     p.smartstore.connect()
     assert provider.calls.count("TOKEN") == 1
     clock.advance(1)
@@ -332,6 +417,35 @@ def test_a_committed_session_is_reused_until_the_renewal_margin(
     header, committed = provider.reads[-1]
     assert committed is not None and committed.session_generation == 2
     assert header == "Bearer fixture-token-2"
+
+
+def test_the_configured_renewal_margin_decides_session_reuse(
+    config: AppConfig, clock: FakeClock, secrets: MemorySecretStore, provider: Provider
+) -> None:
+    # Blocker 1 (review 5200019078): production wiring takes the margin from configuration.
+    # With 300 s configured, a session is still reused 10 minutes before expiry.
+    with _process(config, clock, secrets, provider, margin_s=300) as p:
+        p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+        p.smartstore.connect()
+        clock.advance(10800 - 300 - 1)
+        p.smartstore.connect()
+        assert provider.calls.count("TOKEN") == 1
+        clock.advance(1)
+        p.smartstore.connect()
+        assert provider.calls.count("TOKEN") == 2
+
+
+def test_without_a_configured_renewal_margin_connect_refuses_before_any_provider_call(
+    config: AppConfig, clock: FakeClock, secrets: MemorySecretStore, provider: Provider
+) -> None:
+    with _process(config, clock, secrets, provider, margin_s=None) as p:
+        _current(p)
+        p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+        for action in (p.smartstore.connect, lambda: p.smartstore.bind_account(UID_A, actor=ACTOR)):
+            with pytest.raises(PolicyBlockedError) as caught:
+                action()
+            assert caught.value.code == "SMARTSTORE_RENEWAL_POLICY_NOT_CONFIGURED"
+    assert provider.calls == []
 
 
 def test_restart_reuses_the_committed_session_but_never_the_persisted_ready(

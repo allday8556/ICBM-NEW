@@ -8,6 +8,8 @@ Additive only. One row per connected marketplace account. The credential and ses
 high-water marks keep every committed generation new (AUTH.md §13). The account binding unit is
 admitted complete or not at all (ACCOUNT_IDENTITY.md §5: ``binding_commit_not_proven ->
 NOT_BOUND``). No client_id, secret or token is stored here.
+
+Downgrade refuses while any connection row exists: that state is never silently destroyed.
 """
 
 from collections.abc import Sequence
@@ -65,4 +67,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Every row holds durable safety state: generation high-water marks, and possibly the
+    # canonical account binding. Dropping it would let generations be reused and lose the binding
+    # while secret and session material may still exist, so only an empty table is dropped.
+    held = op.get_bind().execute(sa.text(f"SELECT COUNT(*) FROM {TABLE}")).scalar_one()
+    if held:
+        raise RuntimeError(
+            f"cannot drop {TABLE}: {held} row(s) hold generation high-water marks or an account "
+            "binding; durable connection state is never silently destroyed"
+        )
     op.drop_table(TABLE)

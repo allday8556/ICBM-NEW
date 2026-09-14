@@ -3,6 +3,7 @@
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.service import CollectService
@@ -143,6 +144,12 @@ def build_container(
         ),
         capability=marketplace_capability,
         caller=smartstore_caller or SmartStoreEndpointCaller(),
+        # AUTH §15: from validated configuration only; unset, CONNECT refuses.
+        renewal_margin=(
+            timedelta(seconds=config.smartstore_renewal_margin_s)
+            if config.smartstore_renewal_margin_s is not None
+            else None
+        ),
     )
     # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity comes from the committed
     # SmartStore credential bundle and the endpoint-mapping revision from the endpoint registry

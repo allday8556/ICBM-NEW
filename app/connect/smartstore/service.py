@@ -17,6 +17,9 @@ Reused M1 assets: the OS ``SecretStore``, the encrypted session store (``marketp
 ``SingleFlightAuth`` for per-account serialization (AUTH §15), the audit log and safe payloads.
 PR-A retries nothing and reissues no token on failure: retry budgets are policy-pending (ERRORS
 §25 Q6), so every failure is recorded once and surfaced.
+
+The proactive renewal margin is operational policy from configuration (AUTH §15); without it,
+CONNECT refuses before any provider call.
 """
 
 import json
@@ -34,11 +37,13 @@ from app.connect.marketplace.attestation import (
 )
 from app.connect.marketplace.capability import (
     AuthEvidence,
+    ContractDecision,
     FailureEvidence,
     Finding,
     Generations,
     IdentityProof,
     WorkflowScope,
+    freshness_allows,
 )
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.connect.marketplace.service import MarketplaceCapabilityService
@@ -71,10 +76,6 @@ KEY = MARKETPLACE_KEY
 SYSTEM_ACTOR = "system:connect"
 _TARGET = f"marketplace:{KEY}"
 _SESSION_FORMAT = 1
-# ICBM operational policy (AUTH §15): a committed session is reused while more than this remains
-# of its provider-reported lifetime; inside it a new token is issued. Ten minutes lies inside the
-# documented under-30-minute renewal window. To be reviewed with the §24.3 measurements.
-RENEWAL_MARGIN = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,9 @@ class SmartStoreConnectService:
         sessions: SupplierSessionStore,
         capability: MarketplaceCapabilityService,
         caller: SmartStoreEndpointCaller,
-        renewal_margin: timedelta = RENEWAL_MARGIN,
+        # AUTH §15: a committed session is reused while more than this remains of its lifetime;
+        # inside it a new token is issued. From validated configuration; None while unset.
+        renewal_margin: timedelta | None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -248,10 +251,12 @@ class SmartStoreConnectService:
     def bind_account(self, confirmed_account_uid: str, *, actor: str) -> ConnectResult:
         """The explicit first binding (ACCOUNT_IDENTITY §5).
 
-        It performs a fresh authenticated read, requires the operator's confirmation of the
-        account that read returns, and commits the whole binding unit in one transaction with
-        its audit record. A bound account is never rebound here, and nothing is bound when the
-        confirmation does not match.
+        A first binding is new trust, so it waits for a CURRENT contract (CAPABILITY_MAPPING F5).
+        It performs a fresh authenticated read and requires the operator's confirmation of the
+        account that read returns. The binding unit and its audit record then commit in the same
+        transaction as the capability transition, and only under the freshness decision taken
+        inside that transaction: a refusal or any failure up to the commit leaves nothing bound.
+        A bound account is never rebound here.
         """
         return self._flights.run(KEY, lambda: self._bind(confirmed_account_uid, actor))
 
@@ -264,6 +269,14 @@ class SmartStoreConnectService:
             raise PolicyBlockedError(
                 "SMARTSTORE_ACCOUNT_ALREADY_BOUND", "a bound account is never rebound automatically"
             )
+        # Refuse early, before any provider call. The authoritative decision is taken again inside
+        # the commit transaction below, on the state the binding commits with.
+        freshness = self._capability.capability(KEY).contract_freshness
+        if not freshness_allows(freshness, ContractDecision.PROMOTE_UNVERIFIED_CAPABILITY):
+            raise PolicyBlockedError(
+                "MARKETPLACE_CONTRACT_NOT_CURRENT",
+                "a first binding is new trust and waits for a CURRENT contract",
+            )
         credentials = self._require_credentials()
         account = self._read_account(self._session_for(credentials))
         if account.account_uid != confirmed_account_uid:
@@ -271,8 +284,15 @@ class SmartStoreConnectService:
                 "SMARTSTORE_BINDING_NOT_CONFIRMED",
                 "the current session reads a different account than the one confirmed",
             )
+        evidence = AuthEvidence(
+            binding_committed=True,
+            expected_account_uid=account.account_uid,
+            current=self._current_generations(credentials),
+            proof=self._proof(account),
+        )
         now = self._clock.now()
-        with self._db.write() as session:
+
+        def commit_binding(session: Session) -> None:
             row = self._row(session, now)
             if row.provider_account_uid is not None:
                 raise PolicyBlockedError(
@@ -301,9 +321,19 @@ class SmartStoreConnectService:
                 ),
                 session=session,
             )
-        return self._prove(account)
+
+        view = self._capability.observe_first_binding(KEY, evidence, commit_binding=commit_binding)
+        return self._result(view, bound=True, account=account)
 
     # ------------------------------------------------------------------ steps
+
+    def _require_renewal_margin(self) -> timedelta:
+        if self._renewal_margin is None:
+            raise PolicyBlockedError(
+                "SMARTSTORE_RENEWAL_POLICY_NOT_CONFIGURED",
+                "set ICBM_SMARTSTORE_RENEWAL_MARGIN_S; the renewal margin is configured policy",
+            )
+        return self._renewal_margin
 
     def _require_credentials(self) -> ApplicationCredentials:
         credentials = self._credentials.load(KEY)
@@ -315,11 +345,9 @@ class SmartStoreConnectService:
 
     def _session_for(self, credentials: ApplicationCredentials) -> CommittedSession:
         """The current committed session, or a newly issued and committed one (AUTH §14, §17)."""
+        margin = self._require_renewal_margin()
         committed = self._committed(credentials)
-        if (
-            committed is not None
-            and committed.expires_at - self._clock.now() > self._renewal_margin
-        ):
+        if committed is not None and committed.expires_at - self._clock.now() > margin:
             return committed
         return self._commit(credentials, self._issue(credentials))
 
@@ -383,17 +411,25 @@ class SmartStoreConnectService:
             self._observe_failure(exc, session_generation=committed.session_generation)
             raise
 
-    def _prove(self, account: SellerAccount) -> ConnectResult:
-        proof = IdentityProof(
+    def _proof(self, account: SellerAccount) -> IdentityProof:
+        return IdentityProof(
             Generations(account.credential_generation, account.session_generation),
             account.account_uid,
             self._clock.now(),
         )
-        evidence = self._evidence(proof)
+
+    def _prove(self, account: SellerAccount) -> ConnectResult:
+        evidence = self._evidence(self._proof(account))
         view = self._capability.observe_auth(KEY, evidence)
+        return self._result(view, bound=evidence.binding_committed, account=account)
+
+    @staticmethod
+    def _result(
+        view: MarketplaceCapabilityView, *, bound: bool, account: SellerAccount
+    ) -> ConnectResult:
         return ConnectResult(
             capability=view,
-            bound=evidence.binding_committed,
+            bound=bound,
             observed_account_uid=account.account_uid,
             observed_account_id=account.account_id,
             credential_generation=account.credential_generation,
@@ -425,15 +461,19 @@ class SmartStoreConnectService:
         """Evidence from durable state: the committed binding and the committed generations."""
         expected = self._binding()
         credentials = self._credentials.load(KEY)
-        committed = self._committed(credentials) if credentials is not None else None
         return AuthEvidence(
             binding_committed=expected is not None,
             expected_account_uid=expected,
-            current=Generations(committed.credential_generation, committed.session_generation)
-            if committed is not None
-            else None,
+            current=self._current_generations(credentials) if credentials is not None else None,
             proof=proof,
         )
+
+    def _current_generations(self, credentials: ApplicationCredentials) -> Generations | None:
+        """The generations of the session committed on disk now, never of one held in memory."""
+        committed = self._committed(credentials)
+        if committed is None:
+            return None
+        return Generations(committed.credential_generation, committed.session_generation)
 
     def _committed(self, credentials: ApplicationCredentials) -> CommittedSession | None:
         payload = self._sessions.load(KEY)
