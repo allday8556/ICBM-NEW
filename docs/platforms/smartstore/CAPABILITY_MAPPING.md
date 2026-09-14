@@ -605,7 +605,7 @@ Expiry or invalidation of the evidence a `PAUSED` reason depends on is not ambig
 | Evidence/class situation | Default behavior | Scope | PAUSED reason |
 | --- | --- | --- | --- |
 | transient failure, retry budget remains | bounded retry/backoff | affected operation | none |
-| `RATE_LIMIT` with trustworthy retry guidance | schedule/backoff | affected operation | none |
+| `RATE_LIMITED` with trustworthy retry guidance | schedule/backoff | affected operation | none |
 | expired-token-like failure and bounded recovery succeeds | fresh committed session + identity proof, continue | `AUTHENTICATION` | none |
 | bounded auth recovery exhausted | `PAUSED` | `AUTHENTICATION` | `AUTH_RETRY_LIMIT` |
 | suspected application re-auth before R0 detection contract | `REVIEW_REQUIRED` | `AUTHENTICATION` | none |

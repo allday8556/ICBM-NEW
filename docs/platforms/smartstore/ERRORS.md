@@ -5,7 +5,7 @@
 - Provider: NAVER SmartStore / Commerce API
 - Contract status: `DOCUMENTED_BASELINE_WITH_ENDPOINT_GAPS`
 - M2 integration mode: `OWN_STORE_SELF`
-- Canonical error classes: existing ICBM classes only
+- Canonical error classes: the ADR-0008 aligned taxonomy only (no SmartStore-specific classes)
 - Runtime verification: `PENDING`
 - Endpoint-specific domain mapping: `PARTIAL / PENDING ENDPOINT_MATRIX`
 - Mutation outcome model: `APPLIED_PROVEN / NOT_APPLIED_PROVEN / UNKNOWN`
@@ -61,20 +61,24 @@ Freshness rule:
 
 ## 1. Purpose
 
-This document maps SmartStore provider/transport failures into the existing ICBM canonical error classes without inventing marketplace-specific global error classes.
+This document maps SmartStore provider/transport failures into the canonical ICBM error classes of `docs/adr/0008-error-taxonomy-alignment.md` without inventing marketplace-specific global error classes.
 
-The canonical classes are:
+The canonical classes this document selects from are:
 
 - `TRANSIENT`
-- `RATE_LIMIT`
+- `RATE_LIMITED`
 - `AUTH`
 - `VALIDATION`
-- `POLICY`
+- `POLICY_BLOCKED`
 - `CONFLICT`
 - `DUPLICATE`
 - `REVIEW_REQUIRED`
 - `FATAL`
 - `UNKNOWN`
+
+`RATE_LIMITED` and `POLICY_BLOCKED` are the persisted spellings of the Canonical v3.1 §11.3 classes `RATE_LIMIT` and `POLICY` (ADR-0008, decision A). `CONFLICT`, `DUPLICATE`, `REVIEW_REQUIRED` and `FATAL` may be emitted only once the ADR-0008 implementation stage has added them to the runtime enum; until then an adapter MUST NOT emit them or substitute an older class for them (ADR-0008, staging).
+
+`NOT_FOUND` also remains a canonical class (ADR-0008, decision C), but it is never the classification of a SmartStore provider not-found condition: see §9.3 and §10.4.
 
 This document does not redefine those classes.
 
@@ -211,13 +215,13 @@ Therefore:
 
 as a universal mapping.
 
-The surrounding evidence determines whether the resulting ICBM class is `AUTH`, `POLICY`, `FATAL`, or `UNKNOWN`.
+The surrounding evidence determines whether the resulting ICBM class is `AUTH`, `POLICY_BLOCKED`, `FATAL`, or `UNKNOWN`.
 
 Likewise, `GW.IP_NOT_ALLOWED` is documented as an IP allow-list failure, but official support has also confirmed a case where the same configured outbound IP intermittently received the error due to a temporary provider-side condition.
 
 Therefore:
 
-`GW.IP_NOT_ALLOWED != always POLICY`
+`GW.IP_NOT_ALLOWED != always POLICY_BLOCKED`
 
 without corroborating current IP/configuration evidence.
 
@@ -246,7 +250,7 @@ Product APIs use `400/BAD_REQUEST` broadly.
 Structured `invalidInputs` can indicate:
 
 - structural/input validation such as missing required fields, invalid enum values, numeric range errors, or incompatible values -> usually `VALIDATION`;
-- provider policy such as restricted seller tags -> `POLICY` when the restriction is positively identified;
+- provider policy such as restricted seller tags -> `POLICY_BLOCKED` when the restriction is positively identified;
 - undocumented/provider temporary conditions -> potentially `TRANSIENT` or `UNKNOWN` depending on evidence.
 
 Therefore:
@@ -569,7 +573,7 @@ Possible contextual mappings include:
 
 - `AUTH`
   - current token is locally expired or provider support/endpoint evidence uniquely confirms token invalidity/expiry;
-- `POLICY`
+- `POLICY_BLOCKED`
   - current provider permission evidence proves the required API group is absent;
 - `FATAL`
   - ICBM constructed a malformed authorization header or otherwise violated a frozen request contract;
@@ -584,7 +588,7 @@ A `GW.AUTHN` from a write does not authorize blind replay after token recovery.
 
 If current observed outbound IP is positively known to be absent from the provider allow list:
 
-`error_class = POLICY`
+`error_class = POLICY_BLOCKED`
 
 If provider configuration says the IP should be allowed and behavior is intermittent/contradictory:
 
@@ -610,13 +614,13 @@ This is different from an API-server `NOT_FOUND` for a domain resource.
 
 ### 9.4 `GW.RATE_LIMIT`
 
-`error_class = RATE_LIMIT`
+`error_class = RATE_LIMITED`
 
 Retry must be scheduled/backed off; hot-loop retry is forbidden.
 
 ### 9.5 `GW.QUOTA_LIMIT`
 
-`error_class = RATE_LIMIT`
+`error_class = RATE_LIMITED`
 
 Quota exhaustion is distinct from per-second rate limiting but belongs to the same canonical ICBM error class.
 
@@ -638,7 +642,7 @@ If retry budget is exhausted with no new causal evidence:
 - stop automatic retry;
 - surface the final workflow state defined by the M2 state contract, commonly human review/pause.
 
-Reclassification to `FATAL`, `POLICY`, or another class requires new evidence proving that class; frequency alone is not proof.
+Reclassification to `FATAL`, `POLICY_BLOCKED`, or another class requires new evidence proving that class; frequency alone is not proof.
 
 ---
 
@@ -659,7 +663,7 @@ Inspect:
 Typical mappings:
 
 - missing required field / invalid enum / range / incompatible value -> `VALIDATION`;
-- restricted tag/content/provider rule explicitly identified -> `POLICY`;
+- restricted tag/content/provider rule explicitly identified -> `POLICY_BLOCKED`;
 - temporary/provider error presented through an unexpected 400 shape -> `TRANSIENT` or `UNKNOWN` only with sufficient corroboration;
 - unrecognized or contradictory details -> `UNKNOWN`.
 
@@ -685,7 +689,7 @@ If permission or application-state causes remain plausible:
 
 Candidate class:
 
-`POLICY`
+`POLICY_BLOCKED`
 
 when the restriction/permission/account-state cause is positively identified.
 
@@ -790,7 +794,7 @@ when they describe request data correctness.
 
 A provider restriction type such as a restricted seller tag supports:
 
-`POLICY`
+`POLICY_BLOCKED`
 
 when the provider explicitly identifies the value as disallowed by marketplace policy.
 
@@ -833,7 +837,7 @@ For a write, successful auth recovery does NOT authorize automatic operation rep
 
 If current evidence positively proves a required API group is absent:
 
-- classify the operation failure as `POLICY`;
+- classify the operation failure as `POLICY_BLOCKED`;
 - `write_scope -> MISSING` under `PERMISSIONS_SCOPES.md`;
 - do not mutate merely to reconfirm the missing permission.
 
@@ -860,13 +864,13 @@ Baseline:
 
 - `TRANSIENT`
   - bounded retry with backoff and jitter;
-- `RATE_LIMIT`
+- `RATE_LIMITED`
   - schedule according to rate/quota evidence; do not hot-loop;
 - `AUTH`
   - one bounded auth recovery path per `AUTH.md`, then retry the read;
 - `VALIDATION`
   - no automatic same-input retry;
-- `POLICY`
+- `POLICY_BLOCKED`
   - no automatic same-input retry until policy/config evidence changes;
 - `CONFLICT`
   - re-read current state before deciding;
@@ -1015,7 +1019,7 @@ NAVER documents:
 
 ICBM SHALL record available rate/quota metadata and schedule retries rather than repeatedly testing the limit.
 
-`RATE_LIMIT` is recoverable timing state, not credential invalidity.
+`RATE_LIMITED` is recoverable timing state, not credential invalidity.
 
 Do not refresh tokens merely because a 429 occurred.
 
@@ -1103,8 +1107,8 @@ ICBM MAY reclassify an error when new evidence arrives.
 Examples:
 
 - `GW.AUTHN / UNKNOWN` -> `AUTH` after proving the bearer token was expired;
-- `GW.AUTHN / UNKNOWN` -> `POLICY` after proving the required API group was absent;
-- `GW.IP_NOT_ALLOWED / UNKNOWN` -> `POLICY` after proving the current outbound IP is not configured;
+- `GW.AUTHN / UNKNOWN` -> `POLICY_BLOCKED` after proving the required API group was absent;
+- `GW.IP_NOT_ALLOWED / UNKNOWN` -> `POLICY_BLOCKED` after proving the current outbound IP is not configured;
 - `BAD_REQUEST / UNKNOWN` -> `VALIDATION` after parsing a documented structural `invalidInputs` type;
 - `409 / CONFLICT` -> `DUPLICATE` after an explicit duplicate domain code or read-back proves the same resource already exists.
 
@@ -1164,7 +1168,7 @@ The error mapper supplies evidence to capability/workflow state machines; it doe
 - do not change class merely because the count reached a threshold;
 - workflow may pause/escalate while class remains `TRANSIENT`.
 
-### `RATE_LIMIT`
+### `RATE_LIMITED`
 
 - schedule for later execution;
 - do not mark auth/scope invalid;
@@ -1180,7 +1184,7 @@ The error mapper supplies evidence to capability/workflow state machines; it doe
 - request cannot proceed unchanged;
 - surface field-level actionable evidence when available.
 
-### `POLICY`
+### `POLICY_BLOCKED`
 
 - do not retry unchanged until provider/account/application/product policy condition changes;
 - often requires operator action/review.
@@ -1273,7 +1277,7 @@ Using controlled permission evidence or a safe harness:
 
 - observe the same/similar authorization wire code;
 - prove required API-group absence;
-- classify `POLICY`;
+- classify `POLICY_BLOCKED`;
 - update scope state under `PERMISSIONS_SCOPES.md`;
 - do not mislabel credentials invalid.
 
@@ -1293,13 +1297,13 @@ Test at least one permission-denial scenario represented as two different wire f
 - gateway `401/GW.AUTHN`;
 - API-server `403/FORBIDDEN`.
 
-Verify both can converge to the same canonical `POLICY` class only when permission cause is positively evidenced.
+Verify both can converge to the same canonical `POLICY_BLOCKED` class only when permission cause is positively evidenced.
 
 ### 23.5 `GW.IP_NOT_ALLOWED` evidence conflict
 
 Test both:
 
-- proven outbound-IP mismatch -> `POLICY`;
+- proven outbound-IP mismatch -> `POLICY_BLOCKED`;
 - current allow-list evidence matches but provider response contradicts it -> `UNKNOWN` rather than overwriting config truth.
 
 ### 23.6 Product structural validation
@@ -1327,7 +1331,7 @@ Verify:
 
 provider policy evidence maps to:
 
-`POLICY`.
+`POLICY_BLOCKED`.
 
 ### 23.8 Unknown provider code
 
@@ -1346,7 +1350,7 @@ Use controlled fixtures and safe measured behavior when available.
 
 Verify:
 
-- `RATE_LIMIT` classification;
+- `RATE_LIMITED` classification;
 - rate/quota headers captured when present;
 - bounded/scheduled retry;
 - no token refresh merely because of 429;
@@ -1548,7 +1552,7 @@ Current status:
 
 `UNKNOWN`
 
-Do not map it to `AUTH`, `POLICY`, or `ACCOUNT_RESTRICTED` until measured/documented.
+Do not map it to `AUTH`, `POLICY_BLOCKED`, or `ACCOUNT_RESTRICTED` until measured/documented.
 
 ### Q2. Does every pre-service gateway rejection guarantee no mutation reached the target service?
 
@@ -1642,9 +1646,9 @@ For SmartStore:
 
 `GW.AUTHN != always AUTH`
 
-`GW.IP_NOT_ALLOWED != always proven POLICY`
+`GW.IP_NOT_ALLOWED != always proven POLICY_BLOCKED`
 
-`429/GW.RATE_LIMIT or GW.QUOTA_LIMIT = RATE_LIMIT`
+`429/GW.RATE_LIMIT or GW.QUOTA_LIMIT = RATE_LIMITED`
 
 `unmapped or contradictory evidence = UNKNOWN`
 
