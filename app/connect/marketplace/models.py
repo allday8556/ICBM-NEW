@@ -9,7 +9,7 @@ domain on every load and save. No secret, token or provider identity is stored h
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.connect.marketplace.capability import (
@@ -78,6 +78,41 @@ class MarketplaceCapability(Base):
     session_generation_floor: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class MarketplacePermissionAttestation(Base):
+    """SMARTSTORE-A0-PERMISSION evidence (M2 PR-C): one row per operator attestation.
+
+    Append-only (the migration installs triggers rejecting UPDATE and DELETE): history is never
+    rewritten, and the latest row is the evidence judged for current use. The attested status is
+    derived from the groups, never stored as a second truth. Strength and source are pinned: an
+    attestation can never be stored as MACHINE_VERIFIED (§17 #18).
+    """
+
+    __tablename__ = "marketplace_permission_attestations"
+    __table_args__ = (
+        CheckConstraint(
+            "evidence_source = 'OPERATOR_ATTESTED_PROVIDER_ADMIN'", name="source_is_provider_admin"
+        ),
+        CheckConstraint("evidence_strength = 'OPERATOR_ATTESTED'", name="a0_never_promoted"),
+        CheckConstraint("application_fingerprint <> ''", name="bound_to_application"),
+        CheckConstraint("required_groups <> ''", name="required_groups_present"),
+        CheckConstraint("endpoint_mapping_revision <> ''", name="bound_to_mapping_revision"),
+        Index("ix_marketplace_permission_attestations_marketplace_key", "marketplace_key"),
+    )
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    evidence_source: Mapped[str] = mapped_column(String(40))
+    evidence_strength: Mapped[str] = mapped_column(String(20))
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Keyed, non-reversible (PERMISSIONS_SCOPES §7.1): the client_id itself is never stored.
+    application_fingerprint: Mapped[str] = mapped_column(String(64))
+    # Comma-joined ApiGroup values, sorted.
+    required_groups: Mapped[str] = mapped_column(String(200))
+    observed_groups: Mapped[str] = mapped_column(String(200))
+    endpoint_mapping_revision: Mapped[str] = mapped_column(String(64))
+    recorded_by: Mapped[str] = mapped_column(String(100))
 
 
 class MarketplaceWorkflowOverlay(Base):

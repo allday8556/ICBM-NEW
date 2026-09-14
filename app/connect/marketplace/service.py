@@ -7,6 +7,7 @@ the SmartStore adapter (PR-A) and the permission attestation (PR-C) feed it type
 the local operator records reviewed contract freshness (CAPABILITY_MAPPING F8).
 """
 
+import contextlib
 import logging
 from collections.abc import Callable, Sequence
 
@@ -46,6 +47,7 @@ from app.connect.marketplace.capability import (
 )
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.connect.marketplace.models import MarketplaceCapability, MarketplaceWorkflowOverlay
+from app.connect.marketplace.sources import PermissionEvidenceSource
 from app.core.clock import Clock
 from app.core.errors import ErrorClass, InputValidationError, NotFoundError, PolicyBlockedError
 from app.core.safe_payload import safe_payload
@@ -132,6 +134,11 @@ class MarketplaceCapabilityService:
         self._audit = audit
         self._keys = tuple(marketplace_keys)
         self._policy = policy
+        self._permission_evidence: PermissionEvidenceSource | None = None
+
+    def set_permission_evidence(self, source: PermissionEvidenceSource) -> None:
+        """Wire the permission evidence write_scope converges on (PR-C A0 attestations)."""
+        self._permission_evidence = source
 
     # ------------------------------------------------------------------ reads
 
@@ -156,6 +163,8 @@ class MarketplaceCapabilityService:
 
     def capability(self, marketplace_key: str) -> MarketplaceCapabilityView:
         self._known(marketplace_key)
+        # Capability truth is derived from current evidence: converge before answering.
+        self.converge_permission(marketplace_key)
         with self._db.read() as session:
             row, overlays = self._load(session, marketplace_key)
             return MarketplaceCapabilityView.of(
@@ -166,6 +175,29 @@ class MarketplaceCapabilityService:
         return [self.capability(key) for key in self._keys]
 
     # ------------------------------------------------------------------ evidence and actions
+
+    def converge_permission(self, marketplace_key: str) -> None:
+        """Converge write_scope on current permission evidence (§5; PR-C).
+
+        Evidence that expired, lost its application or mapping binding, or was never recorded
+        is judged by the evidence source. A READY promotion that the contract freshness blocks
+        (F5) leaves write_scope as it is: the evidence waits, and the A0 projection says why.
+        """
+        self._known(marketplace_key)
+        if self._permission_evidence is None:
+            return
+        scope = self._permission_evidence.current_permission(marketplace_key)
+        if scope is None:
+            return
+        with self._db.read() as session:
+            row, overlays = self._load(session, marketplace_key)
+            current = _state(row, overlays).write_scope
+        if current == scope:
+            return
+        with contextlib.suppress(PolicyBlockedError):
+            self._apply(
+                marketplace_key, "OBSERVE_PERMISSION", lambda s: observe_permission(s, scope)
+            )
 
     def observe_auth(
         self, marketplace_key: str, evidence: AuthEvidence
@@ -195,10 +227,11 @@ class MarketplaceCapabilityService:
 
         It is persisted with ``freshness_recorded_at`` and audited with the actor even when the
         value is unchanged: a same-value re-recording is an event, so this path never relies on
-        ``after != before`` (F7). It makes no provider call.
+        ``after != before`` (F7). It makes no provider call. Afterwards permission evidence that
+        was waiting on a CURRENT contract converges.
         """
         recorded_at = self._clock.now()
-        return self._apply(
+        self._apply(
             marketplace_key,
             "RECORD_CONTRACT_FRESHNESS",
             lambda s: record_freshness(s, freshness, recorded_at=recorded_at),
@@ -206,6 +239,7 @@ class MarketplaceCapabilityService:
             outcome=AuditOutcome.ALLOWED,
             always_record=True,
         )
+        return self.capability(marketplace_key)
 
     def resolve(
         self, marketplace_key: str, scope: WorkflowScope, resolution: Resolution, *, actor: str

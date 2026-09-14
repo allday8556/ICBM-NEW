@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.api.deps import ContainerDep
 from app.connect.contracts import StoredLoginView, SupplierConnectionSummary
+from app.connect.marketplace.attestation import ApiGroup
+from app.connect.marketplace.attestation_contracts import PermissionAttestationView
 from app.connect.marketplace.capability import ContractFreshness
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.jobs.records import JobRecord
@@ -90,6 +92,31 @@ def marketplace_capability(
     marketplace_key: str, container: ContainerDep
 ) -> MarketplaceCapabilityView:
     return container.marketplace_capability.capability(marketplace_key)
+
+
+class PermissionAttestationRequest(BaseModel):
+    # Only what the operator saw; ICBM supplies the time, application, requirement and revision.
+    observed_groups: list[ApiGroup]
+
+
+@router.get("/api/v1/connect/marketplaces/{marketplace_key}/permission-attestation")
+def permission_attestation(
+    marketplace_key: str, container: ContainerDep
+) -> PermissionAttestationView:
+    """SMARTSTORE-A0-PERMISSION: the recorded evidence, its current evaluation, and what it did
+    to capability truth (applied, not current, or waiting on the contract freshness)."""
+    return container.permission_attestation.attestation(marketplace_key)
+
+
+@router.post("/api/v1/connect/marketplaces/{marketplace_key}/permission-attestation")
+def record_permission_attestation(
+    marketplace_key: str, body: PermissionAttestationRequest, container: ContainerDep
+) -> PermissionAttestationView:
+    """The local operator records which API groups Commerce API Center shows. It is operator-
+    attested evidence, never provider measurement, and it makes no SmartStore call."""
+    return container.permission_attestation.attest(
+        marketplace_key, body.observed_groups, actor=container.config.operator_actor
+    )
 
 
 @router.post("/api/v1/connect/marketplaces/{marketplace_key}/contract-freshness")

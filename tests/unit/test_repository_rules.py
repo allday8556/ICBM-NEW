@@ -440,6 +440,7 @@ def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
     allowed = (
         "__future__",
         "collections.abc",
+        "contextlib",
         "dataclasses",
         "datetime",
         "enum",
@@ -451,6 +452,12 @@ def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
         "app.core.errors",
         "app.core.clock",
         "app.core.safe_payload",
+        # A0 (PR-C): the keyed fingerprint and its key in the OS secret store — no network.
+        "base64",
+        "hashlib",
+        "hmac",
+        "os",
+        "app.core.secrets",
         "app.audit",
         "app.db.base",
         "app.db.types",
@@ -480,6 +487,35 @@ def test_s17_19_only_the_operator_entry_point_records_contract_freshness() -> No
     }
 
 
+def test_s17_18_no_production_code_supplies_a_mapping_revision_or_application_identity() -> None:
+    # M2 instructions §5.1/§6.7: A0 consumes the endpoint-mapping revision and the application
+    # identity through seams, and PR-A supplies their one authoritative implementation. Until then
+    # no production module may implement either — no hardcoded "v1"-style revision and no typed-in
+    # identity; only test fixtures implement them. PR-A updates this rule with its registry.
+    # The seams are class methods; a module-level function of the same name (the Alembic schema
+    # revision in app/db/migrate.py) is not one.
+    declared, implementers = set(), set()
+    for path, tree in _production_modules().items():
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            for node in cls.body:
+                if not (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name in {"current_revision", "current_identity"}
+                ):
+                    continue
+                body = [
+                    n
+                    for n in node.body
+                    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
+                ]
+                (implementers if body else declared).add(f"{path}:{cls.name}.{node.name}")
+    assert declared == {
+        "app/connect/marketplace/revision.py:EndpointMappingRevisionProvider.current_revision",
+        "app/connect/marketplace/sources.py:ApplicationIdentitySource.current_identity",
+    }
+    assert implementers == set()
+
+
 def test_connect_adds_no_product_facts_or_product_schema() -> None:
     from app.db.metadata import metadata
 
@@ -490,6 +526,7 @@ def test_connect_adds_no_product_facts_or_product_schema() -> None:
         "supplier_connections",
         "marketplace_capabilities",
         "marketplace_workflow_overlays",
+        "marketplace_permission_attestations",
     }
     offenders = [
         path

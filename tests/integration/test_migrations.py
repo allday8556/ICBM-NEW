@@ -20,6 +20,7 @@ CANONICAL_TABLES = (
     "supplier_connections",
     "marketplace_capabilities",
     "marketplace_workflow_overlays",
+    "marketplace_permission_attestations",
 )
 
 
@@ -32,7 +33,7 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0003_m2_marketplace_capabilities"
+        assert current_revision(engine) == head_revision() == "0004_m2_permission_attestations"
         tables = set(inspect(engine).get_table_names())
         assert tables == {"alembic_version", *CANONICAL_TABLES}
     finally:

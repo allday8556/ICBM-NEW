@@ -58,6 +58,13 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "workflow",
         "remote_outcome",
         "resolution",
+        # SMARTSTORE-A0-PERMISSION (M2 PR-C): group keys and bindings, never the client_id
+        "attestation_seq",
+        "evidence_source",
+        "attested_status",
+        "required_groups",
+        "observed_groups",
+        "endpoint_mapping_revision",
     }
 )
 
