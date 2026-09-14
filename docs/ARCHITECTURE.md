@@ -224,7 +224,7 @@ started_at
 finished_at
 ```
 
-Core error classes — the aligned taxonomy of `docs/adr/0008-error-taxonomy-alignment.md`, which also records how it relates to Canonical v3.1 §11.3:
+Core error classes — the aligned taxonomy of `docs/adr/0008-error-taxonomy-alignment.md`, which also records how it relates to `docs/architecture/CANONICAL-V3.1.md` §11.3:
 
 ```text
 TRANSIENT
