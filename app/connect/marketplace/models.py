@@ -54,6 +54,11 @@ class MarketplaceCapability(Base):
             name="missing_scope_blocks_write",
         ),
         CheckConstraint(_in("contract_freshness", ContractFreshness), name="freshness_valid"),
+        # F2/F7: UNRECORDED has no determination; every recorded determination carries its time.
+        CheckConstraint(
+            "(contract_freshness = 'UNRECORDED') = (freshness_recorded_at IS NULL)",
+            name="freshness_recorded",
+        ),
         CheckConstraint(_in("error_class", ErrorClass, nullable=True), name="error_class_valid"),
         CheckConstraint(
             _in("remote_outcome", RemoteOutcome, nullable=True), name="remote_outcome_valid"
@@ -67,6 +72,7 @@ class MarketplaceCapability(Base):
     evidence_strength: Mapped[str | None] = mapped_column(String(20))
     write_status: Mapped[str] = mapped_column(String(20))
     contract_freshness: Mapped[str] = mapped_column(String(20))
+    freshness_recorded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     error_class: Mapped[str | None] = mapped_column(String(20))
     remote_outcome: Mapped[str | None] = mapped_column(String(20))
     session_generation_floor: Mapped[int | None] = mapped_column(Integer)

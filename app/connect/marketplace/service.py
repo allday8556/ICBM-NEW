@@ -3,7 +3,8 @@
 Transitions are the pure functions of ``app.connect.marketplace.capability``. This service only
 loads a state, applies one transition, persists the result and audits the change, all in one
 write transaction. It holds no gateway, credential or session, so it cannot reach a provider:
-the SmartStore adapter (PR-A) and the permission attestation (PR-C) feed it typed evidence.
+the SmartStore adapter (PR-A) and the permission attestation (PR-C) feed it typed evidence, and
+the local operator records reviewed contract freshness (CAPABILITY_MAPPING F8).
 """
 
 import logging
@@ -26,6 +27,7 @@ from app.connect.marketplace.capability import (
     EvidenceStrength,
     ExpansionBlockedError,
     FailureEvidence,
+    FreshnessTransitionError,
     PauseReason,
     RemoteOutcome,
     Resolution,
@@ -93,6 +95,7 @@ def _state(
         else None,
         auth_verified_at=row.auth_verified_at,
         session_generation_floor=row.session_generation_floor,
+        freshness_recorded_at=row.freshness_recorded_at,
     )
 
 
@@ -104,6 +107,7 @@ def _axes(state: CapabilityState) -> dict[str, object]:
         "evidence_strength": state.write_scope.evidence_strength,
         "write_status": state.write,
         "contract_freshness": state.contract_freshness,
+        "freshness_recorded_at": state.freshness_recorded_at,
         "workflow": [
             ":".join(part for part in (o.scope, o.state, o.reason_code) if part)
             for o in state.overlays
@@ -187,12 +191,20 @@ class MarketplaceCapabilityService:
     def record_contract_freshness(
         self, marketplace_key: str, freshness: ContractFreshness, *, actor: str
     ) -> MarketplaceCapabilityView:
+        """A local operator's reviewed contract-freshness determination (F8).
+
+        It is persisted with ``freshness_recorded_at`` and audited with the actor even when the
+        value is unchanged: a same-value re-recording is an event, so this path never relies on
+        ``after != before`` (F7). It makes no provider call.
+        """
+        recorded_at = self._clock.now()
         return self._apply(
             marketplace_key,
             "RECORD_CONTRACT_FRESHNESS",
-            lambda s: record_freshness(s, freshness),
+            lambda s: record_freshness(s, freshness, recorded_at=recorded_at),
             actor=actor,
             outcome=AuditOutcome.ALLOWED,
+            always_record=True,
         )
 
     def resolve(
@@ -216,6 +228,7 @@ class MarketplaceCapabilityService:
         *,
         actor: str = SYSTEM_ACTOR,
         outcome: AuditOutcome = AuditOutcome.RECORDED,
+        always_record: bool = False,
         **details: object,
     ) -> MarketplaceCapabilityView:
         self._known(marketplace_key)
@@ -226,9 +239,13 @@ class MarketplaceCapabilityService:
                 after = transition(before)
             except ExpansionBlockedError as exc:
                 raise PolicyBlockedError("MARKETPLACE_CONTRACT_NOT_CURRENT", str(exc)) from exc
+            except FreshnessTransitionError as exc:
+                raise InputValidationError(
+                    "MARKETPLACE_FRESHNESS_TRANSITION_FORBIDDEN", str(exc)
+                ) from exc
             except CapabilityInvariantError as exc:
                 raise InputValidationError("MARKETPLACE_CAPABILITY_INVARIANT", str(exc)) from exc
-            if after != before:
+            if always_record or after != before:
                 row = self._save(session, marketplace_key, row, overlays, after)
                 self._audit.append(
                     AuditEntry(
@@ -272,6 +289,7 @@ class MarketplaceCapabilityService:
         row.evidence_strength = state.write_scope.evidence_strength
         row.write_status = state.write
         row.contract_freshness = state.contract_freshness
+        row.freshness_recorded_at = state.freshness_recorded_at
         row.error_class = state.error_class
         row.remote_outcome = state.remote_outcome
         row.session_generation_floor = state.session_generation_floor

@@ -47,6 +47,8 @@ class MarketplaceCapabilityView(BaseModel):
     write_scope: WriteScopeView
     write: WriteView
     contract_freshness: ContractFreshness
+    # Provenance of the latest reviewed freshness determination (F7/F8); None while UNRECORDED.
+    contract_freshness_recorded_at: datetime | None
     workflow: list[WorkflowOverlayView]
     error_class: ErrorClass | None
     remote_outcome: RemoteOutcome | None
@@ -67,6 +69,7 @@ class MarketplaceCapabilityView(BaseModel):
             ),
             write=WriteView(status=state.write),
             contract_freshness=state.contract_freshness,
+            contract_freshness_recorded_at=state.freshness_recorded_at,
             workflow=[
                 WorkflowOverlayView(
                     workflow_state=o.state, workflow_scope=o.scope, reason_code=o.reason_code

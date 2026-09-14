@@ -54,6 +54,7 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "evidence_strength",
         "write_status",
         "contract_freshness",
+        "freshness_recorded_at",
         "workflow",
         "remote_outcome",
         "resolution",

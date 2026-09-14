@@ -1,11 +1,13 @@
 """CONNECT API. Supplier (Issue #7): a password goes in; it never comes back out. Marketplace
-capability (M2 PR-B): read only, every axis as its own field."""
+capability (M2 PR-B): every axis as its own field; the only write is the operator's reviewed
+contract-freshness recording."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.api.deps import ContainerDep
 from app.connect.contracts import StoredLoginView, SupplierConnectionSummary
+from app.connect.marketplace.capability import ContractFreshness
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.jobs.records import JobRecord
 
@@ -24,6 +26,10 @@ class CredentialsRequest(BaseModel):
 
 class AutoConnectRequest(BaseModel):
     enabled: bool
+
+
+class ContractFreshnessRequest(BaseModel):
+    contract_freshness: ContractFreshness
 
 
 @router.get("/api/v1/connect/suppliers")
@@ -84,3 +90,16 @@ def marketplace_capability(
     marketplace_key: str, container: ContainerDep
 ) -> MarketplaceCapabilityView:
     return container.marketplace_capability.capability(marketplace_key)
+
+
+@router.post("/api/v1/connect/marketplaces/{marketplace_key}/contract-freshness")
+def record_contract_freshness(
+    marketplace_key: str, body: ContractFreshnessRequest, container: ContainerDep
+) -> MarketplaceCapabilityView:
+    """The local operator records a reviewed contract-freshness determination (CAPABILITY_MAPPING
+    F8). It states that ICBM's adopted-contract review was completed — it is not provider
+    evidence — and it makes no SmartStore call. Every recording, a same-value one included, is
+    persisted with ``freshness_recorded_at`` and audited with the operator as actor (F7)."""
+    return container.marketplace_capability.record_contract_freshness(
+        marketplace_key, body.contract_freshness, actor=container.config.operator_actor
+    )

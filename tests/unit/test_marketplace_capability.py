@@ -1,13 +1,14 @@
 """SmartStore capability truth model (M2 PR-B): fixtures only, no credential, no provider call.
 
-Each ``test_s17_NN_*`` is the named test for CAPABILITY_MAPPING.md §17 target NN at the domain
-layer (ownership: CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md). Targets 16 and 17 are proven
-at the persistence/read-API layer in tests/integration/test_marketplace_capability_store.py.
-Target 8 belongs to PR-A and target 18 to PR-C, so neither has a stand-in here.
+Each ``test_s17_NN_*`` is a named test for CAPABILITY_MAPPING.md §17 target NN at the domain
+layer (ownership: CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md). Targets 16 and 17, and the
+persistence/service/API portion of 19, are proven in
+tests/integration/test_marketplace_capability_store.py. Target 8 belongs to PR-A and target 18
+to PR-C, so neither has a stand-in here.
 """
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from itertools import product
 
@@ -17,6 +18,7 @@ from app.connect.marketplace.capability import (
     APP_REAUTH_DETECTION_ACCEPTED,
     EVIDENCE_GRADES,
     EXPANSION_DECISIONS,
+    FRESHNESS_TRANSITIONS,
     INITIAL,
     PERMISSION_UNKNOWN,
     PRODUCT_WRITE_PROVABLE,
@@ -34,6 +36,7 @@ from app.connect.marketplace.capability import (
     ExpansionBlockedError,
     FailureEvidence,
     Finding,
+    FreshnessTransitionError,
     Generations,
     IdentityProof,
     PauseReason,
@@ -45,6 +48,7 @@ from app.connect.marketplace.capability import (
     WriteScope,
     WriteScopeStatus,
     WriteStatus,
+    freshness_after_upstream_change,
     freshness_allows,
     observe_auth,
     observe_failure,
@@ -62,6 +66,11 @@ AUTH = WorkflowScope.AUTHENTICATION
 REGISTRATION = WorkflowScope.PRODUCT_REGISTRATION
 REVIEW = WorkflowState.REVIEW_REQUIRED
 PAUSED = WorkflowState.PAUSED
+UNRECORDED = ContractFreshness.UNRECORDED
+CURRENT = ContractFreshness.CURRENT
+STALE = ContractFreshness.STALE
+DISPUTED = ContractFreshness.REVIEW_REQUIRED
+CONTINUE = ContractDecision.CONTINUE_PROVEN_BEHAVIOR
 ATTESTED = WriteScope(WriteScopeStatus.READY, EvidenceStrength.OPERATOR_ATTESTED)
 MACHINE = WriteScope(WriteScopeStatus.READY, EvidenceStrength.MACHINE_VERIFIED)
 MISSING = WriteScope(WriteScopeStatus.MISSING, EvidenceStrength.OPERATOR_ATTESTED)
@@ -79,8 +88,20 @@ def _evidence(
     )
 
 
-# A state whose current contract freshness has been recorded explicitly; it is never assumed.
-RECORDED = record_freshness(INITIAL, ContractFreshness.CURRENT)
+def _recorded(state: CapabilityState, freshness: ContractFreshness) -> CapabilityState:
+    """A reviewed freshness recording at T0."""
+    return record_freshness(state, freshness, recorded_at=T0)
+
+
+# A state whose current contract freshness has been recorded; it is never assumed.
+RECORDED = _recorded(INITIAL, CURRENT)
+
+
+def _at(freshness: ContractFreshness) -> CapabilityState:
+    """A state that holds ``freshness``, reached only through lawful recordings."""
+    if freshness is UNRECORDED:
+        return INITIAL
+    return RECORDED if freshness is CURRENT else _recorded(RECORDED, freshness)
 
 
 def _ready() -> CapabilityState:
@@ -116,7 +137,7 @@ def _changed(before: CapabilityState, after: CapabilityState) -> set[str]:
         (WriteScopeStatus, {"READY", "MISSING", "UNKNOWN"}),
         (EvidenceStrength, {"OPERATOR_ATTESTED", "MACHINE_VERIFIED"}),
         (WriteStatus, {"UNVERIFIED", "READY", "BLOCKED"}),
-        (ContractFreshness, {"CURRENT", "STALE", "REVIEW_REQUIRED"}),
+        (ContractFreshness, {"UNRECORDED", "CURRENT", "STALE", "REVIEW_REQUIRED"}),
         (WorkflowState, {"PAUSED", "REVIEW_REQUIRED"}),
         (WorkflowScope, {"AUTHENTICATION", "PRODUCT_REGISTRATION"}),
         (
@@ -138,7 +159,7 @@ def test_each_axis_holds_exactly_its_contract_values(axis: type[StrEnum], values
 
 def test_the_nine_axes_move_independently() -> None:
     base = observe_permission(_ready(), ATTESTED)
-    assert _changed(base, record_freshness(base, ContractFreshness.STALE)) == {"contract_freshness"}
+    assert _changed(base, _recorded(base, STALE)) == {"contract_freshness"}
     assert _changed(base, observe_permission(base, PERMISSION_UNKNOWN)) == {"write_scope.status"}
     transient = FailureEvidence(REGISTRATION, ErrorClass.TRANSIENT, Finding.RECOVERABLE)
     assert _changed(base, observe_failure(base, transient)) == {"error_class"}
@@ -165,27 +186,14 @@ def test_free_text_never_stands_in_for_an_axis_value() -> None:
         CapabilityState(auth="NOT_BOUND")  # type: ignore[arg-type]
     with pytest.raises(CapabilityInvariantError, match=r"write\.status"):
         CapabilityState(write="UNVERIFIED")  # type: ignore[arg-type]
+    with pytest.raises(CapabilityInvariantError, match="contract_freshness"):
+        CapabilityState(contract_freshness="UNRECORDED")  # type: ignore[arg-type]
     with pytest.raises(CapabilityInvariantError, match="error_class"):
         CapabilityState(error_class="AUTH")  # type: ignore[arg-type]
     with pytest.raises(CapabilityInvariantError, match="remote_outcome"):
         CapabilityState(remote_outcome="UNKNOWN")  # type: ignore[arg-type]
     with pytest.raises(CapabilityInvariantError, match=r"write_scope\.status"):
         WriteScope("UNKNOWN")  # type: ignore[arg-type]
-
-
-def test_a_new_state_never_assumes_a_current_contract() -> None:
-    # PR #26 audit 5657617043 (F4): freshness comes from an owning source, never a default.
-    assert INITIAL.contract_freshness is ContractFreshness.REVIEW_REQUIRED
-    assert CapabilityState().contract_freshness is ContractFreshness.REVIEW_REQUIRED
-    # Until it is recorded there is no new trust: no first proof, no permission promotion ...
-    with pytest.raises(ExpansionBlockedError):
-        observe_auth(INITIAL, _evidence())
-    with pytest.raises(ExpansionBlockedError):
-        observe_permission(INITIAL, ATTESTED)
-    # ... while fail-closed evidence still converges as usual.
-    assert observe_permission(INITIAL, MISSING).write is WriteStatus.BLOCKED
-    recorded = record_freshness(INITIAL, ContractFreshness.CURRENT)
-    assert observe_auth(recorded, _evidence()).auth is AuthStatus.READY
 
 
 # ---------------------------------------------------------------- §17, PR-B-owned targets
@@ -311,7 +319,7 @@ def test_s17_09_m2_product_write_can_never_become_ready() -> None:
     best = observe_permission(_ready(), MACHINE)
     reached = [
         best,
-        record_freshness(best, ContractFreshness.CURRENT),
+        _recorded(best, CURRENT),
         observe_auth(best, _evidence(proof_session=2, current_session=2)),
         observe_failure(
             best,
@@ -330,39 +338,33 @@ def test_s17_09_m2_product_write_can_never_become_ready() -> None:
 
 def test_s17_10_stale_keeps_runtime_proof_and_blocks_expansion() -> None:
     proven = observe_permission(_ready(), ATTESTED)
-    stale = record_freshness(proven, ContractFreshness.STALE)
+    stale = _recorded(proven, STALE)
     assert _changed(proven, stale) == {"contract_freshness"}  # F1: no mechanical demotion
     # Existing proven behaviour continues without an extra safety judgement.
     assert observe_auth(stale, _evidence(proof_session=2, current_session=2)).auth is (
         AuthStatus.READY
     )
-    assert freshness_allows(
-        ContractFreshness.STALE,
-        ContractDecision.CONTINUE_PROVEN_BEHAVIOR,
-        depends_on_disputed_invariant=True,
-    )
+    assert freshness_allows(STALE, CONTINUE, depends_on_disputed_invariant=True)
     for decision in EXPANSION_DECISIONS:
-        assert not freshness_allows(ContractFreshness.STALE, decision)
+        assert not freshness_allows(STALE, decision)
     # New trust is refused by the state machine itself.
     with pytest.raises(ExpansionBlockedError):
-        observe_auth(record_freshness(INITIAL, ContractFreshness.STALE), _evidence())
+        observe_auth(_recorded(RECORDED, STALE), _evidence())
     with pytest.raises(ExpansionBlockedError):
-        observe_permission(record_freshness(_ready(), ContractFreshness.STALE), ATTESTED)
+        observe_permission(_recorded(_ready(), STALE), ATTESTED)
 
 
 def test_s17_11_review_required_freshness_stops_dependent_operations() -> None:
-    disputed = ContractFreshness.REVIEW_REQUIRED
-    proven = ContractDecision.CONTINUE_PROVEN_BEHAVIOR
-    assert not freshness_allows(disputed, proven, depends_on_disputed_invariant=True)
-    assert freshness_allows(disputed, proven, depends_on_disputed_invariant=False)
+    assert not freshness_allows(DISPUTED, CONTINUE, depends_on_disputed_invariant=True)
+    assert freshness_allows(DISPUTED, CONTINUE, depends_on_disputed_invariant=False)
     for decision in EXPANSION_DECISIONS:
-        assert not freshness_allows(disputed, decision)
+        assert not freshness_allows(DISPUTED, decision)
     # Stronger than STALE: the same dependent operation still runs under STALE.
-    assert freshness_allows(ContractFreshness.STALE, proven, depends_on_disputed_invariant=True)
-    # The axis converges nothing else by itself (F4).
-    assert _changed(_ready(), record_freshness(_ready(), disputed)) == {"contract_freshness"}
+    assert freshness_allows(STALE, CONTINUE, depends_on_disputed_invariant=True)
+    # The axis converges nothing else by itself (F9).
+    assert _changed(_ready(), _recorded(_ready(), DISPUTED)) == {"contract_freshness"}
     with pytest.raises(ExpansionBlockedError):
-        observe_auth(record_freshness(INITIAL, disputed), _evidence())
+        observe_auth(_recorded(RECORDED, DISPUTED), _evidence())
 
 
 def test_s17_12_paused_requires_one_frozen_reason_and_one_frozen_scope() -> None:
@@ -462,53 +464,120 @@ def test_s17_15_app_reauth_recovery_needs_provider_reauth_fresh_session_and_iden
     assert other.auth is AuthStatus.AUTH_MISMATCH
 
 
-# ---------------------------------------------------------------- supporting convergence
+# §17 #19 — CAPABILITY_MAPPING §8 F2, F5–F8
 
 
-def test_a_new_process_never_trusts_a_persisted_ready() -> None:
-    restarted = on_process_start(observe_permission(_ready(), ATTESTED))
-    assert (restarted.auth, restarted.write) == (AuthStatus.NOT_READY, WriteStatus.UNVERIFIED)
-    assert restarted.write_scope == ATTESTED  # evidence stays; its own validity is PR-C's
-    # A pending human action and a mismatch survive the restart.
-    mismatch = observe_auth(_ready(), _evidence(OTHER))
-    assert on_process_start(mismatch) == mismatch
+def test_s17_19_a_new_state_starts_unrecorded_and_claims_nothing() -> None:
+    assert (INITIAL.contract_freshness, INITIAL.freshness_recorded_at) == (UNRECORDED, None)
+    assert CapabilityState().contract_freshness is UNRECORDED
+    # Until a reviewed recording there is no new trust: no first proof, no permission promotion ...
+    with pytest.raises(ExpansionBlockedError):
+        observe_auth(INITIAL, _evidence())
+    with pytest.raises(ExpansionBlockedError):
+        observe_permission(INITIAL, ATTESTED)
+    # ... yet UNRECORDED claims no contradiction, so proven and fail-closed behaviour goes on.
+    assert freshness_allows(UNRECORDED, CONTINUE, depends_on_disputed_invariant=True)
+    assert observe_permission(INITIAL, MISSING).write is WriteStatus.BLOCKED
+    assert observe_auth(RECORDED, _evidence()).auth is AuthStatus.READY
+    # A recorded determination always carries its time; UNRECORDED never does.
+    with pytest.raises(CapabilityInvariantError, match="UNRECORDED"):
+        CapabilityState(freshness_recorded_at=T0)
+    with pytest.raises(CapabilityInvariantError, match="freshness_recorded_at"):
+        CapabilityState(contract_freshness=CURRENT)
 
 
-def test_exhausted_auth_recovery_pauses_without_reclassifying_the_error() -> None:
-    exhausted = observe_failure(
-        _ready(), FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
+# F5: (expansion / new trust, existing proven behavior, behavior depending on a disputed invariant)
+F5_MATRIX = {
+    CURRENT: ("allow", "allow", "allow"),
+    UNRECORDED: ("block", "allow", "allow"),
+    STALE: ("block", "allow", "allow"),
+    DISPUTED: ("block", "allow", "block"),
+}
+
+
+def test_s17_19_freshness_gates_follow_the_f5_matrix() -> None:
+    assert set(F5_MATRIX) == set(ContractFreshness)
+    for freshness, (expansion, proven, disputed) in F5_MATRIX.items():
+        for decision in EXPANSION_DECISIONS:
+            for depends in (False, True):
+                allowed = freshness_allows(
+                    freshness, decision, depends_on_disputed_invariant=depends
+                )
+                assert allowed is (expansion == "allow"), (freshness, decision, depends)
+        assert freshness_allows(freshness, CONTINUE) is (proven == "allow"), freshness
+        assert freshness_allows(freshness, CONTINUE, depends_on_disputed_invariant=True) is (
+            disputed == "allow"
+        ), freshness
+
+
+# F6 + F7: every allowed reviewed recording; anything else is refused.
+ALLOWED_RECORDINGS = {
+    (UNRECORDED, CURRENT),
+    (CURRENT, CURRENT),
+    (CURRENT, STALE),
+    (CURRENT, DISPUTED),
+    (STALE, STALE),
+    (STALE, CURRENT),
+    (STALE, DISPUTED),
+    (DISPUTED, DISPUTED),
+    (DISPUTED, CURRENT),
+}
+
+
+def test_s17_19_the_freshness_transition_graph_is_closed_and_non_reentrant() -> None:
+    for source, target in product(ContractFreshness, ContractFreshness):
+        state = _at(source)
+        if (source, target) in ALLOWED_RECORDINGS:
+            assert _recorded(state, target).contract_freshness is target
+        else:
+            with pytest.raises(FreshnessTransitionError):
+                _recorded(state, target)
+    forbidden = [
+        (UNRECORDED, STALE),
+        (UNRECORDED, DISPUTED),
+        (UNRECORDED, UNRECORDED),
+        (CURRENT, UNRECORDED),
+        (STALE, UNRECORDED),
+        (DISPUTED, UNRECORDED),
+        (DISPUTED, STALE),
+    ]
+    assert not ALLOWED_RECORDINGS & set(forbidden)
+    assert {(s, t) for s, targets in FRESHNESS_TRANSITIONS.items() for t in targets} == (
+        ALLOWED_RECORDINGS
     )
-    assert exhausted.overlays == (WorkflowOverlay(PAUSED, AUTH, PauseReason.AUTH_RETRY_LIMIT),)
-    assert (exhausted.auth, exhausted.error_class) == (AuthStatus.NOT_READY, ErrorClass.AUTH)
-    resumed = resolve(exhausted, AUTH, Resolution.RESUME)
-    assert (resumed.auth, resumed.overlays) == (AuthStatus.NOT_READY, ())
 
 
-def test_an_unknown_remote_outcome_is_reviewed_never_replayed() -> None:
-    after = observe_failure(
-        _ready(),
-        FailureEvidence(
-            REGISTRATION,
-            ErrorClass.TRANSIENT,
-            Finding.RECOVERABLE,
-            remote_outcome=RemoteOutcome.UNKNOWN,
-        ),
-    )
-    assert after.overlays == (WorkflowOverlay(REVIEW, REGISTRATION),)
-    assert (after.remote_outcome, after.auth) == (RemoteOutcome.UNKNOWN, AuthStatus.READY)
+def test_s17_19_same_value_recordings_refresh_their_provenance() -> None:
+    later = T0 + timedelta(days=30)
+    for freshness in (CURRENT, STALE, DISPUTED):
+        state = _at(freshness)
+        again = record_freshness(state, freshness, recorded_at=later)
+        assert (again.contract_freshness, again.freshness_recorded_at) == (freshness, later)
+        assert again != state  # an event, not a silent no-op
+        assert _changed(state, again) == set()  # and it changes no axis
+    with pytest.raises(FreshnessTransitionError):
+        record_freshness(INITIAL, UNRECORDED, recorded_at=later)
+    with pytest.raises(CapabilityInvariantError, match="timezone-aware"):
+        record_freshness(RECORDED, CURRENT, recorded_at=datetime(2026, 9, 14))
 
 
-def test_a_scope_insufficient_pause_is_lifted_only_by_permission_evidence() -> None:
-    blocked = observe_permission(_ready(), MISSING)
-    for resolution in Resolution:
-        with pytest.raises(CapabilityInvariantError):
-            resolve(blocked, REGISTRATION, resolution)
+def test_s17_19_an_upstream_change_goes_stale_unless_a_contradiction_is_proven() -> None:
+    after = freshness_after_upstream_change
+    assert after(CURRENT, contradiction_established=False) is STALE
+    assert after(CURRENT, contradiction_established=True) is DISPUTED
+    assert after(STALE, contradiction_established=False) is STALE
+    assert after(STALE, contradiction_established=True) is DISPUTED
+    assert after(DISPUTED, contradiction_established=False) is DISPUTED  # never softens
+    # Nothing was ever determined, so nothing can have aged or be disputed.
+    assert after(UNRECORDED, contradiction_established=True) is UNRECORDED
+    for source, proven in product((CURRENT, STALE, DISPUTED), (False, True)):
+        assert after(source, contradiction_established=proven) in FRESHNESS_TRANSITIONS[source]
 
 
-# ------------------------------------------ overlay convergence (re-review 5193155486, #27)
+# §17 #20 — CAPABILITY_MAPPING §10.1
 
 
-def test_a_later_proven_reason_narrows_an_open_review_to_a_pause() -> None:
+def test_s17_20_a_later_proven_reason_narrows_an_open_review_to_a_pause() -> None:
     reviewed = observe_failure(
         _ready(), FailureEvidence(AUTH, ErrorClass.UNKNOWN, Finding.UNRESOLVED)
     )
@@ -551,7 +620,7 @@ def test_a_later_proven_reason_narrows_an_open_review_to_a_pause() -> None:
     )
 
 
-def test_ambiguity_never_erases_a_proven_pause() -> None:
+def test_s17_20_ambiguity_never_erases_a_proven_pause() -> None:
     paused = observe_failure(
         _ready(), FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
     )
@@ -566,6 +635,50 @@ def test_ambiguity_never_erases_a_proven_pause() -> None:
     ]
     for failure in later:
         assert observe_failure(paused, failure).overlays == paused.overlays
+
+
+# ---------------------------------------------------------------- supporting convergence
+
+
+def test_a_new_process_never_trusts_a_persisted_ready() -> None:
+    restarted = on_process_start(observe_permission(_ready(), ATTESTED))
+    assert (restarted.auth, restarted.write) == (AuthStatus.NOT_READY, WriteStatus.UNVERIFIED)
+    assert restarted.write_scope == ATTESTED  # evidence stays; its own validity is PR-C's
+    assert restarted.contract_freshness is CURRENT  # a restart never re-enters UNRECORDED
+    # A pending human action and a mismatch survive the restart.
+    mismatch = observe_auth(_ready(), _evidence(OTHER))
+    assert on_process_start(mismatch) == mismatch
+
+
+def test_exhausted_auth_recovery_pauses_without_reclassifying_the_error() -> None:
+    exhausted = observe_failure(
+        _ready(), FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
+    )
+    assert exhausted.overlays == (WorkflowOverlay(PAUSED, AUTH, PauseReason.AUTH_RETRY_LIMIT),)
+    assert (exhausted.auth, exhausted.error_class) == (AuthStatus.NOT_READY, ErrorClass.AUTH)
+    resumed = resolve(exhausted, AUTH, Resolution.RESUME)
+    assert (resumed.auth, resumed.overlays) == (AuthStatus.NOT_READY, ())
+
+
+def test_an_unknown_remote_outcome_is_reviewed_never_replayed() -> None:
+    after = observe_failure(
+        _ready(),
+        FailureEvidence(
+            REGISTRATION,
+            ErrorClass.TRANSIENT,
+            Finding.RECOVERABLE,
+            remote_outcome=RemoteOutcome.UNKNOWN,
+        ),
+    )
+    assert after.overlays == (WorkflowOverlay(REVIEW, REGISTRATION),)
+    assert (after.remote_outcome, after.auth) == (RemoteOutcome.UNKNOWN, AuthStatus.READY)
+
+
+def test_a_scope_insufficient_pause_is_lifted_only_by_permission_evidence() -> None:
+    blocked = observe_permission(_ready(), MISSING)
+    for resolution in Resolution:
+        with pytest.raises(CapabilityInvariantError):
+            resolve(blocked, REGISTRATION, resolution)
 
 
 def test_the_review_an_auth_mismatch_requires_is_never_narrowed_away() -> None:

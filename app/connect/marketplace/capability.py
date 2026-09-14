@@ -62,8 +62,13 @@ class WriteStatus(StrEnum):
 
 
 class ContractFreshness(StrEnum):
-    """Freshness of ICBM's adopted contract understanding, not runtime truth (§2.4)."""
+    """Freshness of ICBM's adopted-contract understanding, not runtime truth (§2.4, §8).
 
+    UNRECORDED is bootstrap-only: no determination has been recorded yet, so it claims neither
+    currency, expiry nor contradiction (F2), and nothing ever returns to it (F6).
+    """
+
+    UNRECORDED = "UNRECORDED"
     CURRENT = "CURRENT"
     STALE = "STALE"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
@@ -129,7 +134,11 @@ class CapabilityInvariantError(ValueError):
 
 
 class ExpansionBlockedError(CapabilityInvariantError):
-    """A new-trust decision refused because the adopted contract is not CURRENT (§8 F2/F3)."""
+    """A new-trust decision refused because the adopted contract is not CURRENT (§8 F5)."""
+
+
+class FreshnessTransitionError(CapabilityInvariantError):
+    """A freshness recording outside the closed transition graph (§8 F6/F7)."""
 
 
 def _require(condition: bool, message: str) -> None:
@@ -231,10 +240,9 @@ class CapabilityState:
     auth: AuthStatus = AuthStatus.NOT_BOUND
     write_scope: WriteScope = PERMISSION_UNKNOWN
     write: WriteStatus = WriteStatus.UNVERIFIED
-    # F4: freshness is never assumed. A new state starts REVIEW_REQUIRED, so no new-trust decision
-    # can happen until the current freshness is recorded from an owning source (PR #26 audit
-    # 5657617043); proven behaviour that depends on no disputed invariant still continues.
-    contract_freshness: ContractFreshness = ContractFreshness.REVIEW_REQUIRED
+    # F2/F9: freshness is never assumed. A new state is UNRECORDED — it claims neither currency,
+    # expiry nor contradiction — and new trust waits for a reviewed recording (F8).
+    contract_freshness: ContractFreshness = ContractFreshness.UNRECORDED
     overlays: tuple[WorkflowOverlay, ...] = ()
     error_class: ErrorClass | None = None
     remote_outcome: RemoteOutcome | None = None
@@ -242,12 +250,24 @@ class CapabilityState:
     # A proof must come from a session newer than this one (set when an application re-auth
     # pause is resolved, §17 #15).
     session_generation_floor: int | None = None
+    # When the latest reviewed freshness determination was recorded (F7/F8); None only while
+    # UNRECORDED. The recording actor is kept by the append-only audit record.
+    freshness_recorded_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _typed(self.auth, AuthStatus, "auth")
         _require(isinstance(self.write_scope, WriteScope), "write_scope must be a WriteScope")
         _typed(self.write, WriteStatus, "write.status")
         _typed(self.contract_freshness, ContractFreshness, "contract_freshness")
+        recorded_at = self.freshness_recorded_at
+        if self.contract_freshness is ContractFreshness.UNRECORDED:
+            _require(recorded_at is None, "UNRECORDED freshness has no recorded determination (F2)")
+        else:
+            _require(
+                recorded_at is not None and recorded_at.tzinfo is not None,
+                "a recorded freshness determination carries a timezone-aware "
+                "freshness_recorded_at (F7)",
+            )
         _typed(self.error_class, ErrorClass, "error_class", optional=True)
         _typed(self.remote_outcome, RemoteOutcome, "remote_outcome", optional=True)
         _require(
@@ -392,7 +412,7 @@ DEFAULT_POLICY = CapabilityPolicy()
 
 
 class ContractDecision(StrEnum):
-    """What a caller intends to do under the current contract freshness (§8 F2)."""
+    """What a caller intends to do under the current contract freshness (§8 F3–F5)."""
 
     CONTINUE_PROVEN_BEHAVIOR = "CONTINUE_PROVEN_BEHAVIOR"
     ADOPT_ENDPOINT = "ADOPT_ENDPOINT"
@@ -406,7 +426,32 @@ class ContractDecision(StrEnum):
 
 EXPANSION_DECISIONS = frozenset(ContractDecision) - {ContractDecision.CONTINUE_PROVEN_BEHAVIOR}
 
-# ---------------------------------------------------------------- gates
+# ---------------------------------------------------------------- freshness
+
+# F5, the normative behavior matrix: (expansion / new trust, existing proven behavior, behavior
+# depending on a disputed invariant). UNRECORDED and STALE share a gate but not a claim: never
+# recorded versus recorded and no longer current.
+FRESHNESS_GATES: dict[ContractFreshness, tuple[bool, bool, bool]] = {
+    ContractFreshness.CURRENT: (True, True, True),
+    ContractFreshness.UNRECORDED: (False, True, True),
+    ContractFreshness.STALE: (False, True, True),
+    ContractFreshness.REVIEW_REQUIRED: (False, True, False),
+}
+
+# F6/F7, the closed graph of reviewed freshness recordings. A same-value re-recording is an event
+# that refreshes provenance (not for UNRECORDED), and nothing ever returns to UNRECORDED.
+FRESHNESS_TRANSITIONS: dict[ContractFreshness, frozenset[ContractFreshness]] = {
+    ContractFreshness.UNRECORDED: frozenset({ContractFreshness.CURRENT}),
+    ContractFreshness.CURRENT: frozenset(
+        {ContractFreshness.CURRENT, ContractFreshness.STALE, ContractFreshness.REVIEW_REQUIRED}
+    ),
+    ContractFreshness.STALE: frozenset(
+        {ContractFreshness.STALE, ContractFreshness.CURRENT, ContractFreshness.REVIEW_REQUIRED}
+    ),
+    ContractFreshness.REVIEW_REQUIRED: frozenset(
+        {ContractFreshness.REVIEW_REQUIRED, ContractFreshness.CURRENT}
+    ),
+}
 
 
 def freshness_allows(
@@ -415,20 +460,36 @@ def freshness_allows(
     *,
     depends_on_disputed_invariant: bool = False,
 ) -> bool:
-    """F2/F3: STALE keeps proven behaviour and blocks expansion without extra judgement;
-    REVIEW_REQUIRED also stops whatever depends on the disputed invariant."""
+    """Read the F5 matrix: every freshness value has its own explicit row."""
     _typed(freshness, ContractFreshness, "contract_freshness")
     _typed(decision, ContractDecision, "decision")
-    if freshness is ContractFreshness.CURRENT:
-        return True
+    expansion, proven, disputed = FRESHNESS_GATES[freshness]
     if decision in EXPANSION_DECISIONS:
-        return False
-    return not (freshness is ContractFreshness.REVIEW_REQUIRED and depends_on_disputed_invariant)
+        return expansion
+    return disputed if depends_on_disputed_invariant else proven
 
 
 def _gate(freshness: ContractFreshness, decision: ContractDecision) -> None:
     if not freshness_allows(freshness, decision):
         raise ExpansionBlockedError(f"{decision} is blocked while contract_freshness={freshness}")
+
+
+def freshness_after_upstream_change(
+    freshness: ContractFreshness, *, contradiction_established: bool
+) -> ContractFreshness:
+    """The determination an adopted upstream-version change leaves behind (F3, F6).
+
+    A recorded CURRENT or STALE determination no longer covers the new upstream contract, so it
+    goes STALE — or REVIEW_REQUIRED when the change itself positively establishes a material
+    contradiction. REVIEW_REQUIRED never softens to STALE, and UNRECORDED has no determination to
+    age or dispute, so it stays UNRECORDED. Detecting the change is a separately owned feature.
+    """
+    _typed(freshness, ContractFreshness, "contract_freshness")
+    if freshness in (ContractFreshness.UNRECORDED, ContractFreshness.REVIEW_REQUIRED):
+        return freshness
+    if contradiction_established:
+        return ContractFreshness.REVIEW_REQUIRED
+    return ContractFreshness.STALE
 
 
 # ---------------------------------------------------------------- transitions
@@ -492,7 +553,7 @@ def observe_auth(state: CapabilityState, evidence: AuthEvidence) -> CapabilitySt
             auth = AuthStatus.NOT_READY
         else:
             if verified_at is None:
-                # The first proof of an account is new trust (F2).
+                # The first proof of an account is new trust (F5).
                 _gate(state.contract_freshness, ContractDecision.PROMOTE_UNVERIFIED_CAPABILITY)
             verified_at = proven_at
     return replace(
@@ -555,7 +616,7 @@ def _overlay_for(failure: FailureEvidence, policy: CapabilityPolicy) -> Workflow
 
 
 def _converge_overlay(state: CapabilityState, proposed: WorkflowOverlay) -> WorkflowOverlay:
-    """The overlay a scope holds once ``proposed`` arrives (PR #26 re-review 5193155486, #27).
+    """The overlay a scope holds once ``proposed`` arrives (§10.1).
 
     Current evidence narrows uncertainty: an open REVIEW_REQUIRED becomes the PAUSED reason that
     later evidence positively proves. Ambiguity never erases a proven reason, and one proven
@@ -580,7 +641,7 @@ def _converge_overlay(state: CapabilityState, proposed: WorkflowOverlay) -> Work
 def observe_failure(
     state: CapabilityState, failure: FailureEvidence, policy: CapabilityPolicy = DEFAULT_POLICY
 ) -> CapabilityState:
-    """Record a classified failure and converge the workflow overlay (§11).
+    """Record a classified failure and converge the workflow overlay (§10.1, §11).
 
     ``error_class`` is kept exactly as measured: an exhausted budget or a review never
     reclassifies it (A5, ERRORS.md §1). Overlays converge per ``_converge_overlay``. A failure
@@ -657,10 +718,25 @@ def resolve(
     )
 
 
-def record_freshness(state: CapabilityState, freshness: ContractFreshness) -> CapabilityState:
-    """F1/F4: freshness is its own axis; it never demotes nor promotes another."""
+def record_freshness(
+    state: CapabilityState, freshness: ContractFreshness, *, recorded_at: datetime
+) -> CapabilityState:
+    """A reviewed contract-freshness determination (F6–F8).
+
+    It records ICBM's contract review, never provider evidence, and changes no other axis
+    (F1/F9). Only the closed graph's transitions are accepted, and every accepted recording — a
+    same-value one included — refreshes ``freshness_recorded_at``.
+    """
     _typed(freshness, ContractFreshness, "contract_freshness")
-    return replace(state, contract_freshness=freshness)
+    _require(
+        isinstance(recorded_at, datetime) and recorded_at.tzinfo is not None,
+        "recorded_at must be timezone-aware",
+    )
+    if freshness not in FRESHNESS_TRANSITIONS[state.contract_freshness]:
+        raise FreshnessTransitionError(
+            f"contract_freshness cannot be recorded {state.contract_freshness} -> {freshness} (F6)"
+        )
+    return replace(state, contract_freshness=freshness, freshness_recorded_at=recorded_at)
 
 
 def on_process_start(state: CapabilityState) -> CapabilityState:

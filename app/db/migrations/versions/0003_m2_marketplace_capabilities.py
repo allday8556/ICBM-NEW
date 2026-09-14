@@ -7,7 +7,8 @@ Create Date: 2026-09-14
 Additive only. One row per marketplace with an adopted capability contract (SmartStore in M2):
 each axis is its own column, and each human-action overlay is a row keyed by its typed scope.
 CHECK constraints repeat the single-table invariants of docs/platforms/smartstore/
-CAPABILITY_MAPPING.md. No secret, token or provider identity is stored here.
+CAPABILITY_MAPPING.md, including the UNRECORDED freshness bootstrap and its recorded-time
+provenance (F2/F7). No secret, token or provider identity is stored here.
 """
 
 from collections.abc import Sequence
@@ -37,6 +38,7 @@ def upgrade() -> None:
         sa.Column("evidence_strength", sa.String(length=20), nullable=True),
         sa.Column("write_status", sa.String(length=20), nullable=False),
         sa.Column("contract_freshness", sa.String(length=20), nullable=False),
+        sa.Column("freshness_recorded_at", sa.DateTime(), nullable=True),
         sa.Column("error_class", sa.String(length=20), nullable=True),
         sa.Column("remote_outcome", sa.String(length=20), nullable=True),
         sa.Column("session_generation_floor", sa.Integer(), nullable=True),
@@ -71,8 +73,12 @@ def upgrade() -> None:
             name=op.f("ck_marketplace_capabilities_missing_scope_blocks_write"),
         ),
         sa.CheckConstraint(
-            "contract_freshness IN ('CURRENT', 'STALE', 'REVIEW_REQUIRED')",
+            "contract_freshness IN ('UNRECORDED', 'CURRENT', 'STALE', 'REVIEW_REQUIRED')",
             name=op.f("ck_marketplace_capabilities_freshness_valid"),
+        ),
+        sa.CheckConstraint(
+            "(contract_freshness = 'UNRECORDED') = (freshness_recorded_at IS NULL)",
+            name=op.f("ck_marketplace_capabilities_freshness_recorded"),
         ),
         sa.CheckConstraint(
             f"error_class IS NULL OR error_class IN {ERROR_CLASSES}",

@@ -467,12 +467,14 @@ def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
             assert any(name == a or name.startswith(f"{a}.") for a in allowed), f"{path}: {name}"
 
 
-def test_no_production_code_records_contract_freshness_yet() -> None:
-    # PR #26 re-review 5193155486 §3, Issue #27: contract freshness is contract-governance truth,
-    # not provider runtime evidence. Until its reviewed entry point is assigned, no production
-    # code may record it; in particular an adapter must never set CURRENT as a convenience.
+def test_s17_19_only_the_operator_entry_point_records_contract_freshness() -> None:
+    # CAPABILITY_MAPPING F8: contract freshness is contract-governance truth, not provider runtime
+    # evidence. PR-B's local operator entry point is its only production recorder; an adapter
+    # (PR-A) may consume the recorded value but must never set, infer, seed or fabricate CURRENT.
     modules = _production_modules()
-    assert {p for p, t in modules.items() if _calls(t, "record_contract_freshness")} == set()
+    assert {p for p, t in modules.items() if _calls(t, "record_contract_freshness")} == {
+        "app/api/routes/connect.py"
+    }
     assert {p for p, t in modules.items() if _calls(t, "record_freshness")} == {
         "app/connect/marketplace/service.py"
     }
