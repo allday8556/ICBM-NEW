@@ -3,7 +3,7 @@
 > 상태: **FREEZE APPROVED** — 아키텍트 승인 (2026-09-13)
 > 작성: Claude (v3 감사 지적 5건 + 문서 정리 2건 반영)
 > 대체: `CANONICAL-V1/V2/V3-BY-CLAUDE.md` (모두 폐기. 참조하지 않는다)
-> 배치 위치: `docs/review/CANONICAL-V3.1-BY-CLAUDE.md`
+> 배치 위치: `docs/architecture/CANONICAL-V3.1.md`
 
 v1 대비 가장 큰 변경은 **Registration / Draft / Snapshot에 Item 계층이 생긴 것**이다(v2).
 v3는 그 Item 계층이 아직 도달하지 못했던 지점을 마저 정리한다 — Snapshot의 facts revision,
