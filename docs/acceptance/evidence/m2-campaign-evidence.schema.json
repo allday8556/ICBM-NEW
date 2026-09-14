@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "m2-campaign-evidence.schema.json",
+  "title": "M2 SmartStore CONNECT acceptance campaign evidence (sanitized)",
+  "description": "Issue #46 section 2.2 and docs/acceptance/M2.md section 7. Every object is closed, and every string is an enum, a fixed pattern or bounded text. scripts/m2harness/evidence.py enforces this schema and refuses any document that carries a known secret in any encoding. Never add a field for a client secret, a client id, a bearer token or its hash, an Authorization header, or a raw accountUid/accountId.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "mode",
+    "generated_at",
+    "git",
+    "observed_range",
+    "campaign_state",
+    "campaign_outcome",
+    "renewal_margin_s",
+    "budget",
+    "requests",
+    "calls",
+    "phases",
+    "sessions",
+    "identity",
+    "crash",
+    "slots",
+    "scan",
+    "reconcile",
+    "regression",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": {"const": "m2-campaign-evidence/v1"},
+    "campaign_id": {"type": "string", "pattern": "^m2-[a-z0-9][a-z0-9-]{2,40}$"},
+    "mode": {"enum": ["REAL", "DRY"]},
+    "generated_at": {"$ref": "#/$defs/timestamp"},
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "approved_sha", "tree_clean"],
+      "properties": {
+        "head": {"$ref": "#/$defs/sha"},
+        "approved_sha": {"$ref": "#/$defs/sha_or_null"},
+        "tree_clean": {"type": "boolean"}
+      }
+    },
+    "observed_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "finished_at"],
+      "properties": {
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "finished_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "campaign_state": {"$ref": "#/$defs/state"},
+    "campaign_outcome": {
+      "enum": [
+        "COMPLETED",
+        "BUDGET_EXHAUSTED",
+        "STOPPED_FOR_CONTRACT_REVIEW",
+        "STOPPED_OPERATOR_DECLINED",
+        "FAILED",
+        null
+      ]
+    },
+    "renewal_margin_s": {"const": 600},
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caps", "used", "crash_attempt_cap", "crash_attempts_used", "blocked_before_send"],
+      "properties": {
+        "caps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT", "OTHER"],
+          "properties": {
+            "SMARTSTORE_AUTH_TOKEN": {"const": 8},
+            "SMARTSTORE_SELLER_ACCOUNT": {"const": 6},
+            "OTHER": {"const": 0}
+          }
+        },
+        "used": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT", "OTHER"],
+          "properties": {
+            "SMARTSTORE_AUTH_TOKEN": {"type": "integer", "minimum": 0, "maximum": 8},
+            "SMARTSTORE_SELLER_ACCOUNT": {"type": "integer", "minimum": 0, "maximum": 6},
+            "OTHER": {"const": 0}
+          }
+        },
+        "crash_attempt_cap": {"const": 2},
+        "crash_attempts_used": {"type": "integer", "minimum": 0, "maximum": 2},
+        "blocked_before_send": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["at", "endpoint_id", "phase", "reason"],
+            "properties": {
+              "at": {"$ref": "#/$defs/timestamp"},
+              "endpoint_id": {"$ref": "#/$defs/endpoint_any"},
+              "phase": {"$ref": "#/$defs/phase_or_null"},
+              "reason": {
+                "enum": [
+                  "NOT_RUNNING",
+                  "FORBIDDEN_TARGET",
+                  "NO_OPEN_PHASE",
+                  "CAP_REACHED",
+                  "UNPLANNED_REQUEST",
+                  "CRASH_SUB_BUDGET_EXHAUSTED"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "requests": {
+      "type": "array",
+      "maxItems": 14,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "label",
+          "phase",
+          "phase_attempt",
+          "endpoint_id",
+          "reserved_at",
+          "finished_at",
+          "outcome",
+          "http_status",
+          "latency_ms"
+        ],
+        "properties": {
+          "seq": {"type": "integer", "minimum": 1},
+          "label": {"$ref": "#/$defs/label"},
+          "phase": {"$ref": "#/$defs/phase"},
+          "phase_attempt": {"type": "integer", "minimum": 1},
+          "endpoint_id": {"enum": ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"]},
+          "reserved_at": {"$ref": "#/$defs/timestamp"},
+          "finished_at": {"$ref": "#/$defs/timestamp_or_null"},
+          "outcome": {"enum": ["RESERVED", "RESPONDED", "NO_RESPONSE"]},
+          "http_status": {"$ref": "#/$defs/http_status_or_null"},
+          "latency_ms": {"$ref": "#/$defs/latency_or_null"}
+        }
+      }
+    },
+    "calls": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data_dir",
+          "endpoint_id",
+          "result_class",
+          "http_status",
+          "latency_ms",
+          "started_at",
+          "provider_trace_id",
+          "credential_generation",
+          "session_generation",
+          "transmission_phase",
+          "remote_outcome",
+          "predicate_revision"
+        ],
+        "properties": {
+          "data_dir": {"$ref": "#/$defs/data_dir"},
+          "endpoint_id": {"$ref": "#/$defs/endpoint_any"},
+          "result_class": {"$ref": "#/$defs/code"},
+          "http_status": {"$ref": "#/$defs/http_status_or_null"},
+          "latency_ms": {"$ref": "#/$defs/latency_or_null"},
+          "started_at": {"$ref": "#/$defs/timestamp_or_null"},
+          "provider_trace_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_.:-]{1,100}$"},
+          "credential_generation": {"$ref": "#/$defs/generation_or_null"},
+          "session_generation": {"$ref": "#/$defs/generation_or_null"},
+          "transmission_phase": {"$ref": "#/$defs/code_or_null"},
+          "remote_outcome": {"$ref": "#/$defs/code_or_null"},
+          "predicate_revision": {"type": ["string", "null"], "pattern": "^[a-z0-9-]{1,40}$"}
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "attempt", "opened_at", "closed_at", "result"],
+        "properties": {
+          "phase": {"$ref": "#/$defs/phase"},
+          "attempt": {"type": "integer", "minimum": 1},
+          "opened_at": {"$ref": "#/$defs/timestamp"},
+          "closed_at": {"$ref": "#/$defs/timestamp_or_null"},
+          "result": {"type": ["string", "null"], "pattern": "^[A-Z0-9_:.]{1,80}$"}
+        }
+      }
+    },
+    "sessions": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data_dir",
+          "token_type",
+          "expires_in",
+          "expires_at",
+          "credential_generation",
+          "session_generation",
+          "committed_at"
+        ],
+        "properties": {
+          "data_dir": {"$ref": "#/$defs/data_dir"},
+          "token_type": {"type": "string", "pattern": "^[A-Za-z]{1,20}$"},
+          "expires_in": {"type": "integer", "minimum": 1},
+          "expires_at": {"$ref": "#/$defs/timestamp"},
+          "credential_generation": {"type": "integer", "minimum": 1},
+          "session_generation": {"type": "integer", "minimum": 1},
+          "committed_at": {"$ref": "#/$defs/timestamp"}
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "application_fingerprint",
+        "credential_generation",
+        "baseline_account_fingerprint",
+        "observations",
+        "a3_comparison",
+        "a3_reason"
+      ],
+      "properties": {
+        "application_fingerprint": {"$ref": "#/$defs/fingerprint_or_null"},
+        "credential_generation": {"$ref": "#/$defs/generation_or_null"},
+        "baseline_account_fingerprint": {"$ref": "#/$defs/fingerprint_or_null"},
+        "observations": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "data_dir", "account_fingerprint", "bound", "auth", "matches_baseline"],
+            "properties": {
+              "label": {"enum": ["A1", "A1b", "A2", "A3"]},
+              "data_dir": {"$ref": "#/$defs/data_dir"},
+              "account_fingerprint": {"$ref": "#/$defs/fingerprint"},
+              "bound": {"type": "boolean"},
+              "auth": {"enum": ["READY", "NOT_READY", "AUTH_MISMATCH", "NOT_BOUND"]},
+              "matches_baseline": {"type": ["boolean", "null"]}
+            }
+          }
+        },
+        "a3_comparison": {"enum": ["MATCH", "MISMATCH", "NOT_COMPARABLE", null]},
+        "a3_reason": {"$ref": "#/$defs/code_or_null"}
+      }
+    },
+    "crash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "recovery"],
+      "properties": {
+        "attempts": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "crash_attempt",
+              "label",
+              "verdict",
+              "reasons",
+              "exit_code",
+              "reservation_seq",
+              "connect_result",
+              "marker"
+            ],
+            "properties": {
+              "crash_attempt": {"enum": [1, 2]},
+              "label": {"enum": ["T4a", "T4b"]},
+              "verdict": {
+                "enum": [
+                  "BOUNDARY_EXERCISED",
+                  "BOUNDARY_NOT_EXERCISED",
+                  "COMMITTED_BEFORE_CRASH",
+                  "CANDIDATE_LEAKED"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "enum": [
+                    "EXIT_NOT_AT_BOUNDARY",
+                    "NO_MARKER",
+                    "MARKER_UNREADABLE",
+                    "MARKER_NOT_AUTHENTIC",
+                    "MARKER_MISMATCH",
+                    "NO_COMPLETED_TOKEN_RESPONSE",
+                    "SESSION_COMMITTED",
+                    "CANDIDATE_FOUND_IN_ARTIFACTS",
+                    "ATTEMPT_INTERRUPTED"
+                  ]
+                }
+              },
+              "exit_code": {"type": ["integer", "null"]},
+              "reservation_seq": {"type": ["integer", "null"], "minimum": 1},
+              "connect_result": {"$ref": "#/$defs/code_or_null"},
+              "marker": {"$ref": "#/$defs/marker"}
+            }
+          }
+        },
+        "recovery": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": [
+            "connect_result",
+            "t5_http_status",
+            "a3_http_status",
+            "crash_dir_bound",
+            "crash_dir_session_generation"
+          ],
+          "properties": {
+            "connect_result": {"$ref": "#/$defs/code"},
+            "t5_http_status": {"$ref": "#/$defs/http_status_or_null"},
+            "a3_http_status": {"$ref": "#/$defs/http_status_or_null"},
+            "crash_dir_bound": {"type": "boolean"},
+            "crash_dir_session_generation": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "slots": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/slot"}},
+    "scan": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["stage", "local", "evidence"],
+      "properties": {
+        "stage": {"enum": ["recheck", "final"]},
+        "local": {"$ref": "#/$defs/scan_report"},
+        "evidence": {"$ref": "#/$defs/scan_report"}
+      }
+    },
+    "reconcile": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["match", "ledger", "caller_log", "refused_ledger", "refused_caller_log"],
+      "properties": {
+        "match": {"type": "boolean"},
+        "ledger": {"$ref": "#/$defs/adopted_counts"},
+        "caller_log": {"$ref": "#/$defs/adopted_counts"},
+        "refused_ledger": {"type": "integer", "minimum": 0},
+        "refused_caller_log": {"type": "integer", "minimum": 0}
+      }
+    },
+    "regression": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "name", "result", "exit_code", "detail"],
+        "properties": {
+          "stage": {"enum": ["preflight", "recheck", "final"]},
+          "name": {"type": "string", "pattern": "^[a-z0-9_]{1,40}$"},
+          "result": {"enum": ["PASS", "FAIL", "SKIPPED"]},
+          "exit_code": {"type": ["integer", "null"]},
+          "detail": {"$ref": "#/$defs/text_or_null"}
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "result", "at", "detail"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z0-9_.-]{1,80}$"},
+          "result": {"enum": ["PASS", "FAIL"]},
+          "at": {"$ref": "#/$defs/timestamp"},
+          "detail": {"$ref": "#/$defs/text_or_null"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+    },
+    "timestamp_or_null": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+    },
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha_or_null": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fingerprint_or_null": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "generation_or_null": {"type": ["integer", "null"], "minimum": 1},
+    "http_status_or_null": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+    "latency_or_null": {"type": ["number", "null"], "minimum": 0},
+    "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.]{0,79}$"},
+    "code_or_null": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_.]{0,79}$"},
+    "text_or_null": {
+      "type": ["string", "null"],
+      "maxLength": 300,
+      "pattern": "^[A-Za-z0-9 _.,:;=/()<>#%+-]*$"
+    },
+    "data_dir": {"enum": ["baseline", "crash"]},
+    "state": {
+      "enum": [
+        "INITIALIZED",
+        "AWAITING_REAL_PROVIDER_APPROVAL",
+        "RUNNING",
+        "STOPPED_STEP_FAILED",
+        "STOPPED_INTERRUPTED",
+        "COMPLETED",
+        "BUDGET_EXHAUSTED",
+        "STOPPED_FOR_CONTRACT_REVIEW",
+        "STOPPED_OPERATOR_DECLINED",
+        "FAILED"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "BASELINE_CONNECT",
+        "BASELINE_BIND",
+        "BASELINE_RESTART",
+        "CRASH_T4A",
+        "CRASH_T4B",
+        "CRASH_RECOVERY"
+      ]
+    },
+    "phase_or_null": {
+      "enum": [
+        "BASELINE_CONNECT",
+        "BASELINE_BIND",
+        "BASELINE_RESTART",
+        "CRASH_T4A",
+        "CRASH_T4B",
+        "CRASH_RECOVERY",
+        null
+      ]
+    },
+    "label": {"enum": ["T1", "A1", "A1b", "A2", "T4a", "T4b", "T5", "A3"]},
+    "endpoint_any": {
+      "enum": [
+        "SMARTSTORE_AUTH_TOKEN",
+        "SMARTSTORE_SELLER_ACCOUNT",
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
+        "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+        "SMARTSTORE_CATEGORY_LIST",
+        "SMARTSTORE_CATEGORY_READ",
+        "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
+        "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
+        "SMARTSTORE_STANDARD_OPTIONS",
+        "SMARTSTORE_NOTICE_TYPES",
+        "UNRECOGNIZED"
+      ]
+    },
+    "adopted_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"],
+      "properties": {
+        "SMARTSTORE_AUTH_TOKEN": {"type": "integer", "minimum": 0},
+        "SMARTSTORE_SELLER_ACCOUNT": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scan_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files_scanned", "hits", "total_hits"],
+      "properties": {
+        "files_scanned": {"type": "integer", "minimum": 0},
+        "total_hits": {"type": "integer", "minimum": 0},
+        "hits": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z0-9_]{1,40}$"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["raw", "url", "json", "base64", "html"],
+            "properties": {
+              "raw": {"type": "integer", "minimum": 0},
+              "url": {"type": "integer", "minimum": 0},
+              "json": {"type": "integer", "minimum": 0},
+              "base64": {"type": "integer", "minimum": 0},
+              "html": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "marker": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "marker",
+        "campaign_id",
+        "phase",
+        "crash_attempt",
+        "label",
+        "reservation_seq",
+        "pid",
+        "at",
+        "token_type",
+        "expires_in",
+        "credential_generation",
+        "candidate_scan"
+      ],
+      "properties": {
+        "marker": {"const": "CRASH_BOUNDARY_REACHED"},
+        "campaign_id": {"type": "string", "pattern": "^m2-[a-z0-9][a-z0-9-]{2,40}$"},
+        "phase": {"enum": ["CRASH_T4A", "CRASH_T4B"]},
+        "crash_attempt": {"enum": [1, 2]},
+        "label": {"enum": ["T4a", "T4b"]},
+        "reservation_seq": {"type": "integer", "minimum": 1},
+        "pid": {"type": "integer", "minimum": 1},
+        "at": {"$ref": "#/$defs/timestamp"},
+        "token_type": {"type": "string", "pattern": "^[A-Za-z]{1,20}$"},
+        "expires_in": {"type": "integer", "minimum": 1},
+        "credential_generation": {"type": "integer", "minimum": 1},
+        "candidate_scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files_scanned", "total_hits"],
+          "properties": {
+            "files_scanned": {"type": "integer", "minimum": 0},
+            "total_hits": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "evidence_kind",
+        "status",
+        "required_for_m2_acceptance",
+        "observed_at",
+        "application_fingerprint",
+        "credential_generation",
+        "session_generation",
+        "endpoint_ids",
+        "request_count",
+        "evidence_ref",
+        "result_summary",
+        "contract_impact"
+      ],
+      "properties": {
+        "evidence_id": {
+          "enum": [
+            "SMARTSTORE-R0-TOKEN",
+            "SMARTSTORE-R0-SELLER-ACCOUNT",
+            "SMARTSTORE-R0-FIRST-TOKEN-CRASH",
+            "SMARTSTORE-A0-PERMISSION",
+            "SMARTSTORE-R0-TOKEN-REISSUE-WINDOW",
+            "SMARTSTORE-R0-APP-REAUTH"
+          ]
+        },
+        "evidence_kind": {"enum": ["PROVIDER_MEASURED", "OPERATOR_ATTESTED"]},
+        "status": {
+          "enum": [
+            "PASS",
+            "MEASURED_CONTRACT_REVIEW_REQUIRED",
+            "DEFERRED_LONG_HORIZON",
+            "BLOCKED_BY_TIME",
+            "FAIL"
+          ]
+        },
+        "required_for_m2_acceptance": {"type": "boolean"},
+        "observed_at": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["started_at", "finished_at"],
+          "properties": {
+            "started_at": {"$ref": "#/$defs/timestamp_or_null"},
+            "finished_at": {"$ref": "#/$defs/timestamp_or_null"}
+          }
+        },
+        "application_fingerprint": {"$ref": "#/$defs/fingerprint_or_null"},
+        "credential_generation": {"$ref": "#/$defs/generation_or_null"},
+        "session_generation": {"$ref": "#/$defs/generation_or_null"},
+        "endpoint_ids": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {"enum": ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"]}
+        },
+        "request_count": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "SMARTSTORE_AUTH_TOKEN": {"type": "integer", "minimum": 0},
+            "SMARTSTORE_SELLER_ACCOUNT": {"type": "integer", "minimum": 0}
+          }
+        },
+        "evidence_ref": {"type": "string", "pattern": "^[A-Za-z0-9_./#:(),-]{1,120}$"},
+        "result_summary": {
+          "type": "string",
+          "maxLength": 300,
+          "pattern": "^[A-Za-z0-9 _.,:;=/()<>#%+-]+$"
+        },
+        "contract_impact": {"type": "string", "pattern": "^(NONE|REVIEW: [A-Za-z0-9 _.,:;()/-]{1,160})$"}
+      }
+    }
+  }
+}

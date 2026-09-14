@@ -62,7 +62,8 @@ known-first-party = ["app", "integrations", "tests"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["app", "integrations"]
+# The M2 acceptance harness (Issue #46 §2) is acceptance tooling, type-checked like production.
+packages = ["app", "integrations", "scripts.m2harness"]
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
