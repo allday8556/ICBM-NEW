@@ -1,6 +1,6 @@
 # M2 SmartStore CONNECT — acceptance evidence record (closeout)
 
-Status: **PROPOSED**. This record becomes final only after the independent cross-audit, the architect's full-diff/CI review and the user's explicit approval of the closeout merge (Issue #46 §5). It is filled in from `M2-EVIDENCE-TEMPLATE.md`. Every value comes from the committed evidence files below, and those files are never edited by hand.
+Status: **ACCEPTED**. This is the M2 closeout record (Issue #46 §5). It was accepted through the independent cross-audit, the architect's full-diff/CI review and the user's explicit approval of the closeout merge (PR #51). It is filled in from `M2-EVIDENCE-TEMPLATE.md`. Every value comes from the committed evidence files below, and those files are never edited by hand.
 
 | File | What it is |
 | --- | --- |
@@ -12,12 +12,12 @@ The absolute path of the campaign directory, raw account identifiers, bearer or 
 ## Provenance (M2.md §7)
 
 ```text
-Acceptance evidence commit:   the merge commit of this closeout PR (a commit cannot name itself)
+Acceptance evidence commit:   the merge commit of closeout PR #51 (a commit cannot name itself)
 Runtime code last changed at: 494ac4eac098b26bf3581919e3587fe760311cb2 (product runtime: app/, integrations/)
 Evidence produced at:         011e6fdcf2398e7ddae2db2f2e1a7a660a53789f (approved SHA = HEAD; tree clean)
 494ac4e..011e6fd:             docs (#47), acceptance harness with its tests and docs (#49, #50), mypy config;
                               no app/ or integrations/ change
-011e6fd..closeout:            docs/evidence only (this PR)
+011e6fd..closeout:            docs/evidence only (closeout PR #51)
 Campaign ID:                  m2-campaign-02 (REAL)
 Observed range:               2026-09-14T22:22:39.876Z – 22:31:30.741Z
 ```
@@ -37,7 +37,7 @@ Observed range:               2026-09-14T22:22:39.876Z – 22:31:30.741Z
 - **Artifact scan (counts only), 0 hits:**
   * local artifacts: 202 files, scanned for the client secret, the client id and both committed bearers;
   * evidence: the same values plus both observed account identifiers;
-  * the committed form was scanned again in this PR, also 0 hits.
+  * the committed form was scanned again in closeout PR #51, also 0 hits.
 - **Ledger vs caller log:** an exact match: token 3/3, seller 4/4, refusals 0/0.
 - **Regression floor at the recheck and at the final stage:** pytest, ruff check, ruff format, mypy and M0 acceptance `--visual` all passed. M0 scored 24/24 both times.
 - **Evidence schema:** valid. It was re-validated on the committed file.
