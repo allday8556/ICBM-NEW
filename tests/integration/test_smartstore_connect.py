@@ -273,6 +273,33 @@ def test_a_contract_change_during_the_bind_refuses_it_and_binds_nothing(
     assert (view.auth, view.auth_verified_at) == (AuthStatus.NOT_BOUND, None)
 
 
+def test_the_bind_gate_holds_while_an_authentication_review_is_open(
+    p: Container, provider: Provider, config: AppConfig
+) -> None:
+    # An open REVIEW_REQUIRED/AUTHENTICATION overlay keeps auth from READY, so the READY gate of
+    # observe_auth is never reached. The binding is still new trust: when the contract goes
+    # STALE mid-bind, the in-transaction gate refuses and nothing is bound.
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+    provider.account_response = lambda: httpx.Response(404, json={"code": "STORE_NOT_FOUND"})
+    with pytest.raises(SmartStoreCallError):
+        p.smartstore.connect()
+    assert _overlays(p) == REVIEW
+
+    def stale_during_the_read() -> httpx.Response:
+        p.marketplace_capability.record_contract_freshness(
+            KEY, ContractFreshness.STALE, actor=ACTOR
+        )
+        return httpx.Response(200, json={"accountUid": UID_A, "accountId": f"id-{UID_A}"})
+
+    provider.account_response = stale_during_the_read
+    with pytest.raises(PolicyBlockedError) as caught:
+        p.smartstore.bind_account(UID_A, actor=ACTOR)
+    assert caught.value.code == "MARKETPLACE_CONTRACT_NOT_CURRENT"
+    assert _connection(config)[2:] == UNBOUND
+    assert _bound_audits(config) == 0
+
+
 @pytest.mark.parametrize("crash", ["binding-audit", "capability-save"])
 def test_a_failure_inside_the_commit_boundary_leaves_nothing_bound(
     p: Container,
