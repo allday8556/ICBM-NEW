@@ -36,6 +36,10 @@ const REASON = {
 // §14.9
 const SCOPE = { AUTHENTICATION: '인증', PRODUCT_REGISTRATION: '상품 등록' };
 
+export function scopeLabel(scope) {
+  return SCOPE[scope] ?? scope;
+}
+
 // §14.10: the enum value is shown; the gloss is presentation only.
 const ERROR_GLOSS = {
   TRANSIENT: '일시적 오류',

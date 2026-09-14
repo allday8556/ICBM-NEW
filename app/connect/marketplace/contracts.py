@@ -16,10 +16,12 @@ from app.connect.marketplace.capability import (
     EvidenceStrength,
     PauseReason,
     RemoteOutcome,
+    Resolution,
     WorkflowScope,
     WorkflowState,
     WriteScopeStatus,
     WriteStatus,
+    resolution_for,
 )
 from app.core.errors import ErrorClass
 
@@ -38,6 +40,9 @@ class WorkflowOverlayView(BaseModel):
     workflow_state: WorkflowState
     workflow_scope: WorkflowScope
     reason_code: PauseReason | None
+    # The one operator resolution the domain accepts for this overlay (M2 PR-E), or None when no
+    # operator action lifts it (SCOPE_INSUFFICIENT: only fresh permission evidence does).
+    resolution: Resolution | None
 
 
 class MarketplaceCapabilityView(BaseModel):
@@ -72,7 +77,10 @@ class MarketplaceCapabilityView(BaseModel):
             contract_freshness_recorded_at=state.freshness_recorded_at,
             workflow=[
                 WorkflowOverlayView(
-                    workflow_state=o.state, workflow_scope=o.scope, reason_code=o.reason_code
+                    workflow_state=o.state,
+                    workflow_scope=o.scope,
+                    reason_code=o.reason_code,
+                    resolution=resolution_for(o),
                 )
                 for o in state.overlays
             ],

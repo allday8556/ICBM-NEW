@@ -689,7 +689,10 @@ def observe_failure(
     )
 
 
-def _resolution_for(overlay: WorkflowOverlay) -> Resolution | None:
+def resolution_for(overlay: WorkflowOverlay) -> Resolution | None:
+    """The one operator resolution that lifts ``overlay``, or None when no operator action does
+    (SCOPE_INSUFFICIENT lifts only with fresh permission evidence). ``resolve`` enforces it, and
+    the read API exposes it so the operator UI offers nothing else (M2 PR-E)."""
     if overlay.state is WorkflowState.REVIEW_REQUIRED:
         return Resolution.REVIEW_RESOLVED
     if overlay.reason_code is PauseReason.APPLICATION_REAUTH_REQUIRED:
@@ -709,7 +712,7 @@ def resolve(
     overlay = state.overlay(scope)
     if overlay is None:
         raise CapabilityInvariantError(f"no {scope} overlay to resolve")
-    required = _resolution_for(overlay)
+    required = resolution_for(overlay)
     if required is None:
         raise CapabilityInvariantError(
             "SCOPE_INSUFFICIENT lifts only with fresh permission evidence"
