@@ -1,7 +1,11 @@
-"""Canonical error taxonomy (ARCHITECTURE.md §8, ARCHITECT_REVIEW B8).
+"""Canonical error taxonomy: ARCHITECTURE.md §8, aligned by ADR-0008 (ARCHITECT_REVIEW B8).
 
-The core error class is canonical; platform-specific codes remain adapter details carried
-in ``code``. Only TRANSIENT and RATE_LIMITED are ever retried automatically (ADR-0004).
+The core error class is a cause; platform-specific codes remain adapter details carried in
+``code``. Only TRANSIENT and RATE_LIMITED are ever retried automatically (ADR-0004).
+
+The taxonomy only grows. Persisted rows and the append-only audit log hold these values, so no
+member is ever removed or renamed (ADR-0008 D). ``RATE_LIMITED`` and ``POLICY_BLOCKED`` are the
+persisted spellings of Canonical v3.1's ``RATE_LIMIT`` and ``POLICY`` (ADR-0008 A).
 """
 
 from enum import StrEnum
@@ -14,7 +18,14 @@ class ErrorClass(StrEnum):
     AUTH = "AUTH"
     VALIDATION = "VALIDATION"
     POLICY_BLOCKED = "POLICY_BLOCKED"
+    # An ICBM-local addressed resource only; never a provider/wire classification (ADR-0008 C).
     NOT_FOUND = "NOT_FOUND"
+    # Added by ADR-0008 (B). None is retried automatically.
+    CONFLICT = "CONFLICT"
+    DUPLICATE = "DUPLICATE"
+    # A cause; it is not workflow_state=REVIEW_REQUIRED.
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    FATAL = "FATAL"
     UNKNOWN = "UNKNOWN"
 
 
@@ -27,6 +38,10 @@ HTTP_STATUS: dict[ErrorClass, int] = {
     ErrorClass.VALIDATION: 422,
     ErrorClass.POLICY_BLOCKED: 403,
     ErrorClass.NOT_FOUND: 404,
+    ErrorClass.CONFLICT: 409,
+    ErrorClass.DUPLICATE: 409,
+    ErrorClass.REVIEW_REQUIRED: 409,
+    ErrorClass.FATAL: 500,
     ErrorClass.UNKNOWN: 500,
 }
 

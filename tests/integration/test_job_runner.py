@@ -72,7 +72,15 @@ def test_successful_job(container: Container) -> None:
 
 @pytest.mark.parametrize(
     ("job_type", "error_class"),
-    [("test.reject", "VALIDATION"), ("test.crash", "UNKNOWN")],
+    [
+        ("test.reject", "VALIDATION"),
+        ("test.crash", "UNKNOWN"),
+        # ADR-0008: the added classes are never retried (ADR-0005 DEAD on the first failure).
+        ("test.fail.conflict", "CONFLICT"),
+        ("test.fail.duplicate", "DUPLICATE"),
+        ("test.fail.review_required", "REVIEW_REQUIRED"),
+        ("test.fail.fatal", "FATAL"),
+    ],
 )
 def test_non_retryable_failures_dead_letter_on_first_attempt(
     container: Container, job_type: str, error_class: str

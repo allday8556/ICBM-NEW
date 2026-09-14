@@ -24,6 +24,11 @@ def test_retry_stops_at_the_attempt_cap() -> None:
         ErrorClass.POLICY_BLOCKED,
         ErrorClass.AUTH,
         ErrorClass.NOT_FOUND,
+        # ADR-0008: the four added classes go to DEAD on their first failure (ADR-0005).
+        ErrorClass.CONFLICT,
+        ErrorClass.DUPLICATE,
+        ErrorClass.REVIEW_REQUIRED,
+        ErrorClass.FATAL,
     ],
 )
 def test_non_retryable_classes_never_retry(error_class: ErrorClass) -> None:
