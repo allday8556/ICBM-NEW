@@ -407,26 +407,53 @@ class Operator(Protocol):
     def confirm_crash_retry(self, reasons: Sequence[str]) -> bool: ...
 
 
+DECLINE = "DECLINE"
+
+
 class TerminalOperator:
     """The local operator at an interactive terminal (REAL runs). The observed account is shown
-    on this screen only and is never written to a file by the harness."""
+    on this screen only and is never written to a file by the harness.
+
+    Each confirmation has exactly two answers (Issue #46 comment 5671016749): the shown phrase
+    continues, and ``DECLINE`` stops the campaign for good. Anything else is a typing slip. The
+    prompt is asked again locally, with no ledger transition and no provider request. Ctrl+C still
+    interrupts the run resumably."""
+
+    def __init__(
+        self, read: Callable[[str], str] = input, write: Callable[[str], None] = print
+    ) -> None:
+        self._read = read
+        self._write = write
 
     @staticmethod
     def interactive() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
 
+    def _answer(self, expected: str, action: str) -> bool:
+        prompt = f"Type '{expected}' to {action}, or '{DECLINE}' to stop the campaign: "
+        while True:
+            typed = self._read(prompt).strip()
+            if typed == expected:
+                return True
+            if typed == DECLINE:
+                return False
+            self._write(
+                f"Not recognized; nothing was sent. Type the whole line '{expected}'"
+                f" or '{DECLINE}'."
+            )
+
     def confirm_binding(self, account_uid: str, account_id: str | None) -> bool:
-        print("\nA1 observed this SmartStore seller account (shown here only, never recorded):")
-        print(f"  accountUid: {account_uid}")
-        print(f"  accountId:  {account_id or '(none)'}")
-        expected = f"BIND {account_uid[-4:]}"
-        typed = input(f"Type '{expected}' to bind exactly this account; anything else stops: ")
-        return typed.strip() == expected
+        self._write(
+            "\nA1 observed this SmartStore seller account (shown here only, never recorded):"
+        )
+        self._write(f"  accountUid: {account_uid}")
+        self._write(f"  accountId:  {account_id or '(none)'}")
+        return self._answer(f"BIND {account_uid[-4:]}", "bind exactly this account")
 
     def confirm_crash_retry(self, reasons: Sequence[str]) -> bool:
-        print(f"\nT4a did not exercise the crash boundary ({', '.join(reasons)}).")
-        print("T4b is the last crash-boundary attempt; there is no T4c.")
-        return input("Type 'SPEND T4B' to spend it; anything else stops: ").strip() == "SPEND T4B"
+        self._write(f"\nT4a did not exercise the crash boundary ({', '.join(reasons)}).")
+        self._write("T4b is the last crash-boundary attempt; there is no T4c.")
+        return self._answer("SPEND T4B", "spend it")
 
 
 @dataclass
