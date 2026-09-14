@@ -191,6 +191,9 @@ class Typist:
         self.snapshots: list[tuple[dict[str, int], State]] = []
 
     def read(self, prompt: str) -> str:
+        # A prompt that never accepts an answer must fail the test, not hang it.
+        if len(self.snapshots) >= 20:
+            raise AssertionError("the operator was asked more than 20 times")
         ledger = Ledger.open(self.paths.ledger)
         self.snapshots.append((ledger.counts(), ledger.campaign().state))
         if self.slips:
