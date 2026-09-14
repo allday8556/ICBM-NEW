@@ -8,6 +8,7 @@ from app.audit.service import AuditLog
 from app.collect.service import CollectService
 from app.config import AppConfig
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.marketplace.service import MarketplaceCapabilityService
 from app.connect.service import ConnectService
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
 from app.core.clock import Clock, SystemClock
@@ -52,6 +53,7 @@ class Container:
     readiness: ReadinessService
     screens: ScreenService
     connect: ConnectService
+    marketplace_capability: MarketplaceCapabilityService
     ownership: DataDirLease
 
 
@@ -113,6 +115,8 @@ def build_container(
         marketplaces=MARKETPLACE_IDENTITIES,
     )
     registry.register(connect.job_definition())
+    # Marketplace capability truth: typed evidence in, no provider access (M2 PR-B).
+    marketplace_capability = MarketplaceCapabilityService(db=db, clock=clock, audit=audit)
     execution_mode = ExecutionModeService(config.execution_mode, audit)
     diagnostics = DiagnosticsService(
         enabled=config.diagnostics_enabled, db=db, jobs=jobs, audit=audit
@@ -157,5 +161,6 @@ def build_container(
         readiness=readiness,
         screens=screens,
         connect=connect,
+        marketplace_capability=marketplace_capability,
         ownership=ownership,
     )

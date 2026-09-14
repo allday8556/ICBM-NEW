@@ -434,10 +434,63 @@ def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
     assert checked >= 5
 
 
-def test_m1_adds_no_product_facts_or_product_schema() -> None:
+def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
+    # M2 PR-B is provider-call zero: the capability owner imports no client, transport, egress
+    # grant, integration or supplier session — only domain, persistence and audit building blocks.
+    allowed = (
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "datetime",
+        "enum",
+        "logging",
+        "typing",
+        "pydantic",
+        "sqlalchemy",
+        "app.connect.marketplace",
+        "app.core.errors",
+        "app.core.clock",
+        "app.core.safe_payload",
+        "app.audit",
+        "app.db.base",
+        "app.db.types",
+        "app.db.database",
+    )
+    modules = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith("app/connect/marketplace/")
+    }
+    assert "app/connect/marketplace/service.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert any(name == a or name.startswith(f"{a}.") for a in allowed), f"{path}: {name}"
+
+
+def test_s17_19_only_the_operator_entry_point_records_contract_freshness() -> None:
+    # CAPABILITY_MAPPING F8: contract freshness is contract-governance truth, not provider runtime
+    # evidence. PR-B's local operator entry point is its only production recorder; an adapter
+    # (PR-A) may consume the recorded value but must never set, infer, seed or fabricate CURRENT.
+    modules = _production_modules()
+    assert {p for p, t in modules.items() if _calls(t, "record_contract_freshness")} == {
+        "app/api/routes/connect.py"
+    }
+    assert {p for p, t in modules.items() if _calls(t, "record_freshness")} == {
+        "app/connect/marketplace/service.py"
+    }
+
+
+def test_connect_adds_no_product_facts_or_product_schema() -> None:
     from app.db.metadata import metadata
 
-    assert set(metadata.tables) == {"jobs", "job_attempts", "audit_events", "supplier_connections"}
+    assert set(metadata.tables) == {
+        "jobs",
+        "job_attempts",
+        "audit_events",
+        "supplier_connections",
+        "marketplace_capabilities",
+        "marketplace_workflow_overlays",
+    }
     offenders = [
         path
         for path in _production_modules()

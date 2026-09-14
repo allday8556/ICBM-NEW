@@ -26,6 +26,8 @@ class AuditEventType(StrEnum):
     SUPPLIER_AUTO_CONNECT_CHANGED = "SUPPLIER_AUTO_CONNECT_CHANGED"
     # READY demoted because its persisted session is missing or unreadable (self-healing).
     SUPPLIER_CONNECTION_DEMOTED = "SUPPLIER_CONNECTION_DEMOTED"
+    # Marketplace capability truth changed (M2 PR-B): axes before/after, enum values only.
+    MARKETPLACE_CAPABILITY_CHANGED = "MARKETPLACE_CAPABILITY_CHANGED"
 
 
 class AuditOutcome(StrEnum):

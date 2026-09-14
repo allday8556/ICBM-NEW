@@ -69,6 +69,9 @@ EXPECTED_TABLES = {
     "job_attempts",
     "audit_events",
     "supplier_connections",
+    # M2 PR-B: marketplace capability truth (still no product table)
+    "marketplace_capabilities",
+    "marketplace_workflow_overlays",
 }
 # Cookie values shorter than this are flags, too short to identify a session; scanning them
 # would only produce false positives.
