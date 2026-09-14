@@ -1,7 +1,9 @@
 // 등록 권한 확인 (SMARTSTORE-A0-PERMISSION, M2 PR-C). The operator records which API groups
 // Commerce API Center shows. The server supplies the required groups, the application binding,
-// the mapping revision and the time; this form sends only the observed groups. It reports whether
-// the stored evidence counted — the strength glyphs of the three-layer view belong to PR-D.
+// the mapping revision, the time and the age bound; this form sends only the observed groups. It
+// reports whether the stored evidence counted, and says so when it expired rather than letting a
+// lifted block look like a grant (PERMISSIONS_SCOPES §8.2). The strength glyphs of the
+// three-layer view belong to PR-D.
 
 import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
@@ -23,7 +25,6 @@ const INVALIDATION = {
   MAPPING_REVISION_UNAVAILABLE: '매핑 기준 없음',
   MAPPING_REVISION_CHANGED: '매핑 기준 변경',
   EXPIRED: '확인 유효기간 경과',
-  NO_AGE_POLICY: '유효기간 정책 미설정',
   MALFORMED: '기록 손상',
 };
 
@@ -42,9 +43,21 @@ function promotionChip(view) {
   if (view.promotion === 'BLOCKED_BY_CONTRACT_FRESHNESS') {
     return [`저장됨 · 반영 대기 (${CONTRACT[view.contract_freshness] ?? view.contract_freshness})`, 'warn'];
   }
-  if (view.promotion === 'NOT_CURRENT') return ['저장된 확인이 현재 기준과 달라 권한 미확인', 'warn'];
+  if (view.promotion === 'NOT_CURRENT') {
+    // An expired confirmation lifts a block without granting anything (PERMISSIONS_SCOPES §8.2).
+    return view.evaluation?.invalidations?.includes('EXPIRED')
+      ? ['저장된 권한 확인이 만료되어 현재 권한 상태를 확인할 수 없음', 'warn']
+      : ['저장된 확인이 현재 기준과 달라 권한 미확인', 'warn'];
+  }
   if (view.promotion === 'PENDING') return ['반영 확인 중', 'info'];
   return ['기록 없음', null];
+}
+
+function validity(view) {
+  const recorded = view.attestation?.freshness_policy_max_age_days;
+  return recorded && recorded !== view.max_age_days
+    ? `${view.max_age_days}일 (기록 당시 ${recorded}일)`
+    : `${view.max_age_days}일`;
 }
 
 function kv(label, value) {
@@ -89,7 +102,7 @@ function render(root, key, view) {
     h('div', { class: 'kv' }, h('span', {}, '관찰된 API 그룹'), h('span', {}, record ? '' : '확인한 그룹을 선택하세요')),
     ...checks.map((check) => check.row),
     kv('확인 일시', record ? dotDateTime(record.observed_at) : '저장 시 자동 기록'),
-    kv('확인 유효기간', view.max_age_days ? `${view.max_age_days}일` : '정책 미설정'),
+    kv('확인 유효기간', validity(view)),
     h('div', { class: 'kv' }, h('span', {}, '현재 상태'), h('span', { class: tone ? `chip ${tone}` : 'chip' }, chipLabel)),
     invalid.length ? kv('미반영 사유', invalid.map((reason) => INVALIDATION[reason] ?? reason).join(', ')) : null,
     view.recording_available ? null : h('div', { class: 'note' }, REFUSAL[view.recording_refusal] ?? view.recording_refusal),

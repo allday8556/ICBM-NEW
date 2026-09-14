@@ -1,14 +1,16 @@
 """SMARTSTORE-A0-PERMISSION: operator-attested permission evidence (M2 PR-C).
 
-Contract: PERMISSIONS_SCOPES.md §5, §7, §8, §14 and §18; CAPABILITY_MAPPING.md §5 (S1) and §17
-#18; M2 instructions §6. An attestation is OPERATOR_ATTESTED_EVIDENCE (SOURCES.md A0): it proves
-only that ICBM received and handled what the operator observed in Commerce API Center. It is
-never provider runtime truth, never R0 and never MACHINE_VERIFIED, and it cannot make product
-write READY.
+Contract: PERMISSIONS_SCOPES.md §5, §7, §8 (§8.1 the 30-day bound, §8.2 expiry), §14 and §18;
+CAPABILITY_MAPPING.md §5 (S1, S6) and §17 #18, #21, #22; M2 instructions §6. An attestation is
+OPERATOR_ATTESTED_EVIDENCE (SOURCES.md A0): it proves only that ICBM received and handled what the
+operator observed in Commerce API Center. It is never provider runtime truth, never R0 and never
+MACHINE_VERIFIED, and it cannot make product write READY.
 
-This module is pure: no I/O and no clock. Current use is always re-derived from the stored
-evidence against what is current *now*; any mismatch fails closed to write_scope UNKNOWN and never
-fabricates MISSING (§6.5).
+This module is pure: no I/O and no clock. ``now`` is always passed in by the service, which reads
+the injected Clock. Current use is re-derived from the stored evidence against what is current
+*now*; any mismatch fails closed to write_scope UNKNOWN and never fabricates MISSING (§6.5). The
+record-time ``attested_status`` and the age bound in effect at recording are history; current
+freshness is derived here and never stored (Issue #32).
 """
 
 import hashlib
@@ -52,9 +54,18 @@ API_GROUP_LABELS: dict[ApiGroup, str] = {
 # only when M5 adopts the product endpoints.
 PRODUCT_REGISTRATION_REQUIRED_GROUPS: frozenset[ApiGroup] = frozenset({ApiGroup.PRODUCT})
 
+# PERMISSIONS_SCOPES §8.1 (Issue #32): the canonical maximum age of operator-attested evidence. An
+# operational override may only tighten it (1..A0_MAX_AGE_DAYS); nothing leaves evidence unbounded.
+A0_MAX_AGE_DAYS = 30
+
 SMARTSTORE_PROVIDER = "SMARTSTORE"
 SELF_AUTH_MODE = "SELF"
 _MIN_FINGERPRINT_KEY_BYTES = 32
+
+
+def valid_max_age_days(days: object) -> bool:
+    """A bound the contract allows: a whole number of days in 1..A0_MAX_AGE_DAYS."""
+    return isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= A0_MAX_AGE_DAYS
 
 
 class EvidenceSource(StrEnum):
@@ -62,12 +73,10 @@ class EvidenceSource(StrEnum):
 
 
 class EvidenceFreshness(StrEnum):
-    """§8: whether the observation is still inside the configured evidence-age policy."""
+    """§8.1: whether the observation is still inside its applicable age bound."""
 
     FRESH = "FRESH"
     EXPIRED = "EXPIRED"
-    # No bounded age policy is configured, so the evidence can never be current (§8, Q5).
-    NO_AGE_POLICY = "NO_AGE_POLICY"
 
 
 class Invalidation(StrEnum):
@@ -79,7 +88,6 @@ class Invalidation(StrEnum):
     MAPPING_REVISION_UNAVAILABLE = "MAPPING_REVISION_UNAVAILABLE"
     MAPPING_REVISION_CHANGED = "MAPPING_REVISION_CHANGED"
     EXPIRED = "EXPIRED"
-    NO_AGE_POLICY = "NO_AGE_POLICY"
     MALFORMED = "MALFORMED"
 
 
@@ -140,9 +148,13 @@ class Attestation:
     required_groups: frozenset[ApiGroup]
     observed_groups: frozenset[ApiGroup]
     endpoint_mapping_revision: str
+    # The age bound in effect when the evidence was recorded (§8.1), kept so audits can explain it.
+    max_age_days: int
     evidence_source: EvidenceSource = EvidenceSource.OPERATOR_ATTESTED_PROVIDER_ADMIN
     # §17 #18: the only strength an attestation can ever carry; A0 is never promoted.
     evidence_strength: EvidenceStrength = EvidenceStrength.OPERATOR_ATTESTED
+    # The attested_status as persisted (§5, §17 #21); when given it must agree with the groups.
+    recorded_status: WriteScopeStatus | None = None
 
     def __post_init__(self) -> None:
         _require(isinstance(self.evidence_source, EvidenceSource), "unknown evidence source")
@@ -155,6 +167,10 @@ class Attestation:
         _require(
             bool(self.endpoint_mapping_revision), "an attestation is bound to a mapping revision"
         )
+        _require(
+            valid_max_age_days(self.max_age_days),
+            f"the recorded age bound must be 1..{A0_MAX_AGE_DAYS} days (§8.1)",
+        )
         object.__setattr__(
             self, "required_groups", _groups(self.required_groups, "required_groups")
         )
@@ -162,6 +178,10 @@ class Attestation:
             self, "observed_groups", _groups(self.observed_groups, "observed_groups")
         )
         _require(bool(self.required_groups), "the required group set is never empty")
+        _require(
+            self.recorded_status in (None, self.attested_status),
+            "the stored attested_status contradicts the stored groups",
+        )
 
     @property
     def attested_status(self) -> WriteScopeStatus:
@@ -180,7 +200,14 @@ class AttestationContext:
     application_fingerprint: str | None
     required_groups: frozenset[ApiGroup]
     endpoint_mapping_revision: str | None
-    max_age: timedelta | None
+    # The configured age bound (§8.1): 30 days unless an operational override tightens it.
+    max_age_days: int
+
+    def __post_init__(self) -> None:
+        _require(
+            valid_max_age_days(self.max_age_days),
+            f"the configured age bound must be 1..{A0_MAX_AGE_DAYS} days (§8.1)",
+        )
 
 
 def refusal(context: AttestationContext) -> Invalidation | None:
@@ -194,9 +221,9 @@ def refusal(context: AttestationContext) -> Invalidation | None:
 
 
 def attest(observed_groups: Iterable[object], context: AttestationContext) -> Attestation:
-    """Build a new attestation. ``observed_at``, the fingerprint, the required groups and the
-    mapping revision all come from the context; only the observed groups come from the operator.
-    """
+    """Build a new attestation. ``observed_at``, the fingerprint, the required groups, the mapping
+    revision and the age bound all come from the context; only the observed groups come from the
+    operator."""
     reason = refusal(context)
     if reason is not None or context.application_fingerprint is None:
         raise AttestationRefusedError(reason or Invalidation.APPLICATION_NOT_CONFIGURED)
@@ -208,13 +235,19 @@ def attest(observed_groups: Iterable[object], context: AttestationContext) -> At
         required_groups=context.required_groups,
         observed_groups=_groups(observed_groups, "observed_groups"),
         endpoint_mapping_revision=context.endpoint_mapping_revision,
+        max_age_days=context.max_age_days,
     )
 
 
-def freshness(observed_at: datetime, now: datetime, max_age: timedelta | None) -> EvidenceFreshness:
-    """§8: fresh only inside a bounded age policy; with no policy, never fresh."""
-    if max_age is None:
-        return EvidenceFreshness.NO_AGE_POLICY
+def applicable_max_age_days(attestation: Attestation, context: AttestationContext) -> int:
+    """§8.1: the stricter of the recorded and the configured bound. Tightening the policy applies
+    to existing evidence at once; loosening it never extends evidence beyond the bound it was
+    recorded under."""
+    return min(attestation.max_age_days, context.max_age_days)
+
+
+def freshness(observed_at: datetime, now: datetime, max_age: timedelta) -> EvidenceFreshness:
+    """§8.1 boundary: FRESH through exactly the bound, EXPIRED only after crossing it."""
     return EvidenceFreshness.FRESH if now - observed_at <= max_age else EvidenceFreshness.EXPIRED
 
 
@@ -226,6 +259,8 @@ class AttestationEvaluation:
     # None only when the stored evidence itself is malformed.
     freshness: EvidenceFreshness | None
     invalidations: frozenset[Invalidation]
+    # The bound the freshness was judged against (§8.1); None when the evidence is malformed.
+    max_age_days: int | None = None
 
     @property
     def current(self) -> bool:
@@ -238,7 +273,7 @@ class Promotion(StrEnum):
 
     NO_EVIDENCE = "NO_EVIDENCE"
     APPLIED = "APPLIED"
-    # Evidence is on record but invalidated, so write_scope is UNKNOWN.
+    # Evidence is on record but invalidated (expired, rebound, malformed…): write_scope is UNKNOWN.
     NOT_CURRENT = "NOT_CURRENT"
     # Evidence is stored and current, but promoting write_scope to READY is new trust and the
     # contract freshness is not CURRENT (F5): the evidence waits, write_scope stays as it was.
@@ -273,8 +308,8 @@ def promotion(
 
 
 def evaluate(attestation: Attestation, context: AttestationContext) -> AttestationEvaluation:
-    """Current use of stored evidence (§6.5). Any invalidation fails closed to UNKNOWN; the
-    evidence itself stays on record."""
+    """Current use of stored evidence (§6.5, §8.2). Any invalidation — expiry included, whether
+    the evidence said READY or MISSING — fails closed to UNKNOWN; the evidence stays on record."""
     invalid: set[Invalidation] = set()
     if context.application_fingerprint is None:
         invalid.add(Invalidation.APPLICATION_NOT_CONFIGURED)
@@ -290,14 +325,13 @@ def evaluate(attestation: Attestation, context: AttestationContext) -> Attestati
         invalid.add(Invalidation.MAPPING_REVISION_CHANGED)
     if attestation.observed_at > context.now:
         invalid.add(Invalidation.MALFORMED)  # recorded "later" than now: validity unknowable
-    state = freshness(attestation.observed_at, context.now, context.max_age)
+    bound = applicable_max_age_days(attestation, context)
+    state = freshness(attestation.observed_at, context.now, timedelta(days=bound))
     if state is EvidenceFreshness.EXPIRED:
         invalid.add(Invalidation.EXPIRED)
-    elif state is EvidenceFreshness.NO_AGE_POLICY:
-        invalid.add(Invalidation.NO_AGE_POLICY)
     scope = (
         PERMISSION_UNKNOWN
         if invalid
         else WriteScope(attestation.attested_status, EvidenceStrength.OPERATOR_ATTESTED)
     )
-    return AttestationEvaluation(scope, state, frozenset(invalid))
+    return AttestationEvaluation(scope, state, frozenset(invalid), bound)

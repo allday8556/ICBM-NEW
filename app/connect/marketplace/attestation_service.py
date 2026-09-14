@@ -1,9 +1,12 @@
 """SMARTSTORE-A0-PERMISSION handling (M2 PR-C).
 
 The local operator records which API groups Commerce API Center shows for the configured
-application. The attestation is stored append-only with its whole evidence envelope and audited;
-its current use is re-derived on every read against the current application fingerprint, required
-groups, mapping revision and age policy, and capability truth converges on the result.
+application. The attestation is stored append-only with its whole evidence envelope — including
+the record-time ``attested_status`` and the age bound in effect — and audited. Its current use is
+re-derived on every read against the current application fingerprint, required groups, mapping
+revision and age policy, with ``now`` from the injected Clock, and capability truth converges on
+the result (PERMISSIONS_SCOPES §8.1, §8.2; CAPABILITY_MAPPING S6, S7). Current freshness is never
+stored.
 
 Nothing here makes a provider call: the service holds no gateway, transport or egress grant, and
 the application identity and mapping revision arrive through seams that PR-A implements.
@@ -13,7 +16,6 @@ import base64
 import logging
 import os
 from collections.abc import Iterable, Sequence
-from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,12 +47,13 @@ from app.connect.marketplace.capability import (
     CapabilityInvariantError,
     EvidenceStrength,
     WriteScope,
+    WriteScopeStatus,
 )
 from app.connect.marketplace.contracts import WriteScopeView
 from app.connect.marketplace.models import MarketplacePermissionAttestation
 from app.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.connect.marketplace.service import CAPABILITY_MARKETPLACES, MarketplaceCapabilityService
-from app.connect.marketplace.sources import ApplicationIdentitySource
+from app.connect.marketplace.sources import ApplicationIdentitySource, PermissionEvidence
 from app.core.clock import Clock
 from app.core.errors import InputValidationError, NotFoundError, PolicyBlockedError
 from app.core.safe_payload import safe_payload
@@ -76,15 +79,18 @@ def _split(text: str) -> frozenset[ApiGroup]:
 
 
 def _attestation(row: Row) -> Attestation:
-    """Rebuild the envelope; a row that does not rebuild is MALFORMED evidence."""
+    """Rebuild the envelope; a row that does not rebuild — or whose stored attested_status
+    contradicts its stored groups — is MALFORMED evidence."""
     return Attestation(
         observed_at=row.observed_at,
         application_fingerprint=row.application_fingerprint,
         required_groups=_split(row.required_groups),
         observed_groups=_split(row.observed_groups),
         endpoint_mapping_revision=row.endpoint_mapping_revision,
+        max_age_days=row.freshness_policy_max_age_days,
         evidence_source=EvidenceSource(row.evidence_source),
         evidence_strength=EvidenceStrength(row.evidence_strength),
+        recorded_status=WriteScopeStatus(row.attested_status),
     )
 
 
@@ -107,7 +113,7 @@ class PermissionAttestationService:
         capability: MarketplaceCapabilityService,
         identity: ApplicationIdentitySource | None,
         revision: EndpointMappingRevisionProvider | None,
-        max_age: timedelta | None,
+        max_age_days: int,
         marketplace_keys: Sequence[str] = CAPABILITY_MARKETPLACES,
     ) -> None:
         self._db = db
@@ -117,7 +123,7 @@ class PermissionAttestationService:
         self._capability = capability
         self._identity = identity
         self._revision = revision
-        self._max_age = max_age
+        self._max_age_days = max_age_days
         self._keys = tuple(marketplace_keys)
 
     def _known(self, marketplace_key: str) -> None:
@@ -149,11 +155,11 @@ class PermissionAttestationService:
         )
         revision = self._revision.current_revision() if self._revision is not None else None
         return AttestationContext(
-            now=self._clock.now(),
+            now=self._clock.now(),  # the injected Clock, never the wall clock (§8.1)
             application_fingerprint=fingerprint,
             required_groups=PRODUCT_REGISTRATION_REQUIRED_GROUPS,
             endpoint_mapping_revision=revision or None,
-            max_age=self._max_age,
+            max_age_days=self._max_age_days,
         )
 
     @staticmethod
@@ -171,25 +177,28 @@ class PermissionAttestationService:
     ) -> tuple[Attestation | None, AttestationEvaluation]:
         try:
             record = _attestation(row)
-        except ValueError:  # includes CapabilityInvariantError and an unknown stored group
+        except ValueError:  # includes CapabilityInvariantError and an unknown stored value
             return None, MALFORMED_EVALUATION
         return record, evaluate(record, context)
 
     # ------------------------------------------------------------------ PermissionEvidenceSource
 
-    def current_permission(self, marketplace_key: str) -> WriteScope | None:
+    def current_permission(self, marketplace_key: str) -> PermissionEvidence | None:
         with self._db.read() as session:
             row = self._latest(session, marketplace_key)
         if row is None:
             return None
         _, evaluation = self._evaluate(row, self.context(marketplace_key))
-        return evaluation.write_scope
+        return PermissionEvidence(
+            write_scope=evaluation.write_scope,
+            invalidations=tuple(sorted(evaluation.invalidations)),
+        )
 
     # ------------------------------------------------------------------ read and record
 
     def attestation(self, marketplace_key: str) -> PermissionAttestationView:
         self._known(marketplace_key)
-        capability = self._capability.capability(marketplace_key)  # converges first
+        capability = self._capability.capability(marketplace_key)  # converges first (S7)
         context = self.context(marketplace_key)
         with self._db.read() as session:
             row = self._latest(session, marketplace_key)
@@ -205,7 +214,7 @@ class PermissionAttestationService:
             group_labels=dict(API_GROUP_LABELS),
             recording_available=blocked is None,
             recording_refusal=blocked,
-            max_age_days=self._max_age.days if self._max_age is not None else None,
+            max_age_days=self._max_age_days,
             attestation=(
                 AttestationRecordView(
                     attestation_seq=row.seq,
@@ -215,6 +224,7 @@ class PermissionAttestationService:
                     required_groups=sorted(record.required_groups),
                     observed_groups=sorted(record.observed_groups),
                     endpoint_mapping_revision=record.endpoint_mapping_revision,
+                    freshness_policy_max_age_days=record.max_age_days,
                     attested_status=record.attested_status,
                     recorded_by=row.recorded_by,
                 )
@@ -225,6 +235,7 @@ class PermissionAttestationService:
                 AttestationEvaluationView(
                     write_scope=_scope_view(evaluation.write_scope),
                     freshness_status=evaluation.freshness,
+                    applicable_max_age_days=evaluation.max_age_days,
                     invalidations=sorted(evaluation.invalidations),
                 )
                 if evaluation is not None
@@ -239,7 +250,8 @@ class PermissionAttestationService:
         self, marketplace_key: str, observed_groups: Iterable[ApiGroup], *, actor: str
     ) -> PermissionAttestationView:
         """Record what the operator observed. Only the observed groups come from the operator;
-        the time, fingerprint, required groups and mapping revision come from ICBM (§6.7).
+        the time, fingerprint, required groups, mapping revision and age bound come from ICBM
+        (§6.7, §8.1).
 
         A refusal stores nothing. A stored attestation whose READY promotion the contract
         freshness blocks is kept and reported as blocked (F5) — never silently discarded.
@@ -266,6 +278,8 @@ class PermissionAttestationService:
                 required_groups=_join(record.required_groups),
                 observed_groups=_join(record.observed_groups),
                 endpoint_mapping_revision=record.endpoint_mapping_revision,
+                attested_status=record.attested_status,
+                freshness_policy_max_age_days=record.max_age_days,
                 recorded_by=actor,
             )
             session.add(row)
@@ -286,6 +300,7 @@ class PermissionAttestationService:
                         required_groups=sorted(g.value for g in record.required_groups),
                         observed_groups=sorted(g.value for g in record.observed_groups),
                         endpoint_mapping_revision=record.endpoint_mapping_revision,
+                        freshness_policy_max_age_days=record.max_age_days,
                     ),
                 ),
                 session=session,

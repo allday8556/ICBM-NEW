@@ -65,6 +65,9 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "required_groups",
         "observed_groups",
         "endpoint_mapping_revision",
+        "freshness_policy_max_age_days",
+        # why permission evidence stopped supporting write_scope, e.g. EXPIRED (S7)
+        "invalidations",
     }
 )
 

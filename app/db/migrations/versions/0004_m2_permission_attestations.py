@@ -7,7 +7,9 @@ Create Date: 2026-09-14
 Additive only. One append-only row per operator attestation (PERMISSIONS_SCOPES.md §5, §7): the
 evidence envelope bound to a keyed application fingerprint and an endpoint-mapping revision.
 Strength and source are pinned so an attestation can never be stored as MACHINE_VERIFIED
-(CAPABILITY_MAPPING §17 #18). No client_id, secret or token is stored here.
+(CAPABILITY_MAPPING §17 #18). The record-time ``attested_status`` (checked against the stored
+groups) and the age bound in effect at recording are stored; current freshness never is
+(§8.1, §17 #21, Issue #32). No client_id, secret or token is stored here.
 """
 
 from collections.abc import Sequence
@@ -22,6 +24,20 @@ depends_on: str | Sequence[str] | None = None
 
 TABLE = "marketplace_permission_attestations"
 
+# Frozen with this revision: the M2 ApiGroup vocabulary (PERMISSIONS_SCOPES §4). A new group needs
+# a new revision; the integration tests check this expression against the live enum.
+_GROUPS = ("SELLER_INFO", "PRODUCT", "ORDER_SELLER", "INQUIRY")
+
+
+def _attested_status_matches_groups() -> str:
+    """READY iff every required group was observed (PERMISSIONS_SCOPES §5)."""
+    covered = " AND ".join(
+        f"(instr(',' || required_groups || ',', ',{group},') = 0"
+        f" OR instr(',' || observed_groups || ',', ',{group},') > 0)"
+        for group in _GROUPS
+    )
+    return f"attested_status = CASE WHEN {covered} THEN 'READY' ELSE 'MISSING' END"
+
 
 def upgrade() -> None:
     op.create_table(
@@ -35,6 +51,8 @@ def upgrade() -> None:
         sa.Column("required_groups", sa.String(length=200), nullable=False),
         sa.Column("observed_groups", sa.String(length=200), nullable=False),
         sa.Column("endpoint_mapping_revision", sa.String(length=64), nullable=False),
+        sa.Column("attested_status", sa.String(length=10), nullable=False),
+        sa.Column("freshness_policy_max_age_days", sa.Integer(), nullable=False),
         sa.Column("recorded_by", sa.String(length=100), nullable=False),
         sa.CheckConstraint(
             "evidence_source = 'OPERATOR_ATTESTED_PROVIDER_ADMIN'",
@@ -55,6 +73,14 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "endpoint_mapping_revision <> ''",
             name=op.f("ck_marketplace_permission_attestations_bound_to_mapping_revision"),
+        ),
+        sa.CheckConstraint(
+            _attested_status_matches_groups(),
+            name=op.f("ck_marketplace_permission_attestations_attested_status_matches_groups"),
+        ),
+        sa.CheckConstraint(
+            "freshness_policy_max_age_days BETWEEN 1 AND 30",
+            name=op.f("ck_marketplace_permission_attestations_bound_within_canonical_max"),
         ),
         sa.PrimaryKeyConstraint("seq", name=op.f("pk_marketplace_permission_attestations")),
     )

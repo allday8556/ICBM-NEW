@@ -34,13 +34,20 @@ class AttestationRecordView(BaseModel):
     required_groups: list[ApiGroup]
     observed_groups: list[ApiGroup]
     endpoint_mapping_revision: str
+    # The age bound in effect when the evidence was recorded (PERMISSIONS_SCOPES §8.1).
+    freshness_policy_max_age_days: int
+    # Record-time history, not current truth; current truth is the evaluation (Issue #32).
     attested_status: WriteScopeStatus
     recorded_by: str
 
 
 class AttestationEvaluationView(BaseModel):
+    """Current use of the evidence, derived now — never read from storage."""
+
     write_scope: WriteScopeView
     freshness_status: EvidenceFreshness | None
+    # The stricter of the recorded and the configured bound (§8.1); None if malformed.
+    applicable_max_age_days: int | None
     invalidations: list[Invalidation]
 
 
@@ -53,7 +60,8 @@ class PermissionAttestationView(BaseModel):
     recording_available: bool
     # Why a new attestation cannot be recorded right now (nothing would be stored).
     recording_refusal: Invalidation | None
-    max_age_days: int | None
+    # The configured age bound: 30 days unless an operational override tightens it (§8.1).
+    max_age_days: int
     # Evidence, its current evaluation, and its effect on capability truth.
     attestation: AttestationRecordView | None
     evaluation: AttestationEvaluationView | None

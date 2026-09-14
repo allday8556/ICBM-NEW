@@ -516,6 +516,49 @@ def test_s17_18_no_production_code_supplies_a_mapping_revision_or_application_id
     assert implementers == set()
 
 
+def test_s17_22_marketplace_evidence_never_reads_the_wall_clock() -> None:
+    # PERMISSIONS_SCOPES §8.1: current freshness uses the injected Clock — the service obtains
+    # ``now`` and passes it to the pure evaluator — so expiry is deterministic and testable. No
+    # capability or A0 module reads wall-clock time itself.
+    wall_clock = {
+        ("datetime", "now"),
+        ("datetime", "utcnow"),
+        ("datetime", "today"),
+        ("date", "today"),
+        ("time", "time"),
+        ("time", "monotonic"),
+    }
+    modules = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith("app/connect/marketplace/")
+    }
+    assert {
+        "app/connect/marketplace/attestation.py",
+        "app/connect/marketplace/attestation_service.py",
+    } <= set(modules)
+    readers, injected = set(), 0
+    for path, tree in modules.items():
+        for call in _calls(tree):
+            func = call.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            owner = func.value
+            name = (
+                owner.id
+                if isinstance(owner, ast.Name)
+                else owner.attr
+                if isinstance(owner, ast.Attribute)
+                else None
+            )
+            if (name, func.attr) in wall_clock:
+                readers.add(f"{path}:{call.lineno}")
+            if (name, func.attr) == ("_clock", "now"):
+                injected += 1
+    assert readers == set()
+    assert injected >= 2  # the A0 context and the freshness recording read the injected clock
+
+
 def test_connect_adds_no_product_facts_or_product_schema() -> None:
     from app.db.metadata import metadata
 

@@ -53,3 +53,29 @@ def test_invalid_environment_value_names_the_variable(tmp_path: Path) -> None:
 def test_backoff_bounds_are_validated(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         AppConfig(data_dir=tmp_path, job_backoff_base_s=10, job_backoff_max_s=5)
+
+
+def test_s17_22_a0_evidence_age_defaults_to_the_canonical_30_days(tmp_path: Path) -> None:
+    # PERMISSIONS_SCOPES §8.1 (Issue #32): frozen at 30 days for M2, never "unset".
+    assert AppConfig(data_dir=tmp_path).smartstore_a0_max_age_days == 30
+    env = {"ICBM_DATA_DIR": str(tmp_path), "ICBM_SMARTSTORE_A0_MAX_AGE_DAYS": "7"}
+    assert AppConfig.from_env(env).smartstore_a0_max_age_days == 7
+
+
+@pytest.mark.parametrize("days", [1, 30])
+def test_s17_22_a0_evidence_age_override_may_tighten_down_to_one_day(
+    tmp_path: Path, days: int
+) -> None:
+    config = AppConfig(data_dir=tmp_path, smartstore_a0_max_age_days=days)
+    assert config.smartstore_a0_max_age_days == days
+
+
+@pytest.mark.parametrize("days", [0, -1, 31, 365])
+def test_s17_22_a0_evidence_age_override_can_never_extend_past_30_days(
+    tmp_path: Path, days: int
+) -> None:
+    with pytest.raises(ConfigError, match=r"1\.\.30"):
+        AppConfig(data_dir=tmp_path, smartstore_a0_max_age_days=days)
+    env = {"ICBM_DATA_DIR": str(tmp_path), "ICBM_SMARTSTORE_A0_MAX_AGE_DAYS": str(days)}
+    with pytest.raises(ConfigError, match=r"1\.\.30"):
+        AppConfig.from_env(env)

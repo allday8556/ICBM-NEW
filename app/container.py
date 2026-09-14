@@ -3,7 +3,6 @@
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.service import CollectService
@@ -127,7 +126,6 @@ def build_container(
     # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity and the endpoint-mapping
     # revision come from the SmartStore adapter (PR-A); until it exists nothing is injected in
     # production, so no attestation can be recorded and no temporary value stands in (§5.1).
-    max_age_days = config.smartstore_a0_max_age_days
     permission_attestation = PermissionAttestationService(
         db=db,
         clock=clock,
@@ -136,7 +134,7 @@ def build_container(
         capability=marketplace_capability,
         identity=application_identity,
         revision=mapping_revision,
-        max_age=timedelta(days=max_age_days) if max_age_days is not None else None,
+        max_age_days=config.smartstore_a0_max_age_days,
     )
     marketplace_capability.set_permission_evidence(permission_attestation)
     execution_mode = ExecutionModeService(config.execution_mode, audit)

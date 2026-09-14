@@ -177,18 +177,25 @@ class MarketplaceCapabilityService:
     # ------------------------------------------------------------------ evidence and actions
 
     def converge_permission(self, marketplace_key: str) -> None:
-        """Converge write_scope on current permission evidence (§5; PR-C).
+        """Converge write_scope on current permission evidence (§5, S6, S7; PR-C).
 
         Evidence that expired, lost its application or mapping binding, or was never recorded
-        is judged by the evidence source. A READY promotion that the contract freshness blocks
-        (F5) leaves write_scope as it is: the evidence waits, and the A0 projection says why.
+        is judged by the evidence source. Expired MISSING converges to UNKNOWN and so releases
+        the SCOPE_INSUFFICIENT pause it was the basis of, without promoting write (S6). A READY
+        promotion that the contract freshness blocks (F5) leaves write_scope as it is: the
+        evidence waits, and the A0 projection says why.
+
+        This runs on every read, so it is also where time-driven expiry converges (S7). Only a
+        real change is written and audited, with the reasons the evidence gave; a read after
+        convergence finds nothing to change and writes nothing.
         """
         self._known(marketplace_key)
         if self._permission_evidence is None:
             return
-        scope = self._permission_evidence.current_permission(marketplace_key)
-        if scope is None:
+        evidence = self._permission_evidence.current_permission(marketplace_key)
+        if evidence is None:
             return
+        scope = evidence.write_scope
         with self._db.read() as session:
             row, overlays = self._load(session, marketplace_key)
             current = _state(row, overlays).write_scope
@@ -196,7 +203,10 @@ class MarketplaceCapabilityService:
             return
         with contextlib.suppress(PolicyBlockedError):
             self._apply(
-                marketplace_key, "OBSERVE_PERMISSION", lambda s: observe_permission(s, scope)
+                marketplace_key,
+                "OBSERVE_PERMISSION",
+                lambda s: observe_permission(s, scope),
+                invalidations=list(evidence.invalidations),
             )
 
     def observe_auth(
