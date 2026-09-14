@@ -48,7 +48,7 @@ If implementation convenience conflicts with these contracts, the implementation
 
 ---
 
-## 2. Scope discipline: four implementation PRs
+## 2. Scope discipline: five implementation PRs
 
 M2 MUST NOT repeat the large M1 single-PR pattern.
 
@@ -57,18 +57,20 @@ PR-B  capability state machine + workflow overlay
 PR-C  A0 permission attestation input + storage + invalidation
 PR-A  SmartStore adapter + endpoint registry
 PR-D  SmartStore CONNECT three-layer UI projection
+PR-E  M2 operator actions
 ```
 
-Frozen implementation order:
+Frozen implementation order (PR-E added by the architect's decision on Issue #41, comment 5667551746):
 
 ```text
-PR-B → PR-C → PR-A → PR-D
+PR-B → PR-C → PR-A → PR-D → PR-E → controlled real-provider M2 acceptance campaign
 ```
 
 - PR-B defines the domain truth model used by C and A.
 - PR-C implements A0 entirely with zero provider traffic.
 - PR-A is the first unit that introduces real SmartStore transport capability.
 - PR-D projects already-defined backend/domain truth and does not invent state.
+- PR-E adds the loopback-only operator actions the campaign needs. It is never folded into read-only PR-D (§8A).
 
 A dependency finding may justify changing execution order, but MUST NOT collapse these behavioral scopes into one large PR.
 
@@ -168,7 +170,8 @@ Current boundary:
 - PR-B owns domain/state targets and state-transition semantics;
 - PR-A owns the real registry-gated `NOT_ADOPTED` pre-I/O enforcement target;
 - PR-C owns A0 zero-network handling/non-promotion;
-- PR-D owns UI glyph/projection portions of split evidence-strength and field-separation targets.
+- PR-D owns UI glyph/projection portions of split evidence-strength and field-separation targets;
+- PR-E owns no §17 target.
 
 Repository-rule follow-up: issue #23 is evidence for a future `test_repository_rules.py` check asserting exact set equality between §17 target IDs and the ownership registry, with every target assigned. That CI enhancement is not PR-B runtime scope unless separately reviewed.
 
@@ -405,6 +408,47 @@ PR-C owns the A0 input/save form. PR-D owns read-only capability/evidence projec
 
 Follow ICBM UI rules: restrained charcoal/white/metallic theme, policy/help under `ⓘ`, and no explanatory paragraph directly under headings.
 
+`docs/platforms/smartstore/CAPABILITY_MAPPING.md §14` is the direct PR-D checklist. This includes:
+- the §14.3 authentication labels and precedence;
+- the §14.6 freshness labels;
+- §14.8 derived-value primacy;
+- §14.9 `조치 필요` rows;
+- §14.10 diagnostic context;
+- §14.11 surfaces.
+
+PR-D proves the UI halves of §17 targets 6, 7 and 16 with real-browser tests named `test_s17_06_*`, `test_s17_07_*` and `test_s17_16_*`, with zero-provider and zero-egress assertions.
+
+PR-D is read-only. It adds no mutating route or control; those belong to PR-E.
+
+---
+
+# 8A. PR-E — M2 operator actions
+
+PR-E adds the loopback-only operator routes and UI that the controlled real-provider campaign needs. Everything in this section is subject to the existing protections: the audited actor, the CSRF guard with `X-ICBM-Client`, loopback-only binding and safe audit payloads.
+
+It MAY add:
+
+- credential save: the client id and secret go into the OS secret store through PR-A's credential bundle, and the secret is never echoed, logged, audited or returned;
+- connect / account observation: PR-A's CONNECT pass. It returns the observed account identity to the operator's own screen only;
+- the explicit first binding (below);
+- contract-freshness recording: a UI for PR-B's existing recording entry point. It is never presented as provider-measured (CAPABILITY_MAPPING F8);
+- review and pause resolution: an explicit, audited operator action through PR-B's `resolve` (CAPABILITY_MAPPING §9, §10).
+
+**Mandatory first-binding boundary** (`ACCOUNT_IDENTITY.md` §5; PR-A's explicit trust-promotion boundary):
+
+```text
+authenticated seller-account read
+→ display the observed account identity to the operator
+→ operator explicitly confirms that observed account
+→ bind_account(confirmed identity)
+```
+
+- A successful seller-account GET MUST never bind by itself.
+- Read/observe and bind MUST NOT collapse into one generic `연결` button or one automatic action. The operator's confirmation of the observed account is the evidence that authorizes the first binding, which is new trust. The action that commits the binding MUST make that consequence explicit in its label or confirmation surface.
+- A caller-visible failure MUST leave no new binding, preserving PR-A's atomicity and fail-closed contract.
+
+PR-E makes no real SmartStore call during development: tests use fakes, fixtures and transport spies. The real calls happen only in the controlled campaign (§12), within its caps.
+
 ---
 
 # 9. Testing and regression floor
@@ -493,7 +537,7 @@ Do not:
 
 # 12. Implementation complete != M2 ACCEPTED
 
-Merging PR-B, PR-C, PR-A, and PR-D completes planned runtime implementation only. It does not make M2 accepted.
+Merging PR-B, PR-C, PR-A, PR-D and PR-E completes planned runtime implementation only. It does not make M2 accepted.
 
 After implementation, execute `docs/acceptance/M2.md` as a separately controlled campaign.
 
