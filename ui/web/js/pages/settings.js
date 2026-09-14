@@ -1,18 +1,22 @@
 // 설정: renders the v29 settings structure from the settings contract. In M0 the contract is
 // read-only (`editable: false`) with no saved values and no connections, so every field shows
-// as unset, every toggle as off, and save/test actions are inert. The one live card is
-// 등록 권한 확인 (M2 PR-C), which talks to its own permission-attestation contract.
+// as unset, every toggle as off, and save/test actions are inert. The live parts are 등록 권한
+// 확인 (M2 PR-C, its own permission-attestation contract) and the SmartStore capability
+// projection (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API.
 
 import { getJson } from '../core/api.js';
+import { authLine, statusChip } from '../core/capability.js';
 import { fragment, h } from '../core/dom.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
+import { capabilityProjection } from './capability-projection.js';
 import { permissionAttestationPanel } from './permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
+const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
 const TITLE = '설정';
 
 let fieldSequence = 0;
@@ -60,6 +64,16 @@ function statusRow(item, state) {
     ? API_STATUS_LABEL[state.connections.get(item.marketplace)] ?? '미연결'
     : item.chip;
   return h('div', { class: 'kv' }, h('span', {}, item.status), h('span', { class: 'chip' }, chip));
+}
+
+// A marketplace with an adopted capability contract shows its authentication line (§14.3,
+// §14.11 surface 2); the others keep the settings contract's connection state. A capability
+// marketplace whose truth could not be read says so rather than falling back to 미연동.
+function connectionChip(key, state) {
+  const capability = state.capabilities.get(key);
+  if (capability) return statusChip('auth', authLine(capability));
+  if (state.connections.has(key)) return h('span', { class: 'chip' }, CONNECTION_LABEL[state.connections.get(key)] ?? '미연동');
+  return h('span', { class: 'chip warn' }, '확인 불가');
 }
 
 function usersTable() {
@@ -141,13 +155,11 @@ function renderItem(item, state) {
   if (item.button) return button(item.button, item.variant);
   if (item.marketplaceStatus) {
     return item.marketplaceStatus.map((key) =>
-      h(
-        'div',
-        { class: 'alert-row' },
-        h('span', {}, platformTag(key)),
-        h('span', { class: 'chip' }, CONNECTION_LABEL[state.connections.get(key)] ?? '미연동'),
-      ),
+      h('div', { class: 'alert-row', 'data-marketplace': key }, h('span', {}, platformTag(key)), connectionChip(key, state)),
     );
+  }
+  if (item.capabilityProjection) {
+    return capabilityProjection(item.capabilityProjection, state.capabilities.get(item.capabilityProjection) ?? null);
   }
   if (item.permissionAttestation) return permissionAttestationPanel(item.permissionAttestation);
   if (item.usersTable) return usersTable();
@@ -193,7 +205,7 @@ export default {
   navLabel: TITLE,
   icon: '⚙',
   async render(ctx) {
-    const view = await getJson(ENDPOINT);
+    const [view, capabilities] = await Promise.all([getJson(ENDPOINT), getJson(CAPABILITIES).catch(() => [])]);
     const requestedTab = ctx.params.get('tab');
     const tabKey = PLATFORM_TABS.some((tab) => tab.key === requestedTab) ? requestedTab : 'common';
     const subtabs = SUBTABS[tabKey];
@@ -201,6 +213,7 @@ export default {
     const state = {
       values: view.policy_values,
       connections: new Map(view.marketplace_connections.map((c) => [c.marketplace_key, c.connection_state])),
+      capabilities: new Map(capabilities.map((c) => [c.marketplace_key, c])),
     };
 
     return fragment(

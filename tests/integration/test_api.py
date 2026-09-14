@@ -77,7 +77,12 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
         for s in body["supplier_connections"]
     ] == [("kmretail", "DISCONNECTED", "NOT_CONFIGURED", False)]
     assert body["policy_values"] == {}
-    assert {c["connection_state"] for c in body["marketplace_connections"]} == {"NOT_CONNECTED"}
+    # SmartStore's connection truth is its capability (CAPABILITY_MAPPING §14.11): it is never
+    # listed here as a hard-coded NOT_CONNECTED. The marketplaces without a contract still are.
+    marketplaces = {
+        c["marketplace_key"]: c["connection_state"] for c in body["marketplace_connections"]
+    }
+    assert marketplaces == dict.fromkeys(["coupang", "st11", "gmarket", "auction"], "NOT_CONNECTED")
 
 
 def test_shell_contract_serves_marketplace_identity_assets(client: TestClient) -> None:

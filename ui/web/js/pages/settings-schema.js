@@ -299,7 +299,13 @@ export const SUBTABS = {
                 API_ACTIONS,
               ],
             },
-            apiStatusCard('smartstore', ['상품 조회', '상품 등록/수정', '주문 조회', '문의 조회']),
+            {
+              // CAPABILITY_MAPPING §14.11 surface 1 (M2 PR-D): live capability truth, not demo rows.
+              title: '연동 상태 / 권한',
+              help:
+                '인증·등록 권한·실제 등록은 각각의 증거로 따로 판단합니다. · ● 자동으로 확인된 강한 증거 · ◐ 운영자가 관리자 화면에서 확인한 증거 · ○ 미확인 · 운영자 확인은 이후의 권한 변경을 자동으로 감지하지 않습니다. · 실제 상품 등록은 등록 검증 전까지 확인되지 않습니다.',
+              items: [{ capabilityProjection: 'smartstore' }],
+            },
             {
               title: '등록 권한 확인',
               help:

@@ -30,6 +30,7 @@ from app.connect.contracts import (
     SupplierConnectionSummary,
 )
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.marketplace.service import CAPABILITY_MARKETPLACES
 from app.connect.models import SupplierConnection
 from app.connect.proof import ProtectedReadProof, ReadClassification, ReadOutcome, classify
 from app.connect.sessions import SupplierSessionStore
@@ -235,11 +236,15 @@ class ConnectService:
         return sum(1 for s in self.supplier_connections() if s.state is S.READY)
 
     def marketplace_connections(self) -> list[MarketplaceConnectionSummary]:
+        """Marketplaces without an adopted capability contract. A marketplace that has one
+        (SmartStore in M2) takes its connection truth from the capability read API, so it is never
+        reported here as a hard-coded NOT_CONNECTED (CAPABILITY_MAPPING §14.11)."""
         return [
             MarketplaceConnectionSummary(
                 marketplace_key=m.key, connection_state=MarketplaceConnectionState.NOT_CONNECTED
             )
             for m in self._marketplaces
+            if m.key not in CAPABILITY_MARKETPLACES
         ]
 
     def connected_marketplace_count(self) -> int:
