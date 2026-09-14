@@ -14,12 +14,17 @@ and nothing reads the wall clock.
 
 import json
 import sqlite3
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Route, sync_playwright
 
 from app.audit.service import AuditEventRecord
 from app.config import AppConfig
@@ -65,6 +70,8 @@ TABLE = "marketplace_permission_attestations"
 ROWS = f"SELECT COUNT(*) FROM {TABLE}"
 ALL_ROWS = f"SELECT * FROM {TABLE} ORDER BY seq"
 BOUND = timedelta(days=A0_MAX_AGE_DAYS)
+# The channels test_ownership_children uses: the locally installed browser, nothing downloaded.
+BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 
 
 class FixtureIdentity:
@@ -542,6 +549,89 @@ def test_s17_23_the_first_read_after_the_bound_converges_and_audits_exactly_once
     assert first.updated_at == clock.now()
     # The attestation row itself is never touched by its expiry.
     assert _rows(config, ALL_ROWS) == stored
+
+
+# ---------------------------------------------------------------- the bound the decision uses
+#
+# Issue #34 / re-audit 5196956629: a derived decision value is shown as the primary value. The A0
+# card's validity must be the applicable bound, min(recorded, configured) — never a looser
+# configured or recorded bound. Both directions are tested: displaying the configured bound would
+# pass the first case and fail only the second.
+
+BOUND_DIRECTIONS = pytest.mark.parametrize(
+    ("recorded", "configured"),
+    [(30, 7), (7, 30)],
+    ids=["recorded30-configured7", "recorded7-configured30"],
+)
+
+
+def _share_secret_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Two app instances stand in for a restart. They share the secret store — and so the
+    # fingerprint key — exactly as a real restart shares the OS keyring.
+    shared = MemorySecretStore()
+    monkeypatch.setattr("app.container.build_secret_store", lambda backend: shared)
+
+
+def _record_then_reconfigure(config: AppConfig, recorded: int, configured: int) -> FastAPI:
+    """READY evidence recorded under ``recorded`` days, served by an app configured with
+    ``configured`` days."""
+    seams = {"application_identity": FixtureIdentity(), "mapping_revision": FixtureRevision()}
+    first = create_app(config.with_overrides(smartstore_a0_max_age_days=recorded), **seams)  # type: ignore[arg-type]
+    with TestClient(first, base_url=LOCAL) as client:
+        saved = client.post(URL, json={"observed_groups": ["PRODUCT"]}, headers=CLIENT)
+        assert saved.status_code == 200, saved.text
+    return create_app(config.with_overrides(smartstore_a0_max_age_days=configured), **seams)  # type: ignore[arg-type]
+
+
+def _rendered_validity(client: TestClient) -> str:
+    """The card's 확인 유효기간 value as the real UI renders it. Every browser request is answered
+    in-process by the application under test, so nothing reaches a network."""
+
+    def answer(route: Route) -> None:
+        parts = urlsplit(route.request.url)
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        response = client.request(route.request.method, path)
+        route.fulfill(
+            status=response.status_code, headers=dict(response.headers), body=response.content
+        )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+        except PlaywrightError as exc:
+            pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
+        try:
+            page = browser.new_page()
+            page.route("**/*", answer)
+            page.goto(f"{LOCAL}/#/settings?tab=smartstore&sub=api")
+            row = page.locator(".permission-attestation .kv", has_text="확인 유효기간")
+            return row.locator("b").inner_text(timeout=15_000)
+        finally:
+            browser.close()
+
+
+@BOUND_DIRECTIONS
+def test_s17_22_the_api_reports_the_bound_the_decision_actually_uses(
+    config: AppConfig, monkeypatch: pytest.MonkeyPatch, recorded: int, configured: int
+) -> None:
+    _share_secret_store(monkeypatch)
+    with TestClient(_record_then_reconfigure(config, recorded, configured), base_url=LOCAL) as c:
+        view = c.get(URL).json()
+    assert view["evaluation"]["invalidations"] == []  # same application: only the bound differs
+    assert view["evaluation"]["applicable_max_age_days"] == min(recorded, configured) == 7
+    assert view["max_age_days"] == configured
+    assert view["attestation"]["freshness_policy_max_age_days"] == recorded
+
+
+@BOUND_DIRECTIONS
+def test_s17_22_the_a0_card_shows_the_bound_the_decision_actually_uses(
+    config: AppConfig, monkeypatch: pytest.MonkeyPatch, recorded: int, configured: int
+) -> None:
+    _share_secret_store(monkeypatch)
+    with TestClient(_record_then_reconfigure(config, recorded, configured), base_url=LOCAL) as c:
+        shown = _rendered_validity(c)
+    # Primary: the bound the decision uses. The looser input is context, never the headline.
+    assert shown == f"7일 (현재 설정 {configured}일 · 기록 당시 {recorded}일)"
 
 
 # ---------------------------------------------------------------- stored vs refused vs waiting

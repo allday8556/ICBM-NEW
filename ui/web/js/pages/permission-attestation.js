@@ -53,11 +53,16 @@ function promotionChip(view) {
   return ['기록 없음', null];
 }
 
+// The primary value is the bound the current decision uses — min(recorded, configured) — never a
+// looser input (Issue #34). The configured and recorded bounds are context only. Before any
+// evidence exists, the configured bound is the policy a new recording will get.
 function validity(view) {
+  const effective = view.evaluation?.applicable_max_age_days;
+  if (effective == null) return `${view.max_age_days}일`;
   const recorded = view.attestation?.freshness_policy_max_age_days;
-  return recorded && recorded !== view.max_age_days
-    ? `${view.max_age_days}일 (기록 당시 ${recorded}일)`
-    : `${view.max_age_days}일`;
+  return recorded != null && recorded !== view.max_age_days
+    ? `${effective}일 (현재 설정 ${view.max_age_days}일 · 기록 당시 ${recorded}일)`
+    : `${effective}일`;
 }
 
 function kv(label, value) {
