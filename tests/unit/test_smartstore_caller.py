@@ -161,9 +161,11 @@ def test_em13_6_each_endpoint_applies_its_own_timeouts(
         None,
     ],
 )
-def test_em13_2_not_adopted_fails_locally_with_zero_network(
+def test_s17_08_em13_2_not_adopted_fails_before_network_io(
     endpoint: object, no_network: list[str], caplog: pytest.LogCaptureFixture
 ) -> None:
+    # CAPABILITY_MAPPING §17 target 8 (owner PR-A): the real registry-gated caller with a
+    # transport spy, a client-construction spy and an egress-grant spy.
     caplog.set_level(logging.INFO, logger="icbm.connect.smartstore")
     provider = Provider(_json(TOKEN_BODY))
     before = EGRESS.snapshot()
