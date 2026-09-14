@@ -300,6 +300,12 @@ export const SUBTABS = {
               ],
             },
             apiStatusCard('smartstore', ['상품 조회', '상품 등록/수정', '주문 조회', '문의 조회']),
+            {
+              title: '등록 권한 확인',
+              help:
+                '커머스API센터 관리자 화면에서 본 API 그룹을 기록합니다. · 운영자 확인(A0) 증거이며 NAVER 자동 확인이 아닙니다. · 필수 그룹·애플리케이션·매핑 기준·확인 일시는 ICBM이 채우고 실제 상품 등록은 확인하지 않습니다. · 확인은 30일(설정으로 줄일 수만 있음)이 지나면 만료되어 다시 확인해야 합니다.',
+              items: [{ permissionAttestation: 'smartstore' }],
+            },
           ],
         },
       ],

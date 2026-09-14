@@ -1,6 +1,7 @@
 // 설정: renders the v29 settings structure from the settings contract. In M0 the contract is
 // read-only (`editable: false`) with no saved values and no connections, so every field shows
-// as unset, every toggle as off, and save/test actions are inert.
+// as unset, every toggle as off, and save/test actions are inert. The one live card is
+// 등록 권한 확인 (M2 PR-C), which talks to its own permission-attestation contract.
 
 import { getJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -8,6 +9,7 @@ import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
+import { permissionAttestationPanel } from './permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
@@ -147,6 +149,7 @@ function renderItem(item, state) {
       ),
     );
   }
+  if (item.permissionAttestation) return permissionAttestationPanel(item.permissionAttestation);
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);
   return null;

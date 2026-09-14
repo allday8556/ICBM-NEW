@@ -58,6 +58,16 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "workflow",
         "remote_outcome",
         "resolution",
+        # SMARTSTORE-A0-PERMISSION (M2 PR-C): group keys and bindings, never the client_id
+        "attestation_seq",
+        "evidence_source",
+        "attested_status",
+        "required_groups",
+        "observed_groups",
+        "endpoint_mapping_revision",
+        "freshness_policy_max_age_days",
+        # why permission evidence stopped supporting write_scope, e.g. EXPIRED (S7)
+        "invalidations",
     }
 )
 

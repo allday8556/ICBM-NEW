@@ -440,6 +440,7 @@ def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
     allowed = (
         "__future__",
         "collections.abc",
+        "contextlib",
         "dataclasses",
         "datetime",
         "enum",
@@ -451,6 +452,12 @@ def test_marketplace_capability_code_cannot_reach_a_provider() -> None:
         "app.core.errors",
         "app.core.clock",
         "app.core.safe_payload",
+        # A0 (PR-C): the keyed fingerprint and its key in the OS secret store — no network.
+        "base64",
+        "hashlib",
+        "hmac",
+        "os",
+        "app.core.secrets",
         "app.audit",
         "app.db.base",
         "app.db.types",
@@ -480,6 +487,78 @@ def test_s17_19_only_the_operator_entry_point_records_contract_freshness() -> No
     }
 
 
+def test_s17_18_no_production_code_supplies_a_mapping_revision_or_application_identity() -> None:
+    # M2 instructions §5.1/§6.7: A0 consumes the endpoint-mapping revision and the application
+    # identity through seams, and PR-A supplies their one authoritative implementation. Until then
+    # no production module may implement either — no hardcoded "v1"-style revision and no typed-in
+    # identity; only test fixtures implement them. PR-A updates this rule with its registry.
+    # The seams are class methods; a module-level function of the same name (the Alembic schema
+    # revision in app/db/migrate.py) is not one.
+    declared, implementers = set(), set()
+    for path, tree in _production_modules().items():
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            for node in cls.body:
+                if not (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name in {"current_revision", "current_identity"}
+                ):
+                    continue
+                body = [
+                    n
+                    for n in node.body
+                    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
+                ]
+                (implementers if body else declared).add(f"{path}:{cls.name}.{node.name}")
+    assert declared == {
+        "app/connect/marketplace/revision.py:EndpointMappingRevisionProvider.current_revision",
+        "app/connect/marketplace/sources.py:ApplicationIdentitySource.current_identity",
+    }
+    assert implementers == set()
+
+
+def test_s17_22_marketplace_evidence_never_reads_the_wall_clock() -> None:
+    # PERMISSIONS_SCOPES §8.1: current freshness uses the injected Clock — the service obtains
+    # ``now`` and passes it to the pure evaluator — so expiry is deterministic and testable. No
+    # capability or A0 module reads wall-clock time itself.
+    wall_clock = {
+        ("datetime", "now"),
+        ("datetime", "utcnow"),
+        ("datetime", "today"),
+        ("date", "today"),
+        ("time", "time"),
+        ("time", "monotonic"),
+    }
+    modules = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith("app/connect/marketplace/")
+    }
+    assert {
+        "app/connect/marketplace/attestation.py",
+        "app/connect/marketplace/attestation_service.py",
+    } <= set(modules)
+    readers, injected = set(), 0
+    for path, tree in modules.items():
+        for call in _calls(tree):
+            func = call.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            owner = func.value
+            name = (
+                owner.id
+                if isinstance(owner, ast.Name)
+                else owner.attr
+                if isinstance(owner, ast.Attribute)
+                else None
+            )
+            if (name, func.attr) in wall_clock:
+                readers.add(f"{path}:{call.lineno}")
+            if (name, func.attr) == ("_clock", "now"):
+                injected += 1
+    assert readers == set()
+    assert injected >= 2  # the A0 context and the freshness recording read the injected clock
+
+
 def test_connect_adds_no_product_facts_or_product_schema() -> None:
     from app.db.metadata import metadata
 
@@ -490,6 +569,7 @@ def test_connect_adds_no_product_facts_or_product_schema() -> None:
         "supplier_connections",
         "marketplace_capabilities",
         "marketplace_workflow_overlays",
+        "marketplace_permission_attestations",
     }
     offenders = [
         path

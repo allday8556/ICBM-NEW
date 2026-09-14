@@ -8,7 +8,10 @@ from app.audit.service import AuditLog
 from app.collect.service import CollectService
 from app.config import AppConfig
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.marketplace.attestation_service import PermissionAttestationService
+from app.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.connect.marketplace.service import MarketplaceCapabilityService
+from app.connect.marketplace.sources import ApplicationIdentitySource
 from app.connect.service import ConnectService
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
 from app.core.clock import Clock, SystemClock
@@ -54,6 +57,7 @@ class Container:
     screens: ScreenService
     connect: ConnectService
     marketplace_capability: MarketplaceCapabilityService
+    permission_attestation: PermissionAttestationService
     ownership: DataDirLease
 
 
@@ -66,6 +70,8 @@ def build_container(
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
     suppliers: Sequence[SupplierDefinition] = SUPPLIERS,
+    application_identity: ApplicationIdentitySource | None = None,
+    mapping_revision: EndpointMappingRevisionProvider | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -117,6 +123,20 @@ def build_container(
     registry.register(connect.job_definition())
     # Marketplace capability truth: typed evidence in, no provider access (M2 PR-B).
     marketplace_capability = MarketplaceCapabilityService(db=db, clock=clock, audit=audit)
+    # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity and the endpoint-mapping
+    # revision come from the SmartStore adapter (PR-A); until it exists nothing is injected in
+    # production, so no attestation can be recorded and no temporary value stands in (§5.1).
+    permission_attestation = PermissionAttestationService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        secrets=secrets,
+        capability=marketplace_capability,
+        identity=application_identity,
+        revision=mapping_revision,
+        max_age_days=config.smartstore_a0_max_age_days,
+    )
+    marketplace_capability.set_permission_evidence(permission_attestation)
     execution_mode = ExecutionModeService(config.execution_mode, audit)
     diagnostics = DiagnosticsService(
         enabled=config.diagnostics_enabled, db=db, jobs=jobs, audit=audit
@@ -162,5 +182,6 @@ def build_container(
         screens=screens,
         connect=connect,
         marketplace_capability=marketplace_capability,
+        permission_attestation=permission_attestation,
         ownership=ownership,
     )

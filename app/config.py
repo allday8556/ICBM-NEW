@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from app.connect.marketplace.attestation import A0_MAX_AGE_DAYS, valid_max_age_days
 from app.core.execution import ExecutionMode
 from app.core.net import is_loopback_host
 
@@ -51,6 +52,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "job_backoff_max_s": ("ICBM_JOB_BACKOFF_MAX_S", float),
     "job_lease_s": ("ICBM_JOB_LEASE_S", float),
     "browser_channel": ("ICBM_BROWSER_CHANNEL", str),
+    "smartstore_a0_max_age_days": ("ICBM_SMARTSTORE_A0_MAX_AGE_DAYS", int),
 }
 
 
@@ -76,6 +78,9 @@ class AppConfig:
     # Playwright channel for supplier browser logins: the locally installed Edge, so nothing is
     # downloaded (ADR-0001 Chromium engine).
     browser_channel: str = "msedge"
+    # Maximum age of operator-attested SmartStore permission evidence (PERMISSIONS_SCOPES §8.1,
+    # Issue #32): the canonical 30 days by default; an operational override may only tighten it.
+    smartstore_a0_max_age_days: int = A0_MAX_AGE_DAYS
 
     def __post_init__(self) -> None:
         if not is_loopback_host(self.host):
@@ -100,6 +105,11 @@ class AppConfig:
             raise ConfigError("job_backoff_max_s must be >= job_backoff_base_s")
         if self.job_poll_interval_s <= 0 or self.job_lease_s <= 0:
             raise ConfigError("job poll interval and lease must be > 0")
+        if not valid_max_age_days(self.smartstore_a0_max_age_days):
+            raise ConfigError(
+                f"smartstore_a0_max_age_days must be 1..{A0_MAX_AGE_DAYS}: an override may only "
+                "tighten the canonical maximum (PERMISSIONS_SCOPES §8.1)"
+            )
 
     @property
     def database_path(self) -> Path:

@@ -9,9 +9,10 @@ domain on every load and save. No secret, token or provider identity is stored h
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.connect.marketplace.attestation import A0_MAX_AGE_DAYS, ApiGroup
 from app.connect.marketplace.capability import (
     AuthStatus,
     ContractFreshness,
@@ -30,6 +31,18 @@ from app.db.types import UTCDateTime
 def _in(column: str, values: Iterable[str], *, nullable: bool = False) -> str:
     clause = f"{column} IN ({', '.join(repr(str(v)) for v in values)})"
     return f"{column} IS NULL OR {clause}" if nullable else clause
+
+
+def _attested_status_matches_groups() -> str:
+    """READY iff every required group was observed (PERMISSIONS_SCOPES §5, §17 #21). Groups are
+    stored comma-joined, so containment is a delimited substring test over the frozen vocabulary.
+    """
+    covered = " AND ".join(
+        f"(instr(',' || required_groups || ',', ',{group},') = 0"
+        f" OR instr(',' || observed_groups || ',', ',{group},') > 0)"
+        for group in ApiGroup
+    )
+    return f"attested_status = CASE WHEN {covered} THEN 'READY' ELSE 'MISSING' END"
 
 
 class MarketplaceCapability(Base):
@@ -78,6 +91,51 @@ class MarketplaceCapability(Base):
     session_generation_floor: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class MarketplacePermissionAttestation(Base):
+    """SMARTSTORE-A0-PERMISSION evidence (M2 PR-C): one row per operator attestation.
+
+    Append-only (the migration installs triggers rejecting UPDATE and DELETE): history is never
+    rewritten, and the latest row is the evidence judged for current use. The record-time
+    attested status is stored with a CHECK tying it to the stored groups, and so is the age bound
+    in effect at recording; current freshness is never stored (§17 #21, Issue #32). Strength and
+    source are pinned: an attestation can never be stored as MACHINE_VERIFIED (§17 #18).
+    """
+
+    __tablename__ = "marketplace_permission_attestations"
+    __table_args__ = (
+        CheckConstraint(
+            "evidence_source = 'OPERATOR_ATTESTED_PROVIDER_ADMIN'", name="source_is_provider_admin"
+        ),
+        CheckConstraint("evidence_strength = 'OPERATOR_ATTESTED'", name="a0_never_promoted"),
+        CheckConstraint("application_fingerprint <> ''", name="bound_to_application"),
+        CheckConstraint("required_groups <> ''", name="required_groups_present"),
+        CheckConstraint("endpoint_mapping_revision <> ''", name="bound_to_mapping_revision"),
+        CheckConstraint(_attested_status_matches_groups(), name="attested_status_matches_groups"),
+        CheckConstraint(
+            f"freshness_policy_max_age_days BETWEEN 1 AND {A0_MAX_AGE_DAYS}",
+            name="bound_within_canonical_max",
+        ),
+        Index("ix_marketplace_permission_attestations_marketplace_key", "marketplace_key"),
+    )
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    evidence_source: Mapped[str] = mapped_column(String(40))
+    evidence_strength: Mapped[str] = mapped_column(String(20))
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Keyed, non-reversible (PERMISSIONS_SCOPES §7.1): the client_id itself is never stored.
+    application_fingerprint: Mapped[str] = mapped_column(String(64))
+    # Comma-joined ApiGroup values, sorted.
+    required_groups: Mapped[str] = mapped_column(String(200))
+    observed_groups: Mapped[str] = mapped_column(String(200))
+    endpoint_mapping_revision: Mapped[str] = mapped_column(String(64))
+    # Record-time history (READY | MISSING), never current truth (§17 #21).
+    attested_status: Mapped[str] = mapped_column(String(10))
+    # The age bound in effect when the evidence was recorded (PERMISSIONS_SCOPES §8.1).
+    freshness_policy_max_age_days: Mapped[int] = mapped_column(Integer)
+    recorded_by: Mapped[str] = mapped_column(String(100))
 
 
 class MarketplaceWorkflowOverlay(Base):

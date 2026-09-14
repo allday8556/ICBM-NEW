@@ -28,6 +28,8 @@ class AuditEventType(StrEnum):
     SUPPLIER_CONNECTION_DEMOTED = "SUPPLIER_CONNECTION_DEMOTED"
     # Marketplace capability truth changed (M2 PR-B): axes before/after, enum values only.
     MARKETPLACE_CAPABILITY_CHANGED = "MARKETPLACE_CAPABILITY_CHANGED"
+    # SMARTSTORE-A0-PERMISSION recorded (M2 PR-C): operator-attested, never provider-measured.
+    MARKETPLACE_PERMISSION_ATTESTED = "MARKETPLACE_PERMISSION_ATTESTED"
 
 
 class AuditOutcome(StrEnum):

@@ -13,6 +13,8 @@ from app.api.errors import install_error_handlers
 from app.api.middleware import ClientHeaderGuard, RequestContextMiddleware
 from app.api.routes import connect, diagnostics, screens, system
 from app.config import AppConfig
+from app.connect.marketplace.revision import EndpointMappingRevisionProvider
+from app.connect.marketplace.sources import ApplicationIdentitySource
 from app.container import build_container
 from app.core.egress import EGRESS
 from app.core.logging import configure_logging
@@ -31,6 +33,8 @@ def create_app(
     ownership: DataDirLease | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
+    application_identity: ApplicationIdentitySource | None = None,
+    mapping_revision: EndpointMappingRevisionProvider | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -48,7 +52,12 @@ def create_app(
         log_file = configure_logging(config.log_level, config.log_dir)
         EGRESS.install()
         services = build_container(
-            config, ownership=lease, extra_jobs=extra_jobs, supplier_gateway=supplier_gateway
+            config,
+            ownership=lease,
+            extra_jobs=extra_jobs,
+            supplier_gateway=supplier_gateway,
+            application_identity=application_identity,
+            mapping_revision=mapping_revision,
         )
     except BaseException:
         if owns_lease:
