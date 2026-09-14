@@ -1,8 +1,9 @@
 // 설정: renders the v29 settings structure from the settings contract. In M0 the contract is
 // read-only (`editable: false`) with no saved values and no connections, so every field shows
 // as unset, every toggle as off, and save/test actions are inert. The live parts are 등록 권한
-// 확인 (M2 PR-C, its own permission-attestation contract) and the SmartStore capability
-// projection (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API.
+// 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
+// (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, and the SmartStore
+// operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read.
 
 import { getJson } from '../core/api.js';
 import { authLine, statusChip } from '../core/capability.js';
@@ -14,9 +15,34 @@ import { pageHead } from '../components/page-head.js';
 import { capabilityProjection } from './capability-projection.js';
 import { permissionAttestationPanel } from './permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
+import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './smartstore-operator.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
+const CAPABILITY = (key) => `/api/v1/connect/marketplaces/${key}/capability`;
+
+// One live truth per capability marketplace on the page (M2 PR-E). The PR-D projection, its
+// action rows and the A0 card are re-read from the server after every operator action; nothing is
+// promoted locally.
+function liveTruth(key, initial) {
+  const projection = h('div', { class: 'truth-host' });
+  const actions = h('div', { class: 'truth-host' });
+  const attestation = h('div', { class: 'truth-host' });
+  let view = initial;
+  let refresh = null;
+  const draw = () => {
+    projection.replaceChildren(capabilityProjection(key, view));
+    actions.replaceChildren(...workflowActions(key, view, refresh));
+  };
+  refresh = async () => {
+    view = await getJson(CAPABILITY(key)).catch(() => null);
+    draw();
+    attestation.replaceChildren(permissionAttestationPanel(key));
+  };
+  draw();
+  attestation.replaceChildren(permissionAttestationPanel(key));
+  return { projection, actions, attestation, refresh };
+}
 const TITLE = '설정';
 
 let fieldSequence = 0;
@@ -158,10 +184,14 @@ function renderItem(item, state) {
       h('div', { class: 'alert-row', 'data-marketplace': key }, h('span', {}, platformTag(key)), connectionChip(key, state)),
     );
   }
-  if (item.capabilityProjection) {
-    return capabilityProjection(item.capabilityProjection, state.capabilities.get(item.capabilityProjection) ?? null);
+  if (item.capabilityProjection) return state.truth(item.capabilityProjection).projection;
+  if (item.workflowActions) return state.truth(item.workflowActions).actions;
+  if (item.permissionAttestation) return state.truth(item.permissionAttestation).attestation;
+  if (item.smartstoreCredentials) return credentialsPanel(() => state.truth('smartstore').refresh());
+  if (item.smartstoreAccount) return accountPanel(() => state.truth('smartstore').refresh());
+  if (item.contractReview) {
+    return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
   }
-  if (item.permissionAttestation) return permissionAttestationPanel(item.permissionAttestation);
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);
   return null;
@@ -214,6 +244,11 @@ export default {
       values: view.policy_values,
       connections: new Map(view.marketplace_connections.map((c) => [c.marketplace_key, c.connection_state])),
       capabilities: new Map(capabilities.map((c) => [c.marketplace_key, c])),
+    };
+    const truths = new Map();
+    state.truth = (key) => {
+      if (!truths.has(key)) truths.set(key, liveTruth(key, state.capabilities.get(key) ?? null));
+      return truths.get(key);
     };
 
     return fragment(

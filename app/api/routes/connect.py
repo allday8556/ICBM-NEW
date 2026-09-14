@@ -1,6 +1,9 @@
 """CONNECT API. Supplier (Issue #7): a password goes in; it never comes back out. Marketplace
-capability (M2 PR-B): every axis as its own field; the only write is the operator's reviewed
-contract-freshness recording."""
+capability (M2 PR-B): every axis as its own field; the operator records reviewed contract
+freshness. SmartStore operator actions (M2 PR-E, instructions §8A): credential replacement,
+account observation, the explicit first binding and workflow resolution — each a thin typed
+route over the owning service, behind the loopback binding and the client-header CSRF guard, with
+the configured operator as the audited actor."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -9,8 +12,9 @@ from app.api.deps import ContainerDep
 from app.connect.contracts import StoredLoginView, SupplierConnectionSummary
 from app.connect.marketplace.attestation import ApiGroup
 from app.connect.marketplace.attestation_contracts import PermissionAttestationView
-from app.connect.marketplace.capability import ContractFreshness
+from app.connect.marketplace.capability import ContractFreshness, Resolution, WorkflowScope
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
+from app.connect.smartstore.service import ConnectResult
 from app.jobs.records import JobRecord
 
 router = APIRouter(tags=["connect"])
@@ -129,4 +133,113 @@ def record_contract_freshness(
     persisted with ``freshness_recorded_at`` and audited with the operator as actor (F7)."""
     return container.marketplace_capability.record_contract_freshness(
         marketplace_key, body.contract_freshness, actor=container.config.operator_actor
+    )
+
+
+class WorkflowResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_scope: WorkflowScope
+    resolution: Resolution
+
+
+@router.post("/api/v1/connect/marketplaces/{marketplace_key}/workflow-resolution")
+def resolve_workflow(
+    marketplace_key: str, body: WorkflowResolutionRequest, container: ContainerDep
+) -> MarketplaceCapabilityView:
+    """Explicit, audited operator resolution of one overlay (CAPABILITY_MAPPING §9, §10). Only the
+    resolution the overlay's view names is accepted, and it never makes anything READY."""
+    return container.marketplace_capability.resolve(
+        marketplace_key,
+        body.workflow_scope,
+        body.resolution,
+        actor=container.config.operator_actor,
+    )
+
+
+# ---------------------------------------------------------------- SmartStore operator actions
+
+SMARTSTORE = "/api/v1/connect/marketplaces/smartstore"
+
+
+class SmartStoreCredentialsRequest(BaseModel):
+    # A whole replacement bundle. Validation errors never echo what was typed, and nothing else
+    # (a store id, an account override) is accepted.
+    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+
+    client_id: str
+    client_secret: SecretStr
+
+
+class SmartStoreCredentialsView(BaseModel):
+    """Whether a credential bundle is committed, and under which generation — never its content."""
+
+    configured: bool
+    credential_generation: int | None
+
+
+class SmartStoreBindRequest(BaseModel):
+    # Only the identity the operator was shown and confirmed; no override of any kind.
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed_account_uid: str
+
+
+class SmartStoreObservationView(BaseModel):
+    """One CONNECT pass as the operator's own screen needs it. ``bound`` stays false until the
+    explicit first binding: observing an account never binds it (ACCOUNT_IDENTITY §5)."""
+
+    bound: bool
+    observed_account_uid: str
+    observed_account_id: str | None
+    capability: MarketplaceCapabilityView
+
+    @classmethod
+    def of(cls, result: ConnectResult) -> "SmartStoreObservationView":
+        return cls(
+            bound=result.bound,
+            observed_account_uid=result.observed_account_uid,
+            observed_account_id=result.observed_account_id,
+            capability=result.capability,
+        )
+
+
+@router.get(f"{SMARTSTORE}/credentials")
+def smartstore_credentials(container: ContainerDep) -> SmartStoreCredentialsView:
+    configured, generation = container.smartstore.credential_status()
+    return SmartStoreCredentialsView(configured=configured, credential_generation=generation)
+
+
+@router.put(f"{SMARTSTORE}/credentials")
+def save_smartstore_credentials(
+    body: SmartStoreCredentialsRequest, container: ContainerDep
+) -> SmartStoreCredentialsView:
+    """Commit a replacement credential bundle as a new credential generation (AUTH §18). The
+    secret goes to the OS secret store and never comes back out."""
+    generation = container.smartstore.save_credentials(
+        body.client_id,
+        body.client_secret.get_secret_value(),
+        actor=container.config.operator_actor,
+    )
+    return SmartStoreCredentialsView(configured=True, credential_generation=generation)
+
+
+@router.post(f"{SMARTSTORE}/connect")
+def observe_smartstore_account(container: ContainerDep) -> SmartStoreObservationView:
+    """One CONNECT pass: token, durable session commit, seller-account read, capability evidence.
+    It returns the observed account to the operator's screen and never binds a first account."""
+    return SmartStoreObservationView.of(container.smartstore.connect())
+
+
+@router.post(f"{SMARTSTORE}/bind")
+def bind_smartstore_account(
+    body: SmartStoreBindRequest, container: ContainerDep
+) -> SmartStoreObservationView:
+    """The explicit first binding of the account the operator confirmed. The service reads the
+    account again, refuses a different one, and commits the binding only under the freshness
+    decision that authorizes it; a failure leaves nothing bound (PR-A)."""
+    return SmartStoreObservationView.of(
+        container.smartstore.bind_account(
+            body.confirmed_account_uid, actor=container.config.operator_actor
+        )
     )

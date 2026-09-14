@@ -166,16 +166,20 @@ def test_s17_16_axes_are_separate_fields_in_persistence_and_the_read_api(
     assert body["write"] == {"status": "BLOCKED"}
     assert body["contract_freshness"] == "STALE"
     assert body["contract_freshness_recorded_at"] is not None
+    # Each overlay also names the one operator resolution the domain accepts (M2 PR-E); none
+    # lifts SCOPE_INSUFFICIENT, which only fresh permission evidence does.
     assert body["workflow"] == [
         {
             "workflow_state": "REVIEW_REQUIRED",
             "workflow_scope": "AUTHENTICATION",
             "reason_code": None,
+            "resolution": "REVIEW_RESOLVED",
         },
         {
             "workflow_state": "PAUSED",
             "workflow_scope": "PRODUCT_REGISTRATION",
             "reason_code": "SCOPE_INSUFFICIENT",
+            "resolution": None,
         },
     ]
     assert (body["error_class"], body["remote_outcome"]) == ("TRANSIENT", "NOT_APPLIED_PROVEN")

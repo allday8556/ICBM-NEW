@@ -198,6 +198,13 @@ class SmartStoreConnectService:
 
     # ------------------------------------------------------------------ credentials
 
+    def credential_status(self) -> tuple[bool, int | None]:
+        """Whether a credential bundle is committed, and its generation — never its content."""
+        credentials = self._credentials.load(KEY)
+        if credentials is None:
+            return False, None
+        return True, credentials.credential_generation
+
     def save_credentials(self, client_id: str, client_secret: str, *, actor: str) -> int:
         """Commit a replacement credential bundle as a new credential generation (AUTH §18).
 

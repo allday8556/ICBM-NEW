@@ -20,6 +20,7 @@ from app.core.egress import EGRESS
 from app.core.logging import configure_logging
 from app.core.ownership import DataDirLease, acquire_data_dir, require_ownership
 from app.jobs.registry import JobDefinition
+from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.suppliers.base import SupplierGateway
 
 logger = logging.getLogger("icbm.app")
@@ -35,6 +36,7 @@ def create_app(
     supplier_gateway: SupplierGateway | None = None,
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
+    smartstore_caller: SmartStoreEndpointCaller | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -58,6 +60,7 @@ def create_app(
             supplier_gateway=supplier_gateway,
             application_identity=application_identity,
             mapping_revision=mapping_revision,
+            smartstore_caller=smartstore_caller,
         )
     except BaseException:
         if owns_lease:

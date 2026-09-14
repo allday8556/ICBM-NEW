@@ -289,22 +289,32 @@ export const SUBTABS = {
         {
           cards: [
             {
+              // M2 PR-E: a live credential replacement. The prototype's 스토어 식별값 is gone: the
+              // seller account comes only from the authenticated account read.
               title: '스마트스토어 API 인증',
               help:
-                '커머스API 애플리케이션 인증정보를 입력합니다. · Secret은 화면에 평문으로 노출하지 않으며 실제 빌드에서는 암호화 저장소를 사용합니다.',
-              items: [
-                field('애플리케이션 ID', 'smartstore.client_id', { placeholder: 'Application ID' }),
-                field('애플리케이션 Secret', 'smartstore.client_secret', { placeholder: 'Application Secret', secret: true }),
-                field('스토어 식별값', 'smartstore.store_id', { placeholder: '필요한 경우 입력' }),
-                API_ACTIONS,
-              ],
+                '커머스API 애플리케이션 인증정보를 입력합니다. · 저장하면 새 자격증명 세대로 교체되고 이전 세션과 계정 확인은 무효가 됩니다. · Secret은 OS 보안 저장소에만 저장되며 다시 표시되지 않습니다. · 판매자 계정은 입력값이 아니라 인증된 계정 조회 결과로만 정해집니다.',
+              items: [{ smartstoreCredentials: true }],
             },
             {
               // CAPABILITY_MAPPING §14.11 surface 1 (M2 PR-D): live capability truth, not demo rows.
               title: '연동 상태 / 권한',
               help:
                 '인증·등록 권한·실제 등록은 각각의 증거로 따로 판단합니다. · ● 자동으로 확인된 강한 증거 · ◐ 운영자가 관리자 화면에서 확인한 증거 · ○ 미확인 · 운영자 확인은 이후의 권한 변경을 자동으로 감지하지 않습니다. · 실제 상품 등록은 등록 검증 전까지 확인되지 않습니다.',
-              items: [{ capabilityProjection: 'smartstore' }],
+              items: [{ capabilityProjection: 'smartstore' }, { workflowActions: 'smartstore' }],
+            },
+            {
+              // M2 PR-E, instructions §8A: observation and first binding are separate actions.
+              title: '계정 확인 / 연결 대상 확정',
+              help:
+                '계정 확인은 현재 인증으로 판매자 계정을 조회해 보여줄 뿐 연결하지 않습니다. · 처음 연결할 때는 표시된 계정을 운영자가 확인한 뒤 따로 확정해야 합니다. · 확정할 때 계정을 다시 조회해 같은 계정인지 비교하며, 실패하면 아무것도 연결되지 않습니다. · 이미 연결된 계정은 자동으로 바뀌지 않습니다.',
+              items: [{ smartstoreAccount: true }],
+            },
+            {
+              title: 'API 계약 검토 기록',
+              help:
+                'ICBM이 채택한 스마트스토어 API 계약을 운영자가 검토한 결과를 기록합니다. · NAVER가 확인한 것이 아닙니다. · 같은 값을 다시 기록해도 새 검토 기록으로 남습니다. · 허용되지 않는 전환은 서버가 거부합니다.',
+              items: [{ contractReview: 'smartstore' }],
             },
             {
               title: '등록 권한 확인',
