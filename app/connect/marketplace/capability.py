@@ -554,19 +554,46 @@ def _overlay_for(failure: FailureEvidence, policy: CapabilityPolicy) -> Workflow
     return WorkflowOverlay(review, failure.scope)  # UNRESOLVED
 
 
+def _converge_overlay(state: CapabilityState, proposed: WorkflowOverlay) -> WorkflowOverlay:
+    """The overlay a scope holds once ``proposed`` arrives (PR #26 re-review 5193155486, #27).
+
+    Current evidence narrows uncertainty: an open REVIEW_REQUIRED becomes the PAUSED reason that
+    later evidence positively proves. Ambiguity never erases a proven reason, and one proven
+    reason never silently replaces another. The review an AUTH_MISMATCH requires stands until an
+    operator resolves it (A3).
+    """
+    existing = state.overlay(proposed.scope)
+    if existing is None:
+        return proposed
+    if (
+        existing.state is WorkflowState.REVIEW_REQUIRED
+        and proposed.state is WorkflowState.PAUSED
+        and not (
+            existing.scope is WorkflowScope.AUTHENTICATION
+            and state.auth is AuthStatus.AUTH_MISMATCH
+        )
+    ):
+        return proposed
+    return existing
+
+
 def observe_failure(
     state: CapabilityState, failure: FailureEvidence, policy: CapabilityPolicy = DEFAULT_POLICY
 ) -> CapabilityState:
     """Record a classified failure and converge the workflow overlay (§11).
 
     ``error_class`` is kept exactly as measured: an exhausted budget or a review never
-    reclassifies it (A5, ERRORS.md §1). An open overlay stays until an operator resolves it.
+    reclassifies it (A5, ERRORS.md §1). Overlays converge per ``_converge_overlay``. A failure
+    that carries no mutation outcome leaves a prior ``remote_outcome`` as it was: it proves
+    nothing about that mutation, so an UNKNOWN outcome still forbids blind replay (W3).
     """
     _require(isinstance(failure, FailureEvidence), "failure must be FailureEvidence")
     proposed = _overlay_for(failure, policy)
     overlays = state.overlays
-    if proposed is not None and state.overlay(proposed.scope) is None:
-        overlays = _put(overlays, proposed)
+    if proposed is not None:
+        converged = _converge_overlay(state, proposed)
+        if converged != state.overlay(proposed.scope):
+            overlays = _put(overlays, converged)
     touched = {failure.scope} | ({proposed.scope} if proposed is not None else set())
     auth = state.auth
     if auth is AuthStatus.READY and WorkflowScope.AUTHENTICATION in touched:
@@ -578,7 +605,9 @@ def observe_failure(
         overlays=overlays,
         write=_write_for(state.write_scope, overlays),
         error_class=failure.error_class,
-        remote_outcome=failure.remote_outcome,
+        remote_outcome=(
+            failure.remote_outcome if failure.remote_outcome is not None else state.remote_outcome
+        ),
     )
 
 

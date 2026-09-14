@@ -503,3 +503,101 @@ def test_a_scope_insufficient_pause_is_lifted_only_by_permission_evidence() -> N
     for resolution in Resolution:
         with pytest.raises(CapabilityInvariantError):
             resolve(blocked, REGISTRATION, resolution)
+
+
+# ------------------------------------------ overlay convergence (re-review 5193155486, #27)
+
+
+def test_a_later_proven_reason_narrows_an_open_review_to_a_pause() -> None:
+    reviewed = observe_failure(
+        _ready(), FailureEvidence(AUTH, ErrorClass.UNKNOWN, Finding.UNRESOLVED)
+    )
+    assert reviewed.overlays == (WorkflowOverlay(REVIEW, AUTH),)
+    narrowed = observe_failure(
+        reviewed, FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
+    )
+    assert narrowed.overlays == (WorkflowOverlay(PAUSED, AUTH, PauseReason.AUTH_RETRY_LIMIT),)
+    assert narrowed.error_class is ErrorClass.AUTH
+    # The same on PRODUCT_REGISTRATION: an unresolved review becomes a proven restriction.
+    registration = observe_failure(
+        _ready(), FailureEvidence(REGISTRATION, ErrorClass.UNKNOWN, Finding.UNRESOLVED)
+    )
+    restricted = observe_failure(
+        registration,
+        FailureEvidence(
+            REGISTRATION, ErrorClass.POLICY_BLOCKED, Finding.ACCOUNT_RESTRICTION_PROVEN
+        ),
+    )
+    assert restricted.overlays == (
+        WorkflowOverlay(PAUSED, REGISTRATION, PauseReason.ACCOUNT_RESTRICTED),
+    )
+    assert restricted.write is WriteStatus.BLOCKED
+    # A suspected application re-auth review becomes the proven pause once detection counts.
+    suspected = observe_failure(
+        _ready(),
+        FailureEvidence(
+            AUTH, ErrorClass.AUTH, Finding.APPLICATION_REAUTH_SUSPECTED, session_generation=1
+        ),
+    )
+    detected = observe_failure(
+        suspected,
+        FailureEvidence(
+            AUTH, ErrorClass.AUTH, Finding.APPLICATION_REAUTH_DETECTED, session_generation=1
+        ),
+        CapabilityPolicy(app_reauth_detection_accepted=True),
+    )
+    assert detected.overlays == (
+        WorkflowOverlay(PAUSED, AUTH, PauseReason.APPLICATION_REAUTH_REQUIRED, 1),
+    )
+
+
+def test_ambiguity_never_erases_a_proven_pause() -> None:
+    paused = observe_failure(
+        _ready(), FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
+    )
+    later = [
+        FailureEvidence(AUTH, ErrorClass.UNKNOWN, Finding.UNRESOLVED),
+        FailureEvidence(AUTH, ErrorClass.AUTH, Finding.APPLICATION_REAUTH_SUSPECTED),
+        FailureEvidence(
+            AUTH, ErrorClass.TRANSIENT, Finding.RECOVERABLE, remote_outcome=RemoteOutcome.UNKNOWN
+        ),
+        # A second proven reason does not silently replace the first either.
+        FailureEvidence(AUTH, ErrorClass.POLICY_BLOCKED, Finding.ACCOUNT_RESTRICTION_PROVEN),
+    ]
+    for failure in later:
+        assert observe_failure(paused, failure).overlays == paused.overlays
+
+
+def test_the_review_an_auth_mismatch_requires_is_never_narrowed_away() -> None:
+    mismatch = observe_auth(_ready(), _evidence(OTHER))
+    after = observe_failure(
+        mismatch, FailureEvidence(AUTH, ErrorClass.AUTH, Finding.AUTH_RECOVERY_EXHAUSTED)
+    )
+    assert after.auth is AuthStatus.AUTH_MISMATCH
+    assert after.overlays == (WorkflowOverlay(REVIEW, AUTH),)
+
+
+def test_a_failure_without_a_mutation_keeps_an_unknown_remote_outcome() -> None:
+    unknown = observe_failure(
+        _ready(),
+        FailureEvidence(
+            REGISTRATION,
+            ErrorClass.TRANSIENT,
+            Finding.RECOVERABLE,
+            remote_outcome=RemoteOutcome.UNKNOWN,
+        ),
+    )
+    later = observe_failure(
+        unknown, FailureEvidence(AUTH, ErrorClass.TRANSIENT, Finding.RECOVERABLE)
+    )
+    assert later.remote_outcome is RemoteOutcome.UNKNOWN  # still no blind replay (W3)
+    reconciled = observe_failure(
+        unknown,
+        FailureEvidence(
+            REGISTRATION,
+            ErrorClass.VALIDATION,
+            Finding.RECOVERABLE,
+            remote_outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+        ),
+    )
+    assert reconciled.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
