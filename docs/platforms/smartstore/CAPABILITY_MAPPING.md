@@ -596,6 +596,10 @@ existing PAUSED/<proven reason>
 
 Ambiguity MUST NOT erase a previously proven human-remediable reason. This convergence rule does not authorize replacing one proven `PAUSED` reason with another without the owning evidence/remediation contract.
 
+**A3 exception.** A `REVIEW_REQUIRED/AUTHENTICATION` overlay required by `AUTH_MISMATCH` under A3 is not eligible for automatic convergence to `PAUSED`, even when later evidence proves a frozen PAUSED reason. It remains until explicit operator review resolution. For example, `AUTH_MISMATCH` + `REVIEW_REQUIRED/AUTHENTICATION` + a later `AUTH_RECOVERY_EXHAUSTED` keeps the review; it never becomes `PAUSED/AUTHENTICATION/AUTH_RETRY_LIMIT`, whose `RESUME` would bypass the account review A3 requires.
+
+This states the rule the runtime already enforces, under the named test `test_the_review_an_auth_mismatch_requires_is_never_narrowed_away` (Issue #29).
+
 Expiry or invalidation of the evidence a `PAUSED` reason depends on is not ambiguity: S6 governs removal of an evidence-dependent `SCOPE_INSUFFICIENT` overlay.
 
 ---
