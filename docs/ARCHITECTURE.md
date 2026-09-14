@@ -224,17 +224,23 @@ started_at
 finished_at
 ```
 
-Core error classes:
+Core error classes — the aligned taxonomy of `docs/adr/0008-error-taxonomy-alignment.md`, which also records how it relates to Canonical v3.1 §11.3:
 
 ```text
 TRANSIENT
-RATE_LIMITED
+RATE_LIMITED       v3.1 RATE_LIMIT (same class, persisted spelling)
 AUTH
 VALIDATION
-POLICY_BLOCKED
-NOT_FOUND
+POLICY_BLOCKED     v3.1 POLICY (same class, persisted spelling)
+NOT_FOUND          an ICBM-local addressed resource only; never a provider/wire classification
+CONFLICT           added to the runtime enum by the ADR-0008 implementation stage
+DUPLICATE          added to the runtime enum by the ADR-0008 implementation stage
+REVIEW_REQUIRED    added to the runtime enum by the ADR-0008 implementation stage
+FATAL              added to the runtime enum by the ADR-0008 implementation stage
 UNKNOWN
 ```
+
+A class is a cause. It is never a workflow state, retry permission or replay permission: `error_class=REVIEW_REQUIRED` is not `workflow_state=REVIEW_REQUIRED`. Only `TRANSIENT` and `RATE_LIMITED` are retried automatically (ADR-0004, ADR-0005). The taxonomy only grows: no member is removed or renamed while persisted rows can hold it.
 
 UNKNOWN destructive/write outcomes are not automatically retried.
 
