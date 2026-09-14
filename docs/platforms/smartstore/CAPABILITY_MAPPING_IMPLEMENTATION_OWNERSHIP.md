@@ -4,6 +4,7 @@
 - Owning contract: `CAPABILITY_MAPPING.md §17`
 - Scope: M2 SmartStore CONNECT implementation PR ownership only
 - This file does **not** redefine capability semantics. `CAPABILITY_MAPPING.md §17` remains the master target list.
+- The target-ID set in this file MUST exactly match the target-ID set in `CAPABILITY_MAPPING.md §17`. CI enforcement is not implemented yet, so reviewers MUST currently perform this exact-set comparison manually.
 
 ## 1. Purpose
 
