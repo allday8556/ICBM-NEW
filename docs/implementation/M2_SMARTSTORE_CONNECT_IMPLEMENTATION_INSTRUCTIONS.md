@@ -25,9 +25,10 @@ Implementation MUST follow the frozen contract set directly instead of re-summar
 For PR-B, read in this order:
 
 1. `docs/implementation/M2_SMARTSTORE_CONNECT_IMPLEMENTATION_INSTRUCTIONS.md`
-2. `docs/platforms/smartstore/CAPABILITY_MAPPING.md` — **direct PR-B implementation contract**
-3. `docs/platforms/smartstore/README.md`
-4. only as needed for owning semantics: `ERRORS.md`, `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md`, `SOURCES.md`, `docs/acceptance/M2.md`
+2. `docs/platforms/smartstore/CAPABILITY_MAPPING.md` — **direct PR-B semantic contract**
+3. `docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` — **§17 per-target implementation owner registry**
+4. `docs/platforms/smartstore/README.md`
+5. only as needed for owning semantics: `ERRORS.md`, `AUTH.md`, `PERMISSIONS_SCOPES.md`, `ACCOUNT_IDENTITY.md`, `ENDPOINT_MATRIX.md`, `SOURCES.md`, `docs/acceptance/M2.md`
 
 The full frozen SmartStore bundle remains:
 
@@ -40,6 +41,8 @@ The full frozen SmartStore bundle remains:
 - `docs/platforms/smartstore/CAPABILITY_MAPPING.md`
 - `docs/platforms/smartstore/README.md`
 - `docs/acceptance/M2.md`
+
+The ownership registry is normative implementation metadata keyed to §17; it does not redefine §17 capability semantics.
 
 If implementation convenience conflicts with these contracts, the implementation changes — not the contract semantics.
 
@@ -144,29 +147,30 @@ A structured workflow overlay object may group `workflow_state + workflow_scope 
 
 ## 4.3 §17 is the master enforcement checklist
 
-`docs/platforms/smartstore/CAPABILITY_MAPPING.md §17` is the master implementation checklist.
+`docs/platforms/smartstore/CAPABILITY_MAPPING.md §17` is the master semantic target list.
+
+`docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` is the normative per-target implementation ownership registry keyed to that list.
 
 **Do not pin or duplicate the number of §17 targets in this instruction document.**
 
 Rules:
 
-1. every current §17 target must have an explicit owning implementation PR assigned by the canonical §17 ownership metadata;
-2. adding a §17 target without assigning an owning PR in the same contract change is forbidden;
-3. each owning PR must provide a named test traceable 1:1 to each target at the layer it owns;
-4. split-layer targets require tests from every owning layer; one PR MUST NOT fake another PR's coverage;
-5. PR-B implements/tests only the PR-B-owned domain/state/API portion and records the remaining targets as deferred to their canonical owning PRs;
-6. do not rewrite §17 into a weaker local checklist.
+1. every current §17 target must have an explicit owning implementation PR in the ownership registry;
+2. adding/removing/renumbering a §17 target requires updating the ownership registry in the same contract-change PR;
+3. an unowned §17 target is invalid implementation metadata and blocks implementation;
+4. each owning PR must provide a named test traceable 1:1 to each target at the layer it owns;
+5. split-layer targets require tests from every owning layer; one PR MUST NOT fake another PR's coverage;
+6. PR-B implements/tests only the PR-B-owned domain/state/API portion and records the remaining targets as deferred to their canonical owners;
+7. do not rewrite §17 into a weaker local checklist.
 
-The current ownership decision is:
+Current boundary:
 
 - PR-B owns domain/state targets and state-transition semantics;
 - PR-A owns the real registry-gated `NOT_ADOPTED` pre-I/O enforcement target;
 - PR-C owns A0 zero-network handling/non-promotion;
 - PR-D owns UI glyph/projection portions of split evidence-strength and field-separation targets.
 
-The exact per-target ownership lives with `CAPABILITY_MAPPING.md §17`; this instruction intentionally does not copy a cardinality.
-
-Repository-rule follow-up: this incident is evidence for adding a future `test_repository_rules.py` consistency check that fails when a §17 target has no owner assignment. That CI extension is not PR-B runtime scope and must not be smuggled into PR-B unless separately reviewed.
+Repository-rule follow-up: issue #23 is evidence for a future `test_repository_rules.py` check asserting exact set equality between §17 target IDs and the ownership registry, with every target assigned. That CI enhancement is not PR-B runtime scope unless separately reviewed.
 
 ## 4.4 Frozen workflow scope
 
