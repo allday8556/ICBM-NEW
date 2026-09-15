@@ -31,6 +31,12 @@ from pydantic import (
     model_validator,
 )
 
+from app.collect.urls import (
+    STRICT_URL_POLICY,
+    UrlPolicy,
+    check_persisted_text,
+    require_sanitized,
+)
 from app.core.errors import InputValidationError
 from integrations.suppliers.base import SUPPLIER_KEY
 
@@ -452,32 +458,18 @@ def _invalid(message: str) -> InputValidationError:
     return InputValidationError("COLLECT_FACTS_INVALID", message)
 
 
-def _check_https_url(url: str, what: str, *, host: str | None = None) -> None:
-    parts = urlsplit(url)
-    if (
-        parts.scheme != "https"
-        or not parts.hostname
-        or parts.username is not None
-        or parts.password is not None
-        or "#" in url
-    ):
-        raise _invalid(f"{what} must be an https URL without credentials or fragment")
-    if host is not None and parts.hostname != host:
-        raise _invalid(f"{what} must be on its reference host")
-
-
 def _check_identifier(value: str, what: str, maximum: int = IDENTIFIER_MAX_LENGTH) -> None:
     if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
         raise _invalid(f"{what} must be a non-empty identifier of at most {maximum} characters")
 
 
-def _check_provenance(collected: CollectedFacts) -> None:
+def _check_provenance(collected: CollectedFacts, policy: UrlPolicy) -> None:
     if not SUPPLIER_KEY.fullmatch(collected.supplier_key):
         raise _invalid("supplier_key is not a supplier key")
     _check_identifier(
         collected.source_product_id, "source_product_id", SOURCE_PRODUCT_ID_MAX_LENGTH
     )
-    _check_https_url(collected.source_url, "source_url")
+    require_sanitized(collected.source_url, policy, "source_url")
     if collected.captured_at.tzinfo is None:
         raise _invalid("captured_at must be timezone-aware")
     _check_identifier(collected.extractor_revision, "extractor_revision")
@@ -485,9 +477,11 @@ def _check_provenance(collected: CollectedFacts) -> None:
         raise _invalid("extractor_fingerprint must be a lowercase SHA-256 hex digest")
     _check_identifier(collected.collection_run_id, "collection_run_id")
     _check_identifier(collected.correlation_id, "correlation_id")
+    for what in ("source_product_id", "extractor_revision", "collection_run_id", "correlation_id"):
+        check_persisted_text(getattr(collected, what), policy, what)
 
 
-def _check_evidence(key: str, evidence: Evidence) -> None:
+def _check_evidence(key: str, evidence: Evidence, policy: UrlPolicy) -> None:
     if not isinstance(evidence.kind, EvidenceKind) or not isinstance(evidence.status, FieldStatus):
         raise _invalid(f"{key}: evidence kind and status must be members of their vocabularies")
     if not evidence.locator.strip():
@@ -498,9 +492,48 @@ def _check_evidence(key: str, evidence: Evidence) -> None:
             f"{key}: observed evidence exceeds {EVIDENCE_OBSERVED_MAX_BYTES} bytes; keep larger "
             "evidence by digest only"
         )
+    what = f"{key}: evidence"
+    for text in (evidence.locator, evidence.observed, evidence.normalized):
+        if text is not None:
+            check_persisted_text(text, policy, what)
+    if evidence.kind is EvidenceKind.URL:
+        for url in (evidence.observed, evidence.normalized):
+            if url is not None:
+                require_sanitized(url, policy, what)
 
 
-def _check_field(key: str, spec: FieldSpec, fact: FieldFact) -> str | None:
+def _check_coherence(key: str, status: FieldStatus, evidence: Iterable[Evidence]) -> None:
+    """A field status never hides the status of its evidence (PR #57 review 5213637642 §2):
+
+    CONFIRMED        at least one CONFIRMED entry and no REVIEW_REQUIRED entry
+    ABSENT           every entry ABSENT
+    REVIEW_REQUIRED  at least one REVIEW_REQUIRED entry
+
+    REVIEW_REQUIRED evidence therefore always makes its field REVIEW_REQUIRED, and with it the
+    revision's ``facts_status``: unresolved evidence cannot disappear behind a stronger status.
+    """
+    statuses = {entry.status for entry in evidence}
+    if status is FieldStatus.CONFIRMED:
+        coherent = FieldStatus.CONFIRMED in statuses and FieldStatus.REVIEW_REQUIRED not in statuses
+    elif status is FieldStatus.ABSENT:
+        coherent = statuses <= {FieldStatus.ABSENT}
+    else:
+        coherent = FieldStatus.REVIEW_REQUIRED in statuses
+    if not coherent:
+        raise _invalid(f"{key}: a {status.value} field must agree with the status of its evidence")
+
+
+def _strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for k, v in value.items() for text in (k, *_strings(v))]
+    if isinstance(value, list):
+        return [text for item in value for text in _strings(item)]
+    return []
+
+
+def _check_field(key: str, spec: FieldSpec, fact: FieldFact, policy: UrlPolicy) -> str | None:
     """Validate one supplied field and return its canonical value JSON."""
     if not isinstance(fact.status, FieldStatus):
         raise _invalid(f"{key}: status must be a FieldStatus")
@@ -514,7 +547,8 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact) -> str | None:
     if not fact.evidence:
         raise _invalid(f"{key}: every field keeps the evidence that explains it")
     for evidence in fact.evidence:
-        _check_evidence(key, evidence)
+        _check_evidence(key, evidence, policy)
+    _check_coherence(key, fact.status, fact.evidence)
     if value is None:
         return None
     raw = value.model_dump_json()
@@ -532,11 +566,16 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact) -> str | None:
         and fact.status is not FieldStatus.REVIEW_REQUIRED
     ):
         raise _invalid("shipping: an UNKNOWN policy is REVIEW_REQUIRED")
-    return canonical_json(json.loads(raw))
+    value_json = canonical_json(json.loads(raw))
+    for text in _strings(json.loads(value_json)):
+        check_persisted_text(text, policy, f"{key}: value")
+    return value_json
 
 
 _IMAGE_STATUSES = (FieldStatus.CONFIRMED, FieldStatus.REVIEW_REQUIRED)
 _ROLE_ORDER = {ImageRole.REPRESENTATIVE: 0, ImageRole.DETAIL: 1}
+# The derived evidence entry that stands for a missing confirmed representative image.
+MISSING_REPRESENTATIVE_LOCATOR = "images:representative"
 
 
 def image_order(ref: ImageReference) -> tuple[int, int]:
@@ -544,7 +583,9 @@ def image_order(ref: ImageReference) -> tuple[int, int]:
     return _ROLE_ORDER[ref.role], ref.ordinal
 
 
-def _check_images(references: Iterable[ImageReference]) -> tuple[ImageReference, ...]:
+def _check_images(
+    references: Iterable[ImageReference], policy: UrlPolicy
+) -> tuple[ImageReference, ...]:
     seen: set[tuple[ImageRole, int]] = set()
     checked = []
     for ref in references:
@@ -566,16 +607,23 @@ def _check_images(references: Iterable[ImageReference]) -> tuple[ImageReference,
         if ref.status is FieldStatus.REVIEW_REQUIRED and ref.issue is None:
             raise _invalid("images: a REVIEW_REQUIRED reference names its issue")
         if ref.locator is not None:
-            _check_https_url(ref.locator, "images: locator", host=ref.host)
+            require_sanitized(ref.locator, policy, "images: locator")
+            if urlsplit(ref.locator).hostname != ref.host:
+                raise _invalid("images: a locator is on its reference host")
+        for text in (ref.provenance, ref.etag, ref.last_modified):
+            if text is not None:
+                check_persisted_text(text, policy, "images: reference")
         checked.append(ref)
-    return tuple(sorted(checked, key=lambda ref: (_ROLE_ORDER[ref.role], ref.ordinal)))
+    return tuple(sorted(checked, key=image_order))
 
 
 def _images_field(
     references: tuple[ImageReference, ...],
 ) -> tuple[FieldStatus, ImagesValue | None, tuple[Evidence, ...]]:
     """Derive the images field: CONFIRMED only with a confirmed representative image and no
-    reference under review; ABSENT when the source shows no image at all."""
+    reference under review; ABSENT when the source shows no image at all. A missing confirmed
+    representative image is itself REVIEW_REQUIRED evidence, so the derived field stays coherent
+    with its evidence like every supplied field."""
     if not references:
         return FieldStatus.ABSENT, None, ()
     value = ImagesValue(
@@ -584,7 +632,7 @@ def _images_field(
             for ref in references
         )
     )
-    evidence = tuple(
+    evidence = [
         Evidence(
             kind=EvidenceKind.IMAGE,
             locator=ref.provenance,
@@ -593,33 +641,49 @@ def _images_field(
             normalized=f"{ref.role.value}:{ref.ordinal}",
         )
         for ref in references
-    )
+    ]
     representative = any(
         ref.role is ImageRole.REPRESENTATIVE and ref.status is FieldStatus.CONFIRMED
         for ref in references
     )
     if representative and all(ref.status is FieldStatus.CONFIRMED for ref in references):
-        return FieldStatus.CONFIRMED, value, evidence
-    return FieldStatus.REVIEW_REQUIRED, value, evidence
+        return FieldStatus.CONFIRMED, value, tuple(evidence)
+    if not representative:
+        evidence.append(
+            Evidence(
+                kind=EvidenceKind.IMAGE,
+                locator=MISSING_REPRESENTATIVE_LOCATOR,
+                status=FieldStatus.REVIEW_REQUIRED,
+                normalized=f"{ImageRole.REPRESENTATIVE.value}:missing",
+            )
+        )
+    return FieldStatus.REVIEW_REQUIRED, value, tuple(evidence)
 
 
-def evaluate(collected: CollectedFacts) -> EvaluatedFacts:
-    """Validate one collection and compute everything the revision store persists."""
-    _check_provenance(collected)
+def evaluate(
+    collected: CollectedFacts, url_policy: UrlPolicy = STRICT_URL_POLICY
+) -> EvaluatedFacts:
+    """Validate one collection and compute everything the revision store persists.
+
+    ``url_policy`` names the explicitly safe query keys per host (the supplier's collection
+    profile, PR-C). The default keeps none: every URL with a query fails closed.
+    """
+    _check_provenance(collected, url_policy)
     supplied = set(collected.fields)
     if missing := SUPPLIED_FIELDS - supplied:
         raise _invalid(f"every field reports a status; missing: {sorted(missing)}")
     if unknown := supplied - SUPPLIED_FIELDS:
         raise _invalid(f"unknown or derived fields supplied: {sorted(unknown)}")
-    images = _check_images(collected.images)
+    images = _check_images(collected.images, url_policy)
     fields = []
     for key, spec in FIELD_REGISTRY.items():
         if key == IMAGES_FIELD:
             status, value, evidence = _images_field(images)
+            _check_coherence(key, status, evidence)
             value_json = None if value is None else canonical_json(value.model_dump(mode="json"))
         else:
             fact = collected.fields[key]
-            value_json = _check_field(key, spec, fact)
+            value_json = _check_field(key, spec, fact, url_policy)
             status, evidence = fact.status, fact.evidence
         evaluated = tuple(EvaluatedEvidence(e, evidence_digest(e)) for e in evidence)
         fingerprint = field_fingerprint(key, status, value_json, (e.digest for e in evaluated))

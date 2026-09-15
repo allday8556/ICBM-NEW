@@ -249,6 +249,55 @@ def test_0007_downgrade_never_drops_source_truth(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_secret_bearing_url_material_reaches_no_source_truth_table(
+    config: AppConfig, revisions: ProductFactsRevisionStore, images: tuple
+) -> None:
+    # PR #57 review 5213637642 §1: the store refuses signed/tokenized URL material wherever it
+    # appears, and nothing of it is written; an explicitly safe query key survives its policy.
+    from app.collect.facts import Evidence, EvidenceKind, FieldFact, FieldStatus
+    from app.collect.urls import UrlPolicy
+    from tests.collect_support import with_field
+
+    signed = "https://img.shop.example/p.png?X-Amz-Signature=LEAK-MARKER"
+    attempts = [
+        collected(images=images, source_url="https://shop.example/products/1234?token=LEAK-MARKER"),
+        collected(images=(replace(images[0], locator=signed),)),
+        with_field(
+            "original_name",
+            FieldFact(
+                FieldStatus.CONFIRMED,
+                TextValue(text="이름"),
+                (
+                    Evidence(
+                        EvidenceKind.ATTRIBUTE, "img@src", FieldStatus.CONFIRMED, observed=signed
+                    ),
+                ),
+            ),
+            images=images,
+        ),
+        with_field(
+            "detail_description",
+            confirmed(TextValue(text=f"보기 {signed}"), ".detail"),
+            images=images,
+        ),
+    ]
+    for attempt in attempts:
+        with pytest.raises(InputValidationError) as caught:
+            revisions.append(attempt)
+        assert caught.value.code == "COLLECT_URL_UNSAFE"
+    policy = UrlPolicy({"shop.example": frozenset({"no"})})
+    kept = revisions.append(
+        collected(images=images, source_url="https://shop.example/products?no=1234"),
+        url_policy=policy,
+    )
+    assert kept.source_url == "https://shop.example/products?no=1234"
+    with contextlib.closing(_raw(config)) as raw:
+        for table in SOURCE_TRUTH_TABLES:
+            for row in raw.execute(f"SELECT * FROM {table}"):
+                assert not any("LEAK-MARKER" in str(value) for value in row), table
+        assert raw.execute("SELECT COUNT(*) FROM product_facts_revisions").fetchone()[0] == 1
+
+
 # ---------------------------------------------------------------- source assets
 
 

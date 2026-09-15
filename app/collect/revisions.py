@@ -43,6 +43,7 @@ from app.collect.models import (
     ProductFactsRevision,
     SourceAsset,
 )
+from app.collect.urls import STRICT_URL_POLICY, UrlPolicy
 from app.core.clock import Clock
 from app.core.errors import InputValidationError
 from app.db.database import Database
@@ -106,9 +107,15 @@ class ProductFactsRevisionStore:
         self._db = db
         self._clock = clock
 
-    def append(self, collected: CollectedFacts) -> StoredRevision:
-        """Validate, evaluate and append one revision; return it as read back."""
-        evaluated = evaluate(collected)
+    def append(
+        self, collected: CollectedFacts, *, url_policy: UrlPolicy = STRICT_URL_POLICY
+    ) -> StoredRevision:
+        """Validate, evaluate and append one revision; return it as read back.
+
+        ``url_policy`` is the supplier profile's explicit safe query keys; the default keeps none,
+        so no URL with a query can be stored until a profile allowlists its keys.
+        """
+        evaluated = evaluate(collected, url_policy)
         revision_id = str(uuid.uuid4())
         with self._db.write() as session:
             self._require_stored_assets(session, evaluated)
