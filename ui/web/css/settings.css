@@ -23,11 +23,6 @@
   border-bottom-color: var(--color-accent);
 }
 
-.tabs .pf-logo {
-  width: 66px;
-  height: 16px;
-}
-
 .subtabs {
   display: flex;
   flex-wrap: wrap;
