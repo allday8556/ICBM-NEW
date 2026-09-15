@@ -24,7 +24,13 @@ CANONICAL_TABLES = (
     "marketplace_workflow_overlays",
     "marketplace_permission_attestations",
     "marketplace_connections",
+    "product_facts_revisions",
+    "product_facts_fields",
+    "product_facts_evidence",
+    "source_assets",
+    "product_facts_image_refs",
 )
+HEAD = "0007_m3_product_facts_revisions"
 
 
 def _url(path: Path) -> str:
@@ -36,7 +42,7 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0006_m2_marketplace_connections"
+        assert current_revision(engine) == head_revision() == HEAD
         tables = set(inspect(engine).get_table_names())
         assert tables == {"alembic_version", *CANONICAL_TABLES}
     finally:
@@ -185,7 +191,9 @@ def test_0006_downgrade_never_drops_durable_connection_state(tmp_path: Path, row
         command.downgrade(alembic_config(url), AT_0005)
     engine = create_sqlite_engine(url)
     try:
-        assert current_revision(engine) == head_revision() == "0006_m2_marketplace_connections"
+        # SQLite DDL is not transactional in Alembic: the later, empty 0007 steps down first, and
+        # 0006 then refuses, so revision 0006 and its data stay intact.
+        assert current_revision(engine) == "0006_m2_marketplace_connections"
     finally:
         engine.dispose()
     with contextlib.closing(_enforcing(database)) as raw:

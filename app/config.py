@@ -140,6 +140,12 @@ class AppConfig:
         return f"sqlite:///{self.database_path.as_posix()}"
 
     @property
+    def source_assets_dir(self) -> Path:
+        """Content-addressed COLLECT source assets (ADR-0010 §9), inside the owned data
+        directory (ADR-0006)."""
+        return self.data_dir / "source-assets"
+
+    @property
     def log_dir(self) -> Path | None:
         return self.data_dir / "logs" if self.log_to_file else None
 
