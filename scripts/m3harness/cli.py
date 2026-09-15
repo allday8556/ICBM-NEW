@@ -1,7 +1,6 @@
 """Command line of the M3 reconnaissance harness (ADR-0010 §4, §5; Issue #52 §3).
 
     python scripts/m3_recon.py init --campaign-id m3-recon-01 --dir <dir> --product-url <url>
-    python scripts/m3_recon.py credentials --dir <dir>
     python scripts/m3_recon.py preflight --dir <dir>
     python scripts/m3_recon.py approve --dir <dir> --sha <HEAD>
     python scripts/m3_recon.py run --dir <dir> --real
@@ -10,9 +9,24 @@
     python scripts/m3_recon.py report --dir <dir>
     python scripts/m3_recon.py rehearse --dir <dir>
 
-* ``credentials`` stores the KM통상 login in the campaign's scoped OS credential store. The login
-  is typed by the operator and never echoed.
-* ``preflight`` makes zero supplier requests and ends at the approval STOP.
+* The supplier login, the connection state and the session belong to the M1 connection owner:
+  the operator's own ICBM data directory and OS secret store, read exactly as ``icbm serve`` reads
+  them (Issue #52 comment 5687814715). The harness never asks for, copies or stores a login, a
+  session cookie or an auth header. A REAL run borrows the session through
+  ``ConnectService.collection_session()`` and keeps it in memory only. The campaign directory
+  holds the ledger, the encrypted captures and the sanitized findings. The campaign-scoped OS
+  secret-store service holds only the capture key.
+* The owner is found, never named. ``AppConfig.from_env()`` resolves ICBM-NEW's canonical data
+  root (``app.config.default_data_dir``) exactly as ``icbm serve`` does, and the harness has no
+  option for another one (Issue #52 comment 5688150031).
+* ``preflight`` makes zero supplier requests and ends at the approval STOP. For the connection
+  owner it checks, without contacting the supplier:
+  - ICBM is not running on its data directory (one process per data directory, ADR-0006);
+  - its database is at the schema head, brought there as ``icbm db upgrade`` would;
+  - the supplier login is saved in ICBM;
+  - the connection is not paused.
+
+  It records the owner it checked, and a run against any other owner is refused.
 * ``approve`` and ``approve-images`` are the user's explicit go-ahead, and they share one gate
   owner (PR #60 review 5214845204 §2). Each needs:
   - an interactive operator (a non-TTY stdin never approves);
@@ -24,34 +38,39 @@
   recorded as observed in phase A. The findings file is never the authority.
 * A REAL run proceeds only right after its own approval. That approval must be the ledger's
   latest event, no older than two hours, and the checkout must still be the clean SHA it was
-  issued at.
-* ``rehearse`` runs the whole flow on the synthetic storefront. It makes no supplier contact and
-  uses no OS credential store.
+  issued at. The connection owner is checked again before anything is recorded or sent.
+* ``rehearse`` runs the whole flow on the synthetic storefront, with a stand-in connection owner.
+  It makes no supplier contact and uses no OS credential store.
 """
 
 import argparse
-import getpass
 import json
 import os
 import re
 import secrets
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from alembic.util.exc import CommandError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app import __version__
-from app.config import AppConfig
+from app.config import AppConfig, ConfigError
 from app.connect.credentials import SupplierCredentialStore
-from app.container import build_container
+from app.connect.state import ConnectionState
+from app.container import Container, build_container
 from app.core.egress import EGRESS
-from app.core.ownership import acquire_data_dir
+from app.core.ownership import DataDirOwnershipError, acquire_data_dir
 from app.core.secrets import SERVICE_NAME, KeyringSecretStore, MemorySecretStore, SecretStore
-from app.db.migrate import head_revision, read_only_revision, upgrade_to_head
+from app.db.migrate import upgrade_to_head
 from integrations.suppliers import kmretail
-from integrations.suppliers.base import Credentials, SupplierDefinition, SupplierGateway
+from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.registry import SUPPLIERS
 from integrations.suppliers.transport.collection import PolicedCollectionGateway, ci_or_test
 from integrations.suppliers.transport.session_payload import decode_session
 from scripts.m2harness.gates import Checkout, GitCheckout, dedicated_problems, digest
@@ -68,14 +87,16 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 # Why this process may not approve or run for real (CI or a test run); None when it may. The
 # CLI always uses ``ci_or_test``; tests substitute it to reach the other gates.
 Blocker = Callable[[], str | None]
+OPERATOR = "operator:local"
 
 
 class Refused(RuntimeError):
     """A gate refused the command; nothing was sent."""
 
 
-def scoped_store(campaign_id: str) -> SecretStore:
-    """The campaign's own OS credential store service; never the operator's ordinary entries."""
+def capture_key_store(campaign_id: str) -> SecretStore:
+    """The campaign's own OS secret-store service. It holds only the capture key: never a
+    supplier login, session or auth header, which stay with the M1 connection owner."""
     return KeyringSecretStore(
         service=f"{SERVICE_NAME}/m3-recon/{campaign_id}", backend=os_backend()
     )
@@ -85,11 +106,108 @@ def _definition(mode: Mode) -> SupplierDefinition:
     return kmretail.DEFINITION if mode is Mode.REAL else fake_site.definition()
 
 
-def _config(paths: ReconPaths) -> AppConfig:
+# ---------------------------------------------------------------- the M1 connection owner
+
+
+@dataclass(frozen=True)
+class ConnectionOwner:
+    """The M1 connection owner whose session the reconnaissance borrows (ADR-0010 §3, §11). It is
+    the ICBM data directory and secret store that hold the supplier login, the connection state
+    and the session. A REAL campaign uses the operator's own ICBM configuration; the DRY
+    rehearsal and the tests stand one in."""
+
+    config: AppConfig
+    # None: the store the configuration names (the OS secret store for the operator).
+    secrets: SecretStore | None = None
+    # None: the product's own CONNECT transport (M1).
+    gateway: SupplierGateway | None = None
+    suppliers: tuple[SupplierDefinition, ...] = SUPPLIERS
+
+    @classmethod
+    def operator(cls) -> "ConnectionOwner":
+        """The operator's ICBM configuration, read exactly as ``icbm serve`` reads it."""
+        try:
+            return cls(config=AppConfig.from_env())
+        except ConfigError as exc:
+            raise Refused(f"the ICBM configuration is invalid ({exc})") from None
+
+
+class OwnerUnavailable(Refused):
+    """The connection owner cannot be opened: ICBM is running on its data directory, or its
+    database cannot be brought to the schema head."""
+
+
+class OwnerBusy(OwnerUnavailable):
+    """ICBM is running on the owner's data directory (one process per data directory)."""
+
+
+def owner_identity(owner: ConnectionOwner) -> dict[str, str]:
+    """What binds a campaign to its connection owner: the resolved data directory and the secret
+    store the login is read from. The preflight records it, and a run against any other owner is
+    refused, so a campaign can never move to a different owner after its checks."""
+    return {
+        "data_dir": str(owner.config.data_dir.resolve()),
+        "secret_backend": owner.config.secret_backend,
+    }
+
+
+@contextmanager
+def _owner_container(owner: ConnectionOwner) -> Iterator[Container]:
+    """The connection owner's own services, under its data-directory lease (ADR-0006). Its
+    database is brought to the schema head exactly as ``icbm db upgrade`` does, so a canonical
+    data root that ICBM has not created yet is created here. No supplier is contacted."""
+    try:
+        lease = acquire_data_dir(owner.config.data_dir, app_version=__version__)
+    except DataDirOwnershipError:
+        raise OwnerBusy("ICBM is running on its data directory; stop it first") from None
+    with lease:
+        try:
+            upgrade_to_head(owner.config.database_url, ownership=lease)
+        except (CommandError, SQLAlchemyError) as exc:
+            raise OwnerUnavailable(
+                f"the ICBM database cannot be brought to the schema head ({type(exc).__name__})"
+            ) from None
+        container = build_container(
+            owner.config,
+            ownership=lease,
+            secret_store=owner.secrets,
+            supplier_gateway=owner.gateway,
+            suppliers=owner.suppliers,
+        )
+        try:
+            yield container
+        finally:
+            container.db.dispose()
+
+
+def _owner_state(container: Container, supplier_key: str) -> list[tuple[str, bool]]:
+    """What the owner itself reports, without a supplier request: its login and its state."""
+    summary = container.connect.supplier_connection(supplier_key)
+    return [
+        ("icbm_login_saved", summary.credentials_stored),
+        ("icbm_connection_not_paused", summary.state is not ConnectionState.PAUSED),
+    ]
+
+
+def owner_checks(owner: ConnectionOwner, supplier_key: str) -> list[tuple[str, bool]]:
+    """Whether the connection owner can provide the session, with zero supplier requests. A check
+    that cannot be made fails."""
+    unknown = [("icbm_login_saved", False), ("icbm_connection_not_paused", False)]
+    try:
+        with _owner_container(owner) as container:
+            state = _owner_state(container, supplier_key)
+    except OwnerBusy:
+        return [("icbm_not_running", False), ("icbm_data_dir_at_head", False), *unknown]
+    except OwnerUnavailable:
+        return [("icbm_not_running", True), ("icbm_data_dir_at_head", False), *unknown]
+    return [("icbm_not_running", True), ("icbm_data_dir_at_head", True), *state]
+
+
+# ---------------------------------------------------------------- init / preflight
+
+
+def _dry_owner_config(paths: ReconPaths) -> AppConfig:
     return AppConfig(data_dir=paths.data_dir, secret_backend="memory", log_to_file=False)
-
-
-# ---------------------------------------------------------------- init / credentials / preflight
 
 
 def init(root: Path, *, campaign_id: str, product_url: str, mode: Mode) -> Ledger:
@@ -103,55 +221,48 @@ def init(root: Path, *, campaign_id: str, product_url: str, mode: Mode) -> Ledge
     ledger = Ledger.create(
         paths.ledger, campaign_id=campaign_id, mode=mode, product_url=product_url
     )
-    paths.data_dir.mkdir(parents=True, exist_ok=True)
-    with acquire_data_dir(paths.data_dir, app_version=__version__) as lease:
-        upgrade_to_head(_config(paths).database_url, ownership=lease)
+    if mode is Mode.DRY:
+        # Only the rehearsal has a data directory of its own, for its stand-in connection owner.
+        paths.data_dir.mkdir(parents=True, exist_ok=True)
+        with acquire_data_dir(paths.data_dir, app_version=__version__) as lease:
+            upgrade_to_head(_dry_owner_config(paths).database_url, ownership=lease)
     return ledger
 
 
-def store_credentials(root: Path, *, read: Callable[[str], str] = getpass.getpass) -> None:
-    ledger = Ledger(ReconPaths(root).ledger)
-    campaign = ledger.campaign()
-    if campaign.mode is not Mode.REAL or ci_or_test() is not None:
-        raise Refused("credentials are typed by the operator for a REAL campaign only")
-    username = read("KM통상 login ID (not echoed): ")
-    password = read("KM통상 password (not echoed): ")
-    if not username or not password:
-        raise Refused("both the login ID and the password are needed")
-    SupplierCredentialStore(scoped_store(campaign.campaign_id)).save(
-        kmretail.PROFILE.supplier_key, Credentials(username, password)
-    )
-
-
-def preflight(root: Path, *, checkout: Checkout | None = None) -> list[tuple[str, bool]]:
+def preflight(
+    root: Path,
+    *,
+    owner: ConnectionOwner | None = None,
+    checkout: Checkout | None = None,
+    blocker: Blocker = ci_or_test,
+) -> list[tuple[str, bool]]:
     """Zero supplier requests. Every check must pass before the approval STOP is reached."""
     paths = ReconPaths(root)
     ledger = Ledger(paths.ledger)
     campaign = ledger.campaign()
+    if owner is None:
+        if campaign.mode is not Mode.REAL:
+            raise Refused("a DRY preflight names its stand-in connection owner")
+        owner = ConnectionOwner.operator()
     checks = [
         ("ledger_waiting", campaign.state in (State.INITIALIZED, State.AWAITING_APPROVAL)),
         ("zero_requests", not any(ledger.counts().values())),
-        ("data_dir_at_head", read_only_revision(_config(paths).database_path) == head_revision()),
     ]
     head = ""
     if campaign.mode is Mode.REAL:
         checkout = checkout or GitCheckout()
         head = checkout.head()
         checks += [
-            ("not_ci_or_test", ci_or_test() is None),
+            ("not_ci_or_test", blocker() is None),
             ("dedicated_directory", not dedicated_problems(root, os.environ)),
             ("clean_tree", checkout.dirty() == 0),
-            (
-                "credentials_stored",
-                SupplierCredentialStore(scoped_store(campaign.campaign_id)).stored(
-                    kmretail.PROFILE.supplier_key
-                ),
-            ),
         ]
+    checks += owner_checks(owner, _definition(campaign.mode).profile.supplier_key)
     if all(passed for _, passed in checks):
         document = {
             "campaign_id": campaign.campaign_id,
             "head": head,
+            "owner": owner_identity(owner),
             "checks": dict(checks),
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
@@ -160,6 +271,7 @@ def preflight(root: Path, *, checkout: Checkout | None = None) -> list[tuple[str
             "PREFLIGHT_PASSED",
             state=State.AWAITING_APPROVAL,
             head=head,
+            owner=owner_identity(owner),
             digest=digest(paths.preflight),
         )
     return checks
@@ -288,59 +400,69 @@ def _run(
     root: Path,
     phase: str,
     *,
-    store: SecretStore,
-    connect_gateway: SupplierGateway | None,
-    collection: PolicedCollectionGateway,
+    owner: ConnectionOwner,
+    capture_secrets: Callable[[], SecretStore],
+    collection: Callable[[], PolicedCollectionGateway],
+    start: Callable[[], None],
     clock: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
+    """Run one phase with the connection owner's services. The owner is checked first, so a
+    refusal records and sends nothing and leaves the approval to be used once it is fixed."""
     paths = ReconPaths(root)
     ledger = Ledger(paths.ledger)
     campaign = ledger.campaign()
     definition = _definition(campaign.mode)
     key = definition.profile.supplier_key
     session = Session()
-    config = _config(paths)
-    with acquire_data_dir(paths.data_dir, app_version=__version__) as lease:
-        container = build_container(
-            config,
-            ownership=lease,
-            secret_store=store,
-            supplier_gateway=connect_gateway,
-            suppliers=(definition,),
+    passed = ledger.last_event("PREFLIGHT_PASSED")
+    if passed is None or passed["detail"].get("owner") != owner_identity(owner):
+        raise Refused(
+            "the connection owner is not the one the preflight checked; run the preflight again"
         )
-        try:
+    with _owner_container(owner) as container:
+        failed = [name for name, passed in _owner_state(container, key) if not passed]
+        if failed:
+            raise Refused(f"the ICBM connection owner cannot provide the session: {failed}")
+        gateway = collection()
+        start()
 
-            def connect() -> bytes:
-                session.payload = container.connect.collection_session(key, operator_initiated=True)
-                return session.payload
+        def connect() -> bytes:
+            session.payload = container.connect.collection_session(key, operator_initiated=True)
+            return session.payload
 
-            def secret_values() -> list[str]:
-                stored = SupplierCredentialStore(store).load(key)
-                login = [stored.username, stored.password] if stored else []
-                return [*login, *session.cookie_values()]
+        def secret_values() -> list[str]:
+            # Read from the owner only to refuse findings that would carry them; never copied.
+            stored = SupplierCredentialStore(container.secrets).load(key)
+            login = [stored.username, stored.password] if stored else []
+            return [*login, *session.cookie_values()]
 
-            recon = Recon(
-                ledger=ledger,
-                gateway=collection,
-                supplier=definition.profile,
-                captures=CaptureStore(paths.captures, store, campaign_id=campaign.campaign_id),
-                findings_dir=paths.findings,
-                session=connect,
-                secrets=secret_values,
-            )
-            if clock is not None:
-                recon.clock = clock
-                recon.budget.clock = clock
-            if sleep is not None:
-                recon.sleep = sleep
-            return recon.phase_a() if phase == "A" else recon.phase_b()
-        finally:
-            container.db.dispose()
+        recon = Recon(
+            ledger=ledger,
+            gateway=gateway,
+            supplier=definition.profile,
+            captures=CaptureStore(
+                paths.captures, capture_secrets(), campaign_id=campaign.campaign_id
+            ),
+            findings_dir=paths.findings,
+            session=connect,
+            secrets=secret_values,
+        )
+        if clock is not None:
+            recon.clock = clock
+            recon.budget.clock = clock
+        if sleep is not None:
+            recon.sleep = sleep
+        return recon.phase_a() if phase == "A" else recon.phase_b()
 
 
 def run_real(
-    root: Path, phase: str, *, checkout: Checkout, blocker: Blocker = ci_or_test
+    root: Path,
+    phase: str,
+    *,
+    checkout: Checkout,
+    blocker: Blocker = ci_or_test,
+    owner: ConnectionOwner | None = None,
 ) -> dict[str, Any]:
     ledger = Ledger(ReconPaths(root).ledger)
     campaign = ledger.campaign()
@@ -349,16 +471,20 @@ def run_real(
     if (reason := blocker()) is not None:
         raise Refused(f"a REAL run never happens under {reason}")
     _consume(ledger, "APPROVED_A" if phase == "A" else "APPROVED_B", checkout, blocker)
-    ledger.record(
-        f"RUN_{phase}_STARTED", state=State.RUNNING_A if phase == "A" else State.RUNNING_B
-    )
-    EGRESS.install()
+
+    def start() -> None:
+        ledger.record(
+            f"RUN_{phase}_STARTED", state=State.RUNNING_A if phase == "A" else State.RUNNING_B
+        )
+        EGRESS.install()
+
     return _run(
         root,
         phase,
-        store=scoped_store(campaign.campaign_id),
-        connect_gateway=None,  # the product's own CONNECT transport (M1)
-        collection=PolicedCollectionGateway(),
+        owner=owner or ConnectionOwner.operator(),
+        capture_secrets=lambda: capture_key_store(campaign.campaign_id),
+        collection=PolicedCollectionGateway,
+        start=start,
     )
 
 
@@ -408,22 +534,40 @@ def report(root: Path, *, secret_values: Sequence[str] = ()) -> Path:
 # ---------------------------------------------------------------- DRY rehearsal
 
 
-def rehearse(root: Path, *, storefront: fake_site.FakeStorefront | None = None) -> dict[str, Any]:
-    """The whole reconnaissance on the synthetic storefront: no supplier, no OS keyring. DRY has
-    no operator and no SHA, so it records the approvals itself; the ledger still enforces the
+def rehearse(
+    root: Path,
+    *,
+    storefront: fake_site.FakeStorefront | None = None,
+    owner_secrets: SecretStore | None = None,
+    capture_secrets: SecretStore | None = None,
+) -> dict[str, Any]:
+    """The whole reconnaissance on the synthetic storefront: no supplier, no OS keyring. The
+    stand-in connection owner is an ICBM data directory inside the campaign with an in-memory
+    secret store, where the login is saved through ICBM's own operator action. DRY has no
+    operator and no SHA, so it records the approvals itself. The ledger still enforces the
     phases, the caps and the observed-host authority."""
     ledger = init(
         root, campaign_id="m3-recon-dry", product_url=fake_site.PRODUCT_URL, mode=Mode.DRY
     )
-    store = MemorySecretStore()
-    SupplierCredentialStore(store).save(
-        fake_site.definition().profile.supplier_key,
-        Credentials(fake_site.USERNAME, fake_site.PASSWORD),
+    connect_gateway = fake_site.FakeConnectGateway()
+    definition = fake_site.definition()
+    owner = ConnectionOwner(
+        config=_dry_owner_config(ReconPaths(root)),
+        secrets=owner_secrets or MemorySecretStore(),
+        gateway=connect_gateway,
+        suppliers=(definition,),
     )
-    if not all(passed for _, passed in preflight(root)):
+    captures = capture_secrets or MemorySecretStore()
+    with _owner_container(owner) as container:
+        container.connect.save_credentials(
+            definition.profile.supplier_key,
+            username=fake_site.USERNAME,
+            password=fake_site.PASSWORD,
+            actor=OPERATOR,
+        )
+    if not all(passed for _, passed in preflight(root, owner=owner)):
         raise Refused("the DRY preflight failed")
     ledger.record("APPROVED_A", sha="dry", nonce="dry")
-    ledger.record("RUN_A_STARTED", state=State.RUNNING_A)
     now = [1_000_000.0]
 
     def clock() -> float:
@@ -434,16 +578,29 @@ def rehearse(root: Path, *, storefront: fake_site.FakeStorefront | None = None) 
 
     site = storefront or fake_site.FakeStorefront()
     collection = PolicedCollectionGateway(http_transport=site.transport())
-    connect_gateway = fake_site.FakeConnectGateway()
-    common = {"store": store, "connect_gateway": connect_gateway, "collection": collection}
-    phase_a = _run(root, "A", clock=clock, sleep=sleep, **common)  # type: ignore[arg-type]
+
+    def phase(name: str, state: State) -> dict[str, Any]:
+        def start() -> None:
+            ledger.record(f"RUN_{name}_STARTED", state=state)
+
+        return _run(
+            root,
+            name,
+            owner=owner,
+            capture_secrets=lambda: captures,
+            collection=lambda: collection,
+            start=start,
+            clock=clock,
+            sleep=sleep,
+        )
+
+    phase_a = phase("A", State.RUNNING_A)
     phase_b: dict[str, Any] = {}
     observed = ledger.observed_hosts()
     if ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL and observed:
         ledger.approve_hosts(observed)
         ledger.record("APPROVED_B", sha="dry", hosts=sorted(observed), nonce="dry")
-        ledger.record("RUN_B_STARTED", state=State.RUNNING_B)
-        phase_b = _run(root, "B", clock=clock, sleep=sleep, **common)  # type: ignore[arg-type]
+        phase_b = phase("B", State.RUNNING_B)
     secret_values = [fake_site.USERNAME, fake_site.PASSWORD, fake_site.SESSION_COOKIE]
     path = report(root, secret_values=secret_values)
     return {
@@ -474,7 +631,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in (
         "init",
-        "credentials",
         "preflight",
         "approve",
         "run",
@@ -500,9 +656,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "init":
             init(root, campaign_id=args.campaign_id, product_url=args.product_url, mode=Mode.REAL)
             print(f"initialized {args.campaign_id}: zero supplier requests")
-        elif args.command == "credentials":
-            store_credentials(root)
-            print("stored in the campaign's scoped credential store (not shown)")
         elif args.command == "preflight":
             checks = preflight(root)
             for name, passed in checks:

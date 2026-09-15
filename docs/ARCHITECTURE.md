@@ -31,7 +31,9 @@ CI                    GitHub Actions
 
 No framework, DB engine, browser driver, secret store or queue may be swapped casually. A change requires an ADR.
 
-Exactly one ICBM process owns a data directory at a time, through an OS lock on `<ICBM_DATA_DIR>/.icbm-owner.lock` (`docs/adr/0006-single-data-directory-process-ownership.md`).
+ICBM-NEW keeps its state in one canonical per-user application data root. `app/config.py` is its only resolver: `%LOCALAPPDATA%\ICBM-NEW` on Windows. `ICBM_DATA_DIR` is an explicit override, for tests and dedicated acceptance directories only. Exactly one ICBM process owns a data directory at a time, through an OS lock on `<data directory>/.icbm-owner.lock` (`docs/adr/0006-single-data-directory-process-ownership.md`).
+
+The supplier and marketplace logins live in the OS secret-store service `ICBM-NEW` (the same name as the data root), and CONNECT alone owns them together with the connection state and the sessions. COLLECT, and every harness that needs a session, borrows that owner through the canonical resolver and never defines a second one (Issue #52 comments 5687814715 and 5688150031).
 
 ## 3. Layering rule
 

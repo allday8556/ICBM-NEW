@@ -5,18 +5,51 @@ loopback-only binding (ADR-0001) and DRY_RUN-only execution during M0 (CLAUDE.md
 """
 
 import os
+import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
 from app.connect.marketplace.attestation import A0_MAX_AGE_DAYS, valid_max_age_days
 from app.core.execution import ExecutionMode
 from app.core.net import is_loopback_host
+from app.core.secrets import SERVICE_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATA_DIR = REPO_ROOT / "var"
 DEFAULT_UI_DIR = REPO_ROOT / "ui" / "web"
+DATA_DIR_ENV = "ICBM_DATA_DIR"
+
+
+def default_data_dir(
+    environ: Mapping[str, str] | None = None, *, platform: str = sys.platform
+) -> Path:
+    """ICBM-NEW's canonical application data root (Issue #52 comment 5688150031).
+
+    It is decided here and nowhere else. It is the per-user application data directory named
+    after the OS secret-store service that holds the logins (``ICBM-NEW``), so the data root and
+    the credential owner always belong to the same user and application. It never depends on the
+    checkout, the working directory or the shell:
+    - ``%LOCALAPPDATA%\\ICBM-NEW`` on Windows (the v1 target);
+    - ``$XDG_DATA_HOME/ICBM-NEW`` elsewhere, by default ``~/.local/share/ICBM-NEW``.
+    """
+    env = os.environ if environ is None else environ
+    if platform == "win32":
+        name, fallback = "LOCALAPPDATA", Path.home() / "AppData" / "Local"
+    else:
+        name, fallback = "XDG_DATA_HOME", Path.home() / ".local" / "share"
+    raw = env.get(name)
+    base = Path(raw) if raw and Path(raw).is_absolute() else fallback
+    return (base / SERVICE_NAME).resolve()
+
+
+def configured_data_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """The data directory a process uses: ``ICBM_DATA_DIR`` when it is set explicitly (tests,
+    dedicated acceptance directories), otherwise the canonical root. Ordinary use never sets it."""
+    env = os.environ if environ is None else environ
+    raw = env.get(DATA_DIR_ENV)
+    return Path(raw).resolve() if raw else default_data_dir(env)
+
 
 SecretBackend = Literal["os", "memory"]
 
@@ -40,7 +73,6 @@ def _parse_bool(raw: str) -> bool:
 
 
 _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
-    "data_dir": ("ICBM_DATA_DIR", lambda raw: Path(raw).resolve()),
     "host": ("ICBM_HOST", str),
     "port": ("ICBM_PORT", int),
     "execution_mode": ("ICBM_EXECUTION_MODE", ExecutionMode),
@@ -64,7 +96,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
 
 @dataclass(frozen=True)
 class AppConfig:
-    data_dir: Path = DEFAULT_DATA_DIR
+    data_dir: Path = field(default_factory=default_data_dir)
     host: str = "127.0.0.1"
     # Not 8765: legacy clients still poll that port on operator machines.
     port: int = 8790
@@ -157,7 +189,7 @@ class AppConfig:
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, **overrides: Any) -> "AppConfig":
         env = os.environ if environ is None else environ
-        values: dict[str, Any] = {}
+        values: dict[str, Any] = {"data_dir": configured_data_dir(env)}
         for field_name, (var, parse) in _ENV.items():
             raw = env.get(var)
             if raw is None or raw == "":

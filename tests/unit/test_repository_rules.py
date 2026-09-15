@@ -382,6 +382,81 @@ def test_lease_coverage_is_decided_only_by_require_ownership() -> None:
     assert deciders <= {"app/core/ownership.py"}
 
 
+# ---------------------------------------------------------------- the connection owner
+
+# Issue #52 comments 5687814715 and 5688150031: ICBM-NEW decides its own data root in one place,
+# and CONNECT alone owns the logins, the connection state and the sessions. No other code may
+# redefine where that owner lives, or stand up a second one.
+DATA_ROOT_RESOLVER = "app/config.py"
+_DATA_ROOT_READ = re.compile(
+    r"LOCALAPPDATA|XDG_DATA_HOME|DEFAULT_DATA_DIR"
+    r"|(?:\.get|getenv)\(\s*[\"']ICBM_DATA_DIR|\[\s*[\"']ICBM_DATA_DIR[\"']\s*\]"
+)
+M3_HARNESS = REPO_ROOT / "scripts" / "m3harness"
+# Where the M3 harness may make each of these calls: (module, enclosing function).
+M3_OWNER_CALLS = {
+    # The REAL owner is the canonical one; the only configuration built here is the DRY stand-in.
+    "AppConfig": {("cli.py", "_dry_owner_config")},
+    "ConnectionOwner": {("cli.py", "rehearse")},
+    "build_container": {("cli.py", "_owner_container")},
+    # The campaign-scoped store holds the capture key only.
+    "KeyringSecretStore": {("cli.py", "capture_key_store")},
+    # Never: a second session store, a second CONNECT service, or a login prompt.
+    "SupplierSessionStore": set(),
+    "ConnectService": set(),
+    "getpass": set(),
+}
+
+
+def test_only_the_config_module_resolves_the_data_root() -> None:
+    readers = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for root in (REPO_ROOT / "app", REPO_ROOT / "integrations", REPO_ROOT / "scripts")
+        for path in root.rglob("*.py")
+        if _DATA_ROOT_READ.search(path.read_text("utf-8"))
+    }
+    assert readers == {DATA_ROOT_RESOLVER}
+
+
+def test_icbm_and_the_m3_harness_take_the_owner_from_the_same_resolver() -> None:
+    icbm = ast.parse((REPO_ROOT / "app" / "cli.py").read_text("utf-8"))
+    assert _calls(icbm, "from_env"), "icbm reads its configuration through AppConfig.from_env"
+    harness = ast.parse((M3_HARNESS / "cli.py").read_text("utf-8"))
+    operator = next(
+        f for f in ast.walk(harness) if isinstance(f, ast.FunctionDef) and f.name == "operator"
+    )
+    from_env = _calls(operator, "from_env")
+    assert from_env and all(not c.args and not c.keywords for c in from_env), (
+        "the REAL owner is AppConfig.from_env() with no override"
+    )
+
+
+def test_the_m3_harness_never_defines_a_connection_owner_of_its_own() -> None:
+    for path in sorted(M3_HARNESS.glob("*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        assert "getpass" not in _imported_modules(tree), f"{path.name} prompts for a login"
+        for call in _calls(tree):
+            callee = _callee(call)
+            function = _enclosing_function(tree, call)
+            where = (path.name, getattr(function, "name", "<module>"))
+            if callee in M3_OWNER_CALLS:
+                assert where in M3_OWNER_CALLS[callee], f"{path.name}:{call.lineno} {callee}"
+            receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+            writes_login = (
+                callee == "save"
+                and isinstance(receiver, ast.Call)
+                and _callee(receiver) == "SupplierCredentialStore"
+            )
+            assert not writes_login, f"{path.name}:{call.lineno} writes a supplier login"
+
+
+def test_the_docs_name_the_resolver_and_the_canonical_root() -> None:
+    for path in (README_MD, DOCS / "ARCHITECTURE.md"):
+        text = _read(path)
+        assert "app/config.py" in text and r"%LOCALAPPDATA%\ICBM-NEW" in text, path.name
+        assert r"var\icbm.db" not in text and "var/icbm.db" not in text, path.name
+
+
 # ---------------------------------------------------------------- supplier CONNECT boundary
 
 # Issue #7 comments 5653608622 §6/§9 and 5653615136: supplier-specific code is site knowledge
