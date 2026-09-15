@@ -628,6 +628,26 @@ class ConnectService:
             allow_login = bool(row and row.auto_connect)
         return self.verify(supplier_key, trigger=AUTO_CONNECT, allow_login=allow_login)
 
+    def collection_session(self, supplier_key: str, *, operator_initiated: bool = False) -> bytes:
+        """The authenticated session payload for COLLECT reads (ADR-0010 §3, §11).
+
+        The connection is established or reused exactly as for any protected operation: session
+        reuse first, and at most one login through the single flight — when auto-connect allows
+        it, or when the operator started the work, as for a connection test. COLLECT therefore
+        has no login loop of its own. The payload is credential-equivalent: the caller hands it
+        to the collection gateway in memory and never persists or logs it.
+        """
+        if operator_initiated:
+            self.verify(supplier_key, trigger=OPERATOR_TEST, allow_login=True)
+        else:
+            self.ensure_connected(supplier_key)
+        payload = self._sessions.load(supplier_key)
+        if payload is None:
+            raise AuthError(
+                "SUPPLIER_SESSION_UNAVAILABLE", "the supplier connection holds no usable session"
+            )
+        return payload
+
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.
 
