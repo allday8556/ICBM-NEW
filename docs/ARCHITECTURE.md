@@ -67,7 +67,10 @@ Owns supplier and marketplace connectivity only. Supplier CONNECT is supplier-ge
 - crawl/session policies
 
 ### COLLECT
-Owns source evidence and source facts.
+Owns source evidence and source facts. Collection is supplier-generic (`docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md`):
+- every source read goes through a common collection gateway, separate from the CONNECT proof port;
+- suppliers contribute pure collection definitions and parsers;
+- COLLECT persists ProductFactsRevision source truth from M3, while the canonical Product arrives in M4.
 
 - discover/open/extract
 - raw evidence
@@ -110,7 +113,10 @@ Owns everything after publication.
 ## 5. Canonical truth model
 
 ### ProductFactsRevision
-Append-oriented source truth. Recollection creates a new revision; facts are not silently mutated in place.
+Append-oriented source truth. Every successful recollection creates a new immutable revision, even when the source is unchanged; facts are never mutated in place. ADR-0010 defines:
+- provenance: revision ID, extractor revision and fingerprint, collection run/correlation, `facts_status`;
+- the product-scoped evidence model;
+- fingerprint rules.
 
 Minimum identity:
 
@@ -277,6 +283,12 @@ source URL
 ```
 
 Detail-page embedded images used in published content are rehosted as part of the same pipeline.
+
+COLLECT covers only the first three steps for *source* assets (ADR-0010 §9):
+- It keeps the original bytes unmodified, with role/order, dimensions, MIME type, size and SHA-256.
+- It never transforms them.
+
+Derived marketplace variants belong to the M4 image pipeline and to each marketplace adapter/readiness contract.
 
 ## 11. Source drift
 
