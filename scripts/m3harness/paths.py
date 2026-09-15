@@ -1,5 +1,6 @@
 """The layout of one reconnaissance campaign directory. For a REAL campaign it lies outside the
-repository and every ordinary ICBM data directory; the recon data directory lives inside it."""
+repository and every ordinary ICBM data directory. It holds no supplier login, session or ICBM
+data directory: those stay with the M1 connection owner (Issue #52 comment 5687814715)."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ class ReconPaths:
 
     @property
     def data_dir(self) -> Path:
+        # The DRY rehearsal's stand-in ICBM data directory; a REAL campaign has none.
         return self.root / "data"
 
     @property

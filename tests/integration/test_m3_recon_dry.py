@@ -3,15 +3,25 @@
 import contextlib
 import io
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
 import httpx
 import pytest
 
-from app.core.secrets import MemorySecretStore
+from app.config import AppConfig
+from app.core.ownership import acquire_data_dir
+from app.core.secrets import MemorySecretStore, SecretStore
+from integrations.suppliers import kmretail
+from integrations.suppliers.base import (
+    Credentials,
+    ProbeResponse,
+    RequestKind,
+    SupplierDefinition,
+)
 from scripts.m3harness import cli, fake_site
-from scripts.m3harness.capture import CaptureStore
+from scripts.m3harness.capture import KEY_NAME, CaptureStore
 from scripts.m3harness.cli import Refused
 from scripts.m3harness.ledger import Ledger, LedgerError, Mode, State
 from scripts.m3harness.paths import ReconPaths
@@ -255,3 +265,160 @@ def test_a_product_url_off_the_storefront_is_refused_at_init(tmp_path: Path) -> 
                 product_url=url,
                 mode=Mode.DRY,
             )
+
+
+# ---------------------------------------------------------------- the M1 connection owner
+# Issue #52 comment 5687814715: M1/CONNECT is the only owner of the supplier login and session.
+
+KM = kmretail.PROFILE.supplier_key
+ZERO = {"PRODUCT_READ": 0, "IMAGE_REQUEST": 0, "POLICY_READ": 0}
+
+
+class NoSupplierCalls:
+    """The owner's CONNECT transport in these tests: any supplier request fails the test."""
+
+    def fetch(
+        self, definition: SupplierDefinition, *, kind: RequestKind, session: bytes | None
+    ) -> ProbeResponse:
+        raise AssertionError("a supplier request was made")
+
+    def login(self, definition: SupplierDefinition, credentials: Credentials) -> bytes:
+        raise AssertionError("a supplier login was made")
+
+
+class RecordingStore(MemorySecretStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[str] = []
+
+    def set(self, key: str, value: str) -> None:
+        self.writes.append(key)
+        super().set(key, value)
+
+
+def _never(campaign_id: str) -> SecretStore:
+    raise AssertionError("the campaign-scoped store is never used here")
+
+
+def _owner(
+    tmp_path: Path, template: Path, *, login: bool = True, database: bool = True
+) -> tuple[cli.ConnectionOwner, RecordingStore]:
+    """An ICBM data directory standing in for the operator's, with the M1 login saved through
+    ICBM's own operator action."""
+    data = tmp_path / "icbm"
+    data.mkdir()
+    if database:
+        shutil.copyfile(template, data / "icbm.db")
+    store = RecordingStore()
+    owner = cli.ConnectionOwner(
+        config=AppConfig(data_dir=data, secret_backend="memory", log_to_file=False),
+        secrets=store,
+        gateway=NoSupplierCalls(),
+    )
+    if login:
+        with cli._owner_container(owner) as container:
+            container.connect.save_credentials(
+                KM, username="m1-operator", password="m1-password", actor=cli.OPERATOR
+            )
+    store.writes.clear()
+    return owner, store
+
+
+def _initialized(root: Path) -> Ledger:
+    return cli.init(
+        root,
+        campaign_id="m3-recon-01",
+        product_url="https://kmretail.co.kr/product/x/1/",
+        mode=Mode.REAL,
+    )
+
+
+def test_real_preflight_uses_the_m1_login_and_copies_nothing(
+    tmp_path: Path, migrated_template: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "capture_key_store", _never)
+    owner, store = _owner(tmp_path, migrated_template)
+    root = tmp_path / "campaign"
+    ledger = _initialized(root)
+    checks = cli.preflight(root, owner=owner, checkout=Checkout(), blocker=_unblocked)
+    assert all(passed for _, passed in checks), checks
+    assert dict(checks)["icbm_login_saved"] is True
+    assert ledger.state() is State.AWAITING_APPROVAL
+    # No login prompt, no copy: the campaign holds its ledger and preflight record only, and
+    # nothing was written to the owner's secret store.
+    assert sorted(path.name for path in root.iterdir()) == ["ledger.sqlite3", "preflight.json"]
+    assert store.writes == []
+    assert ledger.counts() == ZERO
+    with pytest.raises(SystemExit):
+        cli.main(["credentials", "--dir", str(root)])
+
+
+@pytest.mark.parametrize(
+    ("case", "failing"),
+    [
+        ("no_login", {"icbm_login_saved"}),
+        ("paused", {"icbm_connection_not_paused"}),
+        ("icbm_running", {"icbm_not_running", "icbm_login_saved", "icbm_connection_not_paused"}),
+        (
+            "no_database",
+            {
+                "icbm_data_dir_at_head",
+                "icbm_not_running",
+                "icbm_login_saved",
+                "icbm_connection_not_paused",
+            },
+        ),
+    ],
+)
+def test_real_preflight_fails_safely_without_a_usable_m1_owner(
+    case: str, failing: set[str], tmp_path: Path, migrated_template: Path
+) -> None:
+    owner, _ = _owner(
+        tmp_path,
+        migrated_template,
+        login=case not in ("no_login", "no_database"),
+        database=case != "no_database",
+    )
+    if case == "paused":
+        with contextlib.closing(sqlite3.connect(owner.config.database_path)) as db:
+            assert db.execute("UPDATE supplier_connections SET state = 'PAUSED'").rowcount == 1
+            db.commit()
+    root = tmp_path / "campaign"
+    ledger = _initialized(root)
+    with contextlib.ExitStack() as running:
+        if case == "icbm_running":
+            running.enter_context(acquire_data_dir(owner.config.data_dir, app_version="icbm"))
+        checks = cli.preflight(root, owner=owner, checkout=Checkout(), blocker=_unblocked)
+    assert {name for name, passed in checks if not passed} == failing
+    assert ledger.state() is State.INITIALIZED
+    assert not ReconPaths(root).preflight.exists()
+    assert ledger.counts() == ZERO
+
+
+def test_a_real_run_refuses_before_recording_or_sending_without_an_m1_login(
+    tmp_path: Path, migrated_template: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "capture_key_store", _never)
+    owner, _ = _owner(tmp_path, migrated_template, login=False)
+    root = tmp_path / "real"
+    ledger = _real_campaign(root)
+    ledger.record("APPROVED_A", sha=SHA_A, nonce="n")
+    with pytest.raises(Refused, match="icbm_login_saved"):
+        cli.run_real(root, "A", checkout=Checkout(), blocker=_unblocked, owner=owner)
+    # Nothing recorded, nothing sent: the approval stays usable once ICBM is fixed.
+    approved = ledger.last_event("APPROVED_A")
+    assert approved is not None and approved["seq"] == ledger.latest_seq()
+    assert ledger.state() is State.AWAITING_APPROVAL
+    assert ledger.counts() == ZERO
+
+
+def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path) -> None:
+    owner_store, capture_store = RecordingStore(), RecordingStore()
+    summary = cli.rehearse(
+        tmp_path / "recon", owner_secrets=owner_store, capture_secrets=capture_store
+    )
+    assert summary["state"] == State.COMPLETED.value
+    assert capture_store.writes == [KEY_NAME]
+    assert f"supplier:{fake_site.definition().profile.supplier_key}:credentials" in (
+        owner_store.writes
+    )
