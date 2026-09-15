@@ -101,9 +101,9 @@ def test_real_approval_and_runs_are_refused_under_pytest(tmp_path: Path) -> None
         def dirty(self) -> int:
             return 0
 
-    with pytest.raises(Refused, match=r"(?i)pytest"):
+    with pytest.raises(Refused, match=r"never (issued|happens) under"):
         cli.approve(root, "a" * 40, confirm=lambda _: True, checkout=Clean())  # type: ignore[arg-type]
-    with pytest.raises(Refused, match=r"(?i)pytest"):
+    with pytest.raises(Refused, match=r"never (issued|happens) under"):
         cli.run_real(root, "A", checkout=Clean())  # type: ignore[arg-type]
     assert cli.main(["run", "--dir", str(root)]) == 2  # no --real
     assert Ledger(ReconPaths(root).ledger).counts() == {
