@@ -771,7 +771,9 @@ def test_s17_22_marketplace_evidence_never_reads_the_wall_clock() -> None:
     assert injected >= 2  # the A0 context and the freshness recording read the injected clock
 
 
-def test_connect_adds_no_product_facts_or_product_schema() -> None:
+def test_schema_holds_source_truth_but_no_canonical_product() -> None:
+    # ADR-0010 §1: M3 persists COLLECT source truth; the canonical Product arrives only in M4.
+    # CONNECT code never handles ProductFacts.
     from app.db.metadata import metadata
 
     assert set(metadata.tables) == {
@@ -783,6 +785,11 @@ def test_connect_adds_no_product_facts_or_product_schema() -> None:
         "marketplace_workflow_overlays",
         "marketplace_permission_attestations",
         "marketplace_connections",
+        "product_facts_revisions",
+        "product_facts_fields",
+        "product_facts_evidence",
+        "source_assets",
+        "product_facts_image_refs",
     }
     offenders = [
         path
