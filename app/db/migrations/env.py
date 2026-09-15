@@ -2,7 +2,7 @@ from alembic import context
 
 from app import __version__
 from app.config import AppConfig
-from app.core.ownership import DataDirLease, acquire_data_dir, require_ownership
+from app.core.ownership import DataDirLease, acquire_database_dir, require_ownership
 from app.db.database import create_sqlite_engine, sqlite_database_dir
 from app.db.metadata import metadata
 from app.db.migrate import OWNERSHIP_ATTRIBUTE
@@ -29,7 +29,7 @@ def run_migrations_online() -> None:
     # replaced by another lock; any other caller (e.g. the alembic CLI) acquires one here.
     target = sqlite_database_dir(database_url)
     supplied: DataDirLease | None = config.attributes.get(OWNERSHIP_ATTRIBUTE)
-    lease = supplied or acquire_data_dir(target, app_version=__version__)
+    lease = supplied or acquire_database_dir(target, app_version=__version__)
     try:
         require_ownership(lease, target)
         # Same engine factory as the application, so a fresh database is created in WAL mode.

@@ -1,7 +1,9 @@
 """One ICBM process per data directory (ADR-0006).
 
 Ownership of a data directory is an exclusive, non-blocking OS lock held on an open handle of
-``<data_dir>/.icbm-owner.lock`` for the owner's whole lifetime:
+``<data_dir>/runtime/owner.lock`` for the owner's whole lifetime. ``runtime`` is the
+application-owned part of the data root: the database, the sessions and this lock (Issue #52
+comment 5688854287). The primitive is:
 
 * Windows — ``msvcrt.locking`` on one byte at a fixed offset past the metadata. Windows byte-range
   locks are mandatory, so the locked byte sits away from the metadata contenders read.
@@ -26,7 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-LOCK_FILE_NAME = ".icbm-owner.lock"
+RUNTIME_DIR_NAME = "runtime"
+LOCK_FILE_NAME = "owner.lock"
 DATA_DIR_IN_USE = "DATA_DIR_IN_USE"
 DATA_DIR_LOCK_UNSUPPORTED = "DATA_DIR_LOCK_UNSUPPORTED"
 DATA_DIR_LOCK_FAILED = "DATA_DIR_LOCK_FAILED"
@@ -35,6 +38,15 @@ DATA_DIR_NOT_OWNED = "DATA_DIR_NOT_OWNED"
 _WINDOWS_LOCK_OFFSET = 1 << 20
 _METADATA_LIMIT = 4096
 _CONTENDED = frozenset({errno.EACCES, errno.EAGAIN, errno.EDEADLK})
+
+
+def runtime_dir(data_dir: Path) -> Path:
+    """The application-owned part of a data root: the database, the sessions and the lock."""
+    return data_dir / RUNTIME_DIR_NAME
+
+
+def owner_lock_path(data_dir: Path) -> Path:
+    return runtime_dir(data_dir) / LOCK_FILE_NAME
 
 
 class DataDirOwnershipError(RuntimeError):
@@ -181,9 +193,13 @@ class DataDirLease:
     def active(self) -> bool:
         return self._fd is not None
 
-    def covers(self, data_dir: Path) -> bool:
-        """True when ``data_dir`` is the directory this lease locks (compared as files)."""
-        return self._fd is not None and _same_file(self._fd, data_dir / LOCK_FILE_NAME)
+    def covers(self, directory: Path) -> bool:
+        """True when ``directory`` is the data root this lease locks, or the runtime directory
+        that holds its database (compared as files)."""
+        fd = self._fd
+        return fd is not None and (
+            _same_file(fd, owner_lock_path(directory)) or _same_file(fd, directory / LOCK_FILE_NAME)
+        )
 
     def verify(self) -> tuple[bool, str]:
         fd = self._fd
@@ -210,7 +226,19 @@ class DataDirLease:
 
 
 def acquire_data_dir(data_dir: Path, *, app_version: str) -> DataDirLease:
-    """Take exclusive ownership of ``data_dir`` or fail fast. Never blocks and never takes over."""
+    """Take exclusive ownership of the data root ``data_dir`` or fail fast. Never blocks and
+    never takes over. The lock is ``<data_dir>/runtime/owner.lock``."""
+    return _acquire(data_dir, runtime_dir(data_dir), app_version=app_version)
+
+
+def acquire_database_dir(database_dir: Path, *, app_version: str) -> DataDirLease:
+    """Ownership for a caller that knows only a database (the migration environment): the lock
+    in the directory that holds it. For a data root's own database, in ``<root>/runtime``, that
+    is the very lock ``acquire_data_dir(root)`` takes, so the two always contend."""
+    return _acquire(database_dir, database_dir, app_version=app_version)
+
+
+def _acquire(data_dir: Path, lock_dir: Path, *, app_version: str) -> DataDirLease:
     resolved = data_dir.resolve()
     primitive = _detect_platform_lock()
     if primitive is None:
@@ -220,8 +248,8 @@ def acquire_data_dir(data_dir: Path, *, app_version: str) -> DataDirLease:
             "single-owner protection",
             data_dir=resolved,
         )
-    data_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = data_dir / LOCK_FILE_NAME
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / LOCK_FILE_NAME
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
     try:
         acquired = primitive.try_lock(fd)

@@ -88,7 +88,7 @@ def _process(config: AppConfig, clock: FakeClock) -> Iterator[Container]:
 
 
 def _rows(config: AppConfig, sql: str) -> list[tuple[object, ...]]:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         return raw.execute(sql, (KEY,)).fetchall()
 
 
@@ -403,7 +403,7 @@ def test_the_database_refuses_forbidden_values_and_combinations(
 ) -> None:
     with _process(config, clock) as process:
         process.marketplace_capability.observe_permission(KEY, MISSING)  # a valid row + overlay
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw, pytest.raises(sqlite3.IntegrityError):
+    with sqlite3.connect(config.database_path) as raw, pytest.raises(sqlite3.IntegrityError):
         raw.execute(statement)
 
 
@@ -418,7 +418,7 @@ def test_every_canonical_error_class_round_trips_through_the_store_and_the_read_
         reread = process.marketplace_capability.capability(KEY)
     assert observed.error_class is error_class
     assert reread.error_class is error_class
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         assert raw.execute("SELECT error_class FROM marketplace_capabilities").fetchall() == [
             (error_class.value,)
         ]

@@ -15,10 +15,13 @@ from app.core.ownership import (
     DATA_DIR_LOCK_UNSUPPORTED,
     DATA_DIR_NOT_OWNED,
     LOCK_FILE_NAME,
+    RUNTIME_DIR_NAME,
     DataDirInUseError,
     OwnershipMismatchError,
     OwnershipUnavailableError,
     acquire_data_dir,
+    acquire_database_dir,
+    owner_lock_path,
     read_owner_metadata,
     require_ownership,
 )
@@ -30,7 +33,7 @@ def test_acquisition_writes_diagnostic_metadata(tmp_path: Path) -> None:
     with acquire_data_dir(data_dir, app_version="9.9.9") as lease:
         assert lease.active
         assert lease.verify()[0]
-        metadata = read_owner_metadata(data_dir / LOCK_FILE_NAME)
+        metadata = read_owner_metadata(owner_lock_path(data_dir))
         assert metadata is not None
         assert metadata["pid"] == os.getpid()
         assert metadata["app_version"] == "9.9.9"
@@ -85,15 +88,17 @@ def test_release_allows_reacquisition_and_keeps_the_lock_file(tmp_path: Path) ->
     lease.release()  # idempotent
     assert not lease.active
     assert lease.verify() == (False, "ownership lease was released")
-    assert (tmp_path / LOCK_FILE_NAME).exists()
+    assert owner_lock_path(tmp_path).exists()
     with acquire_data_dir(tmp_path, app_version="t") as again:
         assert again.active
 
 
 def test_stale_metadata_never_blocks_acquisition(tmp_path: Path) -> None:
-    (tmp_path / LOCK_FILE_NAME).write_text(json.dumps({"pid": 999_999, "started_at": "2000"}))
+    stale = owner_lock_path(tmp_path)
+    stale.parent.mkdir()
+    stale.write_text(json.dumps({"pid": 999_999, "started_at": "2000"}))
     with acquire_data_dir(tmp_path, app_version="t"):
-        metadata = read_owner_metadata(tmp_path / LOCK_FILE_NAME)
+        metadata = read_owner_metadata(stale)
         assert metadata is not None and metadata["pid"] == os.getpid()
 
 
@@ -113,6 +118,21 @@ def test_lease_covers_only_its_own_directory(tmp_path: Path) -> None:
     with acquire_data_dir(tmp_path / "a", app_version="t") as lease:
         assert lease.covers(tmp_path / "a" / "sub" / "..")
         assert not lease.covers(tmp_path / "b")
+
+
+def test_the_owner_lock_lives_in_the_runtime_directory(tmp_path: Path) -> None:
+    # Issue #52 comment 5688854287: <root>/runtime holds the database, the sessions and the lock.
+    runtime = tmp_path / RUNTIME_DIR_NAME
+    with acquire_data_dir(tmp_path, app_version="t") as lease:
+        assert lease.lock_path == owner_lock_path(tmp_path) == runtime / LOCK_FILE_NAME
+        assert lease.covers(tmp_path) and lease.covers(runtime)
+        # A caller that knows only the database directory contends for the very same lock.
+        with pytest.raises(DataDirInUseError):
+            acquire_database_dir(runtime, app_version="t")
+    with acquire_database_dir(runtime, app_version="t") as by_database:
+        assert by_database.covers(runtime) and by_database.covers(tmp_path)
+        with pytest.raises(DataDirInUseError):
+            acquire_data_dir(tmp_path, app_version="t")
 
 
 def test_require_ownership_accepts_only_an_active_lease_on_that_directory(tmp_path: Path) -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import AppConfig
+from app.config import AppConfig, database_path
 from app.container import Container, build_container
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore
@@ -41,7 +41,9 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
 
 @pytest.fixture
 def data_dir(tmp_path: Path, migrated_template: Path) -> Path:
-    shutil.copyfile(migrated_template, tmp_path / "icbm.db")
+    database = database_path(tmp_path)
+    database.parent.mkdir(parents=True)
+    shutil.copyfile(migrated_template, database)
     return tmp_path
 
 

@@ -10,7 +10,7 @@ def test_defaults_are_loopback_and_dry_run(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path)
     assert config.host == "127.0.0.1"
     assert config.execution_mode is ExecutionMode.DRY_RUN
-    assert config.database_url == f"sqlite:///{(tmp_path / 'icbm.db').as_posix()}"
+    assert config.database_url == f"sqlite:///{(tmp_path / 'runtime' / 'icbm.db').as_posix()}"
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.0.10", "example.com", "::"])

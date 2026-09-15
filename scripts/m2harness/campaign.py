@@ -41,10 +41,11 @@ import httpx
 import keyring.errors
 
 from app import __version__
+from app.config import database_path
 from app.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME, SupplierSessionStore
 from app.connect.smartstore.credentials import ApplicationCredentialStore
 from app.connect.smartstore.service import CommittedSession
-from app.core.ownership import DataDirOwnershipError, acquire_data_dir
+from app.core.ownership import DataDirOwnershipError, acquire_data_dir, runtime_dir
 from app.core.secrets import KeyringSecretStore
 from app.db.migrate import upgrade_to_head
 from app.system.secret_scan import scan
@@ -258,7 +259,7 @@ def init_campaign(
     for role in ROLES:
         data_dir = paths.data_dir(role)
         with acquire_data_dir(data_dir, app_version=__version__) as lease:
-            upgrade_to_head(f"sqlite:///{(data_dir / 'icbm.db').as_posix()}", ownership=lease)
+            upgrade_to_head(f"sqlite:///{database_path(data_dir).as_posix()}", ownership=lease)
     marker = {"campaign_id": campaign_id, "mode": mode.value, "nonce": nonce, "created_at": now()}
     paths.marker.write_text(json.dumps(marker, indent=2) + "\n", "utf-8")
     return ledger
@@ -1245,7 +1246,9 @@ class Run:
     def _committed(self, role: str) -> CommittedSession | None:
         data_dir = self.paths.data_dir(role)
         sessions = SupplierSessionStore(
-            data_dir / MARKETPLACE_SESSIONS_DIR_NAME, self.store, namespace="marketplace"
+            runtime_dir(data_dir) / MARKETPLACE_SESSIONS_DIR_NAME,
+            self.store,
+            namespace="marketplace",
         )
         if not sessions.exists(KEY):
             return None

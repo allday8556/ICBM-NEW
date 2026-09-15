@@ -50,9 +50,10 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from app.config import database_path  # noqa: E402
 from app.connect.credentials import SupplierCredentialStore  # noqa: E402
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore  # noqa: E402
-from app.core.ownership import acquire_data_dir  # noqa: E402
+from app.core.ownership import acquire_data_dir, runtime_dir  # noqa: E402
 from app.core.secrets import KeyringSecretStore  # noqa: E402
 from app.system.secret_scan import VARIANTS, scan  # noqa: E402
 from integrations.suppliers import kmretail  # noqa: E402
@@ -339,7 +340,9 @@ def _expire_session(ev: Evidence, data_dir: Path) -> dict[str, str]:
     """Keep generation A's values for the final scan, then invalidate the stored session the way
     a supplier-side expiry would — under the ownership lease, with no server running."""
     with acquire_data_dir(data_dir, app_version="m1-acceptance"):
-        store = SupplierSessionStore(data_dir / SESSIONS_DIR_NAME, KeyringSecretStore())
+        store = SupplierSessionStore(
+            runtime_dir(data_dir) / SESSIONS_DIR_NAME, KeyringSecretStore()
+        )
         payload = store.load(KEY)
         if payload is None:
             raise StepFailed("no stored session to expire")
@@ -385,7 +388,7 @@ def _scan_secrets(data_dir: Path, generation_a: dict[str, str]) -> dict[str, str
     """Every value the scan must not find: the login, and both session generations."""
     keyring = KeyringSecretStore()
     with acquire_data_dir(data_dir, app_version="m1-acceptance"):
-        payload = SupplierSessionStore(data_dir / SESSIONS_DIR_NAME, keyring).load(KEY)
+        payload = SupplierSessionStore(runtime_dir(data_dir) / SESSIONS_DIR_NAME, keyring).load(KEY)
     if payload is None:
         raise StepFailed("no session generation B to scan")
     login = SupplierCredentialStore(keyring).load(KEY)
@@ -421,7 +424,7 @@ def _scan_step(ev: Evidence, name: str, paths: list[Path], secrets: dict[str, st
 
 def _scope(ev: Evidence, data_dir: Path) -> None:
     with contextlib.closing(
-        sqlite3.connect(f"{(data_dir / 'icbm.db').as_uri()}?mode=ro", uri=True)
+        sqlite3.connect(f"{database_path(data_dir).as_uri()}?mode=ro", uri=True)
     ) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         rows = db.execute("SELECT COUNT(*) FROM supplier_connections").fetchone()[0]

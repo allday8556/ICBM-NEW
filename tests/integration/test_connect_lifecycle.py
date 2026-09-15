@@ -127,7 +127,7 @@ def test_a_first_connection_logs_in_once_and_is_proven_by_both_reads(
     assert verified.details["control_result"] == "LOGIN_REQUIRED"
     assert verified.details["authenticated_result"] == "AUTHENTICATED"
     assert verified.details["target"] == "/member"
-    blob = (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").read_bytes()
+    blob = (config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").read_bytes()
     assert SESSION_TOKEN.encode() not in blob
 
 
@@ -247,7 +247,7 @@ def test_a_target_that_is_not_authentication_gated_can_never_prove_readiness(
         _verify(app)
     assert caught.value.code == "SUPPLIER_TARGET_NOT_AUTH_GATED"
     assert _summary(app).state is S.DEGRADED
-    assert not (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
+    assert not (config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
     assert gateway.count(RequestKind.PROTECTED_READ) == 0, "no authenticated read without a gate"
 
 
@@ -364,7 +364,7 @@ def test_credential_replacement_waits_for_the_login_in_flight(
     summary = _summary(app)
     assert (summary.state, summary.session_state) == (S.DISCONNECTED, "NONE")
     assert _stored_password(secrets) == "rotated-password"
-    assert not (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
+    assert not (config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
     gateway.accepted = Credentials(username=USERNAME, password="rotated-password")
     assert _verify(app).proven
     assert gateway.logins == 2
@@ -439,7 +439,7 @@ def test_a_corrupt_session_is_discarded_and_replaced_by_a_fresh_login(
 ) -> None:
     _save(app)
     _verify(app)
-    path = config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc"
+    path = config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc"
     path.write_bytes(b"ICBMSESS1" + b"\0" * 40)
     assert _verify(app).proven
     assert gateway.logins == 2

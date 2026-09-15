@@ -26,7 +26,7 @@ It collects no products yet and makes **zero external business writes**. Every s
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -c constraints.txt -e ".[dev]"
-.\.venv\Scripts\icbm db upgrade      # creates %LOCALAPPDATA%\ICBM-NEW\icbm.db (SQLite WAL) at head
+.\.venv\Scripts\icbm db upgrade      # creates %USERPROFILE%\ICBM-NEW\data\runtime\icbm.db at head
 .\.venv\Scripts\icbm serve           # http://127.0.0.1:8790
 ```
 
@@ -43,12 +43,29 @@ loopback only and refuses `ICBM_EXECUTION_MODE=LIVE`.
 
 ### Data directory and connection owner
 
-ICBM-NEW decides its data directory itself, so the operator never names one. `app/config.py` is
-the only resolver (`default_data_dir`). The data directory is the per-user application data root:
-`%LOCALAPPDATA%\ICBM-NEW` on Windows, and `$XDG_DATA_HOME/ICBM-NEW` elsewhere. It is named after
-the OS secret-store service `ICBM-NEW`, which holds the supplier and marketplace logins, and it
-does not depend on the checkout, the working directory or the shell. `ICBM_DATA_DIR` is an
-explicit override, for tests and dedicated acceptance directories only.
+ICBM-NEW decides its data root itself, so the operator never names one. `app/config.py` is the
+only resolver (`default_data_dir`). The local data root is `%USERPROFILE%\ICBM-NEW\data`, taken
+from `USERPROFILE` alone:
+- The user profile is not redirected for packaged (MSIX) processes, so the desktop app, a
+  terminal and a launcher all reach the same physical directory.
+- Without an absolute `USERPROFILE`, resolution fails closed.
+- `ICBM_DATA_DIR` names the data root explicitly, for tests and dedicated acceptance directories
+  only.
+
+This is the local desktop/CLI root. A server deployment will have its own storage owner (Issue
+#52 comment 5688854287).
+
+| Under the data root | Contents |
+| --- | --- |
+| `runtime\icbm.db` | the one canonical relational database |
+| `runtime\sessions\`, `runtime\marketplace_sessions\` | encrypted sessions (keys in the OS secret store) |
+| `runtime\owner.lock` | the single-owner lock (ADR-0006) |
+| `logs\` | application logs |
+| `source-assets\` | COLLECT source assets (ADR-0010), left in place until a separate migration |
+| `products\`, `api\`, `suppliers\`, `backups\` | reserved names for domain data, not created yet |
+
+No login, API secret, session cookie or auth header is ever stored in plain text under the data
+root.
 
 CONNECT (M1/M2) is the only owner of the logins, the connection state and the sessions. Every
 ICBM process, and every harness that borrows a connection (the M3 reconnaissance), resolves this
@@ -59,7 +76,7 @@ preflight and refuses a run against any other. Repository rules in
 
 ### One process per data directory
 
-`icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<data directory>/.icbm-owner.lock`
+`icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<data root>/runtime/owner.lock`
 ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)). A second owner exits with
 status 3 and `DATA_DIR_IN_USE`; stop the server before running `icbm db upgrade`. `icbm db current`
 is read-only and takes no lock. After a crash the next start recovers on its own — never delete the

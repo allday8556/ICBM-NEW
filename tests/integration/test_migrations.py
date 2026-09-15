@@ -8,6 +8,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
 
+from app.config import database_path
 from app.core.errors import ErrorClass
 from app.db.database import create_sqlite_engine
 from app.db.metadata import metadata
@@ -64,7 +65,7 @@ def test_orm_models_match_the_migrations(migrated_template: Path) -> None:
 
 
 def test_audit_events_reject_update_and_delete(data_dir: Path) -> None:
-    with sqlite3.connect(data_dir / "icbm.db") as raw:
+    with sqlite3.connect(database_path(data_dir)) as raw:
         raw.execute(
             "INSERT INTO audit_events (event_id, occurred_at, correlation_id, actor, event_type, "
             "action, outcome, details_json) VALUES ('e1', '2026-09-13 00:00:00', 'cid', "

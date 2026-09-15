@@ -17,7 +17,7 @@ import pytest
 
 from app.audit.models import AuditEventType
 from app.audit.service import AuditEntry, AuditLog
-from app.config import AppConfig
+from app.config import AppConfig, database_path
 from app.connect.marketplace.attestation import ApplicationIdentity, Invalidation
 from app.connect.marketplace.capability import (
     AuthStatus,
@@ -104,7 +104,7 @@ def secrets() -> MemorySecretStore:
 
 @pytest.fixture
 def provider(config: AppConfig, secrets: MemorySecretStore) -> Provider:
-    directory = config.data_dir / MARKETPLACE_SESSIONS_DIR_NAME
+    directory = config.runtime_dir / MARKETPLACE_SESSIONS_DIR_NAME
     return Provider(SupplierSessionStore(directory, secrets, namespace="marketplace"))
 
 
@@ -144,14 +144,14 @@ def _current(p: Container) -> None:
 
 
 def _connection(config: AppConfig) -> tuple[object, ...]:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         rows = raw.execute(CONNECTION).fetchall()
     assert len(rows) == 1
     return tuple(rows[0])
 
 
 def _bound_audits(config: AppConfig) -> int:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         (count,) = raw.execute(
             "SELECT COUNT(*) FROM audit_events WHERE event_type = 'MARKETPLACE_ACCOUNT_BOUND'"
         ).fetchone()
@@ -159,7 +159,7 @@ def _bound_audits(config: AppConfig) -> int:
 
 
 def _session_file(config: AppConfig) -> Path:
-    return config.data_dir / MARKETPLACE_SESSIONS_DIR_NAME / f"{KEY}.enc"
+    return config.runtime_dir / MARKETPLACE_SESSIONS_DIR_NAME / f"{KEY}.enc"
 
 
 def _overlays(p: Container) -> list[tuple[WorkflowState, WorkflowScope, object]]:
@@ -221,7 +221,7 @@ def test_the_first_binding_is_explicit_fresh_and_atomic(
     assert provider.calls.count("TOKEN") == 1
     assert result.bound and result.capability.auth is AuthStatus.READY
     assert _connection(config) == (1, 1, UID_A, f"id-{UID_A}", 1, 1, ACTOR)
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         ((actor, details),) = raw.execute(
             "SELECT actor, details_json FROM audit_events"
             " WHERE event_type = 'MARKETPLACE_ACCOUNT_BOUND'"
@@ -365,12 +365,12 @@ _AT = "'2026-09-15 00:00:00'"
 def test_a_partial_binding_can_never_be_stored(data_dir: Path, binding: str) -> None:
     # ACCOUNT_IDENTITY §5: binding_commit_not_proven -> NOT_BOUND, by construction.
     row = f"('smartstore', 1, 1, {binding}, {_AT}, {_AT})"
-    with sqlite3.connect(data_dir / "icbm.db") as raw, pytest.raises(sqlite3.IntegrityError):
+    with sqlite3.connect(database_path(data_dir)) as raw, pytest.raises(sqlite3.IntegrityError):
         raw.execute(f"INSERT INTO marketplace_connections VALUES {row}")
 
 
 def test_a_complete_binding_or_none_is_stored(data_dir: Path) -> None:
-    with sqlite3.connect(data_dir / "icbm.db") as raw:
+    with sqlite3.connect(database_path(data_dir)) as raw:
         raw.execute(
             "INSERT INTO marketplace_connections VALUES"
             f" ('smartstore', 1, 1, 'uid-x', NULL, 1, 1, {_AT}, 'op', {_AT}, {_AT})"
@@ -504,7 +504,7 @@ def test_credential_rotation_starts_a_new_generation_and_ends_the_old_session(
     # A session committed under the old generation is never current (AUTH §18, §19).
     stale = provider.reads[-1][1]
     assert stale is not None and stale.credential_generation == 1
-    directory = config.data_dir / MARKETPLACE_SESSIONS_DIR_NAME
+    directory = config.runtime_dir / MARKETPLACE_SESSIONS_DIR_NAME
     SupplierSessionStore(directory, secrets, namespace="marketplace").save(KEY, stale.encode())
     result = p.smartstore.connect()
     assert provider.forms[-1]["client_id"] == OTHER_CLIENT_ID
@@ -586,7 +586,7 @@ def test_connect_persists_logs_and_audits_no_secret_token_or_signature(
     timestamp_ms = int(clock.now().timestamp() * 1000)
     secrets = [SECRET, client_secret_sign(CLIENT_ID, SECRET, timestamp_ms), CLIENT_ID]
     secrets += provider.issued
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         tables = [
             name for (name,) in raw.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         ]

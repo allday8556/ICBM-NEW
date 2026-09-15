@@ -388,10 +388,18 @@ def test_lease_coverage_is_decided_only_by_require_ownership() -> None:
 # and CONNECT alone owns the logins, the connection state and the sessions. No other code may
 # redefine where that owner lives, or stand up a second one.
 DATA_ROOT_RESOLVER = "app/config.py"
-_DATA_ROOT_READ = re.compile(
-    r"LOCALAPPDATA|XDG_DATA_HOME|DEFAULT_DATA_DIR"
+_CODE_ROOTS = (REPO_ROOT / "app", REPO_ROOT / "integrations", REPO_ROOT / "scripts")
+# The root's inputs (comment 5688854287): read by the resolver and nothing else.
+_DATA_ROOT_INPUTS = re.compile(
+    r"USERPROFILE|HOME_ENV|DATA_DIR_ENV"
     r"|(?:\.get|getenv)\(\s*[\"']ICBM_DATA_DIR|\[\s*[\"']ICBM_DATA_DIR[\"']\s*\]"
 )
+# Retired roots and home lookups that may never own ICBM-NEW's data again, anywhere in code:
+# the AppData/XDG roots (host-dependent under MSIX), the repo-local var/ default, the old lock.
+_RETIRED_ROOTS = re.compile(
+    r"LOCALAPPDATA|XDG_DATA_HOME|DEFAULT_DATA_DIR|icbm-owner\.lock|\.home\(\)|expanduser\("
+)
+_RESOLVER_FUNCTIONS = {"default_data_dir", "configured_data_dir"}
 M3_HARNESS = REPO_ROOT / "scripts" / "m3harness"
 # Where the M3 harness may make each of these calls: (module, enclosing function).
 M3_OWNER_CALLS = {
@@ -408,14 +416,27 @@ M3_OWNER_CALLS = {
 }
 
 
-def test_only_the_config_module_resolves_the_data_root() -> None:
-    readers = {
-        path.relative_to(REPO_ROOT).as_posix()
-        for root in (REPO_ROOT / "app", REPO_ROOT / "integrations", REPO_ROOT / "scripts")
+def _code_files() -> dict[str, str]:
+    return {
+        path.relative_to(REPO_ROOT).as_posix(): path.read_text("utf-8")
+        for root in _CODE_ROOTS
         for path in root.rglob("*.py")
-        if _DATA_ROOT_READ.search(path.read_text("utf-8"))
     }
+
+
+def test_only_the_config_module_resolves_the_data_root() -> None:
+    files = _code_files()
+    readers = {path for path, text in files.items() if _DATA_ROOT_INPUTS.search(text)}
     assert readers == {DATA_ROOT_RESOLVER}
+    retired = {path for path, text in files.items() if _RETIRED_ROOTS.search(text)}
+    assert retired == set(), "a retired data root or home lookup is back"
+    definers = {
+        path
+        for path, text in files.items()
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.FunctionDef) and node.name in _RESOLVER_FUNCTIONS
+    }
+    assert definers == {DATA_ROOT_RESOLVER}
 
 
 def test_icbm_and_the_m3_harness_take_the_owner_from_the_same_resolver() -> None:
@@ -453,8 +474,10 @@ def test_the_m3_harness_never_defines_a_connection_owner_of_its_own() -> None:
 def test_the_docs_name_the_resolver_and_the_canonical_root() -> None:
     for path in (README_MD, DOCS / "ARCHITECTURE.md"):
         text = _read(path)
-        assert "app/config.py" in text and r"%LOCALAPPDATA%\ICBM-NEW" in text, path.name
-        assert r"var\icbm.db" not in text and "var/icbm.db" not in text, path.name
+        assert "app/config.py" in text and r"%USERPROFILE%\ICBM-NEW\data" in text, path.name
+        assert "runtime/owner.lock" in text, path.name
+        for retired in (r"%LOCALAPPDATA%\ICBM-NEW", "XDG_DATA_HOME", r"var\icbm.db", "var/icbm.db"):
+            assert retired not in text, (path.name, retired)
 
 
 # ---------------------------------------------------------------- supplier CONNECT boundary

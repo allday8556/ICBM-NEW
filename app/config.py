@@ -5,7 +5,6 @@ loopback-only binding (ADR-0001) and DRY_RUN-only execution during M0 (CLAUDE.md
 """
 
 import os
-import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -14,42 +13,23 @@ from typing import Any, Literal
 from app.connect.marketplace.attestation import A0_MAX_AGE_DAYS, valid_max_age_days
 from app.core.execution import ExecutionMode
 from app.core.net import is_loopback_host
+from app.core.ownership import runtime_dir
 from app.core.secrets import SERVICE_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_UI_DIR = REPO_ROOT / "ui" / "web"
+
+# The local data root (Issue #52 comment 5688854287) is %USERPROFILE%\ICBM-NEW\data. It is
+# overridden only explicitly, through ICBM_DATA_DIR, which then names the data root itself.
+HOME_ENV = "USERPROFILE"
 DATA_DIR_ENV = "ICBM_DATA_DIR"
-
-
-def default_data_dir(
-    environ: Mapping[str, str] | None = None, *, platform: str = sys.platform
-) -> Path:
-    """ICBM-NEW's canonical application data root (Issue #52 comment 5688150031).
-
-    It is decided here and nowhere else. It is the per-user application data directory named
-    after the OS secret-store service that holds the logins (``ICBM-NEW``), so the data root and
-    the credential owner always belong to the same user and application. It never depends on the
-    checkout, the working directory or the shell:
-    - ``%LOCALAPPDATA%\\ICBM-NEW`` on Windows (the v1 target);
-    - ``$XDG_DATA_HOME/ICBM-NEW`` elsewhere, by default ``~/.local/share/ICBM-NEW``.
-    """
-    env = os.environ if environ is None else environ
-    if platform == "win32":
-        name, fallback = "LOCALAPPDATA", Path.home() / "AppData" / "Local"
-    else:
-        name, fallback = "XDG_DATA_HOME", Path.home() / ".local" / "share"
-    raw = env.get(name)
-    base = Path(raw) if raw and Path(raw).is_absolute() else fallback
-    return (base / SERVICE_NAME).resolve()
-
-
-def configured_data_dir(environ: Mapping[str, str] | None = None) -> Path:
-    """The data directory a process uses: ``ICBM_DATA_DIR`` when it is set explicitly (tests,
-    dedicated acceptance directories), otherwise the canonical root. Ordinary use never sets it."""
-    env = os.environ if environ is None else environ
-    raw = env.get(DATA_DIR_ENV)
-    return Path(raw).resolve() if raw else default_data_dir(env)
-
+DATA_DIR_NAME = "data"
+DATABASE_FILE_NAME = "icbm.db"
+# The data root's layout, in lowercase names only. ``runtime`` belongs to the application: the
+# one relational database, the encrypted sessions and the owner lock. The names below are
+# reserved for domain data and are neither created nor filled yet. ``api`` is generic: it covers
+# marketplace APIs and other APIs, such as customs checks.
+RESERVED_DIR_NAMES = ("products", "api", "suppliers", "logs", "backups")
 
 SecretBackend = Literal["os", "memory"]
 
@@ -61,6 +41,38 @@ SMARTSTORE_RENEWAL_WINDOW_S = 30 * 60
 
 class ConfigError(ValueError):
     """Configuration violates an accepted architecture rule."""
+
+
+def default_data_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """ICBM-NEW's canonical local data root: ``%USERPROFILE%\\ICBM-NEW\\data``.
+
+    It is decided here and nowhere else, from ``USERPROFILE`` alone. Packaged (MSIX) host
+    processes get the per-user AppData tree redirected, but not the user profile, so every local
+    host (the desktop app, a terminal, a launcher) reaches the same physical directory. There is
+    no host detection and no other fallback: without an absolute ``USERPROFILE`` the resolution
+    fails closed. This is the local desktop/CLI runtime root only; a server deployment has its
+    own storage owner.
+    """
+    env = os.environ if environ is None else environ
+    home = env.get(HOME_ENV, "")
+    if not home or not Path(home).is_absolute():
+        raise ConfigError(
+            f"{HOME_ENV} is missing or not absolute; set {DATA_DIR_ENV} to name the data root"
+        )
+    return (Path(home) / SERVICE_NAME / DATA_DIR_NAME).resolve()
+
+
+def configured_data_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """The data root a process uses: ``ICBM_DATA_DIR`` when it is set explicitly (tests,
+    dedicated acceptance directories), otherwise the canonical root. Ordinary use never sets it."""
+    env = os.environ if environ is None else environ
+    raw = env.get(DATA_DIR_ENV)
+    return Path(raw).resolve() if raw else default_data_dir(env)
+
+
+def database_path(data_dir: Path) -> Path:
+    """The one canonical relational database of a data root: ``<root>/runtime/icbm.db``."""
+    return runtime_dir(data_dir) / DATABASE_FILE_NAME
 
 
 def _parse_bool(raw: str) -> bool:
@@ -164,8 +176,13 @@ class AppConfig:
             )
 
     @property
+    def runtime_dir(self) -> Path:
+        """The application-owned part of the data root: the database, sessions and owner lock."""
+        return runtime_dir(self.data_dir)
+
+    @property
     def database_path(self) -> Path:
-        return self.data_dir / "icbm.db"
+        return database_path(self.data_dir)
 
     @property
     def database_url(self) -> str:
@@ -189,7 +206,9 @@ class AppConfig:
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, **overrides: Any) -> "AppConfig":
         env = os.environ if environ is None else environ
-        values: dict[str, Any] = {"data_dir": configured_data_dir(env)}
+        values: dict[str, Any] = (
+            {} if "data_dir" in overrides else {"data_dir": configured_data_dir(env)}
+        )
         for field_name, (var, parse) in _ENV.items():
             raw = env.get(var)
             if raw is None or raw == "":

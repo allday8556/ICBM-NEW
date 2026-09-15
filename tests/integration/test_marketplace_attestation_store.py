@@ -125,7 +125,7 @@ def _seams() -> dict[str, object]:
 
 
 def _rows(config: AppConfig, sql: str) -> list[tuple[object, ...]]:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         return raw.execute(sql).fetchall()
 
 
@@ -147,7 +147,7 @@ def _insert(config: AppConfig, **changes: object) -> None:
     row.update(changes)
     columns = ", ".join(row)
     marks = ", ".join("?" for _ in row)
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         raw.execute(f"INSERT INTO {TABLE} ({columns}) VALUES ({marks})", list(row.values()))
 
 
@@ -707,7 +707,7 @@ def test_s17_18_without_an_application_or_a_mapping_revision_nothing_is_recorded
 def test_attestation_history_is_append_only(config: AppConfig, clock: FakeClock) -> None:
     with _process(config, clock, **_seams()) as p:  # type: ignore[arg-type]
         p.permission_attestation.attest(KEY, [ApiGroup.PRODUCT], actor=ACTOR)
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             raw.execute(f"UPDATE {TABLE} SET observed_groups = ''")
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
