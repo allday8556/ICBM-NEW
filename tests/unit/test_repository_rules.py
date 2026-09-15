@@ -189,6 +189,58 @@ def test_roadmap_places_fulfillment_inside_operate() -> None:
     assert not [t for t in top_level if re.search(r"fulfil", t, re.I)], "fulfillment is not a phase"
 
 
+# Issue #52 §0: the milestone status is stated in CLAUDE.md §11, ROADMAP.md §12 and the README
+# status, and every accepted milestone has an acceptance record. They must agree, so the active
+# milestone cannot silently drift again. (The runtime ``app.MILESTONE`` is ADR-0010 question 6.)
+_CLAUDE_MILESTONE = re.compile(r"^(M\d+(?:\.\d+)?) — .*?\b(ACCEPTED|CURRENT)\b")
+_ROADMAP_MILESTONE = re.compile(r"^(?:→\s*)?(M\d+(?:\.\d+)?) .*?\s(ACCEPTED|CURRENT)\b")
+_ROADMAP_CHAIN = re.compile(r"^(?:→\s*)?(M\d+(?:\.\d+)?)\s", re.M)
+_README_ACCEPTED = re.compile(r"^- \*\*(M\d+(?:\.\d+)?)\*\* — .*\*\*(ACCEPTED)\*\*")
+_README_CURRENT = re.compile(r"^- \*\*Current milestone:\*\* (M\d+(?:\.\d+)?) — ")
+
+
+def _milestone_statuses(text: str, *patterns: re.Pattern[str]) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        for pattern in patterns:
+            match = pattern.match(line.strip())
+            if match:
+                milestone = match.group(1)
+                assert milestone not in found, f"{milestone} is listed twice"
+                found[milestone] = match.group(2) if pattern.groups > 1 else "CURRENT"
+    return found
+
+
+def _roadmap_sequence() -> str:
+    return _section(_read(ROADMAP_MD), r"Development sequence")
+
+
+def test_active_milestone_agrees_across_the_canonical_status_documents() -> None:
+    claude = _milestone_statuses(
+        _section(_read(CLAUDE_MD), r"Current milestone"), _CLAUDE_MILESTONE
+    )
+    roadmap = _milestone_statuses(_roadmap_sequence(), _ROADMAP_MILESTONE)
+    readme = _milestone_statuses(
+        _section(_read(README_MD), r"^Status$"), _README_ACCEPTED, _README_CURRENT
+    )
+    assert claude == roadmap == readme
+    current = [milestone for milestone, status in roadmap.items() if status == "CURRENT"]
+    assert len(current) == 1, current
+    # Every milestone before the current one is accepted; none after it carries a status.
+    chain = _ROADMAP_CHAIN.findall(_roadmap_sequence())
+    position = chain.index(current[0])
+    assert [roadmap.get(m) for m in chain[:position]] == ["ACCEPTED"] * position
+    assert not [m for m in chain[position + 1 :] if m in roadmap]
+
+
+def test_accepted_milestones_have_an_accepted_acceptance_record() -> None:
+    statuses = _milestone_statuses(_roadmap_sequence(), _ROADMAP_MILESTONE)
+    for milestone, status in statuses.items():
+        record = DOCS / "acceptance" / f"{milestone}.md"
+        header = _read(record).split("\n## ", 1)[0] if record.is_file() else ""
+        assert ("Status: **ACCEPTED**" in header) == (status == "ACCEPTED"), milestone
+
+
 # ---------------------------------------------------------------- recorded decisions
 
 
@@ -443,6 +495,85 @@ def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
                 for field in ("details", "before", "after"):
                     assert _is_safe_payload(_keyword(call, field)), f"{where} {field}"
     assert checked >= 5
+
+
+# ---------------------------------------------------------------- COLLECT source-truth boundary
+
+# ADR-0010 §13 (Issue #52 §10): COLLECT and ProductFactsRevision work with every AI capability
+# unavailable, and the M3 path makes no marketplace call. The source-truth path therefore imports
+# no AI-provider, OCR or vision library, no ``ai`` package and no marketplace code.
+SOURCE_TRUTH_ROOTS = ("app/collect/", "integrations/suppliers/")
+SOURCE_TRUTH_FORBIDDEN = (
+    "anthropic",
+    "openai",
+    "google.generativeai",
+    "google.genai",
+    "vertexai",
+    "cohere",
+    "mistralai",
+    "groq",
+    "ollama",
+    "litellm",
+    "langchain",
+    "llama_index",
+    "transformers",
+    "torch",
+    "tensorflow",
+    "onnxruntime",
+    "pytesseract",
+    "tesserocr",
+    "easyocr",
+    "paddleocr",
+    "cv2",
+    "azure.ai",
+    "azure.cognitiveservices",
+    "app.ai",
+    "integrations.ai",
+    "integrations.marketplaces",
+    "app.connect.marketplace",
+    "app.connect.smartstore",
+)
+
+
+def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> None:
+    modules = {p: t for p, t in _production_modules().items() if p.startswith(SOURCE_TRUTH_ROOTS)}
+    assert {"app/collect/service.py", "integrations/suppliers/kmretail/__init__.py"} <= set(modules)
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            forbidden = [f for f in SOURCE_TRUTH_FORBIDDEN if name == f or name.startswith(f"{f}.")]
+            assert not forbidden, f"{path}: {name}"
+
+
+def test_connect_gateway_port_is_not_widened_for_collect() -> None:
+    # ADR-0010 §3 (Issue #52 §2): COLLECT gets its own port. The CONNECT gateway keeps exactly the
+    # protected-read proof and the login, and ``fetch`` takes no URL, path or target, so it can
+    # never become an arbitrary-URL escape hatch. The Protocol and its implementation agree.
+    expected = {
+        "fetch": (["self", "definition"], ["kind", "session"]),
+        "login": (["self", "definition", "credentials"], []),
+    }
+    modules = _production_modules()
+    for path, class_name in (
+        ("integrations/suppliers/base.py", "SupplierGateway"),
+        ("integrations/suppliers/transport/gateway.py", "PolicedSupplierGateway"),
+    ):
+        cls = next(
+            n
+            for n in ast.walk(modules[path])
+            if isinstance(n, ast.ClassDef) and n.name == class_name
+        )
+        public = {
+            n.name: n
+            for n in cls.body
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and not n.name.startswith("_")
+        }
+        assert set(public) == set(expected), f"{class_name}: {sorted(public)}"
+        for name, (positional, keyword_only) in expected.items():
+            args = public[name].args
+            where = f"{class_name}.{name}"
+            assert [a.arg for a in args.posonlyargs + args.args] == positional, where
+            assert [a.arg for a in args.kwonlyargs] == keyword_only, where
+            assert args.vararg is None and args.kwarg is None, where
 
 
 # ---------------------------------------------------------------- SmartStore endpoint boundary
