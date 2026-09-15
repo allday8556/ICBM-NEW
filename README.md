@@ -26,7 +26,7 @@ It collects no products yet and makes **zero external business writes**. Every s
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -c constraints.txt -e ".[dev]"
-.\.venv\Scripts\icbm db upgrade      # creates var\icbm.db (SQLite WAL) at schema head
+.\.venv\Scripts\icbm db upgrade      # creates %LOCALAPPDATA%\ICBM-NEW\icbm.db (SQLite WAL) at head
 .\.venv\Scripts\icbm serve           # http://127.0.0.1:8790
 ```
 
@@ -41,9 +41,25 @@ py -3.12 -m venv .venv
 Configuration is read from `ICBM_*` environment variables (`app/config.py`). The server binds
 loopback only and refuses `ICBM_EXECUTION_MODE=LIVE`.
 
+### Data directory and connection owner
+
+ICBM-NEW decides its data directory itself, so the operator never names one. `app/config.py` is
+the only resolver (`default_data_dir`). The data directory is the per-user application data root:
+`%LOCALAPPDATA%\ICBM-NEW` on Windows, and `$XDG_DATA_HOME/ICBM-NEW` elsewhere. It is named after
+the OS secret-store service `ICBM-NEW`, which holds the supplier and marketplace logins, and it
+does not depend on the checkout, the working directory or the shell. `ICBM_DATA_DIR` is an
+explicit override, for tests and dedicated acceptance directories only.
+
+CONNECT (M1/M2) is the only owner of the logins, the connection state and the sessions. Every
+ICBM process, and every harness that borrows a connection (the M3 reconnaissance), resolves this
+same owner, so a login saved once in ICBM is the one reused everywhere. Nothing may define a
+second owner, login store or session store. The M3 reconnaissance binds the owner at its
+preflight and refuses a run against any other. Repository rules in
+`tests/unit/test_repository_rules.py` keep this fixed.
+
 ### One process per data directory
 
-`icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<ICBM_DATA_DIR>/.icbm-owner.lock`
+`icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<data directory>/.icbm-owner.lock`
 ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)). A second owner exits with
 status 3 and `DATA_DIR_IN_USE`; stop the server before running `icbm db upgrade`. `icbm db current`
 is read-only and takes no lock. After a crash the next start recovers on its own — never delete the

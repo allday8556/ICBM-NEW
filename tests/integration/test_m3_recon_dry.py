@@ -10,9 +10,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.config import AppConfig
+from app.config import REPO_ROOT, AppConfig, default_data_dir
+from app.connect.credentials import SupplierCredentialStore
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
+from app.db.migrate import head_revision, read_only_revision
 from integrations.suppliers import kmretail
 from integrations.suppliers.base import (
     Credentials,
@@ -65,14 +67,20 @@ def _yes(phrase: str) -> bool:
     return True
 
 
-def _real_campaign(root: Path) -> Ledger:
+def _real_campaign(root: Path, *, owner: dict[str, str] | None = None) -> Ledger:
     ledger = Ledger.create(
         ReconPaths(root).ledger,
         campaign_id="m3-recon-01",
         mode=Mode.REAL,
         product_url="https://kmretail.co.kr/product/x/1/",
     )
-    ledger.record("PREFLIGHT_PASSED", state=State.AWAITING_APPROVAL, head=SHA_A, digest="0" * 64)
+    ledger.record(
+        "PREFLIGHT_PASSED",
+        state=State.AWAITING_APPROVAL,
+        head=SHA_A,
+        owner=owner or {},
+        digest="0" * 64,
+    )
     return ledger
 
 
@@ -306,7 +314,7 @@ def _owner(
     """An ICBM data directory standing in for the operator's, with the M1 login saved through
     ICBM's own operator action."""
     data = tmp_path / "icbm"
-    data.mkdir()
+    data.mkdir(parents=True)
     if database:
         shutil.copyfile(template, data / "icbm.db")
     store = RecordingStore()
@@ -358,30 +366,32 @@ def test_real_preflight_uses_the_m1_login_and_copies_nothing(
     [
         ("no_login", {"icbm_login_saved"}),
         ("paused", {"icbm_connection_not_paused"}),
-        ("icbm_running", {"icbm_not_running", "icbm_login_saved", "icbm_connection_not_paused"}),
         (
-            "no_database",
+            "icbm_running",
             {
-                "icbm_data_dir_at_head",
                 "icbm_not_running",
+                "icbm_data_dir_at_head",
                 "icbm_login_saved",
                 "icbm_connection_not_paused",
             },
+        ),
+        (
+            "newer_schema",
+            {"icbm_data_dir_at_head", "icbm_login_saved", "icbm_connection_not_paused"},
         ),
     ],
 )
 def test_real_preflight_fails_safely_without_a_usable_m1_owner(
     case: str, failing: set[str], tmp_path: Path, migrated_template: Path
 ) -> None:
-    owner, _ = _owner(
-        tmp_path,
-        migrated_template,
-        login=case not in ("no_login", "no_database"),
-        database=case != "no_database",
-    )
+    owner, _ = _owner(tmp_path, migrated_template, login=case != "no_login")
     if case == "paused":
         with contextlib.closing(sqlite3.connect(owner.config.database_path)) as db:
             assert db.execute("UPDATE supplier_connections SET state = 'PAUSED'").rowcount == 1
+            db.commit()
+    if case == "newer_schema":
+        with contextlib.closing(sqlite3.connect(owner.config.database_path)) as db:
+            db.execute("UPDATE alembic_version SET version_num = 'ffff_from_a_newer_build'")
             db.commit()
     root = tmp_path / "campaign"
     ledger = _initialized(root)
@@ -401,7 +411,7 @@ def test_a_real_run_refuses_before_recording_or_sending_without_an_m1_login(
     monkeypatch.setattr(cli, "capture_key_store", _never)
     owner, _ = _owner(tmp_path, migrated_template, login=False)
     root = tmp_path / "real"
-    ledger = _real_campaign(root)
+    ledger = _real_campaign(root, owner=cli.owner_identity(owner))
     ledger.record("APPROVED_A", sha=SHA_A, nonce="n")
     with pytest.raises(Refused, match="icbm_login_saved"):
         cli.run_real(root, "A", checkout=Checkout(), blocker=_unblocked, owner=owner)
@@ -409,6 +419,67 @@ def test_a_real_run_refuses_before_recording_or_sending_without_an_m1_login(
     approved = ledger.last_event("APPROVED_A")
     assert approved is not None and approved["seq"] == ledger.latest_seq()
     assert ledger.state() is State.AWAITING_APPROVAL
+    assert ledger.counts() == ZERO
+
+
+@pytest.fixture
+def canonical_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The operator's machine: no ICBM_DATA_DIR in the shell; the per-user application data
+    directory under a temporary location."""
+    monkeypatch.delenv("ICBM_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "appdata"))
+    return (tmp_path / "appdata" / "ICBM-NEW").resolve()
+
+
+def test_the_recon_owner_is_icbms_own_canonical_data_root(canonical_root: Path) -> None:
+    # Issue #52 comment 5688150031: nobody names a path; ICBM-NEW and the recon resolve one root.
+    resolved = cli.ConnectionOwner.operator().config.data_dir
+    assert resolved == AppConfig.from_env().data_dir == default_data_dir() == canonical_root
+    assert not resolved.is_relative_to(REPO_ROOT)
+
+
+def test_real_preflight_reuses_the_login_icbm_already_saved(
+    canonical_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PR #62 review 5215770649 §3: the M1 login is in ICBM's secret store, which outlives any data
+    # directory, and ICBM has not created its canonical data root on this machine yet. The
+    # preflight finds both by itself: no path, no prompt, no copy.
+    monkeypatch.setattr(cli, "capture_key_store", _never)
+    store = RecordingStore()
+    SupplierCredentialStore(store).save(KM, Credentials("m1-operator", "m1-password"))
+    store.writes.clear()
+    owner = cli.ConnectionOwner(
+        config=AppConfig.from_env(), secrets=store, gateway=NoSupplierCalls()
+    )
+    assert not canonical_root.exists()
+    root = tmp_path / "campaign"
+    ledger = _initialized(root)
+    checks = cli.preflight(root, owner=owner, checkout=Checkout(), blocker=_unblocked)
+    assert all(passed for _, passed in checks), checks
+    assert read_only_revision(canonical_root / "icbm.db") == head_revision()
+    passed = ledger.last_event("PREFLIGHT_PASSED")
+    assert passed is not None and passed["detail"]["owner"]["data_dir"] == str(canonical_root)
+    assert store.writes == []
+    assert sorted(path.name for path in root.iterdir()) == ["ledger.sqlite3", "preflight.json"]
+    assert ledger.counts() == ZERO
+
+
+def test_a_run_against_another_owner_than_the_preflight_checked_is_refused(
+    tmp_path: Path, migrated_template: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "capture_key_store", _never)
+    checked, _ = _owner(tmp_path / "checked", migrated_template)
+    other, _ = _owner(tmp_path / "other", migrated_template)
+    root = tmp_path / "real"
+    ledger = _initialized(root)
+    checks = cli.preflight(root, owner=checked, checkout=Checkout(), blocker=_unblocked)
+    assert all(passed for _, passed in checks), checks
+    ledger.record("APPROVED_A", sha=SHA_A, nonce="n")
+    with pytest.raises(Refused, match="not the one the preflight checked"):
+        cli.run_real(root, "A", checkout=Checkout(), blocker=_unblocked, owner=other)
+    approved = ledger.last_event("APPROVED_A")
+    assert approved is not None and approved["seq"] == ledger.latest_seq()
     assert ledger.counts() == ZERO
 
 

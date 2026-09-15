@@ -16,12 +16,17 @@
   ``ConnectService.collection_session()`` and keeps it in memory only. The campaign directory
   holds the ledger, the encrypted captures and the sanitized findings. The campaign-scoped OS
   secret-store service holds only the capture key.
+* The owner is found, never named. ``AppConfig.from_env()`` resolves ICBM-NEW's canonical data
+  root (``app.config.default_data_dir``) exactly as ``icbm serve`` does, and the harness has no
+  option for another one (Issue #52 comment 5688150031).
 * ``preflight`` makes zero supplier requests and ends at the approval STOP. For the connection
   owner it checks, without contacting the supplier:
-  - the ICBM data directory is at the schema head;
-  - ICBM is not running on it (one process per data directory, ADR-0006);
+  - ICBM is not running on its data directory (one process per data directory, ADR-0006);
+  - its database is at the schema head, brought there as ``icbm db upgrade`` would;
   - the supplier login is saved in ICBM;
   - the connection is not paused.
+
+  It records the owner it checked, and a run against any other owner is refused.
 * ``approve`` and ``approve-images`` are the user's explicit go-ahead, and they share one gate
   owner (PR #60 review 5214845204 §2). Each needs:
   - an interactive operator (a non-TTY stdin never approves);
@@ -51,6 +56,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from alembic.util.exc import CommandError
+from sqlalchemy.exc import SQLAlchemyError
+
 from app import __version__
 from app.config import AppConfig, ConfigError
 from app.connect.credentials import SupplierCredentialStore
@@ -59,7 +67,7 @@ from app.container import Container, build_container
 from app.core.egress import EGRESS
 from app.core.ownership import DataDirOwnershipError, acquire_data_dir
 from app.core.secrets import SERVICE_NAME, KeyringSecretStore, MemorySecretStore, SecretStore
-from app.db.migrate import head_revision, read_only_revision, upgrade_to_head
+from app.db.migrate import upgrade_to_head
 from integrations.suppliers import kmretail
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.registry import SUPPLIERS
@@ -125,27 +133,40 @@ class ConnectionOwner:
 
 
 class OwnerUnavailable(Refused):
-    """The connection owner's data directory is not at the schema head, or ICBM is running on
-    it."""
+    """The connection owner cannot be opened: ICBM is running on its data directory, or its
+    database cannot be brought to the schema head."""
 
 
-def _owner_at_head(owner: ConnectionOwner) -> bool:
-    database = owner.config.database_path
-    return database.is_file() and read_only_revision(database) == head_revision()
+class OwnerBusy(OwnerUnavailable):
+    """ICBM is running on the owner's data directory (one process per data directory)."""
+
+
+def owner_identity(owner: ConnectionOwner) -> dict[str, str]:
+    """What binds a campaign to its connection owner: the resolved data directory and the secret
+    store the login is read from. The preflight records it, and a run against any other owner is
+    refused, so a campaign can never move to a different owner after its checks."""
+    return {
+        "data_dir": str(owner.config.data_dir.resolve()),
+        "secret_backend": owner.config.secret_backend,
+    }
 
 
 @contextmanager
 def _owner_container(owner: ConnectionOwner) -> Iterator[Container]:
-    """The connection owner's own services, under its data-directory lease (ADR-0006)."""
-    if not _owner_at_head(owner):
-        raise OwnerUnavailable(
-            "the ICBM data directory is not at the schema head; run `icbm db upgrade` first"
-        )
+    """The connection owner's own services, under its data-directory lease (ADR-0006). Its
+    database is brought to the schema head exactly as ``icbm db upgrade`` does, so a canonical
+    data root that ICBM has not created yet is created here. No supplier is contacted."""
     try:
         lease = acquire_data_dir(owner.config.data_dir, app_version=__version__)
     except DataDirOwnershipError:
-        raise OwnerUnavailable("ICBM is running on its data directory; stop it first") from None
+        raise OwnerBusy("ICBM is running on its data directory; stop it first") from None
     with lease:
+        try:
+            upgrade_to_head(owner.config.database_url, ownership=lease)
+        except (CommandError, SQLAlchemyError) as exc:
+            raise OwnerUnavailable(
+                f"the ICBM database cannot be brought to the schema head ({type(exc).__name__})"
+            ) from None
         container = build_container(
             owner.config,
             ownership=lease,
@@ -171,16 +192,15 @@ def _owner_state(container: Container, supplier_key: str) -> list[tuple[str, boo
 def owner_checks(owner: ConnectionOwner, supplier_key: str) -> list[tuple[str, bool]]:
     """Whether the connection owner can provide the session, with zero supplier requests. A check
     that cannot be made fails."""
-    at_head = _owner_at_head(owner)
     unknown = [("icbm_login_saved", False), ("icbm_connection_not_paused", False)]
-    if not at_head:
-        return [("icbm_data_dir_at_head", False), ("icbm_not_running", False), *unknown]
     try:
         with _owner_container(owner) as container:
             state = _owner_state(container, supplier_key)
+    except OwnerBusy:
+        return [("icbm_not_running", False), ("icbm_data_dir_at_head", False), *unknown]
     except OwnerUnavailable:
-        return [("icbm_data_dir_at_head", True), ("icbm_not_running", False), *unknown]
-    return [("icbm_data_dir_at_head", True), ("icbm_not_running", True), *state]
+        return [("icbm_not_running", True), ("icbm_data_dir_at_head", False), *unknown]
+    return [("icbm_not_running", True), ("icbm_data_dir_at_head", True), *state]
 
 
 # ---------------------------------------------------------------- init / preflight
@@ -242,6 +262,7 @@ def preflight(
         document = {
             "campaign_id": campaign.campaign_id,
             "head": head,
+            "owner": owner_identity(owner),
             "checks": dict(checks),
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
@@ -250,6 +271,7 @@ def preflight(
             "PREFLIGHT_PASSED",
             state=State.AWAITING_APPROVAL,
             head=head,
+            owner=owner_identity(owner),
             digest=digest(paths.preflight),
         )
     return checks
@@ -393,6 +415,11 @@ def _run(
     definition = _definition(campaign.mode)
     key = definition.profile.supplier_key
     session = Session()
+    passed = ledger.last_event("PREFLIGHT_PASSED")
+    if passed is None or passed["detail"].get("owner") != owner_identity(owner):
+        raise Refused(
+            "the connection owner is not the one the preflight checked; run the preflight again"
+        )
     with _owner_container(owner) as container:
         failed = [name for name, passed in _owner_state(container, key) if not passed]
         if failed:
