@@ -1,7 +1,7 @@
 # ADR-0010 — Supplier-generic COLLECT and ProductFactsRevision source truth (M3)
 
-Status: **PROPOSED** 2026-09-15 — contract PR-A of Issue #52. It becomes ACCEPTED only after the independent Claude cross-audit, the architect's review and the user's merge approval. The status line is then changed in this PR before merge (ADR-0008 precedent).
-Decision owner: Architect (ChatGPT). Sources: Issue #52 body; architect addendum after the independent cross-audit `5672341510`; architect clarification on Coupang representative images `5672418057`.
+Status: **PROPOSED** 2026-09-15. This is contract PR-A of Issue #52, revised for the architect review of PR #55 (`5204359614`, follow-up `5204397433`), whose rulings on the former open questions are incorporated below. It becomes ACCEPTED only after the architect re-audit, the independent Claude cross-audit and the user's merge approval. The status line is then changed in this PR before merge (ADR-0008 precedent).
+Decision owner: Architect (ChatGPT). Sources: Issue #52 body; architect addendum after the independent cross-audit `5672341510`; architect clarification on Coupang representative images `5672418057`; PR #55 architect review `5204359614` and follow-up `5204397433`.
 Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
 Date: 2026-09-15
 Related: ADR-0004 (automation guardrails), ADR-0005 (job states; only TRANSIENT/RATE_LIMITED retry), ADR-0006 (one owner per data directory), ADR-0007 (supplier-generic CONNECT — this ADR is its COLLECT counterpart and changes nothing in it), ADR-0008 (error taxonomy)
@@ -35,6 +35,7 @@ M4 = canonical Product identity + current accepted revision link + enrichment/pr
   - their source-asset references;
   - the collection run that produced them.
 - M4 later creates `Product` and chooses or links the current accepted revision.
+- The runtime milestone metadata (`app.MILESTONE`) reads `M3`. It feeds `/api/health`, the screen `meta.milestone` and the UI footer. `test_active_milestone_agrees_across_the_canonical_status_documents` keeps it equal to the canonical CURRENT milestone (ruling on Q6).
 
 ### 2. Scope of M3
 
@@ -90,7 +91,7 @@ ProductFactsRevision persistence                       app/collect/
 
   It lives in the common supplier transport (`integrations/suppliers/transport/`). Its raw-client and egress-grant ownership is added to the repository rules as a reviewed entry, in the PR that introduces it.
 - **The supplier contributes only immutable site knowledge:**
-  - a collection profile (URL scope, approved transport, collection hosts, limits);
+  - a collection profile (URL scope, approved transport, collection hosts, safe URL query keys, limits);
   - pure, deterministic parser functions over an immutable document view.
 
   The document view is status, final path, content type and body. `body` is used in memory only; it is never logged, persisted whole or returned. This mirrors `ProbeResponse` in ADR-0007.
@@ -99,12 +100,12 @@ ProductFactsRevision persistence                       app/collect/
 - **No redirect is followed automatically** (`test_no_production_client_follows_redirects`). A redirect is evidence:
   - to the login page → `AUTH`;
   - to anything outside the approved product path → `VALIDATION`, with no revision.
-- **The operator URL is validated before any request:**
+- **The operator URL is validated and canonicalized before any request:**
   - `https`;
   - host equal to the supplier's storefront host;
   - path matching the product-path form proven by reconnaissance (§5);
   - no credentials or fragments;
-  - query parameters only as the profile allows.
+  - query parameters only as the profile allows (§9, secret-bearing URLs).
 
   A rejected URL makes zero supplier requests.
 
@@ -112,12 +113,14 @@ ProductFactsRevision persistence                       app/collect/
 
 - **Operator-supplied one-product scope only** (§2).
 - **Pacing:** the supplier `RequestPolicy` applies unchanged. For KM통상 that is one request at a time, at least 2.0 s between request starts, and a 20 s timeout.
-- **Same-product interval:** there is also a **minimum interval between real reads of the same `source_product_id`**. The collection profile fixes it; proposal in Q2.
-- **Bounded real-provider request budget.** Separate budgets cover reconnaissance, debugging and acceptance:
+- **Same-product interval: at least 60 s between real reads of the same product** (ruling on Q2). This is on top of the supplier spacing.
+  - Until a stable `source_product_id` is known, the interval is keyed by the normalized in-scope product URL.
+  - After identity resolution, it is keyed by `(supplier_key, source_product_id)`.
+- **Bounded real-provider request budget.** Separate budgets cover reconnaissance (§5), debugging and acceptance:
   - they are counted **durably before send** (the M2 ledger precedent);
   - they are refused with zero bytes sent once exhausted;
   - job retries count against the same budget.
-- **Caps frozen before the real campaign.** The product-read and image-read caps are frozen in `docs/acceptance/M3.md` and are never left open-ended.
+- **Caps frozen before the real campaign.** The product-read and image-read caps are frozen in `docs/acceptance/M3.md` and are never left open-ended. The reconnaissance caps (§5) are not the acceptance caps.
 - **No-default rule (M2 precedent).** A missing cap or limit is a refusal before any network I/O, never a code default.
 - **Supplier policy review.** `robots.txt`, the terms of use and any automation policy are reviewed during reconnaissance. The findings are recorded in the sanitized reconnaissance record.
 - **No bypass of an explicit technical or contractual restriction.** This covers:
@@ -132,16 +135,28 @@ ProductFactsRevision persistence                       app/collect/
 Before the final KM통상 parser and profile are frozen (PR-C), one bounded reconnaissance runs against the chosen real test product.
 
 **Conditions:**
-- the user's explicit go-ahead for the product and the budget (Q1);
+- the user's explicit go-ahead for the product;
 - the dedicated acceptance data directory;
 - the same budgeted gateway rules.
 
-**Recorded in GitHub, sanitized only:**
+**Reconnaissance caps** (ruling on Q1; reconnaissance only, not the M3 acceptance caps):
+
+| Request | Cap |
+| --- | --- |
+| product-detail reads | ≤ 4 |
+| image requests | ≤ 30 |
+| public policy reads (`robots.txt`, terms) | ≤ 3 |
+| logins | only under the accepted M1 policy (the session is reused) |
+
+If the page exposes more images than the budget allows, the count is recorded and reconnaissance stops. The cap is never raised silently.
+
+**Recorded, sanitized only.** The first record is a sanitized review comment on Issue #52. PR-C then commits `docs/suppliers/kmretail/COLLECT_RECONNAISSANCE.md` (ruling on Q5). The record covers:
 - the observed canonical product URL/path form;
 - the stable product-identity evidence, and the exact rule used for `source_product_id`;
 - whether authenticated HTTP HTML is sufficient or browser rendering is actually required;
 - where each fact's evidence lives: price, shipping, minimum sale price, options, stock, images and notice facts;
-- the exact image/CDN hosts that must be allowlisted;
+- the exact image/CDN hosts that must be allowlisted, their safe URL query keys, and whether their asset URLs are signed or expiring (§9);
+- the observed image formats (§9, decoder);
 - every field that exists only as image evidence;
 - the `robots.txt`, terms and automation-policy review (§4).
 
@@ -164,7 +179,7 @@ Before the final KM통상 parser and profile are frozen (PR-C), one bounded reco
 revision_id
 supplier_key            (kmretail)
 source_product_id
-source_url
+source_url              canonical, sanitized (§9)
 captured_at
 currency                (KRW)
 extractor_revision      semantic extraction identity (§12)
@@ -192,7 +207,14 @@ revision 3 ─ source_product_id X ─ fingerprint F
 **Fingerprints** are deterministic and content-only:
 - `field_fingerprint` = SHA-256 over a canonical serialization of `(field_key, status, normalized value, ordered evidence digests)`.
 - `source_fingerprint` = SHA-256 over the ordered `(field_key, field_fingerprint)` pairs and the ordered image references `(role, order, sha256)`.
-- Neither includes `captured_at`, run or correlation IDs, session material or page-volatile tokens. An unchanged source therefore yields equal fingerprints.
+- Neither includes:
+  - `captured_at`;
+  - run or correlation IDs;
+  - session material;
+  - page-volatile tokens;
+  - volatile signed-URL material (§9).
+
+  An unchanged source therefore yields equal fingerprints.
 - Fingerprints are compared as drift evidence only between revisions with the same `extractor_revision`. Across an extractor change, the change of extractor explains a changed fingerprint.
 
 **Committed evidence** never carries plain digests of business values, such as a SHA-256 of a wholesale price, which would be trivially reversible. Repository evidence uses counts, presence and statuses, plus keyed per-campaign fingerprints (the M2 HMAC precedent). The raw values stay in the local database.
@@ -201,12 +223,20 @@ revision 3 ─ source_product_id X ─ fingerprint F
 
 `ROADMAP.md` §5 and `docs/ARCHITECTURE.md` §5 define the COLLECT source-truth contract. M3 keeps all of it in the schema and the parser/evidence model, and splits only what **acceptance** requires.
 
-| Level | Facts | Acceptance |
-| --- | --- | --- |
-| **Core** | stable source identity + URL; original name; price facts; options / atomic configuration facts; source images; stock evidence | must be proven on the real product |
-| **Source coverage** | shipping policy + fee; `minimum_sale_price`; brand; manufacturer; origin; product-information notice facts/evidence; other product-scoped detail facts of the canonical contract | each must report `CONFIRMED`, `ABSENT` or `REVIEW_REQUIRED`; a legitimately missing field or image-only notice does not fail M3 |
+| Level | Facts |
+| --- | --- |
+| **Core** | stable source identity + URL; original name; price facts; options / atomic configuration facts; source images; stock evidence |
+| **Source coverage** | shipping policy + fee; `minimum_sale_price`; brand; manufacturer; origin; product-information notice facts/evidence; other product-scoped detail facts of the canonical contract |
 
-No OCR or AI may turn a missing or ambiguous source field into a confident fact.
+Every field reports `CONFIRMED`, `ABSENT` or `REVIEW_REQUIRED`. No OCR or AI may turn a missing or ambiguous source field into a confident fact.
+
+**Revision `facts_status`** (ruling on Q3):
+- `facts_status` is `CONFIRMED` if and only if every core field is `CONFIRMED` and no field anywhere is `REVIEW_REQUIRED`. Otherwise it is `REVIEW_REQUIRED`.
+- `ABSENT` is legitimate only for source-coverage fields.
+
+**M3 acceptance semantics:**
+- **Blocker:** any core field that is `ABSENT` or `REVIEW_REQUIRED`.
+- **Not a blocker:** a source-coverage field that is `ABSENT` or `REVIEW_REQUIRED`. The coverage field may make the revision-level `facts_status` `REVIEW_REQUIRED`, for example an image-only notice. The campaign still passes provided every core field is `CONFIRMED` and the required M3 evidence gates pass.
 
 **Price:**
 - Money is integer whole KRW. There is no float money.
@@ -225,8 +255,6 @@ No OCR or AI may turn a missing or ambiguous source field into a confident fact.
 - Option-level sold-out evidence is kept wherever it is observable.
 - A product whose page proves it has no option control has options `CONFIRMED` with zero axes, not `ABSENT`.
 
-**Revision status:** the rule is proposed in Q3.
-
 ### 8. Evidence model
 
 Evidence is separate from normalized facts, and **product-scoped**. The authenticated page can hold member data, so it is never persisted blindly.
@@ -237,14 +265,20 @@ Each evidence entry holds:
 field_key
 source_kind       DOM_TEXT | ATTRIBUTE | EMBEDDED_JSON | JSON_LD | CONTROL_STATE | URL | PRODUCT_HTML_FRAGMENT | IMAGE
 locator           stable locator / semantic selector
-observed          product-scoped value or sanitized fragment (bounded size)
+observed          product-scoped value or sanitized fragment
 normalized        normalization result
 digest            evidence digest (feeds the field fingerprint)
 status            CONFIRMED | ABSENT | REVIEW_REQUIRED
 ```
 
+**Fragment bound** (ruling on Q7):
+- A sanitized `PRODUCT_HTML_FRAGMENT` is at most 4 KiB per entry. Larger evidence is referenced by digest only.
+- **Size never makes a fragment safe.** A fragment of any size must be product-scoped and sanitized.
+- `URL`-kind evidence is stored in its sanitized form (§9).
+
 **Forbidden** in evidence, audit and logs:
 - cookies, authorization headers and session values;
+- secret-bearing URL material (§9);
 - member IDs;
 - unrelated account or profile data;
 - page-wide private HTML.
@@ -259,7 +293,7 @@ If product-information notice facts exist **only inside an image**:
 **Pipeline:**
 
 ```text
-source image reference
+source image reference (discovered from the product source in this run)
 → approved-host fetch (collection gateway)
 → validate status / content type / size bounds
 → SHA-256 checksum
@@ -269,11 +303,16 @@ source image reference
 
 **Metadata kept for every source asset or reference:**
 - role (representative or detail) and source order;
-- source URL and its evidence;
+- sanitized stable locator, or reference provenance (see "Secret-bearing URLs" below);
 - original width and height;
-- MIME type, verified against the bytes rather than trusted from the header;
+- MIME type;
 - byte size;
 - SHA-256.
+
+**Decoder contract** (ruling on Q4):
+- Width, height and MIME are derived from the **observed bytes** with a vetted decoder, never from a declared header.
+- An unknown or unsupported format is `REVIEW_REQUIRED`.
+- The decoder is chosen in PR-C, after reconnaissance shows the real formats. PR-A adds no dependency, and a new dependency still needs the user's explicit approval (CLAUDE.md §4).
 
 **Handling rules:**
 - The original bytes are preserved exactly. M3 **never overwrites, resizes, re-encodes or watermarks** a source asset, and never uploads or publishes one.
@@ -291,7 +330,7 @@ source image reference
 
 **Reuse between revisions:**
 - The same URL is **not** evidence of the same bytes.
-- `ETag` / `Last-Modified` validators are used when the origin provides them. A validated `304 Not Modified` may reuse the existing content-addressed blob and checksum for the new revision's ordered reference.
+- `ETag` / `Last-Modified` validators are used when the origin provides them. A validated `304 Not Modified` on the freshly discovered URL may reuse the existing content-addressed blob and checksum for the new revision's ordered reference.
 - Without a trustworthy validator or supplier-specific immutability proof, the image is refetched under the budget and the checksum recomputed.
 - Checksum equality is never claimed without observing or revalidating the bytes.
 
@@ -300,11 +339,38 @@ source image reference
 - The image facts become `REVIEW_REQUIRED`.
 - The host allowlist is never widened at run time.
 
-**Marketplace image rules are out of M3.** Derived marketplace variants belong to the M4 image-pipeline foundation and to each marketplace adapter/readiness contract. Those record the source checksum, the transformation spec or policy version, and the output checksum, and they never mutate the source asset.
-- Coupang's `REPRESENTATION` image is square, JPG or PNG, 500×500 to 5000×5000 px and at most 3 MB. That is a provider-documented rule for the future Coupang adapter, not for M3 and not for SmartStore.
-- For SmartStore, 1000×1000 is recommended. A 500×500 minimum is not treated as a SmartStore invariant until the current official rule or a measured provider error verifies it.
-- Cropping is never a default fallback.
-- Dimension compliance is never presented as source quality.
+#### Secret-bearing URLs (PR #55 review `5204359614` §3, follow-up `5204397433` §3)
+
+Signed, expiring or tokenized URLs are **credential-equivalent**. This extends the M1/M2 secret boundary to COLLECT assets and applies to the product `source_url` as well as to image URLs.
+
+- **What counts as secret-bearing:**
+  - every query value whose key is not on the profile's safe-key allowlist for that host;
+  - any path segment the profile declares as tokenized.
+
+  The allowlist is declared per host from reconnaissance. By default, every query key is secret-bearing.
+- **Never in plaintext:** secret-bearing material is never persisted, logged, audited, put into evidence or committed in plaintext. The run's in-memory secret scan includes the observed values.
+- **Memory-only use:** a signed URL is used only in memory, for the approved fetch, in the collection run that discovered it from the product source.
+- **What is stored:**
+  - When reconnaissance proves the sanitized locator stable, the reference stores it: scheme, host, path and allowlisted query keys only.
+  - Where a comparison of the removed material is needed, only a keyed digest is stored. This is an HMAC under a key held in the OS secret store, never a plain hash.
+  - When **no stable locator can be proven**, the reference keeps provenance without the URL: the evidence locator of the reference inside the product source, the host, and role/order. The observed metadata and checksum are kept alongside.
+- **Drift never depends on volatile signed-URL bytes.** Image identity and drift rest on role, order, observed metadata, checksum and the stable locator when one is proven.
+- **No stored signed URL is truth.** A later collection discovers a fresh URL from the product source. A stored or expired signed URL is never treated as canonical truth and is never refetched.
+- **Product URL:** the operator-supplied product URL is canonicalized the same way before it becomes `source_url`. A query key outside the profile's allowlist is removed; if the URL cannot be canonicalized safely, it is refused.
+
+#### Marketplace image rules are out of M3
+
+Derived marketplace variants belong to the M4 image-pipeline foundation and to each marketplace adapter/readiness contract. Those record the source checksum, the transformation spec or policy version, and the output checksum, and they never mutate the source asset.
+
+- **Coupang.** The `REPRESENTATION` image rule is P0 provider evidence for the future Coupang adapter, not for M3 and not for SmartStore: square JPG or PNG, 500×500 to 5000×5000 px, at most 3 MB.
+  - Source: the Coupang OPEN API developer portal, *OPEN API Product Listing Guide* (`https://developers.coupang.com/hc/en-us/articles/360034889893-OPEN-API-Product-Listing-Guide`). The page was updated 2025-07-28; the image rules are in its attached PDF guides.
+  - It was checked by the architect in `5672418057` and PR #55 review `5204359614`.
+  - The future Coupang adapter revalidates the rule against the provider's current source at implementation time and records it in its own source registry, as `docs/platforms/smartstore/SOURCES.md` does for SmartStore. This ADR is not the perpetual provider authority.
+- **SmartStore.** 1000×1000 is recommended. A 500×500 minimum stays unverified and is not treated as a SmartStore invariant until the current official rule or a measured provider error verifies it.
+- **General.**
+  - Cropping is never a default fallback.
+  - Dimension compliance is never presented as source quality.
+  - The rule for when to generate a derived image and when to raise `REVIEW_REQUIRED` belongs to the marketplace image/readiness contract.
 
 ### 10. Stock / sold-out
 
@@ -327,22 +393,39 @@ mixed / insufficient evidence      → REVIEW_REQUIRED
 - **An unresolved stable source identity produces no ProductFactsRevision.** The run ends with `COLLECT_REVIEW_REQUIRED` and a `COLLECT_EVIDENCE` review item.
 - **Field-level ambiguity** may produce a revision whose `facts_status` is `REVIEW_REQUIRED`. Process completion (the job) and facts readiness (the revision) are separate concepts.
 - **Audit family.** Names may be normalized during implementation, but they cover at least: `COLLECT_REQUESTED`, `COLLECT_STARTED`, `COLLECT_SOURCE_FETCHED`, `PRODUCT_FACTS_REVISION_CREATED`, `COLLECT_REVIEW_REQUIRED` and `COLLECT_FAILED`.
-- **Audit and log payloads** come only from the allowlist builder `app.core.safe_payload`. They never contain full HTML, cookies, auth or session values, or private account data.
+- **Audit and log payloads** come only from the allowlist builder `app.core.safe_payload`. They never contain:
+  - full HTML;
+  - cookies, auth or session values;
+  - secret-bearing URL material;
+  - private account data.
 
-### 12. Extraction identity (addendum C)
+### 12. Extraction identity (addendum C; PR #55 review `5204359614` §2)
 
 A manual string with no guard is insufficient. The **supplier collection definition** owns its extraction identity, and every revision persists both parts of it.
 
 - **`extractor_revision`: the semantic identity**, for example `kmretail-collect-r1`.
-  - It covers selectors, identity rules, normalization, stock judgment and field interpretation, including the profile's hosts and limits.
+  - It covers selectors, identity rules, normalization, stock judgment and field interpretation, including the profile's hosts, safe query keys and limits.
   - **Any semantic change advances it in the same PR.**
-- **`extractor_fingerprint`: the implementation identity.**
-  - It is SHA-256 over the LF-normalized source of the definition, profile and parser modules, in a fixed file order.
-  - It is pinned next to `extractor_revision`, so the exact extractor that produced a revision can be reproduced from the repository.
+- **`extractor_fingerprint`: the implementation identity.** It is a SHA-256 over a declared input set, as defined below, so the exact extractor that produced a revision can be reproduced from the repository.
+
+**Acyclic definition.** The pin and the hashed bytes never overlap.
+
+1. **Pin manifest.** `integrations/suppliers/<key>/extraction_identity.py` holds exactly three constants:
+   - `EXTRACTOR_REVISION: str`;
+   - `EXTRACTOR_INPUTS: tuple[str, ...]`, repository-relative POSIX paths;
+   - `EXTRACTOR_FINGERPRINT: str`, lowercase hex.
+
+   Nothing else is in it. The runtime reads `EXTRACTOR_REVISION` and `EXTRACTOR_FINGERPRINT` from here and persists them on every revision.
+2. **Hash input set = exactly the files named in `EXTRACTOR_INPUTS`.** It must contain every `*.py` file of the supplier's collection package `integrations/suppliers/<key>/collect/`, which holds the definition, profile and parser, so a new parser file cannot escape. It may also name common pure normalization modules whose output the parser depends on. It **never** contains the pin manifest.
+3. **Order and encoding.**
+   - Files are taken in ascending order of their path string.
+   - Each file's bytes are normalized by converting CRLF to LF, and nothing else.
+   - `EXTRACTOR_FINGERPRINT` = SHA-256 over the concatenation, per file, of `path` (UTF-8), a NUL byte, the lowercase hex SHA-256 of the normalized bytes, and `\n`.
+4. **Recomputation.** A repository test recomputes the fingerprint over only that declared set and compares it with the pin. It also asserts the coverage and exclusion rules of step 2. The M3 acceptance harness recomputes it again at P0.
 
 Mechanical guards (implemented with the parser, PR-C):
 
-1. **Pin check.** A repository test recomputes the fingerprint. Any edit to a pinned file fails until the pin is updated, so no change goes unnoticed.
+1. **Pin check (above).** Any edit to a hashed file fails until the pin is updated, so no change goes unnoticed.
 2. **Golden outputs per revision.** For every sanitized fixture, the expected normalized facts, statuses and fingerprints are recorded under the `extractor_revision` that produces them. A semantic change alters an output, which fails the test until the revision advances and new goldens are recorded. A semantic change without an identity change is therefore a failing test for every covered behaviour.
 3. **Clean-tree campaigns.** The acceptance harness runs only at an exact commit with a clean tree (the M2 P0 precedent), so a local uncommitted edit cannot produce accepted revisions under a stale pin.
 
@@ -383,13 +466,13 @@ A typed application/service contract to:
 
 - Before the **first real product read**, STOP and obtain the user's explicit go-ahead for the chosen product and scope.
 - The recommended real sequence runs on a dedicated acceptance data directory:
-  - **P0:** exact main SHA, clean tree, CI green.
+  - **P0:** exact main SHA, clean tree, CI green, extractor pin recomputed.
   - **P1:** M0 regression 24/24, plus the M1/M2 contract regressions.
   - **P2:** AI/OCR/marketplace egress hard-zero preflight.
   - **P3:** KM통상 CONNECT proof / session usable.
   - **C1, C2, restart, C3:** revisions R1, R2 and R3.
-  - Then DB/API read-back with source-asset checksum verification, and a secret/PII/evidence scan.
-- The assertions are those of Issue #52 §12.
+  - Then DB/API read-back with source-asset checksum verification, and a secret/PII/evidence scan that includes signed-URL material.
+- The assertions are those of Issue #52 §12, judged with the acceptance semantics of §7.
 - Closeout evidence is sanitized (§6): repository evidence is not a business-data dump.
 
 ### 16. Tests and negative controls
@@ -408,6 +491,8 @@ The tests cover at least the Issue #52 §13 list. Fixtures are synthetic or sani
 - mixed stock evidence → `REVIEW_REQUIRED`;
 - image-only notice → evidence kept, text fact `REVIEW_REQUIRED`, no OCR;
 - image with a bad host, content type or size → fail closed / review;
+- signed image URL → no secret-bearing material persisted, logged or in evidence; a fresh URL is rediscovered on recollection;
+- extractor pin: an edit to a hashed file fails until re-pinned, and the manifest is outside the hashed set;
 - no forbidden endpoint or host escapes the collection gateway;
 - CI and tests cannot construct the real supplier transport;
 - no AI or marketplace transport on the M3 path;
@@ -417,48 +502,42 @@ The tests cover at least the Issue #52 §13 list. Fixtures are synthetic or sani
 
 | PR | Scope |
 | --- | --- |
-| **PR-A** (this) | contract, canonical status sync, this ADR, repository rules; docs and rules only, no provider call |
+| **PR-A** (this) | contract, canonical status sync including the runtime milestone metadata, this ADR, repository rules; no provider call |
 | **PR-B** | source-truth model and migrations: revision, evidence and source-asset persistence, repositories, fake tests |
-| **PR-C** | supplier-generic collection gateway and the KM통상 deterministic parser/profile, frozen only after the reconnaissance findings are reviewed |
+| **PR-C** | supplier-generic collection gateway and the KM통상 deterministic parser/profile with its extraction-identity manifest, frozen only after the reconnaissance findings are reviewed |
 | **PR-D** | durable `collect.*` job, application/API read-back, acceptance harness and negative controls; still no CI real call |
 | **Campaign + closeout** | only after the architect audit, the independent Claude cross-audit and the user's explicit go-ahead for the real scope |
 
 No PR is merged without the user's explicit approval. A contract change and its implementation never share a PR.
 
-## Open questions for the architect (proposals)
+## Architect rulings on the former open questions
 
-1. **Reconnaissance budget (§5).**
-   - **Proposal:** product-detail reads ≤ 4; image requests ≤ 30; public policy reads (`robots.txt`, terms) ≤ 3; logins only under the M1 policy (≤ 1 expected, the session is reused).
-   - The reads are counted durably before send, and the user's go-ahead comes before the first read.
-2. **Same-product minimum interval (§4).**
-   - **Proposal:** 60 s between real reads of the same `source_product_id`, on top of the 2.0 s supplier spacing. C1 → C2 → restart → C3 fits comfortably.
-3. **`facts_status` aggregation (§7).**
-   - **Proposal:** `CONFIRMED` iff every core field is `CONFIRMED` and no field anywhere is `REVIEW_REQUIRED`; otherwise `REVIEW_REQUIRED`.
-   - `ABSENT` is allowed only for source-coverage fields. A core field that is `ABSENT` makes the revision `REVIEW_REQUIRED`.
-4. **Image dimensions (§9).**
-   - Reading width and height needs either an in-house header parser for the formats the reconnaissance observes, or a new pinned dependency (Pillow), which needs the user's approval under CLAUDE.md §4.
-   - **Proposal:** an in-house header parser, where an unknown format means `REVIEW_REQUIRED`.
-5. **Where the sanitized reconnaissance record lives (§5).**
-   - **Proposal:** a comment on Issue #52 for the review, plus `docs/suppliers/kmretail/COLLECT_RECONNAISSANCE.md` committed with PR-C.
-6. **Runtime `app.MILESTONE`.**
-   - It still reads `"M1"`. It feeds `/api/health`, the screen `meta.milestone` and the UI footer, and `tests/integration/test_api.py` pins it.
-   - This PR is docs and rules only, so it leaves the value alone.
-   - **Proposal:** the value names the milestone under development. The first M3 code PR (PR-B) sets it to `"M3"`, and the active-milestone rule then also checks it.
-7. **Evidence fragment bound (§8).**
-   - **Proposal:** a sanitized `PRODUCT_HTML_FRAGMENT` is at most 4 KiB per entry, and larger evidence is referenced by digest only.
+PR #55 review `5204359614` §4 and follow-up `5204397433`. No question remains open.
+
+| Q | Ruling | Where |
+| --- | --- | --- |
+| Q1 reconnaissance budget | **Accepted.** Product reads ≤ 4, image requests ≤ 30, policy reads ≤ 3, logins under M1. These are reconnaissance caps only; if more images are exposed, record the count and stop. | §5 |
+| Q2 same-product interval | **Accepted: 60 s.** Keyed by the normalized product URL before identity is known, then by `(supplier_key, source_product_id)`. | §4 |
+| Q3 `facts_status` | **Accepted**, with acceptance semantics: coverage `REVIEW_REQUIRED` does not fail M3 if all core fields are `CONFIRMED`; a core `ABSENT`/`REVIEW_REQUIRED` is a blocker. | §7 |
+| Q4 image decoder | **Contract only:** derived from observed bytes with a vetted decoder; unknown format → `REVIEW_REQUIRED`. Implementation chosen in PR-C; no dependency in PR-A. | §9 |
+| Q5 reconnaissance record | **Accepted:** an Issue #52 sanitized comment first, then `docs/suppliers/kmretail/COLLECT_RECONNAISSANCE.md` with PR-C. | §5 |
+| Q6 runtime milestone | **Deferral rejected.** This PR sets `app.MILESTONE = "M3"` and the active-milestone rule checks it. | §1 |
+| Q7 fragment bound | **Accepted: 4 KiB**, and size never makes a fragment safe. | §8 |
 
 ## Consequences
 
-- A second supplier's collection is a new collection definition, not a core change, just as CONNECT works under ADR-0007.
+- A second supplier's collection is a new collection definition with its own extraction-identity manifest, not a core change, just as CONNECT works under ADR-0007.
 - The source-truth path cannot silently depend on AI, OCR or a marketplace. Repository rules fail such an import.
 - Every revision is reproducible: an unchanged source yields equal fingerprints, and an extractor change is distinguishable from source drift.
+- Signed asset URLs never become stored secrets or false identity.
 - The real supplier sees a bounded, paced, budgeted number of reads, and never an unattended debug loop.
 - M4 inherits a stable, immutable source-truth history. It chooses the current accepted revision instead of repairing mutated facts.
 
 ## References
 
-- Issue #52 and comments `5672341510`, `5672418057`
+- Issue #52 and comments `5672341510`, `5672418057`; PR #55 reviews `5204359614`, `5204397433`
 - `ROADMAP.md` §5, §12; `docs/ARCHITECTURE.md` §4, §5, §8, §10, §11
 - ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008
-- `integrations/suppliers/base.py`, `integrations/suppliers/transport/`, `integrations/suppliers/kmretail/`, `app/collect/service.py`
+- `app/__init__.py`, `integrations/suppliers/base.py`, `integrations/suppliers/transport/`, `integrations/suppliers/kmretail/`, `app/collect/service.py`
 - `tests/unit/test_repository_rules.py`
+- Coupang OPEN API Product Listing Guide (future Coupang adapter source, §9)

@@ -189,9 +189,10 @@ def test_roadmap_places_fulfillment_inside_operate() -> None:
     assert not [t for t in top_level if re.search(r"fulfil", t, re.I)], "fulfillment is not a phase"
 
 
-# Issue #52 §0: the milestone status is stated in CLAUDE.md §11, ROADMAP.md §12 and the README
-# status, and every accepted milestone has an acceptance record. They must agree, so the active
-# milestone cannot silently drift again. (The runtime ``app.MILESTONE`` is ADR-0010 question 6.)
+# Issue #52 §0 and PR #55 review 5204359614: the milestone status is stated in CLAUDE.md §11,
+# ROADMAP.md §12, the README status and the runtime ``app.MILESTONE`` (health, screen meta, UI
+# footer), and every accepted milestone has an acceptance record. They must agree, so the active
+# milestone cannot silently drift again.
 _CLAUDE_MILESTONE = re.compile(r"^(M\d+(?:\.\d+)?) — .*?\b(ACCEPTED|CURRENT)\b")
 _ROADMAP_MILESTONE = re.compile(r"^(?:→\s*)?(M\d+(?:\.\d+)?) .*?\s(ACCEPTED|CURRENT)\b")
 _ROADMAP_CHAIN = re.compile(r"^(?:→\s*)?(M\d+(?:\.\d+)?)\s", re.M)
@@ -226,6 +227,9 @@ def test_active_milestone_agrees_across_the_canonical_status_documents() -> None
     assert claude == roadmap == readme
     current = [milestone for milestone, status in roadmap.items() if status == "CURRENT"]
     assert len(current) == 1, current
+    from app import MILESTONE
+
+    assert current == [MILESTONE], "runtime app.MILESTONE is not the canonical CURRENT milestone"
     # Every milestone before the current one is accepted; none after it carries a status.
     chain = _ROADMAP_CHAIN.findall(_roadmap_sequence())
     position = chain.index(current[0])
