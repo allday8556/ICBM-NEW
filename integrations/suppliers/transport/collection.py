@@ -1,0 +1,365 @@
+"""The policy-enforcing COLLECT gateway (ADR-0010 §3, §4, §9).
+
+This is the only code that performs a supplier collection request. For every request:
+
+* the target is checked against the collection profile before anything else:
+  - https only, with no credentials, no port other than 443 and no fragment;
+  - product and policy documents on the storefront host, in the product path form or at an exact
+    policy path;
+  - images only on the explicit image hosts;
+  - a product URL may carry only the explicitly safe query keys;
+* the request is reserved in the request budget before any byte is sent, so a refusal sends
+  nothing;
+* it is paced by the supplier's ``RequestPolicy`` and runs inside an egress grant limited to the
+  profile's hosts. A redirect is never followed; it is returned as evidence;
+* the session payload of the M1 connection owner is sent only with a product read;
+* it is attributed with one ``supplier.collect_request`` log line of allowlisted fields. The
+  target is the path of a document and only the host of an image, never a query.
+
+The HTTP stack's own loggers are guarded too:
+* httpx writes one INFO line per request with the full URL, so the query of every URL in those
+  lines is redacted;
+* httpcore's debug lines can carry headers and cookies, so httpcore logs warnings and above only.
+
+A signed image URL therefore never reaches a log. Bodies are read up to a bound and refused
+beyond it, keeping nothing partial. The live network transport is never built under CI or pytest.
+"""
+
+import logging
+import os
+import re
+import sys
+import time
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from typing import Protocol
+from urllib.parse import unquote_plus, urlsplit
+
+import httpx
+
+from app.core.egress import EGRESS, EgressBlockedError
+from app.core.errors import (
+    AppError,
+    ErrorClass,
+    PolicyBlockedError,
+    RateLimitedError,
+    TransientError,
+)
+from app.core.safe_payload import safe_payload
+from integrations.suppliers.base import SupplierTransport
+from integrations.suppliers.collection import (
+    CollectionProfile,
+    DocumentView,
+    FetchIssue,
+    ImageResponse,
+    ReadKind,
+)
+from integrations.suppliers.transport.gateway import DEFAULT_USER_AGENT
+from integrations.suppliers.transport.pacing import RequestPacer
+from integrations.suppliers.transport.session_payload import decode_session
+
+logger = logging.getLogger("icbm.collect.transport")
+
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+# Environment markers of CI and test runs: the live transport never exists under them.
+CI_MARKERS = ("CI", "GITHUB_ACTIONS", "PYTEST_CURRENT_TEST")
+_REDIRECTS = frozenset({301, 302, 303, 307, 308})
+_QUERY = re.compile(r"\?[^\s\"'<>]*")
+
+Observe = Callable[[int], None]
+
+
+class _RedactQueries(logging.Filter):
+    """Redacts the query of every URL in a record (ADR-0010 §9: signed URLs are credentials)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str) and "?" in record.msg:
+            record.msg = _QUERY.sub("?[redacted]", record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _QUERY.sub("?[redacted]", str(arg)) if "?" in str(arg) else arg
+                for arg in record.args
+            )
+        return True
+
+
+_REDACT_QUERIES = _RedactQueries()
+
+
+def install_log_guards() -> None:
+    """Guard the HTTP stack's own loggers (idempotent)."""
+    logging.getLogger("httpx").addFilter(_REDACT_QUERIES)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+class CollectionTargetRefused(PolicyBlockedError):
+    """The URL is outside the collection profile; nothing was reserved or sent."""
+
+
+class CollectionBudgetRefused(PolicyBlockedError):
+    """The request budget refused the request before any byte was sent."""
+
+
+class ImageFetchRefused(AppError):
+    """An image response is unusable; the reference becomes REVIEW_REQUIRED with ``issue``."""
+
+    error_class = ErrorClass.REVIEW_REQUIRED
+
+    def __init__(self, issue: FetchIssue, message: str) -> None:
+        super().__init__(f"COLLECT_IMAGE_{issue.value}", message)
+        self.issue = issue
+
+
+class LiveTransportRefused(RuntimeError):
+    """The live supplier transport was requested where it may never exist."""
+
+
+class RequestBudget(Protocol):
+    def reserve(self, kind: ReadKind, subject: str) -> None:
+        """Durably reserve one request before it is sent, or raise ``CollectionBudgetRefused``.
+
+        ``subject`` is the canonical product URL, the policy path, or the image host — never a
+        signed URL."""
+        ...
+
+
+def ci_or_test(environ: Mapping[str, str] | None = None) -> str | None:
+    """Why this process is a CI or test run, or None."""
+    env = os.environ if environ is None else environ
+    for name in CI_MARKERS:
+        if env.get(name):
+            return name
+    return "pytest" if "pytest" in sys.modules else None
+
+
+def _refused(message: str) -> CollectionTargetRefused:
+    return CollectionTargetRefused("COLLECT_TARGET_REFUSED", message)
+
+
+def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
+    """Refuse a URL outside the profile; return the budget subject of an allowed one."""
+    if any(char.isspace() for char in url) or "#" in url:
+        raise _refused("a collection URL has no whitespace and no fragment")
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        raise _refused("the collection URL is not parseable") from None
+    if (
+        parts.scheme != "https"
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or port not in (None, 443)
+    ):
+        raise _refused("a collection URL is https without credentials or another port")
+    host, path = parts.hostname, parts.path or "/"
+    if kind is ReadKind.IMAGE_REQUEST:
+        if host not in profile.image_hosts:
+            raise _refused("the image host is not allowlisted")
+        return host
+    if host != profile.storefront_host:
+        raise _refused("documents are read only from the storefront host")
+    if kind is ReadKind.POLICY_READ:
+        if parts.query or path not in profile.policy_paths:
+            raise _refused("not an allowlisted policy document")
+        return path
+    if not profile.is_product_path(path):
+        raise _refused("the path is not the product path form")
+    safe = profile.safe_query_keys.get(host, frozenset())
+    keys = [pair.split("=", 1)[0] for pair in parts.query.split("&") if pair]
+    if any(unquote_plus(key) not in safe for key in keys):
+        raise _refused("the product URL carries a query key that is not explicitly safe")
+    return f"https://{host}{path}" + (f"?{parts.query}" if parts.query else "")
+
+
+class PolicedCollectionGateway:
+    def __init__(
+        self,
+        *,
+        pacer: RequestPacer | None = None,
+        # Tests pass an httpx.MockTransport; without one the gateway uses the network stack,
+        # which it refuses to do under CI or pytest.
+        http_transport: httpx.BaseTransport | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> None:
+        if http_transport is None and (blocker := ci_or_test(environ)) is not None:
+            raise LiveTransportRefused(
+                f"the live collection transport never exists under {blocker}"
+            )
+        install_log_guards()
+        self._pacer = pacer or RequestPacer()
+        self._http_transport = http_transport
+
+    # ---------------------------------------------------------------- documents
+
+    def read_document(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        kind: ReadKind,
+        budget: RequestBudget,
+        session: bytes | None = None,
+    ) -> DocumentView:
+        if kind is ReadKind.IMAGE_REQUEST:
+            raise ValueError("images are read with read_image")
+        subject = check_target(profile, url, kind)
+        budget.reserve(kind, subject)
+        cookies: list[dict[str, str]] = []
+        user_agent = DEFAULT_USER_AGENT
+        if kind is ReadKind.PRODUCT_READ and session is not None:
+            cookies, user_agent = decode_session(session)
+        path = urlsplit(url).path or "/"
+        with (
+            self._exchange(profile, kind, target=path) as observe,
+            self._client(profile, cookies, user_agent) as client,
+            client.stream("GET", url) as response,
+        ):
+            observe(response.status_code)
+            self._raise_for_status(response.status_code)
+            data = _bounded(response, MAX_DOCUMENT_BYTES)
+            if data is None:
+                raise PolicyBlockedError(
+                    "COLLECT_DOCUMENT_TOO_LARGE", "the document exceeds the size bound"
+                )
+            location = response.headers.get("location")
+            return DocumentView(
+                kind=kind,
+                status=response.status_code,
+                path=path,
+                location=(
+                    urlsplit(location).path or "/"
+                    if location and response.status_code in _REDIRECTS
+                    else None
+                ),
+                content_type=response.headers.get("content-type", ""),
+                body=data.decode(response.encoding or "utf-8", errors="replace"),
+            )
+
+    # ---------------------------------------------------------------- images
+
+    def read_image(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        budget: RequestBudget,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> ImageResponse:
+        """Fetch one image, revalidating with the stored validators when there are any."""
+        host = check_target(profile, url, ReadKind.IMAGE_REQUEST)
+        budget.reserve(ReadKind.IMAGE_REQUEST, host)
+        headers = {}
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        with (
+            self._exchange(profile, ReadKind.IMAGE_REQUEST, target=host) as observe,
+            self._client(profile, [], DEFAULT_USER_AGENT) as client,
+            client.stream("GET", url, headers=headers) as response,
+        ):
+            status = response.status_code
+            observe(status)
+            validators = (response.headers.get("etag"), response.headers.get("last-modified"))
+            if status == 304:
+                return ImageResponse(304, None, validators[0] or etag, validators[1])
+            self._raise_for_status(status)
+            if status != 200:
+                raise ImageFetchRefused(FetchIssue.FETCH_FAILED, f"HTTP {status}")
+            content_type = response.headers.get("content-type", "")
+            media = content_type.split(";", 1)[0].strip().lower()
+            if not media.startswith("image/"):
+                raise ImageFetchRefused(FetchIssue.BAD_CONTENT_TYPE, "the response is not an image")
+            limit = profile.limits.max_image_bytes
+            declared = response.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared) > limit:
+                raise ImageFetchRefused(FetchIssue.OVERSIZE, "declared size over the bound")
+            data = _bounded(response, limit)
+            if data is None:
+                raise ImageFetchRefused(FetchIssue.OVERSIZE, "body over the size bound")
+            return ImageResponse(200, media, validators[0], validators[1], bytes(data))
+
+    # ---------------------------------------------------------------- common
+
+    @contextmanager
+    def _client(
+        self, profile: CollectionProfile, cookies: list[dict[str, str]], user_agent: str
+    ) -> Iterator[httpx.Client]:
+        jar = httpx.Cookies()
+        for cookie in cookies:
+            jar.set(cookie["name"], cookie["value"], domain=cookie.get("domain", ""))
+        supplier = profile.supplier
+        with (
+            self._pacer.slot(supplier),
+            EGRESS.grant(f"supplier:{supplier.supplier_key}:collect", profile.hosts),
+            httpx.Client(
+                timeout=supplier.request_policy.request_timeout_s,
+                follow_redirects=False,
+                trust_env=False,
+                transport=self._http_transport,
+                cookies=jar,
+                headers={"User-Agent": user_agent, "Accept-Language": "ko-KR,ko;q=0.9"},
+            ) as client,
+        ):
+            yield client
+
+    @contextmanager
+    def _exchange(
+        self, profile: CollectionProfile, kind: ReadKind, *, target: str
+    ) -> Iterator[Observe]:
+        """Translate transport failures and write the one attribution line per request."""
+        result, status = "ERROR", None
+        started, started_mono = datetime.now(UTC), time.monotonic()
+
+        def observe(code: int) -> None:
+            nonlocal status, result
+            status, result = code, f"HTTP_{code}"
+
+        try:
+            yield observe
+        except EgressBlockedError as exc:
+            result = "EGRESS_BLOCKED"
+            raise PolicyBlockedError("COLLECT_EGRESS_BLOCKED", str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            result = "TIMEOUT"
+            raise TransientError("COLLECT_TIMEOUT", "the supplier did not answer in time") from exc
+        except httpx.TransportError as exc:
+            result = "NETWORK_ERROR"
+            raise TransientError("COLLECT_NETWORK_ERROR", type(exc).__name__) from exc
+        finally:
+            logger.info(
+                "supplier.collect_request",
+                extra=safe_payload(
+                    supplier_key=profile.supplier.supplier_key,
+                    request_kind=kind,
+                    transport=SupplierTransport.HTTP,
+                    started_at=started,
+                    finished_at=datetime.now(UTC),
+                    latency_ms=round((time.monotonic() - started_mono) * 1000, 1),
+                    retry_count=0,
+                    result_class=result,
+                    http_status=status,
+                    target=target[:200],
+                ),
+            )
+
+    @staticmethod
+    def _raise_for_status(status: int) -> None:
+        if status == 429:
+            raise RateLimitedError("COLLECT_RATE_LIMITED", "the supplier throttled the request")
+        if status >= 500:
+            raise TransientError("COLLECT_SERVER_ERROR", f"the supplier answered HTTP {status}")
+
+
+def _bounded(response: httpx.Response, limit: int) -> bytearray | None:
+    """The body, or None as soon as it exceeds ``limit`` (nothing partial is kept)."""
+    data = bytearray()
+    for chunk in response.iter_bytes():
+        data.extend(chunk)
+        if len(data) > limit:
+            return None
+    return data

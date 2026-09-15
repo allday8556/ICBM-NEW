@@ -386,7 +386,15 @@ def test_lease_coverage_is_decided_only_by_require_ownership() -> None:
 
 # Issue #7 comments 5653608622 §6/§9 and 5653615136: supplier-specific code is site knowledge
 # only, raw clients live in the common transport, and payloads come from the allowlist builder.
-SITE_KNOWLEDGE_IMPORTS = {"integrations.suppliers.base", "__future__", "re", "dataclasses", "enum"}
+SITE_KNOWLEDGE_IMPORTS = {
+    "integrations.suppliers.base",
+    # ADR-0010 §3: the COLLECT port's data types (profile, document view), no transport.
+    "integrations.suppliers.collection",
+    "__future__",
+    "re",
+    "dataclasses",
+    "enum",
+}
 RAW_CLIENTS = {
     "httpx",
     "requests",
@@ -402,6 +410,8 @@ RAW_CLIENTS = {
 # Production modules allowed a raw client, and why.
 RAW_CLIENT_OWNERS = {
     "integrations/suppliers/transport/gateway.py": "the common policy-enforcing supplier transport",
+    # ADR-0010 §3: the common COLLECT gateway, the only code that performs a collection request.
+    "integrations/suppliers/transport/collection.py": "the common collection gateway",
     # ENDPOINT_MATRIX §13: the one registry-gated SmartStore endpoint caller (M2 PR-A).
     "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
     # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
@@ -412,6 +422,8 @@ RAW_CLIENT_OWNERS = {
 _COMMON_SUPPLIER_MODULES = {
     "integrations/suppliers/__init__.py",
     "integrations/suppliers/base.py",
+    "integrations/suppliers/collection.py",
+    "integrations/suppliers/extraction.py",
     "integrations/suppliers/registry.py",
 }
 
@@ -468,8 +480,25 @@ def test_only_the_common_transport_opens_egress_grants() -> None:
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
     assert openers == {
         "integrations/suppliers/transport/gateway.py",
+        # ADR-0010 §3: the COLLECT gateway, for exactly its collection profile's hosts.
+        "integrations/suppliers/transport/collection.py",
         "integrations/marketplaces/smartstore/caller.py",
     }
+
+
+def test_every_collection_definition_pins_its_extraction_identity() -> None:
+    # ADR-0010 §12: a supplier collect package has an acyclic, complete and current pin.
+    from integrations.suppliers.extraction import manifest_problems
+
+    suppliers = REPO_ROOT / "integrations" / "suppliers"
+    packages = [
+        path
+        for path in suppliers.iterdir()
+        if path.is_dir() and path.name not in {"transport", "__pycache__"}
+    ]
+    assert suppliers / "kmretail" in packages
+    problems = {package.name: manifest_problems(REPO_ROOT, package) for package in packages}
+    assert {name: found for name, found in problems.items() if found} == {}
 
 
 def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
