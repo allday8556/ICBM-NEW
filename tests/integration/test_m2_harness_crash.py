@@ -12,6 +12,8 @@ from typing import Any
 
 import pytest
 
+from app.config import database_path
+from app.core.ownership import runtime_dir
 from scripts.m2harness import crash
 from scripts.m2harness.ledger import TOKEN, CrashVerdict, Ledger, Mode, Phase
 
@@ -26,7 +28,8 @@ PID = 4242
 def setup(tmp_path: Path, migrated_template: Path) -> tuple[Ledger, Path, Path]:
     data_dir = tmp_path / "crash"
     data_dir.mkdir()
-    shutil.copyfile(migrated_template, data_dir / "icbm.db")
+    database_path(data_dir).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(migrated_template, database_path(data_dir))
     ledger = Ledger.create(
         tmp_path / "ledger.sqlite3", campaign_id=CAMPAIGN, mode=Mode.DRY, nonce="n"
     )
@@ -149,7 +152,7 @@ def test_no_marker_is_no_boundary(setup: tuple[Ledger, Path, Path]) -> None:
 def test_a_committed_session_is_a_failure_not_a_miss(setup: tuple[Ledger, Path, Path]) -> None:
     ledger, data_dir, marker = setup
     crash.write_marker(marker, _fields(_respond(ledger)), NONCE)
-    sessions = data_dir / "marketplace_sessions"
+    sessions = runtime_dir(data_dir) / "marketplace_sessions"
     sessions.mkdir()
     (sessions / "smartstore.enc").write_bytes(b"a committed bundle")
     result = _verify(setup)

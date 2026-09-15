@@ -132,7 +132,7 @@ def _capability(api: TestClient) -> dict[str, object]:
 
 
 def _binding(config: AppConfig) -> str | None:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         row = raw.execute(
             "SELECT provider_account_uid FROM marketplace_connections WHERE marketplace_key = ?",
             (KEY,),
@@ -141,7 +141,7 @@ def _binding(config: AppConfig) -> str | None:
 
 
 def _audit_text(config: AppConfig) -> str:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         return str(raw.execute("SELECT * FROM audit_events").fetchall())
 
 
@@ -446,7 +446,7 @@ def test_freshness_recording_is_typed_audited_and_closed(
     second = _freshness(api).json()  # a same-value recording is a real event
     assert first["contract_freshness"] == second["contract_freshness"] == "CURRENT"
     assert second["contract_freshness_recorded_at"] >= first["contract_freshness_recorded_at"]
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         events = raw.execute(
             "SELECT actor FROM audit_events WHERE action = 'RECORD_CONTRACT_FRESHNESS'"
         ).fetchall()

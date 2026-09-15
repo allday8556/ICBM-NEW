@@ -562,7 +562,8 @@ def run(args: argparse.Namespace) -> Evidence:
     }
     ev = Evidence()
     ev.data["started_at"] = now_iso()
-    db = Database(data_dir / "icbm.db")
+    # <data root>/runtime/icbm.db (Issue #52 comment 5688854287), read without app code.
+    db = Database(data_dir / "runtime" / "icbm.db")
     servers: list[Server] = []
     try:
         step_environment(ev, run_id, port, data_dir)

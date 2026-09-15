@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import cli
-from app.config import AppConfig
+from app.config import AppConfig, database_path
 from app.container import Container, build_container
 from app.core.ownership import (
     DATA_DIR_NOT_OWNED,
@@ -62,7 +62,9 @@ def target(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
         directory.mkdir()
     if request.param == "unmigrated":
         # A database below head, so a misrouted migration would visibly change it.
-        with contextlib.closing(sqlite3.connect(directory / "icbm.db")) as raw:
+        database = database_path(directory)
+        database.parent.mkdir()
+        with contextlib.closing(sqlite3.connect(database)) as raw:
             raw.execute("CREATE TABLE sentinel (x INTEGER)")
             raw.commit()
     return directory
@@ -111,12 +113,12 @@ def test_mutation_requires_a_lease_covering_its_target(
 
 
 def test_migrations_run_only_under_ownership(tmp_path: Path) -> None:
-    url = f"sqlite:///{(tmp_path / 'icbm.db').as_posix()}"
+    url = f"sqlite:///{database_path(tmp_path).as_posix()}"
     with acquire_data_dir(tmp_path, app_version="t") as lease:
         with pytest.raises(DataDirInUseError):
             upgrade_to_head(url)  # e.g. the alembic CLI while a server owns the directory
         upgrade_to_head(url, ownership=lease)
-    assert read_only_revision(tmp_path / "icbm.db") == head_revision()
+    assert read_only_revision(database_path(tmp_path)) == head_revision()
 
 
 def test_db_upgrade_refuses_an_owned_directory(
@@ -129,7 +131,7 @@ def test_db_upgrade_refuses_an_owned_directory(
     assert err.startswith("DATA_DIR_IN_USE")
     assert "diagnostic only" in err
     assert UPGRADE_HINT in err
-    assert not (tmp_path / "icbm.db").exists()
+    assert not database_path(tmp_path).exists()
     assert not (tmp_path / "logs").exists()
 
 
@@ -146,11 +148,12 @@ def test_db_current_is_read_only_and_needs_no_ownership(
     assert not missing.exists(), "a read-only command creates nothing"
 
     owned = tmp_path / "owned"
-    owned.mkdir()
-    shutil.copyfile(migrated_template, owned / "icbm.db")
-    before = (owned / "icbm.db").read_bytes()
+    database = database_path(owned)
+    database.parent.mkdir(parents=True)
+    shutil.copyfile(migrated_template, database)
+    before = database.read_bytes()
     monkeypatch.setenv("ICBM_DATA_DIR", str(owned))
     with acquire_data_dir(owned, app_version="t"):
         assert cli.main(["db", "current"]) == 0
     assert capsys.readouterr().out.strip() == head_revision()
-    assert (owned / "icbm.db").read_bytes() == before
+    assert database.read_bytes() == before

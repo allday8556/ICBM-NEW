@@ -133,7 +133,7 @@ def _container(client: TestClient) -> Container:
 
 
 def _binding(config: AppConfig) -> str | None:
-    with sqlite3.connect(config.data_dir / "icbm.db") as raw:
+    with sqlite3.connect(config.database_path) as raw:
         row = raw.execute(
             "SELECT provider_account_uid FROM marketplace_connections WHERE marketplace_key = ?",
             (KEY,),

@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.config import configured_data_dir, default_data_dir
+from app.config import ConfigError, configured_data_dir, default_data_dir
 from scripts.m2harness.ledger import (
     CAMPAIGN_ID,
     CAPS,
@@ -100,11 +100,18 @@ def dedicated_problems(root: Path, environ: Mapping[str, str]) -> list[str]:
     problems = []
     if _overlaps(resolved, REPO_ROOT):
         problems.append("it is inside or contains the repository")
-    default = default_data_dir(environ)
-    if _overlaps(resolved, default):
+    # A root that this shell cannot resolve (no usable user profile) cannot overlap.
+    try:
+        default: Path | None = default_data_dir(environ)
+    except ConfigError:
+        default = None
+    if default is not None and _overlaps(resolved, default):
         problems.append("it overlaps the default ICBM data directory")
-    configured = configured_data_dir(environ)
-    if configured != default and _overlaps(resolved, configured):
+    try:
+        configured: Path | None = configured_data_dir(environ)
+    except ConfigError:
+        configured = None
+    if configured is not None and configured != default and _overlaps(resolved, configured):
         problems.append("it overlaps the ICBM_DATA_DIR of this shell")
     return problems
 

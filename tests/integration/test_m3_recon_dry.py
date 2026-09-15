@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.config import REPO_ROOT, AppConfig, default_data_dir
+from app.config import REPO_ROOT, AppConfig, database_path, default_data_dir
 from app.connect.credentials import SupplierCredentialStore
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
@@ -314,9 +314,9 @@ def _owner(
     """An ICBM data directory standing in for the operator's, with the M1 login saved through
     ICBM's own operator action."""
     data = tmp_path / "icbm"
-    data.mkdir(parents=True)
+    database_path(data).parent.mkdir(parents=True)
     if database:
-        shutil.copyfile(template, data / "icbm.db")
+        shutil.copyfile(template, database_path(data))
     store = RecordingStore()
     owner = cli.ConnectionOwner(
         config=AppConfig(data_dir=data, secret_backend="memory", log_to_file=False),
@@ -424,12 +424,11 @@ def test_a_real_run_refuses_before_recording_or_sending_without_an_m1_login(
 
 @pytest.fixture
 def canonical_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The operator's machine: no ICBM_DATA_DIR in the shell; the per-user application data
-    directory under a temporary location."""
+    """The operator's machine: no ICBM_DATA_DIR in the shell, and a user profile under a temporary
+    location (comment 5688854287)."""
     monkeypatch.delenv("ICBM_DATA_DIR", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "appdata"))
-    return (tmp_path / "appdata" / "ICBM-NEW").resolve()
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    return (tmp_path / "home" / "ICBM-NEW" / "data").resolve()
 
 
 def test_the_recon_owner_is_icbms_own_canonical_data_root(canonical_root: Path) -> None:
@@ -457,7 +456,7 @@ def test_real_preflight_reuses_the_login_icbm_already_saved(
     ledger = _initialized(root)
     checks = cli.preflight(root, owner=owner, checkout=Checkout(), blocker=_unblocked)
     assert all(passed for _, passed in checks), checks
-    assert read_only_revision(canonical_root / "icbm.db") == head_revision()
+    assert read_only_revision(database_path(canonical_root)) == head_revision()
     passed = ledger.last_event("PREFLIGHT_PASSED")
     assert passed is not None and passed["detail"]["owner"]["data_dir"] == str(canonical_root)
     assert store.writes == []

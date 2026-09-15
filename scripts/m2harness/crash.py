@@ -35,9 +35,10 @@ from typing import Any, NoReturn
 
 from app import __version__
 from app.audit.models import AuditEventType
+from app.config import database_path
 from app.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME
 from app.connect.smartstore.service import SmartStoreConnectService
-from app.core.ownership import acquire_data_dir
+from app.core.ownership import acquire_data_dir, runtime_dir
 from app.system.secret_scan import scan
 from integrations.marketplaces.smartstore.caller import MARKETPLACE_KEY, TokenGrant
 from integrations.marketplaces.smartstore.signing import ApplicationCredentials
@@ -165,9 +166,9 @@ def data_dir_state(data_dir: Path) -> DataDirState:
     """Read a data directory under its own lease, so no process can hold it meanwhile."""
     with acquire_data_dir(data_dir, app_version=__version__):
         session_file = (
-            data_dir / MARKETPLACE_SESSIONS_DIR_NAME / f"{MARKETPLACE_KEY}.enc"
+            runtime_dir(data_dir) / MARKETPLACE_SESSIONS_DIR_NAME / f"{MARKETPLACE_KEY}.enc"
         ).is_file()
-        uri = f"{(data_dir / 'icbm.db').resolve().as_uri()}?mode=ro"
+        uri = f"{database_path(data_dir).resolve().as_uri()}?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as db:
             row = db.execute(
                 "SELECT session_generation_hwm, provider_account_uid FROM marketplace_connections"

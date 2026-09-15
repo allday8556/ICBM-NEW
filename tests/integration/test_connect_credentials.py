@@ -65,7 +65,7 @@ def _process(
 
 
 def _session_file(config: AppConfig) -> bool:
-    return (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
+    return (config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").exists()
 
 
 def _boom(*_args: object, **_kwargs: object) -> None:
@@ -200,7 +200,7 @@ def test_ready_without_a_usable_session_heals_itself_and_needs_a_fresh_proof(
     secrets = FlakySecretStore()
     with _process(config, gateway, secrets) as app:
         _ready_with_old_login(app, config)
-        path = config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc"
+        path = config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc"
         if damage == "missing":
             path.unlink()
         else:
@@ -230,7 +230,7 @@ def test_a_restart_never_carries_ready_over_a_damaged_session(config: AppConfig)
     secrets = FlakySecretStore()
     with _process(config, gateway, secrets) as app:
         _ready_with_old_login(app, config)
-    (config.data_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").write_bytes(b"not a session")
+    (config.runtime_dir / SESSIONS_DIR_NAME / f"{FAKE_KEY}.enc").write_bytes(b"not a session")
     with _process(config, gateway, secrets) as restarted:
         summary = restarted.connect.supplier_connection(FAKE_KEY)
         assert (summary.state, summary.session_state) == (S.DISCONNECTED, "NONE")

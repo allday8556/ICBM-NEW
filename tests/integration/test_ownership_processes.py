@@ -24,11 +24,12 @@ from typing import Any
 import httpx
 import pytest
 
+from app.config import database_path
 from app.core.logging import LOG_FILE_NAME
 from app.core.ownership import (
-    LOCK_FILE_NAME,
     DataDirInUseError,
     acquire_data_dir,
+    owner_lock_path,
     read_owner_metadata,
 )
 from app.db.migrate import head_revision
@@ -147,12 +148,12 @@ def _log(data_dir: Path) -> list[dict[str, Any]]:
 
 
 def _owner_pid(data_dir: Path) -> int | None:
-    metadata = read_owner_metadata(data_dir / LOCK_FILE_NAME)
+    metadata = read_owner_metadata(owner_lock_path(data_dir))
     return None if metadata is None else int(metadata["pid"])
 
 
 def _journal_mode(data_dir: Path) -> str:
-    with contextlib.closing(sqlite3.connect(data_dir / "icbm.db")) as conn:
+    with contextlib.closing(sqlite3.connect(database_path(data_dir))) as conn:
         return str(conn.execute("PRAGMA journal_mode").fetchone()[0])
 
 

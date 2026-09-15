@@ -125,7 +125,7 @@ def build_container(
         audit=audit,
         jobs=jobs,
         credentials=SupplierCredentialStore(secrets),
-        sessions=SupplierSessionStore(config.data_dir / SESSIONS_DIR_NAME, secrets),
+        sessions=SupplierSessionStore(config.runtime_dir / SESSIONS_DIR_NAME, secrets),
         gateway=supplier_gateway or PolicedSupplierGateway(browser_channel=config.browser_channel),
         suppliers=suppliers,
         marketplaces=MARKETPLACE_IDENTITIES,
@@ -140,7 +140,7 @@ def build_container(
         audit=audit,
         secrets=secrets,
         sessions=SupplierSessionStore(
-            config.data_dir / MARKETPLACE_SESSIONS_DIR_NAME, secrets, namespace="marketplace"
+            config.runtime_dir / MARKETPLACE_SESSIONS_DIR_NAME, secrets, namespace="marketplace"
         ),
         capability=marketplace_capability,
         caller=smartstore_caller or SmartStoreEndpointCaller(),
