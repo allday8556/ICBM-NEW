@@ -16,25 +16,29 @@ This is the only code that performs a supplier collection request. For every req
 * it is attributed with one ``supplier.collect_request`` log line of allowlisted fields. The
   target is the path of a document and only the host of an image, never a query.
 
-The HTTP stack's own loggers are guarded too:
-* httpx writes one INFO line per request with the full URL, so the query of every URL in those
-  lines is redacted;
-* httpcore's debug lines can carry headers and cookies, so httpcore logs warnings and above only.
+A discovered policy read is a separate, bounded concept, not a widening of the profile's fixed
+``policy_paths``. It is one public document linked from a product page, read from the
+storefront host only, with no session, no query, never a product path, and never followed
+further. The budget reserves it under a ``discovered:`` subject, which the reconnaissance ledger
+allows at most once.
 
-A signed image URL therefore never reaches a log. Bodies are read up to a bound and refused
-beyond it, keeping nothing partial. The live network transport is never built under CI or pytest.
+While a COLLECT exchange runs, the HTTP stack's own log records are dropped: httpx's request line
+carries the full URL, and httpcore's debug lines can carry headers and cookies. The guard is a
+filter bound to the COLLECT exchange through a context variable. It changes no logger level and
+leaves every other owner's records untouched. Bodies are read up to a bound and refused beyond
+it, keeping nothing partial. The live network transport is never built under CI or pytest.
 """
 
 import logging
 import os
-import re
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Protocol
-from urllib.parse import unquote_plus, urlsplit
+from urllib.parse import SplitResult, unquote_plus, urlsplit
 
 import httpx
 
@@ -49,6 +53,7 @@ from app.core.errors import (
 from app.core.safe_payload import safe_payload
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
+    DISCOVERED_POLICY_PREFIX,
     CollectionProfile,
     DocumentView,
     FetchIssue,
@@ -65,32 +70,34 @@ MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
 # Environment markers of CI and test runs: the live transport never exists under them.
 CI_MARKERS = ("CI", "GITHUB_ACTIONS", "PYTEST_CURRENT_TEST")
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
-_QUERY = re.compile(r"\?[^\s\"'<>]*")
+# The HTTP stack's loggers, exactly as httpx and httpcore name them.
+HTTP_STACK_LOGGERS = (
+    "httpx",
+    "httpcore.connection",
+    "httpcore.http11",
+    "httpcore.http2",
+    "httpcore.proxy",
+    "httpcore.socks",
+)
+_IN_COLLECT_EXCHANGE: ContextVar[bool] = ContextVar("icbm_collect_exchange", default=False)
 
 Observe = Callable[[int], None]
 
 
-class _RedactQueries(logging.Filter):
-    """Redacts the query of every URL in a record (ADR-0010 §9: signed URLs are credentials)."""
+class _CollectExchangeGuard(logging.Filter):
+    """Drops the HTTP stack's own records only while a COLLECT exchange runs in this context."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str) and "?" in record.msg:
-            record.msg = _QUERY.sub("?[redacted]", record.msg)
-        if isinstance(record.args, tuple):
-            record.args = tuple(
-                _QUERY.sub("?[redacted]", str(arg)) if "?" in str(arg) else arg
-                for arg in record.args
-            )
-        return True
+        return not _IN_COLLECT_EXCHANGE.get()
 
 
-_REDACT_QUERIES = _RedactQueries()
+_GUARD = _CollectExchangeGuard()
 
 
 def install_log_guards() -> None:
-    """Guard the HTTP stack's own loggers (idempotent)."""
-    logging.getLogger("httpx").addFilter(_REDACT_QUERIES)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    """Attach the COLLECT exchange guard to the HTTP stack's loggers (idempotent; no level)."""
+    for name in HTTP_STACK_LOGGERS:
+        logging.getLogger(name).addFilter(_GUARD)
 
 
 class CollectionTargetRefused(PolicyBlockedError):
@@ -119,8 +126,8 @@ class RequestBudget(Protocol):
     def reserve(self, kind: ReadKind, subject: str) -> None:
         """Durably reserve one request before it is sent, or raise ``CollectionBudgetRefused``.
 
-        ``subject`` is the canonical product URL, the policy path, or the image host — never a
-        signed URL."""
+        ``subject`` is the canonical product URL, the policy path, ``discovered:<path>`` for a
+        discovered policy read (allowed at most once), or the image host — never a signed URL."""
         ...
 
 
@@ -137,8 +144,8 @@ def _refused(message: str) -> CollectionTargetRefused:
     return CollectionTargetRefused("COLLECT_TARGET_REFUSED", message)
 
 
-def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
-    """Refuse a URL outside the profile; return the budget subject of an allowed one."""
+def _https(url: str) -> SplitResult:
+    """The parts of an https URL without credentials, another port, a fragment or whitespace."""
     if any(char.isspace() for char in url) or "#" in url:
         raise _refused("a collection URL has no whitespace and no fragment")
     parts = urlsplit(url)
@@ -154,7 +161,13 @@ def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
         or port not in (None, 443)
     ):
         raise _refused("a collection URL is https without credentials or another port")
-    host, path = parts.hostname, parts.path or "/"
+    return parts
+
+
+def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
+    """Refuse a URL outside the profile; return the budget subject of an allowed one."""
+    parts = _https(url)
+    host, path = parts.hostname or "", parts.path or "/"
     if kind is ReadKind.IMAGE_REQUEST:
         if host not in profile.image_hosts:
             raise _refused("the image host is not allowlisted")
@@ -172,6 +185,22 @@ def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
     if any(unquote_plus(key) not in safe for key in keys):
         raise _refused("the product URL carries a query key that is not explicitly safe")
     return f"https://{host}{path}" + (f"?{parts.query}" if parts.query else "")
+
+
+def check_discovered_policy(profile: CollectionProfile, url: str) -> str:
+    """Refuse a discovered policy read that is not a plain public storefront document; return
+    its path."""
+    parts = _https(url)
+    path = parts.path or "/"
+    if parts.hostname != profile.storefront_host:
+        raise _refused("a discovered policy document is read only from the storefront host")
+    if parts.query:
+        raise _refused("a discovered policy read carries no query")
+    if path in profile.policy_paths:
+        raise _refused("a fixed policy document is read as a fixed policy read")
+    if profile.is_product_path(path):
+        raise _refused("a product page is never a policy read")
+    return path
 
 
 class PolicedCollectionGateway:
@@ -211,6 +240,25 @@ class PolicedCollectionGateway:
         user_agent = DEFAULT_USER_AGENT
         if kind is ReadKind.PRODUCT_READ and session is not None:
             cookies, user_agent = decode_session(session)
+        return self._document(profile, url, kind, cookies, user_agent)
+
+    def read_discovered_policy(
+        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
+    ) -> DocumentView:
+        """One public document linked from a product page: same storefront, no session (there is
+        no session parameter), no query, and at most once per budget."""
+        path = check_discovered_policy(profile, url)
+        budget.reserve(ReadKind.POLICY_READ, f"{DISCOVERED_POLICY_PREFIX}{path}")
+        return self._document(profile, url, ReadKind.POLICY_READ, [], DEFAULT_USER_AGENT)
+
+    def _document(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        kind: ReadKind,
+        cookies: list[dict[str, str]],
+        user_agent: str,
+    ) -> DocumentView:
         path = urlsplit(url).path or "/"
         with (
             self._exchange(profile, kind, target=path) as observe,
@@ -311,7 +359,8 @@ class PolicedCollectionGateway:
     def _exchange(
         self, profile: CollectionProfile, kind: ReadKind, *, target: str
     ) -> Iterator[Observe]:
-        """Translate transport failures and write the one attribution line per request."""
+        """Bind the log guard, translate transport failures and write the one attribution
+        line per request."""
         result, status = "ERROR", None
         started, started_mono = datetime.now(UTC), time.monotonic()
 
@@ -319,6 +368,7 @@ class PolicedCollectionGateway:
             nonlocal status, result
             status, result = code, f"HTTP_{code}"
 
+        token = _IN_COLLECT_EXCHANGE.set(True)
         try:
             yield observe
         except EgressBlockedError as exc:
@@ -331,6 +381,7 @@ class PolicedCollectionGateway:
             result = "NETWORK_ERROR"
             raise TransientError("COLLECT_NETWORK_ERROR", type(exc).__name__) from exc
         finally:
+            _IN_COLLECT_EXCHANGE.reset(token)
             logger.info(
                 "supplier.collect_request",
                 extra=safe_payload(

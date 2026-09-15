@@ -5,7 +5,7 @@
     python scripts/m3_recon.py preflight --dir <dir>
     python scripts/m3_recon.py approve --dir <dir> --sha <HEAD>
     python scripts/m3_recon.py run --dir <dir> --real
-    python scripts/m3_recon.py approve-images --dir <dir> --hosts <host,host>
+    python scripts/m3_recon.py approve-images --dir <dir> --sha <HEAD> --hosts <host,host>
     python scripts/m3_recon.py run-images --dir <dir> --real
     python scripts/m3_recon.py report --dir <dir>
     python scripts/m3_recon.py rehearse --dir <dir>
@@ -13,11 +13,18 @@
 * ``credentials`` stores the KM통상 login in the campaign's scoped OS credential store. The login
   is typed by the operator and never echoed.
 * ``preflight`` makes zero supplier requests and ends at the approval STOP.
-* ``approve`` and ``approve-images`` are the user's explicit go-ahead. Each is typed in an
-  interactive terminal, bound to the campaign and the exact checked-out SHA, and refused under
-  CI or pytest.
-* A REAL run proceeds only right after its approval: the approval is the ledger's latest event,
-  no older than two hours, at the same SHA and on a clean tree.
+* ``approve`` and ``approve-images`` are the user's explicit go-ahead, and they share one gate
+  owner (PR #60 review 5214845204 §2). Each needs:
+  - an interactive operator (a non-TTY stdin never approves);
+  - no CI or pytest run;
+  - a REAL campaign at the right STOP;
+  - the exact clean checked-out HEAD, typed into the phrase.
+
+  Image hosts are approved at the same SHA as phase A, and only among the hosts the ledger
+  recorded as observed in phase A. The findings file is never the authority.
+* A REAL run proceeds only right after its own approval. That approval must be the ledger's
+  latest event, no older than two hours, and the checkout must still be the clean SHA it was
+  issued at.
 * ``rehearse`` runs the whole flow on the synthetic storefront. It makes no supplier contact and
   uses no OS credential store.
 """
@@ -26,6 +33,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import secrets
 import sys
 from collections.abc import Callable, Sequence
@@ -46,7 +54,7 @@ from integrations.suppliers import kmretail
 from integrations.suppliers.base import Credentials, SupplierDefinition, SupplierGateway
 from integrations.suppliers.transport.collection import PolicedCollectionGateway, ci_or_test
 from integrations.suppliers.transport.session_payload import decode_session
-from scripts.m2harness.gates import GitCheckout, dedicated_problems, digest
+from scripts.m2harness.gates import Checkout, GitCheckout, dedicated_problems, digest
 from scripts.m2harness.keyrings import os_backend
 from scripts.m3harness import fake_site
 from scripts.m3harness.capture import CaptureStore
@@ -56,6 +64,10 @@ from scripts.m3harness.paths import ReconPaths
 from scripts.m3harness.recon import Recon, product_url_problems
 
 APPROVAL_MAX_AGE = timedelta(hours=2)
+SHA = re.compile(r"^[0-9a-f]{40}$")
+# Why this process may not approve or run for real (CI or a test run); None when it may. The
+# CLI always uses ``ci_or_test``; tests substitute it to reach the other gates.
+Blocker = Callable[[], str | None]
 
 
 class Refused(RuntimeError):
@@ -111,7 +123,7 @@ def store_credentials(root: Path, *, read: Callable[[str], str] = getpass.getpas
     )
 
 
-def preflight(root: Path, *, checkout: GitCheckout | None = None) -> list[tuple[str, bool]]:
+def preflight(root: Path, *, checkout: Checkout | None = None) -> list[tuple[str, bool]]:
     """Zero supplier requests. Every check must pass before the approval STOP is reached."""
     paths = ReconPaths(root)
     ledger = Ledger(paths.ledger)
@@ -153,73 +165,105 @@ def preflight(root: Path, *, checkout: GitCheckout | None = None) -> list[tuple[
     return checks
 
 
-# ---------------------------------------------------------------- approvals
+# ---------------------------------------------------------------- approvals (one gate owner)
 
 
 def approval_phrase(campaign_id: str, sha: str) -> str:
     return f"APPROVE {campaign_id} {sha[:12]} PHASE-A"
 
 
-def images_phrase(campaign_id: str, hosts: Sequence[str]) -> str:
-    return f"APPROVE-IMAGES {campaign_id} {','.join(sorted(hosts))}"
+def images_phrase(campaign_id: str, sha: str, hosts: Sequence[str]) -> str:
+    return f"APPROVE-IMAGES {campaign_id} {sha[:12]} {','.join(sorted(hosts))}"
 
 
-def approve(root: Path, sha: str, *, confirm: Callable[[str], bool], checkout: GitCheckout) -> None:
-    ledger = Ledger(ReconPaths(root).ledger)
+def _approval_problems(
+    ledger: Ledger, *, sha: str, checkout: Checkout, expected: State, blocker: Blocker
+) -> list[str]:
+    """The checks every approval shares: no CI or test run, a REAL campaign at the right STOP,
+    and the exact clean checked-out HEAD."""
     campaign = ledger.campaign()
     problems = []
-    if (blocker := ci_or_test()) is not None:
-        problems.append(f"approval is never issued under {blocker}")
+    if (reason := blocker()) is not None:
+        problems.append(f"approval is never issued under {reason}")
     if campaign.mode is not Mode.REAL:
         problems.append("only a REAL campaign takes approval")
-    if campaign.state is not State.AWAITING_APPROVAL:
-        problems.append(f"the campaign is {campaign.state}, not waiting for approval")
-    if checkout.head() != sha or checkout.dirty():
+    if campaign.state is not expected:
+        problems.append(f"the campaign is {campaign.state}, not {expected}")
+    if not SHA.fullmatch(sha) or checkout.head() != sha or checkout.dirty():
         problems.append("the approved SHA must be the clean, checked-out HEAD")
+    return problems
+
+
+def approve(
+    root: Path,
+    sha: str,
+    *,
+    confirm: Callable[[str], bool],
+    checkout: Checkout,
+    blocker: Blocker = ci_or_test,
+) -> None:
+    ledger = Ledger(ReconPaths(root).ledger)
+    problems = _approval_problems(
+        ledger, sha=sha, checkout=checkout, expected=State.AWAITING_APPROVAL, blocker=blocker
+    )
     passed = ledger.last_event("PREFLIGHT_PASSED")
     if passed is None or passed["detail"].get("head") != sha:
         problems.append("the preflight did not pass at this SHA")
     if problems:
         raise Refused("; ".join(problems))
-    if not confirm(approval_phrase(campaign.campaign_id, sha)):
+    if not confirm(approval_phrase(ledger.campaign().campaign_id, sha)):
         raise Refused("the operator did not type the approval phrase")
     ledger.record("APPROVED_A", sha=sha, nonce=secrets.token_hex(8))
 
 
-def approve_images(root: Path, hosts: Sequence[str], *, confirm: Callable[[str], bool]) -> None:
-    paths = ReconPaths(root)
-    ledger = Ledger(paths.ledger)
-    campaign = ledger.campaign()
-    if campaign.mode is Mode.REAL and (blocker := ci_or_test()) is not None:
-        raise Refused(f"approval is never issued under {blocker}")
-    if campaign.state is not State.AWAITING_IMAGE_HOST_APPROVAL:
-        raise Refused(f"the campaign is {campaign.state}, not waiting for image hosts")
-    observed = set(_findings(paths, "phase-a").get("observed_image_hosts", []))
-    if not hosts or not set(hosts) <= observed:
-        raise Refused("only image hosts observed in phase A can be approved")
-    if not confirm(images_phrase(campaign.campaign_id, hosts)):
+def approve_images(
+    root: Path,
+    sha: str,
+    hosts: Sequence[str],
+    *,
+    confirm: Callable[[str], bool],
+    checkout: Checkout,
+    blocker: Blocker = ci_or_test,
+) -> None:
+    """Approve image hosts with the same strength as phase A: the same clean SHA, and only hosts
+    the ledger recorded as observed (never a findings file)."""
+    ledger = Ledger(ReconPaths(root).ledger)
+    problems = _approval_problems(
+        ledger,
+        sha=sha,
+        checkout=checkout,
+        expected=State.AWAITING_IMAGE_HOST_APPROVAL,
+        blocker=blocker,
+    )
+    approved = ledger.last_event("APPROVED_A")
+    if approved is None or approved["detail"].get("sha") != sha:
+        problems.append("image hosts are approved at the same SHA as phase A")
+    problems += ledger.observation_problems()
+    chosen = sorted(set(hosts))
+    if not chosen or not set(chosen) <= ledger.observed_hosts():
+        problems.append("only image hosts the ledger recorded as observed in phase A")
+    if problems:
+        raise Refused("; ".join(problems))
+    if not confirm(images_phrase(ledger.campaign().campaign_id, sha, chosen)):
         raise Refused("the operator did not type the image-host phrase")
-    ledger.approve_hosts(hosts)
-    ledger.record("APPROVED_B", hosts=sorted(hosts), nonce=secrets.token_hex(8))
+    ledger.approve_hosts(chosen)
+    ledger.record("APPROVED_B", sha=sha, hosts=chosen, nonce=secrets.token_hex(8))
 
 
-def _consume(ledger: Ledger, kind: str, checkout: GitCheckout | None) -> None:
-    """A REAL run proceeds only right after its own approval (latest event, fresh, same SHA)."""
-    campaign = ledger.campaign()
+def _consume(ledger: Ledger, kind: str, checkout: Checkout, blocker: Blocker) -> None:
+    """A REAL run proceeds only right after its own approval: the latest event, fresh, and the
+    checkout still the clean SHA that approval was issued at."""
     event = ledger.last_event(kind)
     problems = []
     if event is None or event["seq"] != ledger.latest_seq():
         problems.append("the approval is not the ledger's latest event")
     elif datetime.now(UTC) - datetime.fromisoformat(event["at"]) > APPROVAL_MAX_AGE:
         problems.append("the approval is older than two hours")
-    if campaign.mode is Mode.REAL:
-        if (blocker := ci_or_test()) is not None:
-            problems.append(f"a REAL run never happens under {blocker}")
-        approved = ledger.last_event("APPROVED_A")
-        sha = approved["detail"].get("sha") if approved else None
-        assert checkout is not None
-        if checkout.head() != sha or checkout.dirty():
-            problems.append("the checkout is not the clean approved SHA")
+    if (reason := blocker()) is not None:
+        problems.append(f"a REAL run never happens under {reason}")
+    sha = event["detail"].get("sha") if event else None
+    if sha is None or checkout.head() != sha or checkout.dirty():
+        problems.append("the checkout is not the clean SHA this approval was issued at")
     if problems:
         raise Refused("; ".join(problems))
 
@@ -295,14 +339,16 @@ def _run(
             container.db.dispose()
 
 
-def run_real(root: Path, phase: str, *, checkout: GitCheckout) -> dict[str, Any]:
+def run_real(
+    root: Path, phase: str, *, checkout: Checkout, blocker: Blocker = ci_or_test
+) -> dict[str, Any]:
     ledger = Ledger(ReconPaths(root).ledger)
     campaign = ledger.campaign()
     if campaign.mode is not Mode.REAL:
         raise Refused("a REAL run needs a REAL campaign")
-    if (blocker := ci_or_test()) is not None:
-        raise Refused(f"a REAL run never happens under {blocker}")
-    _consume(ledger, "APPROVED_A" if phase == "A" else "APPROVED_B", checkout)
+    if (reason := blocker()) is not None:
+        raise Refused(f"a REAL run never happens under {reason}")
+    _consume(ledger, "APPROVED_A" if phase == "A" else "APPROVED_B", checkout, blocker)
     ledger.record(
         f"RUN_{phase}_STARTED", state=State.RUNNING_A if phase == "A" else State.RUNNING_B
     )
@@ -334,6 +380,8 @@ def report(root: Path, *, secret_values: Sequence[str] = ()) -> Path:
         "mode": campaign.mode.value,
         "state": campaign.state.value,
         "requests": ledger.counts(),
+        "observed_hosts": sorted(ledger.observed_hosts()),
+        "approved_hosts": sorted(ledger.approved_hosts()),
         "phase_a": _findings(paths, "phase-a"),
         "phase_b": _findings(paths, "phase-b"),
     }
@@ -361,7 +409,9 @@ def report(root: Path, *, secret_values: Sequence[str] = ()) -> Path:
 
 
 def rehearse(root: Path, *, storefront: fake_site.FakeStorefront | None = None) -> dict[str, Any]:
-    """The whole reconnaissance on the synthetic storefront: no supplier, no OS keyring."""
+    """The whole reconnaissance on the synthetic storefront: no supplier, no OS keyring. DRY has
+    no operator and no SHA, so it records the approvals itself; the ledger still enforces the
+    phases, the caps and the observed-host authority."""
     ledger = init(
         root, campaign_id="m3-recon-dry", product_url=fake_site.PRODUCT_URL, mode=Mode.DRY
     )
@@ -388,8 +438,10 @@ def rehearse(root: Path, *, storefront: fake_site.FakeStorefront | None = None) 
     common = {"store": store, "connect_gateway": connect_gateway, "collection": collection}
     phase_a = _run(root, "A", clock=clock, sleep=sleep, **common)  # type: ignore[arg-type]
     phase_b: dict[str, Any] = {}
-    if ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL:
-        approve_images(root, phase_a["observed_image_hosts"], confirm=lambda _: True)
+    observed = ledger.observed_hosts()
+    if ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL and observed:
+        ledger.approve_hosts(observed)
+        ledger.record("APPROVED_B", sha="dry", hosts=sorted(observed), nonce="dry")
         ledger.record("RUN_B_STARTED", state=State.RUNNING_B)
         phase_b = _run(root, "B", clock=clock, sleep=sleep, **common)  # type: ignore[arg-type]
     secret_values = [fake_site.USERNAME, fake_site.PASSWORD, fake_site.SESSION_COOKIE]
@@ -409,6 +461,8 @@ def rehearse(root: Path, *, storefront: fake_site.FakeStorefront | None = None) 
 
 
 def _typed(phrase: str) -> bool:
+    """The operator types the phrase in an interactive terminal; a non-TTY stdin never
+    approves (PR #60 follow-up 5686950430 §1)."""
     if not sys.stdin.isatty():
         return False
     print(f"Type exactly: {phrase}")
@@ -434,7 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if name == "init":
             sub.add_argument("--campaign-id", required=True)
             sub.add_argument("--product-url", required=True)
-        if name == "approve":
+        if name in ("approve", "approve-images"):
             sub.add_argument("--sha", required=True)
         if name == "approve-images":
             sub.add_argument("--hosts", required=True)
@@ -461,8 +515,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("approved: run phase A with `run --real` within two hours")
         elif args.command == "approve-images":
             hosts = [h.strip() for h in args.hosts.split(",") if h.strip()]
-            approve_images(root, hosts, confirm=_typed)
-            print("image hosts approved: run phase B with `run-images --real`")
+            approve_images(root, args.sha, hosts, confirm=_typed, checkout=GitCheckout())
+            print("image hosts approved: run phase B with `run-images --real` within two hours")
         elif args.command in ("run", "run-images"):
             if not args.real:
                 raise Refused("a real reconnaissance run needs --real")

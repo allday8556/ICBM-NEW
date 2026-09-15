@@ -22,6 +22,9 @@ from integrations.suppliers.base import SupplierProfile, SupplierTransport
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 # ADR-0010 §4 (ruling on Q2): at least 60 s between real reads of the same product.
 MINIMUM_SAME_PRODUCT_INTERVAL_S = 60.0
+# The budget subject prefix of a discovered policy read (a public document linked from a product
+# page): a separate, bounded read, never a widening of a profile's fixed ``policy_paths``.
+DISCOVERED_POLICY_PREFIX = "discovered:"
 
 
 class ReadKind(StrEnum):

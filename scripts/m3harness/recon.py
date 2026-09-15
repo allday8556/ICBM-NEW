@@ -2,24 +2,24 @@
 
 Phase A starts only after the user's approval. It reads, in this order and only through the
 collection gateway and the campaign ledger:
-1. robots.txt, a public policy read. If its ``*`` group disallows the product path, the run
-   stops before any product read;
+1. robots.txt, a fixed public policy read. If its ``*`` group disallows the product path, the
+   run stops before any product read;
 2. the authenticated session, from the M1 connection owner: session reuse, at most one login;
 3. the chosen product page, once, then once more no sooner than 60 s later, to see which
    structure is stable;
-4. the terms page linked from the product page, when there is one (a public policy read).
+4. the terms page linked from the product page, when there is one. This is a *discovered*
+   policy read: same storefront, no session, never followed further, and at most once. It never
+   widens the profile's fixed policy paths.
 
-Raw bodies go only into encrypted captures. The findings hold:
-* the sanitized inventory;
-* the robots and terms signals;
-* the observed image hosts;
-* the request counts.
+Raw bodies go only into encrypted captures. The findings hold the sanitized inventory, the robots
+and terms signals, the observed image hosts and the request counts. Phase A then binds its
+observation into the ledger — the exact observed image hosts and the digests of that set and of
+the findings — in one transaction with the stop at AWAITING_IMAGE_HOST_APPROVAL.
 
-The run then stops at AWAITING_IMAGE_HOST_APPROVAL.
-
-Phase B needs a second approval that names the exact image hosts. It fetches a bounded sample of
-the page's images on those hosts, plus one conditional re-request to test validator support. It
-records only format signatures, sizes, content types and whether validators are present.
+Phase B needs a second approval that names the exact image hosts, bound to the same clean SHA.
+It fetches a bounded sample of the page's images on those hosts, plus one conditional re-request
+to test validator support. It records only format signatures, sizes, content types and whether
+validators are present.
 """
 
 import hashlib
@@ -27,7 +27,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, unquote_plus, urlsplit
@@ -97,18 +97,18 @@ def recon_profile(
     supplier: SupplierProfile,
     product_url: str,
     *,
-    policy_paths: Iterable[str] = (ROBOTS_PATH,),
     image_hosts: Iterable[str] = (),
 ) -> CollectionProfile:
     """The collection profile of this reconnaissance only: exactly the chosen product path, its
-    own query keys, the policy documents and — in phase B — the approved image hosts."""
+    own query keys, robots.txt as the one fixed policy document and — in phase B — the approved
+    image hosts. It is never widened during a run."""
     parts = urlsplit(product_url)
     keys = frozenset(unquote_plus(k) for k, _ in parse_qsl(parts.query, keep_blank_values=True))
     cap = CAPS[ReadKind.IMAGE_REQUEST]
     return CollectionProfile(
         supplier=supplier,
         product_path=re.escape(parts.path),
-        policy_paths=frozenset(policy_paths),
+        policy_paths=frozenset({ROBOTS_PATH}),
         image_hosts=frozenset(image_hosts),
         safe_query_keys={parts.hostname or "": keys} if keys else {},
         limits=CollectionLimits(
@@ -174,16 +174,11 @@ class Recon:
             }
             findings["observed_image_hosts"] = sorted(inventory["images"]["hosts"])
             if terms:
-                path = terms[0]
-                view = self._document(
-                    replace(profile, policy_paths=profile.policy_paths | {path}),
-                    origin + path,
-                    ReadKind.POLICY_READ,
-                )
+                view = self._discovered(profile, origin + terms[0])
                 self.captures.save("terms", view.body.encode("utf-8"))
                 findings["terms"] = {
                     "http_status": view.status,
-                    "path_form": mask(path),
+                    "path_form": mask(terms[0]),
                     **terms_signals(view.body),
                 }
             else:
@@ -195,8 +190,11 @@ class Recon:
         except AppError as exc:
             return self._stop(findings, "phase-a", exc.code, State.STOPPED)
         findings["requests"] = self.ledger.counts()
-        self._write("phase-a", findings)
-        self.ledger.record("PHASE_A_DONE", state=State.AWAITING_IMAGE_HOST_APPROVAL)
+        written = self._write("phase-a", findings)
+        self.ledger.finish_phase_a(
+            findings["observed_image_hosts"],
+            findings_digest=hashlib.sha256(written.read_bytes()).hexdigest(),
+        )
         return findings
 
     # ---------------------------------------------------------------- phase B
@@ -245,6 +243,15 @@ class Recon:
             view = self.gateway.read_document(
                 profile, url, kind=kind, budget=self.budget, session=None
             )
+        except BaseException as exc:
+            self._complete(None, getattr(exc, "code", type(exc).__name__))
+            raise
+        self._complete(view.status, "OK")
+        return view
+
+    def _discovered(self, profile: CollectionProfile, url: str) -> DocumentView:
+        try:
+            view = self.gateway.read_discovered_policy(profile, url, budget=self.budget)
         except BaseException as exc:
             self._complete(None, getattr(exc, "code", type(exc).__name__))
             raise

@@ -253,12 +253,83 @@ def test_unusable_image_responses_are_refused(response: httpx.Response, issue: s
 # ---------------------------------------------------------------- attribution and safety
 
 
-def test_httpcore_debug_lines_are_silenced(caplog: pytest.LogCaptureFixture) -> None:
-    # httpcore's debug lines can carry request/response headers, cookies included.
-    _gateway(Site())
+def test_the_log_guard_changes_no_logger_level_and_no_other_owner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # PR #60 review 5214845204 §3: no process-wide level change; other owners' records pass.
+    names = ("httpcore", *transport.HTTP_STACK_LOGGERS)
+    saved = {name: logging.getLogger(name).level for name in names}
+    sentinel = 7  # a level nobody else uses, so any setLevel() by the gateway shows
+    try:
+        for name in names:
+            logging.getLogger(name).setLevel(sentinel)
+        _gateway(Site()).read_document(
+            _profile(), PRODUCT, kind=ReadKind.PRODUCT_READ, budget=Budget()
+        )
+        assert {name: logging.getLogger(name).level for name in names} == dict.fromkeys(
+            names, sentinel
+        )
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
     caplog.set_level(logging.DEBUG)
-    logging.getLogger("httpcore.http11").debug("receive_response_headers set-cookie=%s", "x")
-    assert not [r for r in caplog.records if r.name.startswith("httpcore")]
+    logging.getLogger("httpcore.http11").debug("outside a collect exchange")
+    logging.getLogger("httpx").info("HTTP Request: GET https://other.owner.test/x?y=1")
+    stack = [r.getMessage() for r in caplog.records if r.name.startswith(("httpx", "httpcore"))]
+    assert stack == [
+        "outside a collect exchange",
+        "HTTP Request: GET https://other.owner.test/x?y=1",
+    ]
+
+
+def test_http_stack_records_inside_a_collect_exchange_are_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        logging.getLogger("httpcore.http11").debug("response headers set-cookie=%s", COOKIE_VALUE)
+        return httpx.Response(200, headers={"content-type": "image/png"}, content=PNG)
+
+    gateway = PolicedCollectionGateway(http_transport=httpx.MockTransport(handler))
+    gateway.read_image(_profile(), IMAGE, budget=Budget())
+    assert not [r for r in caplog.records if r.name.startswith(("httpx", "httpcore"))]
+    own = [r.getMessage() for r in caplog.records if r.name == "icbm.collect.transport"]
+    assert own == ["supplier.collect_request"]
+    assert COOKIE_VALUE not in caplog.text and SIGNATURE not in caplog.text
+
+
+# ---------------------------------------------------------------- discovered policy read
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://img.supplier.test/terms.html",  # another host
+        "https://supplier.test/terms.html?x=1",  # a query
+        "https://supplier.test/robots.txt",  # a fixed policy document
+        "https://supplier.test/products/1234",  # a product page
+        "http://supplier.test/terms.html",
+        "https://supplier.test/terms.html#top",
+    ],
+)
+def test_a_discovered_policy_read_is_same_storefront_public_and_plain(url: str) -> None:
+    site, budget = Site(), Budget()
+    with pytest.raises(CollectionTargetRefused):
+        _gateway(site).read_discovered_policy(_profile(), url, budget=budget)
+    assert (budget.reserved, site.requests) == ([], [])
+
+
+def test_a_discovered_policy_read_carries_no_session_and_widens_nothing() -> None:
+    site, budget, profile = Site(), Budget(), _profile()
+    view = _gateway(site).read_discovered_policy(
+        profile, "https://supplier.test/terms.html", budget=budget
+    )
+    assert view.kind is ReadKind.POLICY_READ
+    assert site.requests[0].headers.get("cookie") is None
+    assert "session" not in PolicedCollectionGateway.read_discovered_policy.__annotations__
+    assert budget.reserved == [(ReadKind.POLICY_READ, "discovered:/terms.html")]
+    assert profile.policy_paths == frozenset({"/robots.txt"})
 
 
 def test_the_log_carries_the_path_or_host_never_a_query(caplog: pytest.LogCaptureFixture) -> None:

@@ -5,19 +5,25 @@ the only thing that lets a reconnaissance request reach the supplier:
 
 * every request is reserved — committed with ``synchronous=FULL`` — before any byte is sent;
 * the reconnaissance caps are hard (ruling on Q1): product-detail reads 4, image requests 30,
-  public policy reads 3. They are reconnaissance caps, not the M3 acceptance caps;
-* requests are accepted only in an approved phase. Phase A (policy and product reads) follows
-  the user's approval. Phase B (image requests) needs a second approval that names the exact
-  image hosts observed in phase A; an image host outside that list is refused;
+  public policy reads 3. They are reconnaissance caps, not the M3 acceptance caps. Of the policy
+  reads, at most one is a discovered policy read (``discovered:<path>``);
+* requests are accepted only in an approved phase. Phase A covers policy and product reads,
+  after the user's approval. Phase B covers image requests only, on the image hosts approved
+  after phase A;
+* phase A's observation is bound here, not in a file (PR #60 review 5214845204 §1): the exact
+  observed image hosts, their digest and the digest of the sanitized findings are recorded in
+  one transaction with the transition to the image-host STOP. Observations cannot be added
+  after phase A, and a host can be approved only if it was recorded as observed;
 * the same product is read at most once per 60 s (ruling on Q2), keyed by its canonical URL;
 * every table is append-only. Triggers refuse UPDATE and DELETE and enforce the caps, the phase,
-  the approved hosts and the interval a second time, so neither a code path nor a stray SQL
-  statement can widen them.
+  the observation, the approved hosts, the discovered read and the interval a second time. No
+  code path and no stray SQL statement can widen them.
 
 The ledger holds no secret and no signed URL: request kinds, the canonical product URL, policy
 paths, image hosts, statuses, times and digests.
 """
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -30,7 +36,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from integrations.suppliers.collection import ReadKind
+from integrations.suppliers.collection import DISCOVERED_POLICY_PREFIX, ReadKind
 from integrations.suppliers.transport.collection import CollectionBudgetRefused
 
 # Ruling on Q1: reconnaissance only. Every other kind of request is capped at 0.
@@ -41,11 +47,22 @@ CAPS: Mapping[ReadKind, int] = {
 }
 SAME_PRODUCT_INTERVAL_S = 60.0
 CAMPAIGN_ID = re.compile(r"^m3-recon-[a-z0-9][a-z0-9-]{1,40}$")
-_TABLES = ("campaign", "events", "approved_hosts", "reservations", "completions")
+_TABLES = (
+    "campaign",
+    "events",
+    "observed_hosts",
+    "approved_hosts",
+    "reservations",
+    "completions",
+)
 
 
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
+
+
+def hosts_digest(hosts: Iterable[str]) -> str:
+    return hashlib.sha256(json.dumps(sorted(set(hosts))).encode("utf-8")).hexdigest()
 
 
 class Mode(StrEnum):
@@ -58,7 +75,7 @@ class State(StrEnum):
     # The durable STOP after the zero-provider preflight; only an approved run leaves it.
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     RUNNING_A = "RUNNING_A"
-    # Phase A found the image hosts; images wait for their explicit approval.
+    # Phase A recorded its observation; images wait for their explicit approval.
     AWAITING_IMAGE_HOST_APPROVAL = "AWAITING_IMAGE_HOST_APPROVAL"
     RUNNING_B = "RUNNING_B"
     COMPLETED = "COMPLETED"
@@ -105,6 +122,7 @@ CREATE TABLE events (
     state TEXT,
     detail TEXT NOT NULL
 );
+CREATE TABLE observed_hosts (host TEXT PRIMARY KEY, at TEXT NOT NULL);
 CREATE TABLE approved_hosts (host TEXT PRIMARY KEY, at TEXT NOT NULL);
 CREATE TABLE reservations (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +139,16 @@ CREATE TABLE completions (
 );
 CREATE VIEW current_state AS
     SELECT state FROM events WHERE state IS NOT NULL ORDER BY seq DESC LIMIT 1;
+CREATE TRIGGER trg_observed_hosts_phase BEFORE INSERT ON observed_hosts BEGIN
+    SELECT RAISE(ABORT, 'OBSERVATION_CLOSED')
+        WHERE (SELECT state FROM current_state) IS NOT 'RUNNING_A';
+END;
+CREATE TRIGGER trg_approved_hosts_observed BEFORE INSERT ON approved_hosts BEGIN
+    SELECT RAISE(ABORT, 'APPROVAL_CLOSED')
+        WHERE (SELECT state FROM current_state) IS NOT 'AWAITING_IMAGE_HOST_APPROVAL';
+    SELECT RAISE(ABORT, 'HOST_NOT_OBSERVED')
+        WHERE NOT EXISTS (SELECT 1 FROM observed_hosts WHERE host = NEW.host);
+END;
 CREATE TRIGGER trg_reservations_guard BEFORE INSERT ON reservations BEGIN
     SELECT RAISE(ABORT, 'CAP_REACHED')
         WHERE (SELECT COUNT(*) FROM reservations WHERE kind = NEW.kind) >= {_cap_case()};
@@ -130,6 +158,11 @@ CREATE TRIGGER trg_reservations_guard BEFORE INSERT ON reservations BEGIN
     SELECT RAISE(ABORT, 'HOST_NOT_APPROVED')
         WHERE NEW.kind = 'IMAGE_REQUEST'
             AND NOT EXISTS (SELECT 1 FROM approved_hosts WHERE host = NEW.subject);
+    SELECT RAISE(ABORT, 'DISCOVERED_POLICY_ONCE')
+        WHERE NEW.kind = 'POLICY_READ' AND NEW.subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
+            AND EXISTS (
+                SELECT 1 FROM reservations WHERE subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
+            );
     SELECT RAISE(ABORT, 'SAME_PRODUCT_INTERVAL')
         WHERE NEW.kind = 'PRODUCT_READ' AND EXISTS (
             SELECT 1 FROM reservations
@@ -195,6 +228,17 @@ class Ledger:
         finally:
             connection.close()
 
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+
     # ---------------------------------------------------------------- campaign and events
 
     def campaign(self) -> Campaign:
@@ -208,25 +252,25 @@ class Ledger:
     def state(self) -> State:
         return self.campaign().state
 
-    def record(self, kind: str, *, state: State | None = None, **detail: Any) -> int:
-        """Append one event; with ``state`` it is a transition the state machine allows."""
-        with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                if state is not None:
-                    (current,) = db.execute("SELECT state FROM current_state").fetchone()
-                    if state not in _TRANSITIONS.get(State(current), frozenset()):
-                        raise LedgerError(f"no transition {current} -> {state}")
-                cursor = db.execute(
-                    "INSERT INTO events (at, kind, state, detail) VALUES (?, ?, ?, ?)",
-                    (now(), kind, None if state is None else state.value, json.dumps(detail)),
-                )
-                db.execute("COMMIT")
-            except BaseException:
-                db.execute("ROLLBACK")
-                raise
+    @staticmethod
+    def _append(
+        db: sqlite3.Connection, kind: str, state: State | None, detail: Mapping[str, Any]
+    ) -> int:
+        if state is not None:
+            (current,) = db.execute("SELECT state FROM current_state").fetchone()
+            if state not in _TRANSITIONS.get(State(current), frozenset()):
+                raise LedgerError(f"no transition {current} -> {state}")
+        cursor = db.execute(
+            "INSERT INTO events (at, kind, state, detail) VALUES (?, ?, ?, ?)",
+            (now(), kind, None if state is None else state.value, json.dumps(detail)),
+        )
         assert cursor.lastrowid is not None
         return cursor.lastrowid
+
+    def record(self, kind: str, *, state: State | None = None, **detail: Any) -> int:
+        """Append one event; with ``state`` it is a transition the state machine allows."""
+        with self._transaction() as db:
+            return self._append(db, kind, state, detail)
 
     def last_event(self, kind: str) -> dict[str, Any] | None:
         with self._db() as db:
@@ -243,6 +287,43 @@ class Ledger:
             (seq,) = db.execute("SELECT MAX(seq) FROM events").fetchone()
         return int(seq)
 
+    # ---------------------------------------------------------------- phase A observation
+
+    def finish_phase_a(self, observed_hosts: Iterable[str], *, findings_digest: str) -> None:
+        """Bind phase A's observation, in one transaction with the image-host STOP: the exact
+        observed image hosts, their digest and the digest of the sanitized findings."""
+        hosts = sorted(set(observed_hosts))
+        try:
+            with self._transaction() as db:
+                db.executemany(
+                    "INSERT INTO observed_hosts VALUES (?, ?)", [(host, now()) for host in hosts]
+                )
+                self._append(
+                    db,
+                    "PHASE_A_DONE",
+                    State.AWAITING_IMAGE_HOST_APPROVAL,
+                    {
+                        "observed_hosts": hosts,
+                        "observed_hosts_digest": hosts_digest(hosts),
+                        "findings_digest": findings_digest,
+                    },
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(f"the observation was refused ({exc})") from None
+
+    def observed_hosts(self) -> frozenset[str]:
+        with self._db() as db:
+            return frozenset(row[0] for row in db.execute("SELECT host FROM observed_hosts"))
+
+    def observation_problems(self) -> list[str]:
+        """Why the recorded observation cannot back an image-host approval; empty if it can."""
+        event = self.last_event("PHASE_A_DONE")
+        if event is None:
+            return ["phase A recorded no observation"]
+        if hosts_digest(self.observed_hosts()) != event["detail"].get("observed_hosts_digest"):
+            return ["the observed hosts do not match the digest recorded at the end of phase A"]
+        return []
+
     # ---------------------------------------------------------------- image hosts
 
     def approve_hosts(self, hosts: Iterable[str]) -> None:
@@ -251,12 +332,13 @@ class Ledger:
             raise LedgerError("phase B approves at least one image host")
         if self.state() is not State.AWAITING_IMAGE_HOST_APPROVAL:
             raise LedgerError("image hosts are approved only after phase A")
-        with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            db.executemany(
-                "INSERT INTO approved_hosts VALUES (?, ?)", [(host, now()) for host in chosen]
-            )
-            db.execute("COMMIT")
+        try:
+            with self._transaction() as db:
+                db.executemany(
+                    "INSERT INTO approved_hosts VALUES (?, ?)", [(host, now()) for host in chosen]
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(f"the image-host approval was refused ({exc})") from None
 
     def approved_hosts(self) -> frozenset[str]:
         with self._db() as db:
@@ -267,17 +349,11 @@ class Ledger:
     def reserve(self, kind: ReadKind, subject: str, *, epoch: float | None = None) -> int:
         """Durably reserve one request before it is sent, or refuse it with nothing sent."""
         try:
-            with self._db() as db:
-                db.execute("BEGIN IMMEDIATE")
-                try:
-                    cursor = db.execute(
-                        "INSERT INTO reservations (at, epoch, kind, subject) VALUES (?, ?, ?, ?)",
-                        (now(), time.time() if epoch is None else epoch, kind.value, subject),
-                    )
-                    db.execute("COMMIT")
-                except BaseException:
-                    db.execute("ROLLBACK")
-                    raise
+            with self._transaction() as db:
+                cursor = db.execute(
+                    "INSERT INTO reservations (at, epoch, kind, subject) VALUES (?, ?, ?, ?)",
+                    (now(), time.time() if epoch is None else epoch, kind.value, subject),
+                )
         except sqlite3.IntegrityError as exc:
             raise CollectionBudgetRefused(
                 "COLLECT_BUDGET_REFUSED",
