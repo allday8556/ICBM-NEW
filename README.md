@@ -13,7 +13,7 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 - **Issue #4** — one ICBM process per data directory: **ACCEPTED** and merged ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)).
 - **M1** — KM통상 CONNECT only: **ACCEPTED** 2026-09-13 (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md), [`docs/acceptance/M1.md`](docs/acceptance/M1.md)).
 - **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`docs/acceptance/M2.md`](docs/acceptance/M2.md)).
-- **Current milestone:** M3 — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls ([`ROADMAP.md`](ROADMAP.md) §12, Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md), proposed).
+- **Current milestone:** M3 — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls ([`ROADMAP.md`](ROADMAP.md) §12, Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md)).
 
 External calls are limited to CONNECT, and happen only when the operator runs a connection action (no call at startup):
 - **KM통상:** the application authenticates and reads the protected 마이쇼핑 page, through the common, allowlisted supplier transport.

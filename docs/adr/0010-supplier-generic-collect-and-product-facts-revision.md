@@ -1,6 +1,6 @@
 # ADR-0010 — Supplier-generic COLLECT and ProductFactsRevision source truth (M3)
 
-Status: **PROPOSED** 2026-09-15. This is contract PR-A of Issue #52, revised for the architect review of PR #55 (`5204359614`, follow-up `5204397433`), whose rulings on the former open questions are incorporated below. It becomes ACCEPTED only after the architect re-audit, the independent Claude cross-audit and the user's merge approval. The status line is then changed in this PR before merge (ADR-0008 precedent).
+Status: **ACCEPTED** 2026-09-15 — contract PR-A of Issue #52 (PR #55). Architect re-audit PASS `5205048938` and independent Claude cross-audit PASS on HEAD `5eb172f`; finalized per architect instruction `5674218319`. The architect review of PR #55 (`5204359614`, follow-up `5204397433`) is incorporated, including its rulings on the former open questions.
 Decision owner: Architect (ChatGPT). Sources: Issue #52 body; architect addendum after the independent cross-audit `5672341510`; architect clarification on Coupang representative images `5672418057`; PR #55 architect review `5204359614` and follow-up `5204397433`.
 Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
 Date: 2026-09-15
