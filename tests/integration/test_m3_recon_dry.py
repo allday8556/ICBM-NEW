@@ -298,6 +298,69 @@ def _events(ledger: Ledger, kind: str) -> list[tuple[str]]:
         return list(db.execute("SELECT detail FROM events WHERE kind = ? ORDER BY seq", (kind,)))
 
 
+class _RobotsTransportFails(fake_site.FakeStorefront):
+    """The image host's robots document answers with something the transport refuses outright."""
+
+    def __init__(self, status: int = 429, third_party_thumbnail: bool = False) -> None:
+        super().__init__()
+        self.status = status
+        self.third_party_thumbnail = third_party_thumbnail
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        url = request.url
+        if url.host in fake_site.IMAGE_HOSTS and url.path == "/robots.txt":
+            self.requests.append(request)
+            return httpx.Response(self.status)
+        if (
+            self.third_party_thumbnail
+            and url.host == fake_site.HOST
+            and url.path == (fake_site.PRODUCT_PATH)
+        ):
+            answer = super().__call__(request)
+            if answer.status_code == 200:
+                page = answer.text.replace(
+                    f"//{fake_site.HOST}/web/product/small/1234.png",
+                    f"//{fake_site.IMAGE_HOSTS[0]}/p/1234.png",
+                )
+                return httpx.Response(200, text=page, headers={"content-type": "text/html"})
+            return answer
+        return super().__call__(request)
+
+
+def test_a_transport_refusal_is_recorded_before_it_stops_phase_b(tmp_path: Path) -> None:
+    # The blocker: a rate limit, a server failure or a network failure is refused by the transport
+    # before any status is read, so without this the ledger said phase B stopped but never why.
+    root = tmp_path / "recon"
+    phase_b = cli.rehearse(root, storefront=_RobotsTransportFails(429))["phase_b"]
+    ledger = Ledger(ReconPaths(root).ledger)
+    recorded = ledger.last_event("IMAGE_HOST_ROBOTS")
+    assert recorded is not None
+    assert recorded["detail"] == {
+        "host": fake_site.IMAGE_HOSTS[1],
+        "requested": True,
+        "allowed": False,
+        "reason": "ROBOTS_COLLECT_RATE_LIMITED",
+    }
+    assert ledger.state() is State.STOPPED, "the refusal still stops the campaign"
+    assert ledger.counts()["IMAGE_REQUEST"] == 0, "not one image was requested"
+    assert phase_b["images"] == []
+
+
+def test_a_host_after_one_that_refused_is_never_consulted(tmp_path: Path) -> None:
+    # Both sampled images sit on third-party hosts here, so the second is a host that would have
+    # to be reached over the network. It never is: the walk ends at the first refusal.
+    root = tmp_path / "recon"
+    site = _RobotsTransportFails(429, third_party_thumbnail=True)
+    cli.rehearse(root, storefront=site)
+    ledger = Ledger(ReconPaths(root).ledger)
+    hosts = [json.loads(detail)["host"] for (detail,) in _events(ledger, "IMAGE_HOST_ROBOTS")]
+    assert hosts == [fake_site.IMAGE_HOSTS[1]], "only the host that refused was ever asked"
+    assert fake_site.IMAGE_HOSTS[0] not in {r.url.host for r in site.requests}
+    subjects = [r["subject"] for r in ledger.reservations() if r["kind"] == "POLICY_READ"]
+    assert subjects.count(f"image-robots:{fake_site.IMAGE_HOSTS[0]}") == 0
+    assert ledger.counts()["IMAGE_REQUEST"] == 0
+
+
 def test_an_image_approval_refuses_a_ledger_whose_guard_is_older(tmp_path: Path) -> None:
     # The approval would otherwise authorize requests the ledger's own guard cannot police.
     root = tmp_path / "real"

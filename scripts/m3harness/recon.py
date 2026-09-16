@@ -407,7 +407,20 @@ class Recon:
         checks: list[dict[str, Any]] = []
         for host in dict.fromkeys(candidate.host for candidate in selected):
             paths = [urlsplit(c.url).path for c in selected if c.host == host]
-            check = self._image_host_robots(profile, host, paths)
+            try:
+                check = self._image_host_robots(profile, host, paths)
+            except AppError as exc:
+                # The transport refused the answer outright — a rate limit, a server failure, a
+                # network failure. The refusal is recorded before it is raised, so the ledger says
+                # why phase B stopped rather than only that it did.
+                self.ledger.record(
+                    "IMAGE_HOST_ROBOTS",
+                    host=host,
+                    requested=True,
+                    allowed=False,
+                    reason=f"ROBOTS_{exc.code}",
+                )
+                raise
             self.ledger.record("IMAGE_HOST_ROBOTS", **check)
             checks.append(check)
             if not check["allowed"]:
