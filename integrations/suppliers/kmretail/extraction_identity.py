@@ -12,4 +12,4 @@ EXTRACTOR_INPUTS = (
     "integrations/suppliers/kmretail/collect/images.py",
     "integrations/suppliers/kmretail/collect/revision.py",
 )
-EXTRACTOR_FINGERPRINT = "3fbf2dc7084368ad9863b5775a1c9e1a0192a6143abc16200bbdfc8dad422e42"
+EXTRACTOR_FINGERPRINT = "cfb41d840bf3151079f44e6316966599949c4de8896b121e221cd5b94a8b6b0a"

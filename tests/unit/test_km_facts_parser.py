@@ -12,6 +12,7 @@ from integrations.suppliers.kmretail.collect import parse_fields, resolve
 from integrations.suppliers.kmretail.collect.identity import (
     UNRESOLVED_ABSENT,
     UNRESOLVED_DISAGREE,
+    UNRESOLVED_INCOMPLETE,
     UNRESOLVED_SHAPE,
     SourceIdentity,
     UnresolvedIdentity,
@@ -36,6 +37,7 @@ def page(
     name: str = "[어바틀] 프리미엄 마그네슘 90정",
     number: str = "355",
     retailer_item: str | None = None,
+    with_retailer_item: bool = True,
     canonical: str | None = "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355",
     rows: str = "",
     body: str = "",
@@ -45,11 +47,11 @@ def page(
     meta = [f'<meta property="og:title" content="{name}">']
     if number:
         meta.append(f'<meta property="product:productId" content="{number}">')
-    meta.append(
-        f'<meta property="product:retailer_item_id" content="{retailer_item or number}">'
-        if (retailer_item or number)
-        else ""
-    )
+    if with_retailer_item:
+        stated = number if retailer_item is None else retailer_item
+        meta.append(
+            f'<meta property="product:retailer_item_id" content="{stated}">' if stated else ""
+        )
     if canonical:
         meta.append(f'<link rel="canonical" href="{canonical}">')
     return (
@@ -105,6 +107,55 @@ def test_a_number_that_is_not_digits_is_never_an_identity(number: str) -> None:
     unresolved = resolve(document(page(number=number, canonical=None)), URL)
     assert isinstance(unresolved, UnresolvedIdentity)
     assert unresolved.reason in (UNRESOLVED_ABSENT, UNRESOLVED_SHAPE)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "url", "absent"),
+    [
+        ({"with_retailer_item": False}, URL, "meta[product:retailer_item_id]"),
+        ({"canonical": None}, URL, "link[canonical]"),
+        ({}, "https://kmretail.co.kr/", "url"),
+    ],
+)
+def test_a_corroboration_the_page_does_not_make_leaves_the_identity_unresolved(
+    kwargs: dict[str, object], url: str, absent: str
+) -> None:
+    # This field decides whether a revision history is appended to or split in two. A declaration
+    # the page never made is not agreement, so one missing corroboration is enough to stop.
+    unresolved = resolve(document(page(**kwargs)), url)  # type: ignore[arg-type]
+    assert isinstance(unresolved, UnresolvedIdentity)
+    assert unresolved.reason == UNRESOLVED_INCOMPLETE
+    assert unresolved.missing == (absent,)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "url", "unreadable"),
+    [
+        ({"retailer_item": "35-5"}, URL, "meta[product:retailer_item_id]"),
+        ({"retailer_item": ""}, URL, "meta[product:retailer_item_id]"),
+        (
+            {"canonical": "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/"},
+            URL,
+            "link[canonical]",
+        ),
+        (
+            {"canonical": "https://kmretail.co.kr/category/23/product/%EC%83%81%ED%92%88/355/"},
+            URL,
+            "link[canonical]",
+        ),
+        ({}, "https://kmretail.co.kr/product/355/", "url"),
+        ({}, "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/x/category/355/", "url"),
+    ],
+)
+def test_a_corroboration_it_cannot_read_is_never_assumed_to_agree(
+    kwargs: dict[str, object], url: str, unreadable: str
+) -> None:
+    # The number sits at one position of a product path. A digit in a category or display segment
+    # is not the identity, and a path that is not a product path states nothing at all.
+    unresolved = resolve(document(page(**kwargs)), url)  # type: ignore[arg-type]
+    assert isinstance(unresolved, UnresolvedIdentity)
+    assert unresolved.reason == UNRESOLVED_INCOMPLETE
+    assert unresolved.missing == (unreadable,)
 
 
 def test_declarations_that_disagree_leave_the_identity_unresolved() -> None:
