@@ -12,9 +12,10 @@ There are no defaults for any of them.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from hashlib import sha256
 from urllib.parse import urlsplit
 
 from integrations.suppliers.base import SupplierProfile, SupplierTransport
@@ -131,3 +132,175 @@ class ImageResponse:
     @property
     def not_modified(self) -> bool:
         return self.status == 304
+
+
+# ---------------------------------------------------------------- image roles and sampling
+
+
+class ImageRole(StrEnum):
+    """What a supplier's own page says an image reference is for (Issue #52 comment 5696242775).
+
+    A role is decided by the supplier's site knowledge from the captured DOM, never from a host
+    name, a path word or document order. ``UNKNOWN`` is the default for a reference no rule
+    recognised, and it is never promoted to a product image.
+    """
+
+    PRIMARY = "PRIMARY"
+    DETAIL = "DETAIL"
+    THUMBNAIL = "THUMBNAIL"
+    PRODUCT_AUX = "PRODUCT_AUX"
+    UI_COMMON = "UI_COMMON"
+    UNKNOWN = "UNKNOWN"
+
+
+# The roles a bounded sample may spend a request on, in the order it spends them, and how many of
+# each at most (``None`` = whatever the cap leaves). ``UI_COMMON`` and ``UNKNOWN`` are absent on
+# purpose: a common layout asset never displaces product evidence, and a reference no rule
+# recognised never fails open into product sampling (comment 5696242775 §2).
+SAMPLE_PRIORITY: tuple[tuple["ImageRole", int | None], ...] = (
+    (ImageRole.PRIMARY, 1),
+    (ImageRole.DETAIL, 5),
+    (ImageRole.THUMBNAIL, None),
+    (ImageRole.PRODUCT_AUX, None),
+)
+SAMPLED_ROLES = frozenset(role for role, _ in SAMPLE_PRIORITY)
+# Network reconnaissance permission is not asset publication or reuse permission: a sampled image
+# proves what the page references, and grants nothing about the asset (comment 5696172833 §7).
+RECONNAISSANCE_ONLY = (
+    "a bounded reconnaissance read of a referenced asset; it is not a publication, reuse or "
+    "licence grant for that asset, and it says nothing about who operates its host"
+)
+_DIGIT_RUN = re.compile(r"\d+")
+
+
+@dataclass(frozen=True)
+class ImageCandidate:
+    """One image reference of a product document, with the role its own DOM supports.
+
+    ``url`` is absolute and may carry a query, so it is used in memory only. Everything that
+    reaches a findings file goes through :meth:`audit`, which drops the query and masks digits.
+    """
+
+    url: str
+    role: ImageRole
+    order: int  # the reference's index in the document's own stable source order
+    rule: str  # which site-knowledge rule assigned the role, for provenance
+
+    @property
+    def host(self) -> str:
+        return urlsplit(self.url).hostname or ""
+
+    @property
+    def identity(self) -> str:
+        """A stable fingerprint of the reference with its query and fragment dropped, so two
+        writings of the same asset are one candidate and no token is ever recorded."""
+        parts = urlsplit(self.url)
+        source = f"{parts.scheme}://{parts.hostname}{parts.path}"
+        return sha256(source.encode("utf-8")).hexdigest()[:16]
+
+    def audit(self, reason: str) -> dict[str, object]:
+        return {
+            "role": self.role.value,
+            "host": self.host,
+            "order": self.order,
+            "identity": self.identity,
+            "path_form": _DIGIT_RUN.sub("{n}", urlsplit(self.url).path)[:80],
+            "rule": self.rule,
+            "reason": reason,
+        }
+
+
+@dataclass(frozen=True)
+class ImageRoleRules:
+    """A supplier's own image-role classifier, bound to its extraction identity.
+
+    ``identity`` is the supplier's ``EXTRACTOR_REVISION``: a semantic change to the rules must
+    advance it, so a findings file always names the rule set that produced it (comment
+    5696242775 §4).
+    """
+
+    identity: str
+    classify: Callable[[str, str], tuple[ImageCandidate, ...]]
+
+
+@dataclass(frozen=True)
+class ImageSamplePlan:
+    """Which references a bounded sample spends its requests on, and why the rest were left."""
+
+    rules: str
+    limit: int
+    selected: tuple[ImageCandidate, ...]
+    excluded: tuple[tuple[ImageCandidate, str], ...]
+
+    def _why(self, slot: int, candidate: ImageCandidate) -> str:
+        """Why this reference consumed a sample slot, in the sampler's own terms."""
+        rank = sum(1 for earlier in self.selected[: slot + 1] if earlier.role is candidate.role)
+        return (
+            f"slot {slot + 1} of {self.limit}: "
+            f"{candidate.role.value} #{rank} in the page's own reference order"
+        )
+
+    def audit(self) -> dict[str, object]:
+        left: dict[tuple[str, str, str], int] = {}
+        for candidate, reason in self.excluded:
+            key = (candidate.role.value, candidate.host, reason)
+            left[key] = left.get(key, 0) + 1
+        return {
+            "rules": self.rules,
+            "limit": self.limit,
+            "policy": [
+                {"role": role.value, "at_most": most if most is not None else "the cap"}
+                for role, most in SAMPLE_PRIORITY
+            ],
+            "selected": [
+                candidate.audit(self._why(slot, candidate))
+                for slot, candidate in enumerate(self.selected)
+            ],
+            "not_selected": [
+                {"role": role, "host": host, "reason": reason, "count": count}
+                for (role, host, reason), count in sorted(left.items())
+            ],
+            "reconnaissance_only": RECONNAISSANCE_ONLY,
+        }
+
+
+def plan_image_sample(
+    candidates: Iterable[ImageCandidate], limit: int, *, rules: str
+) -> ImageSamplePlan:
+    """Spend at most ``limit`` requests on the strongest product evidence the page offers.
+
+    The order is fixed by :data:`SAMPLE_PRIORITY`: the first primary image, then the detail
+    sequence in its own document order, then any thumbnail and product-auxiliary reference that
+    the cap still leaves. A reference whose normalized URL was already taken never consumes a
+    second slot, and a common or unrecognised reference never consumes one at all.
+    """
+    if limit < 0:
+        raise ValueError("a sample cap is not negative")
+    pool = sorted(candidates, key=lambda c: c.order)
+    selected: list[ImageCandidate] = []
+    excluded: list[tuple[ImageCandidate, str]] = []
+    taken: set[str] = set()
+    for candidate in pool:
+        if candidate.role not in SAMPLED_ROLES:
+            excluded.append((candidate, candidate.role.value))
+    for role, most in SAMPLE_PRIORITY:
+        for candidate in pool:
+            if candidate.role is not role:
+                continue
+            if candidate.identity in taken:
+                excluded.append((candidate, "duplicate normalized URL"))
+                continue
+            room = len(selected) < limit and (
+                most is None or sum(1 for chosen in selected if chosen.role is role) < most
+            )
+            if not room:
+                excluded.append((candidate, "lower sampling priority"))
+                continue
+            taken.add(candidate.identity)
+            selected.append(candidate)
+    return ImageSamplePlan(
+        rules=rules,
+        limit=limit,
+        selected=tuple(selected),
+        excluded=tuple(sorted(excluded, key=lambda pair: pair[0].order)),
+    )

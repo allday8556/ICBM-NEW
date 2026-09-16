@@ -25,6 +25,9 @@ from integrations.suppliers.base import (
     SupplierProfile,
     Verdict,
 )
+from integrations.suppliers.kmretail.collect import IMAGE_ROLES
+
+__all__ = ["DEFINITION", "IMAGE_ROLES", "PROFILE", "authenticated", "login_required"]
 
 LOGIN_PATH = "/member/login.html"
 # 마이쇼핑: exists only for a signed-in member. Its product contents are never read or kept.

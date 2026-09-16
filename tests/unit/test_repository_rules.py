@@ -531,6 +531,13 @@ SITE_KNOWLEDGE_IMPORTS = {
     "re",
     "dataclasses",
     "enum",
+    # A collection parser reads text it was handed. These open nothing: html.parser is a pure
+    # tokenizer and urllib.parse is string arithmetic — urllib.request, the one that opens a
+    # connection, stays a raw client below and is never allowed here.
+    "html.parser",
+    "urllib.parse",
+    "collections.abc",
+    "typing",
 }
 RAW_CLIENTS = {
     "httpx",
@@ -592,8 +599,16 @@ def test_supplier_packages_hold_site_knowledge_only() -> None:
         and path not in _COMMON_SUPPLIER_MODULES
     }
     assert "integrations/suppliers/kmretail/__init__.py" in packages
+    assert "integrations/suppliers/kmretail/collect/images.py" in packages
     for path, tree in packages.items():
-        assert _imported_modules(tree) <= SITE_KNOWLEDGE_IMPORTS, path
+        # A package may import its own modules: site knowledge is allowed more than one file.
+        own = "integrations.suppliers." + path.split("/")[2]
+        outside = {
+            module
+            for module in _imported_modules(tree)
+            if module != own and not module.startswith(own + ".")
+        }
+        assert outside <= SITE_KNOWLEDGE_IMPORTS, path
         attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert not attributes & {"_raw", "client", "page", "context", "request", "grant"}, path
 
@@ -636,6 +651,20 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
     assert suppliers / "kmretail" in packages
     problems = {package.name: manifest_problems(REPO_ROOT, package) for package in packages}
     assert {name: found for name, found in problems.items() if found} == {}
+
+
+def test_image_role_rules_are_bound_to_the_extraction_identity() -> None:
+    # Issue #52 comment 5696242775 §4: there is one set of role rules, and a semantic change to
+    # what they mean advances the same identity the future parser will be pinned to.
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.kmretail import IMAGE_ROLES
+    from integrations.suppliers.kmretail.collect.images import ROLE_RULES, ROLE_RULES_REVISION
+
+    manifest = read_manifest(
+        REPO_ROOT / "integrations" / "suppliers" / "kmretail" / "extraction_identity.py"
+    )
+    assert IMAGE_ROLES.identity == ROLE_RULES_REVISION == manifest.revision
+    assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
 
 
 def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:

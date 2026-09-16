@@ -129,6 +129,23 @@ def test_the_rehearsal_stays_inside_the_caps_and_leaks_nothing(tmp_path: Path) -
         assert PRODUCT_ID.encode("utf-8") not in artifact.read_bytes(), artifact.name
 
 
+def test_phase_b_spends_its_sample_on_product_images_only(tmp_path: Path) -> None:
+    # Issue #52 comment 5696172833 §6 and 5696242775 §2: the storefront's layout banner sits on an
+    # approved image host and is still never requested, and the findings say why.
+    summary = cli.rehearse(tmp_path / "recon")
+    plan = summary["phase_b"]["sample_plan"]
+    assert plan["rules"] == fake_site.IMAGE_ROLES.identity
+    assert plan["limit"] == recon.IMAGE_SAMPLE
+    assert [entry["role"] for entry in plan["selected"]] == ["DETAIL", "THUMBNAIL"]
+    assert [image["role"] for image in summary["phase_b"]["images"]] == ["DETAIL", "THUMBNAIL"]
+    assert {entry["reason"] for entry in plan["not_selected"]} == {"UI_COMMON"}
+    assert plan["off_approved_hosts"] == [], "every reference of this page is on an approved host"
+    assert "not a publication" in str(plan["reconnaissance_only"])
+    for image in summary["phase_b"]["images"]:
+        assert set(image) >= {"role", "host", "order", "identity", "rule"}
+        assert fake_site.SIGNATURE not in str(image), "a signed URL never reaches the findings"
+
+
 def test_captures_are_encrypted_at_rest(tmp_path: Path) -> None:
     root = tmp_path / "recon"
     cli.rehearse(root)
