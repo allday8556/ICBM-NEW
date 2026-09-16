@@ -13,6 +13,7 @@ import pytest
 from app.config import REPO_ROOT, AppConfig, database_path, default_data_dir
 from app.connect.credentials import SupplierCredentialStore
 from app.connect.service import ConnectService
+from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
 from app.db.migrate import head_revision, read_only_revision
@@ -643,3 +644,45 @@ def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path)
     assert f"supplier:{fake_site.definition().profile.supplier_key}:credentials" in (
         owner_store.writes
     )
+
+
+def test_an_unreadable_session_stops_finalization_without_disclosing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # PR #64 comment 5690832285: the scan boundary fails closed, the campaign keeps a local failure
+    # trace, and nothing of the payload reaches the error, the ledger, the findings or the output.
+    sentinel = "SENTINEL-4d9f2a-SESSION-MATERIAL"
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=False)
+    owner = _dry_owner(root, owner_secrets)
+    sessions = SupplierSessionStore(owner.config.runtime_dir / SESSIONS_DIR_NAME, owner_secrets)
+    sessions.save(
+        fake_site.definition().profile.supplier_key,
+        b'{"v": 1, "cookies": "' + sentinel.encode("utf-8") + b'"',
+    )
+    ledger = Ledger(ReconPaths(root).ledger)
+    reads = ledger.counts()
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    monkeypatch.setattr(cli.EGRESS, "install", _never_installed)
+    monkeypatch.setattr(ConnectService, "collection_session", _never_connected)
+
+    with pytest.raises(Refused) as refused:
+        cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+    assert "SUPPLIER_SESSION_UNREADABLE" in str(refused.value)
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "AuthError"}
+    assert ledger.state() is State.FINALIZING_A, "network-closed and retryable locally"
+    assert ledger.counts() == reads, "no request, no reservation"
+    paths = ReconPaths(root)
+    written = (
+        [path.read_bytes() for path in paths.findings.rglob("*")] if paths.findings.exists() else []
+    )
+    surfaces = [
+        str(refused.value).encode("utf-8"),
+        paths.ledger.read_bytes(),
+        capsys.readouterr().out.encode("utf-8"),
+        capsys.readouterr().err.encode("utf-8"),
+        *written,
+    ]
+    assert not any(sentinel.encode("utf-8") in surface for surface in surfaces)

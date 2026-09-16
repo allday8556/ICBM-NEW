@@ -6,6 +6,7 @@ import pytest
 
 from app.config import AppConfig
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
 from app.container import Container, build_container
 from app.core.errors import AuthError
 from app.core.ownership import acquire_data_dir
@@ -88,3 +89,36 @@ def test_the_scan_boundary_hands_out_cookie_material_and_never_a_session(
     assert all(isinstance(value, str) for cookie in cookies for value in cookie.values())
     assert (gateway.logins, gateway.count(RequestKind.PROTECTED_READ)) == before
     assert not isinstance(cookies, bytes | bytearray), "no session payload leaves the owner"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"{",  # malformed JSON
+        b'{"v": 2, "cookies": [], "user_agent": "x"}',  # another version
+        b'{"v": 1, "cookies": "not-a-list", "user_agent": "x"}',  # malformed schema
+        b'{"v": 1, "cookies": [], "user_agent": 7}',  # wrong type
+        b"\xff\xfe not utf-8",  # not decodable text at all
+        b"",
+    ],
+)
+def test_an_unreadable_stored_session_fails_the_scan_boundary_closed(
+    connected: Container, gateway: FakeGateway, payload: bytes
+) -> None:
+    # PR #64 comment 5690832285 §1 and §2: no representation of the stored payload leaves
+    # CONNECT, and no sibling path returns one instead.
+    connected.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True)
+    sessions = SupplierSessionStore(
+        connected.config.runtime_dir / SESSIONS_DIR_NAME, connected.secrets
+    )
+    sessions.save(FAKE_KEY, payload)
+    before = (gateway.logins, gateway.count(RequestKind.PROTECTED_READ))
+    with pytest.raises(AuthError) as refused:
+        connected.connect.session_cookies_for_scan(FAKE_KEY)
+    assert refused.value.code == "SUPPLIER_SESSION_UNREADABLE"
+    surfaced = f"{refused.value.code} {refused.value.message} {refused.value!r}"
+    for fragment in (payload.decode("utf-8", "replace"), payload.hex()):
+        if fragment.strip():
+            assert fragment not in surfaced
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+    assert (gateway.logins, gateway.count(RequestKind.PROTECTED_READ)) == before

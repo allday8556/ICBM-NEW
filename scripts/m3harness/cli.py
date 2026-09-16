@@ -71,6 +71,7 @@ from app.connect.credentials import SupplierCredentialStore
 from app.connect.state import ConnectionState
 from app.container import Container, build_container
 from app.core.egress import EGRESS
+from app.core.errors import AppError
 from app.core.ownership import DataDirOwnershipError, acquire_data_dir
 from app.core.secrets import SERVICE_NAME, KeyringSecretStore, MemorySecretStore, SecretStore
 from app.db.migrate import upgrade_to_head
@@ -558,6 +559,9 @@ def finalize(
             )
         except ReconStop as stop:
             raise Refused(f"the captures cannot support finalization ({stop.reason})") from None
+        except AppError as exc:
+            # The code only: a local failure never surfaces material of what it could not read.
+            raise Refused(f"local finalization failed ({exc.code})") from None
 
 
 # ---------------------------------------------------------------- report

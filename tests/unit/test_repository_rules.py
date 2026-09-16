@@ -497,6 +497,20 @@ def test_the_local_scan_boundary_is_not_a_session_transport() -> None:
     )
     forbidden = {"verify", "_verify", "_prove", "_authenticate", "collection_session", "fetch"}
     assert not [call for call in _calls(boundary) if _callee(call) in forbidden], "reads only"
+    # Comment 5690832285 §2: no sibling path may hand out payload material instead.
+    lenient = {"repr", "str", "format", "hex"}
+    assert not [call for call in _calls(boundary) if _callee(call) in lenient], "no coercion"
+    assert not [
+        call
+        for call in _calls(boundary, "decode")
+        if call.args or any(word.arg == "errors" for word in call.keywords)
+    ], "no replacement decoding"
+    handlers = [node for node in ast.walk(boundary) if isinstance(node, ast.ExceptHandler)]
+    assert handlers, "the decode failure is handled"
+    assert not [
+        node for handler in handlers for node in ast.walk(handler) if isinstance(node, ast.Return)
+    ], "no fallback return"
+    assert [node for node in ast.walk(boundary) if isinstance(node, ast.Raise)], "it fails closed"
     returned = {
         _callee(node.value)
         for node in ast.walk(boundary)

@@ -382,8 +382,8 @@ def assert_sanitized(findings: object, secrets: Iterable[str]) -> None:
 # * its name says nothing about a session, authentication or security;
 # * the value is exactly one character, whatever that character is.
 # The login is always scanned, a value of two characters or more is always scanned, and a
-# session-like cookie name is scanned at every length. One byte cannot be told apart from ordinary
-# structure; this is an ambiguity rule, not a claim that a short value cannot be secret.
+# session-like cookie name is scanned at every length. One character cannot be told apart from
+# ordinary structure; this is an ambiguity rule, not a claim that a short value cannot be secret.
 AMBIGUOUS_COOKIE_LENGTH = 1
 SESSION_LIKE_COOKIE = re.compile(r"sess|sid|auth|token|login|verify|csrf", re.IGNORECASE)
 EXCLUSION_REASON = "one-character value on a cookie name that is not session-like"

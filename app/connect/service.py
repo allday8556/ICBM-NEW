@@ -657,18 +657,25 @@ class ConnectService:
         no host list, so it can never stand in for ``collection_session``, which remains the only
         way to obtain a session for collection. It makes no supplier request and proves nothing,
         and the list is empty when no session is stored (PR #64 review 5217542767 §3).
+
+        An unreadable or unsupported stored session fails closed: nothing is returned, and the
+        refusal carries a code only (PR #64 comment 5690832285 §1).
         """
         self._definition(supplier_key)
         payload = self._sessions.load(supplier_key)
         if payload is None:
             return []
+        decoded: list[dict[str, str]] | None = None
         try:
-            cookies, _ = decode_session(payload)
-        except ValueError:
-            # An unreadable payload is still credential-equivalent, so it is handed over whole
-            # rather than skipped: a scan may never see less than the session's own material.
-            return [{"name": "session", "value": payload.decode("utf-8", "replace")}]
-        return [{"name": cookie["name"], "value": cookie["value"]} for cookie in cookies]
+            decoded, _ = decode_session(payload)
+        except Exception:
+            # No fragment of an unreadable payload leaves CONNECT: not decoded, not replaced, not
+            # repr'd. The refusal is raised outside the handler, so the failure that saw the bytes
+            # is not even kept as the new error's context.
+            decoded = None
+        if decoded is None:
+            raise AuthError("SUPPLIER_SESSION_UNREADABLE", "the stored session cannot be read")
+        return [{"name": cookie["name"], "value": cookie["value"]} for cookie in decoded]
 
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.
