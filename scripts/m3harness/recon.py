@@ -48,8 +48,11 @@ from integrations.suppliers.collection import (
     CollectionLimits,
     CollectionProfile,
     DocumentView,
+    ImageCandidate,
     ImageResponse,
+    ImageRoleRules,
     ReadKind,
+    plan_image_sample,
 )
 from integrations.suppliers.transport.collection import (
     CollectionBudgetRefused,
@@ -61,7 +64,6 @@ from scripts.m3harness.inventory import (
     FindingsSecrets,
     assert_sanitized,
     document_inventory,
-    image_urls,
     mask,
     parse_robots,
     policy_links,
@@ -290,6 +292,8 @@ class Recon:
     session: Callable[[], bytes]
     # What the findings are scanned against: the login and the session's own cookie values.
     secrets: Callable[[], FindingsSecrets]
+    # The supplier's own image-role knowledge. This runner never reads a selector or a path word.
+    image_roles: ImageRoleRules
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     budget: LedgerBudget = field(init=False)
@@ -355,25 +359,45 @@ class Recon:
         url = self.ledger.campaign().product_url
         hosts = self.ledger.approved_hosts()
         body = self.captures.load("product-1").decode("utf-8")
-        candidates = [u for u in image_urls(body, url) if urlsplit(u).hostname in hosts]
+        # The supplier's site knowledge says what each reference is for; this runner is handed
+        # roles and never reads a selector, a host name or a path word (comment 5696242775 §1).
+        classified = self.image_roles.classify(body, url)
+        plan = plan_image_sample(
+            [candidate for candidate in classified if candidate.host in hosts],
+            IMAGE_SAMPLE,
+            rules=self.image_roles.identity,
+        )
+        audit = plan.audit()
+        audit["off_approved_hosts"] = _by_role_and_host(
+            candidate for candidate in classified if candidate.host not in hosts
+        )
         profile = recon_profile(self.supplier, url, image_hosts=hosts)
-        findings: dict[str, Any] = {"phase": "B", "approved_hosts": sorted(hosts), "images": []}
+        findings: dict[str, Any] = {
+            "phase": "B",
+            "approved_hosts": sorted(hosts),
+            "sample_plan": audit,
+            "images": [],
+        }
         try:
             revalidated = False
-            for candidate in candidates[:IMAGE_SAMPLE]:
+            for candidate in plan.selected:
                 entry: dict[str, Any] = {
-                    "host": urlsplit(candidate).hostname,
-                    "has_query": bool(urlsplit(candidate).query),
+                    "role": candidate.role.value,
+                    "host": candidate.host,
+                    "order": candidate.order,
+                    "identity": candidate.identity,
+                    "rule": candidate.rule,
+                    "has_query": bool(urlsplit(candidate.url).query),
                 }
                 try:
-                    image = self._image(profile, candidate)
+                    image = self._image(profile, candidate.url)
                 except ImageFetchRefused as refused:
                     entry["issue"] = refused.issue.value
                     findings["images"].append(entry)
                     continue
                 entry.update(_image_signals(image))
                 if not revalidated and (image.etag or image.last_modified):
-                    again = self._image(profile, candidate, image.etag, image.last_modified)
+                    again = self._image(profile, candidate.url, image.etag, image.last_modified)
                     entry["revalidation_status"] = again.status
                     revalidated = True
                 findings["images"].append(entry)
@@ -487,6 +511,18 @@ class Recon:
             self.ledger.record("LOCAL_FINALIZATION_FAILED", reason=type(exc).__name__)
             raise
         return findings
+
+
+def _by_role_and_host(candidates: Iterable[ImageCandidate]) -> list[dict[str, Any]]:
+    """How many references of each role each host contributed; no URL and no value."""
+    counted: dict[tuple[str, str], int] = {}
+    for candidate in candidates:
+        key = (candidate.role.value, candidate.host)
+        counted[key] = counted.get(key, 0) + 1
+    return [
+        {"role": role, "host": host, "count": count}
+        for (role, host), count in sorted(counted.items())
+    ]
 
 
 def _digest(text: str) -> str:

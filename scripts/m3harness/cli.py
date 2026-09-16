@@ -77,6 +77,7 @@ from app.core.secrets import SERVICE_NAME, KeyringSecretStore, MemorySecretStore
 from app.db.migrate import upgrade_to_head
 from integrations.suppliers import kmretail
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.collection import ImageRoleRules
 from integrations.suppliers.registry import SUPPLIERS
 from integrations.suppliers.transport.collection import PolicedCollectionGateway, ci_or_test
 from integrations.suppliers.transport.session_payload import decode_session
@@ -117,6 +118,11 @@ def capture_key_store(campaign_id: str) -> SecretStore:
 
 def _definition(mode: Mode) -> SupplierDefinition:
     return kmretail.DEFINITION if mode is Mode.REAL else fake_site.definition()
+
+
+def _image_roles(mode: Mode) -> ImageRoleRules:
+    """The supplier's own image-role knowledge, bound to its extraction identity."""
+    return kmretail.IMAGE_ROLES if mode is Mode.REAL else fake_site.IMAGE_ROLES
 
 
 # ---------------------------------------------------------------- the M1 connection owner
@@ -477,6 +483,7 @@ def _run(
             findings_dir=paths.findings,
             session=connect,
             secrets=secret_values,
+            image_roles=_image_roles(campaign.mode),
         )
         if clock is not None:
             recon.clock = clock

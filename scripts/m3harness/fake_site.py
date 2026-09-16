@@ -4,6 +4,7 @@ kinds of material the reconnaissance must never let out (a member name, a price,
 a signed image URL) so a rehearsal can prove they stay inside."""
 
 import threading
+from urllib.parse import urljoin
 
 import httpx
 
@@ -18,6 +19,11 @@ from integrations.suppliers.base import (
     SupplierDefinition,
     SupplierProfile,
     Verdict,
+)
+from integrations.suppliers.collection import (
+    ImageCandidate,
+    ImageRole,
+    ImageRoleRules,
 )
 from integrations.suppliers.transport.session_payload import decode_session, encode_session
 
@@ -48,12 +54,35 @@ PAGE = f"""<html><head>
 </form>
 <span id="span_product_price_text" class="price">{PRICE_TEXT}</span>
 <p class="delivery">배송비 3,000원</p><a class="btnBuy buy">구매하기</a>
+<div class="siteBanner"><img src="//{IMAGE_HOSTS[0]}/banner/site.png"></div>
 <div class="thumbnail"><img src="//{IMAGE_HOSTS[0]}/p/1234.png"></div>
 <div id="prdDetail"><img src="https://{IMAGE_HOSTS[1]}/d/1.jpg?X-Amz-Signature={SIGNATURE}"></div>
 <footer><a href="/member/agreement.html">이용약관</a></footer>
 </body></html>"""
 ROBOTS = "User-agent: *\nDisallow: /member/\nAllow: /member/agreement.html\n"
 TERMS = "<html><body><p>무단 수집을 금지합니다.</p></body></html>"
+
+
+def _classify_images(body: str, product_url: str) -> tuple[ImageCandidate, ...]:
+    """The rehearsal storefront's own image-role knowledge: one detail image in its description
+    block, one thumbnail, and a layout banner that must never consume a sample slot."""
+    found: list[ImageCandidate] = []
+    for order, (marker, role, rule) in enumerate(
+        (
+            ("thumbnail", ImageRole.THUMBNAIL, "fake.thumbnail"),
+            ("prdDetail", ImageRole.DETAIL, "fake.detail"),
+            ("siteBanner", ImageRole.UI_COMMON, "fake.banner"),
+        )
+    ):
+        for block in body.split(marker)[1:]:
+            source = block.split('src="', 1)[1].split('"', 1)[0]
+            found.append(
+                ImageCandidate(url=urljoin(product_url, source), role=role, order=order, rule=rule)
+            )
+    return tuple(found)
+
+
+IMAGE_ROLES = ImageRoleRules(identity="reconfake-images-1", classify=_classify_images)
 
 
 def definition() -> SupplierDefinition:

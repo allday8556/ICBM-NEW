@@ -1,0 +1,136 @@
+"""KM통상's image-role knowledge (Issue #52 comments 5696110694, 5696172833, 5696242775).
+
+The fixture reproduces the containers the two retained `m3-recon-02` product captures actually
+use — including the description block's unclosed tags, which is what made document order and
+outermost-container matching unusable. No captured page content is copied here.
+"""
+
+from integrations.suppliers.collection import ImageRole, plan_image_sample
+from integrations.suppliers.kmretail import IMAGE_ROLES
+from integrations.suppliers.kmretail.collect.images import classify_images
+
+PRODUCT_URL = "https://shop.invalid/product/item/1/category/2/display/1/"
+STORE = "shop.invalid"
+ASSETS = "assets.invalid"  # the third-party host that serves both layout and detail images
+
+PAGE = f"""<html><head>
+<meta property="og:image" content="https://{STORE}/web/product/big/1/key.jpg">
+</head><body id="main">
+<div class="storyTeller"><img src="https://{ASSETS}/xYz"></div>
+<div class="promotionBanner"><a class="bannerLink"><img src="https://{ASSETS}/aBc"></a>
+  <a class="btnClose"><img src="/SkinImg/img/btn_close.png"></a></div>
+<div class="clearfix"><h1 class="xans-element- xans-layout xans-layout-logotop">
+  <a class="opacity"><img src="https://{ASSETS}/dEf"></a></h1></div>
+<div id="top_menu"><div id="category-lnb" class="xans-element- xans-layout xans-layout-category">
+  <ul class="category_img"><li><a><img src="https://{ASSETS}/gHi"></a></li>
+  <li><img src="/SkinImg/img/topsub1.jpg"></li></ul></div></div>
+<div id="contents"><div class="xans-element- xans-product xans-product-detail">
+  <div class="detailArea">
+    <div class="xans-element- xans-product xans-product-image">
+      <div class="keyImg"><a>
+        <img class="BigImage" src="//{STORE}/web/product/big/1/key.jpg"></a></div>
+      <div class="xans-element- xans-product xans-product-addimage">
+        <ul><li class="xans-record-">
+          <img class="ThumbImage" src="//{STORE}/web/product/small/1/t.jpg"></li></ul>
+      </div>
+    </div>
+    <div class="infoArea">
+      <span class="icon"><img src="//icons.invalid/icon/product/global/icon_global_1.gif"></span>
+      <p class="displaynone"><img src="//icons.invalid/skin/base_ko_KR/product/txt_naver.gif"></p>
+      <table><tbody class="xans-element- xans-product xans-product-option"><tr class="displaynone">
+        <td class="selectButton"><a><img src="//icons.invalid/skin/btn_manual_select.gif"></a></td>
+      </tr></tbody></table>
+      <table><tbody><tr><td><span class="quantity">
+        <a><img class="QuantityUp up" src="//icons.invalid/skin/btn_count_up.gif"></a>
+      </span></td></tr></table>
+      <div class="xans-element- xans-product xans-product-action"><div>
+        <div class="xans-element- xans-photoslide2 xans-photoslide2-slide-1">
+          <img src="https://{ASSETS}/jKl"></div></div></div>
+    </div>
+  </div>
+  <div class="xans-element- xans-product xans-product-additional"><div id="prdDetail">
+    <div class="cont"><center>
+      <img ec-data-src="//{ASSETS}/d01"><br>
+      <img ec-data-src="//{ASSETS}/d02"><br>
+      <img ec-data-src="https://{ASSETS}/d03"><br>
+      <img ec-data-src="https://{ASSETS}/d04"><br>
+      <img ec-data-src="https://{ASSETS}/d05"><br>
+      <img ec-data-src="//{ASSETS}/d06">
+  <div id="prdReview"><div class="board"><p class="btnArea">
+    <a><img src="/SkinImg/img/d_write.gif"></a>
+    <a><img src="/SkinImg/img/d_all.gif"></a></p></div></div>
+  <div id="prdQnA"><div class="board"><p class="btnArea">
+    <a><img src="/SkinImg/img/d_write.gif"></a>
+    <a><img src="/SkinImg/img/d_all.gif"></a></p></div></div>
+  <div id="addr"><div><div class="fic"><a><img src="https://{ASSETS}/mNo"></a></div></div></div>
+  <div id="progressPaybar"><div id="progressPaybarView"><div class="box"><p class="graph">
+    <span><img src="//popup.invalid/images/ec_hosting/popup/layer_guide/img_loading_bar.gif"></span>
+  </p></div></div></div>
+</body></html>"""
+
+
+def roles() -> list[tuple[ImageRole, str, str]]:
+    return [(c.role, c.rule, c.host) for c in classify_images(PAGE, PRODUCT_URL)]
+
+
+def test_the_product_module_marks_its_own_images() -> None:
+    found = {(role, rule) for role, rule, _ in roles()}
+    assert (ImageRole.PRIMARY, "km.primary.key_image") in found
+    assert (ImageRole.PRIMARY, "km.primary.og_image") in found
+    assert (ImageRole.THUMBNAIL, "km.thumbnail.additional") in found
+    assert (ImageRole.PRODUCT_AUX, "km.aux.photoslide") in found
+    assert sum(1 for role, _, _ in roles() if role is ImageRole.DETAIL) == 6
+
+
+def test_the_description_block_does_not_swallow_what_follows_it() -> None:
+    # The block is written with unclosed tags, so the boards, the footer and the hosting popup are
+    # nested inside it as a parser sees the document. The innermost container still decides.
+    by_rule = {rule: role for role, rule, _ in roles()}
+    assert by_rule["km.ui.community_board"] is ImageRole.UI_COMMON
+    assert by_rule["km.ui.footer"] is ImageRole.UI_COMMON
+    assert by_rule["km.ui.hosting_popup"] is ImageRole.UI_COMMON
+    details = [c for c in classify_images(PAGE, PRODUCT_URL) if c.role is ImageRole.DETAIL]
+    assert {c.host for c in details} == {ASSETS}, "only the description sequence is detail"
+
+
+def test_a_container_no_rule_knows_is_unknown_not_a_product_image() -> None:
+    unknown = [c for c in classify_images(PAGE, PRODUCT_URL) if c.role is ImageRole.UNKNOWN]
+    assert [c.rule for c in unknown] == ["km.unknown"]
+    assert unknown[0].host == ASSETS, "a product host is still not evidence of a product role"
+
+
+def test_a_role_is_never_read_from_a_host_or_a_path() -> None:
+    # The same third-party host serves the header logo, the navigation, the footer and the whole
+    # description sequence; the storefront host serves the representative image and board buttons.
+    by_host: dict[str, set[ImageRole]] = {}
+    for role, _, host in roles():
+        by_host.setdefault(host, set()).add(role)
+    assert by_host[ASSETS] >= {ImageRole.DETAIL, ImageRole.UI_COMMON, ImageRole.UNKNOWN}
+    assert by_host[STORE] >= {ImageRole.PRIMARY, ImageRole.UI_COMMON}
+
+
+def test_the_sample_takes_the_representative_image_and_the_detail_sequence_only() -> None:
+    # Comment 5696172833 §6 with the eligible host set: the six slots carry product evidence and
+    # not one common-layout asset.
+    hosts = {STORE, ASSETS}
+    eligible = [c for c in classify_images(PAGE, PRODUCT_URL) if c.host in hosts]
+    plan = plan_image_sample(eligible, 6, rules=IMAGE_ROLES.identity)
+    assert [c.role for c in plan.selected] == [ImageRole.PRIMARY, *[ImageRole.DETAIL] * 5]
+    assert plan.selected[0].host == STORE
+    assert {c.host for c in plan.selected[1:]} == {ASSETS}
+    assert not [c for c in plan.selected if c.role in (ImageRole.UI_COMMON, ImageRole.UNKNOWN)]
+    # The page declares its representative image twice; both writings name one asset and one slot.
+    assert len({c.identity for c in plan.selected}) == 6
+    audit = plan.audit()
+    assert audit["rules"] == IMAGE_ROLES.identity
+    assert {entry["reason"] for entry in audit["not_selected"]} >= {
+        "UI_COMMON",
+        "duplicate normalized URL",
+        "lower sampling priority",
+    }
+
+
+def test_an_absent_product_module_yields_no_product_sample() -> None:
+    bare = '<html><body><div class="promotionBanner"><img src="/a.png"></div></body></html>'
+    plan = plan_image_sample(classify_images(bare, PRODUCT_URL), 6, rules=IMAGE_ROLES.identity)
+    assert plan.selected == (), "a page without product imagery is sampled zero times"
