@@ -30,10 +30,10 @@ from integrations.suppliers.collection import (
     ImageRole,
     ImageRoleRules,
 )
+from integrations.suppliers.kmretail.collect.revision import EXTRACTION_REVISION
 
-# The identity of these rules. A semantic change to what a rule means advances it, and a
-# repository rule pins it to the package's EXTRACTOR_REVISION (comment 5696242775 §4).
-ROLE_RULES_REVISION = "kmretail-images-1"
+# These rules are part of the package's one collection identity (ruling 5702780630).
+ROLE_RULES_REVISION = EXTRACTION_REVISION
 
 # The attributes a Cafe24 page uses to point at an image. ``ec-data-src`` is the platform's own
 # lazy-load attribute and carries the whole description sequence, so it is read like ``src``.

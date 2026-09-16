@@ -538,6 +538,25 @@ SITE_KNOWLEDGE_IMPORTS = {
     "urllib.parse",
     "collections.abc",
     "typing",
+    # ADR-0010 §7–§8: the COLLECT domain's fact vocabulary — frozen values, evidence and statuses.
+    # It is data, not machinery: a parser needs it to say what it read, and it carries no
+    # database, job, asset store, transport or egress handle of any kind.
+    "app.collect.facts",
+}
+# Issue #52 ruling 5702780630 P2: a supplier parser turns immutable documents into facts. It never
+# executes, retries, hashes, stores, persists or schedules anything — those stay in COLLECT core.
+PARSER_MAY_NOT_OWN = {
+    "app.collect.assets",
+    "app.collect.revisions",
+    "app.collect.sourceassets",
+    "app.collect.readback",
+    "app.core.egress",
+    "app.db.database",
+    "app.jobs.service",
+    "integrations.suppliers.transport.collection",
+    "integrations.suppliers.transport.gateway",
+    "hashlib",
+    "sqlite3",
 }
 RAW_CLIENTS = {
     "httpx",
@@ -665,6 +684,46 @@ def test_image_role_rules_are_bound_to_the_extraction_identity() -> None:
     )
     assert IMAGE_ROLES.identity == ROLE_RULES_REVISION == manifest.revision
     assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
+
+
+def test_a_supplier_parser_owns_nothing_but_reading() -> None:
+    # The KM collect package may read a document and say what it found. Requesting, retrying,
+    # hashing, storing, persisting and scheduling belong to generic COLLECT core, and a module
+    # that cannot import them cannot quietly take them over.
+    package = {
+        path: tree
+        for path, tree in _production_modules().items()
+        if path.startswith("integrations/suppliers/kmretail/")
+    }
+    assert "integrations/suppliers/kmretail/collect/facts.py" in package
+    assert "integrations/suppliers/kmretail/collect/identity.py" in package
+    for path, tree in package.items():
+        imported = _imported_modules(tree)
+        assert not imported & PARSER_MAY_NOT_OWN, path
+        assert not imported & RAW_CLIENTS, path
+        called = {_callee(call) for call in _calls(tree)}
+        # The verbs of ownership: storing an asset, installing egress, scheduling work,
+        # hashing bytes. Building a list is not one of them.
+        assert not called & {"put", "install", "enqueue", "sha256", "acquire"}, path
+        attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        assert not attributes & {"EGRESS", "grant", "db", "jobs", "assets", "revisions"}, path
+
+
+def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
+    # Issue #52 ruling 5702780630: image roles, the identity rule and the facts parser are read
+    # from one document and accepted together, so they share one revision.
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.kmretail import IMAGE_ROLES
+    from integrations.suppliers.kmretail.collect.revision import EXTRACTION_REVISION
+
+    package = REPO_ROOT / "integrations" / "suppliers" / "kmretail"
+    manifest = read_manifest(package / "extraction_identity.py")
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity
+    assert manifest.revision != "kmretail-images-1", "the contract expanded beyond image roles"
+    modules = {
+        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+    }
+    assert modules == set(manifest.inputs), "every collect module is part of the identity"
 
 
 def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:
