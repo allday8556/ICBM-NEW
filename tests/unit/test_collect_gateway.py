@@ -20,6 +20,7 @@ from integrations.suppliers.transport.collection import (
     ImageFetchRefused,
     LiveTransportRefused,
     PolicedCollectionGateway,
+    check_target,
 )
 from integrations.suppliers.transport.session_payload import encode_session
 from tests.suppliers import fake_definition
@@ -363,3 +364,35 @@ def test_profiles_refuse_wildcards_defaults_and_browser_collection() -> None:
 
     with pytest.raises(ValueError):
         _profile(transport=SupplierTransport.BROWSER)
+
+
+# ---------------------------------------------------------------- an image host's own robots
+# Issue #52 ruling 5699776908 §3: an image host is a distinct origin, so its own rules are read
+# before anything is requested from it — and that one document is all it ever answers for.
+
+
+def test_an_image_host_answers_for_its_robots_document_only() -> None:
+    assert (
+        check_target(_profile(), "https://img.supplier.test/robots.txt", ReadKind.POLICY_READ)
+        == "image-robots:img.supplier.test"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://img.supplier.test/terms.html",  # a legal page nobody linked
+        "https://img.supplier.test/policy",  # a guessed policy path
+        "https://img.supplier.test/",  # the host root
+        "https://img.supplier.test/robots.txt?ua=icbm",  # robots with a query
+        "https://img.supplier.test/a/robots.txt",  # robots somewhere else
+    ],
+)
+def test_nothing_else_on_an_image_host_is_a_policy_document(url: str) -> None:
+    with pytest.raises(CollectionTargetRefused, match="robots document only"):
+        check_target(_profile(), url, ReadKind.POLICY_READ)
+
+
+def test_a_host_that_is_not_an_approved_image_host_is_still_refused() -> None:
+    with pytest.raises(CollectionTargetRefused, match="storefront host"):
+        check_target(_profile(), "https://other.test/robots.txt", ReadKind.POLICY_READ)

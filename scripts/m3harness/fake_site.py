@@ -55,7 +55,7 @@ PAGE = f"""<html><head>
 <span id="span_product_price_text" class="price">{PRICE_TEXT}</span>
 <p class="delivery">배송비 3,000원</p><a class="btnBuy buy">구매하기</a>
 <div class="siteBanner"><img src="//{IMAGE_HOSTS[0]}/banner/site.png"></div>
-<div class="thumbnail"><img src="//{IMAGE_HOSTS[0]}/p/1234.png"></div>
+<div class="thumbnail"><img src="//{HOST}/web/product/small/1234.png"></div>
 <div id="prdDetail"><img src="https://{IMAGE_HOSTS[1]}/d/1.jpg?X-Amz-Signature={SIGNATURE}"></div>
 <footer><a href="/member/agreement.html">이용약관</a></footer>
 </body></html>"""
@@ -163,6 +163,13 @@ class FakeStorefront:
             return httpx.Response(200, text=PAGE, headers={"content-type": "text/html"})
         if url.host == HOST and url.path == "/member/agreement.html":
             return httpx.Response(200, text=TERMS, headers={"content-type": "text/html"})
+        if url.host == HOST and url.path.startswith("/web/product/"):
+            etag = '"v1"'
+            if request.headers.get("if-none-match") == etag:
+                return httpx.Response(304, headers={"etag": etag})
+            return httpx.Response(
+                200, content=PNG, headers={"content-type": "image/png", "etag": etag}
+            )
         if url.host in IMAGE_HOSTS:
             etag = '"v1"'
             if request.headers.get("if-none-match") == etag:

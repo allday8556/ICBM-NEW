@@ -5,6 +5,7 @@
     python scripts/m3_recon.py approve --dir <dir> --sha <HEAD>
     python scripts/m3_recon.py run --dir <dir> --real
     python scripts/m3_recon.py finalize --dir <dir>
+    python scripts/m3_recon.py upgrade-guard --dir <dir>
     python scripts/m3_recon.py approve-images --dir <dir> --sha <HEAD> --hosts <host,host>
     python scripts/m3_recon.py run-images --dir <dir> --real
     python scripts/m3_recon.py report --dir <dir>
@@ -34,6 +35,10 @@
   - no CI or pytest run;
   - a REAL campaign at the right STOP;
   - the exact clean checked-out HEAD, typed into the phrase.
+
+  An image-host approval also needs the ledger's reservation guard to be at the current
+  version, because it authorizes requests that guard is what polices; ``upgrade-guard`` installs
+  it locally and makes no request.
 
   Image hosts are approved among the hosts the ledger recorded as observed in phase A, and the
   findings file is never the authority. The approval is issued at the operator's own clean HEAD,
@@ -90,7 +95,7 @@ from scripts.m2harness.keyrings import os_backend
 from scripts.m3harness import fake_site
 from scripts.m3harness.capture import CaptureStore
 from scripts.m3harness.inventory import FindingsSecrets, assert_sanitized, findings_secrets
-from scripts.m3harness.ledger import Ledger, Mode, State
+from scripts.m3harness.ledger import GUARD_VERSION, Ledger, Mode, State
 from scripts.m3harness.paths import ReconPaths
 from scripts.m3harness.recon import (
     Recon,
@@ -404,6 +409,13 @@ def approve_images(
     phase_a = ledger.last_event("APPROVED_A")
     if phase_a is None or not SHA.fullmatch(str(phase_a["detail"].get("sha", ""))):
         problems.append("phase A was never approved at a SHA of its own")
+    guard = ledger.guard_version()
+    if guard < GUARD_VERSION:
+        # The approval would otherwise authorize requests this ledger's own guard cannot police.
+        problems.append(
+            f"the ledger's reservation guard is v{guard}, not v{GUARD_VERSION}; "
+            "run upgrade-guard first"
+        )
     problems += ledger.observation_problems()
     chosen = sorted(set(hosts))
     if not chosen or not set(chosen) <= ledger.observed_hosts():
@@ -422,11 +434,25 @@ def approve_images(
         sha=sha,
         phase_a_sha=phase_a["detail"]["sha"],
         hosts=chosen,
+        guard_version=guard,
         observed_hosts_digest=observation["detail"]["observed_hosts_digest"],
         findings_digest=observation["detail"]["findings_digest"],
         extraction=_extraction_identity(campaign.mode),
         nonce=secrets.token_hex(8),
     )
+
+
+def upgrade_guard(root: Path) -> dict[str, Any]:
+    """Bring an existing campaign's reservation guard up to the current version.
+
+    Local and idempotent: it opens no gateway, makes no request and needs no approval, because it
+    only ever narrows what the ledger will allow. It must run before an approval that depends on a
+    rule the older guard does not have — which that approval refuses until it does.
+    """
+    ledger = Ledger(ReconPaths(root).ledger)
+    before = ledger.guard_version()
+    upgraded = ledger.upgrade_guard()
+    return {"guard_version": ledger.guard_version(), "was": before, "upgraded": upgraded}
 
 
 def _consume(ledger: Ledger, kind: str, checkout: Checkout, blocker: Blocker) -> None:
@@ -781,6 +807,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "finalize",
         "approve-images",
         "run-images",
+        "upgrade-guard",
         "report",
         "rehearse",
     ):
@@ -835,6 +862,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     }
                 )
             )
+        elif args.command == "upgrade-guard":
+            print(json.dumps(upgrade_guard(root)))
         elif args.command == "report":
             print(report(root))
         elif args.command == "rehearse":

@@ -54,6 +54,8 @@ from app.core.safe_payload import safe_payload
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
     DISCOVERED_POLICY_PREFIX,
+    IMAGE_ROBOTS_PATH,
+    IMAGE_ROBOTS_PREFIX,
     CollectionProfile,
     DocumentView,
     FetchIssue,
@@ -172,6 +174,16 @@ def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
         if host not in profile.image_hosts:
             raise _refused("the image host is not allowlisted")
         return host
+    if (
+        kind is ReadKind.POLICY_READ
+        and host != profile.storefront_host
+        and (host in profile.image_hosts)
+    ):
+        # Exactly that one document on that host, with no query and no other path. This is the
+        # host's own policy, not an opening to read anything else from it.
+        if parts.query or path != IMAGE_ROBOTS_PATH:
+            raise _refused("an image host answers for its robots document only")
+        return f"{IMAGE_ROBOTS_PREFIX}{host}"
     if host != profile.storefront_host:
         raise _refused("documents are read only from the storefront host")
     if kind is ReadKind.POLICY_READ:
