@@ -12,6 +12,9 @@ import pytest
 
 from app.config import REPO_ROOT, AppConfig, database_path, default_data_dir
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.service import ConnectService
+from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
+from app.core.errors import AuthError
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
 from app.db.migrate import head_revision, read_only_revision
@@ -22,7 +25,8 @@ from integrations.suppliers.base import (
     RequestKind,
     SupplierDefinition,
 )
-from scripts.m3harness import cli, fake_site
+from integrations.suppliers.collection import ReadKind
+from scripts.m3harness import cli, fake_site, recon
 from scripts.m3harness.capture import KEY_NAME, CaptureStore
 from scripts.m3harness.cli import Refused
 from scripts.m3harness.ledger import Ledger, LedgerError, Mode, State
@@ -129,7 +133,7 @@ def test_captures_are_encrypted_at_rest(tmp_path: Path) -> None:
     cli.rehearse(root)
     paths = ReconPaths(root)
     blobs = list(paths.captures.glob("*.enc"))
-    assert {blob.stem for blob in blobs} == {"product-1", "product-2", "terms"}
+    assert {blob.stem for blob in blobs} == {"robots", "product-1", "product-2", "terms"}
     for blob in blobs:
         assert fake_site.MEMBER_NAME.encode("utf-8") not in blob.read_bytes()
     # Another store (another key) cannot read them.
@@ -308,6 +312,18 @@ def _never(campaign_id: str) -> SecretStore:
     raise AssertionError("the campaign-scoped store is never used here")
 
 
+def _never_built(*_args: object, **_rest: object) -> object:
+    raise AssertionError("no collection gateway is built during local finalization")
+
+
+def _never_installed(*_args: object, **_rest: object) -> None:
+    raise AssertionError("no egress guard is installed during local finalization")
+
+
+def _never_connected(*_args: object, **_rest: object) -> bytes:
+    raise AssertionError("no session is opened during local finalization")
+
+
 def _owner(
     tmp_path: Path, template: Path, *, login: bool = True, database: bool = True
 ) -> tuple[cli.ConnectionOwner, RecordingStore]:
@@ -482,6 +498,143 @@ def test_a_run_against_another_owner_than_the_preflight_checked_is_refused(
     assert ledger.counts() == ZERO
 
 
+# ---------------------------------------------------------------- local phase-A finalization
+# Issue #52 comment 5689874555: provider reads and local findings work are separate steps, and
+# the local half can always be finished offline.
+
+
+def _dry_owner(root: Path, owner_secrets: SecretStore) -> cli.ConnectionOwner:
+    return cli.ConnectionOwner(
+        config=cli._dry_owner_config(ReconPaths(root)),
+        secrets=owner_secrets,
+        gateway=fake_site.FakeConnectGateway(),
+        suppliers=(fake_site.definition(),),
+    )
+
+
+def _stuck_after_the_reads(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, legacy: bool
+) -> tuple[SecretStore, SecretStore]:
+    """A campaign whose phase-A reads are done while its findings were never written: the shape a
+    current run leaves (FINALIZING_A), and the one an older harness left (RUNNING_A)."""
+    owner_secrets, capture_secrets = MemorySecretStore(), MemorySecretStore()
+    if legacy:
+        # An older harness had no reads-done event: it went straight from the reads to the write.
+        record = Ledger.record
+
+        def without_the_event(self: Ledger, kind: str, **rest: object) -> int:
+            if kind == "PHASE_A_READS_DONE":
+                raise RuntimeError("a harness without local-finalization states")
+            return record(self, kind, **rest)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Ledger, "record", without_the_event)
+        expected: type[Exception] = RuntimeError
+    else:
+
+        def refuse(*_args: object, **_rest: object) -> Path:
+            raise ValueError("findings would disclose a secret value; nothing was written")
+
+        monkeypatch.setattr(recon, "write_findings", refuse)
+        expected = ValueError
+    with pytest.raises(expected):
+        cli.rehearse(root, owner_secrets=owner_secrets, capture_secrets=capture_secrets)
+    monkeypatch.undo()
+    return owner_secrets, capture_secrets
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_phase_a_is_finished_offline_from_the_ledger_and_the_captures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy: bool
+) -> None:
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=legacy)
+    paths = ReconPaths(root)
+    ledger = Ledger(paths.ledger)
+    assert ledger.state() is (State.RUNNING_A if legacy else State.FINALIZING_A)
+    # A local failure after the reads leaves its own trace; the legacy shape crashed earlier.
+    assert (ledger.last_event("LOCAL_FINALIZATION_FAILED") is not None) is not legacy
+    assert not (paths.findings / "phase-a.json").exists()
+    assert ledger.observed_hosts() == frozenset()
+    reads = ledger.counts()
+
+    owner = _dry_owner(root, owner_secrets)
+    # Nothing in this path may reach the supplier: no gateway, no egress, no session.
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    monkeypatch.setattr(cli.EGRESS, "install", _never_installed)
+    monkeypatch.setattr(ConnectService, "collection_session", _never_connected)
+    findings = cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+    assert ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL
+    assert ledger.counts() == reads, "finalization reserves nothing"
+    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+    assert ledger.observed_hosts() == frozenset(fake_site.IMAGE_HOSTS)
+    assert findings["secret_scan"]["excluded_cookies"] == []
+    assert json.loads((paths.findings / "phase-a.json").read_text("utf-8")) == findings
+    started = ledger.last_event("OFFLINE_FINALIZATION_STARTED")
+    assert started is not None and started["detail"]["source"] == "ledger+captures"
+    assert findings["robots"]["star_rules"] is not None, "the robots capture was kept"
+    with pytest.raises(Refused, match="already bound"):
+        cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+
+def test_offline_finalization_without_the_robots_capture_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pre-fix harness kept no robots body: the rules are recorded as unavailable, never guessed.
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=True)
+    ReconPaths(root).captures.joinpath("robots.enc").unlink()
+    findings = cli.finalize(
+        root, owner=_dry_owner(root, owner_secrets), capture_secrets=lambda: capture_secrets
+    )
+    assert findings["robots"]["star_rules"] is None
+    assert "not retained" in findings["robots"]["note"]
+    assert findings["robots"]["product_path_disallowed"] is False
+    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+
+
+def test_a_campaign_waiting_for_local_finalization_never_re_runs_phase_a(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, migrated_template: Path
+) -> None:
+    # The reads are done, so the approval is no longer the latest event and the state machine has
+    # no way back to RUNNING_A: a normal run is refused before it can send anything.
+    owner, _ = _owner(tmp_path / "icbm-owner", migrated_template)
+    root = tmp_path / "real"
+    ledger = _real_campaign(root, owner=cli.owner_identity(owner))
+    ledger.record("APPROVED_A", sha=SHA_A, nonce="n")
+    ledger.record("RUN_A_STARTED", state=State.RUNNING_A)
+    reservation = ledger.reserve(ReadKind.PRODUCT_READ, "https://kmretail.co.kr/product/x/1/")
+    ledger.complete(reservation, http_status=200, outcome="OK")
+    ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A)
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    with pytest.raises(Refused, match="latest event"):
+        cli.run_real(root, "A", checkout=Checkout(), blocker=_unblocked, owner=owner)
+    assert ledger.state() is State.FINALIZING_A
+    assert ledger.counts() == {"PRODUCT_READ": 1, "IMAGE_REQUEST": 0, "POLICY_READ": 0}
+
+
+def test_a_failure_rebuilding_the_evidence_is_recorded_and_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PR #64 review 5217542767 §2: the provenance goes in first, and every later local failure
+    # leaves its own trace with a class name, never a value.
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=False)
+    ReconPaths(root).captures.joinpath("product-2.enc").unlink()
+    ledger = Ledger(ReconPaths(root).ledger)
+    with pytest.raises(Refused, match="cannot support finalization"):
+        cli.finalize(
+            root, owner=_dry_owner(root, owner_secrets), capture_secrets=lambda: capture_secrets
+        )
+    started = ledger.last_event("OFFLINE_FINALIZATION_STARTED")
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert started is not None and failed is not None
+    assert failed["seq"] > started["seq"]
+    assert failed["detail"] == {"reason": "ReconStop"}
+    assert ledger.state() is State.FINALIZING_A
+    assert ledger.counts()["PRODUCT_READ"] == 2, "no request, no reservation"
+
+
 def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path) -> None:
     owner_store, capture_store = RecordingStore(), RecordingStore()
     summary = cli.rehearse(
@@ -491,4 +644,155 @@ def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path)
     assert capture_store.writes == [KEY_NAME]
     assert f"supplier:{fake_site.definition().profile.supplier_key}:credentials" in (
         owner_store.writes
+    )
+
+
+def test_an_unreadable_session_stops_finalization_without_disclosing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # PR #64 comment 5690832285: the scan boundary fails closed, the campaign keeps a local failure
+    # trace, and nothing of the payload reaches the error, the ledger, the findings or the output.
+    sentinel = "SENTINEL-4d9f2a-SESSION-MATERIAL"
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=False)
+    owner = _dry_owner(root, owner_secrets)
+    sessions = SupplierSessionStore(owner.config.runtime_dir / SESSIONS_DIR_NAME, owner_secrets)
+    sessions.save(
+        fake_site.definition().profile.supplier_key,
+        b'{"v": 1, "cookies": "' + sentinel.encode("utf-8") + b'"',
+    )
+    ledger = Ledger(ReconPaths(root).ledger)
+    reads = ledger.counts()
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    monkeypatch.setattr(cli.EGRESS, "install", _never_installed)
+    monkeypatch.setattr(ConnectService, "collection_session", _never_connected)
+
+    with pytest.raises(Refused) as refused:
+        cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+    assert "SUPPLIER_SESSION_UNREADABLE" in str(refused.value)
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "AuthError"}
+    assert ledger.state() is State.FINALIZING_A, "network-closed and retryable locally"
+    assert ledger.counts() == reads, "no request, no reservation"
+    captured = capsys.readouterr()  # one read: the first call drains both streams
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(ReconPaths(root), str(refused.value), captured.out, captured.err)
+    )
+
+
+def _surfaces(paths: ReconPaths, error: str, out: str, err: str) -> list[bytes]:
+    """Everywhere a local failure could carry material it could not read."""
+    written = [path.read_bytes() for path in paths.findings.rglob("*.json")]
+    return [
+        error.encode("utf-8"),
+        paths.ledger.read_bytes(),
+        out.encode("utf-8"),
+        err.encode("utf-8"),
+        *written,
+    ]
+
+
+class _RefusesTheSecondProductRead(fake_site.FakeStorefront):
+    """A storefront that stops phase A after the login, with both reads already reserved."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == fake_site.HOST and request.url.path == fake_site.PRODUCT_PATH:
+            self.reads += 1
+            if self.reads == 2:
+                self.requests.append(request)
+                return httpx.Response(403)
+        return super().__call__(request)
+
+
+class _UnreachableImages(fake_site.FakeStorefront):
+    """A storefront whose images cannot be reached: phase B stops on a provider error."""
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host in fake_site.IMAGE_HOSTS:
+            self.requests.append(request)
+            raise httpx.ConnectError("the image host is unreachable", request=request)
+        return super().__call__(request)
+
+
+def test_a_phase_a_stop_is_terminal_before_its_findings_are_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # PR #64 review 5217847727 §1: local work never holds a stopped campaign open, and the live
+    # session decode fails neutrally. The planted sentinel stands for the payload the decoder saw.
+    sentinel = "SENTINEL-7c31e8-LIVE-SESSION-MATERIAL"
+
+    def unreadable(payload: bytes) -> tuple[list[dict[str, str]], str]:
+        raise ValueError(f"cannot decode {sentinel}")
+
+    monkeypatch.setattr(cli, "decode_session", unreadable)
+    # The live session accessor keeps the boundary's own rule: the refusal is raised outside the
+    # handler, so the failure that saw the payload is not kept as its context.
+    with pytest.raises(AuthError) as neutral:
+        cli.Session(payload=b"a session this process cannot read").cookies()
+    assert neutral.value.code == "SUPPLIER_SESSION_UNREADABLE"
+    assert neutral.value.__cause__ is None and neutral.value.__context__ is None
+    assert sentinel not in repr(neutral.value)
+    root = tmp_path / "recon"
+    with pytest.raises(Refused) as refused:
+        cli.rehearse(root, storefront=_RefusesTheSecondProductRead())
+
+    assert "SUPPLIER_SESSION_UNREADABLE" in str(refused.value)
+    ledger = Ledger(ReconPaths(root).ledger)
+    assert ledger.state() is State.STOPPED, "the provider stop is durable on its own"
+    stopped = ledger.last_event("STOPPED")
+    assert stopped is not None and stopped["detail"]["reason"] == "PRODUCT_HTTP_403"
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "AuthError"}
+    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 0, "POLICY_READ": 1}
+    assert not (ReconPaths(root).findings / "phase-a.json").exists(), "nothing half-scanned"
+    with pytest.raises(LedgerError, match="no transition"):
+        ledger.record("RUN_A_STARTED", state=State.RUNNING_A)  # no way back into collection
+    captured = capsys.readouterr()
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(ReconPaths(root), str(refused.value), captured.out, captured.err)
+    )
+
+
+def test_a_phase_b_stop_is_terminal_before_its_findings_are_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The same rule on the phase-B stop, with a write failure after it and the session's own
+    # cookie value planted as the material that may never surface.
+    sentinel = "SENTINEL-be04f5-SESSION-COOKIE"
+    monkeypatch.setattr(fake_site, "SESSION_COOKIE", sentinel)
+    original = recon.write_findings
+
+    def refusing(findings_dir: Path, name: str, findings: dict, secrets: object) -> Path:
+        if name == "phase-b":
+            raise ValueError("the findings cannot be written")
+        return original(findings_dir, name, findings, secrets)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(recon, "write_findings", refusing)
+    root = tmp_path / "recon"
+    with pytest.raises(ValueError, match="cannot be written"):
+        cli.rehearse(root, storefront=_UnreachableImages())
+
+    ledger = Ledger(ReconPaths(root).ledger)
+    assert ledger.state() is State.STOPPED
+    stopped = ledger.last_event("STOPPED")
+    assert stopped is not None and stopped["detail"]["reason"] == "COLLECT_NETWORK_ERROR"
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "ValueError"}
+    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 1, "POLICY_READ": 2}
+    paths = ReconPaths(root)
+    assert (paths.findings / "phase-a.json").exists()
+    assert not (paths.findings / "phase-b.json").exists(), "nothing half-scanned"
+    with pytest.raises(LedgerError, match="no transition"):
+        ledger.record("RUN_B_STARTED", state=State.RUNNING_B)
+    captured = capsys.readouterr()
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(paths, "", captured.out, captured.err)
     )

@@ -480,6 +480,45 @@ def test_the_docs_name_the_resolver_and_the_canonical_root() -> None:
             assert retired not in text, (path.name, retired)
 
 
+# PR #64 review 5217542767 §3: the local scan reads cookie material, never a session.
+SCAN_BOUNDARY = "session_cookies_for_scan"
+SCAN_BOUNDARY_CALLERS = {"app/connect/service.py", "scripts/m3harness/cli.py"}
+
+
+def test_the_local_scan_boundary_is_not_a_session_transport() -> None:
+    files = _code_files()
+    service = files["app/connect/service.py"]
+    assert "def stored_session" not in service, "no generic stored-session accessor"
+    assert {path for path, text in files.items() if SCAN_BOUNDARY in text} == SCAN_BOUNDARY_CALLERS
+    boundary = next(
+        node
+        for node in ast.walk(ast.parse(service))
+        if isinstance(node, ast.FunctionDef) and node.name == SCAN_BOUNDARY
+    )
+    forbidden = {"verify", "_verify", "_prove", "_authenticate", "collection_session", "fetch"}
+    assert not [call for call in _calls(boundary) if _callee(call) in forbidden], "reads only"
+    # Comment 5690832285 §2: no sibling path may hand out payload material instead.
+    lenient = {"repr", "str", "format", "hex"}
+    assert not [call for call in _calls(boundary) if _callee(call) in lenient], "no coercion"
+    assert not [
+        call
+        for call in _calls(boundary, "decode")
+        if call.args or any(word.arg == "errors" for word in call.keywords)
+    ], "no replacement decoding"
+    handlers = [node for node in ast.walk(boundary) if isinstance(node, ast.ExceptHandler)]
+    assert handlers, "the decode failure is handled"
+    assert not [
+        node for handler in handlers for node in ast.walk(handler) if isinstance(node, ast.Return)
+    ], "no fallback return"
+    assert [node for node in ast.walk(boundary) if isinstance(node, ast.Raise)], "it fails closed"
+    returned = {
+        _callee(node.value)
+        for node in ast.walk(boundary)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Call)
+    }
+    assert "load" not in returned, "the session payload itself never leaves the owner"
+
+
 # ---------------------------------------------------------------- supplier CONNECT boundary
 
 # Issue #7 comments 5653608622 §6/§9 and 5653615136: supplier-specific code is site knowledge
