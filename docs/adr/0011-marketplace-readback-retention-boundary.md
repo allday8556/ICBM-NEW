@@ -1,6 +1,6 @@
 # ADR-0011 — Marketplace raw read-back retention boundary
 
-Status: **PROPOSED**
+Status: **ACCEPTED**
 Decision owner: Architect (ChatGPT)
 Date: 2026-09-16
 Related: Issue #58; ADR-0010 §9
