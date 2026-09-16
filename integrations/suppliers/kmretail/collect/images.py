@@ -35,6 +35,26 @@ ROLE_RULES_REVISION = "kmretail-images-1"
 IMAGE_ATTRIBUTES = ("src", "data-src", "ec-data-src", "data-original")
 _SRCSET = "srcset"
 _OG_IMAGE = "meta[og:image]"
+# HTML's void elements: they have no end tag, so they never open a scope. Keeping one on the
+# ancestry stack would make the next close tag remove the wrong element and leave a container such
+# as the description block standing over everything that follows it (review 5222192371 §1).
+VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -126,16 +146,19 @@ class _References(HTMLParser):
             classes=frozenset(name for name in values.get("class", "").split() if name),
         )
 
-    def _role(self) -> tuple[ImageRole, str]:
+    def _role(self, element: Element) -> tuple[ImageRole, str]:
         """The innermost recognised container's role; UNKNOWN when no rule recognises any of them.
 
-        The referencing element is the last link of the chain, so an element that is itself a
-        recognised container is judged by it.
+        The referencing element is judged with its own ancestry, so an element that is itself a
+        recognised container is judged by it. Ancestry is only ever what the document proved open:
+        recovery from malformed markup drops elements and never invents one, so a broken page can
+        lose a product role but can never gain one (review 5222192371 §3).
         """
-        for depth in range(len(self._chain) - 1, -1, -1):
-            container = self._chain[depth]
+        ancestry = (*self._chain, element)
+        for depth in range(len(ancestry) - 1, -1, -1):
+            container = ancestry[depth]
             for rule in ROLE_RULES:
-                if rule.matches(self._chain[: depth + 1], container):
+                if rule.matches(ancestry[: depth + 1], container):
                     return rule.role, rule.rule_id
         return ImageRole.UNKNOWN, _UNRECOGNISED
 
@@ -149,13 +172,14 @@ class _References(HTMLParser):
         if attribute == _OG_IMAGE:
             role, rule_id = OG_IMAGE_RULE.role, OG_IMAGE_RULE.rule_id
         else:
-            role, rule_id = self._role()
+            role, rule_id = self._role(element)
         self.found.append(ImageCandidate(url=url, role=role, order=len(self.found), rule=rule_id))
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
         element = self._element(tag, values)
-        self._chain.append(element)
+        if tag not in VOID_ELEMENTS:
+            self._chain.append(element)
         if tag == "img":
             for attribute in IMAGE_ATTRIBUTES:
                 if values.get(attribute):
@@ -169,8 +193,18 @@ class _References(HTMLParser):
                 self._reference(values["content"], element, _OG_IMAGE)
 
     def handle_endtag(self, tag: str) -> None:
-        if self._chain:
-            self._chain.pop()
+        """Close the nearest element of that name, and with it anything the page left unclosed.
+
+        A close never removes an element of another name: one missing or stray end tag would
+        otherwise shift the whole stack for the rest of the document. A close with nothing open to
+        match is ignored rather than allowed to disturb ancestry (review 5222192371 §2).
+        """
+        if tag in VOID_ELEMENTS:
+            return
+        for depth in range(len(self._chain) - 1, -1, -1):
+            if self._chain[depth].tag == tag:
+                del self._chain[depth:]
+                return
 
 
 def classify_images(body: str, product_url: str) -> tuple[ImageCandidate, ...]:

@@ -5,9 +5,11 @@ use — including the description block's unclosed tags, which is what made docu
 outermost-container matching unusable. No captured page content is copied here.
 """
 
+import pytest
+
 from integrations.suppliers.collection import ImageRole, plan_image_sample
 from integrations.suppliers.kmretail import IMAGE_ROLES
-from integrations.suppliers.kmretail.collect.images import classify_images
+from integrations.suppliers.kmretail.collect.images import VOID_ELEMENTS, classify_images
 
 PRODUCT_URL = "https://shop.invalid/product/item/1/category/2/display/1/"
 STORE = "shop.invalid"
@@ -134,3 +136,126 @@ def test_an_absent_product_module_yields_no_product_sample() -> None:
     bare = '<html><body><div class="promotionBanner"><img src="/a.png"></div></body></html>'
     plan = plan_image_sample(classify_images(bare, PRODUCT_URL), 6, rules=IMAGE_ROLES.identity)
     assert plan.selected == (), "a page without product imagery is sampled zero times"
+
+
+# ---------------------------------------------------------------- the ancestry a role is read from
+# Review 5222192371: a void element has no end tag, and a page's closes are not to be trusted. Both
+# used to shift the stack, leaving the description block standing over the rest of the document so
+# that an unrelated image was promoted to DETAIL and could consume a Phase-B request.
+
+OUTSIDE = f'<div class="storyTeller"><img src="https://{ASSETS}/outside"></div>'
+
+
+def outside_role(markup: str) -> ImageRole:
+    """The role of the one image that sits outside every product container."""
+    page = f"<html><body>{markup}{OUTSIDE}</body></html>"
+    outside = [c for c in classify_images(page, PRODUCT_URL) if c.url.endswith("/outside")]
+    assert len(outside) == 1
+    return outside[0].role
+
+
+@pytest.mark.parametrize(
+    "void",
+    [
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    ],
+)
+def test_no_void_element_ever_becomes_ancestry(void: str) -> None:
+    # One of each, inside the description block, then the block closes normally.
+    inside = f'<div id="prdDetail"><div class="cont"><{void}></div></div>'
+    assert outside_role(inside) is ImageRole.UNKNOWN
+
+
+def test_a_void_element_is_not_an_ancestor_of_what_follows_it() -> None:
+    # The sharpest form of the drift: a void element that carries a product marker. Kept on the
+    # stack it would stand over its siblings, and the next reference would inherit its role.
+    page = (
+        '<html><body><div class="xans-element- xans-product xans-product-image">'
+        f'<img class="keyImg" src="https://{STORE}/web/product/big/1/key.jpg">'
+        f'<img src="https://{ASSETS}/after">'
+        "</div></body></html>"
+    )
+    found = classify_images(page, PRODUCT_URL)
+    assert [c.role for c in found] == [ImageRole.PRIMARY, ImageRole.UNKNOWN]
+    assert found[1].rule == "km.unknown", "a sibling never inherits a void element's role"
+
+
+def test_a_run_of_void_elements_does_not_shift_the_stack() -> None:
+    every = "".join(f"<{void}>" for void in sorted(VOID_ELEMENTS))
+    assert outside_role(f'<div id="prdDetail"><div class="cont">{every}</div></div>') is (
+        ImageRole.UNKNOWN
+    )
+
+
+def test_self_closing_and_plain_void_markup_classify_the_same() -> None:
+    plain = f'<div id="prdDetail"><img src="https://{ASSETS}/d"><br></div>'
+    closed = f'<div id="prdDetail"><img src="https://{ASSETS}/d"/><br/></div>'
+    assert outside_role(plain) is outside_role(closed) is ImageRole.UNKNOWN
+    inside_plain = classify_images(f"<html><body>{plain}</body></html>", PRODUCT_URL)
+    inside_closed = classify_images(f"<html><body>{closed}</body></html>", PRODUCT_URL)
+    assert [c.role for c in inside_plain] == [c.role for c in inside_closed] == [ImageRole.DETAIL]
+
+
+def test_a_close_tag_closes_the_nearest_element_of_its_own_name() -> None:
+    # The page closes a <div> while a <span> and a <p> are still open. The div goes, and with it
+    # everything the page left open above it; a blind pop would have removed only the <p> and left
+    # the description block standing over the rest of the document.
+    assert outside_role('<div id="prdDetail"><span><p></div>') is ImageRole.UNKNOWN
+    # Matching is by name and nearest-first, so a close still only reaches its own element: here
+    # the inner div closes and the description block is genuinely still open.
+    assert outside_role('<div id="prdDetail"><div class="cont"><span></div>') is ImageRole.DETAIL
+
+
+def test_a_close_with_nothing_open_to_match_is_ignored() -> None:
+    # A stray </section> must not pop the container that proves the representative image.
+    page = (
+        '<html><body><div class="xans-element- xans-product xans-product-image">'
+        '<div class="keyImg"></section>'
+        f'<a><img class="BigImage" src="https://{STORE}/web/product/big/1/key.jpg"></a>'
+        "</div></div></body></html>"
+    )
+    found = classify_images(page, PRODUCT_URL)
+    assert [(c.role, c.rule) for c in found] == [(ImageRole.PRIMARY, "km.primary.key_image")]
+
+
+def test_broken_nesting_cannot_promote_a_later_image_into_the_sample() -> None:
+    # The description block is never closed and carries void elements; the image that follows it
+    # in its own container stays UNKNOWN, and UNKNOWN cannot consume a slot.
+    broken = (
+        '<div id="prdDetail"><div class="cont"><center>'
+        f'<img ec-data-src="https://{ASSETS}/d01"><br>'
+        f'<img ec-data-src="https://{ASSETS}/d02"><br>'
+        "</center></div></div></div></div>"  # more closes than the page ever opened
+    )
+    page = f"<html><body>{broken}{OUTSIDE}</body></html>"
+    found = classify_images(page, PRODUCT_URL)
+    assert [c.role for c in found] == [ImageRole.DETAIL, ImageRole.DETAIL, ImageRole.UNKNOWN]
+    plan = plan_image_sample(found, 6, rules=IMAGE_ROLES.identity)
+    assert [c.role for c in plan.selected] == [ImageRole.DETAIL, ImageRole.DETAIL]
+    assert not [c for c in plan.selected if c.url.endswith("/outside")]
+
+
+def test_recovery_only_ever_narrows_what_is_called_a_product_image() -> None:
+    # The same references, once in well-formed markup and once in markup whose closes are wrong.
+    inner = (
+        '<div class="xans-element- xans-product xans-product-image"><div class="keyImg"><a>'
+        f'<img class="BigImage" src="https://{STORE}/web/product/big/1/key.jpg"></a></div></div>'
+    )
+    tidy = classify_images(f"<html><body>{inner}</body></html>", PRODUCT_URL)
+    torn = classify_images(f"<html><body></div></p>{inner}</span></body></html>", PRODUCT_URL)
+    product = {ImageRole.PRIMARY, ImageRole.DETAIL, ImageRole.THUMBNAIL, ImageRole.PRODUCT_AUX}
+    tidy_products = sum(1 for c in tidy if c.role in product)
+    torn_products = sum(1 for c in torn if c.role in product)
+    assert torn_products <= tidy_products == 1
