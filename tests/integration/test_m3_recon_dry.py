@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -30,7 +31,7 @@ from integrations.suppliers.collection import ReadKind
 from scripts.m3harness import cli, fake_site, recon
 from scripts.m3harness.capture import KEY_NAME, CaptureStore
 from scripts.m3harness.cli import Refused
-from scripts.m3harness.ledger import Ledger, LedgerError, Mode, State
+from scripts.m3harness.ledger import GUARD_VERSION, Ledger, LedgerError, Mode, State
 from scripts.m3harness.paths import ReconPaths
 
 pytestmark = pytest.mark.integration
@@ -104,22 +105,30 @@ def test_the_rehearsal_stays_inside_the_caps_and_leaks_nothing(tmp_path: Path) -
     root = tmp_path / "recon"
     summary = cli.rehearse(root)
     assert summary["state"] == State.COMPLETED.value
-    # robots + the discovered terms page; two product reads 60 s apart; two images + one 304.
-    assert summary["requests"] == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 3, "POLICY_READ": 2}
+    # robots, the discovered terms page and the third-party image host's own robots; two product
+    # reads 60 s apart; two images + one 304.
+    assert summary["requests"] == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 3, "POLICY_READ": 3}
     assert summary["logins"] == 1
     phase_a = summary["phase_a"]
     assert phase_a["robots"]["product_path_disallowed"] is False
     assert phase_a["stability"]["inventory_identical"] is True
-    assert phase_a["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+    assert phase_a["observed_image_hosts"] == sorted({fake_site.HOST, *fake_site.IMAGE_HOSTS})
     assert phase_a["terms"]["mentions"] == ["무단", "수집"]
     images = summary["phase_b"]["images"]
     assert {image["signature"] for image in images} == {"png", "jpeg"}
     assert any(image.get("revalidation_status") == 304 for image in images)
     paths = ReconPaths(root)
     ledger = Ledger(paths.ledger)
-    assert ledger.observed_hosts() == frozenset(fake_site.IMAGE_HOSTS)
+    assert ledger.observed_hosts() == frozenset({fake_site.HOST, *fake_site.IMAGE_HOSTS})
     subjects = [r["subject"] for r in ledger.reservations() if r["kind"] == "POLICY_READ"]
-    assert subjects == ["/robots.txt", "discovered:/member/agreement.html"]
+    # The storefront's own robots, the policy document its product page linked, and the one
+    # robots document of the third-party image host the sample reaches. The storefront's image is
+    # never asked again: phase A already read its rules.
+    assert subjects == [
+        "/robots.txt",
+        "discovered:/member/agreement.html",
+        f"image-robots:{fake_site.IMAGE_HOSTS[1]}",
+    ]
     findings = list(paths.findings.iterdir())
     for artifact in (*findings, paths.ledger, paths.preflight):
         data = artifact.read_bytes()
@@ -176,6 +185,135 @@ def test_robots_disallowing_the_product_path_stops_before_any_product_read(
     assert summary["phase_a"]["stopped"] == "ROBOTS_DISALLOWS_PRODUCT_PATH"
     assert summary["requests"] == {"PRODUCT_READ": 0, "IMAGE_REQUEST": 0, "POLICY_READ": 1}
     assert summary["logins"] == 0
+
+
+# ---------------------------------------------------------------- the image host's own robots
+# Issue #52 ruling 5699776908 §3: an image host is a distinct origin, so phase B reads its own
+# rules before it requests anything from it, and stops rather than guessing.
+
+
+class _ImageHostRobots(fake_site.FakeStorefront):
+    """The rehearsal storefront, with an answer of our choosing for the image host's robots."""
+
+    def __init__(self, status: int, body: str = "") -> None:
+        super().__init__()
+        self.status, self.body = status, body
+        self.robots_reads = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host in fake_site.IMAGE_HOSTS and request.url.path == "/robots.txt":
+            self.robots_reads += 1
+            self.requests.append(request)
+            return httpx.Response(self.status, text=self.body)
+        return super().__call__(request)
+
+
+def _phase_b(tmp_path: Path, storefront: fake_site.FakeStorefront) -> dict[str, Any]:
+    return cli.rehearse(tmp_path / "recon", storefront=storefront)["phase_b"]
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_host_that_publishes_no_robots_states_no_exclusion(tmp_path: Path, status: int) -> None:
+    site = _ImageHostRobots(status)
+    phase_b = _phase_b(tmp_path, site)
+    assert site.robots_reads == 1, "exactly one robots document, once"
+    check = next(c for c in phase_b["robots"] if c["host"] == fake_site.IMAGE_HOSTS[1])
+    assert check["allowed"] is True and check["star_rules"] is None
+    assert "not permission to publish" in check["note"]
+    assert phase_b["images"], "the sample proceeds"
+
+
+def test_a_host_that_allows_the_chosen_paths_is_read(tmp_path: Path) -> None:
+    site = _ImageHostRobots(200, "User-agent: *\nDisallow: /private/\nAllow: /d/\n")
+    phase_b = _phase_b(tmp_path, site)
+    check = next(c for c in phase_b["robots"] if c["host"] == fake_site.IMAGE_HOSTS[1])
+    assert check == {
+        "host": fake_site.IMAGE_HOSTS[1],
+        "source": "image-host-robots",
+        "requested": True,
+        "http_status": 200,
+        "star_rules": 2,
+        "allowed": True,
+    }
+    assert phase_b["images"]
+
+
+def test_a_disallowed_image_path_stops_phase_b_before_any_image(tmp_path: Path) -> None:
+    site = _ImageHostRobots(200, "User-agent: *\nDisallow: /d/\n")
+    root = tmp_path / "recon"
+    phase_b = cli.rehearse(root, storefront=site)["phase_b"]
+    assert phase_b["stopped"] == "ROBOTS_DISALLOWS_IMAGE_PATH"
+    assert phase_b["images"] == [], "not one image was requested"
+    assert phase_b["requests"]["IMAGE_REQUEST"] == 0
+    ledger = Ledger(ReconPaths(root).ledger)
+    assert ledger.state() is State.STOPPED
+    recorded = ledger.last_event("IMAGE_HOST_ROBOTS")
+    assert recorded is not None and recorded["detail"]["allowed"] is False
+    assert recorded["detail"]["disallowed_paths"] == ["/d/{n}.jpg"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 418, 451])
+def test_any_other_answer_leaves_the_rules_unknown_and_stops(tmp_path: Path, status: int) -> None:
+    # Unknown is a stop: an authentication, rate-limit or refusal answer is not "no rules".
+    root = tmp_path / "recon"
+    phase_b = cli.rehearse(root, storefront=_ImageHostRobots(status))["phase_b"]
+    assert phase_b["images"] == []
+    assert phase_b["requests"]["IMAGE_REQUEST"] == 0
+    assert Ledger(ReconPaths(root).ledger).state() is State.STOPPED
+
+
+def test_the_storefronts_own_rules_are_reused_and_never_read_again(tmp_path: Path) -> None:
+    # Phase A read them and the ledger recorded it; asking the same host twice would be a request
+    # nobody authorized a second time.
+    root = tmp_path / "recon"
+    site = fake_site.FakeStorefront()
+    phase_b = cli.rehearse(root, storefront=site)["phase_b"]
+    storefront = next(c for c in phase_b["robots"] if c["host"] == fake_site.HOST)
+    assert storefront == {
+        "host": fake_site.HOST,
+        "source": "phase-a",
+        "requested": False,
+        "allowed": True,
+    }
+    subjects = [
+        r["subject"]
+        for r in Ledger(ReconPaths(root).ledger).reservations()
+        if r["kind"] == "POLICY_READ"
+    ]
+    assert subjects.count(f"image-robots:{fake_site.HOST}") == 0
+
+
+def test_every_robots_answer_is_recorded_whether_it_allowed_or_refused(tmp_path: Path) -> None:
+    root = tmp_path / "recon"
+    cli.rehearse(root, storefront=_ImageHostRobots(404))
+    ledger = Ledger(ReconPaths(root).ledger)
+    kinds = [json.loads(detail) for (detail,) in _events(ledger, "IMAGE_HOST_ROBOTS")]
+    # In the order the sample reaches them: the detail image's host first, then the storefront.
+    assert [k["host"] for k in kinds] == [fake_site.IMAGE_HOSTS[1], fake_site.HOST]
+    assert [k["requested"] for k in kinds] == [True, False]
+
+
+def _events(ledger: Ledger, kind: str) -> list[tuple[str]]:
+    with contextlib.closing(sqlite3.connect(ledger.path)) as db:
+        return list(db.execute("SELECT detail FROM events WHERE kind = ? ORDER BY seq", (kind,)))
+
+
+def test_an_image_approval_refuses_a_ledger_whose_guard_is_older(tmp_path: Path) -> None:
+    # The approval would otherwise authorize requests the ledger's own guard cannot police.
+    root = tmp_path / "real"
+    ledger = _waiting_for_images(root)
+    with contextlib.closing(sqlite3.connect(ledger.path)) as raw:
+        raw.execute("PRAGMA user_version = 1")
+        raw.commit()
+    with pytest.raises(Refused, match=r"reservation guard is v1"):
+        cli.approve_images(
+            root, SHA_A, [HOST], confirm=_yes, checkout=Checkout(), blocker=_unblocked
+        )
+    assert ledger.approved_hosts() == frozenset()
+    assert cli.upgrade_guard(root) == {"guard_version": GUARD_VERSION, "was": 1, "upgraded": True}
+    cli.approve_images(root, SHA_A, [HOST], confirm=_yes, checkout=Checkout(), blocker=_unblocked)
+    approved = ledger.last_event("APPROVED_B")
+    assert approved is not None and approved["detail"]["guard_version"] == GUARD_VERSION
 
 
 # ---------------------------------------------------------------- REAL gates
@@ -649,8 +787,8 @@ def test_phase_a_is_finished_offline_from_the_ledger_and_the_captures(
 
     assert ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL
     assert ledger.counts() == reads, "finalization reserves nothing"
-    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
-    assert ledger.observed_hosts() == frozenset(fake_site.IMAGE_HOSTS)
+    assert findings["observed_image_hosts"] == sorted({fake_site.HOST, *fake_site.IMAGE_HOSTS})
+    assert ledger.observed_hosts() == frozenset({fake_site.HOST, *fake_site.IMAGE_HOSTS})
     assert findings["secret_scan"]["excluded_cookies"] == []
     assert json.loads((paths.findings / "phase-a.json").read_text("utf-8")) == findings
     started = ledger.last_event("OFFLINE_FINALIZATION_STARTED")
@@ -673,7 +811,7 @@ def test_offline_finalization_without_the_robots_capture_says_so(
     assert findings["robots"]["star_rules"] is None
     assert "not retained" in findings["robots"]["note"]
     assert findings["robots"]["product_path_disallowed"] is False
-    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+    assert findings["observed_image_hosts"] == sorted({fake_site.HOST, *fake_site.IMAGE_HOSTS})
 
 
 def test_a_campaign_waiting_for_local_finalization_never_re_runs_phase_a(
@@ -881,7 +1019,8 @@ def test_a_phase_b_stop_is_terminal_before_its_findings_are_written(
     assert stopped is not None and stopped["detail"]["reason"] == "COLLECT_NETWORK_ERROR"
     failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
     assert failed is not None and failed["detail"] == {"reason": "ValueError"}
-    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 1, "POLICY_READ": 2}
+    # The host could not be reached for its own robots document, so no image was ever requested.
+    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 0, "POLICY_READ": 3}
     paths = ReconPaths(root)
     assert (paths.findings / "phase-a.json").exists()
     assert not (paths.findings / "phase-b.json").exists(), "nothing half-scanned"

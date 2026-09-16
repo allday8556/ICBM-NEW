@@ -34,7 +34,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,8 +76,16 @@ from scripts.m3harness.ledger import CAPS, SAME_PRODUCT_INTERVAL_S, Ledger, Ledg
 RECON_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_SAMPLE = 6
 ROBOTS_PATH = "/robots.txt"
+# A robots document that is simply not published: the host answered, and said there is no rule
+# file. Anything else — an authentication or rate-limit answer, a server failure, a network
+# failure — leaves the host's rules unknown, and unknown is a stop (ruling 5699776908 §3).
+ROBOTS_ABSENT = (404, 410)
 PRODUCT_CAPTURES = ("product-1", "product-2")
 # A harness before Issue #52 comment 5689874555 did not keep the robots body.
+ROBOTS_NOT_PUBLISHED = (
+    "the host answered that it publishes no robots document, so it states no exclusion rule; that "
+    "is not permission to publish, reuse or licence anything it serves"
+)
 ROBOTS_NOT_RETAINED = (
     "the robots body was not retained by the harness that made this read; the ledger records the "
     "policy read and its status, and phase A reads a product only after a false disallow check"
@@ -353,6 +361,59 @@ class Recon:
 
     # ---------------------------------------------------------------- phase B
 
+    def _image_host_robots(
+        self, profile: CollectionProfile, host: str, paths: Sequence[str]
+    ) -> dict[str, Any]:
+        """Read one image host's own robots rules and say whether the chosen paths may be read.
+
+        The storefront's rules were already read and recorded in phase A, so its host is never
+        asked again: phase A's evidence is reused and no request is made for it. Any other host is
+        a distinct origin, and exactly one ``/robots.txt`` is read from it.
+
+        A stop is the default. Only a published rule file that allows the chosen paths, or a plain
+        answer that no rule file exists, lets phase B continue; an answer that leaves the rules
+        unknown does not. Nothing here is a publication, reuse or licence grant.
+        """
+        if host == profile.storefront_host:
+            return {"host": host, "source": "phase-a", "requested": False, "allowed": True}
+        view = self._document(profile, f"https://{host}{ROBOTS_PATH}", ReadKind.POLICY_READ)
+        record: dict[str, Any] = {
+            "host": host,
+            "source": "image-host-robots",
+            "requested": True,
+            "http_status": view.status,
+        }
+        if view.status in ROBOTS_ABSENT:
+            return record | {"star_rules": None, "allowed": True, "note": ROBOTS_NOT_PUBLISHED}
+        if view.status != 200:
+            return record | {"allowed": False, "reason": f"ROBOTS_HTTP_{view.status}"}
+        groups = parse_robots(view.body)
+        disallowed = sorted({path for path in paths if robots_disallows(groups, path)})
+        record |= {"star_rules": len(groups.get("*", [])), "allowed": not disallowed}
+        if disallowed:
+            record["reason"] = "ROBOTS_DISALLOWS_IMAGE_PATH"
+            record["disallowed_paths"] = [mask(path) for path in disallowed]
+        return record
+
+    def _robots_cleared(
+        self, profile: CollectionProfile, selected: Sequence[ImageCandidate]
+    ) -> list[dict[str, Any]]:
+        """Every host the sample would request, cleared before the first image leaves.
+
+        A host is checked once, in the order the sample would reach it, and the first refusal ends
+        the walk: a host whose rules refused is never asked for an image, and a host after it is
+        never even asked for its rules.
+        """
+        checks: list[dict[str, Any]] = []
+        for host in dict.fromkeys(candidate.host for candidate in selected):
+            paths = [urlsplit(c.url).path for c in selected if c.host == host]
+            check = self._image_host_robots(profile, host, paths)
+            self.ledger.record("IMAGE_HOST_ROBOTS", **check)
+            checks.append(check)
+            if not check["allowed"]:
+                break
+        return checks
+
     def phase_b(self) -> dict[str, Any]:
         if self.ledger.state() is not State.RUNNING_B:
             raise ReconStop("PHASE_B_NOT_RUNNING")
@@ -379,6 +440,11 @@ class Recon:
             "images": [],
         }
         try:
+            # Every host's own rules first: not one image is requested until they allow it.
+            findings["robots"] = self._robots_cleared(profile, plan.selected)
+            blocked = next((c for c in findings["robots"] if not c["allowed"]), None)
+            if blocked is not None:
+                raise ReconStop(str(blocked.get("reason", "ROBOTS_REFUSED")))
             revalidated = False
             for candidate in plan.selected:
                 entry: dict[str, Any] = {
@@ -401,6 +467,8 @@ class Recon:
                     entry["revalidation_status"] = again.status
                     revalidated = True
                 findings["images"].append(entry)
+        except ReconStop as stop:
+            return self._stop_phase_b(findings, stop.reason, State.STOPPED)
         except CollectionBudgetRefused:
             return self._stop_phase_b(findings, "BUDGET_REFUSED", State.BUDGET_EXHAUSTED)
         except AppError as exc:

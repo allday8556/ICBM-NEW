@@ -26,6 +26,12 @@ MINIMUM_SAME_PRODUCT_INTERVAL_S = 60.0
 # The budget subject prefix of a discovered policy read (a public document linked from a product
 # page): a separate, bounded read, never a widening of a profile's fixed ``policy_paths``.
 DISCOVERED_POLICY_PREFIX = "discovered:"
+# An image host is a distinct origin, so its own robots rules are read before anything is
+# requested from it. That read is a POLICY_READ — no new kind and no new cap — with a subject of
+# its own so the ledger can allow exactly one of them per approved host, in phase B only
+# (Issue #52 ruling 5699776908 §3).
+IMAGE_ROBOTS_PREFIX = "image-robots:"
+IMAGE_ROBOTS_PATH = "/robots.txt"
 
 
 class ReadKind(StrEnum):

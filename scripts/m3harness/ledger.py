@@ -36,7 +36,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from integrations.suppliers.collection import DISCOVERED_POLICY_PREFIX, ReadKind
+from integrations.suppliers.collection import (
+    DISCOVERED_POLICY_PREFIX,
+    IMAGE_ROBOTS_PREFIX,
+    ReadKind,
+)
 from integrations.suppliers.transport.collection import CollectionBudgetRefused
 
 # Ruling on Q1: reconnaissance only. Every other kind of request is capped at 0.
@@ -46,6 +50,10 @@ CAPS: Mapping[ReadKind, int] = {
     ReadKind.POLICY_READ: 3,
 }
 SAME_PRODUCT_INTERVAL_S = 60.0
+# The reservation guard's own version, kept in ``PRAGMA user_version``. A ledger created before a
+# rule existed carries the older number until it is upgraded, and an approval that depends on a
+# rule refuses a ledger that does not have it yet (Issue #52 ruling 5699776908).
+GUARD_VERSION = 2
 CAMPAIGN_ID = re.compile(r"^m3-recon-[a-z0-9][a-z0-9-]{1,40}$")
 _TABLES = (
     "campaign",
@@ -115,6 +123,49 @@ def _cap_case() -> str:
     return f"CASE NEW.kind {whens} ELSE 0 END"
 
 
+def reservations_guard() -> str:
+    """The one statement that decides whether a request may be reserved.
+
+    A ledger created today and a ledger upgraded to this version run the same text: it is written
+    once here and installed by both paths, so the two can never drift apart.
+
+    Phase B may reserve an image request, and exactly one robots preflight per approved image
+    host. A generic policy read and a product read stay phase A's alone: the subject prefix, not
+    the kind, is what opens the phase-B door, so nothing else widens with it.
+    """
+    robots = f"NEW.kind = 'POLICY_READ' AND NEW.subject LIKE '{IMAGE_ROBOTS_PREFIX}%'"
+    robots_host = f"substr(NEW.subject, {len(IMAGE_ROBOTS_PREFIX) + 1})"
+    return f"""CREATE TRIGGER trg_reservations_guard BEFORE INSERT ON reservations BEGIN
+    SELECT RAISE(ABORT, 'CAP_REACHED')
+        WHERE (SELECT COUNT(*) FROM reservations WHERE kind = NEW.kind) >= {_cap_case()};
+    SELECT RAISE(ABORT, 'PHASE_CLOSED')
+        WHERE (SELECT state FROM current_state) IS NOT (CASE
+            WHEN NEW.kind = 'IMAGE_REQUEST' THEN 'RUNNING_B'
+            WHEN {robots} THEN 'RUNNING_B'
+            ELSE 'RUNNING_A' END);
+    SELECT RAISE(ABORT, 'HOST_NOT_APPROVED')
+        WHERE NEW.kind = 'IMAGE_REQUEST'
+            AND NOT EXISTS (SELECT 1 FROM approved_hosts WHERE host = NEW.subject);
+    SELECT RAISE(ABORT, 'HOST_NOT_APPROVED')
+        WHERE {robots}
+            AND NOT EXISTS (SELECT 1 FROM approved_hosts WHERE host = {robots_host});
+    SELECT RAISE(ABORT, 'IMAGE_ROBOTS_ONCE')
+        WHERE {robots}
+            AND EXISTS (SELECT 1 FROM reservations WHERE subject = NEW.subject);
+    SELECT RAISE(ABORT, 'DISCOVERED_POLICY_ONCE')
+        WHERE NEW.kind = 'POLICY_READ' AND NEW.subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
+            AND EXISTS (
+                SELECT 1 FROM reservations WHERE subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
+            );
+    SELECT RAISE(ABORT, 'SAME_PRODUCT_INTERVAL')
+        WHERE NEW.kind = 'PRODUCT_READ' AND EXISTS (
+            SELECT 1 FROM reservations
+            WHERE kind = 'PRODUCT_READ' AND subject = NEW.subject
+                AND NEW.epoch - epoch < {SAME_PRODUCT_INTERVAL_S}
+        );
+END;"""
+
+
 _SCHEMA = f"""
 CREATE TABLE campaign (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -157,27 +208,7 @@ CREATE TRIGGER trg_approved_hosts_observed BEFORE INSERT ON approved_hosts BEGIN
     SELECT RAISE(ABORT, 'HOST_NOT_OBSERVED')
         WHERE NOT EXISTS (SELECT 1 FROM observed_hosts WHERE host = NEW.host);
 END;
-CREATE TRIGGER trg_reservations_guard BEFORE INSERT ON reservations BEGIN
-    SELECT RAISE(ABORT, 'CAP_REACHED')
-        WHERE (SELECT COUNT(*) FROM reservations WHERE kind = NEW.kind) >= {_cap_case()};
-    SELECT RAISE(ABORT, 'PHASE_CLOSED')
-        WHERE (SELECT state FROM current_state) IS NOT
-            (CASE NEW.kind WHEN 'IMAGE_REQUEST' THEN 'RUNNING_B' ELSE 'RUNNING_A' END);
-    SELECT RAISE(ABORT, 'HOST_NOT_APPROVED')
-        WHERE NEW.kind = 'IMAGE_REQUEST'
-            AND NOT EXISTS (SELECT 1 FROM approved_hosts WHERE host = NEW.subject);
-    SELECT RAISE(ABORT, 'DISCOVERED_POLICY_ONCE')
-        WHERE NEW.kind = 'POLICY_READ' AND NEW.subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
-            AND EXISTS (
-                SELECT 1 FROM reservations WHERE subject LIKE '{DISCOVERED_POLICY_PREFIX}%'
-            );
-    SELECT RAISE(ABORT, 'SAME_PRODUCT_INTERVAL')
-        WHERE NEW.kind = 'PRODUCT_READ' AND EXISTS (
-            SELECT 1 FROM reservations
-            WHERE kind = 'PRODUCT_READ' AND subject = NEW.subject
-                AND NEW.epoch - epoch < {SAME_PRODUCT_INTERVAL_S}
-        );
-END;
+{reservations_guard()}
 """ + "".join(
     f"CREATE TRIGGER trg_{table}_no_update BEFORE UPDATE ON {table} "
     f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;\n"
@@ -215,6 +246,7 @@ class Ledger:
         with closing(sqlite3.connect(path)) as db:
             db.execute("PRAGMA synchronous=FULL")
             db.executescript(_SCHEMA)
+            db.execute(f"PRAGMA user_version = {GUARD_VERSION}")
             db.execute(
                 "INSERT INTO campaign VALUES (1, ?, ?, ?, ?)",
                 (campaign_id, mode.value, product_url, now()),
@@ -246,6 +278,35 @@ class Ledger:
             except BaseException:
                 db.execute("ROLLBACK")
                 raise
+
+    def guard_version(self) -> int:
+        """Which reservation guard this ledger carries."""
+        with self._db() as db:
+            (version,) = db.execute("PRAGMA user_version").fetchone()
+        return int(version)
+
+    def upgrade_guard(self) -> bool:
+        """Install the current reservation guard on an older ledger; True when it did.
+
+        Idempotent and versioned: a ledger already at this version is left alone, so running it
+        twice changes nothing. The drop, the new guard, the version and the event that records it
+        are one transaction, so a ledger can never be left carrying a guard its version denies.
+        It adds no table, alters no CHECK and touches no recorded row.
+        """
+        with self._transaction() as db:
+            (version,) = db.execute("PRAGMA user_version").fetchone()
+            if int(version) >= GUARD_VERSION:
+                return False
+            db.execute("DROP TRIGGER IF EXISTS trg_reservations_guard")
+            db.execute(reservations_guard())
+            db.execute(f"PRAGMA user_version = {GUARD_VERSION}")
+            self._append(
+                db,
+                "LEDGER_GUARD_UPGRADED",
+                None,  # the campaign's own state is not touched by an upgrade
+                {"from": int(version), "to": GUARD_VERSION},
+            )
+        return True
 
     # ---------------------------------------------------------------- campaign and events
 
