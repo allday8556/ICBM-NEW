@@ -75,6 +75,10 @@ class State(StrEnum):
     # The durable STOP after the zero-provider preflight; only an approved run leaves it.
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     RUNNING_A = "RUNNING_A"
+    # The provider reads are done and their captures are durable; only local work is left
+    # (Issue #52 comment 5689874555 §4). No reservation is possible here, so phase A's network
+    # collection can never resume from this state.
+    FINALIZING_A = "FINALIZING_A"
     # Phase A recorded its observation; images wait for their explicit approval.
     AWAITING_IMAGE_HOST_APPROVAL = "AWAITING_IMAGE_HOST_APPROVAL"
     RUNNING_B = "RUNNING_B"
@@ -89,12 +93,16 @@ _TRANSITIONS: Mapping[State, frozenset[State]] = {
     State.AWAITING_APPROVAL: frozenset({State.AWAITING_APPROVAL, State.RUNNING_A, State.STOPPED}),
     State.RUNNING_A: frozenset(
         {
+            State.FINALIZING_A,
             State.AWAITING_IMAGE_HOST_APPROVAL,
             State.COMPLETED,
             State.STOPPED,
             State.BUDGET_EXHAUSTED,
         }
     ),
+    # Local finalization only: the findings are written and bound, or the campaign stops. There
+    # is no way back to RUNNING_A, so a refused finalization can never re-send provider requests.
+    State.FINALIZING_A: frozenset({State.AWAITING_IMAGE_HOST_APPROVAL, State.STOPPED}),
     State.AWAITING_IMAGE_HOST_APPROVAL: frozenset(
         {State.RUNNING_B, State.COMPLETED, State.STOPPED}
     ),
@@ -141,7 +149,7 @@ CREATE VIEW current_state AS
     SELECT state FROM events WHERE state IS NOT NULL ORDER BY seq DESC LIMIT 1;
 CREATE TRIGGER trg_observed_hosts_phase BEFORE INSERT ON observed_hosts BEGIN
     SELECT RAISE(ABORT, 'OBSERVATION_CLOSED')
-        WHERE (SELECT state FROM current_state) IS NOT 'RUNNING_A';
+        WHERE (SELECT state FROM current_state) NOT IN ('RUNNING_A', 'FINALIZING_A');
 END;
 CREATE TRIGGER trg_approved_hosts_observed BEFORE INSERT ON approved_hosts BEGIN
     SELECT RAISE(ABORT, 'APPROVAL_CLOSED')
@@ -314,6 +322,28 @@ class Ledger:
     def observed_hosts(self) -> frozenset[str]:
         with self._db() as db:
             return frozenset(row[0] for row in db.execute("SELECT host FROM observed_hosts"))
+
+    def offline_finalization_problems(self) -> list[str]:
+        """Why phase A cannot be finished locally; empty when it can (comment 5689874555 §5).
+
+        A campaign qualifies while its reads are done and nothing is bound yet: the FINALIZING_A
+        shape a current run reaches on its own, and the RUNNING_A shape left by a run that
+        crashed after its reads.
+        """
+        problems = []
+        state = self.state()
+        if state not in (State.RUNNING_A, State.FINALIZING_A):
+            problems.append(f"the campaign is {state}, not phase A awaiting local finalization")
+        if self.last_event("PHASE_A_DONE") is not None:
+            problems.append("phase A is already bound")
+        counts = self.counts()
+        if counts[ReadKind.IMAGE_REQUEST.value]:
+            problems.append("image requests exist; this finishes phase A only")
+        if not counts[ReadKind.PRODUCT_READ.value]:
+            problems.append("no product read was reserved")
+        if any(row["outcome"] is None for row in self.reservations()):
+            problems.append("a reservation has no completion")
+        return problems
 
     def observation_problems(self) -> list[str]:
         """Why the recorded observation cannot back an image-host approval; empty if it can."""

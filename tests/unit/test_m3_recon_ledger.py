@@ -117,6 +117,43 @@ def test_the_observation_is_bound_with_its_digest_and_closed_after_phase_a(
             raw.execute("INSERT INTO approved_hosts VALUES ('cdn.other.test', 't')")
 
 
+def test_local_finalization_takes_the_campaign_out_of_network_collection(tmp_path: Path) -> None:
+    # Issue #52 comment 5689874555 §4: the reads are done and only local work is left.
+    ledger = _running_a(tmp_path)
+    ledger.reserve(ReadKind.POLICY_READ, "/robots.txt")
+    ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A)
+    assert ledger.state() is State.FINALIZING_A
+    assert "PHASE_CLOSED" in _refused(ledger, ReadKind.PRODUCT_READ, PRODUCT)
+    assert "PHASE_CLOSED" in _refused(ledger, ReadKind.POLICY_READ, "/other.txt")
+    with pytest.raises(LedgerError):
+        ledger.record("RUN_A_STARTED", state=State.RUNNING_A)  # collection never resumes
+    ledger.finish_phase_a([HOST], findings_digest="0" * 64)  # observation binds from here
+    assert ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL
+    assert ledger.observed_hosts() == frozenset({HOST})
+
+
+def test_which_campaigns_can_be_finished_locally(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    assert ledger.offline_finalization_problems() == [
+        "the campaign is INITIALIZED, not phase A awaiting local finalization",
+        "no product read was reserved",
+    ]
+    ledger.record("PREFLIGHT_PASSED", state=State.AWAITING_APPROVAL)
+    ledger.record("RUN_STARTED", state=State.RUNNING_A)
+    seq = ledger.reserve(ReadKind.PRODUCT_READ, PRODUCT)
+    # A read that never completed: the evidence is incomplete, so finalization is refused.
+    assert ledger.offline_finalization_problems() == ["a reservation has no completion"]
+    ledger.complete(seq, http_status=200, outcome="OK")
+    assert ledger.offline_finalization_problems() == []  # the legacy stuck shape qualifies
+    ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A)
+    assert ledger.offline_finalization_problems() == []
+    ledger.finish_phase_a([HOST], findings_digest="0" * 64)
+    assert ledger.offline_finalization_problems() == [
+        "the campaign is AWAITING_IMAGE_HOST_APPROVAL, not phase A awaiting local finalization",
+        "phase A is already bound",
+    ]
+
+
 def test_illegal_transitions_are_refused(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     with pytest.raises(LedgerError):

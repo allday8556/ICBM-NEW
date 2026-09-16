@@ -67,6 +67,7 @@ from integrations.suppliers.base import (
     SupplierDefinition,
     SupplierGateway,
 )
+from integrations.suppliers.transport.session_payload import decode_session
 
 logger = logging.getLogger("icbm.connect")
 
@@ -647,6 +648,45 @@ class ConnectService:
                 "SUPPLIER_SESSION_UNAVAILABLE", "the supplier connection holds no usable session"
             )
         return payload
+
+    def session_cookies_for_scan(self, supplier_key: str) -> list[dict[str, str]]:
+        """The name and value of each cookie of the stored session, for local leak scanning only.
+
+        A scanner must know the values a collected page could have echoed. This hands out that
+        cookie material and nothing a transport could use: no session payload, no user agent and
+        no host list, so it can never stand in for ``collection_session``, which remains the only
+        way to obtain a session for collection. It makes no supplier request and proves nothing,
+        and the list is empty when no session is stored (PR #64 review 5217542767 §3).
+
+        An unreadable or unsupported stored session fails closed: nothing is returned, and the
+        refusal carries a code only (PR #64 comment 5690832285 §1). So does a session whose own
+        cookie entries do not carry the pair a scan needs, which the shared decoder tolerates
+        (PR #64 review 5219631112).
+        """
+        self._definition(supplier_key)
+        payload = self._sessions.load(supplier_key)
+        if payload is None:
+            return []
+        decoded: list[dict[str, str]] | None = None
+        try:
+            cookies, _ = decode_session(payload)
+            # The projection belongs inside the boundary: an entry without a usable name and value
+            # makes the stored session unusable for a scan, and is refused exactly like a payload
+            # that cannot be decoded rather than skipped, which would scan less than the session's
+            # own material or raise a KeyError of its own.
+            if all(
+                isinstance(cookie.get("name"), str) and isinstance(cookie.get("value"), str)
+                for cookie in cookies
+            ):
+                decoded = [{"name": cookie["name"], "value": cookie["value"]} for cookie in cookies]
+        except Exception:
+            # No fragment of an unreadable payload leaves CONNECT: not decoded, not replaced, not
+            # repr'd. The refusal is raised outside the handler, so the failure that saw the bytes
+            # is not even kept as the new error's context.
+            decoded = None
+        if decoded is None:
+            raise AuthError("SUPPLIER_SESSION_UNREADABLE", "the stored session cannot be read")
+        return decoded
 
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.

@@ -2,6 +2,7 @@
 
 import threading
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from app.core.errors import AppError, AuthError
 from integrations.suppliers.base import (
@@ -15,6 +16,7 @@ from integrations.suppliers.base import (
     SupplierProfile,
     Verdict,
 )
+from integrations.suppliers.transport.session_payload import encode_session
 
 FAKE_KEY = "fakesupplier"
 USERNAME = "icbm-test-operator@example.invalid"
@@ -124,7 +126,12 @@ class FakeGateway:
             raise self.login_error
         if credentials != self.accepted:
             raise AuthError("SUPPLIER_LOGIN_REJECTED", "the supplier rejected the login")
-        session = f'{{"cookie":"{SESSION_TOKEN}-{number}"}}'.encode()
+        host = urlsplit(definition.profile.base_url).hostname or ""
+        session = encode_session(
+            [{"name": "SID", "value": f"{SESSION_TOKEN}-{number}", "domain": host, "path": "/"}],
+            user_agent="FakeSupplier/1",
+            hosts={host},
+        )
         if self.login_effective:
             self.valid_sessions.add(session)
         return session
