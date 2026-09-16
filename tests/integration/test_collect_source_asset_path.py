@@ -365,6 +365,17 @@ def test_the_persisted_validators_reach_the_api_unchanged(
             + struct.pack("<HH", 50, 40),
             "the bytes are all here but the chunk ends past the container the file declared",
         ),
+        (
+            # An odd-sized lossless payload: the container left no room for its pad byte.
+            b"RIFF"
+            + struct.pack("<I", 17)
+            + b"WEBP"
+            + b"VP8L"
+            + struct.pack("<I", 5)
+            + b"\x2f"
+            + struct.pack("<I", 63 | (31 << 14)),
+            "an odd-sized chunk has a pad byte, and the container has no room for it",
+        ),
     ],
 )
 def test_a_header_that_is_not_complete_is_not_a_source_asset(

@@ -58,8 +58,11 @@ def webp_extended(width: int, height: int) -> bytes:
     return _riff(b"VP8X", payload)
 
 
-def _riff(chunk: bytes, payload: bytes) -> bytes:
-    body = b"WEBP" + chunk + struct.pack("<I", len(payload)) + payload
+def _riff(chunk: bytes, payload: bytes, *, pad: bool = True) -> bytes:
+    """A RIFF container. An odd-sized payload is padded to an even length, and the pad byte counts
+    towards the container's own size; ``pad=False`` builds a file that forgot it."""
+    padding = b"\x00" * (len(payload) & 1) if pad else b""
+    body = b"WEBP" + chunk + struct.pack("<I", len(payload)) + payload + padding
     return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
@@ -111,6 +114,8 @@ def test_a_jpeg_frame_is_found_past_the_segments_before_it() -> None:
         gif(0, 0),
         _riff(b"VP8 ", b"\x00" * 6),  # WebP without its start code
         _riff(b"XXXX", b"\x00" * 16),  # a RIFF that is not one of the WebP chunks
+        # An odd-sized payload whose required pad byte the container never made room for.
+        _riff(b"VP8L", b"\x2f" + struct.pack("<I", 63 | (31 << 14)), pad=False),
         b"RIFF" + struct.pack("<I", 4) + b"WAVE",  # RIFF, but not WebP at all
     ],
 )

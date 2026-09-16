@@ -22,8 +22,9 @@ describe.
 A size is only an answer when the structure that declares it is complete: the whole GIF screen
 descriptor is present, the PNG image header declares its own standard length and the bytes of that
 chunk and its checksum are there, a JPEG frame segment's length matches the component count it
-declares and ends inside the buffer, and a WebP chunk ends inside the RIFF container the file
-itself declared rather than in bytes appended past it.
+declares and ends inside the buffer, and a WebP chunk — with the pad byte an odd-sized one
+carries — ends inside the RIFF container the file itself declared rather than in bytes appended
+past it.
 Without that a provider could hand over a few plausible bytes and have dimensions read from
 whatever followed them. Every read is bounds-checked against the buffer it was given, so a
 malformed or hostile header yields ``None`` instead of an exception or an unbounded scan.
@@ -134,7 +135,11 @@ def _webp(data: bytes) -> DecodedImage | None:
     if riff_size is None or chunk_size is None or riff_size < _WEBP_MIN_RIFF_SIZE:
         return None
     container_end = 8 + riff_size
-    if len(data) < container_end or 20 + chunk_size > container_end:
+    # A chunk of an odd number of bytes is followed by one pad byte, and that byte is part of the
+    # chunk's place in the container: a file whose payload ends exactly at the container's last
+    # byte has not left room for it.
+    chunk_end = 20 + chunk_size + (chunk_size & 1)
+    if len(data) < container_end or chunk_end > container_end:
         return None
     # The chunk is whole by construction now: it ends inside the container, and the container is
     # inside the buffer.
