@@ -20,11 +20,16 @@ Two properties matter more than coverage:
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
-from integrations.suppliers.collection import ImageCandidate, ImageRole, ImageRoleRules
+from integrations.suppliers.collection import (
+    SAMPLED_ROLES,
+    ImageCandidate,
+    ImageRole,
+    ImageRoleRules,
+)
 
 # The identity of these rules. A semantic change to what a rule means advances it, and a
 # repository rule pins it to the package's EXTRACTOR_REVISION (comment 5696242775 §4).
@@ -59,8 +64,14 @@ VOID_ELEMENTS = frozenset(
 
 @dataclass(frozen=True)
 class Element:
-    """One open element of the document, reduced to what a role rule may look at."""
+    """One element of the document, reduced to what a role rule may look at.
 
+    ``frame`` identifies this occurrence for the whole parse, so a role can name the scope that
+    proved it and that scope can be checked again once the document ends. It is positional only:
+    nothing is ever inferred from a host, a path or a document order.
+    """
+
+    frame: int
     tag: str
     element_id: str
     classes: frozenset[str]
@@ -130,6 +141,10 @@ ROLE_RULES: tuple[RoleRule, ...] = (
 # de-duplication keeps the two to one slot.
 OG_IMAGE_RULE = RoleRule("km.primary.og_image", ImageRole.PRIMARY, "")
 _UNRECOGNISED = "km.unknown"
+# A product role whose proving scope the page never closed is withdrawn at EOF: the scope reached
+# the end of the document still open, so it stands over everything after it and nothing it appears
+# to contain is proven (review 5222613374 §2). The provisional rule is kept for the audit.
+_UNCLOSED_SCOPE = "km.unclosed_scope"
 
 
 class _References(HTMLParser):
@@ -137,30 +152,49 @@ class _References(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._base = product_url
         self._chain: list[Element] = []
+        self._frames = 0
+        self._closed: set[int] = set()
         self.found: list[ImageCandidate] = []
+        # Per reference, the frame of the scope that proved its role, or None when the referencing
+        # element proved it by itself and there is no scope that could be left open.
+        self.proofs: list[int | None] = []
+
+    def closed_frames(self) -> frozenset[int]:
+        """The scopes the page closed with their own end tag.
+
+        A scope removed while unwinding an ancestor's close is not among them: the page never said
+        where that scope ended, so it never proved what it contains.
+        """
+        return frozenset(self._closed)
 
     def _element(self, tag: str, values: dict[str, str]) -> Element:
+        self._frames += 1
         return Element(
+            frame=self._frames,
             tag=tag,
             element_id=values.get("id", "").strip(),
             classes=frozenset(name for name in values.get("class", "").split() if name),
         )
 
-    def _role(self, element: Element) -> tuple[ImageRole, str]:
-        """The innermost recognised container's role; UNKNOWN when no rule recognises any of them.
+    def _role(self, element: Element) -> tuple[ImageRole, str, int | None]:
+        """The innermost recognised container's role, and the frame of that container.
 
         The referencing element is judged with its own ancestry, so an element that is itself a
         recognised container is judged by it. Ancestry is only ever what the document proved open:
         recovery from malformed markup drops elements and never invents one, so a broken page can
-        lose a product role but can never gain one (review 5222192371 §3).
+        lose a product role but can never gain one (review 5222192371 §3). The answer is
+        provisional until the document ends: see :func:`classify_images`.
         """
         ancestry = (*self._chain, element)
         for depth in range(len(ancestry) - 1, -1, -1):
             container = ancestry[depth]
             for rule in ROLE_RULES:
                 if rule.matches(ancestry[: depth + 1], container):
-                    return rule.role, rule.rule_id
-        return ImageRole.UNKNOWN, _UNRECOGNISED
+                    # The last link is the referencing element itself: it opens no scope, so its
+                    # proof cannot be left hanging by a missing close.
+                    proof = None if depth == len(ancestry) - 1 else container.frame
+                    return rule.role, rule.rule_id, proof
+        return ImageRole.UNKNOWN, _UNRECOGNISED, None
 
     def _reference(self, raw: str, element: Element, attribute: str) -> None:
         raw = raw.strip()
@@ -170,10 +204,13 @@ class _References(HTMLParser):
         if urlsplit(url).scheme not in ("http", "https"):
             return
         if attribute == _OG_IMAGE:
-            role, rule_id = OG_IMAGE_RULE.role, OG_IMAGE_RULE.rule_id
+            # The page's own declaration of its representative image. It is proved by the element
+            # that carries it, not by a container, so no unclosed scope can withdraw it.
+            role, rule_id, frame = OG_IMAGE_RULE.role, OG_IMAGE_RULE.rule_id, None
         else:
-            role, rule_id = self._role(element)
+            role, rule_id, frame = self._role(element)
         self.found.append(ImageCandidate(url=url, role=role, order=len(self.found), rule=rule_id))
+        self.proofs.append(frame)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
@@ -203,17 +240,41 @@ class _References(HTMLParser):
             return
         for depth in range(len(self._chain) - 1, -1, -1):
             if self._chain[depth].tag == tag:
+                # Only this element was closed by the page. Whatever sat above it is unwound with
+                # it but was never closed, so it stays unproven.
+                self._closed.add(self._chain[depth].frame)
                 del self._chain[depth:]
                 return
 
 
 def classify_images(body: str, product_url: str) -> tuple[ImageCandidate, ...]:
     """Every image reference of a KM통상 product document, in the document's own order, with the
-    role its DOM supports. Nothing is fetched and nothing but structure is kept."""
+    role its DOM supports. Nothing is fetched and nothing but structure is kept.
+
+    Roles are provisional while the document is read, because a scope only proves what it contains
+    once the page closes it with its own end tag. A scope the page never closed proves nothing: it
+    stands over everything written after it, so the page never said where it stopped. Being unwound
+    by an ancestor's close is not the page saying it — that is the same missing close seen from
+    outside. Every sample-eligible role proved by such a scope is withdrawn to ``UNKNOWN`` before
+    anything is sampled: the genuine references inside it as well as any later one that inherited
+    it (review 5222613374 §2).
+
+    A role the referencing element proved by itself, such as the page's own ``og:image``
+    declaration, opens no scope and is never withdrawn this way (§4).
+
+    This is deliberately conservative. A malformed page can yield fewer product images, or none; it
+    can never yield more, and it can never widen what a phase-B run is allowed to request.
+    """
     parser = _References(product_url)
     parser.feed(body)
     parser.close()
-    return tuple(parser.found)
+    closed = parser.closed_frames()
+    return tuple(
+        candidate
+        if not (candidate.role in SAMPLED_ROLES and frame is not None and frame not in closed)
+        else replace(candidate, role=ImageRole.UNKNOWN, rule=f"{_UNCLOSED_SCOPE}:{candidate.rule}")
+        for candidate, frame in zip(parser.found, parser.proofs, strict=True)
+    )
 
 
 IMAGE_ROLES = ImageRoleRules(identity=ROLE_RULES_REVISION, classify=classify_images)

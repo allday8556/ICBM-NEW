@@ -68,6 +68,7 @@ PAGE = f"""<html><head>
   <div id="progressPaybar"><div id="progressPaybarView"><div class="box"><p class="graph">
     <span><img src="//popup.invalid/images/ec_hosting/popup/layer_guide/img_loading_bar.gif"></span>
   </p></div></div></div>
+  </div></div></div></div></div>
 </body></html>"""
 
 
@@ -209,13 +210,21 @@ def test_self_closing_and_plain_void_markup_classify_the_same() -> None:
 
 
 def test_a_close_tag_closes_the_nearest_element_of_its_own_name() -> None:
-    # The page closes a <div> while a <span> and a <p> are still open. The div goes, and with it
-    # everything the page left open above it; a blind pop would have removed only the <p> and left
-    # the description block standing over the rest of the document.
-    assert outside_role('<div id="prdDetail"><span><p></div>') is ImageRole.UNKNOWN
-    # Matching is by name and nearest-first, so a close still only reaches its own element: here
-    # the inner div closes and the description block is genuinely still open.
-    assert outside_role('<div id="prdDetail"><div class="cont"><span></div>') is ImageRole.DETAIL
+    # The page closes a <div> while a <span> and a <p> are still open. That close reaches the div
+    # and takes the unclosed elements above it; a blind pop would have removed only the <p>, and
+    # the description block would then have ended the document unclosed and proved nothing.
+    closed = (
+        f'<html><body><div id="prdDetail"><span><p>'
+        f'<img src="https://{ASSETS}/inside"></div></body></html>'
+    )
+    assert [c.role for c in classify_images(closed, PRODUCT_URL)] == [ImageRole.DETAIL]
+    # Matching is by name and nearest-first, so a close only ever reaches its own element: here the
+    # inner div closes and the description block is left open, which proves nothing at all.
+    inner = (
+        f'<html><body><div id="prdDetail"><div class="cont">'
+        f'<img src="https://{ASSETS}/inside"></div></body></html>'
+    )
+    assert [c.role for c in classify_images(inner, PRODUCT_URL)] == [ImageRole.UNKNOWN]
 
 
 def test_a_close_with_nothing_open_to_match_is_ignored() -> None:
@@ -259,3 +268,76 @@ def test_recovery_only_ever_narrows_what_is_called_a_product_image() -> None:
     tidy_products = sum(1 for c in tidy if c.role in product)
     torn_products = sum(1 for c in torn if c.role in product)
     assert torn_products <= tidy_products == 1
+
+
+# ---------------------------------------------------------------- what an unclosed scope proves
+# Review 5222613374: a scope only proves what it contains once the page closes it. One that runs to
+# the end of the document open stands over everything after it, so every sample-eligible role it
+# proved is withdrawn before anything is sampled — the real references inside it included.
+
+# The review's own shape: nothing closes #prdDetail, and no surplus close stands in for it.
+NEVER_CLOSED = (
+    f'<div id="prdDetail">\n  <img src="https://{ASSETS}/detail1.jpg">\n'
+    f'<div class="new-unrecognised-section">\n  <img src="https://{ASSETS}/outside.jpg">\n'
+)
+PROPERLY_CLOSED = (
+    f'<div id="prdDetail">\n  <img src="https://{ASSETS}/detail1.jpg">\n</div>\n'
+    f'<div class="new-unrecognised-section">\n  <img src="https://{ASSETS}/outside.jpg">\n</div>\n'
+)
+REPRESENTATIVE = f'<meta property="og:image" content="https://{STORE}/web/product/big/1/key.jpg">'
+
+
+def classified(markup: str, head: str = "") -> list[tuple[ImageRole, str]]:
+    page = f"<html><head>{head}</head><body>{markup}</body></html>"
+    return [(c.role, c.rule) for c in classify_images(page, PRODUCT_URL)]
+
+
+def test_a_scope_the_page_never_closed_proves_nothing() -> None:
+    roles = classified(NEVER_CLOSED)
+    assert [role for role, _ in roles] == [ImageRole.UNKNOWN, ImageRole.UNKNOWN]
+    # Both the genuine reference inside the block and the later one that inherited it are withdrawn,
+    # and the audit still names the role the parse had provisionally reached.
+    assert all(rule.startswith("km.unclosed_scope:km.detail.prd_detail") for _, rule in roles)
+
+
+def test_an_unclosed_scope_cannot_consume_a_sample_slot() -> None:
+    found = classify_images(f"<html><body>{NEVER_CLOSED}</body></html>", PRODUCT_URL)
+    plan = plan_image_sample(found, 6, rules=IMAGE_ROLES.identity)
+    assert plan.selected == (), "no network request is authorised by an unclosed scope"
+    assert {reason for _, reason in plan.excluded} == {"UNKNOWN"}
+
+
+def test_being_unwound_by_an_ancestor_is_not_the_page_closing_the_scope() -> None:
+    # </body> removes #prdDetail with it, but the page never said where the block ended.
+    assert [role for role, _ in classified(NEVER_CLOSED)] == [ImageRole.UNKNOWN] * 2
+
+
+def test_the_same_document_with_the_block_closed_keeps_its_detail_sequence() -> None:
+    roles = classified(PROPERLY_CLOSED)
+    assert roles == [
+        (ImageRole.DETAIL, "km.detail.prd_detail"),
+        (ImageRole.UNKNOWN, "km.unknown"),
+    ]
+    found = classify_images(f"<html><body>{PROPERLY_CLOSED}</body></html>", PRODUCT_URL)
+    assert [c.role for c in plan_image_sample(found, 6, rules="r").selected] == [ImageRole.DETAIL]
+
+
+def test_an_independently_proven_primary_survives_an_unclosed_block() -> None:
+    # The page's own declaration of its representative image is proved by the element that carries
+    # it, not by a container, so no missing close can withdraw it (review 5222613374 §4).
+    roles = classified(NEVER_CLOSED, head=REPRESENTATIVE)
+    assert roles[0] == (ImageRole.PRIMARY, "km.primary.og_image")
+    assert [role for role, _ in roles[1:]] == [ImageRole.UNKNOWN, ImageRole.UNKNOWN]
+    found = classify_images(
+        f"<html><head>{REPRESENTATIVE}</head><body>{NEVER_CLOSED}</body></html>", PRODUCT_URL
+    )
+    plan = plan_image_sample(found, 6, rules=IMAGE_ROLES.identity)
+    assert [c.role for c in plan.selected] == [ImageRole.PRIMARY], "one proven image, nothing else"
+
+
+def test_a_safe_exclusion_is_never_promoted_while_recovering() -> None:
+    # UI_COMMON needs no rescue and must not become sampleable because a scope went unclosed.
+    markup = f'<div class="promotionBanner"><img src="https://{ASSETS}/banner">{NEVER_CLOSED}'
+    roles = classified(markup)
+    assert roles[0] == (ImageRole.UI_COMMON, "km.ui.promotion_banner")
+    assert not [role for role, _ in roles if role in (ImageRole.DETAIL, ImageRole.PRIMARY)]
