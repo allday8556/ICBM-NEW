@@ -24,8 +24,21 @@ def gif(width: int, height: int, version: bytes = b"GIF89a") -> bytes:
     return version + struct.pack("<HH", width, height) + b"\x70\x00\x00"
 
 
-def jpeg(width: int, height: int, *, marker: int = 0xC0, before: bytes = b"") -> bytes:
-    frame = struct.pack(">BHH", 8, height, width) + b"\x03"
+def jpeg(
+    width: int,
+    height: int,
+    *,
+    marker: int = 0xC0,
+    before: bytes = b"",
+    components: int = 3,
+    carried: int | None = None,
+) -> bytes:
+    """A frame segment: precision, size, a component count, then three bytes per component.
+
+    ``carried`` builds a structurally invalid frame that declares one count and carries another.
+    """
+    descriptors = b"\x01\x11\x00" * (components if carried is None else carried)
+    frame = struct.pack(">BHH", 8, height, width) + bytes([components]) + descriptors
     segment = bytes([0xFF, marker]) + struct.pack(">H", 2 + len(frame)) + frame
     return b"\xff\xd8" + before + segment + b"\xff\xd9"
 
@@ -58,6 +71,7 @@ def _riff(chunk: bytes, payload: bytes) -> bytes:
         (gif(8, 8, version=b"GIF87a"), "image/gif", (8, 8)),
         (jpeg(1200, 900), "image/jpeg", (1200, 900)),
         (jpeg(640, 480, marker=0xC2), "image/jpeg", (640, 480)),  # progressive
+        (jpeg(24, 16, components=1), "image/jpeg", (24, 16)),  # greyscale
         (webp_lossy(500, 400), "image/webp", (500, 400)),
         (webp_lossless(64, 32), "image/webp", (64, 32)),
         (webp_extended(4096, 2160), "image/webp", (4096, 2160)),
@@ -90,6 +104,9 @@ def test_a_jpeg_frame_is_found_past_the_segments_before_it() -> None:
         png(0, 10),  # a declared size of zero
         png(10, 0),
         b"\xff\xd8\xff\xe0",  # JPEG magic, no frame
+        jpeg(10, 10, components=3, carried=0),  # declares three components, carries none
+        jpeg(10, 10, components=3, carried=1),  # declares three, carries one
+        jpeg(10, 10, components=0),  # a frame of no components at all
         jpeg(10, 10)[:6],  # truncated mid-header
         gif(0, 0),
         _riff(b"VP8 ", b"\x00" * 6),  # WebP without its start code

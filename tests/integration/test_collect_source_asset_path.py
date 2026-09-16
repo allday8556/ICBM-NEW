@@ -323,11 +323,15 @@ def test_the_persisted_validators_reach_the_api_unchanged(
             "the image header declares a length the format does not have",
         ),
         (
-            b"\xff\xd8\xff\xc0" + struct.pack(">H", 2) + struct.pack(">BHH", 8, 300, 200),
-            "the frame segment is too short to contain the size it seems to state",
+            b"\xff\xd8\xff\xc0" + struct.pack(">H", 8) + struct.pack(">BHH", 8, 300, 200) + b"\x03",
+            "the frame declares three components and carries none of them",
         ),
         (
-            b"\xff\xd8\xff\xc0" + struct.pack(">H", 11) + struct.pack(">BHH", 8, 300, 200),
+            b"\xff\xd8\xff\xc0"
+            + struct.pack(">H", 17)
+            + struct.pack(">BHH", 8, 300, 200)
+            + b"\x03"
+            + b"\x01\x11\x00",
             "the frame segment runs past the end of the bytes",
         ),
         (
@@ -349,6 +353,17 @@ def test_the_persisted_validators_reach_the_api_unchanged(
             + struct.pack("<I", 4096)
             + b"\x00" * 8,
             "the chunk declares more bytes than it carries",
+        ),
+        (
+            b"RIFF"
+            + struct.pack("<I", 16)
+            + b"WEBP"
+            + b"VP8 "
+            + struct.pack("<I", 10)
+            + b"\x00\x00\x00"
+            + b"\x9d\x01\x2a"
+            + struct.pack("<HH", 50, 40),
+            "the bytes are all here but the chunk ends past the container the file declared",
         ),
     ],
 )

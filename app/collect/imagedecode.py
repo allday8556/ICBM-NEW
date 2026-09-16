@@ -21,8 +21,9 @@ describe.
 
 A size is only an answer when the structure that declares it is complete: the whole GIF screen
 descriptor is present, the PNG image header declares its own standard length and the bytes of that
-chunk and its checksum are there, a JPEG frame segment is long enough to contain the size and ends
-inside the buffer, and a WebP chunk's declared size covers the fields read and fits the container.
+chunk and its checksum are there, a JPEG frame segment's length matches the component count it
+declares and ends inside the buffer, and a WebP chunk ends inside the RIFF container the file
+itself declared rather than in bytes appended past it.
 Without that a provider could hand over a few plausible bytes and have dimensions read from
 whatever followed them. Every read is bounds-checked against the buffer it was given, so a
 malformed or hostile header yields ``None`` instead of an exception or an unbounded scan.
@@ -43,9 +44,12 @@ _WEBP_START_CODE = b"\x9d\x01\x2a"
 _GIF_HEADER_BYTES = 13
 _PNG_IHDR_PAYLOAD = 13
 _PNG_HEADER_BYTES = 8 + 4 + 4 + _PNG_IHDR_PAYLOAD + 4
-# A frame segment carries its own length, the sample precision, the height, the width and the
-# component count, so it is never shorter than this.
-_JPEG_FRAME_MIN_LENGTH = 8
+# A frame segment's length covers itself, the sample precision, the height, the width, the
+# component count and three bytes for each component it declares.
+_JPEG_FRAME_FIXED_LENGTH = 8
+_JPEG_COMPONENT_BYTES = 3
+# A RIFF container holds at least its form type and one chunk header.
+_WEBP_MIN_RIFF_SIZE = 4 + 8
 
 
 def _u16be(data: bytes, at: int) -> int | None:
@@ -108,9 +112,14 @@ def _jpeg(data: bytes) -> DecodedImage | None:
         if length is None or length < 2:
             return None
         if marker in _JPEG_FRAME:
-            # The frame header is precision, then height, then width — and all of it has to be
-            # inside the segment the page declared, not read from whatever follows it.
-            if length < _JPEG_FRAME_MIN_LENGTH or at + 2 + length > len(data):
+            # The frame header is precision, height, width and a component count, then three bytes
+            # for each of those components. A frame that declares components it does not carry is
+            # not a frame, and its size would be read from whatever followed it.
+            if at + 9 >= len(data):
+                return None
+            components = data[at + 9]
+            declared = _JPEG_FRAME_FIXED_LENGTH + _JPEG_COMPONENT_BYTES * components
+            if components < 1 or length != declared or at + 2 + length > len(data):
                 return None
             return _sized("image/jpeg", _u16be(data, at + 7), _u16be(data, at + 5))
         at += 2 + length
@@ -118,14 +127,18 @@ def _jpeg(data: bytes) -> DecodedImage | None:
 
 
 def _webp(data: bytes) -> DecodedImage | None:
-    # The RIFF size counts everything after itself; the chunk size counts its own payload. Both
-    # have to be there, or the chunk is not a header this can read.
+    # The RIFF size counts everything after itself; the chunk size counts its own payload. The
+    # chunk has to be here *and* end inside the container the file declared: trailing bytes past
+    # that container are not part of this image, however many of them a provider appends.
     riff_size, chunk_size = _u32le(data, 4), _u32le(data, 16)
-    if riff_size is None or chunk_size is None or len(data) < 8 + riff_size:
+    if riff_size is None or chunk_size is None or riff_size < _WEBP_MIN_RIFF_SIZE:
         return None
+    container_end = 8 + riff_size
+    if len(data) < container_end or 20 + chunk_size > container_end:
+        return None
+    # The chunk is whole by construction now: it ends inside the container, and the container is
+    # inside the buffer.
     chunk, payload = data[12:16], data[20 : 20 + chunk_size]
-    if len(payload) < chunk_size:
-        return None
     if chunk == b"VP8 ":
         # A key frame: the three-byte tag, then the start code, then 14-bit dimensions.
         if payload[3:6] != _WEBP_START_CODE:
