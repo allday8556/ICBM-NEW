@@ -71,7 +71,7 @@ from app.connect.credentials import SupplierCredentialStore
 from app.connect.state import ConnectionState
 from app.container import Container, build_container
 from app.core.egress import EGRESS
-from app.core.errors import AppError
+from app.core.errors import AppError, AuthError
 from app.core.ownership import DataDirOwnershipError, acquire_data_dir
 from app.core.secrets import SERVICE_NAME, KeyringSecretStore, MemorySecretStore, SecretStore
 from app.db.migrate import upgrade_to_head
@@ -405,8 +405,17 @@ class Session:
     def cookies(self) -> list[dict[str, str]]:
         if self.payload is None:
             return []
-        cookies, _ = decode_session(self.payload)
-        return cookies
+        decoded: list[dict[str, str]] | None = None
+        try:
+            decoded, _ = decode_session(self.payload)
+        except ValueError:
+            # The rule the CONNECT boundary already keeps: no fragment of a session that cannot be
+            # read leaves this process, and the refusal is raised outside the handler, so the
+            # failure that saw the bytes is not kept as its context either (review 5217847727 §1).
+            decoded = None
+        if decoded is None:
+            raise AuthError("SUPPLIER_SESSION_UNREADABLE", "the session cannot be read")
+        return decoded
 
 
 def _findings_secrets(
@@ -474,7 +483,11 @@ def _run(
             recon.budget.clock = clock
         if sleep is not None:
             recon.sleep = sleep
-        return recon.phase_a() if phase == "A" else recon.phase_b()
+        try:
+            return recon.phase_a() if phase == "A" else recon.phase_b()
+        except AppError as exc:
+            # The code only: local work after the reads never surfaces material it could not read.
+            raise Refused(f"local finalization failed ({exc.code})") from None
 
 
 def run_real(

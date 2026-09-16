@@ -14,6 +14,7 @@ from app.config import REPO_ROOT, AppConfig, database_path, default_data_dir
 from app.connect.credentials import SupplierCredentialStore
 from app.connect.service import ConnectService
 from app.connect.sessions import SESSIONS_DIR_NAME, SupplierSessionStore
+from app.core.errors import AuthError
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
 from app.db.migrate import head_revision, read_only_revision
@@ -674,15 +675,124 @@ def test_an_unreadable_session_stops_finalization_without_disclosing_it(
     assert failed is not None and failed["detail"] == {"reason": "AuthError"}
     assert ledger.state() is State.FINALIZING_A, "network-closed and retryable locally"
     assert ledger.counts() == reads, "no request, no reservation"
-    paths = ReconPaths(root)
-    written = (
-        [path.read_bytes() for path in paths.findings.rglob("*")] if paths.findings.exists() else []
+    captured = capsys.readouterr()  # one read: the first call drains both streams
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(ReconPaths(root), str(refused.value), captured.out, captured.err)
     )
-    surfaces = [
-        str(refused.value).encode("utf-8"),
+
+
+def _surfaces(paths: ReconPaths, error: str, out: str, err: str) -> list[bytes]:
+    """Everywhere a local failure could carry material it could not read."""
+    written = [path.read_bytes() for path in paths.findings.rglob("*.json")]
+    return [
+        error.encode("utf-8"),
         paths.ledger.read_bytes(),
-        capsys.readouterr().out.encode("utf-8"),
-        capsys.readouterr().err.encode("utf-8"),
+        out.encode("utf-8"),
+        err.encode("utf-8"),
         *written,
     ]
-    assert not any(sentinel.encode("utf-8") in surface for surface in surfaces)
+
+
+class _RefusesTheSecondProductRead(fake_site.FakeStorefront):
+    """A storefront that stops phase A after the login, with both reads already reserved."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == fake_site.HOST and request.url.path == fake_site.PRODUCT_PATH:
+            self.reads += 1
+            if self.reads == 2:
+                self.requests.append(request)
+                return httpx.Response(403)
+        return super().__call__(request)
+
+
+class _UnreachableImages(fake_site.FakeStorefront):
+    """A storefront whose images cannot be reached: phase B stops on a provider error."""
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host in fake_site.IMAGE_HOSTS:
+            self.requests.append(request)
+            raise httpx.ConnectError("the image host is unreachable", request=request)
+        return super().__call__(request)
+
+
+def test_a_phase_a_stop_is_terminal_before_its_findings_are_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # PR #64 review 5217847727 §1: local work never holds a stopped campaign open, and the live
+    # session decode fails neutrally. The planted sentinel stands for the payload the decoder saw.
+    sentinel = "SENTINEL-7c31e8-LIVE-SESSION-MATERIAL"
+
+    def unreadable(payload: bytes) -> tuple[list[dict[str, str]], str]:
+        raise ValueError(f"cannot decode {sentinel}")
+
+    monkeypatch.setattr(cli, "decode_session", unreadable)
+    # The live session accessor keeps the boundary's own rule: the refusal is raised outside the
+    # handler, so the failure that saw the payload is not kept as its context.
+    with pytest.raises(AuthError) as neutral:
+        cli.Session(payload=b"a session this process cannot read").cookies()
+    assert neutral.value.code == "SUPPLIER_SESSION_UNREADABLE"
+    assert neutral.value.__cause__ is None and neutral.value.__context__ is None
+    assert sentinel not in repr(neutral.value)
+    root = tmp_path / "recon"
+    with pytest.raises(Refused) as refused:
+        cli.rehearse(root, storefront=_RefusesTheSecondProductRead())
+
+    assert "SUPPLIER_SESSION_UNREADABLE" in str(refused.value)
+    ledger = Ledger(ReconPaths(root).ledger)
+    assert ledger.state() is State.STOPPED, "the provider stop is durable on its own"
+    stopped = ledger.last_event("STOPPED")
+    assert stopped is not None and stopped["detail"]["reason"] == "PRODUCT_HTTP_403"
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "AuthError"}
+    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 0, "POLICY_READ": 1}
+    assert not (ReconPaths(root).findings / "phase-a.json").exists(), "nothing half-scanned"
+    with pytest.raises(LedgerError, match="no transition"):
+        ledger.record("RUN_A_STARTED", state=State.RUNNING_A)  # no way back into collection
+    captured = capsys.readouterr()
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(ReconPaths(root), str(refused.value), captured.out, captured.err)
+    )
+
+
+def test_a_phase_b_stop_is_terminal_before_its_findings_are_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The same rule on the phase-B stop, with a write failure after it and the session's own
+    # cookie value planted as the material that may never surface.
+    sentinel = "SENTINEL-be04f5-SESSION-COOKIE"
+    monkeypatch.setattr(fake_site, "SESSION_COOKIE", sentinel)
+    original = recon.write_findings
+
+    def refusing(findings_dir: Path, name: str, findings: dict, secrets: object) -> Path:
+        if name == "phase-b":
+            raise ValueError("the findings cannot be written")
+        return original(findings_dir, name, findings, secrets)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(recon, "write_findings", refusing)
+    root = tmp_path / "recon"
+    with pytest.raises(ValueError, match="cannot be written"):
+        cli.rehearse(root, storefront=_UnreachableImages())
+
+    ledger = Ledger(ReconPaths(root).ledger)
+    assert ledger.state() is State.STOPPED
+    stopped = ledger.last_event("STOPPED")
+    assert stopped is not None and stopped["detail"]["reason"] == "COLLECT_NETWORK_ERROR"
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert failed is not None and failed["detail"] == {"reason": "ValueError"}
+    assert ledger.counts() == {"PRODUCT_READ": 2, "IMAGE_REQUEST": 1, "POLICY_READ": 2}
+    paths = ReconPaths(root)
+    assert (paths.findings / "phase-a.json").exists()
+    assert not (paths.findings / "phase-b.json").exists(), "nothing half-scanned"
+    with pytest.raises(LedgerError, match="no transition"):
+        ledger.record("RUN_B_STARTED", state=State.RUNNING_B)
+    captured = capsys.readouterr()
+    assert not any(
+        sentinel.encode("utf-8") in surface
+        for surface in _surfaces(paths, "", captured.out, captured.err)
+    )

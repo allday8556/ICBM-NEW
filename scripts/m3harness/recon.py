@@ -452,17 +452,40 @@ class Recon:
     # ---------------------------------------------------------------- findings
 
     def _stop(self, evidence: PhaseAEvidence, reason: str, state: State) -> dict[str, Any]:
-        findings = phase_a_findings(evidence, self.counts())
-        findings["stopped"] = reason
-        write_findings(self.findings_dir, "phase-a", findings, self.secrets())
         self.ledger.record("STOPPED", state=state, reason=reason)
-        return findings
+
+        def built() -> dict[str, Any]:
+            findings = phase_a_findings(evidence, self.counts())
+            findings["stopped"] = reason
+            return findings
+
+        return self._stop_findings("phase-a", built)
 
     def _stop_phase_b(self, findings: dict[str, Any], reason: str, state: State) -> dict[str, Any]:
-        findings["stopped"] = reason
-        findings["requests"] = self.counts()
-        write_findings(self.findings_dir, "phase-b", findings, self.secrets())
         self.ledger.record("STOPPED", state=state, reason=reason)
+
+        def built() -> dict[str, Any]:
+            findings["stopped"] = reason
+            findings["requests"] = self.counts()
+            return findings
+
+        return self._stop_findings("phase-b", built)
+
+    def _stop_findings(self, name: str, built: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        """Write the findings of a stop the ledger has already made terminal.
+
+        The provider side has stopped, so the terminal state is recorded first and the local work
+        follows it. Building the findings, the secret scan and the write can each fail; none of
+        that may hold the campaign open in a state that could collect again, and none of it may
+        mask why the provider stopped. A failure appends its class name only — never a value — and
+        the recorded stop and its reason stand (PR #64 review 5217847727 §1).
+        """
+        try:
+            findings = built()
+            write_findings(self.findings_dir, name, findings, self.secrets())
+        except Exception as exc:
+            self.ledger.record("LOCAL_FINALIZATION_FAILED", reason=type(exc).__name__)
+            raise
         return findings
 
 
