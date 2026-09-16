@@ -35,8 +35,11 @@
   - a REAL campaign at the right STOP;
   - the exact clean checked-out HEAD, typed into the phrase.
 
-  Image hosts are approved at the same SHA as phase A, and only among the hosts the ledger
-  recorded as observed in phase A. The findings file is never the authority.
+  Image hosts are approved among the hosts the ledger recorded as observed in phase A, and the
+  findings file is never the authority. The approval is issued at the operator's own clean HEAD,
+  which is what phase B will then run on; what binds it to phase A is the observation itself —
+  the approval carries phase A's SHA, its observed-host and findings digests, and the extraction
+  identity that will classify the candidates (Issue #52 ruling 5699776908).
 * A REAL run proceeds only right after its own approval. That approval must be the ledger's
   latest event, no older than two hours, and the checkout must still be the clean SHA it was
   issued at. The connection owner is checked again before anything is recorded or sent.
@@ -66,7 +69,7 @@ from alembic.util.exc import CommandError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import __version__
-from app.config import AppConfig, ConfigError
+from app.config import REPO_ROOT, AppConfig, ConfigError
 from app.connect.credentials import SupplierCredentialStore
 from app.connect.state import ConnectionState
 from app.container import Container, build_container
@@ -78,6 +81,7 @@ from app.db.migrate import upgrade_to_head
 from integrations.suppliers import kmretail
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRoleRules
+from integrations.suppliers.extraction import MANIFEST_NAME, read_manifest
 from integrations.suppliers.registry import SUPPLIERS
 from integrations.suppliers.transport.collection import PolicedCollectionGateway, ci_or_test
 from integrations.suppliers.transport.session_payload import decode_session
@@ -307,6 +311,22 @@ def images_phrase(campaign_id: str, sha: str, hosts: Sequence[str]) -> str:
     return f"APPROVE-IMAGES {campaign_id} {sha[:12]} {','.join(sorted(hosts))}"
 
 
+def _extraction_identity(mode: Mode) -> dict[str, str]:
+    """Which site-knowledge rules the approval is issued against.
+
+    The clean-HEAD gate already pins the whole checkout, so this is recorded as evidence rather
+    than checked again: it lets an audit say which role rules governed a phase-B sample without
+    re-deriving them from the tree.
+    """
+    key = _definition(mode).profile.supplier_key
+    identity: dict[str, str] = {"rules": _image_roles(mode).identity}
+    manifest = REPO_ROOT / "integrations" / "suppliers" / key / MANIFEST_NAME
+    if manifest.is_file():
+        pinned = read_manifest(manifest)
+        identity |= {"revision": pinned.revision, "fingerprint": pinned.fingerprint}
+    return identity
+
+
 def _approval_problems(
     ledger: Ledger, *, sha: str, checkout: Checkout, expected: State, blocker: Blocker
 ) -> list[str]:
@@ -356,8 +376,23 @@ def approve_images(
     checkout: Checkout,
     blocker: Blocker = ci_or_test,
 ) -> None:
-    """Approve image hosts with the same strength as phase A: the same clean SHA, and only hosts
-    the ledger recorded as observed (never a findings file)."""
+    """Approve image hosts with the same strength as phase A, at the SHA phase B will run on.
+
+    Every gate phase A's approval passes is kept: an interactive operator, no CI or pytest run, a
+    REAL campaign at this STOP, the exact clean checked-out HEAD typed into the phrase, and only
+    hosts the ledger itself recorded as observed.
+
+    What the approval may no longer require is that this SHA *equals* phase A's. Phase A's reads
+    are already done and bound; the approval authorizes the requests that follow it, and those run
+    on the checkout the operator is approving on. Tying the two together would mean either
+    approving on a tree that no longer exists in the branch, or running phase B on code that has
+    since been reviewed and replaced.
+
+    The tie to phase A is therefore the evidence, not the revision. ``observation_problems`` proves
+    the observed hosts still match the digest phase A bound them with, and the approval records
+    phase A's own SHA, both of its digests and the extraction identity that will classify the
+    candidates, so what was approved can be read back without trusting any file on disk.
+    """
     ledger = Ledger(ReconPaths(root).ledger)
     problems = _approval_problems(
         ledger,
@@ -366,19 +401,32 @@ def approve_images(
         expected=State.AWAITING_IMAGE_HOST_APPROVAL,
         blocker=blocker,
     )
-    approved = ledger.last_event("APPROVED_A")
-    if approved is None or approved["detail"].get("sha") != sha:
-        problems.append("image hosts are approved at the same SHA as phase A")
+    phase_a = ledger.last_event("APPROVED_A")
+    if phase_a is None or not SHA.fullmatch(str(phase_a["detail"].get("sha", ""))):
+        problems.append("phase A was never approved at a SHA of its own")
     problems += ledger.observation_problems()
     chosen = sorted(set(hosts))
     if not chosen or not set(chosen) <= ledger.observed_hosts():
         problems.append("only image hosts the ledger recorded as observed in phase A")
     if problems:
         raise Refused("; ".join(problems))
-    if not confirm(images_phrase(ledger.campaign().campaign_id, sha, chosen)):
+    campaign = ledger.campaign()
+    if not confirm(images_phrase(campaign.campaign_id, sha, chosen)):
         raise Refused("the operator did not type the image-host phrase")
+    assert phase_a is not None
+    observation = ledger.last_event("PHASE_A_DONE")
+    assert observation is not None  # observation_problems refuses when it is missing
     ledger.approve_hosts(chosen)
-    ledger.record("APPROVED_B", sha=sha, hosts=chosen, nonce=secrets.token_hex(8))
+    ledger.record(
+        "APPROVED_B",
+        sha=sha,
+        phase_a_sha=phase_a["detail"]["sha"],
+        hosts=chosen,
+        observed_hosts_digest=observation["detail"]["observed_hosts_digest"],
+        findings_digest=observation["detail"]["findings_digest"],
+        extraction=_extraction_identity(campaign.mode),
+        nonce=secrets.token_hex(8),
+    )
 
 
 def _consume(ledger: Ledger, kind: str, checkout: Checkout, blocker: Blocker) -> None:

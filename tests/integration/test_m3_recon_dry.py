@@ -196,14 +196,15 @@ def test_real_approval_and_runs_are_refused_under_pytest(tmp_path: Path) -> None
     }
 
 
-def test_image_host_approval_is_bound_to_the_clean_phase_a_sha(tmp_path: Path) -> None:
-    # PR #60 review 5214845204 §2: the same strength as phase A, at the same SHA.
+def test_image_host_approval_is_bound_to_the_operators_own_clean_head(tmp_path: Path) -> None:
+    # PR #60 review 5214845204 §2, as re-bound by Issue #52 ruling 5699776908: every gate phase A's
+    # approval passes is kept, and the SHA it is issued at is the one phase B will run on.
     root = tmp_path / "real"
     ledger = _waiting_for_images(root)
     for checkout, sha in (
         (Checkout(dirty=1), SHA_A),  # a dirty tree
-        (Checkout(head=OTHER_SHA), SHA_A),  # a moved HEAD
-        (Checkout(head=OTHER_SHA), OTHER_SHA),  # clean, but not phase A's SHA
+        (Checkout(head=OTHER_SHA), SHA_A),  # a SHA that is not the checked-out HEAD
+        (Checkout(dirty=1, head=OTHER_SHA), OTHER_SHA),  # the right SHA, an unclean tree
     ):
         with pytest.raises(Refused, match="SHA"):
             cli.approve_images(
@@ -218,11 +219,75 @@ def test_image_host_approval_is_bound_to_the_clean_phase_a_sha(tmp_path: Path) -
         typed.append(phrase)
         return True
 
-    cli.approve_images(root, SHA_A, [HOST], confirm=record, checkout=Checkout(), blocker=_unblocked)
-    assert typed == [f"APPROVE-IMAGES m3-recon-01 {SHA_A[:12]} {HOST}"]
+    # The branch has moved on since phase A read the product: the approval is issued here.
+    cli.approve_images(
+        root,
+        OTHER_SHA,
+        [HOST],
+        confirm=record,
+        checkout=Checkout(head=OTHER_SHA),
+        blocker=_unblocked,
+    )
+    assert typed == [f"APPROVE-IMAGES m3-recon-01 {OTHER_SHA[:12]} {HOST}"]
     event = ledger.last_event("APPROVED_B")
-    assert event is not None and event["detail"]["sha"] == SHA_A
+    assert event is not None
+    detail = event["detail"]
+    assert detail["sha"] == OTHER_SHA, "phase B runs on the SHA the operator approved"
+    assert detail["phase_a_sha"] == SHA_A, "and the approval says which reads it rests on"
     assert ledger.approved_hosts() == frozenset({HOST})
+
+
+def test_the_image_approval_carries_the_evidence_it_rests_on(tmp_path: Path) -> None:
+    # What ties the approval to phase A is the observation, not the revision, so the approval
+    # records it: both digests phase A bound, and the rules that will classify the candidates.
+    root = tmp_path / "real"
+    ledger = _waiting_for_images(root)
+    cli.approve_images(root, SHA_A, [HOST], confirm=_yes, checkout=Checkout(), blocker=_unblocked)
+    bound = ledger.last_event("PHASE_A_DONE")
+    approved = ledger.last_event("APPROVED_B")
+    assert bound is not None and approved is not None
+    assert approved["detail"]["observed_hosts_digest"] == bound["detail"]["observed_hosts_digest"]
+    assert approved["detail"]["findings_digest"] == bound["detail"]["findings_digest"]
+    assert approved["detail"]["hosts"] == [HOST]
+    identity = approved["detail"]["extraction"]
+    assert identity["rules"] == kmretail.IMAGE_ROLES.identity
+    assert identity["revision"] == identity["rules"], "the rules are pinned by the manifest"
+    assert len(identity["fingerprint"]) == 64
+
+
+def test_an_image_approval_needs_an_observation_that_still_matches_its_digest(
+    tmp_path: Path,
+) -> None:
+    # The evidence is what carries the approval now, so a ledger whose observation no longer
+    # matches the digest phase A bound cannot be approved at any SHA.
+    root = tmp_path / "real"
+    ledger = _waiting_for_images(root)
+    # The ledger is append-only, so the observation cannot be edited away; what it can carry is a
+    # later claim that disagrees with the hosts it actually holds.
+    ledger.record(
+        "PHASE_A_DONE",
+        observed_hosts=[HOST],
+        observed_hosts_digest="0" * 64,
+        findings_digest="0" * 64,
+    )
+    with pytest.raises(Refused, match="digest"):
+        cli.approve_images(
+            root, SHA_A, [HOST], confirm=_yes, checkout=Checkout(), blocker=_unblocked
+        )
+    assert ledger.approved_hosts() == frozenset()
+
+
+def test_an_image_approval_needs_a_phase_a_approval_of_its_own(tmp_path: Path) -> None:
+    root = tmp_path / "real"
+    ledger = _real_campaign(root)
+    # A campaign that reached the image STOP without an approval of its own ever being recorded.
+    ledger.record("RUN_A_STARTED", state=State.RUNNING_A)
+    ledger.finish_phase_a([HOST], findings_digest="0" * 64)
+    with pytest.raises(Refused, match="phase A was never approved"):
+        cli.approve_images(
+            root, SHA_A, [HOST], confirm=_yes, checkout=Checkout(), blocker=_unblocked
+        )
+    assert ledger.approved_hosts() == frozenset()
 
 
 def test_only_hosts_the_ledger_observed_can_be_approved(tmp_path: Path) -> None:
