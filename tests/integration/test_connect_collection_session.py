@@ -73,3 +73,18 @@ def test_operator_initiated_collection_logs_in_at_most_once(
     assert session in gateway.valid_sessions and gateway.logins == 1
     assert connected.connect.collection_session(FAKE_KEY, operator_initiated=True) == session
     assert gateway.logins == 1
+
+
+def test_the_scan_boundary_hands_out_cookie_material_and_never_a_session(
+    connected: Container, gateway: FakeGateway
+) -> None:
+    # PR #64 review 5217542767 §3: local leak scanning needs the values a collected page could
+    # have echoed, and nothing a transport could use. It asks the supplier for nothing.
+    assert connected.connect.session_cookies_for_scan(FAKE_KEY) == []
+    connected.connect.verify(FAKE_KEY, trigger="operator_test", allow_login=True)
+    before = (gateway.logins, gateway.count(RequestKind.PROTECTED_READ))
+    cookies = connected.connect.session_cookies_for_scan(FAKE_KEY)
+    assert cookies and all(set(cookie) == {"name", "value"} for cookie in cookies)
+    assert all(isinstance(value, str) for cookie in cookies for value in cookie.values())
+    assert (gateway.logins, gateway.count(RequestKind.PROTECTED_READ)) == before
+    assert not isinstance(cookies, bytes | bytearray), "no session payload leaves the owner"

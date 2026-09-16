@@ -68,14 +68,7 @@ from scripts.m3harness.inventory import (
     robots_disallows,
     terms_signals,
 )
-from scripts.m3harness.ledger import (
-    CAPS,
-    SAME_PRODUCT_INTERVAL_S,
-    Ledger,
-    LedgerBudget,
-    LedgerError,
-    State,
-)
+from scripts.m3harness.ledger import CAPS, SAME_PRODUCT_INTERVAL_S, Ledger, LedgerBudget, State
 
 # Reconnaissance only (not the frozen M3 acceptance limits): one image may be at most 10 MiB.
 RECON_IMAGE_BYTES = 10 * 1024 * 1024
@@ -261,23 +254,26 @@ def finalize_phase_a(
     *,
     ledger: Ledger,
     findings_dir: Path,
-    evidence: PhaseAEvidence,
+    evidence: Callable[[], PhaseAEvidence],
     secrets: Callable[[], FindingsSecrets],
 ) -> dict[str, Any]:
-    """Local work only: build the findings, write them, and bind the observation and the digests.
+    """Local work only: take or rebuild the evidence, build the findings, write them, and bind the
+    observation and the digests.
 
-    It makes no request and reserves nothing. A failure appends ``LOCAL_FINALIZATION_FAILED`` and
-    leaves the campaign where it is, so the same work can be retried offline while phase A's
-    network collection stays closed.
+    It makes no request and reserves nothing. Every step of that local work is covered: rebuilding
+    the evidence, building the findings, the secret scan, the write and the binding. Any failure
+    appends ``LOCAL_FINALIZATION_FAILED`` with the failure's class name, never a value, and leaves
+    the campaign where it is, so the same work can be retried offline while phase A's network
+    collection stays closed (PR #64 review 5217542767 §2).
     """
-    findings = phase_a_findings(evidence, ledger.counts())
     try:
+        findings = phase_a_findings(evidence(), ledger.counts())
         written = write_findings(findings_dir, "phase-a", findings, secrets())
         ledger.finish_phase_a(
             findings.get("observed_image_hosts", []),
             findings_digest=hashlib.sha256(written.read_bytes()).hexdigest(),
         )
-    except (ValueError, OSError, LedgerError) as exc:
+    except Exception as exc:
         ledger.record("LOCAL_FINALIZATION_FAILED", reason=type(exc).__name__)
         raise
     return findings
@@ -337,10 +333,14 @@ class Recon:
             return self._stop(evidence, exc.code, State.STOPPED)
         # Every read is done and every capture is durable: nothing further may be reserved.
         self.ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A, requests=self.counts())
+
+        def collected() -> PhaseAEvidence:
+            return evidence
+
         return finalize_phase_a(
             ledger=self.ledger,
             findings_dir=self.findings_dir,
-            evidence=evidence,
+            evidence=collected,
             secrets=self.secrets,
         )
 

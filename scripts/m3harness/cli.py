@@ -55,7 +55,7 @@ import os
 import re
 import secrets
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -408,12 +408,14 @@ class Session:
         return cookies
 
 
-def _findings_secrets(container: Container, supplier_key: str, session: Session) -> FindingsSecrets:
+def _findings_secrets(
+    container: Container, supplier_key: str, cookies: Sequence[Mapping[str, str]]
+) -> FindingsSecrets:
     """What the findings are scanned against: the owner's login, always, and the session's cookie
-    values, except the short flag cookies that would collide with ordinary structure."""
+    values, except a one-character flag cookie that would collide with ordinary structure."""
     stored = SupplierCredentialStore(container.secrets).load(supplier_key)
     login = [stored.username, stored.password] if stored else []
-    return findings_secrets(login, session.cookies())
+    return findings_secrets(login, cookies)
 
 
 def _run(
@@ -453,7 +455,7 @@ def _run(
 
         def secret_values() -> FindingsSecrets:
             # Read from the owner only to refuse findings that would carry them; never copied.
-            return _findings_secrets(container, key, session)
+            return _findings_secrets(container, key, session.cookies())
 
         recon = Recon(
             ledger=ledger,
@@ -537,23 +539,25 @@ def finalize(
         raise Refused("the connection owner is not the one the preflight checked")
     store = capture_secrets() if capture_secrets else capture_key_store(campaign.campaign_id)
     captures = CaptureStore(paths.captures, store, campaign_id=campaign.campaign_id)
-    try:
-        evidence = evidence_from_captures(ledger, captures)
-    except ReconStop as stop:
-        raise Refused(f"the captures cannot support finalization ({stop.reason})") from None
     with _owner_container(owner) as container:
-        session = Session(container.connect.stored_session(key))
+        # The provenance goes in before any local work, so every later failure, rebuilding the
+        # evidence included, sits after it in the ledger (review 5217542767 §2).
         ledger.record(
             "OFFLINE_FINALIZATION_STARTED",
             source="ledger+captures",
             captures=sorted(captures.labels()),
         )
-        return finalize_phase_a(
-            ledger=ledger,
-            findings_dir=paths.findings,
-            evidence=evidence,
-            secrets=lambda: _findings_secrets(container, key, session),
-        )
+        try:
+            return finalize_phase_a(
+                ledger=ledger,
+                findings_dir=paths.findings,
+                evidence=lambda: evidence_from_captures(ledger, captures),
+                secrets=lambda: _findings_secrets(
+                    container, key, container.connect.session_cookies_for_scan(key)
+                ),
+            )
+        except ReconStop as stop:
+            raise Refused(f"the captures cannot support finalization ({stop.reason})") from None
 
 
 # ---------------------------------------------------------------- report

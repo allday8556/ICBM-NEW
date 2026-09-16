@@ -611,6 +611,28 @@ def test_a_campaign_waiting_for_local_finalization_never_re_runs_phase_a(
     assert ledger.counts() == {"PRODUCT_READ": 1, "IMAGE_REQUEST": 0, "POLICY_READ": 0}
 
 
+def test_a_failure_rebuilding_the_evidence_is_recorded_and_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PR #64 review 5217542767 §2: the provenance goes in first, and every later local failure
+    # leaves its own trace with a class name, never a value.
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=False)
+    ReconPaths(root).captures.joinpath("product-2.enc").unlink()
+    ledger = Ledger(ReconPaths(root).ledger)
+    with pytest.raises(Refused, match="cannot support finalization"):
+        cli.finalize(
+            root, owner=_dry_owner(root, owner_secrets), capture_secrets=lambda: capture_secrets
+        )
+    started = ledger.last_event("OFFLINE_FINALIZATION_STARTED")
+    failed = ledger.last_event("LOCAL_FINALIZATION_FAILED")
+    assert started is not None and failed is not None
+    assert failed["seq"] > started["seq"]
+    assert failed["detail"] == {"reason": "ReconStop"}
+    assert ledger.state() is State.FINALIZING_A
+    assert ledger.counts()["PRODUCT_READ"] == 2, "no request, no reservation"
+
+
 def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path) -> None:
     owner_store, capture_store = RecordingStore(), RecordingStore()
     summary = cli.rehearse(

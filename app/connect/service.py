@@ -67,6 +67,7 @@ from integrations.suppliers.base import (
     SupplierDefinition,
     SupplierGateway,
 )
+from integrations.suppliers.transport.session_payload import decode_session
 
 logger = logging.getLogger("icbm.connect")
 
@@ -648,15 +649,26 @@ class ConnectService:
             )
         return payload
 
-    def stored_session(self, supplier_key: str) -> bytes | None:
-        """The stored session payload, read without any supplier request and without proving it.
+    def session_cookies_for_scan(self, supplier_key: str) -> list[dict[str, str]]:
+        """The name and value of each cookie of the stored session, for local leak scanning only.
 
-        It is credential-equivalent, so it is never a substitute for ``collection_session``: the
-        only caller is local leak scanning, which must know the session values that a collected
-        page could have echoed (Issue #52 comment 5689874555 §5).
+        A scanner must know the values a collected page could have echoed. This hands out that
+        cookie material and nothing a transport could use: no session payload, no user agent and
+        no host list, so it can never stand in for ``collection_session``, which remains the only
+        way to obtain a session for collection. It makes no supplier request and proves nothing,
+        and the list is empty when no session is stored (PR #64 review 5217542767 §3).
         """
         self._definition(supplier_key)
-        return self._sessions.load(supplier_key)
+        payload = self._sessions.load(supplier_key)
+        if payload is None:
+            return []
+        try:
+            cookies, _ = decode_session(payload)
+        except ValueError:
+            # An unreadable payload is still credential-equivalent, so it is handed over whole
+            # rather than skipped: a scan may never see less than the session's own material.
+            return [{"name": "session", "value": payload.decode("utf-8", "replace")}]
+        return [{"name": cookie["name"], "value": cookie["value"]} for cookie in cookies]
 
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.

@@ -372,22 +372,21 @@ def assert_sanitized(findings: object, secrets: Iterable[str]) -> None:
 
 
 # ---------------------------------------------------------------- what the findings are scanned
-# against (Issue #52 comment 5689874555)
+# against (Issue #52 comment 5689874555; PR #64 review 5217542767 §1)
 
 # The generic scanner and ``assert_sanitized`` above stay strict. This decides only which values
-# the M3 findings path feeds into them, because a storefront's flag cookies can be one character
-# long and would then collide with ordinary structural text in every findings file.
+# the M3 findings path feeds into them, because a storefront's flag cookies can be a single
+# character and would then collide with ordinary structural text in every findings file.
 #
-# A cookie value is left out only when all of these hold:
+# A cookie value is left out only when both of these hold:
 # * its name says nothing about a session, authentication or security;
-# * the value is 1-5 characters;
-# * the value is a simple alphanumeric flag.
-# The login is always scanned, every other cookie value is scanned, and a session-like cookie name
-# is scanned whatever its value looks like. The bound avoids collisions with observed flag
-# cookies; it is not a claim that a short value cannot be secret.
-FLAG_VALUE = re.compile(r"^[A-Za-z0-9]{1,5}$")
+# * the value is exactly one character, whatever that character is.
+# The login is always scanned, a value of two characters or more is always scanned, and a
+# session-like cookie name is scanned at every length. One byte cannot be told apart from ordinary
+# structure; this is an ambiguity rule, not a claim that a short value cannot be secret.
+AMBIGUOUS_COOKIE_LENGTH = 1
 SESSION_LIKE_COOKIE = re.compile(r"sess|sid|auth|token|login|verify|csrf", re.IGNORECASE)
-EXCLUSION_REASON = "1-5 character alphanumeric flag on a cookie name that is not session-like"
+EXCLUSION_REASON = "one-character value on a cookie name that is not session-like"
 
 
 @dataclass(frozen=True)
@@ -416,7 +415,7 @@ def findings_secrets(
         name, value = cookie.get("name", ""), cookie.get("value", "")
         if not value:
             continue
-        if FLAG_VALUE.fullmatch(value) and not SESSION_LIKE_COOKIE.search(name):
+        if len(value) <= AMBIGUOUS_COOKIE_LENGTH and not SESSION_LIKE_COOKIE.search(name):
             excluded.append(name)
         else:
             values.append(value)

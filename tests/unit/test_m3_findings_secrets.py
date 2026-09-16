@@ -29,8 +29,8 @@ def test_the_login_is_always_scanned() -> None:
     assert secrets.excluded_cookies == ()
 
 
-@pytest.mark.parametrize("value", ["F", "1", "ko", "T12", "abcde", "00000"])
-def test_a_short_alphanumeric_flag_on_an_ordinary_cookie_is_left_out(value: str) -> None:
+@pytest.mark.parametrize("value", ["F", "1", "/", "-", "\u00e9"])
+def test_a_one_character_value_on_an_ordinary_cookie_is_left_out(value: str) -> None:
     secrets = findings_secrets([], [cookie("ec_ipad_device", value)])
     assert secrets.values == ()
     assert secrets.excluded_cookies == ("ec_ipad_device",)
@@ -47,11 +47,12 @@ def test_a_short_alphanumeric_flag_on_an_ordinary_cookie_is_left_out(value: str)
     [
         ("ECSESSID", "a1b2c"),  # session-like name, short value
         ("PHPSESSVERIFY", "1"),  # security-like name, one character
+        ("csrf", "x"),  # security-like name, one character
         ("login_provider_1", "kakao"),
-        ("csrf", "abc"),
         ("auth_state", "zz"),
-        ("return_url", "/"),  # not alphanumeric, so it stays in the scan
-        ("wish_id", "abcdef"),  # six characters, over the bound
+        ("isviewtype", "M2"),  # two characters on an ordinary name: still scanned
+        ("ec_mem_level", "12"),
+        ("wish_id", "abcdef"),
         ("fb_event_id", "12345678"),
     ],
 )
