@@ -12,9 +12,17 @@ collection gateway and the campaign ledger:
    widens the profile's fixed policy paths.
 
 Raw bodies go only into encrypted captures. The findings hold the sanitized inventory, the robots
-and terms signals, the observed image hosts and the request counts. Phase A then binds its
-observation into the ledger — the exact observed image hosts and the digests of that set and of
-the findings — in one transaction with the stop at AWAITING_IMAGE_HOST_APPROVAL.
+and terms signals, the observed image hosts and the request counts.
+
+Provider reads and local work are separate steps (Issue #52 comment 5689874555 §4). Once every
+read is done and its capture is durable, the campaign moves to FINALIZING_A, where no reservation
+is possible. Only then are the findings built, scanned and written, and the observation bound in
+one transaction with the stop at AWAITING_IMAGE_HOST_APPROVAL. A local failure after the reads
+leaves the campaign in that finalization state, from which the same work can be retried offline
+and network collection can never resume.
+
+The findings are a pure function of the evidence, so ``finalize_phase_a`` serves both the live run
+and an offline finalization rebuilt from the encrypted captures and the append-only ledger.
 
 Phase B needs a second approval that names the exact image hosts, bound to the same clean SHA.
 It fetches a bounded sample of the page's images on those hosts, plus one conditional re-request
@@ -36,6 +44,7 @@ from app.collect.urls import secret_looking
 from app.core.errors import AppError
 from integrations.suppliers.base import SupplierProfile
 from integrations.suppliers.collection import (
+    DISCOVERED_POLICY_PREFIX,
     CollectionLimits,
     CollectionProfile,
     DocumentView,
@@ -49,6 +58,7 @@ from integrations.suppliers.transport.collection import (
 )
 from scripts.m3harness.capture import CaptureStore
 from scripts.m3harness.inventory import (
+    FindingsSecrets,
     assert_sanitized,
     document_inventory,
     image_urls,
@@ -58,12 +68,25 @@ from scripts.m3harness.inventory import (
     robots_disallows,
     terms_signals,
 )
-from scripts.m3harness.ledger import CAPS, SAME_PRODUCT_INTERVAL_S, Ledger, LedgerBudget, State
+from scripts.m3harness.ledger import (
+    CAPS,
+    SAME_PRODUCT_INTERVAL_S,
+    Ledger,
+    LedgerBudget,
+    LedgerError,
+    State,
+)
 
 # Reconnaissance only (not the frozen M3 acceptance limits): one image may be at most 10 MiB.
 RECON_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_SAMPLE = 6
 ROBOTS_PATH = "/robots.txt"
+PRODUCT_CAPTURES = ("product-1", "product-2")
+# A harness before Issue #52 comment 5689874555 did not keep the robots body.
+ROBOTS_NOT_RETAINED = (
+    "the robots body was not retained by the harness that made this read; the ledger records the "
+    "policy read and its status, and phase A reads a product only after a false disallow check"
+)
 _SIGNATURES = (
     (b"\x89PNG\r\n\x1a\n", "png"),
     (b"\xff\xd8\xff", "jpeg"),
@@ -121,6 +144,145 @@ def recon_profile(
     )
 
 
+# ---------------------------------------------------------------- phase A evidence and findings
+
+
+@dataclass
+class PhaseAEvidence:
+    """What phase A's reads produced: the bodies and statuses, in memory during a run or reread
+    from the encrypted captures afterwards. The findings are a pure function of it."""
+
+    product_url: str
+    robots_status: int | None = None
+    robots_body: str | None = None
+    robots_note: str | None = None
+    product_bodies: tuple[str, ...] = ()
+    terms_status: int | None = None
+    terms_path: str | None = None
+    terms_body: str | None = None
+    terms_note: str | None = None
+
+
+def phase_a_findings(evidence: PhaseAEvidence, requests: dict[str, int]) -> dict[str, Any]:
+    """The sanitized findings of phase A: structure, signals, hosts and counts only."""
+    url = evidence.product_url
+    findings: dict[str, Any] = {"phase": "A", "product_path_form": mask(urlsplit(url).path)}
+    groups = parse_robots(evidence.robots_body) if evidence.robots_body is not None else {}
+    findings["robots"] = {
+        "http_status": evidence.robots_status,
+        # Never invented: without the body the rules are unknown, and the note says why.
+        "star_rules": (
+            [[directive, mask(rule)] for directive, rule in groups.get("*", [])]
+            if evidence.robots_body is not None
+            else None
+        ),
+        "product_path_disallowed": robots_disallows(groups, urlsplit(url).path),
+    }
+    if evidence.robots_note:
+        findings["robots"]["note"] = evidence.robots_note
+    if evidence.product_bodies:
+        first, *rest = evidence.product_bodies
+        inventory = document_inventory(first, url)
+        findings["inventory"] = inventory
+        findings["observed_image_hosts"] = sorted(inventory["images"]["hosts"])
+        if rest:
+            again = document_inventory(rest[0], url)
+            findings["stability"] = {
+                "body_identical": _digest(first) == _digest(rest[0]),
+                "inventory_identical": inventory == again,
+                "changed_sections": sorted(k for k in inventory if inventory[k] != again.get(k)),
+            }
+    if evidence.terms_body is not None:
+        findings["terms"] = {
+            "http_status": evidence.terms_status,
+            "path_form": mask(evidence.terms_path or ""),
+            **terms_signals(evidence.terms_body),
+        }
+    else:
+        findings["terms"] = {
+            "http_status": evidence.terms_status,
+            "note": evidence.terms_note or "no terms link on the page",
+        }
+    findings["requests"] = requests
+    return findings
+
+
+def evidence_from_captures(ledger: Ledger, captures: CaptureStore) -> PhaseAEvidence:
+    """Rebuild phase A's evidence from the append-only ledger and the encrypted captures only.
+
+    It reads no page and asks the supplier for nothing: what the captures do not hold is recorded
+    as unavailable rather than guessed (Issue #52 comment 5689810516 §5).
+    """
+    labels = set(captures.labels())
+    missing = [label for label in PRODUCT_CAPTURES if label not in labels]
+    if missing:
+        raise ReconStop(f"CAPTURES_MISSING_{'_'.join(missing).upper().replace('-', '_')}")
+    evidence = PhaseAEvidence(
+        product_url=ledger.campaign().product_url,
+        product_bodies=tuple(
+            captures.load(label).decode("utf-8") for label in PRODUCT_CAPTURES if label in labels
+        ),
+    )
+    reservations = ledger.reservations()
+    robots = next((r for r in reservations if r["subject"] == ROBOTS_PATH), None)
+    evidence.robots_status = robots["http_status"] if robots else None
+    if "robots" in labels:
+        evidence.robots_body = captures.load("robots").decode("utf-8")
+    else:
+        evidence.robots_note = ROBOTS_NOT_RETAINED
+    discovered = next(
+        (r for r in reservations if r["subject"].startswith(DISCOVERED_POLICY_PREFIX)), None
+    )
+    if discovered is None:
+        evidence.terms_note = "no discovered policy read was reserved"
+    elif "terms" not in labels:
+        raise ReconStop("CAPTURES_MISSING_TERMS")
+    else:
+        evidence.terms_status = discovered["http_status"]
+        evidence.terms_path = discovered["subject"][len(DISCOVERED_POLICY_PREFIX) :]
+        evidence.terms_body = captures.load("terms").decode("utf-8")
+    return evidence
+
+
+def write_findings(
+    findings_dir: Path, name: str, findings: dict[str, Any], secrets: FindingsSecrets
+) -> Path:
+    """Scan the findings against the secret set, record which cookies it left out (names only)
+    and write them. Nothing is written when the scan refuses."""
+    findings["secret_scan"] = secrets.audit()
+    assert_sanitized(findings, secrets.values)
+    findings_dir.mkdir(parents=True, exist_ok=True)
+    path = findings_dir / f"{name}.json"
+    path.write_text(json.dumps(findings, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    return path
+
+
+def finalize_phase_a(
+    *,
+    ledger: Ledger,
+    findings_dir: Path,
+    evidence: PhaseAEvidence,
+    secrets: Callable[[], FindingsSecrets],
+) -> dict[str, Any]:
+    """Local work only: build the findings, write them, and bind the observation and the digests.
+
+    It makes no request and reserves nothing. A failure appends ``LOCAL_FINALIZATION_FAILED`` and
+    leaves the campaign where it is, so the same work can be retried offline while phase A's
+    network collection stays closed.
+    """
+    findings = phase_a_findings(evidence, ledger.counts())
+    try:
+        written = write_findings(findings_dir, "phase-a", findings, secrets())
+        ledger.finish_phase_a(
+            findings.get("observed_image_hosts", []),
+            findings_digest=hashlib.sha256(written.read_bytes()).hexdigest(),
+        )
+    except (ValueError, OSError, LedgerError) as exc:
+        ledger.record("LOCAL_FINALIZATION_FAILED", reason=type(exc).__name__)
+        raise
+    return findings
+
+
 @dataclass
 class Recon:
     ledger: Ledger
@@ -130,8 +292,8 @@ class Recon:
     findings_dir: Path
     # The M1 connection owner, operator-initiated: session reuse, at most one login.
     session: Callable[[], bytes]
-    # Values that may never appear in findings: the login, the session's cookie values.
-    secrets: Callable[[], list[str]]
+    # What the findings are scanned against: the login and the session's own cookie values.
+    secrets: Callable[[], FindingsSecrets]
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     budget: LedgerBudget = field(init=False)
@@ -147,55 +309,43 @@ class Recon:
         url = self.ledger.campaign().product_url
         origin = f"https://{urlsplit(url).hostname}"
         profile = recon_profile(self.supplier, url)
-        findings: dict[str, Any] = {"phase": "A", "product_path_form": mask(urlsplit(url).path)}
+        evidence = PhaseAEvidence(product_url=url)
         try:
             robots = self._document(profile, origin + ROBOTS_PATH, ReadKind.POLICY_READ)
-            groups = parse_robots(robots.body) if robots.status == 200 else {}
-            findings["robots"] = {
-                "http_status": robots.status,
-                "star_rules": [[d, mask(p)] for d, p in groups.get("*", [])],
-                "product_path_disallowed": robots_disallows(groups, urlsplit(url).path),
-            }
-            if findings["robots"]["product_path_disallowed"]:
+            self.captures.save("robots", robots.body.encode("utf-8"))
+            evidence.robots_status = robots.status
+            evidence.robots_body = robots.body if robots.status == 200 else None
+            if robots_disallows(parse_robots(robots.body or ""), urlsplit(url).path):
                 raise ReconStop("ROBOTS_DISALLOWS_PRODUCT_PATH")
             session = self.session()
             first = self._product(profile, url, session, "product-1")
             started = self.clock()
-            inventory = document_inventory(first.body, url)
             terms = policy_links(first.body, url)["terms"][:1]
             self.sleep(max(0.0, SAME_PRODUCT_INTERVAL_S - (self.clock() - started)) + 1.0)
             second = self._product(profile, url, session, "product-2")
-            again = document_inventory(second.body, url)
-            findings["inventory"] = inventory
-            findings["stability"] = {
-                "body_identical": _digest(first.body) == _digest(second.body),
-                "inventory_identical": inventory == again,
-                "changed_sections": sorted(k for k in inventory if inventory[k] != again.get(k)),
-            }
-            findings["observed_image_hosts"] = sorted(inventory["images"]["hosts"])
+            evidence.product_bodies = (first.body, second.body)
             if terms:
                 view = self._discovered(profile, origin + terms[0])
                 self.captures.save("terms", view.body.encode("utf-8"))
-                findings["terms"] = {
-                    "http_status": view.status,
-                    "path_form": mask(terms[0]),
-                    **terms_signals(view.body),
-                }
-            else:
-                findings["terms"] = {"http_status": None, "note": "no terms link on the page"}
+                evidence.terms_status, evidence.terms_path = view.status, terms[0]
+                evidence.terms_body = view.body
         except ReconStop as stop:
-            return self._stop(findings, "phase-a", stop.reason, State.STOPPED)
+            return self._stop(evidence, stop.reason, State.STOPPED)
         except CollectionBudgetRefused:
-            return self._stop(findings, "phase-a", "BUDGET_REFUSED", State.BUDGET_EXHAUSTED)
+            return self._stop(evidence, "BUDGET_REFUSED", State.BUDGET_EXHAUSTED)
         except AppError as exc:
-            return self._stop(findings, "phase-a", exc.code, State.STOPPED)
-        findings["requests"] = self.ledger.counts()
-        written = self._write("phase-a", findings)
-        self.ledger.finish_phase_a(
-            findings["observed_image_hosts"],
-            findings_digest=hashlib.sha256(written.read_bytes()).hexdigest(),
+            return self._stop(evidence, exc.code, State.STOPPED)
+        # Every read is done and every capture is durable: nothing further may be reserved.
+        self.ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A, requests=self.counts())
+        return finalize_phase_a(
+            ledger=self.ledger,
+            findings_dir=self.findings_dir,
+            evidence=evidence,
+            secrets=self.secrets,
         )
-        return findings
+
+    def counts(self) -> dict[str, int]:
+        return self.ledger.counts()
 
     # ---------------------------------------------------------------- phase B
 
@@ -228,11 +378,11 @@ class Recon:
                     revalidated = True
                 findings["images"].append(entry)
         except CollectionBudgetRefused:
-            return self._stop(findings, "phase-b", "BUDGET_REFUSED", State.BUDGET_EXHAUSTED)
+            return self._stop_phase_b(findings, "BUDGET_REFUSED", State.BUDGET_EXHAUSTED)
         except AppError as exc:
-            return self._stop(findings, "phase-b", exc.code, State.STOPPED)
-        findings["requests"] = self.ledger.counts()
-        self._write("phase-b", findings)
+            return self._stop_phase_b(findings, exc.code, State.STOPPED)
+        findings["requests"] = self.counts()
+        write_findings(self.findings_dir, "phase-b", findings, self.secrets())
         self.ledger.record("PHASE_B_DONE", state=State.COMPLETED)
         return findings
 
@@ -301,21 +451,19 @@ class Recon:
 
     # ---------------------------------------------------------------- findings
 
-    def _stop(
-        self, findings: dict[str, Any], name: str, reason: str, state: State
-    ) -> dict[str, Any]:
+    def _stop(self, evidence: PhaseAEvidence, reason: str, state: State) -> dict[str, Any]:
+        findings = phase_a_findings(evidence, self.counts())
         findings["stopped"] = reason
-        findings["requests"] = self.ledger.counts()
-        self._write(name, findings)
+        write_findings(self.findings_dir, "phase-a", findings, self.secrets())
         self.ledger.record("STOPPED", state=state, reason=reason)
         return findings
 
-    def _write(self, name: str, findings: dict[str, Any]) -> Path:
-        assert_sanitized(findings, self.secrets())
-        self.findings_dir.mkdir(parents=True, exist_ok=True)
-        path = self.findings_dir / f"{name}.json"
-        path.write_text(json.dumps(findings, ensure_ascii=False, indent=2) + "\n", "utf-8")
-        return path
+    def _stop_phase_b(self, findings: dict[str, Any], reason: str, state: State) -> dict[str, Any]:
+        findings["stopped"] = reason
+        findings["requests"] = self.counts()
+        write_findings(self.findings_dir, "phase-b", findings, self.secrets())
+        self.ledger.record("STOPPED", state=state, reason=reason)
+        return findings
 
 
 def _digest(text: str) -> str:

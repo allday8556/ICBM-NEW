@@ -17,6 +17,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qsl, urljoin, urlsplit
@@ -368,3 +369,55 @@ def assert_sanitized(findings: object, secrets: Iterable[str]) -> None:
             continue
         if any(form in rendered for family in variants(secret).values() for form in family):
             raise ValueError("findings would disclose a secret value; nothing was written")
+
+
+# ---------------------------------------------------------------- what the findings are scanned
+# against (Issue #52 comment 5689874555)
+
+# The generic scanner and ``assert_sanitized`` above stay strict. This decides only which values
+# the M3 findings path feeds into them, because a storefront's flag cookies can be one character
+# long and would then collide with ordinary structural text in every findings file.
+#
+# A cookie value is left out only when all of these hold:
+# * its name says nothing about a session, authentication or security;
+# * the value is 1-5 characters;
+# * the value is a simple alphanumeric flag.
+# The login is always scanned, every other cookie value is scanned, and a session-like cookie name
+# is scanned whatever its value looks like. The bound avoids collisions with observed flag
+# cookies; it is not a claim that a short value cannot be secret.
+FLAG_VALUE = re.compile(r"^[A-Za-z0-9]{1,5}$")
+SESSION_LIKE_COOKIE = re.compile(r"sess|sid|auth|token|login|verify|csrf", re.IGNORECASE)
+EXCLUSION_REASON = "1-5 character alphanumeric flag on a cookie name that is not session-like"
+
+
+@dataclass(frozen=True)
+class FindingsSecrets:
+    """The values the findings are scanned against, and the names of the cookies left out. Names
+    only: the exclusion is auditable without disclosing anything."""
+
+    values: tuple[str, ...]
+    excluded_cookies: tuple[str, ...]
+
+    def audit(self) -> dict[str, Any]:
+        return {
+            "scanned_values": len(self.values),
+            "excluded_cookies": list(self.excluded_cookies),
+            "excluded_count": len(self.excluded_cookies),
+            "reason": EXCLUSION_REASON,
+        }
+
+
+def findings_secrets(
+    credentials: Iterable[str], cookies: Iterable[Mapping[str, str]]
+) -> FindingsSecrets:
+    values = [value for value in credentials if value]
+    excluded: list[str] = []
+    for cookie in cookies:
+        name, value = cookie.get("name", ""), cookie.get("value", "")
+        if not value:
+            continue
+        if FLAG_VALUE.fullmatch(value) and not SESSION_LIKE_COOKIE.search(name):
+            excluded.append(name)
+        else:
+            values.append(value)
+    return FindingsSecrets(tuple(values), tuple(sorted(excluded)))

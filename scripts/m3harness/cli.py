@@ -4,6 +4,7 @@
     python scripts/m3_recon.py preflight --dir <dir>
     python scripts/m3_recon.py approve --dir <dir> --sha <HEAD>
     python scripts/m3_recon.py run --dir <dir> --real
+    python scripts/m3_recon.py finalize --dir <dir>
     python scripts/m3_recon.py approve-images --dir <dir> --sha <HEAD> --hosts <host,host>
     python scripts/m3_recon.py run-images --dir <dir> --real
     python scripts/m3_recon.py report --dir <dir>
@@ -39,6 +40,11 @@
 * A REAL run proceeds only right after its own approval. That approval must be the ledger's
   latest event, no older than two hours, and the checkout must still be the clean SHA it was
   issued at. The connection owner is checked again before anything is recorded or sent.
+* ``finalize`` finishes phase A locally once its reads are done (Issue #52 comment 5689874555).
+  It rebuilds the findings from the append-only ledger and the encrypted captures, scans them,
+  writes them and binds the observation. It builds no collection gateway, installs no egress,
+  opens no session and reserves nothing, so it cannot reach the supplier. It runs only while the
+  campaign waits for that local work, and never twice.
 * ``rehearse`` runs the whole flow on the synthetic storefront, with a stand-in connection owner.
   It makes no supplier contact and uses no OS credential store.
 """
@@ -77,10 +83,16 @@ from scripts.m2harness.gates import Checkout, GitCheckout, dedicated_problems, d
 from scripts.m2harness.keyrings import os_backend
 from scripts.m3harness import fake_site
 from scripts.m3harness.capture import CaptureStore
-from scripts.m3harness.inventory import assert_sanitized
+from scripts.m3harness.inventory import FindingsSecrets, assert_sanitized, findings_secrets
 from scripts.m3harness.ledger import Ledger, Mode, State
 from scripts.m3harness.paths import ReconPaths
-from scripts.m3harness.recon import Recon, product_url_problems
+from scripts.m3harness.recon import (
+    Recon,
+    ReconStop,
+    evidence_from_captures,
+    finalize_phase_a,
+    product_url_problems,
+)
 
 APPROVAL_MAX_AGE = timedelta(hours=2)
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -389,11 +401,19 @@ class Session:
 
     payload: bytes | None = None
 
-    def cookie_values(self) -> list[str]:
+    def cookies(self) -> list[dict[str, str]]:
         if self.payload is None:
             return []
         cookies, _ = decode_session(self.payload)
-        return [cookie["value"] for cookie in cookies]
+        return cookies
+
+
+def _findings_secrets(container: Container, supplier_key: str, session: Session) -> FindingsSecrets:
+    """What the findings are scanned against: the owner's login, always, and the session's cookie
+    values, except the short flag cookies that would collide with ordinary structure."""
+    stored = SupplierCredentialStore(container.secrets).load(supplier_key)
+    login = [stored.username, stored.password] if stored else []
+    return findings_secrets(login, session.cookies())
 
 
 def _run(
@@ -431,11 +451,9 @@ def _run(
             session.payload = container.connect.collection_session(key, operator_initiated=True)
             return session.payload
 
-        def secret_values() -> list[str]:
+        def secret_values() -> FindingsSecrets:
             # Read from the owner only to refuse findings that would carry them; never copied.
-            stored = SupplierCredentialStore(container.secrets).load(key)
-            login = [stored.username, stored.password] if stored else []
-            return [*login, *session.cookie_values()]
+            return _findings_secrets(container, key, session)
 
         recon = Recon(
             ledger=ledger,
@@ -486,6 +504,56 @@ def run_real(
         collection=PolicedCollectionGateway,
         start=start,
     )
+
+
+# ---------------------------------------------------------------- offline phase-A finalization
+
+
+def finalize(
+    root: Path,
+    *,
+    owner: ConnectionOwner | None = None,
+    capture_secrets: Callable[[], SecretStore] | None = None,
+) -> dict[str, Any]:
+    """Finish phase A locally, from the append-only ledger and the encrypted captures.
+
+    It builds no collection gateway, installs no egress, opens no session and reserves nothing,
+    so it cannot reach the supplier (Issue #52 comment 5689874555 §5). It runs only while every
+    phase-A read is completed, no image was requested and the observation is not yet bound, and
+    it refuses a second run because the campaign has left that state.
+    """
+    paths = ReconPaths(root)
+    ledger = Ledger(paths.ledger)
+    campaign = ledger.campaign()
+    if problems := ledger.offline_finalization_problems():
+        raise Refused("; ".join(problems))
+    key = _definition(campaign.mode).profile.supplier_key
+    if owner is None:
+        if campaign.mode is not Mode.REAL:
+            raise Refused("a DRY finalization names its stand-in connection owner")
+        owner = ConnectionOwner.operator()
+    passed = ledger.last_event("PREFLIGHT_PASSED")
+    if passed is None or passed["detail"].get("owner") != owner_identity(owner):
+        raise Refused("the connection owner is not the one the preflight checked")
+    store = capture_secrets() if capture_secrets else capture_key_store(campaign.campaign_id)
+    captures = CaptureStore(paths.captures, store, campaign_id=campaign.campaign_id)
+    try:
+        evidence = evidence_from_captures(ledger, captures)
+    except ReconStop as stop:
+        raise Refused(f"the captures cannot support finalization ({stop.reason})") from None
+    with _owner_container(owner) as container:
+        session = Session(container.connect.stored_session(key))
+        ledger.record(
+            "OFFLINE_FINALIZATION_STARTED",
+            source="ledger+captures",
+            captures=sorted(captures.labels()),
+        )
+        return finalize_phase_a(
+            ledger=ledger,
+            findings_dir=paths.findings,
+            evidence=evidence,
+            secrets=lambda: _findings_secrets(container, key, session),
+        )
 
 
 # ---------------------------------------------------------------- report
@@ -634,6 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "preflight",
         "approve",
         "run",
+        "finalize",
         "approve-images",
         "run-images",
         "report",
@@ -678,6 +747,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 json.dumps(
                     {"stopped": findings.get("stopped"), "requests": findings.get("requests")}
+                )
+            )
+        elif args.command == "finalize":
+            findings = finalize(root)
+            print(
+                json.dumps(
+                    {
+                        "observed_image_hosts": findings.get("observed_image_hosts", []),
+                        "requests": findings.get("requests"),
+                    }
                 )
             )
         elif args.command == "report":

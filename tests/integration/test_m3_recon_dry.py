@@ -12,6 +12,7 @@ import pytest
 
 from app.config import REPO_ROOT, AppConfig, database_path, default_data_dir
 from app.connect.credentials import SupplierCredentialStore
+from app.connect.service import ConnectService
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore, SecretStore
 from app.db.migrate import head_revision, read_only_revision
@@ -22,7 +23,8 @@ from integrations.suppliers.base import (
     RequestKind,
     SupplierDefinition,
 )
-from scripts.m3harness import cli, fake_site
+from integrations.suppliers.collection import ReadKind
+from scripts.m3harness import cli, fake_site, recon
 from scripts.m3harness.capture import KEY_NAME, CaptureStore
 from scripts.m3harness.cli import Refused
 from scripts.m3harness.ledger import Ledger, LedgerError, Mode, State
@@ -129,7 +131,7 @@ def test_captures_are_encrypted_at_rest(tmp_path: Path) -> None:
     cli.rehearse(root)
     paths = ReconPaths(root)
     blobs = list(paths.captures.glob("*.enc"))
-    assert {blob.stem for blob in blobs} == {"product-1", "product-2", "terms"}
+    assert {blob.stem for blob in blobs} == {"robots", "product-1", "product-2", "terms"}
     for blob in blobs:
         assert fake_site.MEMBER_NAME.encode("utf-8") not in blob.read_bytes()
     # Another store (another key) cannot read them.
@@ -308,6 +310,18 @@ def _never(campaign_id: str) -> SecretStore:
     raise AssertionError("the campaign-scoped store is never used here")
 
 
+def _never_built(*_args: object, **_rest: object) -> object:
+    raise AssertionError("no collection gateway is built during local finalization")
+
+
+def _never_installed(*_args: object, **_rest: object) -> None:
+    raise AssertionError("no egress guard is installed during local finalization")
+
+
+def _never_connected(*_args: object, **_rest: object) -> bytes:
+    raise AssertionError("no session is opened during local finalization")
+
+
 def _owner(
     tmp_path: Path, template: Path, *, login: bool = True, database: bool = True
 ) -> tuple[cli.ConnectionOwner, RecordingStore]:
@@ -480,6 +494,121 @@ def test_a_run_against_another_owner_than_the_preflight_checked_is_refused(
     approved = ledger.last_event("APPROVED_A")
     assert approved is not None and approved["seq"] == ledger.latest_seq()
     assert ledger.counts() == ZERO
+
+
+# ---------------------------------------------------------------- local phase-A finalization
+# Issue #52 comment 5689874555: provider reads and local findings work are separate steps, and
+# the local half can always be finished offline.
+
+
+def _dry_owner(root: Path, owner_secrets: SecretStore) -> cli.ConnectionOwner:
+    return cli.ConnectionOwner(
+        config=cli._dry_owner_config(ReconPaths(root)),
+        secrets=owner_secrets,
+        gateway=fake_site.FakeConnectGateway(),
+        suppliers=(fake_site.definition(),),
+    )
+
+
+def _stuck_after_the_reads(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, legacy: bool
+) -> tuple[SecretStore, SecretStore]:
+    """A campaign whose phase-A reads are done while its findings were never written: the shape a
+    current run leaves (FINALIZING_A), and the one an older harness left (RUNNING_A)."""
+    owner_secrets, capture_secrets = MemorySecretStore(), MemorySecretStore()
+    if legacy:
+        # An older harness had no reads-done event: it went straight from the reads to the write.
+        record = Ledger.record
+
+        def without_the_event(self: Ledger, kind: str, **rest: object) -> int:
+            if kind == "PHASE_A_READS_DONE":
+                raise RuntimeError("a harness without local-finalization states")
+            return record(self, kind, **rest)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Ledger, "record", without_the_event)
+        expected: type[Exception] = RuntimeError
+    else:
+
+        def refuse(*_args: object, **_rest: object) -> Path:
+            raise ValueError("findings would disclose a secret value; nothing was written")
+
+        monkeypatch.setattr(recon, "write_findings", refuse)
+        expected = ValueError
+    with pytest.raises(expected):
+        cli.rehearse(root, owner_secrets=owner_secrets, capture_secrets=capture_secrets)
+    monkeypatch.undo()
+    return owner_secrets, capture_secrets
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_phase_a_is_finished_offline_from_the_ledger_and_the_captures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy: bool
+) -> None:
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=legacy)
+    paths = ReconPaths(root)
+    ledger = Ledger(paths.ledger)
+    assert ledger.state() is (State.RUNNING_A if legacy else State.FINALIZING_A)
+    # A local failure after the reads leaves its own trace; the legacy shape crashed earlier.
+    assert (ledger.last_event("LOCAL_FINALIZATION_FAILED") is not None) is not legacy
+    assert not (paths.findings / "phase-a.json").exists()
+    assert ledger.observed_hosts() == frozenset()
+    reads = ledger.counts()
+
+    owner = _dry_owner(root, owner_secrets)
+    # Nothing in this path may reach the supplier: no gateway, no egress, no session.
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    monkeypatch.setattr(cli.EGRESS, "install", _never_installed)
+    monkeypatch.setattr(ConnectService, "collection_session", _never_connected)
+    findings = cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+    assert ledger.state() is State.AWAITING_IMAGE_HOST_APPROVAL
+    assert ledger.counts() == reads, "finalization reserves nothing"
+    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+    assert ledger.observed_hosts() == frozenset(fake_site.IMAGE_HOSTS)
+    assert findings["secret_scan"]["excluded_cookies"] == []
+    assert json.loads((paths.findings / "phase-a.json").read_text("utf-8")) == findings
+    started = ledger.last_event("OFFLINE_FINALIZATION_STARTED")
+    assert started is not None and started["detail"]["source"] == "ledger+captures"
+    assert findings["robots"]["star_rules"] is not None, "the robots capture was kept"
+    with pytest.raises(Refused, match="already bound"):
+        cli.finalize(root, owner=owner, capture_secrets=lambda: capture_secrets)
+
+
+def test_offline_finalization_without_the_robots_capture_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pre-fix harness kept no robots body: the rules are recorded as unavailable, never guessed.
+    root = tmp_path / "recon"
+    owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=True)
+    ReconPaths(root).captures.joinpath("robots.enc").unlink()
+    findings = cli.finalize(
+        root, owner=_dry_owner(root, owner_secrets), capture_secrets=lambda: capture_secrets
+    )
+    assert findings["robots"]["star_rules"] is None
+    assert "not retained" in findings["robots"]["note"]
+    assert findings["robots"]["product_path_disallowed"] is False
+    assert findings["observed_image_hosts"] == sorted(fake_site.IMAGE_HOSTS)
+
+
+def test_a_campaign_waiting_for_local_finalization_never_re_runs_phase_a(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, migrated_template: Path
+) -> None:
+    # The reads are done, so the approval is no longer the latest event and the state machine has
+    # no way back to RUNNING_A: a normal run is refused before it can send anything.
+    owner, _ = _owner(tmp_path / "icbm-owner", migrated_template)
+    root = tmp_path / "real"
+    ledger = _real_campaign(root, owner=cli.owner_identity(owner))
+    ledger.record("APPROVED_A", sha=SHA_A, nonce="n")
+    ledger.record("RUN_A_STARTED", state=State.RUNNING_A)
+    reservation = ledger.reserve(ReadKind.PRODUCT_READ, "https://kmretail.co.kr/product/x/1/")
+    ledger.complete(reservation, http_status=200, outcome="OK")
+    ledger.record("PHASE_A_READS_DONE", state=State.FINALIZING_A)
+    monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)
+    with pytest.raises(Refused, match="latest event"):
+        cli.run_real(root, "A", checkout=Checkout(), blocker=_unblocked, owner=owner)
+    assert ledger.state() is State.FINALIZING_A
+    assert ledger.counts() == {"PRODUCT_READ": 1, "IMAGE_REQUEST": 0, "POLICY_READ": 0}
 
 
 def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path) -> None:

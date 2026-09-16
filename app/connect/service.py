@@ -648,6 +648,16 @@ class ConnectService:
             )
         return payload
 
+    def stored_session(self, supplier_key: str) -> bytes | None:
+        """The stored session payload, read without any supplier request and without proving it.
+
+        It is credential-equivalent, so it is never a substitute for ``collection_session``: the
+        only caller is local leak scanning, which must know the session values that a collected
+        page could have echoed (Issue #52 comment 5689874555 §5).
+        """
+        self._definition(supplier_key)
+        return self._sessions.load(supplier_key)
+
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.
 
