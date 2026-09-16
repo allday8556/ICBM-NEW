@@ -92,6 +92,8 @@ class SourceTruthReadback:
             locator=reference.locator,
             status=reference.status,
             issue=reference.issue,
+            http_etag=reference.etag,
+            http_last_modified=reference.last_modified,
             asset=None
             if stored is None
             else SourceAssetView(

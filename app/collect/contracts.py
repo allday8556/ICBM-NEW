@@ -27,7 +27,12 @@ class SourceAssetView(BaseModel):
 
 
 class ImageReferenceView(BaseModel):
-    """One ordered image reference. ``asset`` is absent while the bytes are not stored."""
+    """One ordered image reference. ``asset`` is absent while the bytes are not stored.
+
+    The HTTP validators are part of the reference, not decoration: a later collection may reuse
+    stored content only after the provider confirms it with them, so they are read back exactly as
+    they were recorded.
+    """
 
     role: ImageRole
     ordinal: int
@@ -36,6 +41,8 @@ class ImageReferenceView(BaseModel):
     locator: str | None
     status: FieldStatus
     issue: ImageIssue | None
+    http_etag: str | None
+    http_last_modified: str | None
     asset: SourceAssetView | None
 
 

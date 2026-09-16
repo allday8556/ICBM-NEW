@@ -17,8 +17,15 @@ WebP        image/webp  the VP8, VP8L or VP8X chunk of the RIFF container
 
 Anything else — another format, a truncated header, a declared size of zero — is ``None``, and the
 caller records the reference as ``UNSUPPORTED_FORMAT`` rather than storing bytes it cannot
-describe. Every read is bounds-checked against the buffer it was given, so a malformed or hostile
-header yields ``None`` instead of an exception or an unbounded scan.
+describe.
+
+A size is only an answer when the structure that declares it is complete: the whole GIF screen
+descriptor is present, the PNG image header declares its own standard length and the bytes of that
+chunk and its checksum are there, a JPEG frame segment is long enough to contain the size and ends
+inside the buffer, and a WebP chunk's declared size covers the fields read and fits the container.
+Without that a provider could hand over a few plausible bytes and have dimensions read from
+whatever followed them. Every read is bounds-checked against the buffer it was given, so a
+malformed or hostile header yields ``None`` instead of an exception or an unbounded scan.
 """
 
 from app.collect.assets import DecodedImage
@@ -31,6 +38,14 @@ _JPEG_STANDALONE = frozenset({0x01, *range(0xD0, 0xD8)})
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _GIF_MAGICS = (b"GIF87a", b"GIF89a")
 _WEBP_START_CODE = b"\x9d\x01\x2a"
+# The smallest complete header of each format: signature and screen descriptor; signature and the
+# whole IHDR chunk with its length, type, 13-byte payload and checksum.
+_GIF_HEADER_BYTES = 13
+_PNG_IHDR_PAYLOAD = 13
+_PNG_HEADER_BYTES = 8 + 4 + 4 + _PNG_IHDR_PAYLOAD + 4
+# A frame segment carries its own length, the sample precision, the height, the width and the
+# component count, so it is never shorter than this.
+_JPEG_FRAME_MIN_LENGTH = 8
 
 
 def _u16be(data: bytes, at: int) -> int | None:
@@ -45,6 +60,10 @@ def _u24le(data: bytes, at: int) -> int | None:
     return int.from_bytes(data[at : at + 3], "little") if at + 3 <= len(data) else None
 
 
+def _u32le(data: bytes, at: int) -> int | None:
+    return int.from_bytes(data[at : at + 4], "little") if at + 4 <= len(data) else None
+
+
 def _u32be(data: bytes, at: int) -> int | None:
     return int.from_bytes(data[at : at + 4], "big") if at + 4 <= len(data) else None
 
@@ -57,13 +76,18 @@ def _sized(mime: str, width: int | None, height: int | None) -> DecodedImage | N
 
 
 def _png(data: bytes) -> DecodedImage | None:
-    # The IHDR chunk is the first one, and its width and height open its payload.
-    if data[12:16] != b"IHDR":
+    # The IHDR chunk is the first one, and its width and height open its payload. It must declare
+    # the one length the format gives it, and the chunk and its checksum must actually be here.
+    if len(data) < _PNG_HEADER_BYTES or data[12:16] != b"IHDR":
+        return None
+    if _u32be(data, 8) != _PNG_IHDR_PAYLOAD:
         return None
     return _sized("image/png", _u32be(data, 16), _u32be(data, 20))
 
 
 def _gif(data: bytes) -> DecodedImage | None:
+    if len(data) < _GIF_HEADER_BYTES:
+        return None  # the logical screen descriptor is not all here
     return _sized("image/gif", _u16le(data, 6), _u16le(data, 8))
 
 
@@ -84,14 +108,24 @@ def _jpeg(data: bytes) -> DecodedImage | None:
         if length is None or length < 2:
             return None
         if marker in _JPEG_FRAME:
-            # The frame header is precision, then height, then width.
+            # The frame header is precision, then height, then width — and all of it has to be
+            # inside the segment the page declared, not read from whatever follows it.
+            if length < _JPEG_FRAME_MIN_LENGTH or at + 2 + length > len(data):
+                return None
             return _sized("image/jpeg", _u16be(data, at + 7), _u16be(data, at + 5))
         at += 2 + length
     return None
 
 
 def _webp(data: bytes) -> DecodedImage | None:
-    chunk, payload = data[12:16], data[20:]
+    # The RIFF size counts everything after itself; the chunk size counts its own payload. Both
+    # have to be there, or the chunk is not a header this can read.
+    riff_size, chunk_size = _u32le(data, 4), _u32le(data, 16)
+    if riff_size is None or chunk_size is None or len(data) < 8 + riff_size:
+        return None
+    chunk, payload = data[12:16], data[20 : 20 + chunk_size]
+    if len(payload) < chunk_size:
+        return None
     if chunk == b"VP8 ":
         # A key frame: the three-byte tag, then the start code, then 14-bit dimensions.
         if payload[3:6] != _WEBP_START_CODE:

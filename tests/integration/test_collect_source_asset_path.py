@@ -5,7 +5,9 @@ Everything here runs against a migrated database and a fake provider. No supplie
 network of any kind is contacted: the images are bytes the test made itself.
 """
 
+import contextlib
 import hashlib
+import sqlite3
 import struct
 from collections.abc import Iterator
 from dataclasses import replace
@@ -250,6 +252,116 @@ def test_the_history_reads_back_every_revision_of_one_identity(
     served = answer.json()
     assert [r["sequence"] for r in served["revisions"]] == [1, 2]
     assert served["supplier_key"] == first.supplier_key
+
+
+def test_the_persisted_validators_reach_the_api_unchanged(
+    client: TestClient,
+    config: AppConfig,
+    recorder: SourceAssetRecorder,
+    revisions: ProductFactsRevisionStore,
+) -> None:
+    """Audit 5226242829 blocker 1.
+
+    A later collection may reuse stored content only after the provider confirms it with these,
+    so they are durable evidence. The comparison reads the database directly rather than through
+    the mapper the route uses, so a field the mapper silently drops cannot pass.
+    """
+    etag, last_modified = '"v1-abc"', "Wed, 16 Sep 2026 01:00:00 GMT"
+    images = recorder.record(
+        [
+            replace(
+                fetched(png(120, 90, b"validators")),
+                http_etag=etag,
+                http_last_modified=last_modified,
+            ),
+            UnfetchedImage(
+                role=ImageRole.DETAIL,
+                ordinal=1,
+                host=HOST,
+                provenance="#prdDetail img:nth-of-type(2)",
+                issue=ImageIssue.FETCH_FAILED,
+                http_etag=None,
+                http_last_modified=last_modified,
+            ),
+        ]
+    )
+    stored = revisions.append(collected(images=images))
+
+    with contextlib.closing(sqlite3.connect(config.database_path)) as raw:
+        in_database = list(
+            raw.execute(
+                "SELECT role, ordinal, http_etag, http_last_modified FROM"
+                " product_facts_image_refs WHERE revision_id = ? ORDER BY ordinal",
+                (stored.revision_id,),
+            )
+        )
+    assert in_database == [
+        (ImageRole.REPRESENTATIVE, 0, etag, last_modified),
+        (ImageRole.DETAIL, 1, None, last_modified),
+    ], "the validators are what the database holds"
+
+    served = client.get(f"/api/v1/collect/revisions/{stored.revision_id}").json()["images"]
+    assert [
+        (row["role"], row["ordinal"], row["http_etag"], row["http_last_modified"]) for row in served
+    ] == in_database, "and the API says the same, field for field"
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        (b"GIF89a" + struct.pack("<HH", 640, 480), "the screen descriptor is cut short"),
+        (
+            b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 8, 8),
+            "the image header chunk and its checksum are not all there",
+        ),
+        (
+            b"\x89PNG\r\n\x1a\n"
+            + struct.pack(">I", 99)
+            + b"IHDR"
+            + struct.pack(">II", 8, 8)
+            + b"\x00" * 17,
+            "the image header declares a length the format does not have",
+        ),
+        (
+            b"\xff\xd8\xff\xc0" + struct.pack(">H", 2) + struct.pack(">BHH", 8, 300, 200),
+            "the frame segment is too short to contain the size it seems to state",
+        ),
+        (
+            b"\xff\xd8\xff\xc0" + struct.pack(">H", 11) + struct.pack(">BHH", 8, 300, 200),
+            "the frame segment runs past the end of the bytes",
+        ),
+        (
+            b"RIFF"
+            + struct.pack("<I", 4096)
+            + b"WEBP"
+            + b"VP8 "
+            + struct.pack("<I", 10)
+            + b"\x00\x00\x00"
+            + b"\x9d\x01\x2a"
+            + struct.pack("<HH", 50, 40),
+            "the chunk is whole but the container declares more bytes than it carries",
+        ),
+        (
+            b"RIFF"
+            + struct.pack("<I", 20)
+            + b"WEBP"
+            + b"VP8 "
+            + struct.pack("<I", 4096)
+            + b"\x00" * 8,
+            "the chunk declares more bytes than it carries",
+        ),
+    ],
+)
+def test_a_header_that_is_not_complete_is_not_a_source_asset(
+    recorder: SourceAssetRecorder, assets: SourceAssetStore, body: bytes, why: str
+) -> None:
+    """Audit 5226242829 blocker 2: a few plausible bytes must not become a CONFIRMED asset whose
+    dimensions were read from whatever followed the header."""
+    (reference,) = recorder.record([fetched(body)])
+    assert reference.status is FieldStatus.REVIEW_REQUIRED, why
+    assert reference.issue is ImageIssue.UNSUPPORTED_FORMAT
+    assert reference.sha256 is None
+    assert assets.get(hashlib.sha256(body).hexdigest()) is None, "nothing was stored"
 
 
 def test_an_unknown_revision_is_not_found(client: TestClient) -> None:
