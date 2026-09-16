@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.audit.service import AuditLog
+from app.collect.assets import SourceAssetStore
+from app.collect.imagedecode import HeaderImageDecoder
+from app.collect.readback import SourceTruthReadback
+from app.collect.revisions import ProductFactsRevisionStore
 from app.collect.service import CollectService
+from app.collect.sourceassets import SourceAssetRecorder
 from app.config import AppConfig
 from app.connect.credentials import SupplierCredentialStore
 from app.connect.marketplace.attestation_service import PermissionAttestationService
@@ -64,6 +69,10 @@ class Container:
     readiness: ReadinessService
     screens: ScreenService
     connect: ConnectService
+    source_assets: SourceAssetStore
+    source_asset_recorder: SourceAssetRecorder
+    revisions: ProductFactsRevisionStore
+    source_truth: SourceTruthReadback
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -181,6 +190,11 @@ def build_container(
         capabilities=connect.capabilities,
     )
 
+    # COLLECT source truth: the content-addressed asset path and the immutable revisions over
+    # it. The decoder reads MIME and the original size from the stored bytes themselves.
+    source_assets = SourceAssetStore(config.source_assets_dir, db, HeaderImageDecoder(), clock)
+    revisions = ProductFactsRevisionStore(db, clock)
+
     products = ProductsService()
     screens = ScreenService(
         clock=clock,
@@ -209,6 +223,10 @@ def build_container(
         readiness=readiness,
         screens=screens,
         connect=connect,
+        source_assets=source_assets,
+        source_asset_recorder=SourceAssetRecorder(source_assets),
+        revisions=revisions,
+        source_truth=SourceTruthReadback(revisions, source_assets),
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
