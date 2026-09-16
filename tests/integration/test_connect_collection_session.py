@@ -1,5 +1,6 @@
 """COLLECT uses the M1 connection owner for its session (ADR-0010 §3, §11): no login of its own."""
 
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -91,6 +92,11 @@ def test_the_scan_boundary_hands_out_cookie_material_and_never_a_session(
     assert not isinstance(cookies, bytes | bytearray), "no session payload leaves the owner"
 
 
+def _payload(cookies: list[dict[str, str]]) -> bytes:
+    """A payload of the stored format's own version, corrupt only in its cookie entries."""
+    return json.dumps({"v": 1, "cookies": cookies, "user_agent": "x"}).encode("utf-8")
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -100,6 +106,11 @@ def test_the_scan_boundary_hands_out_cookie_material_and_never_a_session(
         b'{"v": 1, "cookies": [], "user_agent": 7}',  # wrong type
         b"\xff\xfe not utf-8",  # not decodable text at all
         b"",
+        # Review 5219631112: corrupt but v1, with entries the shared decoder tolerates.
+        _payload([{"domain": "x"}]),  # neither a name nor a value
+        _payload([{"name": "SID"}]),  # no value
+        _payload([{"value": "s"}]),  # no name
+        _payload([{"name": "SID", "value": "s"}, {}]),  # one usable entry, one not
     ],
 )
 def test_an_unreadable_stored_session_fails_the_scan_boundary_closed(

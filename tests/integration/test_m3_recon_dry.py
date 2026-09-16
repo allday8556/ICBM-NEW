@@ -5,6 +5,7 @@ import io
 import json
 import shutil
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -647,8 +648,24 @@ def test_the_rehearsal_keeps_the_login_with_the_connection_owner(tmp_path: Path)
     )
 
 
+def _truncated(sentinel: str) -> bytes:
+    """Not parseable at all: the decoder's own failure holds the whole document."""
+    return json.dumps({"v": 1, "cookies": sentinel}).encode("utf-8")[:-1]
+
+
+def _malformed_entry(sentinel: str) -> bytes:
+    """Parseable, of the stored version, and tolerated entry by entry by the shared decoder, but
+    without the pair a scan needs (PR #64 review 5219631112)."""
+    cookies = [{"name": "SID", "domain": sentinel}]
+    return json.dumps({"v": 1, "cookies": cookies, "user_agent": "x"}).encode("utf-8")
+
+
+@pytest.mark.parametrize("corrupt", [_truncated, _malformed_entry])
 def test_an_unreadable_session_stops_finalization_without_disclosing_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    corrupt: Callable[[str], bytes],
 ) -> None:
     # PR #64 comment 5690832285: the scan boundary fails closed, the campaign keeps a local failure
     # trace, and nothing of the payload reaches the error, the ledger, the findings or the output.
@@ -657,10 +674,7 @@ def test_an_unreadable_session_stops_finalization_without_disclosing_it(
     owner_secrets, capture_secrets = _stuck_after_the_reads(root, monkeypatch, legacy=False)
     owner = _dry_owner(root, owner_secrets)
     sessions = SupplierSessionStore(owner.config.runtime_dir / SESSIONS_DIR_NAME, owner_secrets)
-    sessions.save(
-        fake_site.definition().profile.supplier_key,
-        b'{"v": 1, "cookies": "' + sentinel.encode("utf-8") + b'"',
-    )
+    sessions.save(fake_site.definition().profile.supplier_key, corrupt(sentinel))
     ledger = Ledger(ReconPaths(root).ledger)
     reads = ledger.counts()
     monkeypatch.setattr(cli, "PolicedCollectionGateway", _never_built)

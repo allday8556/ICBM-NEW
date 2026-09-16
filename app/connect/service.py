@@ -659,7 +659,9 @@ class ConnectService:
         and the list is empty when no session is stored (PR #64 review 5217542767 §3).
 
         An unreadable or unsupported stored session fails closed: nothing is returned, and the
-        refusal carries a code only (PR #64 comment 5690832285 §1).
+        refusal carries a code only (PR #64 comment 5690832285 §1). So does a session whose own
+        cookie entries do not carry the pair a scan needs, which the shared decoder tolerates
+        (PR #64 review 5219631112).
         """
         self._definition(supplier_key)
         payload = self._sessions.load(supplier_key)
@@ -667,7 +669,16 @@ class ConnectService:
             return []
         decoded: list[dict[str, str]] | None = None
         try:
-            decoded, _ = decode_session(payload)
+            cookies, _ = decode_session(payload)
+            # The projection belongs inside the boundary: an entry without a usable name and value
+            # makes the stored session unusable for a scan, and is refused exactly like a payload
+            # that cannot be decoded rather than skipped, which would scan less than the session's
+            # own material or raise a KeyError of its own.
+            if all(
+                isinstance(cookie.get("name"), str) and isinstance(cookie.get("value"), str)
+                for cookie in cookies
+            ):
+                decoded = [{"name": cookie["name"], "value": cookie["value"]} for cookie in cookies]
         except Exception:
             # No fragment of an unreadable payload leaves CONNECT: not decoded, not replaced, not
             # repr'd. The refusal is raised outside the handler, so the failure that saw the bytes
@@ -675,7 +686,7 @@ class ConnectService:
             decoded = None
         if decoded is None:
             raise AuthError("SUPPLIER_SESSION_UNREADABLE", "the stored session cannot be read")
-        return [{"name": cookie["name"], "value": cookie["value"]} for cookie in decoded]
+        return decoded
 
     def verify(self, supplier_key: str, *, trigger: str, allow_login: bool) -> ProtectedReadProof:
         """Establish or reuse the connection through the supplier's single flight.
