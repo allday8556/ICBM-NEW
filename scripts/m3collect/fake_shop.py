@@ -49,6 +49,10 @@ SUPPLIER_KEY = "fakeshop"
 HOST = "shop.collect.invalid"
 IMAGE_HOST = "img.collect.invalid"
 PRODUCT_URL = f"https://{HOST}/product/sample/4242/"
+# The same product reached through this shop's listing. Only this form states the product
+# number where a reader of the URL alone can see it, so the pair exercises the case ADR-0010
+# §4 cares about: paced on the URL until a run proves the identity, on the product after.
+LISTED_URL = f"https://{HOST}/product/sample/4242/category/7/"
 EXTRACTOR_REVISION = "fakeshop-collect-1"
 EXTRACTOR_FINGERPRINT = "c" * 64
 
@@ -181,6 +185,19 @@ def _fields(view: DocumentView) -> Mapping[str, FieldFact]:
     return fields
 
 
+def _url_product_hint(url: str) -> str | None:
+    """Which product this URL points at, when its own form says so.
+
+    This shop spells the number out only in its listing form. A plain product URL says nothing
+    until the document has been read, which is exactly the transition the interval must survive.
+    """
+    parts = [segment for segment in url.split("/") if segment]
+    if "category" not in parts:
+        return None
+    number = parts[parts.index("category") - 1]
+    return number if number.isdigit() else None
+
+
 def _classify(body: str, product_url: str) -> tuple[ImageCandidate, ...]:
     found = []
     for order, (url, role, rule) in enumerate(
@@ -215,7 +232,7 @@ def collection_profile(
 ) -> CollectionProfile:
     return CollectionProfile(
         supplier=PROFILE,
-        product_path=r"/product/[^/]+/\d+/?",
+        product_path=r"/product/[^/]+/\d+(?:/category/\d+)?/?",
         policy_paths=frozenset({"/robots.txt"}),
         image_hosts=frozenset({IMAGE_HOST}),
         safe_query_keys={},
@@ -240,6 +257,7 @@ def collection(
         roles=ImageRoleRules(identity=EXTRACTOR_REVISION, classify=_classify),
         identity=_identity,
         fields=_fields,
+        url_product_hint=_url_product_hint,
     )
 
 

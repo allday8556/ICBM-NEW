@@ -41,6 +41,7 @@ from integrations.suppliers.collection import (
 from integrations.suppliers.kmretail import PROFILE
 from integrations.suppliers.kmretail.collect import IMAGE_ROLES, parse_fields, resolve
 from integrations.suppliers.kmretail.collect.identity import SourceIdentity as ParsedIdentity
+from integrations.suppliers.kmretail.collect.identity import _path_number
 
 # The product path form the storefront writes, with the listing segments the operator's own URL
 # may carry after it. Anything else is not a product page and is never read.
@@ -75,6 +76,17 @@ def _fields(document: DocumentView) -> Mapping[str, FieldFact]:
     return parse_fields(document)
 
 
+def _url_product_hint(url: str) -> str | None:
+    """Which product this URL points at, read from the path alone.
+
+    ``/product/<name>/355/`` and ``/product/<name>/355/category/23/display/1/`` point at one
+    product, and so does the same URL after a rename. Pacing must treat them as one product
+    before any of them has been read, so it asks the identity rule's own path reader rather than
+    a second copy of it — one rule, in one place, even for a question this small.
+    """
+    return _path_number(url)
+
+
 def build_profile(*, image_hosts: frozenset[str] = IMAGE_HOSTS) -> CollectionProfile:
     return CollectionProfile(
         supplier=PROFILE,
@@ -98,4 +110,5 @@ COLLECTION = SupplierCollection(
     roles=IMAGE_ROLES,
     identity=_identity,
     fields=_fields,
+    url_product_hint=_url_product_hint,
 )

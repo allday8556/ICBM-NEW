@@ -44,7 +44,12 @@ from app.collect.facts import (
 )
 from app.collect.models import CollectionOutcome
 from app.collect.revisions import ProductFactsRevisionStore
-from app.collect.runs import CollectionRunRecord, CollectionRunStore, SameProductTooSoon
+from app.collect.runs import (
+    CollectionRunRecord,
+    CollectionRunStore,
+    PacingKey,
+    SameProductTooSoon,
+)
 from app.collect.sourceassets import (
     FetchedImage,
     RevalidatedImage,
@@ -83,7 +88,11 @@ logger = logging.getLogger("icbm.collect")
 COLLECT_PRODUCT_JOB = "collect.product"
 # A collection reads one page and fetches bounded images. A transient provider failure is worth
 # another attempt; nothing else is, and the shared error taxonomy decides which classes those are.
-COLLECT_POLICY = RetryPolicy(max_attempts=3, base_delay_s=5.0, factor=3.0, max_delay_s=120.0)
+#
+# Every delay here is longer than the same-product floor of ADR-0010 §4, deliberately: a retry is
+# another *real* read of the same product, so the schedule has to be compatible with the interval
+# rather than something the interval has to keep refusing.
+COLLECT_POLICY = RetryPolicy(max_attempts=3, base_delay_s=90.0, factor=2.0, max_delay_s=600.0)
 
 # What a supplier's own page role means in the revision's canonical vocabulary. A page's primary
 # image is the product's representative one; everything else the role rules recognise as product
@@ -239,8 +248,8 @@ class ProductCollectionService:
             job_type=COLLECT_PRODUCT_JOB,
             handler=self._run_job,
             description="Collect one supplier product into an immutable source-truth revision.",
-            # A collection only reads: re-running an interrupted attempt duplicates no external
-            # effect. It may append a second revision, which is the history the model intends.
+            # A collection only reads, and one run leaves one revision: an interrupted attempt is
+            # recovered from the revision it already appended, never collected a second time.
             idempotent=True,
             retry_policy=COLLECT_POLICY,
         )
@@ -254,7 +263,8 @@ class ProductCollectionService:
         The URL is checked against the supplier's own profile here, so an unacceptable target is
         refused before a job exists rather than becoming a failed run.
         """
-        profile = self._registered(supplier_key).collection.profile
+        registered = self._registered(supplier_key)
+        profile = registered.collection.profile
         try:
             # The same rule the transport applies, so a URL the profile already knows is
             # unacceptable — a foreign host, a listing path, a query key that is not explicitly
@@ -262,10 +272,12 @@ class ProductCollectionService:
             check_target(profile, product_url, ReadKind.PRODUCT_READ)
         except CollectionTargetRefused as refused:
             raise InputValidationError("COLLECT_URL_REFUSED", refused.message) from None
-        if (last := self._runs.next_read_allowed_at(supplier_key, product_url)) is not None:
-            waited = (self._clock.now() - last).total_seconds()
-            if waited < profile.limits.same_product_interval_s:
-                raise SameProductTooSoon(profile.limits.same_product_interval_s - waited)
+        remaining = self._runs.seconds_until_readable(
+            pacing_key(registered.collection, product_url),
+            interval_s=profile.limits.same_product_interval_s,
+        )
+        if remaining > 0:
+            raise SameProductTooSoon(remaining)
         with self._db.write() as session:
             job = self._jobs.enqueue(
                 COLLECT_PRODUCT_JOB,
@@ -346,9 +358,14 @@ class ProductCollectionService:
         budget = RunBudget(
             max_product_reads=1, max_image_requests=profile.limits.max_image_requests_per_run
         )
-        # One product read, taken durably before anything is sent: the same product is never
-        # read twice inside the interval ADR-0010 §4 fixes, restart or no restart.
-        self._runs.reserve_product_read(run_id, interval_s=profile.limits.same_product_interval_s)
+        # One real product read, taken durably before anything is sent. Every attempt passes
+        # through here — a retry of this same run included — so the same product is never read
+        # twice inside the interval ADR-0010 §4 fixes, restart or no restart.
+        self._runs.reserve_product_read(
+            run_id,
+            key=pacing_key(collection, product_url),
+            interval_s=profile.limits.same_product_interval_s,
+        )
         captured_at = self._clock.now()
         document = self._gateway.read_document(
             profile,
@@ -364,6 +381,9 @@ class ProductCollectionService:
                 extra={"collection_run_id": run_id, "supplier": supplier_key},
             )
             return CollectionResult(None, None, identity.reason)
+        # The source has now said which product this is, so that is what the interval follows
+        # from here: another accepted form of this product's URL buys no second read.
+        self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
         images = self._images(
             profile,
             collection.roles.classify(document.body, product_url),
@@ -539,6 +559,22 @@ def _unfetched(
         )
 
     return reference
+
+
+def pacing_key(collection: SupplierCollection, product_url: str) -> PacingKey:
+    """What the same-product interval is measured on for this URL (ADR-0010 §4).
+
+    The URL part is the normalized in-scope URL — never the raw operator string, whose spelling is
+    not evidence of anything. The product part is filled in when the supplier's own URL form makes
+    plain which product the URL points at: two accepted spellings of one product, and the same
+    product after a rename, are then one product to the interval rather than three.
+
+    A hint is never an identity. It can only make a collection wait; what a revision is recorded
+    under still comes from the document the supplier served.
+    """
+    parts = urlsplit(product_url)
+    normalized = f"{collection.supplier_key}:url:https://{parts.hostname}{parts.path.rstrip('/')}"
+    return PacingKey(url=normalized, source_product_id=collection.url_product_hint(product_url))
 
 
 def stable_locator(url: str) -> str | None:

@@ -14,9 +14,11 @@ import pytest
 from app.api.routes.collect import collection_run
 from app.api.routes.collect import revision as revision_route
 from app.collect.collection import (
+    COLLECT_POLICY,
     COLLECT_PRODUCT_JOB,
     ProductCollectionService,
     RegisteredCollection,
+    pacing_key,
 )
 from app.collect.facts import FactsStatus, FieldStatus, ImageIssue, ImageRole
 from app.collect.models import CollectionOutcome, CollectionRun
@@ -34,6 +36,7 @@ from scripts.m3collect.fake_shop import (
     DETAIL_URL,
     EXTRACTOR_FINGERPRINT,
     EXTRACTOR_REVISION,
+    LISTED_URL,
     OTHER_BYTES,
     PRIMARY_BYTES,
     PRIMARY_URL,
@@ -402,8 +405,14 @@ def test_a_transient_product_read_leaves_the_run_open_for_its_retry(
             open_run = built.collection.run(submitted.collection_run_id)
             assert open_run.outcome is CollectionOutcome.PENDING
             assert open_run.detail is None and open_run.finished_at is None
+            assert open_run.product_read_at is not None, "the attempt took a real read"
 
-            clock.advance(5.0)
+            # The retry is another real read of the same product, so the schedule waits out the
+            # interval rather than asking the interval to refuse it.
+            assert first.next_attempt_at is not None
+            assert (first.next_attempt_at - open_run.product_read_at).total_seconds() >= INTERVAL
+
+            clock.advance(COLLECT_POLICY.base_delay_s)
             second = built.runner.run_next()
             assert second is not None and second.state is JobState.SUCCEEDED
             settled = built.collection.run(submitted.collection_run_id)
@@ -526,15 +535,20 @@ def test_a_queued_run_still_cannot_read_inside_the_interval(
     run_once(collecting)  # the first reads
     assert gateway.document_reads == 1
 
-    blocked = collecting.runner.run_next()
-    assert blocked is not None and blocked.state is JobState.DEAD, "waiting is not a retry"
+    held = collecting.runner.run_next()
+    assert held is not None and held.state is JobState.RETRY_SCHEDULED, "waiting, not failing"
     assert collecting.jobs.get(second.job_id).last_error_code == "COLLECT_SAME_PRODUCT_TOO_SOON"
     assert gateway.document_reads == 1, "the second run sent nothing"
-    settled = collecting.collection.run(second.collection_run_id)
-    assert settled.outcome is CollectionOutcome.FAILED
-    assert settled.detail == "COLLECT_SAME_PRODUCT_TOO_SOON"
-    assert settled.revision_id is None
+    assert collecting.collection.run(second.collection_run_id).outcome is CollectionOutcome.PENDING
     assert collecting.collection.run(first.collection_run_id).outcome is CollectionOutcome.RECORDED
+
+    # Its turn comes, and only then does it read.
+    clock.advance(COLLECT_POLICY.base_delay_s)
+    assert collecting.runner.run_next() is not None
+    assert gateway.document_reads == 2
+    assert collecting.collection.run(second.collection_run_id).outcome is (
+        CollectionOutcome.RECORDED
+    )
 
 
 def test_an_image_that_would_cross_the_run_total_is_never_stored(
@@ -614,6 +628,121 @@ def test_the_km_profile_refuses_a_queried_product_url_before_a_job_exists(
     with pytest.raises(InputValidationError):
         service.submit("kmretail", f"{plain}?utm_source=mail")
     assert collecting.jobs.count(job_type_prefix="collect.") == 0
+
+
+def test_a_retry_of_one_run_is_still_a_real_read_and_is_still_paced(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # Review 5231792043 P0: the reservation is the time of the last real read, not a permit the
+    # run keeps. The first attempt read and then failed transiently, so the run is still open —
+    # and its next attempt is still a real read of the same product, paced like any other.
+    class Flaky(FakeGateway):
+        failures: int = 1
+
+        def read_document(self, *args: object, **kwargs: object) -> object:
+            if self.failures:
+                self.failures -= 1
+                self.document_reads += 1
+                raise TransientError("PROVIDER_BUSY", "try again")
+            return super().read_document(*args, **kwargs)  # type: ignore[arg-type]
+
+    gateway = Flaky(
+        documents=[page()], images={PRIMARY_URL: PRIMARY_BYTES, DETAIL_URL: DETAIL_BYTES}
+    )
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            collection_gateway=gateway,
+            collection_sessions=StubSessions(),
+            collections=(registered(),),
+        )
+        try:
+            submitted = built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            run_id = submitted.collection_run_id
+            with pytest.raises(TransientError):
+                built.collection.collect(SUPPLIER_KEY, PRODUCT_URL, run_id=run_id)
+            assert gateway.document_reads == 1
+            assert built.collection.run(run_id).outcome is CollectionOutcome.PENDING
+
+            clock.advance(INTERVAL - 1)
+            with pytest.raises(SameProductTooSoon):
+                built.collection.collect(SUPPLIER_KEY, PRODUCT_URL, run_id=run_id)
+            assert gateway.document_reads == 1, "the same run's retry bought no second read"
+
+            clock.advance(2)
+            result = built.collection.collect(SUPPLIER_KEY, PRODUCT_URL, run_id=run_id)
+            assert result.revision_id is not None
+            assert gateway.document_reads == 2, "once eligible, the retry reads"
+        finally:
+            built.db.dispose()
+
+
+def test_the_identity_a_run_proved_paces_the_next_url_that_names_it(
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
+) -> None:
+    # Review 5231792043 P0, the key transition. The first URL says nothing about which product it
+    # is, so it is paced on the URL; the document then proves the identity. A second URL that does
+    # name that product is measured against the read that already happened, not given its own.
+    first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)
+    assert gateway.document_reads == 1
+    assert collecting.collection.run(first.collection_run_id).source_product_id == "4242"
+
+    clock.advance(INTERVAL - 1)
+    with pytest.raises(SameProductTooSoon):
+        collecting.collection.submit(SUPPLIER_KEY, LISTED_URL)
+    assert gateway.document_reads == 1, "another spelling of one product is not another product"
+
+    clock.advance(2)
+    later = collecting.collection.submit(SUPPLIER_KEY, LISTED_URL)
+    run_once(collecting)
+    assert gateway.document_reads == 2
+    assert collecting.collection.run(later.collection_run_id).outcome is (
+        CollectionOutcome.RECORDED
+    )
+
+
+def test_equivalent_accepted_urls_for_one_product_are_paced_as_one_product(
+    collecting: Container, clock: FakeClock
+) -> None:
+    # Review 5231792043 P0: ADR-0010 §4 paces on the product, not on which accepted spelling of
+    # its URL was submitted. KM writes /product/<name>/<number>/ with optional listing segments,
+    # and a rename changes only the name.
+    from integrations.suppliers.kmretail.collection import COLLECTION as KM
+
+    plain = "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355/"
+    listed = "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355/category/23/display/1/"
+    renamed = "https://kmretail.co.kr/product/%EB%8B%A4%EB%A5%B8-%EC%9D%B4%EB%A6%84/355/"
+    other = "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/356/"
+
+    keys = {url: pacing_key(KM, url) for url in (plain, listed, renamed, other)}
+    assert keys[plain].source_product_id == "355"
+    assert keys[listed] == keys[plain] or keys[listed].source_product_id == "355"
+    assert keys[renamed].source_product_id == "355"
+    assert keys[other].source_product_id == "356"
+
+    # And the store measures the interval across them: one read of any spelling paces the rest.
+    runs = CollectionRunStore(collecting.db, clock)
+    with collecting.db.write() as session:
+        run_id = runs.open(
+            session,
+            job_id="job-pacing",
+            correlation_id="cid-pacing",
+            supplier_key="kmretail",
+            source_url=plain,
+        )
+    runs.reserve_product_read(run_id, key=keys[plain], interval_s=INTERVAL)
+    runs.note_identity(run_id, source_product_id="355")
+
+    for url in (plain, listed, renamed):
+        assert runs.seconds_until_readable(keys[url], interval_s=INTERVAL) > 0, url
+    assert runs.seconds_until_readable(keys[other], interval_s=INTERVAL) == 0
+
+    clock.advance(INTERVAL + 1)
+    for url in (plain, listed, renamed):
+        assert runs.seconds_until_readable(keys[url], interval_s=INTERVAL) == 0, url
 
 
 # ---------------------------------------------------------------- scope and egress

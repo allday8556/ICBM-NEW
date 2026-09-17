@@ -19,21 +19,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.collect.facts import FactsStatus
 from app.collect.models import CollectionOutcome, CollectionRun
 from app.core.clock import Clock
-from app.core.errors import NotFoundError, PolicyBlockedError
+from app.core.errors import NotFoundError, RateLimitedError
 from app.db.database import Database
 
 
-class SameProductTooSoon(PolicyBlockedError):
+class SameProductTooSoon(RateLimitedError):
     """The same product was read less than the profile's interval ago (ADR-0010 §4).
 
-    Not a transient failure: waiting is the answer, and the operator is told when. Nothing was
-    requested, so nothing has to be undone.
+    Waiting is the answer, so this is rate limiting and not a fault: a job that meets it is
+    rescheduled by the owner that already schedules every retry, and a run of its own stays open
+    until its turn comes. Nothing was requested, so nothing has to be undone.
     """
 
     def __init__(self, seconds_remaining: float) -> None:
@@ -42,6 +43,20 @@ class SameProductTooSoon(PolicyBlockedError):
             f"this product was read too recently; {seconds_remaining:.0f} s remain",
         )
         self.seconds_remaining = seconds_remaining
+
+
+@dataclass(frozen=True)
+class PacingKey:
+    """What the same-product interval is measured on (ADR-0010 §4).
+
+    ``url`` is the normalized in-scope URL key, which is all there is before anything has been
+    read. ``source_product_id`` is the product the source itself states, when the supplier's own
+    URL form makes it plain in advance or an earlier run has already proven it; from then on the
+    interval follows the product rather than whichever accepted spelling of its URL was used.
+    """
+
+    url: str
+    source_product_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +74,8 @@ class CollectionRunRecord:
     detail: str | None
     requested_at: datetime
     product_read_at: datetime | None
+    pacing_key: str | None
+    source_product_id: str | None
     finished_at: datetime | None
 
 
@@ -91,51 +108,51 @@ class CollectionRunStore:
                 detail=None,
                 requested_at=self._clock.now(),
                 product_read_at=None,
+                pacing_key=None,
+                source_product_id=None,
                 finished_at=None,
             )
         )
         session.flush()
         return run_id
 
-    def reserve_product_read(self, run_id: str, *, interval_s: float) -> None:
-        """Take this run's one product read, or refuse because the last one was too recent.
+    def reserve_product_read(self, run_id: str, *, key: PacingKey, interval_s: float) -> None:
+        """Take one real product read, or refuse because the last one was too recent.
 
-        The check and the reservation are one write: two runs racing for the same product cannot
-        both pass it, and a restart sees the reservation the earlier run already committed. The
-        reservation is taken *before* the request, so a refusal has sent nothing.
+        Every attempt passes through here, a retry of this same run included: what is stored is
+        the timestamp of the most recent real read, never a permit the run keeps. The check and
+        the write are one transaction, so two runs racing for one product cannot both pass, and a
+        restart sees what the earlier attempt committed. It is taken *before* the request, so a
+        refusal has sent nothing.
         """
         with self._db.write() as session:
             row = session.get(CollectionRun, run_id)
             if row is None:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
-            if row.product_read_at is not None:
-                return  # this run already holds its read
             now = self._clock.now()
-            last = session.scalar(
-                select(func.max(CollectionRun.product_read_at)).where(
-                    CollectionRun.supplier_key == row.supplier_key,
-                    CollectionRun.source_url == row.source_url,
-                    CollectionRun.product_read_at.is_not(None),
-                )
-            )
-            if last is not None:
-                if last.tzinfo is None:
-                    last = last.replace(tzinfo=now.tzinfo)
-                remaining = (last + timedelta(seconds=interval_s) - now).total_seconds()
-                if remaining > 0:
-                    raise SameProductTooSoon(remaining)
+            remaining = _remaining(_last_read(session, key), now, interval_s)
+            if remaining > 0:
+                raise SameProductTooSoon(remaining)
+            row.pacing_key = key.url
             row.product_read_at = now
 
-    def next_read_allowed_at(self, supplier_key: str, source_url: str) -> datetime | None:
-        """When this product was last read, if it ever was. Read-only; reserves nothing."""
+    def seconds_until_readable(self, key: PacingKey, *, interval_s: float) -> float:
+        """How long this product must still be left alone. Read-only; reserves nothing."""
         with self._db.read() as session:
-            return session.scalar(
-                select(func.max(CollectionRun.product_read_at)).where(
-                    CollectionRun.supplier_key == supplier_key,
-                    CollectionRun.source_url == source_url,
-                    CollectionRun.product_read_at.is_not(None),
-                )
-            )
+            return _remaining(_last_read(session, key), self._clock.now(), interval_s)
+
+    def note_identity(self, run_id: str, *, source_product_id: str) -> None:
+        """Record what the document identified, so later reads are paced on the product itself.
+
+        Before the read the only thing available was the URL. Afterwards the source itself has
+        said which product it is, and ADR-0010 §4 paces on that; the URL key is kept beside it,
+        because a read that already happened under it still counts.
+        """
+        with self._db.write() as session:
+            row = session.get(CollectionRun, run_id)
+            if row is None:
+                raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
+            row.source_product_id = source_product_id
 
     def recorded(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
         self._finish(
@@ -191,6 +208,27 @@ class CollectionRunStore:
             return None if row is None else _record(row)
 
 
+def _last_read(session: Session, key: "PacingKey") -> datetime | None:
+    """The most recent real read of this product, by either name it may have been read under."""
+    named = CollectionRun.pacing_key == key.url
+    if key.source_product_id is not None:
+        named = or_(named, CollectionRun.source_product_id == key.source_product_id)
+    return session.scalar(
+        select(func.max(CollectionRun.product_read_at)).where(
+            named, CollectionRun.product_read_at.is_not(None)
+        )
+    )
+
+
+def _remaining(last: datetime | None, now: datetime, interval_s: float) -> float:
+    """Seconds still owed to the interval, or 0 when the product may be read."""
+    if last is None:
+        return 0.0
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=now.tzinfo)
+    return max(0.0, (last + timedelta(seconds=interval_s) - now).total_seconds())
+
+
 def _record(row: CollectionRun) -> CollectionRunRecord:
     return CollectionRunRecord(
         collection_run_id=row.collection_run_id,
@@ -204,5 +242,7 @@ def _record(row: CollectionRun) -> CollectionRunRecord:
         detail=row.detail,
         requested_at=row.requested_at,
         product_read_at=row.product_read_at,
+        pacing_key=row.pacing_key,
+        source_product_id=row.source_product_id,
         finished_at=row.finished_at,
     )

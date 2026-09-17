@@ -358,6 +358,14 @@ class SupplierCollection:
     roles: ImageRoleRules
     identity: Callable[[DocumentView, str], SourceIdentityResult]
     fields: Callable[[DocumentView], Mapping[str, FieldFact]]
+    # Which product an accepted URL points at, read from the URL alone, or None when the URL by
+    # itself does not say. It exists so the same product is paced as one product before anything
+    # has been read of it: two accepted forms of one product's URL are not two products.
+    #
+    # It is never an identity. A revision's ``source_product_id`` comes from the document the
+    # supplier served and from nothing else; this answers a much smaller question, and answering
+    # it wrongly can only make a collection wait, never mislabel a revision.
+    url_product_hint: Callable[[str], str | None] = lambda url: None
 
     @property
     def supplier_key(self) -> str:

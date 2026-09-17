@@ -237,7 +237,7 @@ class CollectionRun(Base):
         CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
         Index("ix_collection_runs_job_id", "job_id"),
         Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
-        Index("ix_collection_runs_product_read", "supplier_key", "source_url", "product_read_at"),
+        Index("ix_collection_runs_pacing", "pacing_key", "product_read_at"),
     )
 
     collection_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -253,8 +253,12 @@ class CollectionRun(Base):
     # Why there is no revision, or which error ended the run: a code of ours, never page content.
     detail: Mapped[str | None] = mapped_column(Text)
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
-    # When this run durably reserved its one product read. It is what the next run for the same
-    # product is measured against, so a restart cannot read the same page twice inside the
-    # interval ADR-0010 §4 fixes.
+    # When this run last took a real product read, and the key that read was paced on. Every
+    # attempt — a retry of this same run included — is measured against the most recent read on
+    # that key, so nothing buys a second read inside the interval ADR-0010 §4 fixes.
     product_read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    pacing_key: Mapped[str | None] = mapped_column(Text)
+    # What the document turned out to identify. Recorded after the read, so later runs pace on
+    # the source identity rather than on whichever accepted URL form was submitted.
+    source_product_id: Mapped[str | None] = mapped_column(String(80))
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
