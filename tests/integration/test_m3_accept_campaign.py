@@ -8,11 +8,14 @@ synthetic: the shop, its CONNECT transport and its bytes. No test here can reach
 none of them starts a REAL campaign.
 """
 
+import json
+import logging
 import shutil
 import sqlite3
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
@@ -28,7 +31,7 @@ from app.core.secrets import MemorySecretStore
 from integrations.suppliers.base import Credentials, ProbeResponse, RequestKind, SupplierDefinition
 from integrations.suppliers.collection import DocumentView, ReadKind, SupplierCollection
 from integrations.suppliers.transport.collection import PolicedCollectionGateway
-from scripts.m3accept.campaign import Environment, closeout, run_pass
+from scripts.m3accept.campaign import Environment, closeout, fresh_session, run_pass
 from scripts.m3accept.gateways import (
     LedgeredCollectionGateway,
     LedgeredConnectGateway,
@@ -51,9 +54,11 @@ from scripts.m3accept.manifest import (
 )
 from scripts.m3accept.prep import (
     ArmingRefused,
+    Gate,
     arm,
     canonical_target,
     hard_zero_problems,
+    prep_gates,
     profile_problems,
     real_environment,
     typed_approval_matches,
@@ -885,6 +890,220 @@ def test_thirteen_legal_images_that_cross_24_mib_hold_the_pass(
     assert references["stored_bytes"] <= 24 * MIB, "no byte past the pass total was stored"
     assert outcome.detail["revision_id"] is not None, "the safe incomplete revision still exists"
     assert world.ledger.ceiling(RequestClass.IMAGE_REQUEST) == (13, 26), "nothing was widened"
+
+
+# ---------------------------------------------------------------- run-pass target and request log
+
+# Spellings the production transport reads as the armed URL: a host in capitals, the https port.
+SAME_TARGET = (
+    fake_shop.PRODUCT_URL,
+    f"https://{fake_shop.HOST.upper()}/product/sample/4242/",
+    f"https://{fake_shop.HOST}:443/product/sample/4242/",
+)
+OTHER_TARGETS = (
+    f"https://{fake_shop.HOST}/product/sample/4243/",  # another product of the same shop
+    fake_shop.LISTED_URL,  # the same product through another URL than the one approved
+    fake_shop.OTHER_PRODUCT_URL,  # a URL this shop's transport refuses outright
+)
+GATES_BUT_THE_TARGET = (
+    "not a CI or test run",
+    "exact armed SHA checked out",
+    "clean working tree",
+    "dedicated campaign directory",
+    "no AI, OCR or marketplace import",
+    "REAL mode armed",
+)
+
+
+@dataclass
+class ArmedCheckout:
+    """The armed commit, checked out clean."""
+
+    def head(self) -> str:
+        return CODE_SHA
+
+    def dirty(self) -> int:
+        return 0
+
+
+def approved_world(template: Path, base: Path) -> World:
+    world = make_world(template, base, mode="REAL")
+    world.ledger.approve(CODE_SHA)
+    return world
+
+
+def armed_target_gate(world: World, url: str | None) -> Gate | None:
+    gates = prep_gates(
+        root=world.ledger.path.parent,
+        manifest=world.ledger.manifest() or {},
+        checkout=ArmedCheckout(),
+        environ={},
+        collection=world.env.collection,
+        product_url=url,
+    )
+    return {gate.name: gate for gate in gates}.get("armed target")
+
+
+def activity(world: World) -> tuple[object, ...]:
+    """Everything a pass could change: the ledger, and what either transport was asked to do."""
+    with closing(sqlite3.connect(world.ledger.path)) as db:
+        submissions = db.execute("SELECT COUNT(*) FROM submissions").fetchone()[0]
+    return (
+        world.ledger.manifest(),
+        world.ledger.events(),
+        world.ledger.counts(),
+        world.ledger.refusals(),
+        submissions,
+        world.gateway.document_reads,
+        list(world.gateway.image_reads),
+        list(world.connect.fetches),
+        world.connect.logins,
+    )
+
+
+def standalone(monkeypatch: pytest.MonkeyPatch, world: World) -> list[Path]:
+    """``m3_accept run-pass`` on the synthetic world, as the operator's terminal runs it.
+
+    Stood in for is only what a test process can never be: an interactive terminal outside a test
+    run, the armed commit checked out clean, and the REAL supplier and its transports, which are
+    the world's own. Every PREP gate still runs. Returns the data directories a REAL environment
+    was built for.
+    """
+    from scripts import m3_accept
+    from scripts.m3accept import prep
+
+    built: list[Path] = []
+
+    def environment(config: AppConfig, **_: object) -> Environment:
+        built.append(config.data_dir)
+        return world.env
+
+    monkeypatch.setattr(m3_accept, "COLLECTION", world.env.collection)
+    monkeypatch.setattr(m3_accept, "_registered", lambda: world.env.registered)
+    monkeypatch.setattr(m3_accept, "_refuse_unattended", lambda: None)
+    monkeypatch.setattr(m3_accept, "GitCheckout", ArmedCheckout)
+    monkeypatch.setattr(m3_accept, "real_environment", environment)
+    monkeypatch.setattr(prep, "ci_or_test", lambda environ=None: None)
+    return built
+
+
+def run_pass_argv(world: World, pass_id: str, url: str) -> list[str]:
+    root = str(world.ledger.path.parent)
+    return ["run-pass", "--root", root, "--pass", pass_id, "--product-url", url]
+
+
+@pytest.fixture
+def icbm_log_handlers() -> Iterator[None]:
+    """The JSON handlers a test installs, removed again, so no log file stays open after it."""
+    root = logging.getLogger()
+    level, before = root.level, list(root.handlers)
+    yield
+    for handler in [h for h in root.handlers if h not in before]:
+        root.removeHandler(handler)
+        handler.close()
+    root.setLevel(level)
+
+
+def test_run_pass_prep_passes_the_armed_target_however_the_transport_spells_it(
+    migrated_template: Path, tmp_path: Path
+) -> None:
+    world = approved_world(migrated_template, tmp_path)
+    armed = canonical_target(world.env.collection, fake_shop.PRODUCT_URL)
+    for url in SAME_TARGET:
+        assert canonical_target(world.env.collection, url) == armed
+        gate = armed_target_gate(world, url)
+        assert gate is not None and gate.passed, (url, gate)
+    # Closeout submits nothing and is given no target, so it has no target gate to pass.
+    assert armed_target_gate(world, None) is None
+
+
+def test_run_pass_refuses_any_other_target_before_anything_exists(
+    migrated_template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import m3_accept
+
+    world = approved_world(migrated_template, tmp_path)
+    for url in OTHER_TARGETS:
+        gate = armed_target_gate(world, url)
+        assert gate is not None and not gate.passed, url
+
+    built = standalone(monkeypatch, world)
+    before = activity(world)
+    for url in OTHER_TARGETS:
+        with pytest.raises(SystemExit, match="armed target") as refused:
+            m3_accept.main(run_pass_argv(world, "A", url))
+        message = str(refused.value)
+        assert not any(name in message for name in GATES_BUT_THE_TARGET), message
+        assert url not in message and fake_shop.HOST not in message, "the refusal names no URL"
+        assert built == [], "no REAL environment was built"
+        assert activity(world) == before, "no state, reservation, refusal, submission or send"
+    assert world.ledger.state() is State.APPROVED
+
+    # The same command, given the armed target, gets past every gate to the REAL environment:
+    # the refusals above were the target gate's alone.
+    m3_accept._real_env(world.ledger.path.parent, SAME_TARGET[1])
+    assert built == [world.env.config.data_dir]
+    assert activity(world) == before
+
+
+def test_the_standalone_run_pass_writes_one_sender_side_line_per_request(
+    migrated_template: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    icbm_log_handlers: None,
+) -> None:
+    from scripts import m3_accept
+
+    world = approved_world(migrated_template, tmp_path)
+    sent: list[str] = []
+
+    def shop(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.host)
+        if request.url.host == fake_shop.IMAGE_HOST:
+            return httpx.Response(
+                200, headers={"content-type": "image/png"}, content=fake_shop.OTHER_BYTES
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=fake_shop.page(product_evidence=13),
+        )
+
+    # The production collection transport, over a mock network, writes its own request lines.
+    world.env.collection_transport = lambda: PolicedCollectionGateway(
+        http_transport=httpx.MockTransport(shop)
+    )
+    standalone(monkeypatch, world)
+    log = world.env.config.data_dir / "logs" / "icbm.jsonl"
+    manifest = world.ledger.manifest()
+    assert not log.exists()
+
+    assert m3_accept.main(run_pass_argv(world, "A", fake_shop.PRODUCT_URL)) == 0
+    assert world.ledger.state() is State.WAITING_FOR_PACING
+
+    records = [json.loads(line) for line in log.read_text("utf-8").splitlines()]
+    lines = Counter(r["request_kind"] for r in records if r["msg"] == "supplier.collect_request")
+    counts = world.ledger.counts("A")
+    assert lines == {"PRODUCT_READ": 1, "IMAGE_REQUEST": 13}
+    assert lines == {kind: counts[kind] for kind in lines}, "one line per reserved request"
+    assert len(sent) == sum(lines.values()), "one line per request that left"
+    assert world.ledger.manifest() == manifest, "logging changed no manifest and no budget"
+
+
+def test_turning_the_json_log_on_sends_nothing_and_changes_no_campaign_state(
+    migrated_template: Path, tmp_path: Path, icbm_log_handlers: None
+) -> None:
+    world = approved_world(migrated_template, tmp_path)
+    before = activity(world)
+
+    with fresh_session(replace(world.env, json_logs=True), world.ledger, "A"):
+        pass
+
+    log = world.env.config.data_dir / "logs" / "icbm.jsonl"
+    assert log.is_file(), "the session writes the application's own log"
+    assert activity(world) == before
+    records = [json.loads(line) for line in log.read_text("utf-8").splitlines()]
+    assert not [r for r in records if str(r["msg"]).startswith("supplier.")]
 
 
 # ---------------------------------------------------------------- CI

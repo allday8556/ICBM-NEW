@@ -43,6 +43,7 @@ from app.config import AppConfig
 from app.container import Container, build_container
 from app.core.clock import Clock
 from app.core.errors import AppError
+from app.core.logging import configure_logging
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import SecretStore
 from app.jobs.models import JobState
@@ -90,6 +91,10 @@ class Environment:
     A *fresh session* is a fresh application composition — its own ownership lease, database
     engine, job runner and service graph — on the campaign's one dedicated data directory, loading
     the M1 connection owner that directory already holds. It is never a new supplier login.
+
+    ``json_logs`` has the session write the application's own JSON log for its data directory, as
+    ``icbm serve`` does: the transports' sender-side request lines, beside the ledger's
+    reservations. A standalone run-pass turns it on.
     """
 
     config: AppConfig
@@ -101,6 +106,7 @@ class Environment:
     clock: Clock | None = None
     registered: Sequence[RegisteredCollection] | None = None
     suppliers: Sequence[SupplierDefinition] | None = None
+    json_logs: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,6 +148,9 @@ def fresh_session(
         kwargs["suppliers"] = env.suppliers
     nonce = secrets.token_hex(16)
     with acquire_data_dir(env.config.data_dir, app_version=f"m3-accept-{nonce[:8]}") as lease:
+        if env.json_logs:
+            # Under the lease and before the database, as the application factory does (ADR-0006).
+            configure_logging(env.config.log_level, env.config.log_dir)
         container = build_container(env.config, ownership=lease, **kwargs)
         owner.owner = container.connect
         try:

@@ -11,6 +11,9 @@
 directory. It holds the ledger, the campaign's own ICBM data directory under ``data/`` — where the
 accepted M1 connection must already be established before arming — and the sanitized closeout.
 
+``run-pass`` refuses, among its PREP gates, any ``--product-url`` that is not the armed target; and
+it writes the application's JSON log to ``<dir>/data/logs/icbm.jsonl``.
+
 Nothing here is authorized to run against a provider until the prep PR is merged, the exact SHA is
 frozen, and the operator types the approval phrase ``approve`` shows them. ``approve`` and
 ``run-pass`` refuse CI, pytest and non-interactive terminals, and the REAL environment cannot even
@@ -21,6 +24,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -140,7 +144,7 @@ def cmd_status(root: Path) -> int:
     return 0
 
 
-def _real_env(root: Path) -> tuple[CampaignLedger, Environment]:
+def _real_env(root: Path, product_url: str | None) -> tuple[CampaignLedger, Environment]:
     ledger = _ledger(root)
     manifest = ledger.manifest() or {}
     gates = prep_gates(
@@ -148,6 +152,8 @@ def _real_env(root: Path) -> tuple[CampaignLedger, Environment]:
         manifest=manifest,
         checkout=GitCheckout(),
         environ=dict(os.environ),
+        collection=COLLECTION,
+        product_url=product_url,
     )
     failed = [gate for gate in gates if not gate.passed]
     if failed:
@@ -160,8 +166,8 @@ def _real_env(root: Path) -> tuple[CampaignLedger, Environment]:
 
 def cmd_run_pass(root: Path, pass_id: str, product_url: str) -> int:
     _refuse_unattended()
-    ledger, env = _real_env(root)
-    outcome = run_pass(ledger, env, pass_id, product_url)
+    ledger, env = _real_env(root, product_url)
+    outcome = run_pass(ledger, replace(env, json_logs=True), pass_id, product_url)
     report = {
         "status": outcome.status,
         "pass": outcome.pass_id,
@@ -174,7 +180,7 @@ def cmd_run_pass(root: Path, pass_id: str, product_url: str) -> int:
 
 def cmd_closeout(root: Path) -> int:
     _refuse_unattended()
-    ledger, env = _real_env(root)
+    ledger, env = _real_env(root, None)
     report = closeout(ledger, env)
     write_report(root / REPORT, report)
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
