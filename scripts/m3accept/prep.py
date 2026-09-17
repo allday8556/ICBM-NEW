@@ -13,7 +13,8 @@ persisted — no manifest, no ceiling, and so no approval can exist — it refus
 
 The PREP gates are evaluated before a pass starts and before any transport exists. None of them
 sends anything: the M1 session check reads the connection owner's own local state, and the hard-
-zero check reads source files.
+zero check reads source files. A command given a product URL is also held to the armed target: the
+URL is read exactly as arming read it, and only the armed target digest passes.
 """
 
 import ast
@@ -226,19 +227,46 @@ def hard_zero_problems(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
+def target_gate(
+    collection: SupplierCollection, manifest: Mapping[str, Any], product_url: str
+) -> Gate:
+    """Whether ``product_url`` is the one target the campaign was armed with.
+
+    The URL is read through the same ``canonical_target`` and ``target_digest`` arming used, so a
+    spelling the production transport reads as the armed URL passes and any other target fails.
+    The detail names digests only, never the URL.
+    """
+    armed = str(manifest.get("target_digest") or "")
+    try:
+        supplied = target_digest(canonical_target(collection, product_url))
+    except ArmingRefused as refused:
+        return Gate("armed target", False, "; ".join(refused.problems))
+    return Gate(
+        "armed target",
+        bool(armed) and supplied == armed,
+        f"supplied {supplied[:12]} vs armed {armed[:12]}",
+    )
+
+
 def prep_gates(
     *,
     root: Path,
     manifest: Mapping[str, Any],
     checkout: Checkout,
     environ: Mapping[str, str],
+    collection: SupplierCollection,
+    product_url: str | None,
 ) -> list[Gate]:
-    """The gates a REAL pass needs before anything else happens."""
+    """The gates a REAL pass needs before anything else happens.
+
+    ``product_url`` is the target the command was given. A command that submits one must be given
+    the armed target; closeout submits nothing and is given none.
+    """
     head = checkout.head()
     blocker = ci_or_test(environ)
     dedicated = dedicated_problems(root, environ)
     hard_zero = hard_zero_problems()
-    return [
+    gates = [
         Gate("not a CI or test run", blocker is None, blocker or ""),
         Gate(
             "exact armed SHA checked out",
@@ -250,6 +278,9 @@ def prep_gates(
         Gate("no AI, OCR or marketplace import", not hard_zero, "; ".join(hard_zero)),
         Gate("REAL mode armed", manifest.get("mode") == "REAL", str(manifest.get("mode"))),
     ]
+    if product_url is not None:
+        gates.append(target_gate(collection, manifest, product_url))
+    return gates
 
 
 # ---------------------------------------------------------------- the REAL environment
