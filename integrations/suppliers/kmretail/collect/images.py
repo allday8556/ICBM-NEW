@@ -197,6 +197,10 @@ class _References(HTMLParser):
         return ImageRole.UNKNOWN, _UNRECOGNISED, None
 
     def _reference(self, raw: str, element: Element, attribute: str) -> None:
+        # What the page wrote, kept beside what it resolves to: generic COLLECT core records how it
+        # was written, so a reference that cannot be fetched can be told from one that was
+        # resolved wrongly (Issue #52 ruling 5716978033). It decides nothing here.
+        written = raw
         raw = raw.strip()
         if not raw or raw.lower().startswith("data:"):
             return
@@ -209,7 +213,9 @@ class _References(HTMLParser):
             role, rule_id, frame = OG_IMAGE_RULE.role, OG_IMAGE_RULE.rule_id, None
         else:
             role, rule_id, frame = self._role(element)
-        self.found.append(ImageCandidate(url=url, role=role, order=len(self.found), rule=rule_id))
+        self.found.append(
+            ImageCandidate(url=url, role=role, order=len(self.found), rule=rule_id, source=written)
+        )
         self.proofs.append(frame)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:

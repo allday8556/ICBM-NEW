@@ -77,6 +77,13 @@ def images(assets: SourceAssetStore) -> tuple:
     return (replace(REPRESENTATIVE, sha256=assets.put(PNG).sha256),)
 
 
+_REF_COLUMNS = (
+    "(revision_id, role, ordinal, host, provenance, locator, sha256, status, issue, http_etag, "
+    "http_last_modified)"
+)
+_REF_COLUMNS_0011 = _REF_COLUMNS[:-1] + ", source_form, source_trimmed, target_refusal)"
+
+
 def _raw(config: AppConfig) -> sqlite3.Connection:
     raw = sqlite3.connect(config.database_path)
     raw.execute("PRAGMA foreign_keys=ON")
@@ -204,8 +211,30 @@ def test_the_database_refuses_forbidden_rows_even_without_the_domain(
             f"'.price', '{'x' * 4097}', NULL, 'CONFIRMED', '{'e' * 64}')"
         ),
         "ck_product_facts_image_refs_status_matches_issue": (
-            f"INSERT INTO product_facts_image_refs VALUES ('{revision}', 'DETAIL', 9, "
-            "'img.shop.example', '.detail img', NULL, NULL, 'CONFIRMED', NULL, NULL, NULL)"
+            f"INSERT INTO product_facts_image_refs {_REF_COLUMNS} VALUES ('{revision}', 'DETAIL', "
+            "9, 'img.shop.example', '.detail img', NULL, NULL, 'CONFIRMED', NULL, NULL, NULL)"
+        ),
+        # 0011 (Issue #52 ruling 5716978033): diagnostics are closed vocabularies, and a refused
+        # fetch target never carries bytes or a locator.
+        "ck_product_facts_image_refs_source_form_valid": (
+            f"INSERT INTO product_facts_image_refs {_REF_COLUMNS_0011} VALUES ('{revision}', "
+            "'DETAIL', 9, 'img.shop.example', '.detail img', NULL, NULL, 'REVIEW_REQUIRED', "
+            "'FETCH_FAILED', NULL, NULL, 'SOMEWHERE', NULL, NULL)"
+        ),
+        "ck_product_facts_image_refs_source_trimmed_has_form": (
+            f"INSERT INTO product_facts_image_refs {_REF_COLUMNS_0011} VALUES ('{revision}', "
+            "'DETAIL', 9, 'img.shop.example', '.detail img', NULL, NULL, 'REVIEW_REQUIRED', "
+            "'FETCH_FAILED', NULL, NULL, NULL, 1, NULL)"
+        ),
+        "ck_product_facts_image_refs_target_refusal_valid": (
+            f"INSERT INTO product_facts_image_refs {_REF_COLUMNS_0011} VALUES ('{revision}', "
+            "'DETAIL', 9, 'img.shop.example', '.detail img', NULL, NULL, 'REVIEW_REQUIRED', "
+            "'FETCH_FAILED', NULL, NULL, 'ABSOLUTE', 0, 'OTHER')"
+        ),
+        "ck_product_facts_image_refs_refused_target_has_nothing": (
+            f"INSERT INTO product_facts_image_refs {_REF_COLUMNS_0011} VALUES ('{revision}', "
+            "'DETAIL', 9, 'img.shop.example', '.detail img', 'https://img.shop.example/x.png', "
+            "NULL, 'REVIEW_REQUIRED', 'FETCH_FAILED', NULL, NULL, 'ABSOLUTE', 0, 'NON_HTTPS')"
         ),
         "ck_source_assets_sha256_hex": (
             f"INSERT INTO source_assets VALUES ('{'F' * 64}', 'image/png', 1, 1, 1, {at})"
@@ -248,6 +277,48 @@ def test_0007_downgrade_never_drops_source_truth(tmp_path: Path) -> None:
         # is still there and the database stops exactly at it.
         assert current_revision(engine) == "0007_m3_product_facts_revisions"
         assert head_revision() >= "0007_m3_product_facts_revisions"
+    finally:
+        engine.dispose()
+
+
+def test_0011_downgrade_never_drops_recorded_image_diagnostics(tmp_path: Path) -> None:
+    # Issue #52 ruling 5716978033: how a reference was written and why its target was refused are
+    # source truth once recorded, so the columns holding them are not dropped from under them.
+    from app.collect.facts import (
+        FetchTargetRefusal,
+        FieldStatus,
+        ImageIssue,
+        ImageReference,
+        ImageRole,
+        LocatorForm,
+    )
+
+    url = f"sqlite:///{(tmp_path / 'icbm.db').as_posix()}"
+    upgrade_to_head(url)
+    db = Database(url)
+    try:
+        assets = SourceAssetStore(tmp_path / "source-assets", db, FakeDecoder(), FakeClock())
+        refused = ImageReference(
+            role=ImageRole.DETAIL,
+            ordinal=1,
+            host="img.shop.example",
+            provenance=".detail img:nth-of-type(1)",
+            status=FieldStatus.REVIEW_REQUIRED,
+            issue=ImageIssue.FETCH_FAILED,
+            source_form=LocatorForm.ABSOLUTE,
+            source_trimmed=False,
+            target_refusal=FetchTargetRefusal.NON_HTTPS,
+        )
+        ProductFactsRevisionStore(db, FakeClock()).append(
+            collected(images=(replace(REPRESENTATIVE, sha256=assets.put(PNG).sha256), refused))
+        )
+    finally:
+        db.dispose()
+    with pytest.raises(RuntimeError, match="never silently destroyed"):
+        command.downgrade(alembic_config(url), "0010_m3_same_product_pacing")
+    engine = create_sqlite_engine(url)
+    try:
+        assert current_revision(engine) == "0011_m3_image_reference_diagnostics"
     finally:
         engine.dispose()
 

@@ -24,11 +24,13 @@ from app.collect.facts import (
     EvidenceKind,
     FactsStatus,
     FactValue,
+    FetchTargetRefusal,
     FieldLevel,
     FieldStatus,
     ImageIssue,
     ImageReference,
     ImageRole,
+    LocatorForm,
     evaluate,
     evidence_digest,
     field_fingerprint,
@@ -184,6 +186,9 @@ class ProductFactsRevisionStore:
                     issue=None if ref.issue is None else ref.issue.value,
                     http_etag=ref.etag,
                     http_last_modified=ref.last_modified,
+                    source_form=None if ref.source_form is None else ref.source_form.value,
+                    source_trimmed=ref.source_trimmed,
+                    target_refusal=None if ref.target_refusal is None else ref.target_refusal.value,
                 )
                 for ref in evaluated.images
             )
@@ -305,6 +310,13 @@ class ProductFactsRevisionStore:
                         issue=None if ref.issue is None else ImageIssue(ref.issue),
                         etag=ref.http_etag,
                         last_modified=ref.http_last_modified,
+                        source_form=None
+                        if ref.source_form is None
+                        else LocatorForm(ref.source_form),
+                        source_trimmed=ref.source_trimmed,
+                        target_refusal=None
+                        if ref.target_refusal is None
+                        else FetchTargetRefusal(ref.target_refusal),
                     )
                     for ref in session.scalars(
                         select(ProductFactsImageRef).where(

@@ -94,6 +94,9 @@ class SourceTruthReadback:
             issue=reference.issue,
             http_etag=reference.etag,
             http_last_modified=reference.last_modified,
+            source_form=reference.source_form,
+            source_trimmed=reference.source_trimmed,
+            target_refusal=reference.target_refusal,
             asset=None
             if stored is None
             else SourceAssetView(

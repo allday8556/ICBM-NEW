@@ -13,7 +13,15 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.collect.facts import FactsStatus, FieldLevel, FieldStatus, ImageIssue, ImageRole
+from app.collect.facts import (
+    FactsStatus,
+    FetchTargetRefusal,
+    FieldLevel,
+    FieldStatus,
+    ImageIssue,
+    ImageRole,
+    LocatorForm,
+)
 from app.collect.models import CollectionOutcome
 
 
@@ -45,6 +53,11 @@ class ImageReferenceView(BaseModel):
     http_etag: str | None
     http_last_modified: str | None
     asset: SourceAssetView | None
+    # How the source wrote the reference and, when the target check refused what it resolved to,
+    # why (Issue #52 ruling 5716978033). ``None`` on references recorded before these were kept.
+    source_form: LocatorForm | None
+    source_trimmed: bool | None
+    target_refusal: FetchTargetRefusal | None
 
 
 class EvidenceView(BaseModel):

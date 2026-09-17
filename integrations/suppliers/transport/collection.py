@@ -36,12 +36,14 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import SplitResult, unquote_plus, urlsplit
 
 import httpx
 
+from app.collect.facts import FetchTargetRefusal
 from app.core.egress import EGRESS, EgressBlockedError
 from app.core.errors import (
     AppError,
@@ -103,7 +105,15 @@ def install_log_guards() -> None:
 
 
 class CollectionTargetRefused(PolicyBlockedError):
-    """The URL is outside the collection profile; nothing was reserved or sent."""
+    """The URL is outside the collection profile; nothing was reserved or sent.
+
+    ``reason`` says which rule refused it, from a closed vocabulary with no catch-all. The message
+    is for people and never echoes the URL.
+    """
+
+    def __init__(self, reason: FetchTargetRefusal, message: str) -> None:
+        super().__init__("COLLECT_TARGET_REFUSED", message)
+        self.reason = reason
 
 
 class CollectionBudgetRefused(PolicyBlockedError):
@@ -142,38 +152,81 @@ def ci_or_test(environ: Mapping[str, str] | None = None) -> str | None:
     return "pytest" if "pytest" in sys.modules else None
 
 
-def _refused(message: str) -> CollectionTargetRefused:
-    return CollectionTargetRefused("COLLECT_TARGET_REFUSED", message)
+def _refused(reason: FetchTargetRefusal, message: str) -> CollectionTargetRefused:
+    return CollectionTargetRefused(reason, message)
 
 
 def _https(url: str) -> SplitResult:
-    """The parts of an https URL without credentials, another port, a fragment or whitespace."""
-    if any(char.isspace() for char in url) or "#" in url:
-        raise _refused("a collection URL has no whitespace and no fragment")
-    parts = urlsplit(url)
+    """The parts of an https URL without credentials, another port, a fragment or whitespace.
+
+    A URL with more than one defect is refused for the first of them, in this fixed order, so the
+    same URL always gets the same reason: whitespace, a fragment, an unparseable URL or port, no
+    scheme, ``http``, another scheme, no host, credentials, another port. Nothing is repaired: a
+    URL is accepted as written or refused.
+    """
+    if any(char.isspace() for char in url):
+        raise _refused(FetchTargetRefusal.WHITESPACE, "a collection URL has no whitespace")
+    if "#" in url:
+        raise _refused(FetchTargetRefusal.FRAGMENT, "a collection URL has no fragment")
     try:
+        parts = urlsplit(url)
         port = parts.port
     except ValueError:
-        raise _refused("the collection URL is not parseable") from None
-    if (
-        parts.scheme != "https"
-        or not parts.hostname
-        or parts.username is not None
-        or parts.password is not None
-        or port not in (None, 443)
-    ):
-        raise _refused("a collection URL is https without credentials or another port")
+        raise _refused(
+            FetchTargetRefusal.UNPARSEABLE, "the collection URL is not parseable"
+        ) from None
+    if not parts.scheme:
+        raise _refused(FetchTargetRefusal.NOT_ABSOLUTE, "a collection URL names its own scheme")
+    if parts.scheme == "http":
+        raise _refused(FetchTargetRefusal.NON_HTTPS, "a collection URL is https, not http")
+    if parts.scheme != "https":
+        raise _refused(FetchTargetRefusal.UNSUPPORTED_SCHEME, "a collection URL is https")
+    if not parts.hostname:
+        raise _refused(FetchTargetRefusal.UNPARSEABLE, "the collection URL names no host")
+    if parts.username is not None or parts.password is not None:
+        raise _refused(
+            FetchTargetRefusal.CREDENTIALS_PRESENT, "a collection URL carries no credentials"
+        )
+    if port not in (None, 443):
+        raise _refused(FetchTargetRefusal.NON_STANDARD_PORT, "a collection URL uses port 443")
     return parts
+
+
+@dataclass(frozen=True)
+class ImageFetchTarget:
+    """What the target check made of one image URL it allows.
+
+    ``host`` is the budget subject. ``locator`` is the canonical form of the target — https, the
+    host as parsed, the path as written — and ``None`` when the target carries a query, which may
+    be a token and is never persisted. The request itself is still sent to the URL exactly as it
+    was written: the canonical form is for reading back, never a rewrite.
+    """
+
+    host: str
+    locator: str | None
+
+
+def image_fetch_target(profile: CollectionProfile, url: str) -> ImageFetchTarget:
+    """The one judge of whether an image URL may be fetched, or its structured refusal.
+
+    :func:`check_target` answers image requests through this function, and generic COLLECT core
+    asks it the same question to record what a reference resolved to. No other code decides it.
+    """
+    parts = _https(url)
+    host = parts.hostname or ""
+    if host not in profile.image_hosts:
+        raise _refused(FetchTargetRefusal.HOST_NOT_ALLOWLISTED, "the image host is not allowlisted")
+    return ImageFetchTarget(
+        host=host, locator=None if parts.query else f"https://{host}{parts.path}"
+    )
 
 
 def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
     """Refuse a URL outside the profile; return the budget subject of an allowed one."""
+    if kind is ReadKind.IMAGE_REQUEST:
+        return image_fetch_target(profile, url).host
     parts = _https(url)
     host, path = parts.hostname or "", parts.path or "/"
-    if kind is ReadKind.IMAGE_REQUEST:
-        if host not in profile.image_hosts:
-            raise _refused("the image host is not allowlisted")
-        return host
     if (
         kind is ReadKind.POLICY_READ
         and host != profile.storefront_host
@@ -181,21 +234,39 @@ def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
     ):
         # Exactly that one document on that host, with no query and no other path. This is the
         # host's own policy, not an opening to read anything else from it.
-        if parts.query or path != IMAGE_ROBOTS_PATH:
-            raise _refused("an image host answers for its robots document only")
+        if parts.query:
+            raise _refused(
+                FetchTargetRefusal.QUERY_NOT_ALLOWED,
+                "an image host answers for its robots document only",
+            )
+        if path != IMAGE_ROBOTS_PATH:
+            raise _refused(
+                FetchTargetRefusal.PATH_NOT_ALLOWED,
+                "an image host answers for its robots document only",
+            )
         return f"{IMAGE_ROBOTS_PREFIX}{host}"
     if host != profile.storefront_host:
-        raise _refused("documents are read only from the storefront host")
+        raise _refused(
+            FetchTargetRefusal.HOST_NOT_ALLOWLISTED,
+            "documents are read only from the storefront host",
+        )
     if kind is ReadKind.POLICY_READ:
-        if parts.query or path not in profile.policy_paths:
-            raise _refused("not an allowlisted policy document")
+        if parts.query:
+            raise _refused(FetchTargetRefusal.QUERY_NOT_ALLOWED, "a policy document has no query")
+        if path not in profile.policy_paths:
+            raise _refused(
+                FetchTargetRefusal.PATH_NOT_ALLOWED, "not an allowlisted policy document"
+            )
         return path
     if not profile.is_product_path(path):
-        raise _refused("the path is not the product path form")
+        raise _refused(FetchTargetRefusal.PATH_NOT_ALLOWED, "the path is not the product path form")
     safe = profile.safe_query_keys.get(host, frozenset())
     keys = [pair.split("=", 1)[0] for pair in parts.query.split("&") if pair]
     if any(unquote_plus(key) not in safe for key in keys):
-        raise _refused("the product URL carries a query key that is not explicitly safe")
+        raise _refused(
+            FetchTargetRefusal.QUERY_NOT_ALLOWED,
+            "the product URL carries a query key that is not explicitly safe",
+        )
     return f"https://{host}{path}" + (f"?{parts.query}" if parts.query else "")
 
 
@@ -205,13 +276,21 @@ def check_discovered_policy(profile: CollectionProfile, url: str) -> str:
     parts = _https(url)
     path = parts.path or "/"
     if parts.hostname != profile.storefront_host:
-        raise _refused("a discovered policy document is read only from the storefront host")
+        raise _refused(
+            FetchTargetRefusal.HOST_NOT_ALLOWLISTED,
+            "a discovered policy document is read only from the storefront host",
+        )
     if parts.query:
-        raise _refused("a discovered policy read carries no query")
+        raise _refused(
+            FetchTargetRefusal.QUERY_NOT_ALLOWED, "a discovered policy read carries no query"
+        )
     if path in profile.policy_paths:
-        raise _refused("a fixed policy document is read as a fixed policy read")
+        raise _refused(
+            FetchTargetRefusal.PATH_NOT_ALLOWED,
+            "a fixed policy document is read as a fixed policy read",
+        )
     if profile.is_product_path(path):
-        raise _refused("a product page is never a policy read")
+        raise _refused(FetchTargetRefusal.PATH_NOT_ALLOWED, "a product page is never a policy read")
     return path
 
 

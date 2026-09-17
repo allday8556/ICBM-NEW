@@ -32,12 +32,13 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from app.collect.facts import (
     CollectedFacts,
     FactsStatus,
+    FetchTargetRefusal,
     ImageIssue,
     ImageReference,
     ImageRole,
@@ -81,6 +82,7 @@ from integrations.suppliers.transport.collection import (
     ImageFetchRefused,
     RequestBudget,
     check_target,
+    image_fetch_target,
 )
 
 logger = logging.getLogger("icbm.collect")
@@ -460,8 +462,16 @@ class ProductCollectionService:
         spent_bytes = 0
         for candidate in wanted:
             role = CANONICAL_ROLE[candidate.role]
-            unreadable = _unfetched(candidate, role)
-            locator = stable_locator(candidate.url)
+            # What the reference resolves to is the transport's own judgement, asked once and
+            # recorded whether or not a request follows. A refusal here is exactly the refusal the
+            # gateway would make before reserving anything, so no request is made for it.
+            locator: str | None = None
+            refusal: FetchTargetRefusal | None = None
+            try:
+                locator = image_fetch_target(profile, candidate.url).locator
+            except CollectionTargetRefused as refused:
+                refusal = refused.reason
+            unreadable = _unfetched(candidate, role, locator=locator, refusal=refusal)
             stored = known.get(locator) if locator else None
             # What this run may still spend. The bound goes to the gateway, so a body over it is
             # refused as it arrives and never reaches the store: the advertised run total is a
@@ -469,6 +479,11 @@ class ProductCollectionService:
             allowance = limits.max_new_image_bytes_per_run - spent_bytes
             if allowance <= 0:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
+                continue
+            if refusal is not None:
+                # The gateway would refuse it before reserving anything: the same outcome, and the
+                # reason is now kept. Nothing about the URL is repaired to make it fetchable.
+                collected.append(unreadable(ImageIssue.FETCH_FAILED))
                 continue
             try:
                 response = self._gateway.read_image(
@@ -481,6 +496,14 @@ class ProductCollectionService:
                 )
             except CollectionBudgetRefused:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
+                continue
+            except CollectionTargetRefused as refused:
+                # The same judge refused it at the gateway; keep its reason as well.
+                collected.append(
+                    _unfetched(candidate, role, locator=None, refusal=refused.reason)(
+                        ImageIssue.FETCH_FAILED
+                    )
+                )
                 continue
             except ImageFetchRefused as refused:
                 issue = ImageIssue(refused.issue.value)
@@ -512,6 +535,7 @@ class ProductCollectionService:
                         locator=locator,
                         http_etag=response.etag or stored.etag,
                         http_last_modified=response.last_modified or stored.last_modified,
+                        **_written(candidate),
                     )
                 )
                 continue
@@ -529,6 +553,7 @@ class ProductCollectionService:
                     locator=locator,
                     http_etag=response.etag,
                     http_last_modified=response.last_modified,
+                    **_written(candidate),
                 )
             )
         return self._recorder.record(collected)
@@ -544,10 +569,27 @@ class ProductCollectionService:
             ) from None
 
 
+def _written(candidate: ImageCandidate) -> dict[str, Any]:
+    """What a revision keeps of how the page wrote the reference: its form, never its text."""
+    written = candidate.source_form
+    if written is None:
+        return {"source_form": None, "source_trimmed": None}
+    form, trimmed = written
+    return {"source_form": form, "source_trimmed": trimmed}
+
+
 def _unfetched(
-    candidate: ImageCandidate, role: ImageRole
+    candidate: ImageCandidate,
+    role: ImageRole,
+    *,
+    locator: str | None,
+    refusal: FetchTargetRefusal | None,
 ) -> Callable[[ImageIssue], UnfetchedImage]:
-    """One reference that produced no bytes, whatever the reason turns out to be."""
+    """One reference that produced no bytes, whatever the reason turns out to be.
+
+    It keeps what the reference resolved to: the canonical fetch target when the target check
+    allowed it, or the target check's reason when it did not.
+    """
 
     def reference(issue: ImageIssue) -> UnfetchedImage:
         return UnfetchedImage(
@@ -556,6 +598,9 @@ def _unfetched(
             host=candidate.host,
             provenance=candidate.rule,
             issue=issue,
+            locator=locator,
+            target_refusal=refusal,
+            **_written(candidate),
         )
 
     return reference
@@ -578,20 +623,6 @@ def pacing_key(collection: SupplierCollection, product_url: str) -> PacingKey:
         url=f"https://{parts.hostname}{parts.path.rstrip('/')}",
         source_product_id=collection.url_product_hint(product_url),
     )
-
-
-def stable_locator(url: str) -> str | None:
-    """The reference's own https URL when it can stand as a stable locator, else None.
-
-    A URL carrying a query may carry a token, so it is not persisted at all: the reference then
-    identifies itself by host and provenance, and is fetched afresh every time.
-    """
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.hostname or parts.query or parts.fragment:
-        return None
-    if parts.username or parts.password or parts.port not in (None, 443):
-        return None
-    return f"https://{parts.hostname}{parts.path}"
 
 
 def url_policy_of(profile: CollectionProfile) -> UrlPolicy:
