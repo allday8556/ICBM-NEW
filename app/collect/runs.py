@@ -16,6 +16,7 @@ content, no URL of a provider's making and no credential ever reaches this row.
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -27,6 +28,7 @@ from app.collect.models import CollectionOutcome, CollectionRun
 from app.core.clock import Clock
 from app.core.errors import NotFoundError, RateLimitedError
 from app.db.database import Database
+from app.jobs.models import Job
 
 
 class SameProductTooSoon(RateLimitedError):
@@ -205,6 +207,37 @@ class CollectionRunStore:
             if row is None:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             return _record(row)
+
+    def unsettled_job_ids(
+        self, terminal_states: Sequence[str], *, limit: int = 500
+    ) -> tuple[str, ...]:
+        """The jobs whose runs are still waiting for an answer and can no longer run.
+
+        This is the owner's half of the reconciliation join (Issue #52 rulings 5721367502 S1 and
+        5721796080): a run with no outcome names the job it belongs to, and the job table says what
+        became of that job. Which states a job never leaves is the job system's to define and is
+        handed in; this knows only where its own rows are. Nothing is remembered in memory, so an
+        inconsistency outlives the process that caused it, and an answered run is simply not here.
+
+        The join happens **before** the bound, so what comes back is a page of inconsistencies and
+        not a page of runs that merely might be one. Bounding the waiting runs first would let a
+        page of jobs that are still perfectly alive hide an orphan behind them — the same page,
+        every sweep, for ever. Settled runs leave this set, so bounded sweeps keep reaching further
+        until nothing is left.
+        """
+        with self._db.read() as session:
+            return tuple(
+                session.scalars(
+                    select(CollectionRun.job_id)
+                    .join(Job, Job.job_id == CollectionRun.job_id)
+                    .where(
+                        CollectionRun.outcome == CollectionOutcome.PENDING,
+                        Job.state.in_(terminal_states),
+                    )
+                    .order_by(CollectionRun.requested_at)
+                    .limit(limit)
+                ).all()
+            )
 
     def for_job(self, job_id: str) -> CollectionRunRecord | None:
         with self._db.read() as session:

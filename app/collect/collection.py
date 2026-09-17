@@ -64,7 +64,7 @@ from app.core.correlation import get_correlation_id, new_correlation_id
 from app.core.errors import AppError, InputValidationError, NotFoundError
 from app.db.database import Database
 from app.jobs.policy import RetryPolicy
-from app.jobs.registry import JobContext, JobDefinition
+from app.jobs.registry import JobContext, JobDefinition, TerminalJob
 from app.jobs.service import JobService
 from integrations.suppliers.collection import (
     CollectionProfile,
@@ -88,6 +88,9 @@ from integrations.suppliers.transport.collection import (
 logger = logging.getLogger("icbm.collect")
 
 COLLECT_PRODUCT_JOB = "collect.product"
+# What a run says when its job ended without the run reaching an answer of its own. It names the
+# lifecycle fact and the job system's own classification, and claims nothing about the source.
+UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
 # A collection reads one page and fetches bounded images. A transient provider failure is worth
 # another attempt; nothing else is, and the shared error taxonomy decides which classes those are.
 #
@@ -254,6 +257,42 @@ class ProductCollectionService:
             # recovered from the revision it already appended, never collected a second time.
             idempotent=True,
             retry_policy=COLLECT_POLICY,
+            # A run belongs to its job: when the job can no longer run, the run has its answer.
+            on_terminal=self._settle_unfinished_run,
+            # And where a run still waiting for one can be found again, so that answer does not
+            # depend on the call above having happened, or having worked.
+            unsettled_owned_jobs=self._runs.unsettled_job_ids,
+        )
+
+    def _settle_unfinished_run(self, terminal: TerminalJob) -> None:
+        """Close a run whose job ended without the run reaching an outcome of its own.
+
+        Every answer a collection can give — recorded, no revision, a classified failure — is
+        settled by :meth:`_run_job` itself. This is only reached when the job ended some other
+        way: an exception no one classified, an interrupted attempt that will not resume, or a
+        handler that returned without settling. The run is then FAILED and says exactly that, with
+        the job system's own classification of what happened; it is never given a source-truth
+        meaning it has no evidence for, and no revision is invented for it. What the attempt
+        already consumed stays consumed: the same-product read it reserved is untouched, so a
+        failure buys no earlier next read.
+
+        It is called when the job ends and again by the reconciliation sweep, in any order and any
+        number of times: a run that already has an answer is left exactly as it is.
+        """
+        record = self._runs.for_job(terminal.job_id)
+        if record is None or record.outcome is not CollectionOutcome.PENDING:
+            return
+        detail = f"{UNFINISHED_RUN}:{terminal.error_code or terminal.state}"
+        self._runs.failed(record.collection_run_id, detail=detail)
+        logger.error(
+            "collect.run_unfinished",
+            extra={
+                "collection_run_id": record.collection_run_id,
+                "job_id": terminal.job_id,
+                "job_state": terminal.state,
+                "error_class": terminal.error_class,
+                "error_code": terminal.error_code,
+            },
         )
 
     def supplier_keys(self) -> list[str]:
