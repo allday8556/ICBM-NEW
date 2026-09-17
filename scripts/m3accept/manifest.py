@@ -1,4 +1,5 @@
-"""The frozen contract of ``m3-accept-01`` (Issue #52 rulings 5711123764 §2–§5, 5711187191).
+"""The frozen contract of an M3 REAL acceptance campaign (Issue #52 rulings 5711123764 §2–§5,
+5711187191, 5714750891).
 
 Everything a REAL pass may do is written here once, and nothing an operator types can widen it:
 the request classes and their ceilings are code, so a different budget is a different commit, a
@@ -6,18 +7,25 @@ different SHA, a new audit and a new approval — never a flag.
 
 The budget in this module is **proposed for review and NOT authorized for REAL**. It becomes
 executable only after the prep PR is merged, the exact SHA is frozen, and the operator types the
-approval phrase for that SHA and this campaign id.
+approval phrase for that SHA and the campaign's id.
+
+A campaign id is not a constant here. It belongs to the campaign's ledger, which records it when
+the ledger is created; the target digest, the approval phrase and the manifest all take the id the
+ledger returns.
 """
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
-CAMPAIGN_ID = "m3-accept-01"
+# The form of a campaign id: m3-accept-01 was the first, m3-accept-02 replaces it. An id has no
+# space, so it cannot run into the words of the approval phrase around it.
+CAMPAIGN_ID_FORMAT = re.compile(r"m3-accept-[0-9]{2,}")
 SUPPLIER_KEY = "kmretail"
 PASSES = ("A", "B")
 MIB = 1024 * 1024
@@ -163,14 +171,21 @@ def byte_facts(phase_b: Mapping[str, Any], *, baseline: int) -> ByteFacts:
     )
 
 
-def target_digest(canonical_product_url: str) -> str:
-    """The target as GitHub may see it: a digest of the canonical URL, never the URL itself."""
-    return hashlib.sha256(f"{CAMPAIGN_ID}\n{canonical_product_url}".encode()).hexdigest()
+def valid_campaign_id(campaign_id: object) -> bool:
+    return isinstance(campaign_id, str) and CAMPAIGN_ID_FORMAT.fullmatch(campaign_id) is not None
 
 
-def approval_phrase(code_sha: str) -> str:
+def target_digest(campaign_id: str, canonical_product_url: str) -> str:
+    """The target as GitHub may see it: a digest of the canonical URL, never the URL itself.
+
+    The campaign id is part of it, so one URL armed by two campaigns has two digests.
+    """
+    return hashlib.sha256(f"{campaign_id}\n{canonical_product_url}".encode()).hexdigest()
+
+
+def approval_phrase(campaign_id: str, code_sha: str) -> str:
     """The exact words the operator types. It is shown, never generated on their behalf."""
-    return f"APPROVE {CAMPAIGN_ID} {code_sha[:12]} TWO-PASS-REAL"
+    return f"APPROVE {campaign_id} {code_sha[:12]} TWO-PASS-REAL"
 
 
 @dataclass(frozen=True)

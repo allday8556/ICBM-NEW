@@ -1,7 +1,13 @@
-"""The durable ledger of ``m3-accept-01`` (Issue #52 rulings 5711123764 §4, §7 and 5711187191).
+"""The durable ledger of an M3 REAL acceptance campaign (Issue #52 rulings 5711123764 §4, §7,
+5711187191 and 5714750891).
 
 One SQLite file per campaign, outside the repository and outside every ordinary ICBM data
 directory. It is the only thing that lets a campaign request leave the machine:
+
+* **Identity.** The ledger owns its campaign's id. It is written into the INITIALIZED event when
+  the ledger is created — before anything is armed — and every command reads it back from there.
+  Arming builds the manifest, its target digest included, from that id, so no ledger can be armed
+  under another campaign's identity.
 
 * **Pre-send.** Every external request is reserved — committed with ``synchronous=FULL`` — before a
   byte of it can be sent, and only while its own pass is running. A refused reservation sends
@@ -34,7 +40,14 @@ from pathlib import Path
 from typing import Any
 
 from integrations.suppliers.transport.collection import CollectionBudgetRefused
-from scripts.m3accept.manifest import CAMPAIGN_ID, Manifest, RequestClass
+from scripts.m3accept.manifest import (
+    ByteFacts,
+    CampaignBudget,
+    Manifest,
+    RequestClass,
+    target_digest,
+    valid_campaign_id,
+)
 
 _TABLES = ("manifest", "ceilings", "events", "reservations", "refusals", "submissions", "results")
 
@@ -64,10 +77,10 @@ class CampaignBudgetRefused(CollectionBudgetRefused):
     """The campaign ledger refused a request before anything was sent."""
 
 
-_SCHEMA = f"""
+_SCHEMA = """
 CREATE TABLE manifest (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    campaign_id TEXT NOT NULL CHECK (campaign_id = '{CAMPAIGN_ID}'),
+    campaign_id TEXT NOT NULL CHECK (length(campaign_id) BETWEEN 1 AND 64),
     mode TEXT NOT NULL CHECK (mode IN ('REAL', 'DRY')),
     code_sha TEXT NOT NULL CHECK (length(code_sha) = 40),
     target_digest TEXT NOT NULL CHECK (length(target_digest) = 64),
@@ -170,7 +183,10 @@ class CampaignLedger:
         self.path = path
 
     @classmethod
-    def create(cls, path: Path) -> "CampaignLedger":
+    def create(cls, path: Path, *, campaign_id: str) -> "CampaignLedger":
+        """A new ledger that owns ``campaign_id`` from its first event on."""
+        if not valid_campaign_id(campaign_id):
+            raise LedgerError("a campaign id has the form m3-accept-NN")
         if path.exists():
             raise LedgerError("a campaign ledger is never initialized twice")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,8 +194,12 @@ class CampaignLedger:
             db.execute("PRAGMA synchronous=FULL")
             db.executescript(_SCHEMA)
             db.execute(
-                "INSERT INTO events (at, state, detail) VALUES (?, ?, '{}')",
-                (now(), State.INITIALIZED.value),
+                "INSERT INTO events (at, state, detail) VALUES (?, ?, ?)",
+                (
+                    now(),
+                    State.INITIALIZED.value,
+                    json.dumps({"campaign_id": campaign_id}, sort_keys=True),
+                ),
             )
             db.commit()
         return cls(path)
@@ -224,7 +244,35 @@ class CampaignLedger:
             raise LedgerError(f"the campaign is {state.value}, not {'/'.join(allowed)}")
         return state
 
+    @staticmethod
+    def _campaign_id(db: sqlite3.Connection) -> str:
+        (detail,) = db.execute(
+            "SELECT detail FROM events WHERE state = ? ORDER BY seq LIMIT 1",
+            (State.INITIALIZED.value,),
+        ).fetchone()
+        initialized = json.loads(detail).get("campaign_id")
+        row = db.execute("SELECT campaign_id FROM manifest").fetchone()
+        armed = None if row is None else row[0]
+        if initialized is None:
+            # A ledger from before the id was recorded at creation: the armed m3-accept-01. Its
+            # manifest names it; nothing is written back.
+            if armed is None:
+                raise LedgerError("this ledger records no campaign identity")
+            return str(armed)
+        if armed is not None and armed != initialized:
+            raise LedgerError("the manifest names another campaign than this ledger")
+        return str(initialized)
+
     # ---------------------------------------------------------------- reading
+
+    def campaign_id(self) -> str:
+        """This campaign's identity, from this ledger alone.
+
+        A ledger records it in its INITIALIZED event. A ledger created before that was recorded
+        has an empty INITIALIZED event, and only if it was armed does its manifest's id stand in.
+        """
+        with self._db() as db:
+            return self._campaign_id(db)
 
     def state(self) -> State:
         with self._db() as db:
@@ -289,13 +337,33 @@ class CampaignLedger:
 
     # ---------------------------------------------------------------- arming and approval
 
-    def arm(self, manifest: Manifest) -> None:
-        """Write the manifest and its ceilings once. After this nothing in either can change."""
-        if manifest.campaign_id != CAMPAIGN_ID:
-            raise LedgerError(f"this ledger belongs to {CAMPAIGN_ID}")
-        body = manifest.as_json()
+    def arm(
+        self,
+        *,
+        code_sha: str,
+        canonical_target: str,
+        budget: CampaignBudget,
+        byte_facts: ByteFacts,
+        mode: str,
+    ) -> Manifest:
+        """Write the manifest and its ceilings once. After this nothing in either can change.
+
+        The manifest is built here, under this ledger's own campaign id: its ``campaign_id`` and
+        its target digest both come from the ledger, never from the caller. The canonical target
+        is only digested; the URL itself is not stored.
+        """
         with self._transaction() as db:
             self._require(db, State.INITIALIZED)
+            campaign_id = self._campaign_id(db)
+            manifest = Manifest(
+                campaign_id=campaign_id,
+                code_sha=code_sha,
+                target_digest=target_digest(campaign_id, canonical_target),
+                budget=budget,
+                byte_facts=byte_facts,
+                mode=mode,
+            )
+            body = manifest.as_json()
             db.execute(
                 "INSERT INTO manifest VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -316,6 +384,7 @@ class CampaignLedger:
                     (request.value, ceiling.per_pass, ceiling.campaign),
                 )
             self._event(db, State.ARMED, {"manifest_digest": manifest.digest()})
+        return manifest
 
     def approve(self, code_sha: str) -> None:
         """Record that the operator typed the approval for exactly this SHA. REAL only."""

@@ -1,5 +1,5 @@
-"""The ``m3-accept-01`` campaign harness, offline (Issue #52 rulings 5711123764, 5711187191; PR #71
-review 5233744115 and comment 5712246461).
+"""The M3 REAL acceptance campaign harness, offline (Issue #52 rulings 5711123764, 5711187191,
+5713773005, 5714750891; PR #71 review 5233744115 and comment 5712246461).
 
 Every pass here runs through the production ``ProductCollectionService``, the production job
 runner and the production collection gateway contract, with the production M1 connection owner
@@ -8,6 +8,7 @@ synthetic: the shop, its CONNECT transport and its bytes. No test here can reach
 none of them starts a REAL campaign.
 """
 
+import hashlib
 import json
 import logging
 import shutil
@@ -48,9 +49,11 @@ from scripts.m3accept.m1 import m1_session_problems
 from scripts.m3accept.manifest import (
     M3_ACCEPT_01_BUDGET,
     MIB,
+    Manifest,
     RequestClass,
     approval_phrase,
     byte_facts,
+    target_digest,
 )
 from scripts.m3accept.prep import (
     ArmingRefused,
@@ -58,6 +61,7 @@ from scripts.m3accept.prep import (
     arm,
     canonical_target,
     hard_zero_problems,
+    ledger_approval_phrase,
     prep_gates,
     profile_problems,
     real_environment,
@@ -70,6 +74,10 @@ from tests.support import FakeClock
 pytestmark = pytest.mark.integration
 
 CODE_SHA = "a" * 40
+# The replacement campaign's id (ruling 5714750891). The first campaign, m3-accept-01, predates the
+# ledger recording its id and appears here only as a legacy ledger.
+CAMPAIGN = "m3-accept-02"
+LEGACY_CAMPAIGN = "m3-accept-01"
 PHASE_B = {"images": [{"bytes": 59019}, {"bytes": 555361}, {"bytes": 11147}]}
 CONTROL, PROTECTED = RequestClass.CONNECT_CONTROL_READ, RequestClass.CONNECT_PROTECTED_READ
 
@@ -193,6 +201,7 @@ def make_world(
     images: dict[str, object] | None = None,
     mode: str = "DRY",
     auto_connect: bool = False,
+    campaign_id: str = CAMPAIGN,
 ) -> World:
     clock = FakeClock()
     config = campaign_data(template, base)
@@ -204,7 +213,7 @@ def make_world(
         config, gateway=gateway, connect=connect, secrets=MemorySecretStore(), clock=clock
     )
     establish_m1(env, connect, auto_connect=auto_connect)
-    ledger = CampaignLedger.create(base / "campaign" / "campaign.sqlite3")
+    ledger = CampaignLedger.create(base / "campaign" / "campaign.sqlite3", campaign_id=campaign_id)
     arm(
         ledger,
         env=env,
@@ -226,7 +235,7 @@ def test_the_armed_manifest_and_its_ceilings_can_never_change(
     world = make_world(migrated_template, tmp_path)
     manifest = world.ledger.manifest()
     assert manifest is not None
-    assert manifest["campaign_id"] == "m3-accept-01" and manifest["code_sha"] == CODE_SHA
+    assert manifest["campaign_id"] == CAMPAIGN and manifest["code_sha"] == CODE_SHA
     ceilings = manifest["budget"]["ceilings"]
     assert ceilings["IMAGE_REQUEST"] == {"per_pass": 13, "campaign": 26}
     assert ceilings["CONNECT_CONTROL_READ"] == {"per_pass": 2, "campaign": 4}
@@ -279,7 +288,7 @@ def test_arming_refuses_a_budget_that_is_not_the_production_profile(
         collection=narrower,
     )
     establish_m1(env, connect)
-    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3")
+    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3", campaign_id=CAMPAIGN)
     with pytest.raises(ArmingRefused):
         arm(
             ledger,
@@ -308,13 +317,19 @@ def test_byte_facts_claim_only_what_reconnaissance_proved() -> None:
 def test_the_approval_is_the_operator_s_exact_words_for_the_exact_sha(
     migrated_template: Path, tmp_path: Path
 ) -> None:
-    phrase = approval_phrase(CODE_SHA)
-    assert phrase == f"APPROVE m3-accept-01 {CODE_SHA[:12]} TWO-PASS-REAL"
-    assert typed_approval_matches(phrase, CODE_SHA)
-    for typed in ("approve m3-accept-01", phrase.replace("REAL", "DRY"), "yes"):
-        assert not typed_approval_matches(typed, CODE_SHA)
-
     real = make_world(migrated_template, tmp_path / "real", mode="REAL")
+    phrase = ledger_approval_phrase(real.ledger)
+    assert phrase == f"APPROVE {CAMPAIGN} {CODE_SHA[:12]} TWO-PASS-REAL"
+    assert typed_approval_matches(phrase, real.ledger)
+    for typed in (
+        f"approve {CAMPAIGN}",
+        phrase.replace("REAL", "DRY"),
+        approval_phrase(LEGACY_CAMPAIGN, CODE_SHA),  # another campaign's words
+        approval_phrase(CAMPAIGN, "b" * 40),  # another SHA's words
+        "yes",
+    ):
+        assert not typed_approval_matches(typed, real.ledger)
+
     with pytest.raises(LedgerError):
         real.ledger.begin_pass("A", session_nonce="n")  # not approved
     with pytest.raises(LedgerError):
@@ -345,7 +360,7 @@ def test_arming_refuses_a_campaign_whose_data_directory_holds_no_m1_connection(
         secrets=MemorySecretStore(),
         clock=FakeClock(),
     )
-    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3")
+    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3", campaign_id=CAMPAIGN)
 
     def attempt() -> None:
         arm(
@@ -402,7 +417,7 @@ def test_the_arm_check_cannot_send_even_if_the_check_itself_tried(
         return []
 
     monkeypatch.setattr(prep, "m1_session_problems", reaching)
-    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3")
+    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3", campaign_id=CAMPAIGN)
     with pytest.raises(LocalCheckOnly):
         arm(
             ledger,
@@ -433,7 +448,7 @@ def test_arming_accepts_no_data_directory_but_the_campaign_s_own(
         clock=FakeClock(),
     )
     establish_m1(env, connect)
-    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3")
+    ledger = CampaignLedger.create(tmp_path / "campaign" / "campaign.sqlite3", campaign_id=CAMPAIGN)
     with pytest.raises(ArmingRefused, match="not this campaign's own"):
         arm(
             ledger,
@@ -917,10 +932,12 @@ GATES_BUT_THE_TARGET = (
 
 @dataclass
 class ArmedCheckout:
-    """The armed commit, checked out clean."""
+    """A clean checkout of ``sha`` — the armed commit unless told otherwise."""
+
+    sha: str = CODE_SHA
 
     def head(self) -> str:
-        return CODE_SHA
+        return self.sha
 
     def dirty(self) -> int:
         return 0
@@ -935,7 +952,7 @@ def approved_world(template: Path, base: Path) -> World:
 def armed_target_gate(world: World, url: str | None) -> Gate | None:
     gates = prep_gates(
         root=world.ledger.path.parent,
-        manifest=world.ledger.manifest() or {},
+        ledger=world.ledger,
         checkout=ArmedCheckout(),
         environ={},
         collection=world.env.collection,
@@ -1104,6 +1121,271 @@ def test_turning_the_json_log_on_sends_nothing_and_changes_no_campaign_state(
     assert activity(world) == before
     records = [json.loads(line) for line in log.read_text("utf-8").splitlines()]
     assert not [r for r in records if str(r["msg"]).startswith("supplier.")]
+
+
+# ---------------------------------------------------------------- campaign identity
+
+NEXT_CAMPAIGN = "m3-accept-03"
+NEW_SHA = "d" * 40
+
+
+def ledger_rows(path: Path) -> str:
+    """The ledger file's exact bytes, as a digest: reading must leave it byte for byte the same."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def legacy_schema() -> str:
+    """The first campaign's ledger schema: it pinned the id in the manifest's CHECK. The rest of it
+    is today's, so this is today's schema with that one CHECK put back."""
+    from scripts.m3accept import ledger as ledger_module
+
+    current = "CHECK (length(campaign_id) BETWEEN 1 AND 64)"
+    assert ledger_module._SCHEMA.count(current) == 1
+    return ledger_module._SCHEMA.replace(current, f"CHECK (campaign_id = '{LEGACY_CAMPAIGN}')")
+
+
+def legacy_ledger(path: Path, *, code_sha: str) -> CampaignLedger:
+    """A ledger as the first campaign's harness left it: ``m3-accept-01``, armed and approved, with
+    an empty INITIALIZED event."""
+    canonical = canonical_target(shop_collection(), fake_shop.PRODUCT_URL)
+    manifest = Manifest(
+        campaign_id=LEGACY_CAMPAIGN,
+        code_sha=code_sha,
+        # The digest as that harness wrote it, from its process-wide id.
+        target_digest=hashlib.sha256(f"{LEGACY_CAMPAIGN}\n{canonical}".encode()).hexdigest(),
+        budget=M3_ACCEPT_01_BUDGET,
+        byte_facts=byte_facts(PHASE_B, baseline=13),
+        mode="REAL",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript(legacy_schema())
+        db.execute("INSERT INTO events (at, state, detail) VALUES ('t0', 'INITIALIZED', '{}')")
+        db.execute(
+            "INSERT INTO manifest VALUES (1, ?, 'REAL', ?, ?, ?, ?, ?, 't1')",
+            (
+                LEGACY_CAMPAIGN,
+                code_sha,
+                manifest.target_digest,
+                manifest.budget.digest(),
+                manifest.digest(),
+                json.dumps(manifest.as_json(), sort_keys=True),
+            ),
+        )
+        for request in RequestClass:
+            ceiling = manifest.budget.ceiling(request)
+            db.execute(
+                "INSERT INTO ceilings VALUES (?, ?, ?)",
+                (request.value, ceiling.per_pass, ceiling.campaign),
+            )
+        for state, detail in (
+            ("ARMED", {"manifest_digest": manifest.digest()}),
+            ("APPROVED", {"code_sha": code_sha}),
+        ):
+            db.execute(
+                "INSERT INTO events (at, state, detail) VALUES ('t2', ?, ?)",
+                (state, json.dumps(detail, sort_keys=True)),
+            )
+        db.commit()
+    return CampaignLedger(path)
+
+
+def test_init_records_the_campaign_id_before_anything_is_armed(tmp_path: Path) -> None:
+    from scripts import m3_accept
+
+    root = tmp_path / "campaign"
+    assert m3_accept.main(["init", "--root", str(root), "--campaign-id", CAMPAIGN]) == 0
+
+    ledger = CampaignLedger(root / "campaign.sqlite3")
+    assert ledger.state() is State.INITIALIZED and ledger.manifest() is None
+    assert [(e["state"], e["detail"]) for e in ledger.events()] == [
+        ("INITIALIZED", {"campaign_id": CAMPAIGN})
+    ]
+    assert ledger.campaign_id() == CAMPAIGN
+    assert CampaignLedger(ledger.path).campaign_id() == CAMPAIGN, "a reopened ledger says the same"
+    with closing(sqlite3.connect(ledger.path)) as db:
+        for statement in (
+            f'UPDATE events SET detail = \'{{"campaign_id": "{NEXT_CAMPAIGN}"}}\'',
+            "DELETE FROM events",
+        ):
+            with pytest.raises(sqlite3.DatabaseError):
+                db.execute(statement)
+    assert ledger.campaign_id() == CAMPAIGN
+
+
+def test_only_init_names_a_campaign_and_only_in_the_campaign_id_form(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import m3_accept
+
+    for refused in ("", "m3-recon-02", "M3-ACCEPT-02", "m3-accept-2", f"{CAMPAIGN} TWO-PASS-REAL"):
+        root = tmp_path / f"refused-{len(refused)}"
+        with pytest.raises(SystemExit, match="m3-accept-NN"):
+            m3_accept.main(["init", "--root", str(root), "--campaign-id", refused])
+        assert not (root / "campaign.sqlite3").exists()
+        with pytest.raises(LedgerError, match="m3-accept-NN"):
+            CampaignLedger.create(root / "campaign.sqlite3", campaign_id=refused)
+    with pytest.raises(SystemExit):
+        m3_accept.main(["init", "--root", str(tmp_path / "unnamed")])
+
+    root = tmp_path / "campaign"
+    m3_accept.main(["init", "--root", str(root), "--campaign-id", CAMPAIGN])
+    before = ledger_rows(root / "campaign.sqlite3")
+    url, findings = fake_shop.PRODUCT_URL, str(tmp_path / "findings.json")
+    for argv in (
+        ["arm", "--root", str(root), "--product-url", url, "--phase-b-findings", findings],
+        ["approve", "--root", str(root)],
+        ["status", "--root", str(root)],
+        ["run-pass", "--root", str(root), "--pass", "A", "--product-url", url],
+        ["closeout", "--root", str(root)],
+    ):
+        capsys.readouterr()
+        with pytest.raises(SystemExit) as rejected:
+            m3_accept.main([*argv, "--campaign-id", NEXT_CAMPAIGN])
+        assert rejected.value.code == 2, argv[0]
+        assert "unrecognized arguments: --campaign-id" in capsys.readouterr().err, argv[0]
+    assert ledger_rows(root / "campaign.sqlite3") == before
+    assert CampaignLedger(root / "campaign.sqlite3").campaign_id() == CAMPAIGN
+
+
+def test_one_target_and_sha_under_two_campaign_ids_are_two_contracts(
+    migrated_template: Path, tmp_path: Path
+) -> None:
+    from scripts.m3accept import ledger as ledger_module
+    from scripts.m3accept import manifest as manifest_module
+    from scripts.m3accept import prep
+
+    # Arming and the PREP target gate digest through one function, which takes the campaign id.
+    assert prep.target_digest is ledger_module.target_digest is manifest_module.target_digest
+
+    worlds = {
+        campaign_id: make_world(
+            migrated_template, tmp_path / campaign_id, mode="REAL", campaign_id=campaign_id
+        )
+        for campaign_id in (CAMPAIGN, NEXT_CAMPAIGN)
+    }
+    armed = {}
+    for campaign_id, world in worlds.items():
+        manifest = world.ledger.manifest()
+        assert manifest is not None
+        assert world.ledger.campaign_id() == manifest["campaign_id"] == campaign_id
+        canonical = canonical_target(world.env.collection, fake_shop.PRODUCT_URL)
+        assert manifest["target_digest"] == target_digest(campaign_id, canonical)
+        gate = armed_target_gate(world, SAME_TARGET[1])
+        assert gate is not None and gate.passed, "PR #72: a canonical-equivalent spelling passes"
+        with closing(sqlite3.connect(world.ledger.path)) as db:
+            (manifest_digest,) = db.execute("SELECT manifest_digest FROM manifest").fetchone()
+        armed[campaign_id] = (manifest, manifest_digest, ledger_approval_phrase(world.ledger))
+
+    (a, a_digest, a_phrase), (b, b_digest, b_phrase) = armed.values()
+    assert (a["code_sha"], a["budget_digest"]) == (b["code_sha"], b["budget_digest"])
+    assert a["target_digest"] != b["target_digest"]
+    assert a_digest != b_digest
+    assert a_phrase != b_phrase
+    assert a_phrase == approval_phrase(CAMPAIGN, CODE_SHA)
+    assert b_phrase == approval_phrase(NEXT_CAMPAIGN, CODE_SHA)
+
+
+def test_a_manifest_carries_its_ledger_s_campaign_id_and_no_other(
+    migrated_template: Path, tmp_path: Path
+) -> None:
+    import inspect
+
+    from scripts.m3accept import prep
+
+    # No arming entry point takes an id: the ledger supplies it.
+    for function in (CampaignLedger.arm, prep.arm):
+        parameters = inspect.signature(function).parameters
+        assert "campaign_id" not in parameters and "manifest" not in parameters
+
+    world = make_world(migrated_template, tmp_path)
+    with closing(sqlite3.connect(world.ledger.path)) as db:
+        (column,) = db.execute("SELECT campaign_id FROM manifest").fetchone()
+    assert column == world.ledger.campaign_id() == CAMPAIGN
+
+    # A manifest row naming another campaign cannot come from the API. Written past it, the ledger
+    # refuses to answer for its identity, and so nothing downstream can proceed on it.
+    stray = CampaignLedger.create(tmp_path / "stray" / "campaign.sqlite3", campaign_id=CAMPAIGN)
+    with closing(sqlite3.connect(stray.path)) as db:
+        db.execute(
+            "INSERT INTO manifest VALUES (1, ?, 'DRY', ?, ?, ?, ?, '{}', 't')",
+            (NEXT_CAMPAIGN, CODE_SHA, "0" * 64, "0" * 64, "0" * 64),
+        )
+        db.commit()
+    with pytest.raises(LedgerError, match="another campaign"):
+        stray.campaign_id()
+    with pytest.raises(LedgerError, match="another campaign"):
+        ledger_approval_phrase(stray)
+    gate = armed_target_gate(replace(world, ledger=stray), fake_shop.PRODUCT_URL)
+    assert gate is not None and not gate.passed
+
+
+def test_the_legacy_m3_accept_01_ledger_reads_as_it_is_and_never_runs_on_a_new_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import m3_accept
+    from scripts.m3accept import prep
+
+    root = tmp_path / LEGACY_CAMPAIGN
+    legacy = legacy_ledger(root / "campaign.sqlite3", code_sha=CODE_SHA)
+    before = ledger_rows(legacy.path)
+
+    # Read through the explicit fallback: an empty INITIALIZED event, the manifest's id.
+    assert legacy.events()[0]["detail"] == {}
+    assert legacy.campaign_id() == LEGACY_CAMPAIGN
+    assert legacy.state() is State.APPROVED
+    assert (
+        ledger_approval_phrase(legacy) == f"APPROVE {LEGACY_CAMPAIGN} {CODE_SHA[:12]} TWO-PASS-REAL"
+    )
+    canonical = canonical_target(shop_collection(), fake_shop.PRODUCT_URL)
+    manifest = legacy.manifest()
+    assert manifest is not None
+    assert manifest["target_digest"] == target_digest(LEGACY_CAMPAIGN, canonical), "same formula"
+    with pytest.raises(LedgerError):
+        legacy.arm(
+            code_sha=NEW_SHA,
+            canonical_target=canonical,
+            budget=M3_ACCEPT_01_BUDGET,
+            byte_facts=byte_facts(PHASE_B, baseline=13),
+            mode="REAL",
+        )
+
+    # On a new SHA its PREP refuses it at the exact-SHA gate, and nothing else refuses it.
+    gates = prep_gates(
+        root=root,
+        ledger=legacy,
+        checkout=ArmedCheckout(NEW_SHA),
+        environ={},
+        collection=shop_collection(),
+        product_url=fake_shop.PRODUCT_URL,
+    )
+    failed = {gate.name for gate in gates if not gate.passed}
+    assert failed == {"exact armed SHA checked out", "not a CI or test run"}
+
+    built: list[AppConfig] = []
+    monkeypatch.setattr(m3_accept, "COLLECTION", shop_collection())
+    monkeypatch.setattr(m3_accept, "_refuse_unattended", lambda: None)
+    monkeypatch.setattr(m3_accept, "GitCheckout", lambda: ArmedCheckout(NEW_SHA))
+    monkeypatch.setattr(m3_accept, "real_environment", lambda config, **_: built.append(config))
+    monkeypatch.setattr(prep, "ci_or_test", lambda environ=None: None)
+    argv = ["run-pass", "--root", str(root), "--pass", "A", "--product-url", fake_shop.PRODUCT_URL]
+    with pytest.raises(SystemExit, match="exact armed SHA checked out") as refused:
+        m3_accept.main(argv)
+    assert "armed target" not in str(refused.value)
+    assert built == [], "no REAL environment was built"
+    assert m3_accept.main(["status", "--root", str(root)]) == 0
+
+    assert ledger_rows(legacy.path) == before, "reading the old ledger changed no byte of it"
+
+    # A ledger from that harness that was never armed has no identity to read, and none is made up.
+    unarmed = tmp_path / "unarmed" / "campaign.sqlite3"
+    unarmed.parent.mkdir()
+    with closing(sqlite3.connect(unarmed)) as db:
+        db.executescript(legacy_schema())
+        db.execute("INSERT INTO events (at, state, detail) VALUES ('t0', 'INITIALIZED', '{}')")
+        db.commit()
+    with pytest.raises(LedgerError, match="no campaign identity"):
+        CampaignLedger(unarmed).campaign_id()
 
 
 # ---------------------------------------------------------------- CI

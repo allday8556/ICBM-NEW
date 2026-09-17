@@ -1,4 +1,5 @@
-"""The M3 REAL acceptance campaign ``m3-accept-01`` (Issue #52 rulings 5711123764, 5711187191).
+"""M3 REAL acceptance campaigns — ``m3-accept-01``, replaced by ``m3-accept-02`` (Issue #52 rulings
+5711123764, 5711187191, 5714750891).
 
 This package orchestrates; it does not collect. Every product read and every image request goes
 through the production ``ProductCollectionService`` and its policed gateway, the session comes from
