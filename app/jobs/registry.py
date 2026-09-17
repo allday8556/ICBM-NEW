@@ -24,6 +24,32 @@ JobHandler = Callable[[JobContext], None]
 
 
 @dataclass(frozen=True)
+class TerminalJob:
+    """A job that has reached a state it will never leave, and why.
+
+    ``error_class`` and ``error_code`` are the job system's own classification of the last
+    attempt, not a domain's: an unexpected exception is ``UNKNOWN`` / ``UNHANDLED_EXCEPTION``
+    here, and an owner must not translate that into a meaning of its own.
+    """
+
+    job_id: str
+    job_type: str
+    state: str  # SUCCEEDED or DEAD
+    attempt_no: int
+    correlation_id: str
+    target_ref: str | None
+    error_class: str | None
+    error_code: str | None
+
+
+# What an owner does when its job can no longer change: settle whatever durable state that job
+# was the only thing working on. It is called once the job's terminal state is committed, so an
+# unexpected failure anywhere inside the handler cannot leave that state waiting forever. It runs
+# outside the job's own transaction and may never raise into the worker.
+TerminalHook = Callable[[TerminalJob], None]
+
+
+@dataclass(frozen=True)
 class JobDefinition:
     job_type: str
     handler: JobHandler
@@ -32,6 +58,7 @@ class JobDefinition:
     # effect. Interrupted non-idempotent jobs go to dead-letter as UNKNOWN (ARCHITECTURE §8).
     idempotent: bool = False
     retry_policy: RetryPolicy | None = None
+    on_terminal: TerminalHook | None = None
 
 
 class JobRegistry:

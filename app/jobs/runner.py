@@ -22,7 +22,7 @@ from app.core.errors import AUTO_RETRYABLE, ErrorClass, classify
 from app.db.database import Database
 from app.jobs.models import DUE_STATES, AttemptOutcome, Job, JobAttempt, JobState
 from app.jobs.policy import RetryPolicy
-from app.jobs.registry import JobContext, JobRegistry
+from app.jobs.registry import JobContext, JobRegistry, TerminalJob
 
 logger = logging.getLogger("icbm.jobs")
 
@@ -216,6 +216,19 @@ class JobRunner:
                     self._record_dead_letter(session, job, error_class, code)
             state = JobState(job.state)
 
+        self._settle_owner(
+            state,
+            TerminalJob(
+                job_id=claimed.job_id,
+                job_type=claimed.job_type,
+                state=state.value,
+                attempt_no=claimed.attempt_no,
+                correlation_id=claimed.correlation_id,
+                target_ref=claimed.target_ref,
+                error_class=None if error_class is None else error_class.value,
+                error_code=code,
+            ),
+        )
         self._log_result(claimed, state, error_class, code, next_attempt_at)
         return AttemptResult(
             job_id=claimed.job_id,
@@ -226,6 +239,28 @@ class JobRunner:
             error_class=error_class,
             error_code=code,
         )
+
+    def _settle_owner(self, state: JobState, terminal: TerminalJob) -> None:
+        """Tell the owner its job is over, once that is committed (ARCHITECTURE §8).
+
+        A job that can no longer run must leave nothing of its owner's waiting on it: whatever the
+        handler was in the middle of, including a failure it never expected, ends here. The job's
+        own bookkeeping is already durable, so a hook that fails changes none of it — it is logged
+        and never raised into the worker.
+        """
+        if state not in (JobState.SUCCEEDED, JobState.DEAD):
+            return
+        definition = self._registry.find(terminal.job_type)
+        if definition is None or definition.on_terminal is None:
+            return
+        with correlation_scope(terminal.correlation_id):
+            try:
+                definition.on_terminal(terminal)
+            except Exception:
+                logger.exception(
+                    "job.terminal_owner_failed",
+                    extra={"job_id": terminal.job_id, "job_type": terminal.job_type},
+                )
 
     def _record_dead_letter(
         self, session: Any, job: Job, error_class: ErrorClass, code: str | None
@@ -290,6 +325,7 @@ class JobRunner:
         because their external effect cannot be proven either way.
         """
         recovered = 0
+        ended: list[TerminalJob] = []
         with self._db.write() as session:
             now = self._clock.now()
             for job in session.scalars(select(Job).where(Job.state == JobState.RUNNING)).all():
@@ -326,9 +362,25 @@ class JobRunner:
                     job.state = JobState.DEAD
                     job.finished_at = now
                     self._record_dead_letter(session, job, error_class, code)
+                    ended.append(
+                        TerminalJob(
+                            job_id=job.job_id,
+                            job_type=job.job_type,
+                            state=JobState.DEAD.value,
+                            attempt_no=job.attempt_count,
+                            correlation_id=job.correlation_id,
+                            target_ref=job.target_ref,
+                            error_class=error_class.value,
+                            error_code=code,
+                        )
+                    )
                 with correlation_scope(job.correlation_id):
                     logger.warning(
                         "job.recovered_after_interruption",
                         extra={"job_id": job.job_id, "state": job.state, "error_code": code},
                     )
+        for (
+            terminal
+        ) in ended:  # an interrupted job that will never run again ends its owner's work too
+            self._settle_owner(JobState.DEAD, terminal)
         return recovered

@@ -503,8 +503,10 @@ def test_a_reference_whose_authority_does_not_parse_fails_loudly_and_is_never_dr
         job = container.jobs.get(submitted.job_id)
         assert run.revision_id is None, "nothing was appended"
         assert run.outcome is not CollectionOutcome.RECORDED
-        # The job carries the failure and dies; the run is left unsettled, which is visible.
+        # The job carries the failure and dies, and the run it owns ends with it (ruling
+        # 5720586391): a terminal job never leaves its run waiting.
         assert (job.state, job.last_error_code) == (JobState.DEAD, "UNHANDLED_EXCEPTION")
+        assert run.outcome is CollectionOutcome.FAILED and run.finished_at is not None
         assert "ValueError" in (job.last_error_message or "")
         assert network.sent == [], "no image request was made for it"
 
