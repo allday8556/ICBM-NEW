@@ -237,7 +237,13 @@ class CollectionRun(Base):
         CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
         Index("ix_collection_runs_job_id", "job_id"),
         Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
-        Index("ix_collection_runs_pacing", "pacing_key", "product_read_at"),
+        Index("ix_collection_runs_pacing", "supplier_key", "pacing_key", "product_read_at"),
+        Index(
+            "ix_collection_runs_pacing_identity",
+            "supplier_key",
+            "source_product_id",
+            "product_read_at",
+        ),
     )
 
     collection_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)

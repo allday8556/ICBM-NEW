@@ -47,8 +47,16 @@ from integrations.suppliers.transport.collection import ImageFetchRefused, Reque
 
 SUPPLIER_KEY = "fakeshop"
 HOST = "shop.collect.invalid"
+# A second shop, which numbers its own product 4242 as well. Two suppliers numbering a
+# product alike are two products (ARCHITECTURE §14), and neither may pace the other.
+OTHER_SUPPLIER_KEY = "othershop"
+OTHER_HOST = "shop.other.invalid"
 IMAGE_HOST = "img.collect.invalid"
 PRODUCT_URL = f"https://{HOST}/product/sample/4242/"
+OTHER_PRODUCT_URL = f"https://{OTHER_HOST}/product/sample/4242/"
+# The other shop's listing form, which does state its product number. Two suppliers whose
+# URLs both name a product 4242 are the case where a supplier-blind lookup goes wrong.
+OTHER_LISTED_URL = f"https://{OTHER_HOST}/product/sample/4242/category/7/"
 # The same product reached through this shop's listing. Only this form states the product
 # number where a reader of the URL alone can see it, so the pair exercises the case ADR-0010
 # §4 cares about: paced on the URL until a run proves the identity, on the product after.
@@ -212,26 +220,34 @@ def _classify(body: str, product_url: str) -> tuple[ImageCandidate, ...]:
     return tuple(found)
 
 
-PROFILE = SupplierProfile(
-    supplier_key=SUPPLIER_KEY,
-    display_name="Fake Shop",
-    base_url=f"https://{HOST}",
-    auth_required=True,
-    egress_hosts=frozenset({HOST}),
-    request_policy=RequestPolicy(
-        max_concurrency=1,
-        minimum_request_interval_s=0.0,
-        auth_retry_limit=1,
-        request_timeout_s=5.0,
-    ),
-)
+def _supplier(key: str, host: str, name: str) -> SupplierProfile:
+    return SupplierProfile(
+        supplier_key=key,
+        display_name=name,
+        base_url=f"https://{host}",
+        auth_required=True,
+        egress_hosts=frozenset({host}),
+        request_policy=RequestPolicy(
+            max_concurrency=1,
+            minimum_request_interval_s=0.0,
+            auth_retry_limit=1,
+            request_timeout_s=5.0,
+        ),
+    )
+
+
+PROFILE = _supplier(SUPPLIER_KEY, HOST, "Fake Shop")
+OTHER_PROFILE = _supplier(OTHER_SUPPLIER_KEY, OTHER_HOST, "Other Shop")
 
 
 def collection_profile(
-    *, max_image_requests: int = 10, max_run_bytes: int = 4 * 1024 * 1024
+    *,
+    max_image_requests: int = 10,
+    max_run_bytes: int = 4 * 1024 * 1024,
+    supplier: SupplierProfile = PROFILE,
 ) -> CollectionProfile:
     return CollectionProfile(
-        supplier=PROFILE,
+        supplier=supplier,
         product_path=r"/product/[^/]+/\d+(?:/category/\d+)?/?",
         policy_paths=frozenset({"/robots.txt"}),
         image_hosts=frozenset({IMAGE_HOST}),
@@ -248,11 +264,16 @@ def collection_profile(
 
 
 def collection(
-    *, max_image_requests: int = 10, max_run_bytes: int = 4 * 1024 * 1024
+    *,
+    max_image_requests: int = 10,
+    max_run_bytes: int = 4 * 1024 * 1024,
+    supplier: SupplierProfile = PROFILE,
 ) -> SupplierCollection:
     return SupplierCollection(
         profile=collection_profile(
-            max_image_requests=max_image_requests, max_run_bytes=max_run_bytes
+            max_image_requests=max_image_requests,
+            max_run_bytes=max_run_bytes,
+            supplier=supplier,
         ),
         roles=ImageRoleRules(identity=EXTRACTOR_REVISION, classify=_classify),
         identity=_identity,

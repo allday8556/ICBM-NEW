@@ -573,8 +573,11 @@ def pacing_key(collection: SupplierCollection, product_url: str) -> PacingKey:
     under still comes from the document the supplier served.
     """
     parts = urlsplit(product_url)
-    normalized = f"{collection.supplier_key}:url:https://{parts.hostname}{parts.path.rstrip('/')}"
-    return PacingKey(url=normalized, source_product_id=collection.url_product_hint(product_url))
+    return PacingKey(
+        supplier_key=collection.supplier_key,
+        url=f"https://{parts.hostname}{parts.path.rstrip('/')}",
+        source_product_id=collection.url_product_hint(product_url),
+    )
 
 
 def stable_locator(url: str) -> str | None:

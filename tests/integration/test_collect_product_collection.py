@@ -38,6 +38,9 @@ from scripts.m3collect.fake_shop import (
     EXTRACTOR_REVISION,
     LISTED_URL,
     OTHER_BYTES,
+    OTHER_LISTED_URL,
+    OTHER_PROFILE,
+    OTHER_SUPPLIER_KEY,
     PRIMARY_BYTES,
     PRIMARY_URL,
     PRODUCT_URL,
@@ -702,6 +705,57 @@ def test_the_identity_a_run_proved_paces_the_next_url_that_names_it(
     assert collecting.collection.run(later.collection_run_id).outcome is (
         CollectionOutcome.RECORDED
     )
+
+
+def test_two_suppliers_numbering_a_product_alike_do_not_pace_each_other(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # Review 5232163157: a source product number is unique only inside its supplier. Two shops
+    # that both call their product 4242 are two products, and one's read must not hold the other.
+    gateway = FakeGateway(
+        documents=[page()], images={PRIMARY_URL: PRIMARY_BYTES, DETAIL_URL: DETAIL_BYTES}
+    )
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            collection_gateway=gateway,
+            collection_sessions=StubSessions(),
+            collections=(registered(), registered(supplier=OTHER_PROFILE)),
+        )
+        try:
+            first = built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            assert built.runner.run_next() is not None
+            assert built.collection.run(first.collection_run_id).source_product_id == "4242"
+
+            # Immediately, with no waiting at all: the other shop's product 4242 is its own.
+            # The listing form is used on purpose — it names the product number, so this is the
+            # lookup that would match the first shop's read if it were not scoped by supplier.
+            second = built.collection.submit(OTHER_SUPPLIER_KEY, OTHER_LISTED_URL)
+            assert built.runner.run_next() is not None
+            settled = built.collection.run(second.collection_run_id)
+            assert settled.outcome is CollectionOutcome.RECORDED
+            assert settled.source_product_id == "4242"
+            assert gateway.document_reads == 2
+            # Within that shop its own product is paced normally.
+            with pytest.raises(SameProductTooSoon):
+                built.collection.submit(OTHER_SUPPLIER_KEY, OTHER_LISTED_URL)
+
+            # The first shop's own product is still paced, by URL and by identity alike.
+            with pytest.raises(SameProductTooSoon):
+                built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            with pytest.raises(SameProductTooSoon):
+                built.collection.submit(SUPPLIER_KEY, LISTED_URL)
+            assert gateway.document_reads == 2
+
+            # Two revisions exist, one per supplier, under the same source product number.
+            mine = built.source_truth.history(SUPPLIER_KEY, "4242").revisions
+            theirs = built.source_truth.history(OTHER_SUPPLIER_KEY, "4242").revisions
+            assert len(mine) == 1 and len(theirs) == 1
+            assert mine[0].revision_id != theirs[0].revision_id
+        finally:
+            built.db.dispose()
 
 
 def test_equivalent_accepted_urls_for_one_product_are_paced_as_one_product(

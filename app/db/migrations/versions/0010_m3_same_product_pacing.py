@@ -15,6 +15,10 @@ A run now records the key it paced on and, once the document has been read, the 
 turned out to be. The interval is measured across runs on that key, so alternate and renamed
 accepted URLs for one product cannot each buy a fresh read.
 
+Both pacing indexes lead with ``supplier_key``: a source product number is unique only inside the
+supplier that issued it, so two suppliers that both number a product ``355`` are two products and
+must never pace each other.
+
 Additive: two nullable columns and one index, replacing the URL-keyed index 0009 added.
 """
 
@@ -31,16 +35,21 @@ depends_on: str | Sequence[str] | None = None
 RUNS = "collection_runs"
 OLD_PACE = "ix_collection_runs_product_read"
 NEW_PACE = "ix_collection_runs_pacing"
+IDENTITY_PACE = "ix_collection_runs_pacing_identity"
 
 
 def upgrade() -> None:
     op.add_column(RUNS, sa.Column("pacing_key", sa.Text, nullable=True))
     op.add_column(RUNS, sa.Column("source_product_id", sa.String(80), nullable=True))
     op.drop_index(OLD_PACE, table_name=RUNS)
-    op.create_index(NEW_PACE, RUNS, ["pacing_key", "product_read_at"])
+    # Both lookups are supplier-first: a source product number is unique only inside the supplier
+    # that issued it, so neither the URL nor the identity is ever matched across suppliers.
+    op.create_index(NEW_PACE, RUNS, ["supplier_key", "pacing_key", "product_read_at"])
+    op.create_index(IDENTITY_PACE, RUNS, ["supplier_key", "source_product_id", "product_read_at"])
 
 
 def downgrade() -> None:
+    op.drop_index(IDENTITY_PACE, table_name=RUNS)
     op.drop_index(NEW_PACE, table_name=RUNS)
     op.create_index(OLD_PACE, RUNS, ["supplier_key", "source_url", "product_read_at"])
     op.drop_column(RUNS, "source_product_id")

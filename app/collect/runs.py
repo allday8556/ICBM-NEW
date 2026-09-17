@@ -49,12 +49,18 @@ class SameProductTooSoon(RateLimitedError):
 class PacingKey:
     """What the same-product interval is measured on (ADR-0010 §4).
 
-    ``url`` is the normalized in-scope URL key, which is all there is before anything has been
-    read. ``source_product_id`` is the product the source itself states, when the supplier's own
-    URL form makes it plain in advance or an earlier run has already proven it; from then on the
+    ``supplier_key`` scopes the whole key. A source product number is unique only inside the
+    supplier that issued it (ARCHITECTURE §14: the identity is ``supplier_key`` *and*
+    ``source_product_id``), so two suppliers that both number a product ``355`` are two products
+    and must not pace each other.
+
+    ``url`` is the normalized in-scope URL, which is all there is before anything has been read.
+    ``source_product_id`` is the product the source itself states, when the supplier's own URL
+    form makes it plain in advance or an earlier run has already proven it; from then on the
     interval follows the product rather than whichever accepted spelling of its URL was used.
     """
 
+    supplier_key: str
     url: str
     source_product_id: str | None = None
 
@@ -209,13 +215,19 @@ class CollectionRunStore:
 
 
 def _last_read(session: Session, key: "PacingKey") -> datetime | None:
-    """The most recent real read of this product, by either name it may have been read under."""
+    """The most recent real read of this product, by either name it may have been read under.
+
+    The supplier is a constraint of the query and not a prefix of a string: what the contract
+    says is ``(supplier_key, source_product_id)``, so that is what is asked of the database.
+    """
     named = CollectionRun.pacing_key == key.url
     if key.source_product_id is not None:
         named = or_(named, CollectionRun.source_product_id == key.source_product_id)
     return session.scalar(
         select(func.max(CollectionRun.product_read_at)).where(
-            named, CollectionRun.product_read_at.is_not(None)
+            CollectionRun.supplier_key == key.supplier_key,
+            named,
+            CollectionRun.product_read_at.is_not(None),
         )
     )
 
