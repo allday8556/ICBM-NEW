@@ -841,6 +841,53 @@ def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> No
             assert not forbidden, f"{path}: {name}"
 
 
+# Issue #52 ruling 5711123764 §1: the REAL acceptance harness orchestrates and never collects.
+CAMPAIGN_MAY_NOT_IMPORT = (
+    "integrations.suppliers.kmretail.collect",
+    "app.collect.assets",
+    "app.collect.sourceassets",
+    "app.collect.revisions",
+    "app.collect.imagedecode",
+)
+# What a campaign may not reach on the composed application, and what it may not call.
+CAMPAIGN_MAY_NOT_TOUCH = {"revisions", "source_asset_recorder", "source_assets"}
+# (The identity rule itself, `resolve`, is reachable only through the parser package, which the
+# import rule above already refuses; `Path.resolve` is not it.)
+CAMPAIGN_MAY_NOT_CALL = {"classify", "classify_images", "parse_fields", "record"}
+
+
+def test_the_acceptance_harness_parses_hashes_and_appends_nothing() -> None:
+    # A campaign reaches the product only through the production ProductCollectionService: it
+    # does not parse a supplier page, classify an image, store an asset or append a revision.
+    files = [
+        *sorted((REPO_ROOT / "scripts" / "m3accept").rglob("*.py")),
+        REPO_ROOT / "scripts" / "m3_accept.py",
+    ]
+    assert any(f.name == "campaign.py" for f in files)
+    for path in files:
+        tree = ast.parse(path.read_text("utf-8"))
+        for name in _imported_modules(tree):
+            assert not any(
+                name == f or name.startswith(f"{f}.") for f in CAMPAIGN_MAY_NOT_IMPORT
+            ), f"{path.name}: {name}"
+        reached = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in {"container", "built"}
+        }
+        assert not reached & CAMPAIGN_MAY_NOT_TOUCH, f"{path.name}: {reached}"
+        called = {_callee(call) for call in _calls(tree)}
+        assert not called & CAMPAIGN_MAY_NOT_CALL, f"{path.name}: {called & CAMPAIGN_MAY_NOT_CALL}"
+
+
+def test_the_campaign_hard_zero_list_is_the_source_truth_list() -> None:
+    from scripts.m3accept.prep import HARD_ZERO_MODULES
+
+    assert HARD_ZERO_MODULES == SOURCE_TRUTH_FORBIDDEN
+
+
 def test_connect_gateway_port_is_not_widened_for_collect() -> None:
     # ADR-0010 §3 (Issue #52 §2): COLLECT gets its own port. The CONNECT gateway keeps exactly the
     # protected-read proof and the login, and ``fetch`` takes no URL, path or target, so it can

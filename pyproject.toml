@@ -70,6 +70,7 @@ packages = [
     "scripts.m2harness",
     "scripts.m3harness",
     "scripts.m3collect",
+    "scripts.m3accept",
 ]
 warn_unused_ignores = true
 
