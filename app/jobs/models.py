@@ -20,6 +20,10 @@ DUE_STATES = (JobState.QUEUED, JobState.RETRY_SCHEDULED)
 # The states a job never leaves. Whatever it was the only thing working on is over from here,
 # so these are also the only states an owner may be settled from.
 TERMINAL_STATES = (JobState.SUCCEEDED, JobState.DEAD)
+# The same set as plain values, for an owner that is handed the predicate instead of writing one.
+# Which states a job never leaves is the job system's to say; an owner only knows where its own
+# rows are, and asks with whatever it is given.
+TERMINAL_STATE_NAMES: tuple[str, ...] = tuple(state.value for state in TERMINAL_STATES)
 
 
 class AttemptOutcome(StrEnum):

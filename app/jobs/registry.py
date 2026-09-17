@@ -57,7 +57,12 @@ TerminalHook = Callable[[TerminalJob], None]
 # the job table says is over, named by an owner that says it is still waiting, is an inconsistency
 # — whether a hook raised, or no hook was ever called. An owner with nothing open says so with an
 # empty sequence, which is the normal answer.
-UnsettledOwnedJobs = Callable[[], Sequence[str]]
+#
+# The job states that count as over are handed in, because they are the job system's to define and
+# never the owner's. An owner that bounds its answer must apply that predicate *before* the bound:
+# a page of rows whose jobs are still running would otherwise hide everything behind it, sweep
+# after sweep, and nothing further along would ever be reached.
+UnsettledOwnedJobs = Callable[[Sequence[str]], Sequence[str]]
 
 
 @dataclass(frozen=True)

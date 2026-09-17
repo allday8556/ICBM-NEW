@@ -6,7 +6,7 @@ interrupted attempt — and never while a retry is still scheduled. It runs afte
 is committed, so an owner that fails cannot undo the job's bookkeeping.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import pytest
@@ -39,6 +39,7 @@ class Owner:
         self.told: list[TerminalJob] = []
         self.raise_on_call = False
         self.waiting: list[str] = []
+        self.asked_with: list[tuple[str, ...]] = []
 
     def __call__(self, terminal: TerminalJob) -> None:
         self.told.append(terminal)
@@ -47,7 +48,10 @@ class Owner:
         if terminal.job_id in self.waiting:
             self.waiting.remove(terminal.job_id)
 
-    def unsettled(self) -> tuple[str, ...]:
+    def unsettled(self, terminal_states: Sequence[str]) -> tuple[str, ...]:
+        # The states that count as over are the job system's, handed in; this double keeps no
+        # opinion of its own about them.
+        self.asked_with.append(tuple(terminal_states))
         return tuple(self.waiting)
 
 

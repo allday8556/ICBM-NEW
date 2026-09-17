@@ -23,6 +23,7 @@ from app.core.errors import AUTO_RETRYABLE, ErrorClass, classify
 from app.db.database import Database
 from app.jobs.models import (
     DUE_STATES,
+    TERMINAL_STATE_NAMES,
     TERMINAL_STATES,
     AttemptOutcome,
     Job,
@@ -294,6 +295,10 @@ class JobRunner:
         settlement that fails again is logged and leaves the inconsistency exactly as discoverable
         as it was, for the next sweep.
 
+        What counts as over is this layer's to define and is handed to the owner, which asks with
+        it. An owner may bound how much it answers with; what it answers with is then a page of
+        inconsistencies, so every sweep settles some and the next one reaches further.
+
         Returns how many terminal jobs it found an owner still waiting on — what it discovered,
         not what converged, which is the same question the next sweep asks.
         """
@@ -302,7 +307,8 @@ class JobRunner:
             definition = self._registry.find(job_type)
             if definition is None or definition.unsettled_owned_jobs is None:
                 continue
-            for terminal in self._unsettled_terminal(job_type, definition.unsettled_owned_jobs()):
+            waiting_on = definition.unsettled_owned_jobs(TERMINAL_STATE_NAMES)
+            for terminal in self._unsettled_terminal(job_type, waiting_on):
                 with correlation_scope(terminal.correlation_id):
                     logger.warning(
                         "job.owner_left_unsettled",

@@ -21,7 +21,7 @@ rows are exercised in ``test_collect_run_lifecycle.py``. Nothing in this module 
 """
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any, cast
@@ -33,7 +33,7 @@ from app.container import Container, build_container
 from app.core.errors import AppError, ErrorClass
 from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore
-from app.jobs.models import JobState
+from app.jobs.models import TERMINAL_STATE_NAMES, JobState
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, JobHandler, JobRegistry, TerminalJob
 from app.jobs.runner import JobRunner
@@ -57,6 +57,7 @@ class Owner:
     def __init__(self) -> None:
         self.told: list[TerminalJob] = []
         self.waiting: list[str] = []
+        self.asked_with: list[tuple[str, ...]] = []
         self.broken = False
 
     def __call__(self, terminal: TerminalJob) -> None:
@@ -66,7 +67,10 @@ class Owner:
         if terminal.job_id in self.waiting:
             self.waiting.remove(terminal.job_id)
 
-    def unsettled(self) -> tuple[str, ...]:
+    def unsettled(self, terminal_states: Sequence[str]) -> tuple[str, ...]:
+        # Which states count as over is handed in by the job layer; the owner keeps no such
+        # definition of its own, and records what it was asked with.
+        self.asked_with.append(tuple(terminal_states))
         return tuple(self.waiting)
 
 
@@ -257,6 +261,18 @@ def test_a_settlement_that_fails_leaves_the_same_inconsistency_for_the_next_swee
     assert owning.runner.reconcile_terminal_owners() == 1
     assert owner.waiting == []
     assert owning.runner.reconcile_terminal_owners() == 0
+
+
+def test_the_job_layer_tells_the_owner_which_states_count_as_over(
+    owning: Container, owner: Owner
+) -> None:
+    # An owner is handed the predicate; it never decides what "over" means (ruling 5721796080 §3).
+    submit(owning, owner, "owned.succeed")
+    assert owning.runner.run_next() is not None
+    assert owning.runner.reconcile_terminal_owners() == 0
+
+    assert owner.asked_with and set(owner.asked_with) == {TERMINAL_STATE_NAMES}
+    assert TERMINAL_STATE_NAMES == ("SUCCEEDED", "DEAD")
 
 
 def test_an_owner_is_only_offered_the_jobs_it_owns(owning: Container, owner: Owner) -> None:

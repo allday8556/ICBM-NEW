@@ -32,8 +32,11 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass, replace
+from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+from uuid import uuid4
 
 import pytest
 
@@ -46,13 +49,13 @@ from app.collect.collection import (
     pacing_key,
 )
 from app.collect.facts import FactsStatus
-from app.collect.models import CollectionOutcome
+from app.collect.models import CollectionOutcome, CollectionRun
 from app.collect.runs import SameProductTooSoon
 from app.config import AppConfig
 from app.container import Container, build_container
 from app.core.errors import TransientError
 from app.core.ownership import acquire_data_dir
-from app.jobs.models import JobState
+from app.jobs.models import TERMINAL_STATES, AttemptOutcome, Job, JobAttempt, JobState
 from app.jobs.registry import TerminalHook, TerminalJob
 from integrations.suppliers.collection import ImageCandidate, ImageRoleRules
 from integrations.suppliers.collection import ImageRole as SourceRole
@@ -689,6 +692,158 @@ def test_a_sweep_leaves_the_image_diagnostics_of_a_recorded_revision_alone(
         assert container.runner.reconcile_terminal_owners() == 0
         assert image_refs(container) == before
         assert gateway.image_reads == [PRIMARY_URL]
+
+
+# ---------------------------------------------------------------- the bound, and what it hides
+
+
+def waiting_runs(container: Container, count: int, *, state: JobState, from_when: int) -> list[str]:
+    """``count`` runs with no outcome, each owned by a job in ``state``, requested before now.
+
+    They stand for an ordinary backlog: a page of work the sweep has to look past. Writing them
+    directly is the point — the question here is what the discovery query returns when there are
+    more of them than any one sweep may answer with, not how they were made.
+    """
+    run_ids: list[str] = []
+    with container.db.write() as session:
+        for index in range(count):
+            at = container.clock.now() - timedelta(seconds=from_when - index)
+            job_id, run_id = str(uuid4()), str(uuid4())
+            session.add(
+                Job(
+                    job_id=job_id,
+                    job_type=COLLECT_PRODUCT_JOB,
+                    target_ref=SUPPLIER_KEY,
+                    payload_json="{}",
+                    state=state,
+                    attempt_count=1 if state in TERMINAL_STATES else 0,
+                    max_attempts=3,
+                    next_attempt_at=None if state in TERMINAL_STATES else at + timedelta(days=1),
+                    correlation_id=f"backlog-{index}",
+                    last_error_class="UNKNOWN" if state is JobState.DEAD else None,
+                    last_error_code="UNHANDLED_EXCEPTION" if state is JobState.DEAD else None,
+                    created_at=at,
+                    started_at=at if state in TERMINAL_STATES else None,
+                    finished_at=at if state in TERMINAL_STATES else None,
+                    updated_at=at,
+                )
+            )
+            if state in TERMINAL_STATES:
+                session.add(
+                    JobAttempt(
+                        job_id=job_id,
+                        attempt_no=1,
+                        scheduled_for=at,
+                        started_at=at,
+                        finished_at=at,
+                        outcome=AttemptOutcome.FAILED,
+                        error_class="UNKNOWN",
+                        error_code="UNHANDLED_EXCEPTION",
+                        error_message="unexpected bug",
+                    )
+                )
+            session.add(
+                CollectionRun(
+                    collection_run_id=run_id,
+                    job_id=job_id,
+                    correlation_id=f"backlog-{index}",
+                    supplier_key=SUPPLIER_KEY,
+                    source_url=f"https://shop.collect.invalid/product/sample/{index}/",
+                    outcome=CollectionOutcome.PENDING,
+                    revision_id=None,
+                    facts_status=None,
+                    detail=None,
+                    requested_at=at,
+                    product_read_at=None,
+                    pacing_key=None,
+                    source_product_id=None,
+                    finished_at=None,
+                )
+            )
+            run_ids.append(run_id)
+    return run_ids
+
+
+def test_a_page_of_jobs_that_can_still_run_never_hides_an_orphan_behind_it(
+    collecting: Container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 501 runs waiting on jobs that are alive and due tomorrow — more than the discovery bound —
+    # and all of them requested before the orphan, so any bound taken before the join would return
+    # nothing but these, sweep after sweep (ruling 5721796080 §1).
+    alive = waiting_runs(collecting, 501, state=JobState.QUEUED, from_when=10_000)
+    assert len(collecting.collection._runs.unsettled_job_ids(("SUCCEEDED", "DEAD"))) == 0
+
+    breaking("revision append")(collecting)
+    owner_is(collecting, None, monkeypatch)
+    run_id, job_id = submit_and_run(collecting)  # the orphan, requested last
+    monkeypatch.undo()
+    assert orphaned(collecting) == [(job_id, run_id)]
+
+    assert collecting.runner.reconcile_terminal_owners() == 1, "the bound is spent on orphans only"
+    settled = collecting.collection.run(run_id)
+    assert settled.outcome is CollectionOutcome.FAILED
+    assert settled.detail == f"{UNFINISHED_RUN}:UNHANDLED_EXCEPTION"
+
+    # And the backlog is exactly as it was: a job that can still run is nobody's inconsistency.
+    for other in alive:
+        run = collecting.collection.run(other)
+        assert run.outcome is CollectionOutcome.PENDING
+        assert run.detail is None and run.finished_at is None
+    assert collecting.runner.reconcile_terminal_owners() == 0
+
+
+def test_bounded_sweeps_keep_reaching_further_until_none_is_left(
+    collecting: Container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # More orphans than one sweep may answer with, behind a backlog of jobs that are still alive.
+    waiting_runs(collecting, 20, state=JobState.QUEUED, from_when=10_000)
+    orphans = waiting_runs(collecting, 7, state=JobState.DEAD, from_when=9_000)
+    store = collecting.collection._runs
+    registry = collecting.runner._registry
+    monkeypatch.setitem(
+        registry._definitions,
+        COLLECT_PRODUCT_JOB,
+        replace(
+            registry.get(COLLECT_PRODUCT_JOB),
+            # The same query, with a bound small enough to need several sweeps.
+            unsettled_owned_jobs=lambda states: store.unsettled_job_ids(states, limit=3),
+        ),
+    )
+
+    remaining = [len(orphaned(collecting))]
+    found = []
+    for _ in range(4):
+        found.append(collecting.runner.reconcile_terminal_owners())
+        remaining.append(len(orphaned(collecting)))
+
+    assert remaining[0] == 7, "every orphan is discoverable from the start"
+    assert found == [3, 3, 1, 0], "each sweep settles what it is allowed to, and no more"
+    assert remaining == [7, 4, 1, 0, 0], "strictly fewer every time, then none"
+    for run_id in orphans:
+        run = collecting.collection.run(run_id)
+        assert run.outcome is CollectionOutcome.FAILED
+        assert run.detail == f"{UNFINISHED_RUN}:UNHANDLED_EXCEPTION"
+    assert revisions_held(collecting) == 0
+
+
+def test_the_owner_asks_with_the_states_it_is_given_and_defines_none(
+    collecting: Container,
+) -> None:
+    store = collecting.collection._runs
+    waiting = waiting_runs(collecting, 2, state=JobState.QUEUED, from_when=100)
+    dead = waiting_runs(collecting, 1, state=JobState.DEAD, from_when=50)
+
+    # It applies the predicate it is handed, whatever that is — including states that are not
+    # terminal at all, which it has no opinion about.
+    by_job = {run_id: collecting.collection.run(run_id).job_id for run_id in (*waiting, *dead)}
+    assert set(store.unsettled_job_ids(("QUEUED",))) == {by_job[run] for run in waiting}
+    assert set(store.unsettled_job_ids(("DEAD",))) == {by_job[run] for run in dead}
+    assert set(store.unsettled_job_ids(())) == set(), "and it invents none of its own"
+
+    source = (Path(__file__).resolve().parents[2] / "app" / "collect" / "runs.py").read_text(
+        encoding="utf-8"
+    )
+    assert "SUCCEEDED" not in source and "DEAD" not in source
 
 
 def test_a_candidate_the_parser_cannot_resolve_ends_the_run_too(
