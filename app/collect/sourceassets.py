@@ -51,7 +51,26 @@ class UnfetchedImage:
     http_last_modified: str | None = None
 
 
-SourceImage = FetchedImage | UnfetchedImage
+@dataclass(frozen=True)
+class RevalidatedImage:
+    """One reference the provider confirmed unchanged, against the validators it gave before.
+
+    No bytes came back, and none are needed: the content already in the store *is* the evidence,
+    so the new revision points at exactly the same asset. The checksum is not recomputed and not
+    invented — it is the one the earlier collection recorded for these same validators.
+    """
+
+    role: ImageRole
+    ordinal: int
+    host: str
+    provenance: str
+    sha256: str
+    locator: str | None = None
+    http_etag: str | None = None
+    http_last_modified: str | None = None
+
+
+SourceImage = FetchedImage | UnfetchedImage | RevalidatedImage
 
 
 class SourceAssetRecorder:
@@ -71,6 +90,19 @@ class SourceAssetRecorder:
     def _reference(self, image: SourceImage) -> ImageReference:
         if isinstance(image, UnfetchedImage):
             return _review(image, image.issue)
+        if isinstance(image, RevalidatedImage):
+            return ImageReference(
+                role=image.role,
+                ordinal=image.ordinal,
+                host=image.host,
+                provenance=image.provenance,
+                locator=image.locator,
+                sha256=image.sha256,
+                status=FieldStatus.CONFIRMED,
+                issue=None,
+                etag=image.http_etag,
+                last_modified=image.http_last_modified,
+            )
         try:
             stored = self._assets.put(image.content)
         except UnsupportedSourceImageError:

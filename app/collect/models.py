@@ -9,11 +9,13 @@ domain. There is no canonical Product here; that is M4 (ADR-0010 §1).
 
 from collections.abc import Iterable
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -59,6 +61,9 @@ class ProductFactsRevision(Base):
         CheckConstraint(_hex64("extractor_fingerprint"), name="extractor_fingerprint_hex"),
         CheckConstraint(_hex64("source_fingerprint"), name="source_fingerprint_hex"),
         CheckConstraint("collection_run_id <> ''", name="collection_run_present"),
+        # Review 5231130447 P0: a run appends its revision and then settles. If it dies between
+        # the two, the retry must recover this row — never append a second one beside it.
+        Index("ux_product_facts_revisions_collection_run", "collection_run_id", unique=True),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
         CheckConstraint(_in("facts_status", FactsStatus), name="facts_status_valid"),
     )
@@ -193,3 +198,73 @@ class ProductFactsImageRef(Base):
     issue: Mapped[str | None] = mapped_column(String(30))
     http_etag: Mapped[str | None] = mapped_column(Text)
     http_last_modified: Mapped[str | None] = mapped_column(Text)
+
+
+class CollectionOutcome(StrEnum):
+    """What one collection run ended as (ADR-0010 §6; Issue #52 ruling 5706133893).
+
+    ``NO_REVISION`` is a success, not a failure: the run read the product and the source stated no
+    stable identity to record against, so there is nothing to append and nothing a retry could
+    change. A run that could not finish its work at all is ``FAILED``.
+    """
+
+    PENDING = "PENDING"
+    RECORDED = "RECORDED"
+    NO_REVISION = "NO_REVISION"
+    FAILED = "FAILED"
+
+
+class CollectionRun(Base):
+    """The durable identity of one operator-submitted collection, and what it produced.
+
+    A run row is opened in the same unit of work as its job, so the operator holds a result
+    identity from the moment the request is accepted. It is the only place a caller has to look to
+    learn whether a revision exists; it never holds page content, only a code.
+    """
+
+    __tablename__ = "collection_runs"
+    __table_args__ = (
+        CheckConstraint(_in("outcome", CollectionOutcome), name="outcome_valid"),
+        CheckConstraint(_in("facts_status", FactsStatus, nullable=True), name="facts_status_valid"),
+        CheckConstraint(
+            "(outcome = 'RECORDED' AND revision_id IS NOT NULL AND facts_status IS NOT NULL)"
+            " OR (outcome <> 'RECORDED' AND revision_id IS NULL AND facts_status IS NULL)",
+            name="revision_only_when_recorded",
+        ),
+        CheckConstraint(
+            "(outcome IN ('PENDING')) = (finished_at IS NULL)", name="finished_when_terminal"
+        ),
+        CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
+        Index("ix_collection_runs_job_id", "job_id"),
+        Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
+        Index("ix_collection_runs_pacing", "supplier_key", "pacing_key", "product_read_at"),
+        Index(
+            "ix_collection_runs_pacing_identity",
+            "supplier_key",
+            "source_product_id",
+            "product_read_at",
+        ),
+    )
+
+    collection_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(36))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    source_url: Mapped[str] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(String(20))
+    revision_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("product_facts_revisions.revision_id")
+    )
+    facts_status: Mapped[str | None] = mapped_column(String(20))
+    # Why there is no revision, or which error ended the run: a code of ours, never page content.
+    detail: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # When this run last took a real product read, and the key that read was paced on. Every
+    # attempt — a retry of this same run included — is measured against the most recent read on
+    # that key, so nothing buys a second read inside the interval ADR-0010 §4 fixes.
+    product_read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    pacing_key: Mapped[str | None] = mapped_column(Text)
+    # What the document turned out to identify. Recorded after the read, so later runs pace on
+    # the source identity rather than on whichever accepted URL form was submitted.
+    source_product_id: Mapped[str | None] = mapped_column(String(80))
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

@@ -18,6 +18,7 @@ from enum import StrEnum
 from hashlib import sha256
 from urllib.parse import urlsplit
 
+from app.collect.facts import FieldFact
 from integrations.suppliers.base import SupplierProfile, SupplierTransport
 
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
@@ -310,3 +311,62 @@ def plan_image_sample(
         selected=tuple(selected),
         excluded=tuple(sorted(excluded, key=lambda pair: pair[0].order)),
     )
+
+
+# ---------------------------------------------------------------- one supplier's collection
+
+
+@dataclass(frozen=True)
+class SourceIdentity:
+    """The stable identity a supplier's own document states for its product.
+
+    ``agreed`` names the declarations that stated it, so a stored revision can say what the page
+    was asked and what it answered.
+    """
+
+    source_product_id: str
+    agreed: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class UnresolvedIdentity:
+    """Why a document states no identity that a revision may be recorded against.
+
+    A collection that gets this records no revision at all. Nothing downstream may substitute a
+    name, a URL or a digest for the identity the source did not state.
+    """
+
+    reason: str
+    seen: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
+
+
+SourceIdentityResult = SourceIdentity | UnresolvedIdentity
+
+
+@dataclass(frozen=True)
+class SupplierCollection:
+    """Everything a supplier contributes to a collection, and nothing more (ADR-0010 §3).
+
+    A supplier says where its product pages live and what its own documents mean: the profile,
+    the image-role rules, the identity rule and the field parser. It performs no request, stores
+    no byte, computes no checksum and schedules nothing — the run, the fetching, the asset store,
+    the revision history and the job are generic COLLECT core's, and stay there.
+    """
+
+    profile: CollectionProfile
+    roles: ImageRoleRules
+    identity: Callable[[DocumentView, str], SourceIdentityResult]
+    fields: Callable[[DocumentView], Mapping[str, FieldFact]]
+    # Which product an accepted URL points at, read from the URL alone, or None when the URL by
+    # itself does not say. It exists so the same product is paced as one product before anything
+    # has been read of it: two accepted forms of one product's URL are not two products.
+    #
+    # It is never an identity. A revision's ``source_product_id`` comes from the document the
+    # supplier served and from nothing else; this answers a much smaller question, and answering
+    # it wrongly can only make a collection wait, never mislabel a revision.
+    url_product_hint: Callable[[str], str | None] = lambda url: None
+
+    @property
+    def supplier_key(self) -> str:
+        return self.profile.supplier.supplier_key

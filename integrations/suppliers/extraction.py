@@ -77,6 +77,15 @@ def read_manifest(path: Path) -> Manifest:
     return Manifest(revision, inputs, fingerprint)
 
 
+def supplier_manifest(supplier_key: str) -> Manifest:
+    """The extraction identity of one supplier package, read and never imported.
+
+    A supplier's package is named by its key, so the manifest is found without importing anything
+    the parser owns (the repository rule pins the same path form).
+    """
+    return read_manifest(Path(__file__).resolve().parent / supplier_key / MANIFEST_NAME)
+
+
 def manifest_problems(repo_root: Path, package: Path) -> list[str]:
     """Why ``package``'s extraction identity is not acyclic, complete and current; empty if it
     is, or if the package has no collection definition at all."""

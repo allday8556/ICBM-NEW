@@ -209,6 +209,39 @@ class ProductFactsRevisionStore:
             ).all()
             return tuple(self._load(session, row) for row in rows)
 
+    def for_run(self, collection_run_id: str) -> StoredRevision | None:
+        """The revision one durable run appended, if it got that far.
+
+        A run appends its revision and then settles. A retry after a crash between the two reads
+        this instead of collecting again: the revision is already immutable and already the
+        answer, and a second one for the same run is refused by the database anyway.
+        """
+        with self._db.read() as session:
+            row = session.scalars(
+                select(ProductFactsRevision).where(
+                    ProductFactsRevision.collection_run_id == collection_run_id
+                )
+            ).first()
+            return None if row is None else self._load(session, row)
+
+    def latest(self, supplier_key: str, source_product_id: str) -> StoredRevision | None:
+        """The most recent revision of one source identity, or None if there is none yet.
+
+        A collection reads it to ask a provider whether the bytes it already stored are still
+        current; it never copies a fact from it.
+        """
+        with self._db.read() as session:
+            row = session.scalars(
+                select(ProductFactsRevision)
+                .where(
+                    ProductFactsRevision.supplier_key == supplier_key,
+                    ProductFactsRevision.source_product_id == source_product_id,
+                )
+                .order_by(ProductFactsRevision.sequence.desc())
+                .limit(1)
+            ).first()
+            return None if row is None else self._load(session, row)
+
     @staticmethod
     def _require_stored_assets(session: Session, evaluated: EvaluatedFacts) -> None:
         named = {ref.sha256 for ref in evaluated.images if ref.sha256 is not None}

@@ -227,6 +227,27 @@ def test_a_validated_image_is_reused_only_on_304() -> None:
     assert site.requests[0].headers["if-none-match"] == '"v1"'
 
 
+def test_a_caller_s_remaining_allowance_bounds_the_body_it_receives() -> None:
+    # PR #70 review 5231130447 P1: a run's total is a hard cap, so the caller narrows the
+    # per-image bound to what it has left and the body over it never comes back.
+    fits = Site(httpx.Response(200, headers={"content-type": "image/png"}, content=b"x" * 100))
+    image = _gateway(fits).read_image(_profile(), IMAGE, budget=Budget(), max_bytes=100)
+    assert image.content == b"x" * 100
+
+    over = Site(httpx.Response(200, headers={"content-type": "image/png"}, content=b"x" * 101))
+    with pytest.raises(ImageFetchRefused) as caught:
+        _gateway(over).read_image(_profile(), IMAGE, budget=Budget(), max_bytes=100)
+    assert caught.value.issue is FetchIssue.OVERSIZE, "under the profile bound, over the run's"
+
+    declared = Site(
+        httpx.Response(
+            200, headers={"content-type": "image/png", "content-length": "400"}, content=b"x" * 400
+        )
+    )
+    with pytest.raises(ImageFetchRefused):
+        _gateway(declared).read_image(_profile(), IMAGE, budget=Budget(), max_bytes=100)
+
+
 @pytest.mark.parametrize(
     ("response", "issue"),
     [

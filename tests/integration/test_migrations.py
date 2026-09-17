@@ -30,8 +30,9 @@ CANONICAL_TABLES = (
     "product_facts_evidence",
     "source_assets",
     "product_facts_image_refs",
+    "collection_runs",
 )
-HEAD = "0007_m3_product_facts_revisions"
+HEAD = "0010_m3_same_product_pacing"
 
 
 def _url(path: Path) -> str:

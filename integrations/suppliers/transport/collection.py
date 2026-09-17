@@ -308,8 +308,14 @@ class PolicedCollectionGateway:
         budget: RequestBudget,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_bytes: int | None = None,
     ) -> ImageResponse:
-        """Fetch one image, revalidating with the stored validators when there are any."""
+        """Fetch one image, revalidating with the stored validators when there are any.
+
+        ``max_bytes`` narrows the profile's own per-image bound to what the caller still has left
+        to spend. The bound is applied to the declared size and to the body as it arrives, so a
+        response never reaches the caller — and never reaches storage — above it.
+        """
         host = check_target(profile, url, ReadKind.IMAGE_REQUEST)
         budget.reserve(ReadKind.IMAGE_REQUEST, host)
         headers = {}
@@ -334,7 +340,7 @@ class PolicedCollectionGateway:
             media = content_type.split(";", 1)[0].strip().lower()
             if not media.startswith("image/"):
                 raise ImageFetchRefused(FetchIssue.BAD_CONTENT_TYPE, "the response is not an image")
-            limit = profile.limits.max_image_bytes
+            limit = min(profile.limits.max_image_bytes, max_bytes or profile.limits.max_image_bytes)
             declared = response.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > limit:
                 raise ImageFetchRefused(FetchIssue.OVERSIZE, "declared size over the bound")
@@ -426,3 +432,52 @@ def _bounded(response: httpx.Response, limit: int) -> bytearray | None:
         if len(data) > limit:
             return None
     return data
+
+
+class DeferredCollectionGateway:
+    """The policed gateway, built on the first request and not before.
+
+    Composing the application must not open a transport: a process that never collects anything
+    never builds one, and under CI or pytest building one is refused outright. Deferring the
+    construction keeps that refusal where it belongs — at the moment a real request would be
+    made — instead of making the whole application impossible to compose in a test.
+    """
+
+    def __init__(self, build: Callable[[], PolicedCollectionGateway] | None = None) -> None:
+        self._build = build or PolicedCollectionGateway
+        self._gateway: PolicedCollectionGateway | None = None
+
+    def _ready(self) -> PolicedCollectionGateway:
+        if self._gateway is None:
+            self._gateway = self._build()
+        return self._gateway
+
+    def read_document(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        kind: ReadKind,
+        budget: RequestBudget,
+        session: bytes | None = None,
+    ) -> DocumentView:
+        return self._ready().read_document(profile, url, kind=kind, budget=budget, session=session)
+
+    def read_image(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        budget: RequestBudget,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        max_bytes: int | None = None,
+    ) -> ImageResponse:
+        return self._ready().read_image(
+            profile,
+            url,
+            budget=budget,
+            etag=etag,
+            last_modified=last_modified,
+            max_bytes=max_bytes,
+        )
