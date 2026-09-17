@@ -1,8 +1,15 @@
 """PREP for ``m3-accept-01``: arming, the gates before any request, and the REAL environment.
 
-Arming binds the campaign to one exact commit, one target and one frozen budget, and refuses when
-the budget and the production profile disagree — the campaign never changes the profile, so a
-mismatch means the contract under review is not the code that would run.
+Arming binds the campaign to one exact commit, one target and one frozen budget. Before anything is
+persisted — no manifest, no ceiling, and so no approval can exist — it refuses when:
+
+* the budget and the production profile disagree (the campaign never changes the profile);
+* the data directory is not the campaign's own ``<root>/data``: an ordinary ICBM data directory,
+  or a path that resolves anywhere else, is not a substitute for it;
+* the M1 connection owner in that directory does not hold a locally usable connection and session.
+  This is read from the owner's own local state with every transport refusing — arming never calls
+  ``collection_session`` or ``verify`` and never sends a request. Establishing the connection there
+  is an ordinary CONNECT operation outside the campaign; the harness never automates a login.
 
 The PREP gates are evaluated before a pass starts and before any transport exists. None of them
 sends anything: the M1 session check reads the connection owner's own local state, and the hard-
@@ -16,8 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from app.collect.collection import RegisteredCollection
-from app.config import AppConfig
-from app.container import Container
+from app.config import AppConfig, database_path
+from app.container import build_container
+from app.core.ownership import acquire_data_dir
 from integrations.suppliers.collection import ReadKind, SupplierCollection
 from integrations.suppliers.transport.collection import (
     CollectionTargetRefused,
@@ -28,6 +36,7 @@ from integrations.suppliers.transport.collection import (
 from scripts.m2harness.gates import REPO_ROOT, Checkout, dedicated_problems
 from scripts.m3accept.campaign import Environment
 from scripts.m3accept.ledger import CampaignLedger
+from scripts.m3accept.m1 import NoTraffic, m1_session_problems
 from scripts.m3accept.manifest import (
     CAMPAIGN_ID,
     EXCLUDED_IMAGE_HOSTS,
@@ -72,6 +81,7 @@ HARD_ZERO_MODULES = (
     "app.connect.smartstore",
 )
 HARD_ZERO_ROOTS = ("app/collect", "integrations/suppliers", "scripts/m3accept")
+DATA_DIR_NAME = "data"
 
 
 class ArmingRefused(RuntimeError):
@@ -112,22 +122,70 @@ def profile_problems(collection: SupplierCollection, budget: CampaignBudget) -> 
     return problems
 
 
+def campaign_data_dir(ledger: CampaignLedger) -> Path:
+    """The one data directory a campaign runs on: ``data`` beside its ledger."""
+    return ledger.path.parent / DATA_DIR_NAME
+
+
+def data_dir_problems(ledger: CampaignLedger, config: AppConfig) -> list[str]:
+    """Why ``config`` is not the campaign's own data directory. Empty when it is."""
+    expected = campaign_data_dir(ledger)
+    given = Path(config.data_dir)
+    if given.absolute() != expected.absolute():
+        return ["the data directory is not this campaign's own <root>/data"]
+    if given.is_symlink() or given.resolve() != expected.parent.resolve() / DATA_DIR_NAME:
+        return ["the campaign data directory resolves somewhere else; a link is not a substitute"]
+    return []
+
+
+def local_m1_problems(env: Environment) -> list[str]:
+    """The M1 owner's local answer, composed with transports that refuse every request."""
+    kwargs: dict[str, Any] = {
+        "collection_gateway": NoTraffic(),
+        "supplier_gateway": NoTraffic(),
+    }
+    if env.secret_store is not None:
+        kwargs["secret_store"] = env.secret_store
+    if env.clock is not None:
+        kwargs["clock"] = env.clock
+    if env.registered is not None:
+        kwargs["collections"] = env.registered
+    if env.suppliers is not None:
+        kwargs["suppliers"] = env.suppliers
+    if not database_path(env.config.data_dir).is_file():
+        return ["the campaign data directory holds no ICBM database, so no M1 connection"]
+    with acquire_data_dir(env.config.data_dir, app_version="m3-accept-arm-check") as lease:
+        container = build_container(env.config, ownership=lease, **kwargs)
+        try:
+            return m1_session_problems(container, env.supplier_key)
+        finally:
+            container.db.dispose()
+
+
 def arm(
     ledger: CampaignLedger,
     *,
-    collection: SupplierCollection,
+    env: Environment,
     product_url: str,
     phase_b_findings: Mapping[str, Any],
     mode: str,
     code_sha: str,
     budget: CampaignBudget = M3_ACCEPT_01_BUDGET,
 ) -> Manifest:
-    """Bind the campaign once: exact SHA, target digest, frozen budget, proven byte facts."""
+    """Bind the campaign once: exact SHA, target digest, frozen budget, proven byte facts.
+
+    Every gate runs before the ledger is written, so a refused campaign has no manifest, no
+    ceilings, and cannot be approved.
+    """
+    collection = env.collection
     problems = profile_problems(collection, budget)
     if len(code_sha) != 40 or any(c not in "0123456789abcdef" for c in code_sha):
         problems.append("the code SHA is a full 40-character commit")
     if mode not in ("REAL", "DRY"):
         problems.append("a campaign is REAL or DRY")
+    problems += data_dir_problems(ledger, env.config)
+    if not problems:
+        problems += local_m1_problems(env)
     if problems:
         raise ArmingRefused(problems)
     manifest = Manifest(
@@ -168,19 +226,6 @@ def hard_zero_problems(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
-def m1_session_problems(container: Container, supplier_key: str) -> list[str]:
-    """Whether the accepted M1 session is loadable, read locally. No request is made.
-
-    The connection owner's own summary answers it: a READY connection reports a VERIFIED session
-    only when the stored session exists and decrypts, and it demotes itself when it does not. The
-    cookie material is never read here — that stays with the local leak scanner alone.
-    """
-    summary = container.connect.supplier_connection(supplier_key)
-    if summary.auth_state != "AUTHENTICATED" or summary.session_state != "VERIFIED":
-        return [f"the M1 connection is {summary.state}; a campaign never logs in or recovers"]
-    return []
-
-
 def prep_gates(
     *,
     root: Path,
@@ -208,6 +253,20 @@ def prep_gates(
 
 
 # ---------------------------------------------------------------- the REAL environment
+
+
+def local_environment(
+    config: AppConfig, *, collection: SupplierCollection, registered: RegisteredCollection
+) -> Environment:
+    """What arming composes: the campaign data directory, with every transport refusing."""
+    return Environment(
+        config=config,
+        supplier_key=collection.supplier_key,
+        collection=collection,
+        collection_transport=NoTraffic,
+        connect_transport=NoTraffic,
+        registered=(registered,),
+    )
 
 
 def real_environment(

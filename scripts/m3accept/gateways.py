@@ -10,13 +10,16 @@ Two thin wrappers, and neither of them collects anything:
   call it verifies that a reservation was actually taken — a transport that sent without reserving
   is a defect, and the campaign stops on it rather than trusting it.
 
-* ``LedgeredConnectGateway`` sits in front of the M1 connection owner's gateway. A session proof
-  read is reserved before it is delegated; a login is refused outright and recorded. There is no
-  recovery path in a campaign, only a stop.
+* ``LedgeredConnectGateway`` sits directly in front of the M1 connection owner's gateway, and it
+  is the one place CONNECT traffic is accounted for. Each session-proof read is reserved in the
+  ledger immediately before it is delegated, so the ledger records the proof reads that were
+  actually sent — one pair for an ordinary attempt, another for a job retry — and a read over the
+  ceiling is refused before it reaches the transport. Nothing is reserved in advance of need. A
+  login is refused outright and recorded; there is no recovery path in a campaign, only a stop.
 
-``CampaignSessions`` asks the M1 owner for its session only when the campaign has budgeted the
-proof that owner performs. When it has not, the pass stops *before* the owner is called, so the M1
-connection's own state is left exactly as it was.
+``CampaignSessions`` hands the production collection path the M1 owner itself. It counts nothing
+and decides nothing about the budget: it only refuses the operator-initiated form of the call,
+because a campaign never starts a login.
 """
 
 from dataclasses import dataclass
@@ -53,11 +56,6 @@ _CONNECT_CLASS = {
 
 class UnreservedRequest(PolicyBlockedError):
     """A transport returned from a request without having reserved it. The campaign stops."""
-
-
-class SessionProofNotBudgeted(PolicyBlockedError):
-    """The M1 owner proves a stored session before handing it out, and this campaign's frozen
-    budget allows no such request. The pass stops before the owner is asked."""
 
 
 @dataclass
@@ -158,12 +156,14 @@ class LedgeredConnectGateway:
 
 
 class CampaignSessions:
-    """The M1 connection owner, reached only when the campaign has budgeted its session proof."""
+    """The production M1 connection owner, as the collection path's session provider.
 
-    def __init__(self, owner: SessionProvider, ledger: CampaignLedger, pass_id: str) -> None:
+    Its proof reads are accounted for where they are sent — in ``LedgeredConnectGateway`` — and
+    nowhere else.
+    """
+
+    def __init__(self, owner: SessionProvider) -> None:
         self._owner = owner
-        self._ledger = ledger
-        self._pass = pass_id
 
     def collection_session(self, supplier_key: str, *, operator_initiated: bool = False) -> bytes:
         if operator_initiated:
@@ -171,13 +171,4 @@ class CampaignSessions:
             raise PolicyBlockedError(
                 "M3_ACCEPT_OPERATOR_LOGIN_REFUSED", "a campaign never starts a login"
             )
-        for request in (RequestClass.CONNECT_CONTROL_READ, RequestClass.CONNECT_PROTECTED_READ):
-            per_pass, _ = self._ledger.ceiling(request)
-            if per_pass < 1:
-                self._ledger.refuse(self._pass, request, "SESSION_PROOF_NOT_BUDGETED")
-                raise SessionProofNotBudgeted(
-                    "M3_ACCEPT_SESSION_PROOF_NOT_BUDGETED",
-                    "the M1 owner proves its session before handing it out, and this campaign's "
-                    "frozen budget allows no proof request",
-                )
         return self._owner.collection_session(supplier_key)

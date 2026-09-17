@@ -87,21 +87,22 @@ class CampaignBudget:
         return _digest(self.as_json())
 
 
-# Ruling 5711123764 §4 and 5711187191. PROPOSED — NOT AUTHORIZED FOR REAL.
+# Rulings 5711123764 §4, 5711187191 and PR #71 review 5233744115. NOT AUTHORIZED FOR REAL until
+# the prep PR is merged and the operator approves the exact SHA.
 #
-# The CONNECT classes are zero because the ruling freezes AUTH/login/recovery at zero. The M1
-# connection owner, however, proves a stored session with a control read and a protected read
-# before it hands the session out, so under this budget a pass stops before its product read. That
-# is deliberate fail-closed behaviour, and the question of budgeting the proof is raised for a
-# ruling rather than decided here.
+# The M1 connection owner proves a stored session — one control read, one protected read — every
+# time it hands the session out, a job retry included. So the proof is budgeted exactly as the
+# product read is: one pair per attempt, at most two attempts a pass. These are ceilings, not
+# expected counts; a pass with no retry spends one pair. A login is never budgeted: an expired
+# session stops the campaign, it is not recovered.
 M3_ACCEPT_01_BUDGET = CampaignBudget(
     ceilings=MappingProxyType(
         {
             RequestClass.PRODUCT_READ: Ceiling(per_pass=2, campaign=4),
             RequestClass.IMAGE_REQUEST: Ceiling(per_pass=13, campaign=26),
             RequestClass.POLICY_READ: Ceiling(per_pass=0, campaign=0),
-            RequestClass.CONNECT_CONTROL_READ: Ceiling(per_pass=0, campaign=0),
-            RequestClass.CONNECT_PROTECTED_READ: Ceiling(per_pass=0, campaign=0),
+            RequestClass.CONNECT_CONTROL_READ: Ceiling(per_pass=2, campaign=4),
+            RequestClass.CONNECT_PROTECTED_READ: Ceiling(per_pass=2, campaign=4),
             RequestClass.CONNECT_AUTHENTICATE: Ceiling(per_pass=0, campaign=0),
         }
     ),

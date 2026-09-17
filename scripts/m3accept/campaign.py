@@ -54,6 +54,7 @@ from scripts.m3accept.gateways import (
     LedgeredConnectGateway,
 )
 from scripts.m3accept.ledger import CampaignLedger, State, Submission
+from scripts.m3accept.m1 import m1_session_problems
 from scripts.m3accept.manifest import (
     HARD_ZERO,
     CampaignBudget,
@@ -123,7 +124,7 @@ def fresh_session(
 ) -> Iterator[tuple[Container, str]]:
     """Compose one fresh application on the campaign data directory, behind the ledger."""
     owner = _LateOwner()
-    sessions = CampaignSessions(owner, ledger, pass_id)
+    sessions = CampaignSessions(owner)
     kwargs: dict[str, Any] = {
         "collection_gateway": LedgeredCollectionGateway(
             env.collection_transport(), ledger, pass_id
@@ -170,6 +171,11 @@ def run_pass(
     with fresh_session(env, ledger, pass_id) as (container, nonce):
         running = state.value == f"PASS_{pass_id}_RUNNING"
         if not running:
+            # Pre-pass PREP, local only: the M1 owner must still hold a usable stored session.
+            # Whether it is live is the budgeted proof inside the pass, not this check.
+            if problems := m1_session_problems(container, env.supplier_key):
+                ledger.stop("M1_SESSION_NOT_LOADABLE")
+                return PassOutcome("STOPPED", pass_id, detail={"reasons": problems})
             if pass_id == "B":
                 remaining = seconds_until_eligible(env, container, product_url)
                 if remaining > 0:
@@ -254,7 +260,9 @@ def classify_pass(
 
     if run.outcome is not CollectionOutcome.RECORDED:
         detail = run.detail or ""
-        stopped = any(detail.startswith(code) for code in _CAMPAIGN_STOP_CODES)
+        # A run the campaign itself refused is a stop, whatever code the production owner then
+        # surfaced for it: the M1 owner, for one, reports a refused login as its own auth failure.
+        stopped = bool(refusals) or any(detail.startswith(code) for code in _CAMPAIGN_STOP_CODES)
         if run.outcome is CollectionOutcome.NO_REVISION:
             reasons.append("IDENTITY_UNRESOLVED")
         else:

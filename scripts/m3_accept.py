@@ -41,6 +41,7 @@ from scripts.m3accept.ledger import CampaignLedger
 from scripts.m3accept.manifest import approval_phrase
 from scripts.m3accept.prep import (
     arm,
+    local_environment,
     prep_gates,
     real_environment,
     typed_approval_matches,
@@ -88,9 +89,12 @@ def cmd_arm(root: Path, product_url: str, findings: Path, dry: bool) -> int:
     checkout = GitCheckout()
     if not dry and checkout.dirty():
         raise SystemExit("refused: arming binds an exact commit, and the working tree is not clean")
+    env = local_environment(
+        AppConfig(data_dir=root / DATA), collection=COLLECTION, registered=_registered()
+    )
     manifest = arm(
         _ledger(root),
-        collection=COLLECTION,
+        env=env,
         product_url=product_url,
         phase_b_findings=json.loads(findings.read_text("utf-8")),
         mode="DRY" if dry else "REAL",
