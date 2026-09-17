@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -27,10 +28,12 @@ from app.collect.facts import (
     EVIDENCE_OBSERVED_MAX_BYTES,
     EvidenceKind,
     FactsStatus,
+    FetchTargetRefusal,
     FieldLevel,
     FieldStatus,
     ImageIssue,
     ImageRole,
+    LocatorForm,
 )
 from app.db.base import Base
 from app.db.types import UTCDateTime
@@ -183,6 +186,19 @@ class ProductFactsImageRef(Base):
             " OR (status = 'REVIEW_REQUIRED' AND issue IS NOT NULL)",
             name="status_matches_issue",
         ),
+        # 0011: how the source wrote the reference, and why its fetch target was refused.
+        CheckConstraint(_in("source_form", LocatorForm, nullable=True), name="source_form_valid"),
+        CheckConstraint(
+            "source_trimmed IS NULL OR source_form IS NOT NULL", name="source_trimmed_has_form"
+        ),
+        CheckConstraint(
+            _in("target_refusal", FetchTargetRefusal, nullable=True), name="target_refusal_valid"
+        ),
+        CheckConstraint(
+            "target_refusal IS NULL OR "
+            "(status = 'REVIEW_REQUIRED' AND sha256 IS NULL AND locator IS NULL)",
+            name="refused_target_has_nothing",
+        ),
     )
 
     revision_id: Mapped[str] = mapped_column(
@@ -198,6 +214,9 @@ class ProductFactsImageRef(Base):
     issue: Mapped[str | None] = mapped_column(String(30))
     http_etag: Mapped[str | None] = mapped_column(Text)
     http_last_modified: Mapped[str | None] = mapped_column(Text)
+    source_form: Mapped[str | None] = mapped_column(String(20))
+    source_trimmed: Mapped[bool | None] = mapped_column(Boolean)
+    target_refusal: Mapped[str | None] = mapped_column(String(30))
 
 
 class CollectionOutcome(StrEnum):

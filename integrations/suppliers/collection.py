@@ -18,7 +18,7 @@ from enum import StrEnum
 from hashlib import sha256
 from urllib.parse import urlsplit
 
-from app.collect.facts import FieldFact
+from app.collect.facts import FieldFact, LocatorForm
 from integrations.suppliers.base import SupplierProfile, SupplierTransport
 
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
@@ -178,24 +178,52 @@ RECONNAISSANCE_ONLY = (
     "licence grant for that asset, and it says nothing about who operates its host"
 )
 _DIGIT_RUN = re.compile(r"\d+")
+# RFC 3986 §3.1: a scheme is a letter, then letters, digits, "+", "-" or ".", then ":".
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 @dataclass(frozen=True)
 class ImageCandidate:
     """One image reference of a product document, with the role its own DOM supports.
 
-    ``url`` is absolute and may carry a query, so it is used in memory only. Everything that
-    reaches a findings file goes through :meth:`audit`, which drops the query and masks digits.
+    ``url`` is the reference resolved against the document's own URL, and ``source`` is the
+    reference exactly as the page wrote it, before trimming or resolving — ``None`` when a supplier
+    does not report it. Both may carry a query, so both are used in memory only. Everything that
+    reaches a findings file goes through :meth:`audit`, which drops the query and masks digits, and
+    what a revision keeps of ``source`` is only its :attr:`source_form`.
     """
 
     url: str
     role: ImageRole
     order: int  # the reference's index in the document's own stable source order
     rule: str  # which site-knowledge rule assigned the role, for provenance
+    source: str | None = None
 
     @property
     def host(self) -> str:
-        return urlsplit(self.url).hostname or ""
+        """The resolved reference's host, or ``""`` when it has none that parses."""
+        try:
+            return urlsplit(self.url).hostname or ""
+        except ValueError:
+            return ""
+
+    @property
+    def source_form(self) -> tuple[LocatorForm, bool] | None:
+        """How the page wrote the reference, and whether surrounding whitespace was trimmed.
+
+        Read from ``source`` alone, by the URL grammar: a leading ``//`` borrows the page's scheme,
+        a leading ``scheme:`` names its own, and anything else is a path resolved against the page.
+        """
+        if self.source is None:
+            return None
+        written = self.source.strip()
+        if written.startswith("//"):
+            form = LocatorForm.PROTOCOL_RELATIVE
+        elif _SCHEME.match(written):
+            form = LocatorForm.ABSOLUTE
+        else:
+            form = LocatorForm.RELATIVE
+        return form, written != self.source
 
     @property
     def identity(self) -> str:

@@ -636,6 +636,43 @@ def test_supplier_packages_hold_site_knowledge_only() -> None:
         assert not attributes & {"_raw", "client", "page", "context", "request", "grant"}, path
 
 
+def test_only_the_collect_transport_judges_a_fetch_target_and_it_always_names_why() -> None:
+    # Issue #52 ruling 5716978033 §3–§4: one judge of fetchability, and a refusal from a closed
+    # vocabulary. A target refusal is built only in the COLLECT transport, always with a
+    # ``FetchTargetRefusal`` member, never a free-form string; and nothing outside the transport
+    # keeps a URL-shape check of its own that could disagree with it.
+    judge = "integrations/suppliers/transport/collection.py"
+    builders = {}
+    for path, tree in _production_modules().items():
+        calls = _calls(tree, "CollectionTargetRefused") + _calls(tree, "_refused")
+        if calls:
+            builders[path] = calls
+    assert set(builders) == {judge}
+    for call in builders[judge]:
+        if _callee(call) == "CollectionTargetRefused":
+            reason = call.args[0]
+            assert isinstance(reason, ast.Name) and reason.id == "reason", ast.dump(call)
+            continue
+        reason = call.args[0]
+        assert (
+            isinstance(reason, ast.Attribute)
+            and isinstance(reason.value, ast.Name)
+            and reason.value.id == "FetchTargetRefusal"
+        ), f"{judge}:{call.lineno}"
+    shape_checks = {
+        path
+        for path, tree in _production_modules().items()
+        if path.startswith(("app/collect/", "integrations/suppliers/"))
+        and not path.startswith("integrations/suppliers/transport/")
+        and path != "app/collect/urls.py"  # the persisted-URL sanitizer, not a fetch decision
+        and any(
+            isinstance(node, ast.Attribute) and node.attr in {"port", "username", "password"}
+            for node in ast.walk(tree)
+        )
+    }
+    assert shape_checks == set(), "a fetch-target decision lives in the transport only"
+
+
 def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> None:
     importers = {
         path

@@ -17,7 +17,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.collect.assets import SourceAssetStore, UnsupportedSourceImageError
-from app.collect.facts import FieldStatus, ImageIssue, ImageReference, ImageRole
+from app.collect.facts import (
+    FetchTargetRefusal,
+    FieldStatus,
+    ImageIssue,
+    ImageReference,
+    ImageRole,
+    LocatorForm,
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,8 @@ class FetchedImage:
     locator: str | None = None
     http_etag: str | None = None
     http_last_modified: str | None = None
+    source_form: LocatorForm | None = None
+    source_trimmed: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,9 @@ class UnfetchedImage:
     locator: str | None = None
     http_etag: str | None = None
     http_last_modified: str | None = None
+    source_form: LocatorForm | None = None
+    source_trimmed: bool | None = None
+    target_refusal: FetchTargetRefusal | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,8 @@ class RevalidatedImage:
     locator: str | None = None
     http_etag: str | None = None
     http_last_modified: str | None = None
+    source_form: LocatorForm | None = None
+    source_trimmed: bool | None = None
 
 
 SourceImage = FetchedImage | UnfetchedImage | RevalidatedImage
@@ -102,6 +116,8 @@ class SourceAssetRecorder:
                 issue=None,
                 etag=image.http_etag,
                 last_modified=image.http_last_modified,
+                source_form=image.source_form,
+                source_trimmed=image.source_trimmed,
             )
         try:
             stored = self._assets.put(image.content)
@@ -120,6 +136,8 @@ class SourceAssetRecorder:
             issue=None,
             etag=image.http_etag,
             last_modified=image.http_last_modified,
+            source_form=image.source_form,
+            source_trimmed=image.source_trimmed,
         )
 
 
@@ -135,4 +153,7 @@ def _review(image: SourceImage, issue: ImageIssue) -> ImageReference:
         issue=issue,
         etag=image.http_etag,
         last_modified=image.http_last_modified,
+        source_form=image.source_form,
+        source_trimmed=image.source_trimmed,
+        target_refusal=image.target_refusal if isinstance(image, UnfetchedImage) else None,
     )

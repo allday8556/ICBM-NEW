@@ -5,8 +5,11 @@ use — including the description block's unclosed tags, which is what made docu
 outermost-container matching unusable. No captured page content is copied here.
 """
 
+from urllib.parse import urljoin
+
 import pytest
 
+from app.collect.facts import LocatorForm
 from integrations.suppliers.collection import ImageRole, plan_image_sample
 from integrations.suppliers.kmretail import IMAGE_ROLES
 from integrations.suppliers.kmretail.collect.images import VOID_ELEMENTS, classify_images
@@ -341,3 +344,46 @@ def test_a_safe_exclusion_is_never_promoted_while_recovering() -> None:
     roles = classified(markup)
     assert roles[0] == (ImageRole.UI_COMMON, "km.ui.promotion_banner")
     assert not [role for role, _ in roles if role in (ImageRole.DETAIL, ImageRole.PRIMARY)]
+
+
+# ---------------------------------------------------------------- what the page wrote (PR-1)
+
+
+def test_every_reference_keeps_what_the_page_wrote_beside_what_it_resolves_to() -> None:
+    # Issue #52 ruling 5716978033: the written reference is reported, and resolving it is the only
+    # thing the parser does to it — trimming and joining against the page, nothing repaired.
+    for candidate in classify_images(PAGE, PRODUCT_URL):
+        assert candidate.source is not None
+        assert candidate.url == urljoin(PRODUCT_URL, candidate.source.strip())
+
+
+def test_a_written_form_is_reported_as_written_and_never_repaired() -> None:
+    written = (
+        f" //{ASSETS}/w1 ",
+        f"http://{ASSETS}/w2",
+        "/rel/w3.jpg",
+        f"https://{ASSETS}/w4#frame",
+        f"https://{ASSETS}/w 5",
+    )
+    markup = (
+        '<div id="prdDetail"><div class="cont">'
+        + "".join(f'<img ec-data-src="{value}">' for value in written)
+        + "</div></div>"
+    )
+    found = classify_images(markup, PRODUCT_URL)
+    assert [c.source for c in found] == list(written)
+    assert [c.role for c in found] == [ImageRole.DETAIL] * len(written)
+    assert [c.url for c in found] == [
+        f"https://{ASSETS}/w1",
+        f"http://{ASSETS}/w2",  # still http: the parser never upgrades a scheme
+        f"https://{STORE}/rel/w3.jpg",
+        f"https://{ASSETS}/w4#frame",  # the fragment stays for the target check to judge
+        f"https://{ASSETS}/w 5",
+    ]
+    assert [c.source_form for c in found] == [
+        (LocatorForm.PROTOCOL_RELATIVE, True),
+        (LocatorForm.ABSOLUTE, False),
+        (LocatorForm.RELATIVE, False),
+        (LocatorForm.ABSOLUTE, False),
+        (LocatorForm.ABSOLUTE, False),
+    ]

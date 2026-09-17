@@ -94,6 +94,39 @@ class ImageIssue(StrEnum):
     FETCH_FAILED = "FETCH_FAILED"
 
 
+class LocatorForm(StrEnum):
+    """How the source page wrote an image reference, before it was resolved against the page.
+
+    The written text itself is kept in memory only: it may carry a token, a credential or a scheme
+    the persisted-URL rule refuses (ADR-0010 §9), so what the revision keeps is its form.
+    """
+
+    ABSOLUTE = "ABSOLUTE"  # it names its own scheme
+    PROTOCOL_RELATIVE = "PROTOCOL_RELATIVE"  # ``//host/path``: the page's scheme is borrowed
+    RELATIVE = "RELATIVE"  # a path, resolved against the page's own URL
+
+
+class FetchTargetRefusal(StrEnum):
+    """Why the COLLECT transport's target check refused a URL before anything was reserved or sent.
+
+    Closed on purpose: every refusal the target check can make has exactly one member, and there is
+    no catch-all. A failure that is not one of these is not a target refusal at all and keeps its
+    own classification (Issue #52 ruling 5716978033 §4).
+    """
+
+    UNPARSEABLE = "UNPARSEABLE"  # no parseable URL: bad bracket, bad port, or no host
+    WHITESPACE = "WHITESPACE"  # whitespace anywhere in the URL
+    FRAGMENT = "FRAGMENT"  # a ``#fragment``
+    NOT_ABSOLUTE = "NOT_ABSOLUTE"  # no scheme: a relative or protocol-relative URL left unresolved
+    NON_HTTPS = "NON_HTTPS"  # ``http``
+    UNSUPPORTED_SCHEME = "UNSUPPORTED_SCHEME"  # any other scheme
+    CREDENTIALS_PRESENT = "CREDENTIALS_PRESENT"  # a user or password in the authority
+    NON_STANDARD_PORT = "NON_STANDARD_PORT"  # a port other than 443
+    HOST_NOT_ALLOWLISTED = "HOST_NOT_ALLOWLISTED"  # not a host the profile allows for this kind
+    PATH_NOT_ALLOWED = "PATH_NOT_ALLOWED"  # not a path the profile allows for this kind
+    QUERY_NOT_ALLOWED = "QUERY_NOT_ALLOWED"  # a query this kind of read may not carry
+
+
 class Availability(StrEnum):
     ON_SALE = "ON_SALE"
     SOLD_OUT = "SOLD_OUT"
@@ -318,7 +351,18 @@ class FieldFact:
 class ImageReference:
     """One ordered image reference (ADR-0010 §9). ``locator`` is a sanitized stable locator when
     one is proven; otherwise only ``provenance`` (the reference's evidence locator in the product
-    source) and ``host`` identify where it came from. No secret-bearing URL is ever held here."""
+    source) and ``host`` identify where it came from. No secret-bearing URL is ever held here.
+
+    What the source wrote and what could be fetched are kept apart (Issue #52 ruling 5716978033):
+
+    * ``source_form`` and ``source_trimmed`` say how the page wrote the reference — absolute,
+      protocol-relative or relative, and whether surrounding whitespace was trimmed before it was
+      resolved. ``None`` when the supplier did not report what the page wrote.
+    * ``locator`` is the canonical fetch target, as the transport's target check computes it, when
+      that target is fetchable and carries no query; whether or not its bytes then arrived.
+    * ``target_refusal`` is why the transport's target check refused the resolved reference before
+      anything was reserved or sent. A refused reference has no locator and no bytes.
+    """
 
     role: ImageRole
     ordinal: int
@@ -330,6 +374,9 @@ class ImageReference:
     issue: ImageIssue | None = None
     etag: str | None = None
     last_modified: str | None = None
+    source_form: LocatorForm | None = None
+    source_trimmed: bool | None = None
+    target_refusal: FetchTargetRefusal | None = None
 
 
 @dataclass(frozen=True)
@@ -610,6 +657,23 @@ def _check_images(
             require_sanitized(ref.locator, policy, "images: locator")
             if urlsplit(ref.locator).hostname != ref.host:
                 raise _invalid("images: a locator is on its reference host")
+        if ref.source_form is not None and not isinstance(ref.source_form, LocatorForm):
+            raise _invalid("images: source_form must be a LocatorForm")
+        if ref.source_trimmed is not None and (
+            not isinstance(ref.source_trimmed, bool) or ref.source_form is None
+        ):
+            raise _invalid("images: source_trimmed is a bool reported with the source form")
+        if ref.target_refusal is not None:
+            if not isinstance(ref.target_refusal, FetchTargetRefusal):
+                raise _invalid("images: target_refusal must be a FetchTargetRefusal")
+            if (
+                ref.status is not FieldStatus.REVIEW_REQUIRED
+                or ref.sha256 is not None
+                or ref.locator is not None
+            ):
+                raise _invalid(
+                    "images: a refused fetch target is REVIEW_REQUIRED with no bytes and no locator"
+                )
         for text in (ref.provenance, ref.etag, ref.last_modified):
             if text is not None:
                 check_persisted_text(text, policy, "images: reference")
