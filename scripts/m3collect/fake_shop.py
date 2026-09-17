@@ -6,6 +6,7 @@ steps, the budget, the asset recorder, the revision append and the read-back —
 provider. Nothing in this module opens a connection.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,7 +28,19 @@ from app.collect.facts import (
     StockValue,
     TextValue,
 )
-from integrations.suppliers.base import RequestPolicy, SupplierProfile, SupplierTransport
+from app.core.errors import AuthError
+from integrations.suppliers.base import (
+    Credentials,
+    LoginFormSpec,
+    ProbeResponse,
+    ProtectedReadProbe,
+    RequestKind,
+    RequestPolicy,
+    SupplierDefinition,
+    SupplierProfile,
+    SupplierTransport,
+    Verdict,
+)
 from integrations.suppliers.collection import (
     CollectionLimits,
     CollectionProfile,
@@ -44,6 +57,7 @@ from integrations.suppliers.collection import (
     UnresolvedIdentity,
 )
 from integrations.suppliers.transport.collection import ImageFetchRefused, RequestBudget
+from integrations.suppliers.transport.session_payload import decode_session, encode_session
 
 SUPPLIER_KEY = "fakeshop"
 HOST = "shop.collect.invalid"
@@ -92,14 +106,27 @@ OTHER_BYTES = png(640, 480)
 UNCLEAR_STOCK = '<span id="stock">the page does not say</span>'
 
 
-def page(*, product_id: str = "4242", images: bool = True, stock_unclear: bool = False) -> str:
-    references = (
-        f'<img id="primary" src="{PRIMARY_URL}">'
-        f'<img id="detail" src="{DETAIL_URL}">'
-        f'<img id="banner" src="{BANNER_URL}">'
-        if images
-        else ""
-    )
+def detail_url(index: int) -> str:
+    """The Nth detail reference after the first. The first keeps its historical URL."""
+    return DETAIL_URL if index == 0 else f"https://{IMAGE_HOST}/p/detail-{index}.png"
+
+
+def page(
+    *,
+    product_id: str = "4242",
+    images: bool = True,
+    stock_unclear: bool = False,
+    product_evidence: int = 2,
+) -> str:
+    """The product page. ``product_evidence`` is how many references its roles call product
+    evidence — one primary and the rest detail — beside one layout banner that is never evidence.
+    """
+    references = ""
+    if images:
+        references = f'<img id="primary" src="{PRIMARY_URL}">' + "".join(
+            f'<img class="detail" src="{detail_url(i)}">' for i in range(product_evidence - 1)
+        )
+        references += f'<img id="banner" src="{BANNER_URL}">'
     declared = f'<meta property="product:id" content="{product_id}">' if product_id else ""
     unclear = UNCLEAR_STOCK if stock_unclear else ""
     return f"<html><head>{declared}</head><body>{references}{unclear}</body></html>"
@@ -207,16 +234,21 @@ def _url_product_hint(url: str) -> str | None:
 
 
 def _classify(body: str, product_url: str) -> tuple[ImageCandidate, ...]:
+    """This shop's own image roles, in the page's own order."""
     found = []
-    for order, (url, role, rule) in enumerate(
-        (
-            (PRIMARY_URL, ImageRole.PRIMARY, "fake.primary"),
-            (DETAIL_URL, ImageRole.DETAIL, "fake.detail"),
-            (BANNER_URL, ImageRole.UI_COMMON, "fake.layout"),
-        )
-    ):
-        if url in body:
-            found.append(ImageCandidate(url=url, role=role, order=order, rule=rule))
+    for order, url in enumerate(re.findall(r'src="([^"]+)"', body)):
+        if url == PRIMARY_URL:
+            found.append(
+                ImageCandidate(url=url, role=ImageRole.PRIMARY, order=order, rule="fake.primary")
+            )
+        elif url.startswith(f"https://{IMAGE_HOST}/p/detail"):
+            found.append(
+                ImageCandidate(url=url, role=ImageRole.DETAIL, order=order, rule="fake.detail")
+            )
+        elif url == BANNER_URL:
+            found.append(
+                ImageCandidate(url=url, role=ImageRole.UI_COMMON, order=order, rule="fake.layout")
+            )
     return tuple(found)
 
 
@@ -244,6 +276,7 @@ def collection_profile(
     *,
     max_image_requests: int = 10,
     max_run_bytes: int = 4 * 1024 * 1024,
+    max_image_bytes: int = 1024 * 1024,
     supplier: SupplierProfile = PROFILE,
 ) -> CollectionProfile:
     return CollectionProfile(
@@ -254,7 +287,7 @@ def collection_profile(
         safe_query_keys={},
         limits=CollectionLimits(
             max_image_refs=30,
-            max_image_bytes=1024 * 1024,
+            max_image_bytes=max_image_bytes,
             max_image_requests_per_run=max_image_requests,
             max_new_image_bytes_per_run=max_run_bytes,
             same_product_interval_s=60.0,
@@ -267,12 +300,14 @@ def collection(
     *,
     max_image_requests: int = 10,
     max_run_bytes: int = 4 * 1024 * 1024,
+    max_image_bytes: int = 1024 * 1024,
     supplier: SupplierProfile = PROFILE,
 ) -> SupplierCollection:
     return SupplierCollection(
         profile=collection_profile(
             max_image_requests=max_image_requests,
             max_run_bytes=max_run_bytes,
+            max_image_bytes=max_image_bytes,
             supplier=supplier,
         ),
         roles=ImageRoleRules(identity=EXTRACTOR_REVISION, classify=_classify),
@@ -365,3 +400,63 @@ class FakeGateway:
 
 def refusal(issue: FetchIssue = FetchIssue.BAD_CONTENT_TYPE) -> ImageFetchRefused:
     return ImageFetchRefused(issue, "the fake provider refused this image")
+
+
+# ---------------------------------------------------------------- CONNECT
+
+MEMBER_ID = "rehearsal-member@example.invalid"
+MEMBER_PASSWORD = "Rehearsal pa$$word/한글"
+SESSION_COOKIE = "fakeshop-session-cookie-3c9e"
+MYSHOP = "/myshop/index.html"
+
+
+def connect_definition() -> SupplierDefinition:
+    """What CONNECT knows of this shop: a protected page, and how to tell signed in from out."""
+
+    def logged_off(response: ProbeResponse) -> Verdict:
+        return ("state-logoff" in response.body, ("state_logoff",))
+
+    def logged_on(response: ProbeResponse) -> Verdict:
+        return ("state-logon" in response.body, ("state_logon",))
+
+    return SupplierDefinition(
+        profile=PROFILE,
+        probe=ProtectedReadProbe(
+            target=MYSHOP, unauthenticated_expectation=logged_off, authenticated_predicate=logged_on
+        ),
+        login=LoginFormSpec(
+            path="/member/login.html",
+            username_selector="#id",
+            password_selector="#pw",
+            submit_selector="#go",
+        ),
+    )
+
+
+@dataclass
+class FakeConnect:
+    """The shop's CONNECT transport, counted. It knows one member and one session cookie."""
+
+    fetches: list[str] = field(default_factory=list)
+    logins: int = 0
+
+    def fetch(
+        self, definition: SupplierDefinition, *, kind: RequestKind, session: bytes | None
+    ) -> ProbeResponse:
+        self.fetches.append(kind.value)
+        signed_in = False
+        if kind is RequestKind.PROTECTED_READ and session is not None:
+            cookies, _ = decode_session(session)
+            signed_in = any(cookie["value"] == SESSION_COOKIE for cookie in cookies)
+        body = '<div class="state-logon"></div>' if signed_in else '<div class="state-logoff">'
+        return ProbeResponse(status=200, path=definition.probe.target, location=None, body=body)
+
+    def login(self, definition: SupplierDefinition, credentials: Credentials) -> bytes:
+        self.logins += 1
+        if credentials != Credentials(MEMBER_ID, MEMBER_PASSWORD):
+            raise AuthError("SUPPLIER_LOGIN_REJECTED", "the rehearsal shop rejected the login")
+        return encode_session(
+            [{"name": "SID", "value": SESSION_COOKIE, "domain": HOST, "path": "/"}],
+            user_agent="Rehearsal/1",
+            hosts={HOST},
+        )
