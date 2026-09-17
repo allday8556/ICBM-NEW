@@ -44,7 +44,7 @@ from app.collect.facts import (
 )
 from app.collect.models import CollectionOutcome
 from app.collect.revisions import ProductFactsRevisionStore
-from app.collect.runs import CollectionRunRecord, CollectionRunStore
+from app.collect.runs import CollectionRunRecord, CollectionRunStore, SameProductTooSoon
 from app.collect.sourceassets import (
     FetchedImage,
     RevalidatedImage,
@@ -72,8 +72,10 @@ from integrations.suppliers.collection import (
 from integrations.suppliers.collection import ImageRole as SourceRole
 from integrations.suppliers.transport.collection import (
     CollectionBudgetRefused,
+    CollectionTargetRefused,
     ImageFetchRefused,
     RequestBudget,
+    check_target,
 )
 
 logger = logging.getLogger("icbm.collect")
@@ -124,6 +126,7 @@ class CollectionGateway(Protocol):
         budget: RequestBudget,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_bytes: int | None = None,
     ) -> ImageResponse: ...
 
 
@@ -252,8 +255,17 @@ class ProductCollectionService:
         refused before a job exists rather than becoming a failed run.
         """
         profile = self._registered(supplier_key).collection.profile
-        if problems := product_url_problems(product_url, profile):
-            raise InputValidationError("COLLECT_URL_REFUSED", "; ".join(problems))
+        try:
+            # The same rule the transport applies, so a URL the profile already knows is
+            # unacceptable — a foreign host, a listing path, a query key that is not explicitly
+            # safe — never becomes a durable job and a failed run.
+            check_target(profile, product_url, ReadKind.PRODUCT_READ)
+        except CollectionTargetRefused as refused:
+            raise InputValidationError("COLLECT_URL_REFUSED", refused.message) from None
+        if (last := self._runs.next_read_allowed_at(supplier_key, product_url)) is not None:
+            waited = (self._clock.now() - last).total_seconds()
+            if waited < profile.limits.same_product_interval_s:
+                raise SameProductTooSoon(profile.limits.same_product_interval_s - waited)
         with self._db.write() as session:
             job = self._jobs.enqueue(
                 COLLECT_PRODUCT_JOB,
@@ -286,6 +298,23 @@ class ProductCollectionService:
             raise NotFoundError("COLLECT_RUN_UNKNOWN", "this job has no collection run")
         if record.outcome is not CollectionOutcome.PENDING:
             return  # the run already has its answer; another attempt never rewrites it
+        if (appended := self._revisions.for_run(record.collection_run_id)) is not None:
+            # The previous attempt appended this run's revision and died before settling the run.
+            # The revision is immutable and is already the answer: finish the run from it rather
+            # than reading the provider again and appending a second one.
+            logger.info(
+                "collect.recovered",
+                extra={
+                    "collection_run_id": record.collection_run_id,
+                    "revision_id": appended.revision_id,
+                },
+            )
+            self._runs.recorded(
+                record.collection_run_id,
+                revision_id=appended.revision_id,
+                facts_status=appended.facts_status,
+            )
+            return
         try:
             result = self.collect(
                 record.supplier_key, record.source_url, run_id=record.collection_run_id
@@ -317,6 +346,9 @@ class ProductCollectionService:
         budget = RunBudget(
             max_product_reads=1, max_image_requests=profile.limits.max_image_requests_per_run
         )
+        # One product read, taken durably before anything is sent: the same product is never
+        # read twice inside the interval ADR-0010 §4 fixes, restart or no restart.
+        self._runs.reserve_product_read(run_id, interval_s=profile.limits.same_product_interval_s)
         captured_at = self._clock.now()
         document = self._gateway.read_document(
             profile,
@@ -411,7 +443,11 @@ class ProductCollectionService:
             unreadable = _unfetched(candidate, role)
             locator = stable_locator(candidate.url)
             stored = known.get(locator) if locator else None
-            if spent_bytes >= limits.max_new_image_bytes_per_run:
+            # What this run may still spend. The bound goes to the gateway, so a body over it is
+            # refused as it arrives and never reaches the store: the advertised run total is a
+            # hard cap, not an average.
+            allowance = limits.max_new_image_bytes_per_run - spent_bytes
+            if allowance <= 0:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
                 continue
             try:
@@ -421,12 +457,18 @@ class ProductCollectionService:
                     budget=budget,
                     etag=stored.etag if stored else None,
                     last_modified=stored.last_modified if stored else None,
+                    max_bytes=min(limits.max_image_bytes, allowance),
                 )
             except CollectionBudgetRefused:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
                 continue
             except ImageFetchRefused as refused:
-                collected.append(unreadable(ImageIssue(refused.issue.value)))
+                issue = ImageIssue(refused.issue.value)
+                if issue is ImageIssue.OVERSIZE and allowance < limits.max_image_bytes:
+                    # It fitted the profile's per-image bound; what it did not fit was what this
+                    # run had left.
+                    issue = ImageIssue.BUDGET_EXHAUSTED
+                collected.append(unreadable(issue))
                 continue
             except AppError:
                 # One image a provider would not serve is not a failed collection: the reference
@@ -516,16 +558,3 @@ def stable_locator(url: str) -> str | None:
 def url_policy_of(profile: CollectionProfile) -> UrlPolicy:
     """The supplier's own safe query keys, as the URL policy the revision store enforces."""
     return UrlPolicy({host: frozenset(keys) for host, keys in profile.safe_query_keys.items()})
-
-
-def product_url_problems(url: str, profile: CollectionProfile) -> list[str]:
-    """Why ``url`` is not a product of this supplier. Names no value of the URL itself."""
-    parts = urlsplit(url)
-    problems = []
-    if parts.scheme != "https" or parts.hostname != profile.storefront_host:
-        problems.append("a product URL is https on the supplier's storefront host")
-    if parts.username or parts.password or parts.fragment or parts.port not in (None, 443):
-        problems.append("a product URL carries no credentials, port or fragment")
-    if not profile.is_product_path(parts.path):
-        problems.append("the path is not this supplier's product path form")
-    return problems

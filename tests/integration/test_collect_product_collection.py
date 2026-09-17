@@ -19,13 +19,15 @@ from app.collect.collection import (
     RegisteredCollection,
 )
 from app.collect.facts import FactsStatus, FieldStatus, ImageIssue, ImageRole
-from app.collect.models import CollectionOutcome
-from app.collect.runs import CollectionRunStore
+from app.collect.models import CollectionOutcome, CollectionRun
+from app.collect.runs import CollectionRunStore, SameProductTooSoon
+from app.collect.urls import UrlPolicy
 from app.config import AppConfig
 from app.container import Container, build_container
 from app.core.errors import InputValidationError, TransientError
 from app.core.ownership import acquire_data_dir
 from app.jobs.models import JobState
+from app.jobs.registry import JobContext
 from integrations.suppliers.collection import ImageResponse
 from scripts.m3collect.fake_shop import (
     DETAIL_BYTES,
@@ -39,6 +41,7 @@ from scripts.m3collect.fake_shop import (
     SUPPLIER_KEY,
     FakeGateway,
     StubSessions,
+    collected_for_run,
     collection,
     page,
     refusal,
@@ -88,9 +91,17 @@ def collecting(
             built.db.dispose()
 
 
+INTERVAL = collection().profile.limits.same_product_interval_s
+
+
 def run_once(container: Container) -> None:
     record = container.runner.run_next()
     assert record is not None, "the collection job did not run"
+
+
+def wait_out_the_interval(clock: FakeClock) -> None:
+    """What an operator does between two collections of one product (ADR-0010 §4)."""
+    clock.advance(INTERVAL + 1)
 
 
 # ---------------------------------------------------------------- the whole path
@@ -187,10 +198,11 @@ def test_the_database_row_and_the_api_agree(collecting: Container) -> None:
 
 
 def test_the_same_bytes_are_stored_once_and_each_run_appends_its_own_revision(
-    collecting: Container, gateway: FakeGateway
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
 ) -> None:
     first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
+    wait_out_the_interval(clock)
     second = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
 
@@ -212,10 +224,11 @@ def test_the_same_bytes_are_stored_once_and_each_run_appends_its_own_revision(
 
 
 def test_the_same_url_serving_different_bytes_is_a_different_asset(
-    collecting: Container, gateway: FakeGateway
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
 ) -> None:
     first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
+    wait_out_the_interval(clock)
     gateway.images[PRIMARY_URL] = OTHER_BYTES  # same URL, the provider now serves other content
     second = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
@@ -233,7 +246,7 @@ def test_the_same_url_serving_different_bytes_is_a_different_asset(
 
 
 def test_a_validated_reuse_keeps_the_exact_content_and_still_appends_a_reference(
-    collecting: Container, gateway: FakeGateway
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
 ) -> None:
     first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
@@ -245,6 +258,7 @@ def test_a_validated_reuse_keeps_the_exact_content_and_still_appends_a_reference
         if i.role is ImageRole.REPRESENTATIVE and i.asset is not None
     )
 
+    wait_out_the_interval(clock)
     gateway.images[PRIMARY_URL] = ImageResponse(304, None, f'"etag-{len(PRIMARY_BYTES)}"', None)
     second = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
     run_once(collecting)
@@ -335,19 +349,22 @@ def test_a_transient_failure_retries_and_review_ambiguity_never_does(
             raise TransientError("PROVIDER_BUSY", "try again")
 
     busy = Busy()
+    runs = CollectionRunStore(collecting.db, clock)
     service = ProductCollectionService(
         db=collecting.db,
         clock=clock,
         jobs=collecting.jobs,
-        runs=collecting.collection._runs,  # the same durable store, driven directly
+        runs=runs,
         revisions=collecting.revisions,
         recorder=collecting.source_asset_recorder,
         sessions=StubSessions(),
         gateway=busy,
         collections=(registered(),),
     )
+    wait_out_the_interval(clock)
+    another = service.submit(SUPPLIER_KEY, PRODUCT_URL)
     with pytest.raises(TransientError):
-        service.collect(SUPPLIER_KEY, PRODUCT_URL, run_id="run-transient")
+        service.collect(SUPPLIER_KEY, PRODUCT_URL, run_id=another.collection_run_id)
     assert busy.document_reads == 1, "the service itself never loops; the job policy decides"
 
 
@@ -413,6 +430,190 @@ def test_a_settled_run_keeps_the_answer_it_first_recorded(collecting: Container)
     assert unchanged.revision_id == settled.revision_id
     assert unchanged.detail is None
     assert unchanged.finished_at == settled.finished_at
+
+
+def test_a_run_that_died_after_appending_recovers_instead_of_collecting_again(
+    collecting: Container, gateway: FakeGateway
+) -> None:
+    # Review 5231130447 P0: the revision commits, then the run settles. A crash between the two
+    # leaves a retryable job; the next attempt must finish from the revision already appended and
+    # must not read the provider or append a second one.
+    submitted = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)
+    recorded = collecting.collection.run(submitted.collection_run_id)
+    assert recorded.revision_id is not None
+
+    # Rewind the run to what a crash would have left behind: the revision exists, the run does not
+    # know it yet.
+    with collecting.db.write() as session:
+        row = session.get(CollectionRun, submitted.collection_run_id)
+        assert row is not None
+        row.outcome = CollectionOutcome.PENDING
+        row.revision_id = None
+        row.facts_status = None
+        row.finished_at = None
+    reads_before, images_before = gateway.document_reads, len(gateway.image_reads)
+
+    collecting.collection._run_job(
+        JobContext(
+            job_id=submitted.job_id,
+            job_type=COLLECT_PRODUCT_JOB,
+            attempt_no=2,
+            max_attempts=3,
+            correlation_id=submitted.correlation_id,
+            target_ref=SUPPLIER_KEY,
+            payload={},
+        )
+    )
+
+    settled = collecting.collection.run(submitted.collection_run_id)
+    assert settled.outcome is CollectionOutcome.RECORDED
+    assert settled.revision_id == recorded.revision_id, (
+        "the revision already appended is the answer"
+    )
+    assert gateway.document_reads == reads_before, "recovery reads no provider"
+    assert len(gateway.image_reads) == images_before
+    assert len(collecting.source_truth.history(SUPPLIER_KEY, "4242").revisions) == 1
+
+
+def test_one_run_can_never_hold_two_revisions(collecting: Container) -> None:
+    # The database refuses it even if a code path ever tried.
+    from sqlalchemy.exc import IntegrityError
+
+    submitted = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)
+    run = collecting.collection.run(submitted.collection_run_id)
+    assert run.revision_id is not None
+
+    with pytest.raises(IntegrityError):
+        collecting.revisions.append(
+            collected_for_run(run.collection_run_id), url_policy=UrlPolicy({})
+        )
+    assert len(collecting.source_truth.history(SUPPLIER_KEY, "4242").revisions) == 1
+
+
+def test_the_same_product_is_not_read_twice_inside_the_interval(
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
+) -> None:
+    first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)
+    assert gateway.document_reads == 1
+
+    clock.advance(INTERVAL - 1)
+    with pytest.raises(SameProductTooSoon):
+        collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    assert gateway.document_reads == 1, "a refused submission requests nothing"
+    assert collecting.jobs.count(job_type_prefix="collect.") == 1, "and creates no job"
+
+    clock.advance(2)
+    second = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)
+    assert gateway.document_reads == 2
+    assert collecting.collection.run(second.collection_run_id).outcome is (
+        CollectionOutcome.RECORDED
+    )
+    assert first.collection_run_id != second.collection_run_id
+
+
+def test_a_queued_run_still_cannot_read_inside_the_interval(
+    collecting: Container, gateway: FakeGateway, clock: FakeClock
+) -> None:
+    # Two runs queued while both were eligible: the second still cannot read, because the read
+    # itself is what is reserved. The job settles instead of quietly reading too soon.
+    first = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    clock.advance(INTERVAL + 1)
+    second = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+    run_once(collecting)  # the first reads
+    assert gateway.document_reads == 1
+
+    blocked = collecting.runner.run_next()
+    assert blocked is not None and blocked.state is JobState.DEAD, "waiting is not a retry"
+    assert collecting.jobs.get(second.job_id).last_error_code == "COLLECT_SAME_PRODUCT_TOO_SOON"
+    assert gateway.document_reads == 1, "the second run sent nothing"
+    settled = collecting.collection.run(second.collection_run_id)
+    assert settled.outcome is CollectionOutcome.FAILED
+    assert settled.detail == "COLLECT_SAME_PRODUCT_TOO_SOON"
+    assert settled.revision_id is None
+    assert collecting.collection.run(first.collection_run_id).outcome is CollectionOutcome.RECORDED
+
+
+def test_an_image_that_would_cross_the_run_total_is_never_stored(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # Review 5231130447 P1: the run total is a hard cap. The second image fits its own per-image
+    # bound but not what the run has left, so it is refused as it arrives and never persisted.
+    gateway = FakeGateway(
+        documents=[page()], images={PRIMARY_URL: PRIMARY_BYTES, DETAIL_URL: DETAIL_BYTES}
+    )
+    allowance = len(PRIMARY_BYTES) + len(DETAIL_BYTES) - 1
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            collection_gateway=gateway,
+            collection_sessions=StubSessions(),
+            collections=(registered(max_run_bytes=allowance),),
+        )
+        try:
+            submitted = built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            assert built.runner.run_next() is not None
+            run = built.collection.run(submitted.collection_run_id)
+            assert run.revision_id is not None
+            stored = built.source_truth.revision(run.revision_id)
+
+            primary = next(i for i in stored.images if i.role is ImageRole.REPRESENTATIVE)
+            detail = next(i for i in stored.images if i.role is ImageRole.DETAIL)
+            assert primary.status is FieldStatus.CONFIRMED and primary.asset is not None
+            assert detail.status is FieldStatus.REVIEW_REQUIRED
+            assert detail.issue is ImageIssue.BUDGET_EXHAUSTED
+            assert detail.asset is None
+
+            persisted = sum(i.asset.byte_size for i in stored.images if i.asset is not None)
+            assert persisted <= allowance, "the advertised run total is never exceeded"
+        finally:
+            built.db.dispose()
+
+
+def test_a_product_url_with_a_query_key_is_refused_before_a_job_exists(
+    collecting: Container, gateway: FakeGateway
+) -> None:
+    # Review 5231130447 P1: the profile allowlists no query key, so submission refuses it with the
+    # transport's own rule instead of creating a job that is bound to fail.
+    with pytest.raises(InputValidationError):
+        collecting.collection.submit(SUPPLIER_KEY, f"{PRODUCT_URL}?ref=newsletter")
+    assert collecting.jobs.count(job_type_prefix="collect.") == 0
+    assert gateway.document_reads == 0
+
+
+def test_the_km_profile_refuses_a_queried_product_url_before_a_job_exists(
+    collecting: Container,
+) -> None:
+    # The same check, against the real KM profile and a real KM product URL form.
+    from app.collect.collection import ProductCollectionService
+    from integrations.suppliers.kmretail.collection import COLLECTION as KM
+
+    service = ProductCollectionService(
+        db=collecting.db,
+        clock=collecting.clock,
+        jobs=collecting.jobs,
+        runs=CollectionRunStore(collecting.db, collecting.clock),
+        revisions=collecting.revisions,
+        recorder=collecting.source_asset_recorder,
+        sessions=StubSessions(),
+        gateway=FakeGateway(documents=[page()]),
+        collections=(
+            RegisteredCollection(
+                collection=KM,
+                extractor_revision=KM.roles.identity,
+                extractor_fingerprint="d" * 64,
+            ),
+        ),
+    )
+    plain = "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355/category/23/display/1/"
+    with pytest.raises(InputValidationError):
+        service.submit("kmretail", f"{plain}?utm_source=mail")
+    assert collecting.jobs.count(job_type_prefix="collect.") == 0
 
 
 # ---------------------------------------------------------------- scope and egress

@@ -16,10 +16,15 @@ def test_the_offline_rehearsal_walks_the_whole_production_path() -> None:
     steps = {step.name: step for step in rehearse()}
     assert list(steps) == [
         "first collection",
+        "same product too soon",
         "revalidated reuse",
         "changed content",
         "unresolved identity",
     ]
+
+    refused = steps["same product too soon"]
+    assert refused.detail == "COLLECT_SAME_PRODUCT_TOO_SOON"
+    assert refused.revision_id is None and refused.image_requests == 0
 
     first = steps["first collection"]
     assert first.outcome is CollectionOutcome.RECORDED

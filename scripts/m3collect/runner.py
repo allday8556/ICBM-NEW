@@ -14,11 +14,13 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.collect.collection import RegisteredCollection
 from app.collect.models import CollectionOutcome
+from app.collect.runs import SameProductTooSoon
 from app.config import AppConfig
 from app.container import Container, build_container
 from app.core.ownership import acquire_data_dir
@@ -52,8 +54,27 @@ class Step:
         }
 
 
+class RehearsalClock:
+    """A clock the rehearsal can move, so the same-product interval is honoured, not skipped.
+
+    A real operator waits out the interval between two collections of one product. A rehearsal
+    that pretended the interval did not exist would prove nothing about it.
+    """
+
+    def __init__(self) -> None:
+        self._now = datetime(2026, 9, 17, 0, 0, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self._now
+
+    def wait(self, seconds: float) -> None:
+        self._now += timedelta(seconds=seconds)
+
+
 @contextmanager
-def application(gateway: fake_shop.FakeGateway, directory: Path) -> Iterator[Container]:
+def application(
+    gateway: fake_shop.FakeGateway, directory: Path, clock: RehearsalClock
+) -> Iterator[Container]:
     """The real application, owning a throwaway data directory, with the shop as its transport."""
     database = directory / "runtime" / "icbm.db"
     database.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +84,7 @@ def application(gateway: fake_shop.FakeGateway, directory: Path) -> Iterator[Con
         container = build_container(
             config,
             ownership=lease,
+            clock=clock,
             secret_store=MemorySecretStore(),
             collection_gateway=gateway,
             collection_sessions=fake_shop.StubSessions(),
@@ -105,8 +127,26 @@ def collect_once(container: Container, gateway: fake_shop.FakeGateway, name: str
     )
 
 
+def too_soon(container: Container, gateway: fake_shop.FakeGateway, name: str) -> Step:
+    """A submission the same-product interval refuses. No job, no run, no request."""
+    before = len(gateway.image_reads)
+    try:
+        container.collection.submit(fake_shop.SUPPLIER_KEY, fake_shop.PRODUCT_URL)
+    except SameProductTooSoon as refused:
+        return Step(
+            name=name,
+            outcome=CollectionOutcome.PENDING,
+            revision_id=None,
+            facts_status=None,
+            detail=refused.code,
+            image_requests=len(gateway.image_reads) - before,
+            assets=(),
+        )
+    raise AssertionError("the same-product interval did not refuse the submission")
+
+
 def rehearse() -> list[Step]:
-    """Four collections of one synthetic product, in the order an operator would meet them."""
+    """The collections one operator would meet, in order, including the ones that are refused."""
     gateway = fake_shop.FakeGateway(
         documents=[fake_shop.page()],
         images={
@@ -115,11 +155,17 @@ def rehearse() -> list[Step]:
         },
     )
     steps = []
+    clock = RehearsalClock()
+    interval = fake_shop.collection().profile.limits.same_product_interval_s
     with (
         TemporaryDirectory(prefix="m3collect-") as temporary,
-        application(gateway, Path(temporary)) as container,
+        application(gateway, Path(temporary), clock) as container,
     ):
         steps.append(collect_once(container, gateway, "first collection"))
+
+        # The same product, too soon: refused before a job exists, and nothing was requested.
+        steps.append(too_soon(container, gateway, "same product too soon"))
+        clock.wait(interval + 1)
 
         # The provider says the representative image is unchanged: the stored bytes stay the
         # evidence, and the new revision points at the same asset.
@@ -127,10 +173,12 @@ def rehearse() -> list[Step]:
             304, None, f'"etag-{len(fake_shop.PRIMARY_BYTES)}"', None
         )
         steps.append(collect_once(container, gateway, "revalidated reuse"))
+        clock.wait(interval + 1)
 
         # The same URL now serves other bytes: a different asset, never the same identity.
         gateway.images[fake_shop.PRIMARY_URL] = fake_shop.OTHER_BYTES
         steps.append(collect_once(container, gateway, "changed content"))
+        clock.wait(interval + 1)
 
         # A page that states no product number records nothing at all.
         gateway.documents = [fake_shop.page(product_id="")]
@@ -143,8 +191,11 @@ def main() -> int:
     print(json.dumps([step.report() for step in steps], ensure_ascii=False, indent=2))
     recorded = [s for s in steps if s.outcome is CollectionOutcome.RECORDED]
     unresolved = [s for s in steps if s.outcome is CollectionOutcome.NO_REVISION]
+    refused = [s for s in steps if s.detail == "COLLECT_SAME_PRODUCT_TOO_SOON"]
     ok = (
-        len(recorded) == 3
+        len(refused) == 1
+        and refused[0].image_requests == 0
+        and len(recorded) == 3
         and len(unresolved) == 1
         and unresolved[0].revision_id is None
         and recorded[0].assets[0].split(":")[2] == recorded[1].assets[0].split(":")[2]

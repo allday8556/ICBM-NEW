@@ -209,6 +209,21 @@ class ProductFactsRevisionStore:
             ).all()
             return tuple(self._load(session, row) for row in rows)
 
+    def for_run(self, collection_run_id: str) -> StoredRevision | None:
+        """The revision one durable run appended, if it got that far.
+
+        A run appends its revision and then settles. A retry after a crash between the two reads
+        this instead of collecting again: the revision is already immutable and already the
+        answer, and a second one for the same run is refused by the database anyway.
+        """
+        with self._db.read() as session:
+            row = session.scalars(
+                select(ProductFactsRevision).where(
+                    ProductFactsRevision.collection_run_id == collection_run_id
+                )
+            ).first()
+            return None if row is None else self._load(session, row)
+
     def latest(self, supplier_key: str, source_product_id: str) -> StoredRevision | None:
         """The most recent revision of one source identity, or None if there is none yet.
 

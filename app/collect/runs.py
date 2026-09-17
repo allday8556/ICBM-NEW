@@ -17,16 +17,31 @@ content, no URL of a provider's making and no credential ever reaches this row.
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.collect.facts import FactsStatus
 from app.collect.models import CollectionOutcome, CollectionRun
 from app.core.clock import Clock
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, PolicyBlockedError
 from app.db.database import Database
+
+
+class SameProductTooSoon(PolicyBlockedError):
+    """The same product was read less than the profile's interval ago (ADR-0010 §4).
+
+    Not a transient failure: waiting is the answer, and the operator is told when. Nothing was
+    requested, so nothing has to be undone.
+    """
+
+    def __init__(self, seconds_remaining: float) -> None:
+        super().__init__(
+            "COLLECT_SAME_PRODUCT_TOO_SOON",
+            f"this product was read too recently; {seconds_remaining:.0f} s remain",
+        )
+        self.seconds_remaining = seconds_remaining
 
 
 @dataclass(frozen=True)
@@ -43,6 +58,7 @@ class CollectionRunRecord:
     facts_status: FactsStatus | None
     detail: str | None
     requested_at: datetime
+    product_read_at: datetime | None
     finished_at: datetime | None
 
 
@@ -74,11 +90,52 @@ class CollectionRunStore:
                 facts_status=None,
                 detail=None,
                 requested_at=self._clock.now(),
+                product_read_at=None,
                 finished_at=None,
             )
         )
         session.flush()
         return run_id
+
+    def reserve_product_read(self, run_id: str, *, interval_s: float) -> None:
+        """Take this run's one product read, or refuse because the last one was too recent.
+
+        The check and the reservation are one write: two runs racing for the same product cannot
+        both pass it, and a restart sees the reservation the earlier run already committed. The
+        reservation is taken *before* the request, so a refusal has sent nothing.
+        """
+        with self._db.write() as session:
+            row = session.get(CollectionRun, run_id)
+            if row is None:
+                raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
+            if row.product_read_at is not None:
+                return  # this run already holds its read
+            now = self._clock.now()
+            last = session.scalar(
+                select(func.max(CollectionRun.product_read_at)).where(
+                    CollectionRun.supplier_key == row.supplier_key,
+                    CollectionRun.source_url == row.source_url,
+                    CollectionRun.product_read_at.is_not(None),
+                )
+            )
+            if last is not None:
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=now.tzinfo)
+                remaining = (last + timedelta(seconds=interval_s) - now).total_seconds()
+                if remaining > 0:
+                    raise SameProductTooSoon(remaining)
+            row.product_read_at = now
+
+    def next_read_allowed_at(self, supplier_key: str, source_url: str) -> datetime | None:
+        """When this product was last read, if it ever was. Read-only; reserves nothing."""
+        with self._db.read() as session:
+            return session.scalar(
+                select(func.max(CollectionRun.product_read_at)).where(
+                    CollectionRun.supplier_key == supplier_key,
+                    CollectionRun.source_url == source_url,
+                    CollectionRun.product_read_at.is_not(None),
+                )
+            )
 
     def recorded(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
         self._finish(
@@ -146,5 +203,6 @@ def _record(row: CollectionRun) -> CollectionRunRecord:
         facts_status=None if row.facts_status is None else FactsStatus(row.facts_status),
         detail=row.detail,
         requested_at=row.requested_at,
+        product_read_at=row.product_read_at,
         finished_at=row.finished_at,
     )

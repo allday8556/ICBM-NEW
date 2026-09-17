@@ -61,6 +61,9 @@ class ProductFactsRevision(Base):
         CheckConstraint(_hex64("extractor_fingerprint"), name="extractor_fingerprint_hex"),
         CheckConstraint(_hex64("source_fingerprint"), name="source_fingerprint_hex"),
         CheckConstraint("collection_run_id <> ''", name="collection_run_present"),
+        # Review 5231130447 P0: a run appends its revision and then settles. If it dies between
+        # the two, the retry must recover this row — never append a second one beside it.
+        Index("ux_product_facts_revisions_collection_run", "collection_run_id", unique=True),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
         CheckConstraint(_in("facts_status", FactsStatus), name="facts_status_valid"),
     )
@@ -234,6 +237,7 @@ class CollectionRun(Base):
         CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
         Index("ix_collection_runs_job_id", "job_id"),
         Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
+        Index("ix_collection_runs_product_read", "supplier_key", "source_url", "product_read_at"),
     )
 
     collection_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -249,4 +253,8 @@ class CollectionRun(Base):
     # Why there is no revision, or which error ended the run: a code of ours, never page content.
     detail: Mapped[str | None] = mapped_column(Text)
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # When this run durably reserved its one product read. It is what the next run for the same
+    # product is measured against, so a restart cannot read the same page twice inside the
+    # interval ADR-0010 §4 fixes.
+    product_read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

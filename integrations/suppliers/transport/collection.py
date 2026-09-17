@@ -308,8 +308,14 @@ class PolicedCollectionGateway:
         budget: RequestBudget,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_bytes: int | None = None,
     ) -> ImageResponse:
-        """Fetch one image, revalidating with the stored validators when there are any."""
+        """Fetch one image, revalidating with the stored validators when there are any.
+
+        ``max_bytes`` narrows the profile's own per-image bound to what the caller still has left
+        to spend. The bound is applied to the declared size and to the body as it arrives, so a
+        response never reaches the caller — and never reaches storage — above it.
+        """
         host = check_target(profile, url, ReadKind.IMAGE_REQUEST)
         budget.reserve(ReadKind.IMAGE_REQUEST, host)
         headers = {}
@@ -334,7 +340,7 @@ class PolicedCollectionGateway:
             media = content_type.split(";", 1)[0].strip().lower()
             if not media.startswith("image/"):
                 raise ImageFetchRefused(FetchIssue.BAD_CONTENT_TYPE, "the response is not an image")
-            limit = profile.limits.max_image_bytes
+            limit = min(profile.limits.max_image_bytes, max_bytes or profile.limits.max_image_bytes)
             declared = response.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > limit:
                 raise ImageFetchRefused(FetchIssue.OVERSIZE, "declared size over the bound")
@@ -465,7 +471,13 @@ class DeferredCollectionGateway:
         budget: RequestBudget,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_bytes: int | None = None,
     ) -> ImageResponse:
         return self._ready().read_image(
-            profile, url, budget=budget, etag=etag, last_modified=last_modified
+            profile,
+            url,
+            budget=budget,
+            etag=etag,
+            last_modified=last_modified,
+            max_bytes=max_bytes,
         )

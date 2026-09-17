@@ -5,6 +5,7 @@ Everything here is invented: no real supplier page, URL form, identity rule, pri
 """
 
 from datetime import UTC, datetime
+from itertools import count
 
 from app.collect.facts import (
     Availability,
@@ -93,11 +94,16 @@ REPRESENTATIVE = ImageReference(
 )
 
 
+_RUNS = count(1)
+
+
 def collected(
     fields: dict[str, FieldFact] | None = None,
     images: tuple[ImageReference, ...] = (REPRESENTATIVE,),
     **overrides: object,
 ) -> CollectedFacts:
+    """One synthetic collection. Each call is its own run: a durable run appends one revision, so
+    a recollection history is a history of distinct runs (PR #70 review 5231130447)."""
     values: dict[str, object] = {
         "supplier_key": "kmretail",
         "source_product_id": "1234",
@@ -105,7 +111,7 @@ def collected(
         "captured_at": CAPTURED,
         "extractor_revision": "test-collect-r1",
         "extractor_fingerprint": EXTRACTOR_FINGERPRINT,
-        "collection_run_id": "run-1",
+        "collection_run_id": f"run-{next(_RUNS)}",
         "correlation_id": "cid-1",
         "fields": base_fields() if fields is None else fields,
         "images": images,

@@ -8,9 +8,11 @@ provider. Nothing in this module opens a connection.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from app.collect.facts import (
     Availability,
+    CollectedFacts,
     Evidence,
     EvidenceKind,
     FieldFact,
@@ -208,7 +210,9 @@ PROFILE = SupplierProfile(
 )
 
 
-def collection_profile(*, max_image_requests: int = 10) -> CollectionProfile:
+def collection_profile(
+    *, max_image_requests: int = 10, max_run_bytes: int = 4 * 1024 * 1024
+) -> CollectionProfile:
     return CollectionProfile(
         supplier=PROFILE,
         product_path=r"/product/[^/]+/\d+/?",
@@ -219,19 +223,39 @@ def collection_profile(*, max_image_requests: int = 10) -> CollectionProfile:
             max_image_refs=30,
             max_image_bytes=1024 * 1024,
             max_image_requests_per_run=max_image_requests,
-            max_new_image_bytes_per_run=4 * 1024 * 1024,
+            max_new_image_bytes_per_run=max_run_bytes,
             same_product_interval_s=60.0,
         ),
         transport=SupplierTransport.HTTP,
     )
 
 
-def collection(*, max_image_requests: int = 10) -> SupplierCollection:
+def collection(
+    *, max_image_requests: int = 10, max_run_bytes: int = 4 * 1024 * 1024
+) -> SupplierCollection:
     return SupplierCollection(
-        profile=collection_profile(max_image_requests=max_image_requests),
+        profile=collection_profile(
+            max_image_requests=max_image_requests, max_run_bytes=max_run_bytes
+        ),
         roles=ImageRoleRules(identity=EXTRACTOR_REVISION, classify=_classify),
         identity=_identity,
         fields=_fields,
+    )
+
+
+def collected_for_run(collection_run_id: str, *, source_product_id: str = "4242") -> CollectedFacts:
+    """One collection's facts, addressed to a run that already has a revision. No images, so it
+    asks nothing of the asset store: only the run's own uniqueness is under test."""
+    return CollectedFacts(
+        supplier_key=SUPPLIER_KEY,
+        source_product_id=source_product_id,
+        source_url=PRODUCT_URL,
+        captured_at=datetime(2026, 9, 17, tzinfo=UTC),
+        extractor_revision=EXTRACTOR_REVISION,
+        extractor_fingerprint=EXTRACTOR_FINGERPRINT,
+        collection_run_id=collection_run_id,
+        correlation_id="rehearsal-correlation",
+        fields=base_fields(),
     )
 
 
@@ -283,6 +307,7 @@ class FakeGateway:
         budget: RequestBudget,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_bytes: int | None = None,
     ) -> ImageResponse:
         budget.reserve(ReadKind.IMAGE_REQUEST, url)
         self.image_reads.append(url)
@@ -292,6 +317,10 @@ class FakeGateway:
         if isinstance(answer, ImageResponse):
             return answer
         content = answer if isinstance(answer, bytes) else OTHER_BYTES
+        if max_bytes is not None and len(content) > max_bytes:
+            # The real gateway refuses a body over the bound as it arrives, so this one does too:
+            # the bytes never reach the caller and never reach the store.
+            raise ImageFetchRefused(FetchIssue.OVERSIZE, "body over the size bound")
         return ImageResponse(200, "image/png", f'"etag-{len(content)}"', None, content)
 
 
