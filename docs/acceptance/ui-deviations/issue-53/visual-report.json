@@ -1,0 +1,1884 @@
+{
+  "base_url": "http://127.0.0.1:49370",
+  "v29": "ui\\prototypes\\icbm_redesign_test_v29_final.html",
+  "browser": "msedge 153.0.4234.32",
+  "landscape-1920x1080": {
+    "dashboard": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "대시보드",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▦대시보드",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/dashboard__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "대시보드",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "대시보드",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/dashboard__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "collect": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "◌수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/collect__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          192,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/collect__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": false,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "db": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          92,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "통합DB",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "◫통합DB",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/db__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          92,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "통합DB",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "통합DB",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/db__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "register": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "등록관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▱등록관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/register__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "등록관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "등록관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/register__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "orders": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "주문관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "🛒주문관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/orders__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "주문관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "주문관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/orders__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "inquiry": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "문의관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✉문의관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/inquiry__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "문의관리",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "문의관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/inquiry__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "soldout": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "품절확인",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✓품절확인",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/soldout__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "품절확인",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          131,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "품절확인",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/soldout__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "ai-insight": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          175,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "AI 쇼핑 인사이트",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✨AI쇼핑인사이트",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/ai-insight__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          175,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "AI 쇼핑 인사이트",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "AI쇼핑인사이트",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/ai-insight__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "analytics": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          62,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "분석",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▥분석",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/analytics__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          62,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "분석",
+        "title_help_icons": 1,
+        "empty": [
+          250,
+          133,
+          1648,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "분석",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/analytics__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "settings": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          62,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "설정",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "⚙설정",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/settings__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          62,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "설정",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "설정",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/settings__m0.jpg",
+        "requests": 38,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "collect-suppliers": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "◌수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/collect-suppliers__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          228,
+          1080
+        ],
+        "topbar": [
+          228,
+          0,
+          1692,
+          62
+        ],
+        "title": [
+          250,
+          84,
+          102,
+          27
+        ],
+        "title_font": [
+          "23px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "landscape-1920x1080/collect-suppliers__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    }
+  },
+  "portrait-1080x1920": {
+    "dashboard": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "대시보드",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▦대시보드",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/dashboard__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "대시보드",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "대시보드",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/dashboard__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "collect": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "◌수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/collect__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          264,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/collect__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": false,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "db": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          95,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "통합DB",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "◫통합DB",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/db__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          95,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "통합DB",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "통합DB",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/db__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "register": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "등록관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▱등록관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/register__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "등록관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "등록관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/register__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "orders": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "주문관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "🛒주문관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/orders__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "주문관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "주문관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/orders__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "inquiry": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "문의관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✉문의관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/inquiry__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "문의관리",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "문의관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/inquiry__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "soldout": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "품절확인",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✓품절확인",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/soldout__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "품절확인",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          154,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "품절확인",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/soldout__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "ai-insight": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          182,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "AI 쇼핑 인사이트",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "✨AI쇼핑인사이트",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/ai-insight__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          182,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "AI 쇼핑 인사이트",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "AI쇼핑인사이트",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/ai-insight__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "analytics": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          63,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "분석",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "▥분석",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/analytics__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          63,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "분석",
+        "title_help_icons": 1,
+        "empty": [
+          84,
+          205,
+          984,
+          260
+        ],
+        "nav_items": 10,
+        "active_nav": "분석",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/analytics__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "settings": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          63,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "설정",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "⚙설정",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/settings__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          63,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "설정",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "설정",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/settings__m0.jpg",
+        "requests": 38,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    },
+    "collect-suppliers": {
+      "v29": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "◌수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/collect-suppliers__v29.jpg"
+      },
+      "m0": {
+        "sidebar": [
+          0,
+          0,
+          72,
+          1920
+        ],
+        "topbar": [
+          72,
+          0,
+          1008,
+          100
+        ],
+        "title": [
+          84,
+          112,
+          106,
+          28
+        ],
+        "title_font": [
+          "24px",
+          "760"
+        ],
+        "title_text": "수집관리",
+        "title_help_icons": 1,
+        "empty": null,
+        "nav_items": 10,
+        "active_nav": "수집관리",
+        "horizontal_scroll": false,
+        "screenshot": "portrait-1080x1920/collect-suppliers__m0.jpg",
+        "requests": 37,
+        "external_requests": [],
+        "console_errors": []
+      },
+      "match": {
+        "sidebar": true,
+        "topbar": true,
+        "title_font": true,
+        "title_box": true,
+        "empty_state_box": true,
+        "nav_items": true,
+        "single_help_icon": true,
+        "no_horizontal_scroll": true
+      }
+    }
+  },
+  "failures": []
+}

@@ -88,6 +88,7 @@ class ScreenService:
                 MarketplaceIdentityView(
                     key=m.key,
                     label=m.label,
+                    wordmark=m.wordmark,
                     brand_color=m.brand_color,
                     logo_url=f"/assets/marketplaces/{m.logo_asset}" if m.logo_asset else None,
                 )

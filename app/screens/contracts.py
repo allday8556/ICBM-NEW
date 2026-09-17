@@ -143,6 +143,7 @@ class SettingsView(BaseModel):
 class MarketplaceIdentityView(BaseModel):
     key: str
     label: str
+    wordmark: str
     brand_color: str
     logo_url: str | None
 
