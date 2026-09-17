@@ -17,6 +17,9 @@ class JobState(StrEnum):
 
 
 DUE_STATES = (JobState.QUEUED, JobState.RETRY_SCHEDULED)
+# The states a job never leaves. Whatever it was the only thing working on is over from here,
+# so these are also the only states an owner may be settled from.
+TERMINAL_STATES = (JobState.SUCCEEDED, JobState.DEAD)
 
 
 class AttemptOutcome(StrEnum):

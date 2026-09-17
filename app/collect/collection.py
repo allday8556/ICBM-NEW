@@ -259,6 +259,9 @@ class ProductCollectionService:
             retry_policy=COLLECT_POLICY,
             # A run belongs to its job: when the job can no longer run, the run has its answer.
             on_terminal=self._settle_unfinished_run,
+            # And where a run still waiting for one can be found again, so that answer does not
+            # depend on the call above having happened, or having worked.
+            unsettled_owned_jobs=self._runs.unsettled_job_ids,
         )
 
     def _settle_unfinished_run(self, terminal: TerminalJob) -> None:
@@ -272,6 +275,9 @@ class ProductCollectionService:
         meaning it has no evidence for, and no revision is invented for it. What the attempt
         already consumed stays consumed: the same-product read it reserved is untouched, so a
         failure buys no earlier next read.
+
+        It is called when the job ends and again by the reconciliation sweep, in any order and any
+        number of times: a run that already has an answer is left exactly as it is.
         """
         record = self._runs.for_job(terminal.job_id)
         if record is None or record.outcome is not CollectionOutcome.PENDING:

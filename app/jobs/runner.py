@@ -7,12 +7,13 @@ contracts (ADR-0002 migration boundary).
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.audit.models import AuditEventType, AuditOutcome
 from app.audit.service import AuditEntry, AuditLog
@@ -20,7 +21,14 @@ from app.core.clock import Clock
 from app.core.correlation import correlation_scope
 from app.core.errors import AUTO_RETRYABLE, ErrorClass, classify
 from app.db.database import Database
-from app.jobs.models import DUE_STATES, AttemptOutcome, Job, JobAttempt, JobState
+from app.jobs.models import (
+    DUE_STATES,
+    TERMINAL_STATES,
+    AttemptOutcome,
+    Job,
+    JobAttempt,
+    JobState,
+)
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobRegistry, TerminalJob
 
@@ -28,6 +36,9 @@ logger = logging.getLogger("icbm.jobs")
 
 WORKER_ACTOR = "system:job-worker"
 _MAX_MESSAGE = 2000
+# How many job ids one reconciliation query asks about. SQLite binds each one, so the sweep asks
+# in batches rather than building a statement whose size depends on how much is unsettled.
+_RECONCILE_BATCH = 400
 
 
 @dataclass(frozen=True)
@@ -247,8 +258,12 @@ class JobRunner:
         handler was in the middle of, including a failure it never expected, ends here. The job's
         own bookkeeping is already durable, so a hook that fails changes none of it — it is logged
         and never raised into the worker.
+
+        This call is the prompt path, not the authoritative one. Whether it happened, and whether
+        it worked, is not remembered anywhere: what the owner did not settle stays visible in the
+        owner's own rows, and :meth:`reconcile_terminal_owners` finds it there.
         """
-        if state not in (JobState.SUCCEEDED, JobState.DEAD):
+        if state not in TERMINAL_STATES:
             return
         definition = self._registry.find(terminal.job_type)
         if definition is None or definition.on_terminal is None:
@@ -261,6 +276,66 @@ class JobRunner:
                     "job.terminal_owner_failed",
                     extra={"job_id": terminal.job_id, "job_type": terminal.job_type},
                 )
+
+    # ------------------------------------------------------------------ reconciliation
+
+    def reconcile_terminal_owners(self) -> int:
+        """Settle every owner the database still shows waiting on a job that can no longer run.
+
+        Correctness does not rest on the hook in :meth:`_finish` having been called, or having
+        worked (Issue #52 ruling 5721367502 S2/S4). Both halves of the inconsistency are already
+        written down — the job's terminal state, and the owner's unsettled row — so this asks each
+        owner which jobs its rows are waiting on, reads what the job table says about exactly those
+        jobs, and hands it the ones that are over. Nothing in memory takes part, so a crash before
+        the hook, a hook that raised, and a process that never reached either all converge here.
+
+        It is safe to repeat and safe to interrupt: an owner that has settled is waiting on nothing
+        and is never asked again, and one told twice about the same job settles nothing new. A
+        settlement that fails again is logged and leaves the inconsistency exactly as discoverable
+        as it was, for the next sweep.
+
+        Returns how many terminal jobs it found an owner still waiting on — what it discovered,
+        not what converged, which is the same question the next sweep asks.
+        """
+        found = 0
+        for job_type in self._registry.job_types():
+            definition = self._registry.find(job_type)
+            if definition is None or definition.unsettled_owned_jobs is None:
+                continue
+            for terminal in self._unsettled_terminal(job_type, definition.unsettled_owned_jobs()):
+                with correlation_scope(terminal.correlation_id):
+                    logger.warning(
+                        "job.owner_left_unsettled",
+                        extra={
+                            "job_id": terminal.job_id,
+                            "job_type": terminal.job_type,
+                            "state": terminal.state,
+                            "error_class": terminal.error_class,
+                            "error_code": terminal.error_code,
+                        },
+                    )
+                self._settle_owner(JobState(terminal.state), terminal)
+                found += 1
+        return found
+
+    def _unsettled_terminal(self, job_type: str, waiting_on: Sequence[str]) -> list[TerminalJob]:
+        """Of the jobs this owner is waiting on, the ones the job table says are already over."""
+        job_ids = list(dict.fromkeys(waiting_on))
+        if not job_ids:
+            return []
+        terminal: list[TerminalJob] = []
+        with self._db.read() as session:
+            for start in range(0, len(job_ids), _RECONCILE_BATCH):
+                batch = job_ids[start : start + _RECONCILE_BATCH]
+                rows = session.scalars(
+                    select(Job).where(
+                        Job.job_id.in_(batch),
+                        Job.job_type == job_type,
+                        Job.state.in_(TERMINAL_STATES),
+                    )
+                ).all()
+                terminal.extend(_terminal_job(session, job) for job in rows)
+        return terminal
 
     def _record_dead_letter(
         self, session: Any, job: Job, error_class: ErrorClass, code: str | None
@@ -384,3 +459,37 @@ class JobRunner:
         ) in ended:  # an interrupted job that will never run again ends its owner's work too
             self._settle_owner(JobState.DEAD, terminal)
         return recovered
+
+
+def _terminal_job(session: Session, job: Job) -> TerminalJob:
+    """Rebuild what the hook was handed, from committed rows only (ruling 5721367502 G5).
+
+    Everything here is the job system's own: the state it will not leave, the attempt that ended
+    it, its correlation and its target. The classification is that last attempt's own outcome
+    rather than ``jobs.last_error_*``, because that column keeps the most recent *failure* — a job
+    that failed once and then succeeded still carries it, and calling that the end of the job
+    would be a reinterpretation, which G5 forbids.
+    """
+    attempt = session.scalars(
+        select(JobAttempt).where(
+            JobAttempt.job_id == job.job_id, JobAttempt.attempt_no == job.attempt_count
+        )
+    ).first()
+    if attempt is not None:
+        succeeded = attempt.outcome == AttemptOutcome.SUCCEEDED
+        error_class = None if succeeded else attempt.error_class
+        error_code = None if succeeded else attempt.error_code
+    elif JobState(job.state) is JobState.SUCCEEDED:  # pragma: no cover - every attempt is recorded
+        error_class, error_code = None, None
+    else:  # pragma: no cover - as above; the job's own last error is all there would be
+        error_class, error_code = job.last_error_class, job.last_error_code
+    return TerminalJob(
+        job_id=job.job_id,
+        job_type=job.job_type,
+        state=JobState(job.state).value,
+        attempt_no=job.attempt_count,
+        correlation_id=job.correlation_id,
+        target_ref=job.target_ref,
+        error_class=error_class,
+        error_code=error_code,
+    )

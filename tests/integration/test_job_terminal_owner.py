@@ -7,6 +7,7 @@ is committed, so an owner that fails cannot undo the job's bookkeeping.
 """
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,7 @@ from app.core.ownership import acquire_data_dir
 from app.core.secrets import MemorySecretStore
 from app.jobs.models import JobState
 from app.jobs.policy import RetryPolicy
-from app.jobs.registry import JobContext, JobDefinition, TerminalJob
+from app.jobs.registry import JobContext, JobDefinition, JobHandler, TerminalJob
 from tests.support import TEST_JOBS, FakeClock
 
 pytestmark = pytest.mark.integration
@@ -27,16 +28,27 @@ TWICE = RetryPolicy(max_attempts=2, base_delay_s=0.01, max_delay_s=0.01)
 
 
 class Owner:
-    """An owner that records every job it is told about."""
+    """An owner that records every job it is told about.
+
+    ``waiting`` stands for the rows an owner of its own would have: a job it has durable work for
+    that is not settled yet. The reconciliation sweep reads it, so the double has to keep it the
+    way a real owner does — a settled job is no longer waiting.
+    """
 
     def __init__(self) -> None:
         self.told: list[TerminalJob] = []
         self.raise_on_call = False
+        self.waiting: list[str] = []
 
     def __call__(self, terminal: TerminalJob) -> None:
         self.told.append(terminal)
         if self.raise_on_call:
             raise RuntimeError("the owner itself is broken")
+        if terminal.job_id in self.waiting:
+            self.waiting.remove(terminal.job_id)
+
+    def unsettled(self) -> tuple[str, ...]:
+        return tuple(self.waiting)
 
 
 class Transient(AppError):
@@ -56,19 +68,27 @@ def jobs_for(owner: Owner) -> tuple[JobDefinition, ...]:
     def flaky(ctx: JobContext) -> None:
         raise Transient("OWNED_TRANSIENT", "try again")
 
+    def owned(job_type: str, handler: JobHandler, described: str, **rest: Any) -> JobDefinition:
+        # A terminal owner and where its unsettled work can be found are declared together.
+        return JobDefinition(
+            job_type,
+            handler,
+            described,
+            on_terminal=owner,
+            unsettled_owned_jobs=owner.unsettled,
+            **rest,
+        )
+
     return (
-        JobDefinition("owned.succeed", succeed, "succeeds", on_terminal=owner, retry_policy=ONCE),
-        JobDefinition("owned.crash", crash, "crashes", on_terminal=owner, retry_policy=ONCE),
-        JobDefinition("owned.reject", reject, "invalid", on_terminal=owner, retry_policy=ONCE),
-        JobDefinition("owned.flaky", flaky, "retries once", on_terminal=owner, retry_policy=TWICE),
-        JobDefinition(
-            "owned.interrupted", succeed, "not idempotent", on_terminal=owner, idempotent=False
-        ),
-        JobDefinition(
+        owned("owned.succeed", succeed, "succeeds", retry_policy=ONCE),
+        owned("owned.crash", crash, "crashes", retry_policy=ONCE),
+        owned("owned.reject", reject, "invalid", retry_policy=ONCE),
+        owned("owned.flaky", flaky, "retries once", retry_policy=TWICE),
+        owned("owned.interrupted", succeed, "not idempotent", idempotent=False),
+        owned(
             "owned.resumable",
             succeed,
             "idempotent, with an attempt left",
-            on_terminal=owner,
             idempotent=True,
             retry_policy=TWICE,
         ),

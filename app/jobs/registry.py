@@ -1,5 +1,5 @@
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,7 +46,18 @@ class TerminalJob:
 # was the only thing working on. It is called once the job's terminal state is committed, so an
 # unexpected failure anywhere inside the handler cannot leave that state waiting forever. It runs
 # outside the job's own transaction and may never raise into the worker.
+#
+# Being called is prompt, not authoritative. The call happens after the commit, so a hook that
+# raises — or a process that stops between the two — leaves the job over and its owner waiting.
+# A hook must therefore be safe to call again, and must settle nothing that is already settled.
 TerminalHook = Callable[[TerminalJob], None]
+
+# Which jobs the owner's own durable rows are still waiting on, read from the database and from
+# nothing else. This is what makes a settlement that never happened discoverable afterwards: a job
+# the job table says is over, named by an owner that says it is still waiting, is an inconsistency
+# — whether a hook raised, or no hook was ever called. An owner with nothing open says so with an
+# empty sequence, which is the normal answer.
+UnsettledOwnedJobs = Callable[[], Sequence[str]]
 
 
 @dataclass(frozen=True)
@@ -59,6 +70,7 @@ class JobDefinition:
     idempotent: bool = False
     retry_policy: RetryPolicy | None = None
     on_terminal: TerminalHook | None = None
+    unsettled_owned_jobs: UnsettledOwnedJobs | None = None
 
 
 class JobRegistry:
@@ -70,6 +82,14 @@ class JobRegistry:
             raise ValueError(f"invalid job type name: {definition.job_type!r}")
         if definition.job_type in self._definitions:
             raise ValueError(f"job type already registered: {definition.job_type}")
+        if (definition.on_terminal is None) != (definition.unsettled_owned_jobs is None):
+            # An owner whose settlement can only be attempted once is the hole this contract
+            # exists to close: declaring the hook means also saying where the work it did not do
+            # can be found again.
+            raise ValueError(
+                "a job type declares a terminal owner and what that owner is still waiting on "
+                f"together, or neither: {definition.job_type}"
+            )
         self._definitions[definition.job_type] = definition
 
     def get(self, job_type: str) -> JobDefinition:

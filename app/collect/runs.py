@@ -206,6 +206,24 @@ class CollectionRunStore:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             return _record(row)
 
+    def unsettled_job_ids(self, *, limit: int = 500) -> tuple[str, ...]:
+        """The jobs whose runs are still waiting for an answer, from the durable rows alone.
+
+        This is the owner's half of the reconciliation join (Issue #52 ruling 5721367502 S1): a run
+        with no outcome names the job it belongs to, and the job table says whether that job can
+        still run. Nothing is remembered in memory, so an inconsistency outlives the process that
+        caused it, and an answered run is simply not here.
+        """
+        with self._db.read() as session:
+            return tuple(
+                session.scalars(
+                    select(CollectionRun.job_id)
+                    .where(CollectionRun.outcome == CollectionOutcome.PENDING)
+                    .order_by(CollectionRun.requested_at)
+                    .limit(limit)
+                ).all()
+            )
+
     def for_job(self, job_id: str) -> CollectionRunRecord | None:
         with self._db.read() as session:
             row = session.scalars(
