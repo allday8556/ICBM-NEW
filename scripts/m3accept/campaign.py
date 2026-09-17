@@ -1,4 +1,5 @@
-"""Running ``m3-accept-01``: two fresh-session passes and a closeout (ruling 5711123764 §3, §5).
+"""Running an M3 REAL acceptance campaign: two fresh-session passes and a closeout (ruling
+5711123764 §3, §5).
 
 A pass is one invocation, in one fresh application process, on the campaign's own data directory:
 
@@ -368,7 +369,7 @@ def closeout(ledger: CampaignLedger, env: Environment) -> dict[str, Any]:
         problems.append("HISTORY_MISSING_A_REVISION")
     manifest = ledger.manifest() or {}
     report: dict[str, Any] = {
-        "campaign_id": manifest.get("campaign_id"),
+        "campaign_id": ledger.campaign_id(),
         "code_sha": manifest.get("code_sha"),
         "manifest_digest": _manifest_digest(ledger),
         "target_digest": manifest.get("target_digest"),

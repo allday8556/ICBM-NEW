@@ -1,6 +1,8 @@
-"""PREP for ``m3-accept-01``: arming, the gates before any request, and the REAL environment.
+"""PREP for an M3 REAL acceptance campaign: arming, the gates before any request, and the REAL
+environment.
 
-Arming binds the campaign to one exact commit, one target and one frozen budget. Before anything is
+Arming binds the campaign to one exact commit, one target and one frozen budget, under the campaign
+id its ledger owns: nothing here takes an id from anywhere else. Before anything is
 persisted — no manifest, no ceiling, and so no approval can exist — it refuses when:
 
 * the budget and the production profile disagree (the campaign never changes the profile);
@@ -36,10 +38,9 @@ from integrations.suppliers.transport.collection import (
 )
 from scripts.m2harness.gates import REPO_ROOT, Checkout, dedicated_problems
 from scripts.m3accept.campaign import Environment
-from scripts.m3accept.ledger import CampaignLedger
+from scripts.m3accept.ledger import CampaignLedger, LedgerError
 from scripts.m3accept.m1 import NoTraffic, m1_session_problems
 from scripts.m3accept.manifest import (
-    CAMPAIGN_ID,
     EXCLUDED_IMAGE_HOSTS,
     M3_ACCEPT_01_BUDGET,
     CampaignBudget,
@@ -189,21 +190,24 @@ def arm(
         problems += local_m1_problems(env)
     if problems:
         raise ArmingRefused(problems)
-    manifest = Manifest(
-        campaign_id=CAMPAIGN_ID,
+    return ledger.arm(
         code_sha=code_sha,
-        target_digest=target_digest(canonical_target(collection, product_url)),
+        canonical_target=canonical_target(collection, product_url),
         budget=budget,
         byte_facts=byte_facts(phase_b_findings, baseline=budget.product_evidence_baseline),
         mode=mode,
     )
-    ledger.arm(manifest)
-    return manifest
 
 
-def typed_approval_matches(typed: str, code_sha: str) -> bool:
-    """Whether the operator's own words are the exact phrase for this SHA. Nothing is generated."""
-    return typed.strip() == approval_phrase(code_sha)
+def ledger_approval_phrase(ledger: CampaignLedger) -> str:
+    """The phrase for this ledger's campaign id and armed SHA. It is shown, never typed for them."""
+    manifest = ledger.manifest() or {}
+    return approval_phrase(ledger.campaign_id(), str(manifest.get("code_sha", "")))
+
+
+def typed_approval_matches(typed: str, ledger: CampaignLedger) -> bool:
+    """Whether the operator's own words are the exact phrase for this campaign and SHA."""
+    return typed.strip() == ledger_approval_phrase(ledger)
 
 
 # ---------------------------------------------------------------- the gates
@@ -227,20 +231,20 @@ def hard_zero_problems(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
-def target_gate(
-    collection: SupplierCollection, manifest: Mapping[str, Any], product_url: str
-) -> Gate:
+def target_gate(collection: SupplierCollection, ledger: CampaignLedger, product_url: str) -> Gate:
     """Whether ``product_url`` is the one target the campaign was armed with.
 
-    The URL is read through the same ``canonical_target`` and ``target_digest`` arming used, so a
-    spelling the production transport reads as the armed URL passes and any other target fails.
-    The detail names digests only, never the URL.
+    The URL is read through the same ``canonical_target`` and ``target_digest`` arming used, under
+    the campaign id the ledger owns, so a spelling the production transport reads as the armed URL
+    passes and any other target fails. The detail names digests only, never the URL.
     """
-    armed = str(manifest.get("target_digest") or "")
+    armed = str((ledger.manifest() or {}).get("target_digest") or "")
     try:
-        supplied = target_digest(canonical_target(collection, product_url))
+        supplied = target_digest(ledger.campaign_id(), canonical_target(collection, product_url))
     except ArmingRefused as refused:
         return Gate("armed target", False, "; ".join(refused.problems))
+    except LedgerError as unowned:
+        return Gate("armed target", False, str(unowned))
     return Gate(
         "armed target",
         bool(armed) and supplied == armed,
@@ -251,7 +255,7 @@ def target_gate(
 def prep_gates(
     *,
     root: Path,
-    manifest: Mapping[str, Any],
+    ledger: CampaignLedger,
     checkout: Checkout,
     environ: Mapping[str, str],
     collection: SupplierCollection,
@@ -262,6 +266,7 @@ def prep_gates(
     ``product_url`` is the target the command was given. A command that submits one must be given
     the armed target; closeout submits nothing and is given none.
     """
+    manifest = ledger.manifest() or {}
     head = checkout.head()
     blocker = ci_or_test(environ)
     dedicated = dedicated_problems(root, environ)
@@ -279,7 +284,7 @@ def prep_gates(
         Gate("REAL mode armed", manifest.get("mode") == "REAL", str(manifest.get("mode"))),
     ]
     if product_url is not None:
-        gates.append(target_gate(collection, manifest, product_url))
+        gates.append(target_gate(collection, ledger, product_url))
     return gates
 
 

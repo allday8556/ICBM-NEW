@@ -1,6 +1,6 @@
-"""The M3 REAL acceptance campaign ``m3-accept-01`` (Issue #52 rulings 5711123764, 5711187191).
+"""An M3 REAL acceptance campaign (Issue #52 rulings 5711123764, 5711187191, 5714750891).
 
-    python scripts/m3_accept.py init      --root <dir>
+    python scripts/m3_accept.py init      --root <dir> --campaign-id <m3-accept-NN>
     python scripts/m3_accept.py arm       --root <dir> --product-url <url> --phase-b-findings <json>
     python scripts/m3_accept.py approve   --root <dir>
     python scripts/m3_accept.py status    --root <dir>
@@ -10,6 +10,9 @@
 ``<dir>`` is dedicated to this campaign: outside the repository and every ordinary ICBM data
 directory. It holds the ledger, the campaign's own ICBM data directory under ``data/`` — where the
 accepted M1 connection must already be established before arming — and the sanitized closeout.
+
+Only ``init`` names the campaign: the id is written into the new ledger, and every later command
+reads it from the ledger under ``<dir>`` and accepts no id of its own.
 
 ``run-pass`` refuses, among its PREP gates, any ``--product-url`` that is not the armed target; and
 it writes the application's JSON log to ``<dir>/data/logs/icbm.jsonl``.
@@ -42,9 +45,10 @@ from scripts.m3accept.campaign import (
     write_report,
 )
 from scripts.m3accept.ledger import CampaignLedger
-from scripts.m3accept.manifest import approval_phrase
+from scripts.m3accept.manifest import valid_campaign_id
 from scripts.m3accept.prep import (
     arm,
+    ledger_approval_phrase,
     local_environment,
     prep_gates,
     real_environment,
@@ -80,12 +84,14 @@ def _registered() -> RegisteredCollection:
     )
 
 
-def cmd_init(root: Path) -> int:
+def cmd_init(root: Path, campaign_id: str) -> int:
     if problems := dedicated_problems(root, dict(os.environ)):
         raise SystemExit("refused: " + "; ".join(problems))
-    CampaignLedger.create(root / LEDGER)
+    if not valid_campaign_id(campaign_id):
+        raise SystemExit("refused: a campaign id has the form m3-accept-NN")
+    ledger = CampaignLedger.create(root / LEDGER, campaign_id=campaign_id)
     (root / DATA).mkdir(parents=True, exist_ok=True)
-    print(f"initialized m3-accept-01 at {root}")
+    print(f"initialized {ledger.campaign_id()} at {root}")
     return 0
 
 
@@ -114,11 +120,12 @@ def cmd_approve(root: Path) -> int:
     ledger = _ledger(root)
     manifest = ledger.manifest() or {}
     sha = str(manifest.get("code_sha", ""))
-    phrase = approval_phrase(sha)
-    print("Type this exact phrase to approve two REAL passes of m3-accept-01 at this SHA:")
-    print(f"    {phrase}")
+    print(
+        f"Type this exact phrase to approve two REAL passes of {ledger.campaign_id()} at this SHA:"
+    )
+    print(f"    {ledger_approval_phrase(ledger)}")
     typed = input("> ")
-    if not typed_approval_matches(typed, sha):
+    if not typed_approval_matches(typed, ledger):
         print("not approved: the phrase did not match")
         return 1
     ledger.approve(sha)
@@ -131,6 +138,7 @@ def cmd_status(root: Path) -> int:
     print(
         json.dumps(
             {
+                "campaign_id": ledger.campaign_id(),
                 "state": ledger.state().value,
                 "requests": ledger.counts(),
                 "refusals": ledger.refusals(),
@@ -146,10 +154,9 @@ def cmd_status(root: Path) -> int:
 
 def _real_env(root: Path, product_url: str | None) -> tuple[CampaignLedger, Environment]:
     ledger = _ledger(root)
-    manifest = ledger.manifest() or {}
     gates = prep_gates(
         root=root,
-        manifest=manifest,
+        ledger=ledger,
         checkout=GitCheckout(),
         environ=dict(os.environ),
         collection=COLLECTION,
@@ -193,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("init", "arm", "approve", "status", "run-pass", "closeout"):
         command = sub.add_parser(name)
         command.add_argument("--root", type=Path, required=True)
+        if name == "init":
+            command.add_argument("--campaign-id", required=True)
         if name in ("arm", "run-pass"):
             command.add_argument("--product-url", required=True)
         if name == "arm":
@@ -202,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--pass", dest="pass_id", choices=("A", "B"), required=True)
     args = parser.parse_args(argv)
     if args.command == "init":
-        return cmd_init(args.root)
+        return cmd_init(args.root, args.campaign_id)
     if args.command == "arm":
         return cmd_arm(args.root, args.product_url, args.phase_b_findings, args.dry)
     if args.command == "approve":
