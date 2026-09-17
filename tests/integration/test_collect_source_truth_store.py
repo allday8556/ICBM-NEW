@@ -244,7 +244,10 @@ def test_0007_downgrade_never_drops_source_truth(tmp_path: Path) -> None:
         command.downgrade(alembic_config(url), "0006_m2_marketplace_connections")
     engine = create_sqlite_engine(url)
     try:
-        assert current_revision(engine) == head_revision() == "0007_m3_product_facts_revisions"
+        # The later revisions above it came off cleanly; 0007 itself refused, so source truth
+        # is still there and the database stops exactly at it.
+        assert current_revision(engine) == "0007_m3_product_facts_revisions"
+        assert head_revision() >= "0007_m3_product_facts_revisions"
     finally:
         engine.dispose()
 

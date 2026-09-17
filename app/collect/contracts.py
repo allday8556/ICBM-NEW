@@ -14,6 +14,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.collect.facts import FactsStatus, FieldLevel, FieldStatus, ImageIssue, ImageRole
+from app.collect.models import CollectionOutcome
 
 
 class SourceAssetView(BaseModel):
@@ -92,3 +93,38 @@ class RevisionHistoryView(BaseModel):
     supplier_key: str
     source_product_id: str
     revisions: tuple[RevisionView, ...]
+
+
+class CollectionRequest(BaseModel):
+    """Exactly one product. There is no list form, and no field that could widen a run."""
+
+    supplier_key: str
+    product_url: str
+
+
+class SubmittedCollectionView(BaseModel):
+    """What the operator is handed the moment a collection is accepted."""
+
+    collection_run_id: str
+    job_id: str
+    correlation_id: str
+
+
+class CollectionRunView(BaseModel):
+    """One run's durable result.
+
+    ``NO_REVISION`` is a finished run with nothing to append, because the source stated no stable
+    identity; ``detail`` then holds the parser's reason. Only a ``RECORDED`` run names a revision.
+    """
+
+    collection_run_id: str
+    job_id: str
+    correlation_id: str
+    supplier_key: str
+    source_url: str
+    outcome: CollectionOutcome
+    revision_id: str | None
+    facts_status: FactsStatus | None
+    detail: str | None
+    requested_at: datetime
+    finished_at: datetime | None

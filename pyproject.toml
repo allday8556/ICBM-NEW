@@ -64,7 +64,13 @@ python_version = "3.12"
 strict = true
 # The M2 acceptance harness (Issue #46 §2) and the M3 reconnaissance harness (Issue #52 §3,
 # ADR-0010 §5) are acceptance tooling, type-checked like production.
-packages = ["app", "integrations", "scripts.m2harness", "scripts.m3harness"]
+packages = [
+    "app",
+    "integrations",
+    "scripts.m2harness",
+    "scripts.m3harness",
+    "scripts.m3collect",
+]
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]

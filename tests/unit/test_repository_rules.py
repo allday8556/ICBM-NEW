@@ -547,6 +547,10 @@ SITE_KNOWLEDGE_IMPORTS = {
 # executes, retries, hashes, stores, persists or schedules anything — those stay in COLLECT core.
 PARSER_MAY_NOT_OWN = {
     "app.collect.assets",
+    # Stage-B2 (ruling 5706133893): the run, its durable result and the job stay in COLLECT core.
+    "app.collect.collection",
+    "app.collect.runs",
+    "app.jobs.registry",
     "app.collect.revisions",
     "app.collect.sourceassets",
     "app.collect.readback",
@@ -707,6 +711,41 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
         assert not called & {"put", "install", "enqueue", "sha256", "acquire"}, path
         attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert not attributes & {"EGRESS", "grant", "db", "jobs", "assets", "revisions"}, path
+
+
+def test_a_collection_reads_exactly_one_product_page() -> None:
+    # Issue #52 ruling 5706133893: one operator URL, one product document. No listing, no
+    # pagination, no related product. The budget is the structural guarantee, so every budget a
+    # production collection builds allows exactly one product read.
+    budgets = [
+        call
+        for _, tree in _production_modules().items()
+        for call in _calls(tree)
+        if _callee(call) == "RunBudget"
+    ]
+    assert budgets, "the collection budget must exist"
+    for call in budgets:
+        reads = {
+            keyword.arg: keyword.value
+            for keyword in call.keywords
+            if keyword.arg == "max_product_reads"
+        }
+        value = reads.get("max_product_reads")
+        assert isinstance(value, ast.Constant) and value.value == 1, ast.dump(call)
+
+
+def test_the_collection_job_belongs_to_collect_core() -> None:
+    # The durable job is generic: a supplier contributes site knowledge, never a job type.
+    from app.collect.collection import COLLECT_PRODUCT_JOB
+
+    assert COLLECT_PRODUCT_JOB.startswith("collect.")
+    offenders = [
+        path
+        for path, tree in _production_modules().items()
+        if path.startswith("integrations/")
+        and any(_callee(call) == "JobDefinition" for call in _calls(tree))
+    ]
+    assert offenders == [], "a supplier never defines a job"
 
 
 def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
@@ -1044,6 +1083,9 @@ def test_schema_holds_source_truth_but_no_canonical_product() -> None:
         "product_facts_evidence",
         "source_assets",
         "product_facts_image_refs",
+        # Stage-B2: the durable identity and result of one submitted collection. It is not source
+        # truth and holds no product fact; it says which run produced which revision.
+        "collection_runs",
     }
     offenders = [
         path

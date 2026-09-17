@@ -426,3 +426,46 @@ def _bounded(response: httpx.Response, limit: int) -> bytearray | None:
         if len(data) > limit:
             return None
     return data
+
+
+class DeferredCollectionGateway:
+    """The policed gateway, built on the first request and not before.
+
+    Composing the application must not open a transport: a process that never collects anything
+    never builds one, and under CI or pytest building one is refused outright. Deferring the
+    construction keeps that refusal where it belongs — at the moment a real request would be
+    made — instead of making the whole application impossible to compose in a test.
+    """
+
+    def __init__(self, build: Callable[[], PolicedCollectionGateway] | None = None) -> None:
+        self._build = build or PolicedCollectionGateway
+        self._gateway: PolicedCollectionGateway | None = None
+
+    def _ready(self) -> PolicedCollectionGateway:
+        if self._gateway is None:
+            self._gateway = self._build()
+        return self._gateway
+
+    def read_document(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        kind: ReadKind,
+        budget: RequestBudget,
+        session: bytes | None = None,
+    ) -> DocumentView:
+        return self._ready().read_document(profile, url, kind=kind, budget=budget, session=session)
+
+    def read_image(
+        self,
+        profile: CollectionProfile,
+        url: str,
+        *,
+        budget: RequestBudget,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> ImageResponse:
+        return self._ready().read_image(
+            profile, url, budget=budget, etag=etag, last_modified=last_modified
+        )

@@ -9,11 +9,13 @@ domain. There is no canonical Product here; that is M4 (ADR-0010 §1).
 
 from collections.abc import Iterable
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -193,3 +195,58 @@ class ProductFactsImageRef(Base):
     issue: Mapped[str | None] = mapped_column(String(30))
     http_etag: Mapped[str | None] = mapped_column(Text)
     http_last_modified: Mapped[str | None] = mapped_column(Text)
+
+
+class CollectionOutcome(StrEnum):
+    """What one collection run ended as (ADR-0010 §6; Issue #52 ruling 5706133893).
+
+    ``NO_REVISION`` is a success, not a failure: the run read the product and the source stated no
+    stable identity to record against, so there is nothing to append and nothing a retry could
+    change. A run that could not finish its work at all is ``FAILED``.
+    """
+
+    PENDING = "PENDING"
+    RECORDED = "RECORDED"
+    NO_REVISION = "NO_REVISION"
+    FAILED = "FAILED"
+
+
+class CollectionRun(Base):
+    """The durable identity of one operator-submitted collection, and what it produced.
+
+    A run row is opened in the same unit of work as its job, so the operator holds a result
+    identity from the moment the request is accepted. It is the only place a caller has to look to
+    learn whether a revision exists; it never holds page content, only a code.
+    """
+
+    __tablename__ = "collection_runs"
+    __table_args__ = (
+        CheckConstraint(_in("outcome", CollectionOutcome), name="outcome_valid"),
+        CheckConstraint(_in("facts_status", FactsStatus, nullable=True), name="facts_status_valid"),
+        CheckConstraint(
+            "(outcome = 'RECORDED' AND revision_id IS NOT NULL AND facts_status IS NOT NULL)"
+            " OR (outcome <> 'RECORDED' AND revision_id IS NULL AND facts_status IS NULL)",
+            name="revision_only_when_recorded",
+        ),
+        CheckConstraint(
+            "(outcome IN ('PENDING')) = (finished_at IS NULL)", name="finished_when_terminal"
+        ),
+        CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
+        Index("ix_collection_runs_job_id", "job_id"),
+        Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
+    )
+
+    collection_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(36))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    source_url: Mapped[str] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(String(20))
+    revision_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("product_facts_revisions.revision_id")
+    )
+    facts_status: Mapped[str | None] = mapped_column(String(20))
+    # Why there is no revision, or which error ended the run: a code of ours, never page content.
+    detail: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

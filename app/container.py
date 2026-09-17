@@ -1,15 +1,22 @@
 """Explicit composition root: every service is built here and nowhere else."""
 
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.assets import SourceAssetStore
+from app.collect.collection import (
+    CollectionGateway,
+    ProductCollectionService,
+    RegisteredCollection,
+    SessionProvider,
+)
 from app.collect.imagedecode import HeaderImageDecoder
 from app.collect.readback import SourceTruthReadback
 from app.collect.revisions import ProductFactsRevisionStore
+from app.collect.runs import CollectionRunStore
 from app.collect.service import CollectService
 from app.collect.sourceassets import SourceAssetRecorder
 from app.config import AppConfig
@@ -49,7 +56,10 @@ from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
-from integrations.suppliers.registry import SUPPLIERS
+from integrations.suppliers.collection import SupplierCollection
+from integrations.suppliers.extraction import supplier_manifest
+from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
+from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
 
@@ -73,6 +83,7 @@ class Container:
     source_asset_recorder: SourceAssetRecorder
     revisions: ProductFactsRevisionStore
     source_truth: SourceTruthReadback
+    collection: ProductCollectionService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -87,6 +98,9 @@ def build_container(
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
+    collection_gateway: CollectionGateway | None = None,
+    collection_sessions: SessionProvider | None = None,
+    collections: Sequence[RegisteredCollection] | None = None,
     suppliers: Sequence[SupplierDefinition] = SUPPLIERS,
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
@@ -194,6 +208,23 @@ def build_container(
     # it. The decoder reads MIME and the original size from the stored bytes themselves.
     source_assets = SourceAssetStore(config.source_assets_dir, db, HeaderImageDecoder(), clock)
     revisions = ProductFactsRevisionStore(db, clock)
+    source_asset_recorder = SourceAssetRecorder(source_assets)
+    # One operator-submitted product at a time, as a durable collect.* job. The transport is
+    # deferred: composing the application opens no connection, and under CI it cannot.
+    collection = ProductCollectionService(
+        db=db,
+        clock=clock,
+        jobs=jobs,
+        runs=CollectionRunStore(db, clock),
+        revisions=revisions,
+        recorder=source_asset_recorder,
+        sessions=collection_sessions or connect,
+        gateway=collection_gateway or DeferredCollectionGateway(),
+        collections=(
+            tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
+        ),
+    )
+    registry.register(collection.job_definition())
 
     products = ProductsService()
     screens = ScreenService(
@@ -224,11 +255,27 @@ def build_container(
         screens=screens,
         connect=connect,
         source_assets=source_assets,
-        source_asset_recorder=SourceAssetRecorder(source_assets),
+        source_asset_recorder=source_asset_recorder,
         revisions=revisions,
         source_truth=SourceTruthReadback(revisions, source_assets),
+        collection=collection,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
         ownership=ownership,
     )
+
+
+def _registered(collections: Sequence[SupplierCollection]) -> Iterator[RegisteredCollection]:
+    """Bind each supplier's collection to the extraction identity its own manifest names.
+
+    A revision records the rules that produced it, so a supplier whose image-role rules and
+    manifest disagree is refused here rather than storing a revision under a stale identity.
+    """
+    for collection in collections:
+        manifest = supplier_manifest(collection.supplier_key)
+        yield RegisteredCollection(
+            collection=collection,
+            extractor_revision=manifest.revision,
+            extractor_fingerprint=manifest.fingerprint,
+        )

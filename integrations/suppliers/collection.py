@@ -18,6 +18,7 @@ from enum import StrEnum
 from hashlib import sha256
 from urllib.parse import urlsplit
 
+from app.collect.facts import FieldFact
 from integrations.suppliers.base import SupplierProfile, SupplierTransport
 
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
@@ -310,3 +311,54 @@ def plan_image_sample(
         selected=tuple(selected),
         excluded=tuple(sorted(excluded, key=lambda pair: pair[0].order)),
     )
+
+
+# ---------------------------------------------------------------- one supplier's collection
+
+
+@dataclass(frozen=True)
+class SourceIdentity:
+    """The stable identity a supplier's own document states for its product.
+
+    ``agreed`` names the declarations that stated it, so a stored revision can say what the page
+    was asked and what it answered.
+    """
+
+    source_product_id: str
+    agreed: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class UnresolvedIdentity:
+    """Why a document states no identity that a revision may be recorded against.
+
+    A collection that gets this records no revision at all. Nothing downstream may substitute a
+    name, a URL or a digest for the identity the source did not state.
+    """
+
+    reason: str
+    seen: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
+
+
+SourceIdentityResult = SourceIdentity | UnresolvedIdentity
+
+
+@dataclass(frozen=True)
+class SupplierCollection:
+    """Everything a supplier contributes to a collection, and nothing more (ADR-0010 §3).
+
+    A supplier says where its product pages live and what its own documents mean: the profile,
+    the image-role rules, the identity rule and the field parser. It performs no request, stores
+    no byte, computes no checksum and schedules nothing — the run, the fetching, the asset store,
+    the revision history and the job are generic COLLECT core's, and stay there.
+    """
+
+    profile: CollectionProfile
+    roles: ImageRoleRules
+    identity: Callable[[DocumentView, str], SourceIdentityResult]
+    fields: Callable[[DocumentView], Mapping[str, FieldFact]]
+
+    @property
+    def supplier_key(self) -> str:
+        return self.profile.supplier.supplier_key
