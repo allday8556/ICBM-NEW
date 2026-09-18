@@ -185,7 +185,7 @@ mixed/insufficient evidence        → REVIEW_REQUIRED
 
 Collection writes append-oriented/revisioned `ProductFactsRevision` records. Never silently mutate historical source facts in place.
 
-`Product` references the current accepted revision.
+`Product` resolves each member source product through that member's current source revision; this pointer is not an acceptance or confirmation status.
 
 ### 6.5 Marketplace CREATE
 
