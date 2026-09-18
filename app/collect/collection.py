@@ -235,6 +235,7 @@ class ProductCollectionService:
         sessions: SessionProvider,
         gateway: CollectionGateway,
         collections: Sequence[RegisteredCollection] = (),
+        after_recorded: Callable[[str], object] | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -245,6 +246,10 @@ class ProductCollectionService:
         self._sessions = sessions
         self._gateway = gateway
         self._collections = {registered.supplier_key: registered for registered in collections}
+        # What follows a durably RECORDED run (M4 PR-C): the product owner's materialization,
+        # handed in so COLLECT never depends on it. It is idempotent, so a replayed attempt of a
+        # RECORDED run calls it again and changes nothing that already follows the run.
+        self._after_recorded = after_recorded
 
     # ------------------------------------------------------------------ submission
 
@@ -350,7 +355,11 @@ class ProductCollectionService:
         if record is None:
             raise NotFoundError("COLLECT_RUN_UNKNOWN", "this job has no collection run")
         if record.outcome is not CollectionOutcome.PENDING:
-            return  # the run already has its answer; another attempt never rewrites it
+            # The run already has its answer; another attempt never rewrites it. A RECORDED one
+            # may still owe what follows it, if the attempt that recorded it died before that.
+            if record.outcome is CollectionOutcome.RECORDED:
+                self._recorded(record.collection_run_id)
+            return
         if (appended := self._revisions.for_run(record.collection_run_id)) is not None:
             # The previous attempt appended this run's revision and died before settling the run.
             # The revision is immutable and is already the answer: finish the run from it rather
@@ -367,6 +376,7 @@ class ProductCollectionService:
                 revision_id=appended.revision_id,
                 facts_status=appended.facts_status,
             )
+            self._recorded(record.collection_run_id)
             return
         try:
             result = self.collect(
@@ -390,6 +400,12 @@ class ProductCollectionService:
             revision_id=result.revision_id,
             facts_status=result.facts_status,
         )
+        self._recorded(record.collection_run_id)
+
+    def _recorded(self, collection_run_id: str) -> None:
+        """Hand a run to what follows it, only once its RECORDED outcome is durable."""
+        if self._after_recorded is not None:
+            self._after_recorded(collection_run_id)
 
     def collect(self, supplier_key: str, product_url: str, *, run_id: str) -> CollectionResult:
         """Read one product and append its revision, or say why there is none."""
