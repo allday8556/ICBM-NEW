@@ -332,6 +332,8 @@ Product
 └─ Operational State
 ```
 
+The M4 contract for this structure is `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80). The canonical Product is the Canonical v3.1 `ProductGroup`: one identity, never a second product root.
+
 ## Core principle
 
 No downstream screen owns a second copy of product truth.
@@ -698,7 +700,15 @@ Accepted so far:
 
 Next, in order:
 
-1. M4 — canonical Product DB + image pipeline + pricing/readiness foundations (§12). M4 is the CURRENT milestone as a status pointer only. No M4 scope, contract or implementation is authorized until it is decided in GitHub.
+1. M4 — canonical Product DB + image pipeline + pricing/readiness foundations (§12; Issue #80). The PRs, in order:
+   - PR-A: contract (`docs/adr/0013-m4-canonical-product-contract.md`, accepted);
+   - PR-B: canonical product, group and composition models and migrations;
+   - PR-C: materialization, the current-revision pointer and read-back;
+   - PR-D: `PricingSnapshot` and derived readiness;
+   - PR-E: derived image lineage;
+   - PR-F: the M4 integration and acceptance harness.
+
+   Each PR needs its own authorization in GitHub.
 2. The rest of the first single-product vertical (M5 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
