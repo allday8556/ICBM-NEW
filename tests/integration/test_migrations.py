@@ -31,8 +31,18 @@ CANONICAL_TABLES = (
     "source_assets",
     "product_facts_image_refs",
     "collection_runs",
+    # M4 PR-B (ADR-0013): the canonical product foundation.
+    "source_products",
+    "current_source_revision_moves",
+    "product_groups",
+    "group_members",
+    "group_membership_revisions",
+    "group_change_events",
+    "listing_compositions",
+    "product_items",
+    "source_bindings",
 )
-HEAD = "0011_m3_image_reference_diagnostics"
+HEAD = "0012_m4_product_foundation"
 
 
 def _url(path: Path) -> str:

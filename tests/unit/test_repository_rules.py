@@ -1148,8 +1148,9 @@ def test_s17_22_marketplace_evidence_never_reads_the_wall_clock() -> None:
     assert injected >= 2  # the A0 context and the freshness recording read the injected clock
 
 
-def test_schema_holds_source_truth_but_no_canonical_product() -> None:
-    # ADR-0010 §1: M3 persists COLLECT source truth; the canonical Product arrives only in M4.
+def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
+    # ADR-0010 §1: M3 persists COLLECT source truth. ADR-0013 (Issue #80 PR-B) adds the M4
+    # foundation, whose canonical Product is the ProductGroup; no other product root exists.
     # CONNECT code never handles ProductFacts.
     from app.db.metadata import metadata
 
@@ -1170,6 +1171,17 @@ def test_schema_holds_source_truth_but_no_canonical_product() -> None:
         # Stage-B2: the durable identity and result of one submitted collection. It is not source
         # truth and holds no product fact; it says which run produced which revision.
         "collection_runs",
+        # M4 PR-B (ADR-0013): source identity, the current source revision history, the
+        # canonical Product (ProductGroup) with its membership, compositions, Items and bindings.
+        "source_products",
+        "current_source_revision_moves",
+        "product_groups",
+        "group_members",
+        "group_membership_revisions",
+        "group_change_events",
+        "listing_compositions",
+        "product_items",
+        "source_bindings",
     }
     offenders = [
         path
