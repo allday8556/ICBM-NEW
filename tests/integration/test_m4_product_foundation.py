@@ -22,7 +22,7 @@ from app.config import AppConfig
 from app.core.errors import InputValidationError, NotFoundError
 from app.db.database import Database, create_sqlite_engine
 from app.db.metadata import metadata
-from app.db.migrate import alembic_config, current_revision, upgrade_to_head
+from app.db.migrate import alembic_config, current_revision, head_revision, upgrade_to_head
 from app.products.model import (
     DEFAULT_SINGLE_UNIT_SIGNATURE,
     CompositionSpec,
@@ -763,7 +763,7 @@ def test_0011_to_0012_preserves_m3_source_truth_and_backfills_only_identity(
     upgrade_to_head(url)
     engine = create_sqlite_engine(url)
     try:
-        assert current_revision(engine) == "0012_m4_product_foundation"
+        assert current_revision(engine) == head_revision()
     finally:
         engine.dispose()
     assert _m3_rows(database) == before  # every M3 row, field for field

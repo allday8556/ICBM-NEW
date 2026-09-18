@@ -38,6 +38,10 @@ class AuditEventType(StrEnum):
     # source fact value, page text or URL. Committed in the same unit of work as the change.
     PRODUCT_CURRENT_SOURCE_REVISION_MOVED = "PRODUCT_CURRENT_SOURCE_REVISION_MOVED"
     PRODUCT_MATERIALIZED = "PRODUCT_MATERIALIZED"
+    # M4 PR-D pricing (ADR-0013 §7): identifiers, versions, basis/guard enums, fingerprints and the
+    # calculated amounts only. Committed with the snapshot and its current-pointer move.
+    PRODUCT_PRICING_SNAPSHOT_RECORDED = "PRODUCT_PRICING_SNAPSHOT_RECORDED"
+    PRODUCT_CURRENT_PRICING_SNAPSHOT_MOVED = "PRODUCT_CURRENT_PRICING_SNAPSHOT_MOVED"
 
 
 class AuditOutcome(StrEnum):

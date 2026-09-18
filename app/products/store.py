@@ -107,6 +107,25 @@ class ConfirmedMembership:
 
 
 @dataclass(frozen=True)
+class MemberDetail:
+    member_id: str
+    product_group_id: str
+    source_product_uid: str
+    status: MemberStatus
+
+
+@dataclass(frozen=True)
+class ItemDetail:
+    """An Item with the structure of its composition, as pricing and readiness read it."""
+
+    item_id: str
+    product_group_id: str
+    composition_id: str
+    composition_signature: str
+    signature_version: str
+
+
+@dataclass(frozen=True)
 class CompositionRecord:
     composition_id: str
     composition_signature: str
@@ -199,7 +218,8 @@ class ProductFoundationStore:
             yield ProductFoundationUnit(session, self._clock)
 
     @contextmanager
-    def _reading(self) -> Iterator["ProductFoundationUnit"]:
+    def reading(self) -> Iterator["ProductFoundationUnit"]:
+        """The same reads over a read-only session, for evaluations that write nothing."""
         with self._db.read() as session:
             yield ProductFoundationUnit(session, self._clock)
 
@@ -325,13 +345,13 @@ class ProductFoundationStore:
 
     def current_source_revision(self, source_product_uid: str) -> str | None:
         """The revision the newest move names, or ``None`` before any move."""
-        with self._reading() as unit:
+        with self.reading() as unit:
             move = unit.current_move(source_product_uid)
             return None if move is None else move.revision_id
 
     def current_membership_revision(self, product_group_id: str) -> MembershipRevision | None:
         """The group's newest membership revision, or ``None`` before its first CONFIRMED member."""
-        with self._reading() as unit:
+        with self.reading() as unit:
             return unit.current_membership_revision(product_group_id)
 
     def active_group_count(self) -> int:
@@ -349,12 +369,12 @@ class ProductFoundationStore:
     def readback(self, product_group_id: str) -> ProductReadback | None:
         """One group as persisted, retired or not: a retired group stays addressable for
         history."""
-        with self._reading() as unit:
+        with self.reading() as unit:
             return unit.readback(product_group_id)
 
     def group_of_source(self, supplier_key: str, source_product_id: str) -> str | None:
         """The group in which this source identity is CONFIRMED now, if any."""
-        with self._reading() as unit:
+        with self.reading() as unit:
             row = _source_product(unit.session, supplier_key, source_product_id)
             if row is None:
                 return None
@@ -484,6 +504,49 @@ class ProductFoundationUnit:
         if row is None:
             return None
         return ConfirmedMembership(row[0], row[1], GroupStatus(row[2]))
+
+    def group_status(self, product_group_id: str) -> GroupStatus | None:
+        status = self.session.scalar(
+            select(ProductGroup.status).where(ProductGroup.product_group_id == product_group_id)
+        )
+        return None if status is None else GroupStatus(status)
+
+    def member_detail(self, member_id: str) -> MemberDetail | None:
+        row = self.session.get(GroupMember, member_id)
+        if row is None:
+            return None
+        return MemberDetail(
+            row.member_id, row.product_group_id, row.source_product_uid, MemberStatus(row.status)
+        )
+
+    def membership_is_current(self, product_group_id: str) -> bool:
+        """Whether the group's newest membership revision names exactly its CONFIRMED set."""
+        confirmed = sorted(
+            self.session.scalars(
+                select(GroupMember.source_product_uid).where(
+                    GroupMember.product_group_id == product_group_id,
+                    GroupMember.status == MemberStatus.CONFIRMED.value,
+                )
+            )
+        )
+        revision = self.current_membership_revision(product_group_id)
+        if revision is None:
+            return not confirmed
+        return sorted(revision.source_product_uids) == confirmed
+
+    def pending_candidates(self, product_group_id: str) -> int:
+        """Membership decisions still open for the group: its CANDIDATE members."""
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(GroupMember)
+                .where(
+                    GroupMember.product_group_id == product_group_id,
+                    GroupMember.status == MemberStatus.CANDIDATE.value,
+                )
+            )
+            or 0
+        )
 
     # A change to a group's CONFIRMED member set and the membership revision recording it are
     # one unit of work (ADR-0013 §4; PR #82 review 5247426764). No method here can make one
@@ -687,6 +750,26 @@ class ProductFoundationUnit:
             self.session.add(row)
             self.session.flush()
         return CompositionRecord(row.composition_id, row.composition_signature, row.quantity)
+
+    def item_detail(self, item_id: str) -> ItemDetail | None:
+        row = self.session.execute(
+            select(ProductItem, ListingComposition.signature_version)
+            .join(
+                ListingComposition,
+                ListingComposition.composition_id == ProductItem.composition_id,
+            )
+            .where(ProductItem.item_id == item_id)
+        ).first()
+        if row is None:
+            return None
+        item, signature_version = row
+        return ItemDetail(
+            item.item_id,
+            item.product_group_id,
+            item.composition_id,
+            item.composition_signature,
+            signature_version,
+        )
 
     def find_item(self, product_group_id: str, signature: str) -> ItemRecord | None:
         """The group's Item with this composition signature, if it exists. Creates nothing."""

@@ -165,6 +165,44 @@ def composition_signature(spec: CompositionSpec) -> str:
     return hashlib.sha256(text.encode("ascii")).hexdigest()
 
 
+class ReadinessStatus(StrEnum):
+    """ADR-0013 §8 (Canonical v3.1 §3, §9.3). Derived from current canonical state, never stored."""
+
+    READY = "READY"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    BLOCKED = "BLOCKED"
+    DUPLICATE = "DUPLICATE"
+    STALE = "STALE"
+
+
+# Ruling D: within one evaluation context the highest wins; precedence never merges contexts.
+READINESS_PRECEDENCE: Final = (
+    ReadinessStatus.BLOCKED,
+    ReadinessStatus.DUPLICATE,
+    ReadinessStatus.STALE,
+    ReadinessStatus.REVIEW_REQUIRED,
+    ReadinessStatus.READY,
+)
+
+
+@dataclass(frozen=True)
+class Reason:
+    """One reason a derived evaluation is not READY: our own code, the status it contributes and,
+    where it names one, the field or dependency it is about. Never page content."""
+
+    code: str
+    status: ReadinessStatus
+    subject: str | None = None
+
+
+def precedence_status(reasons: "tuple[Reason, ...]") -> ReadinessStatus:
+    """The one status of an evaluation: the highest-precedence status among all its reasons."""
+    present = {reason.status for reason in reasons}
+    return next(
+        (status for status in READINESS_PRECEDENCE if status in present), ReadinessStatus.READY
+    )
+
+
 # The only composition a BASE_PRODUCT binding may fulfil under the accepted M3 capability
 # (ADR-0013 §5–§6; PR #82 review 5247426764): quantity 1 and every unit and pack field unknown.
 # A quantity-1 structure that states a pack, a unit or a total is a seller configuration the
