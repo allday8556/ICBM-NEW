@@ -12,7 +12,7 @@ CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE
 
 Supporting capabilities — AI, OCR, learning, pricing, compliance, jobs, audit, fulfillment, analytics — must attach to this spine. They are not separate top-level systems.
 
-The AI runtime contract is proposed in `docs/adr/0012-ai-runtime-provider-contract.md` (Issue #8). It covers provider-neutral profiles, an optional local sidecar that ICBM never depends on, AI as a capability that never fails core readiness, and AI failure never blocking COLLECT, `ProductFactsRevision` or the canonical DB.
+The AI runtime contract is `docs/adr/0012-ai-runtime-provider-contract.md` (Issue #8). It covers provider-neutral profiles, an optional local sidecar that ICBM never depends on, AI as a capability that never fails core readiness, and AI failure never blocking COLLECT, `ProductFactsRevision` or the canonical DB.
 
 ## 2. Runtime stack
 

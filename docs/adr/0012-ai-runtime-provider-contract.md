@@ -1,6 +1,12 @@
 # ADR-0012 — AI runtime provider contract: provider-neutral profiles, an optional local sidecar, capability readiness and failure isolation
 
-Status: **PROPOSED**. This is the contract PR for Issue #8. It becomes binding only when this line reads ACCEPTED, and that needs three things: the GPT audit, the independent Claude AI cross-audit and the user's explicit merge authorization. Nothing in this ADR authorizes an AI call, a sidecar download, start or stop, or a provider credential.
+Status: **ACCEPTED** 2026-09-18. This is the contract PR for Issue #8 (PR #79).
+- GPT re-audit PASS `5244658428` and the independent Claude AI cross-audit PASS `5725805525`, both on head `ea9ed17`.
+- The rulings of review `5244523325` are incorporated.
+- It lands on main with the merge of PR #79.
+
+Nothing in this ADR authorizes an AI call, a sidecar download, start or stop, or a provider credential. Implementation needs its own authorization.
+
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #8 body, which is the contract agreed during architecture review;
 - the architect kickoff `5725353427` on Issue #8, which authorized this contract-only PR, fixed the number and corrected the supplier name;
