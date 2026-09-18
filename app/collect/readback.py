@@ -15,7 +15,13 @@ from app.collect.contracts import (
     RevisionView,
     SourceAssetView,
 )
-from app.collect.facts import ImageReference
+from app.collect.facts import (
+    IMAGES_FIELD,
+    ImageReference,
+    ImageRole,
+    ImageSummary,
+    ImagesValue,
+)
 from app.collect.revisions import ProductFactsRevisionStore, StoredRevision
 from app.core.errors import NotFoundError
 
@@ -42,6 +48,7 @@ class SourceTruthReadback:
         )
 
     def _view(self, stored: StoredRevision) -> RevisionView:
+        decisions = _recorded_decisions(stored)
         return RevisionView(
             revision_id=stored.revision_id,
             supplier_key=stored.supplier_key,
@@ -79,10 +86,15 @@ class SourceTruthReadback:
                 )
                 for field in stored.fields.values()
             ),
-            images=tuple(self._image(reference) for reference in stored.images),
+            images=tuple(
+                self._image(reference, decisions.get((reference.role, reference.ordinal)))
+                for reference in stored.images
+            ),
         )
 
-    def _image(self, reference: ImageReference) -> ImageReferenceView:
+    def _image(
+        self, reference: ImageReference, decision: ImageSummary | None
+    ) -> ImageReferenceView:
         stored = None if reference.sha256 is None else self._assets.get(reference.sha256)
         return ImageReferenceView(
             role=reference.role,
@@ -97,6 +109,9 @@ class SourceTruthReadback:
             source_form=reference.source_form,
             source_trimmed=reference.source_trimmed,
             target_refusal=reference.target_refusal,
+            certainty=None if decision is None else decision.certainty,
+            disposition=None if decision is None else decision.disposition,
+            exclusion=None if decision is None else decision.exclusion,
             asset=None
             if stored is None
             else SourceAssetView(
@@ -107,3 +122,15 @@ class SourceTruthReadback:
                 height=stored.height,
             ),
         )
+
+
+def _recorded_decisions(stored: StoredRevision) -> dict[tuple[ImageRole, int], ImageSummary]:
+    """Each reference's acceptance decision, exactly as the revision's images field recorded it.
+
+    Nothing is decided here: a revision recorded before the acceptance model existed holds no
+    decision, and its references read back without one rather than being classified now.
+    """
+    field = stored.fields.get(IMAGES_FIELD)
+    if field is None or not isinstance(field.value, ImagesValue):
+        return {}
+    return {(summary.role, summary.ordinal): summary for summary in field.value.references}

@@ -18,6 +18,9 @@ from app.collect.facts import (
     FetchTargetRefusal,
     FieldLevel,
     FieldStatus,
+    ImageCertainty,
+    ImageDisposition,
+    ImageExclusion,
     ImageIssue,
     ImageRole,
     LocatorForm,
@@ -58,6 +61,12 @@ class ImageReferenceView(BaseModel):
     source_form: LocatorForm | None
     source_trimmed: bool | None
     target_refusal: FetchTargetRefusal | None
+    # What acceptance decided for this reference when the revision was recorded (Issue #52 ruling
+    # 5723016554 R1), read from the revision's own images field and never recomputed. ``None`` on a
+    # revision recorded before the acceptance model existed: it was never classified.
+    certainty: ImageCertainty | None
+    disposition: ImageDisposition | None
+    exclusion: ImageExclusion | None
 
 
 class EvidenceView(BaseModel):

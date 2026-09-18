@@ -14,12 +14,14 @@ minimum sale price exists only as an observed value, and quantity tiers keep the
 import hashlib
 import json
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from fractions import Fraction
 from types import MappingProxyType
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -125,6 +127,34 @@ class FetchTargetRefusal(StrEnum):
     HOST_NOT_ALLOWLISTED = "HOST_NOT_ALLOWLISTED"  # not a host the profile allows for this kind
     PATH_NOT_ALLOWED = "PATH_NOT_ALLOWED"  # not a path the profile allows for this kind
     QUERY_NOT_ALLOWED = "QUERY_NOT_ALLOWED"  # a query this kind of read may not carry
+
+
+class ImageCertainty(StrEnum):
+    """Whether looking at a source image reference again could change its outcome (Issue #52 ruling
+    5723016554 R1). Kept apart from what acceptance then does with the reference."""
+
+    DETERMINATE = "DETERMINATE"  # the outcome is settled by what was recorded
+    INDETERMINATE = "INDETERMINATE"  # ICBM did not finish observing it, or cannot say whose it is
+
+
+class ImageDisposition(StrEnum):
+    """What acceptance does with one source image reference (ruling 5723016554 R1).
+
+    ``UNRESOLVED`` is every reference that is neither observed nor proven to be the source's own
+    defect — a failed request, a refusal the closed table does not name, a budget ICBM spent. It is
+    never folded into ``EXCLUDED``, and one of them keeps the images field under review (R7).
+    """
+
+    INCLUDED = "INCLUDED"  # its bytes were observed: it is product evidence
+    EXCLUDED = "EXCLUDED"  # the source authored a reference no fetch can honour (R2)
+    UNRESOLVED = "UNRESOLVED"  # not observed, and not proven to be the source's own defect
+
+
+class ImageExclusion(StrEnum):
+    """Why a reference is ``EXCLUDED``. Closed (ruling 5723016554 R11): exactly one member per row
+    of :data:`EXCLUSION_TABLE`, and no catch-all. A case no row names stays ``UNRESOLVED``."""
+
+    SOURCE_AUTHORED_NON_HTTPS = "SOURCE_AUTHORED_NON_HTTPS"
 
 
 class Availability(StrEnum):
@@ -283,17 +313,73 @@ class NoticeValue(FactValue):
     items: tuple[NoticeItem, ...] = Field(min_length=1)
 
 
+# The acceptance model a revision's image decisions were made under. A revision recorded before
+# the model existed carries none, and its references were never classified: nothing reads one of
+# them as if the table had been applied (ruling 5723016554, history is immutable).
+ImageAcceptanceModel = Literal["image-acceptance/v1"]
+IMAGE_ACCEPTANCE_MODEL: ImageAcceptanceModel = "image-acceptance/v1"
+
+# What each decision may look like: the reference's own observation beside the two axes. Anything
+# else is refused, so a stored decision is always one the table could have produced.
+_DECISIONS: Mapping[tuple[ImageCertainty, ImageDisposition], FieldStatus] = MappingProxyType(
+    {
+        (ImageCertainty.DETERMINATE, ImageDisposition.INCLUDED): FieldStatus.CONFIRMED,
+        (ImageCertainty.DETERMINATE, ImageDisposition.EXCLUDED): FieldStatus.REVIEW_REQUIRED,
+        (ImageCertainty.INDETERMINATE, ImageDisposition.UNRESOLVED): FieldStatus.REVIEW_REQUIRED,
+    }
+)
+
+
 class ImageSummary(FactValue):
+    """One reference as the images field records it: what was observed, and what acceptance did.
+
+    ``status`` is the observation — CONFIRMED only when its bytes were stored. ``certainty``,
+    ``disposition`` and ``exclusion`` are the acceptance decision (ruling 5723016554 R1); they are
+    ``None`` together on a revision recorded before the acceptance model existed.
+    """
+
     role: ImageRole
     ordinal: int = Field(ge=0)
     sha256: str | None
     status: FieldStatus
+    certainty: ImageCertainty | None = None
+    disposition: ImageDisposition | None = None
+    exclusion: ImageExclusion | None = None
+
+    @model_validator(mode="after")
+    def _one_decision(self) -> Self:
+        if self.certainty is None and self.disposition is None:
+            if self.exclusion is not None:
+                raise ValueError("an exclusion is recorded only with its decision")
+            return self
+        if self.certainty is None or self.disposition is None:
+            raise ValueError("certainty and disposition are recorded together")
+        observed = _DECISIONS.get((self.certainty, self.disposition))
+        if observed is None:
+            raise ValueError("not a decision the acceptance table can make")
+        if self.status is not observed or (self.sha256 is not None) != (
+            self.disposition is ImageDisposition.INCLUDED
+        ):
+            raise ValueError("a decision agrees with what was observed of the reference")
+        if (self.exclusion is not None) != (self.disposition is ImageDisposition.EXCLUDED):
+            raise ValueError("an EXCLUDED reference names its closed reason, and only it does")
+        return self
 
 
 class ImagesValue(FactValue):
     """The ordered image references of a revision; derived, never supplied."""
 
     references: tuple[ImageSummary, ...] = Field(min_length=1)
+    acceptance: ImageAcceptanceModel | None = None
+
+    @model_validator(mode="after")
+    def _decided_under_one_model(self) -> Self:
+        decided = {reference.disposition is not None for reference in self.references}
+        if decided == {True} and self.acceptance is None:
+            raise ValueError("classified references name the acceptance model that decided them")
+        if decided != {True} and self.acceptance is not None:
+            raise ValueError("an acceptance model classifies every reference, or none was applied")
+        return self
 
 
 @dataclass(frozen=True)
@@ -621,8 +707,90 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact, policy: UrlPolicy) 
 
 _IMAGE_STATUSES = (FieldStatus.CONFIRMED, FieldStatus.REVIEW_REQUIRED)
 _ROLE_ORDER = {ImageRole.REPRESENTATIVE: 0, ImageRole.DETAIL: 1}
-# The derived evidence entry that stands for a missing confirmed representative image.
+# The derived evidence entries that stand for an images guard that failed. Each is REVIEW_REQUIRED
+# evidence of its own, so the derived field stays coherent with its evidence like every other.
 MISSING_REPRESENTATIVE_LOCATOR = "images:representative"
+MISSING_DETAIL_LOCATOR = "images:detail"
+EXCLUDED_SHARE_LOCATOR = "images:excluded"
+
+
+# ---------------------------------------------------------------- image acceptance
+
+# The whole of what may be EXCLUDED (ruling 5723016554 R2, R3, R11, R13). A row is what the page
+# wrote beside what the transport's own target check refused before anything was reserved or sent;
+# a pair that is not a row stays UNRESOLVED. Nothing here parses, resolves or repairs a URL: the
+# transport judged the target once, and this reads only what it recorded.
+#
+# Each row must prove the defect is the source's own and could not be ICBM's. That is why a row
+# is keyed on the written form and not on the refusal alone: under the parser contract (PR #74) an
+# ABSOLUTE reference keeps the scheme the page gave it, while a relative or protocol-relative one
+# is resolved by ICBM — so ``NOT_ABSOLUTE``, or ``NON_HTTPS`` after a resolution, could be a parser
+# regression and is never a row (R3). Profile-scoped refusals (host, path, query) can mean ICBM's
+# configuration is behind the source, and are not rows either.
+EXCLUSION_TABLE: Mapping[tuple[LocatorForm, FetchTargetRefusal], ImageExclusion] = MappingProxyType(
+    {
+        # The page wrote an absolute ``http://`` reference; the parser keeps an absolute
+        # scheme and the transport serves https only (ADR-0010 §9). Looking again can change
+        # nothing, and nothing was requested for it.
+        (
+            LocatorForm.ABSOLUTE,
+            FetchTargetRefusal.NON_HTTPS,
+        ): ImageExclusion.SOURCE_AUTHORED_NON_HTTPS,
+    }
+)
+# The drift guard (R9): images stay under review when excluded references are MORE than this share
+# of the references the source exposed. Exactly this share does not fire it.
+EXCLUDED_SHARE_LIMIT = Fraction(1, 3)
+
+
+@dataclass(frozen=True)
+class ImageDecision:
+    certainty: ImageCertainty
+    disposition: ImageDisposition
+    exclusion: ImageExclusion | None = None
+
+
+_INCLUDED = ImageDecision(ImageCertainty.DETERMINATE, ImageDisposition.INCLUDED)
+_UNRESOLVED = ImageDecision(ImageCertainty.INDETERMINATE, ImageDisposition.UNRESOLVED)
+
+
+def decide_image(ref: ImageReference) -> ImageDecision:
+    """What acceptance does with one reference, from its persisted diagnostics alone (R1–R5).
+
+    Observed bytes are included. A reference is excluded only when a row of the closed table
+    names exactly what the page wrote and what the transport refused before sending. Everything
+    else — budget, network, server, content the validator refused, a refusal no row names — stays
+    unresolved, however often it repeats.
+    """
+    if ref.status is FieldStatus.CONFIRMED:
+        return _INCLUDED
+    if ref.issue is ImageIssue.BUDGET_EXHAUSTED:
+        # R4: ICBM chose not to finish looking. That is never the source's defect, whatever the
+        # reference would have been refused for had it been reached.
+        return _UNRESOLVED
+    if (
+        ref.issue is ImageIssue.FETCH_FAILED
+        and ref.target_refusal is not None
+        and ref.source_form is not None
+        and ref.source_trimmed is not None
+        and ref.sha256 is None
+        and ref.locator is None
+    ):
+        exclusion = EXCLUSION_TABLE.get((ref.source_form, ref.target_refusal))
+        if exclusion is not None:
+            return ImageDecision(ImageCertainty.DETERMINATE, ImageDisposition.EXCLUDED, exclusion)
+    return _UNRESOLVED
+
+
+# What one reference contributes to the images field's evidence: an excluded reference is no usable
+# image, which is ABSENT evidence — neither confirmation nor something still to resolve.
+_EVIDENCE_STATUS: Mapping[ImageDisposition, FieldStatus] = MappingProxyType(
+    {
+        ImageDisposition.INCLUDED: FieldStatus.CONFIRMED,
+        ImageDisposition.EXCLUDED: FieldStatus.ABSENT,
+        ImageDisposition.UNRESOLVED: FieldStatus.REVIEW_REQUIRED,
+    }
+)
 
 
 def image_order(ref: ImageReference) -> tuple[int, int]:
@@ -681,47 +849,85 @@ def _check_images(
     return tuple(sorted(checked, key=image_order))
 
 
+def _guard(locator: str, normalized: str) -> Evidence:
+    return Evidence(
+        kind=EvidenceKind.IMAGE,
+        locator=locator,
+        status=FieldStatus.REVIEW_REQUIRED,
+        normalized=normalized,
+    )
+
+
 def _images_field(
     references: tuple[ImageReference, ...],
 ) -> tuple[FieldStatus, ImagesValue | None, tuple[Evidence, ...]]:
-    """Derive the images field: CONFIRMED only with a confirmed representative image and no
-    reference under review; ABSENT when the source shows no image at all. A missing confirmed
-    representative image is itself REVIEW_REQUIRED evidence, so the derived field stays coherent
-    with its evidence like every supplied field."""
+    """Derive the images field from the references the source exposed (ruling 5723016554).
+
+    ABSENT when the source shows no image at all. Otherwise every reference is decided by
+    :func:`decide_image`, and the field is CONFIRMED only when all of these hold:
+
+    * no reference is UNRESOLVED (R7) — one is enough to keep the field under review;
+    * a REPRESENTATIVE reference is INCLUDED, and — when the source exposed any DETAIL reference at
+      all — so is a DETAIL one (R6). What the source exposed is read from the references
+      themselves, never from which requests succeeded (R12): a reference that was refused or
+      excluded still proves the source had it;
+    * excluded references are not more than one third of all of them (R9), counting every excluded
+      position on its own even when several share one reason (R10).
+
+    With those met, excluded references do not by themselves lower the field (R8). Each guard that
+    fails is REVIEW_REQUIRED evidence of its own, so the field stays coherent with its evidence.
+    """
     if not references:
         return FieldStatus.ABSENT, None, ()
+    decided = [(ref, decide_image(ref)) for ref in references]
     value = ImagesValue(
+        acceptance=IMAGE_ACCEPTANCE_MODEL,
         references=tuple(
-            ImageSummary(role=ref.role, ordinal=ref.ordinal, sha256=ref.sha256, status=ref.status)
-            for ref in references
-        )
+            ImageSummary(
+                role=ref.role,
+                ordinal=ref.ordinal,
+                sha256=ref.sha256,
+                status=ref.status,
+                certainty=decision.certainty,
+                disposition=decision.disposition,
+                exclusion=decision.exclusion,
+            )
+            for ref, decision in decided
+        ),
     )
     evidence = [
         Evidence(
             kind=EvidenceKind.IMAGE,
             locator=ref.provenance,
-            status=ref.status,
+            status=_EVIDENCE_STATUS[decision.disposition],
             observed=ref.sha256,
-            normalized=f"{ref.role.value}:{ref.ordinal}",
+            normalized=f"{ref.role.value}:{ref.ordinal}"
+            if decision.exclusion is None
+            else f"{ref.role.value}:{ref.ordinal}:EXCLUDED:{decision.exclusion.value}",
         )
-        for ref in references
+        for ref, decision in decided
     ]
-    representative = any(
-        ref.role is ImageRole.REPRESENTATIVE and ref.status is FieldStatus.CONFIRMED
-        for ref in references
+    included = Counter(
+        ref.role for ref, decision in decided if decision.disposition is ImageDisposition.INCLUDED
     )
-    if representative and all(ref.status is FieldStatus.CONFIRMED for ref in references):
-        return FieldStatus.CONFIRMED, value, tuple(evidence)
-    if not representative:
-        evidence.append(
-            Evidence(
-                kind=EvidenceKind.IMAGE,
-                locator=MISSING_REPRESENTATIVE_LOCATOR,
-                status=FieldStatus.REVIEW_REQUIRED,
-                normalized=f"{ImageRole.REPRESENTATIVE.value}:missing",
-            )
+    dispositions = [decision.disposition for _, decision in decided]
+    unresolved = ImageDisposition.UNRESOLVED in dispositions
+    # R10: every excluded position counts, however many share one reason.
+    excluded = dispositions.count(ImageDisposition.EXCLUDED)
+    exposes_detail = any(ref.role is ImageRole.DETAIL for ref in references)
+
+    guards = []
+    if not included[ImageRole.REPRESENTATIVE]:
+        guards.append(
+            _guard(MISSING_REPRESENTATIVE_LOCATOR, f"{ImageRole.REPRESENTATIVE.value}:missing")
         )
-    return FieldStatus.REVIEW_REQUIRED, value, tuple(evidence)
+    if exposes_detail and not included[ImageRole.DETAIL]:
+        guards.append(_guard(MISSING_DETAIL_LOCATOR, f"{ImageRole.DETAIL.value}:missing"))
+    if Fraction(excluded, len(references)) > EXCLUDED_SHARE_LIMIT:
+        guards.append(_guard(EXCLUDED_SHARE_LOCATOR, f"EXCLUDED:{excluded}/{len(references)}"))
+    if not unresolved and not guards:
+        return FieldStatus.CONFIRMED, value, tuple(evidence)
+    return FieldStatus.REVIEW_REQUIRED, value, (*evidence, *guards)
 
 
 def evaluate(

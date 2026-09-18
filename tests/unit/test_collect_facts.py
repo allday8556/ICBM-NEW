@@ -99,10 +99,21 @@ def test_a_complete_collection_is_confirmed_in_registry_order() -> None:
     assert [field.key for field in facts.fields] == list(FIELD_REGISTRY)
     images = _field(facts, "images")
     assert images.status is FieldStatus.CONFIRMED
+    # Each reference records what was observed and what acceptance did with it (ruling
+    # 5723016554 R1), under the model that decided it.
     assert json.loads(images.value_json or "") == {
+        "acceptance": "image-acceptance/v1",
         "references": [
-            {"role": "REPRESENTATIVE", "ordinal": 0, "sha256": SHA, "status": "CONFIRMED"}
-        ]
+            {
+                "role": "REPRESENTATIVE",
+                "ordinal": 0,
+                "sha256": SHA,
+                "status": "CONFIRMED",
+                "certainty": "DETERMINATE",
+                "disposition": "INCLUDED",
+                "exclusion": None,
+            }
+        ],
     }
 
 
