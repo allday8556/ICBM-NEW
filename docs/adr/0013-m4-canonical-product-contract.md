@@ -1,9 +1,10 @@
-# ADR-0013 — M4 canonical product contract: one product identity, the accepted-revision pointer, composition and Item, pricing, derived readiness and image lineage
+# ADR-0013 — M4 canonical product contract: one product identity, the current source revision, composition and Item, context-scoped pricing, layered readiness and image lineage
 
 Status: **PROPOSED**. This is PR-A of Issue #80. It becomes binding only when this line reads ACCEPTED, and that needs three things: the GPT audit, the independent Claude AI cross-audit and the user's explicit merge authorization. It authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call.
 
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #80 body (the M4 umbrella) and the architect kickoff `5726182664`, which authorized PR-A only;
+- the architect's PR #81 review `5245152210`, which ruled the five former choices for review and set two blockers (see "Rulings");
 - `docs/architecture/CANONICAL-V3.1.md` §2, §5.2, §6, §7.3, §8, §9, §10.1, §11.5, §12 and §14 (the frozen v3.1 identity model and schema);
 - `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` B1, B6 and §8;
 - Issue #56 (Image Studio, planned), whose extension points this foundation must keep open;
@@ -42,7 +43,7 @@ This ADR is a contract. It names entities and invariants. It does not fix tables
 | ROADMAP, ARCHITECTURE, CLAUDE.md, UI (통합DB) | `Product`, "the canonical ICBM product ID", `icbm_product_id` |
 | Canonical v3.1 | `ProductGroup`, `group_id`, `current_group_id`, `group_id_at_registration` |
 
-- **The persisted entity is `ProductGroup`**, as the frozen v3.1 schema names it (Choice for review E).
+- **The persisted entity is `ProductGroup`**, as the frozen v3.1 schema names it (ruling E). UI and prose may call it `Product`.
 - **No second product entity exists.** There is no separate `Product` row, table or identifier above, below or beside it.
 - **The downstream key.** Pricing, readiness, drafts, registration, orders, stock, inquiries and analytics resolve to that one identifier. Per sellable Item they also use the composition (§5).
 - **`icbm_product_id` in `docs/ARCHITECTURE.md` §5 is this identifier.** Under the v3.1 Item layer, M5 records it per registration Item: `current_group_id` on the live item, and `group_id_at_registration` in the immutable snapshot.
@@ -72,30 +73,49 @@ This ADR is a contract. It names entities and invariants. It does not fix tables
 
 - **`SourceProduct`** is the supplier's product, identified by `(supplier_key, source_product_id)`. This is the self-duplicate identity: at most one per pair (v3.1 §6.1).
 - **Its facts are its `ProductFactsRevision` history**, exactly as ADR-0010 defines it: immutable, sequenced per identity, fingerprinted. M4 never updates, deletes or re-derives a revision.
-- **`SourceSKU` and `QuantityOffer`** are source facts that M4 reads from a revision (v3.1 §5.2).
+- **`SourceSKU` and `QuantityOffer`** are source facts. M4 reads them from a revision only where the source states them (v3.1 §5.2).
   - Quantity tiers stay original `(quantity, total_price)` facts. They are never flattened into a unit price or multiplied into new totals.
   - Atomic source SKU identity is preserved. The same weight never merges a different count, grade or pack.
-- **The M3 capability boundary carries forward unchanged** (`docs/acceptance/M3.md` §2): positive `CONFIRMED` option-axis/configuration support and positive quantity-tier values are not accepted. M4 fabricates no SKU and no offer. How a revision that states no options and no tiers presents its one sellable unit is Choice for review B.
+- **The M3 capability boundary carries forward unchanged** (`docs/acceptance/M3.md` §2): positive `CONFIRMED` option-axis/configuration support and positive quantity-tier values are not accepted.
+- **ABSENT is never turned into a source entity.** A revision that validly reads `options = ABSENT` and `quantity_tiers = ABSENT` states no SKU and no tier. M4 creates and persists **no** `SourceSKU`, supplier SKU identifier or `QuantityOffer` for it. The sellable unit such a product needs is represented on the product side only: a default single-unit composition and Item (§5) with a base-product binding (§6). Missing capability is not a licence to guess (M3.md §2.4).
 
-### 3. The current accepted revision is a pointer, never an edit
+### 3. The current source revision is a pointer, never an edit
 
-**Where the pointer lives.** It is kept **per `SourceProduct`**. A group has no facts revision of its own in M4. Downstream reads a member's facts through that member's current pointer. v3.1 §10.1 reserves a separately named `group_facts_revision_*` for any future group-level facts.
+**What it is, and what it is not.**
+- The pointer names **the source revision downstream uses now**: the `current_source_revision` of a `SourceProduct`.
+- It is **not** an "accepted" or "confirmed" revision, and nothing may call it that: a current revision may be `REVIEW_REQUIRED`.
+- Any later persisted name keeps this distinction. Its fact ambiguity is carried by readiness (§8), never by the pointer.
+- The phrase "current accepted facts revision" in `docs/ARCHITECTURE.md` (before this ADR), in ARCHITECT_REVIEW B6 and in ADR-0010 §1 names this pointer.
 
-**Its history.** The pointer history is append-only. Each decision records:
-- the revision it points to and the one it replaced;
-- the rule or actor that decided it, with the rule version;
-- the reason, the time and the correlation.
+**Where the pointer lives.** It is kept **per `SourceProduct`**.
+- A group has no facts revision of its own in M4, so downstream reads a member's facts through that member's current source revision.
+- v3.1 §10.1 reserves a separately named `group_facts_revision_*` for any future group-level facts.
 
-Each decision is audited (`AuditEvent`).
+**How it advances (ruling A).** It advances **automatically** to the newest eligible revision, with no operator confirmation per collection. A revision is eligible only when all of these hold:
+- it belongs to the **same stable source identity** `(supplier_key, source_product_id)`;
+- it is durably **`RECORDED`**, meaning its collection run's outcome is `RECORDED`;
+- its fingerprints are structurally **intact**.
+
+An unresolved identity never advances the pointer: such a run records no revision at all (ADR-0010).
 
 **Invariants:**
-- It points only to a revision of the **same** `(supplier_key, source_product_id)`, and only to one whose fingerprints are intact.
-- Accepting a revision **does not** change its `facts_status`, any field status or any evidence. "Current" means "the source facts downstream uses now", not "confirmed". A `REVIEW_REQUIRED` revision may be current, and readiness then reads its field statuses (§8).
+- Advancing the pointer **does not** change the revision's `facts_status`, any field status or any evidence.
+- A `REVIEW_REQUIRED` revision may be current. No operator acceptance is required merely because of that status.
 - A recollection creates a new revision (ADR-0010). It never updates a historical one.
 - The pointer never moves to an older revision silently. Moving it backwards is an explicit, recorded decision.
-- When the pointer moves, the difference between the old and new current revision is classified by the source-drift rules (`docs/ARCHITECTURE.md` §11). Every derived result whose dependency fingerprint includes the old revision becomes `STALE` (§8). User-locked values are kept, with a `SOURCE_DRIFT` mark, and are not overwritten (v3.1 §7.3, §7.7).
+- The history is append-only. Each move records:
+  - the revision it points to and the one it replaced;
+  - the rule and rule version, or the actor, that moved it;
+  - the reason, the time and the correlation.
 
-How the pointer advances when a new revision is recorded is Choice for review A.
+  Each move is audited (`AuditEvent`).
+
+**Source drift vs extractor change (ADR-0010 §6).** Fingerprints are drift evidence only between revisions with the **same `extractor_revision`**.
+- **Same extractor.** When the pointer moves, the old and new current revisions are compared. The difference is classified by the source-drift rules (`docs/ARCHITECTURE.md` §11). Every derived result whose dependency fingerprint includes the old revision becomes `STALE` (§8). User-locked values are kept, with a `SOURCE_DRIFT` mark, and are not overwritten (v3.1 §7.3, §7.7).
+- **Different extractor.**
+  - A fingerprint difference or equality proves **neither** drift nor its absence.
+  - The move is recorded with the explicit reason `EXTRACTOR_CHANGED`, and every dependent derived result is invalidated for re-evaluation under that reason. It is never treated as ordinary source drift.
+  - A drift classification is not inferred across the change.
 
 ### 4. Group membership and its revisions
 
@@ -109,9 +129,9 @@ A `SourceProduct` is a `CONFIRMED` member of **at most one** group at a time.
 **`GroupMembershipRevision`** is an immutable, numbered revision of a group's confirmed member set.
 - A new one is created on every change to that set.
 - Derived state names it in its dependency fingerprint, and a later `RegistrationItemSnapshot` names it as `group_membership_revision_id` (v3.1 §2.5).
-- A change of a member's accepted-revision pointer is **not** a membership change and creates no membership revision.
+- A move of a member's current source revision is **not** a membership change and creates no membership revision.
 
-**Materialization in M4.** An accepted `SourceProduct` with no confirmed group gets a new group with that one member. The first vertical has one supplier. Nothing in the contract makes one member per group an invariant.
+**Materialization in M4.** A `SourceProduct` that has a current source revision but no confirmed group gets a new group with that one member. The first vertical has one supplier. Nothing in the contract makes one member per group an invariant.
 
 **Matching (v3.1 §6.2–§6.4):**
 - **Auto-confirmation** happens only on a valid GTIN, or on manufacturer (brand) + MPN, with no conflict in capacity, specification or manufacturer pack. Such a conflict is a **rejection**, not a weak signal.
@@ -149,6 +169,12 @@ ListingComposition        immutable
 
 **Source facts stay source facts.** A `QuantityOffer` is never rewritten as a composition, and a composition never writes a source fact. Which offer fulfils which composition is a binding (§6).
 
+**The default single-unit composition (ruling B).** Some products validly prove "no options" and "no quantity tiers": their current source revision reads `options = ABSENT` and `quantity_tiers = ABSENT`, as M3.md §2.1 records for the product of the accepted M3 campaign.
+- For such a product M4 may materialize a **product-side default single-unit composition**: quantity 1 of the base product as the source sells it. It also materializes the default Item on it.
+- Unit fields no source fact states stay **unknown**, and "unknown" is part of the canonical signature. No capacity is guessed.
+- This is a product-side representation only. It creates **no** `SourceSKU`, supplier SKU identifier or `QuantityOffer`.
+- If option- or tier-looking evidence is `REVIEW_REQUIRED`, **no default unit is inferred**. The affected Item and its pricing stay `REVIEW_REQUIRED`.
+
 **The product-side `Item`:**
 - It is the sellable unit: `group identifier + composition_signature`. That pair is its identity and it is unique (v3.1 §2.4).
 - M4 creates this product-side foundation. Pricing snapshots and readiness attach to it.
@@ -164,11 +190,19 @@ ListingComposition        immutable
 SourceBinding
   source_binding_id
   group_member_id
-  source_sku_id
-  quantity_offer_id
+  binding_kind             SOURCE_OFFER | BASE_PRODUCT
+  source_sku_id            SOURCE_OFFER only; none for BASE_PRODUCT
+  quantity_offer_id        SOURCE_OFFER only; none for BASE_PRODUCT
   fulfillment_quantity
+  provenance               which source revision and which fields justify the binding
   valid_from / valid_to
 ```
+
+**The two binding kinds:**
+- **`SOURCE_OFFER`** binds a source-stated `SourceSKU` and `QuantityOffer` (v3.1 §12.1).
+- **`BASE_PRODUCT`** binds the source product itself, when its current source revision validly states no options and no tiers (§2, §5). It references no SKU or offer identity, because none exists. Its provenance names the revision and the explicit base product price, `shipping` and `minimum_sale_price` fields it relies on.
+
+A `BASE_PRODUCT` binding fulfils only the default single-unit composition with `fulfillment_quantity = 1`. Anything more would be composed fulfillment, which is off by default (below).
 
 **What M4 owns:** `SourceBinding` records, and the product-side Item's current binding that Pricing reads.
 
@@ -187,15 +221,37 @@ SourceBinding
 - **The historical source snapshot** (`RegistrationItemSnapshot.source_snapshot`) is an immutable **copy** taken at registration and owned by M5. It never references a mutable binding in place of a copy.
 - **How a `MarketplaceRegistrationItem.current_source_binding_id` is chosen** is M5's decision.
 
-### 7. `PricingSnapshot`: one owner, one rule, immutable
+### 7. `PricingSnapshot`: one owner, one rule, immutable, per Item **and pricing context**
 
 **Only the Pricing owner calculates a selling price.** No UI, no adapter and no other service re-decides one.
 
+**Price varies by context, not only by Item (blocker 1).**
+- v3.1 §8's "the price belongs to the Item" means that price is never flattened above the Item/SKU layer.
+- It does **not** mean one global price per Item. The platform fee, and with it the target-margin price, the expected margin and the guard outcome, differ by marketplace, by account and by policy.
+- One Item can hold a SmartStore, a Coupang and an 11st price at the same time, each with its own margin and guard.
+
+**The pricing context.** It is an explicit part of every snapshot:
+
+```text
+PricingContext
+  marketplace_key          the target the price is for
+  account_id               when the fee or policy can differ by account; otherwise explicitly none
+  fee_table_version        the versioned platform-fee inputs
+  pricing_policy_version   target margin, guards, rounding, other policy costs
+```
+
 **What a snapshot is:**
-- It is **immutable**, and it belongs to one Item: the price is an Item attribute, never a listing attribute (v3.1 §8).
-- It is computed from one current binding, the bound source's current accepted revision, and one pricing policy version.
+- It is **immutable**, and it belongs to **one Item under one pricing context**: the price is an Item attribute, never a listing attribute.
+- It is computed from four things:
+  - one current binding;
+  - the bound source's current source revision;
+  - that context's fee table;
+  - that context's pricing policy version.
 - Any change of input produces a **new** snapshot. A snapshot is never updated.
-- A later `RegistrationItemSnapshot.pricing_snapshot_id_at_registration` references the exact snapshot used.
+- **Many snapshots per Item.** One Item can have many current and historical snapshots, at most one current per `(Item, pricing context)`.
+- **No universal price is assumed.** No SmartStore assumption is built into the Product DB.
+- **A platform fee always has its context.** No snapshot carries a platform fee without its pricing context.
+- A later `RegistrationItemSnapshot.pricing_snapshot_id_at_registration` references the exact **context-specific** snapshot used.
 
 At contract level it records:
 
@@ -203,18 +259,19 @@ At contract level it records:
 PricingSnapshot            immutable
   pricing_snapshot_id
   item key                 (group identifier + composition_signature)
+  pricing_context          marketplace_key, account_id (or none), fee_table_version, pricing_policy_version
   source_binding_id
   source_product_facts_revision_id
-  purchase_cost            from the bound QuantityOffer's own total; never a derived unit price
+  purchase_cost            SOURCE_OFFER: the bound QuantityOffer's own total;
+                           BASE_PRODUCT: the revision's explicit base product price; never a derived unit price
   supplier_shipping
-  platform_fee             with its fee-table version
-  minimum_sale_price       exactly as the source states it for the bound offer, or none
+  platform_fee             from the context's fee table
+  minimum_sale_price       exactly as the source states it for the bound offer or base product, or none
   target_margin_price
   final_sale_price
   price_basis              MINIMUM_SALE_PRICE | TARGET_MARGIN
   expected_net_margin
   price_guard              OK | LOSS | BELOW_MIN_MARGIN
-  pricing_policy_version
   fx_rate / fx_source / fx_captured_at    non-KRW sources only
   input fingerprint
 ```
@@ -232,7 +289,7 @@ else:
 
 Never restore `max(target_margin_price, minimum_sale_price)`.
 
-**The registration guard (Issue #80 §7).** These are policy inputs, versioned by `pricing_policy_version`, and never source facts:
+**The registration guard (Issue #80 §7).** These are policy inputs, versioned by the context's `pricing_policy_version`, and never source facts. Each is evaluated per snapshot, so per context:
 - **Unrestricted price.** When no `minimum_sale_price` applies, `target_margin_price` is set for a target net margin of **35%**.
 - **Loss guard.** If `purchase_cost + supplier_shipping + platform_fee >= final_sale_price`, then `price_guard = LOSS`: not registerable.
 - **Margin guard.** If `expected_net_margin < 10%`, then `price_guard = BELOW_MIN_MARGIN`: not registerable.
@@ -255,7 +312,8 @@ Both are policy-version content decided in PR-D, with deterministic tests.
 
 **What the snapshot holds, and what it never does:**
 - It holds an **estimated** margin. The actual settled margin is a different state, owned by OPERATE (ARCHITECT_REVIEW B1).
-- No `minimum_sale_price × quantity` and no per-unit source price is ever manufactured. When a composition's quantity has no minimum the source states, while the unit does, the case is Choice for review C.
+- No `minimum_sale_price × quantity` and no per-unit source price is ever manufactured.
+- **Ruling C.** Sometimes the source states a minimum for one unit but none for the bound quantity of a multi-unit composition. Then nothing is derived, and that Item's pricing is `REVIEW_REQUIRED` in every context.
 
 ### 8. Readiness is derived, never a stored truth
 
@@ -269,34 +327,55 @@ DUPLICATE
 STALE
 ```
 
-**How it is evaluated.** Readiness is a **server-side evaluation of current canonical state**. At M4 it is evaluated per product-side Item.
-- It returns one status and **every** applicable reason code. When several apply, the status is the highest in the order `BLOCKED > DUPLICATE > STALE > REVIEW_REQUIRED > READY` (Choice for review D).
+**How it is evaluated.** Readiness is a **server-side evaluation of current canonical state**, in three separate layers (blocker 1). **No single readiness result is claimed for an Item across pricing contexts:** a pricing guard can be `READY` for one marketplace or account and `BLOCKED` for another.
+
+| layer | scope | owner | reads |
+| --- | --- | --- | --- |
+| **Base readiness** | one Item, context-free | M4 | see below |
+| **Pricing readiness** | one Item under one pricing context | M4 | see below |
+| **Registration preflight** | a draft or registration target | M5 | base readiness + pricing readiness for the target's context + the marketplace/account requirements below |
+
+**Base readiness reads:**
+- **Source facts.** The current source revision's field statuses. A CORE field that is `REVIEW_REQUIRED` gives `REVIEW_REQUIRED`.
+- **Stock evidence.** `SOLD_OUT` gives `BLOCKED`; mixed evidence gives `REVIEW_REQUIRED`.
+- **Binding and composition.**
+  - The Item needs a valid current binding for its composition.
+  - A default unit that could not be inferred gives `REVIEW_REQUIRED` (§5).
+- **Image integrity.** The image state of §9.
+- **Unresolved group or Item conflicts.**
+  - Open review items for the Item or its group, including an unresolved successor.
+  - Product-side Item-key duplicates after a merge give `DUPLICATE`.
+
+**Pricing readiness reads** the current `PricingSnapshot` for that Item **and that context**:
+- a guard of `LOSS` or `BELOW_MIN_MARGIN` gives `BLOCKED`;
+- pricing `REVIEW_REQUIRED` (ruling C, §5) gives `REVIEW_REQUIRED`;
+- a missing or superseded snapshot gives `STALE`.
+
+**Rules for every layer:**
+- It returns one status and **every** applicable reason code.
+- **Ruling D.** Within **one evaluation context**, the status is the highest of `BLOCKED > DUPLICATE > STALE > REVIEW_REQUIRED > READY`. Precedence never merges results across contexts.
 - It carries its rule version.
-- If an evaluation is cached, it is keyed by its dependency fingerprint and rule version. It stays recomputable and is never authoritative.
+- **Caching.**
+  - A cached evaluation is keyed by its dependency fingerprint and rule version.
+  - Pricing readiness, and anything that consumes a context-specific snapshot, includes the **pricing context** in that fingerprint.
+  - A cached evaluation stays recomputable and is never authoritative.
 - **No independent `REGISTERABLE = true`** or equivalent row exists as a source of truth.
 - The UI displays the server's result and never re-decides it.
 
-**What it reads at M4:**
-- the current accepted revision's field statuses: a CORE field that is `REVIEW_REQUIRED` gives `REVIEW_REQUIRED`;
-- stock evidence: `SOLD_OUT` gives `BLOCKED`, and mixed evidence gives `REVIEW_REQUIRED`;
-- the current `PricingSnapshot`: a guard of `LOSS` or `BELOW_MIN_MARGIN` gives `BLOCKED`;
-- open review items for the Item or its group, including an unresolved successor;
-- the image state of §9;
-- product-side Item-key duplicates after a merge, which give `DUPLICATE`.
-
 **`STALE`.**
 - It applies when a derived input was computed against a dependency that is no longer current:
-  - the accepted-revision pointer;
+  - the current source revision, including an `EXTRACTOR_CHANGED` move (§3);
   - the membership revision;
   - the binding;
   - the composition;
-  - a policy, rule or prompt version;
+  - the pricing context's fee table or policy version;
+  - a rule or prompt version;
   - the image selection or its QA.
 - It is not permanent: re-evaluation against current inputs clears it.
 
 **The M3 capability boundary.** `ABSENT` options or tiers, read as absent from the page, are not in themselves a readiness failure. `REVIEW_REQUIRED` fields are.
 
-**What M5 owns.** Marketplace- and account-scoped checks are M5 preflight:
+**What M5 owns.** Registration preflight combines the two M4 layers with the marketplace- and account-scoped checks:
 - category and category-required notices;
 - required options;
 - platform policy;
@@ -328,7 +407,7 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 - **QA belongs to the exact artifact:** `artifact_sha256 + qa_rule_version → verdict (+ findings)`.
   - It is never inherited by another artifact, even one from the same logical edit (Issue #56 §8).
   - Readiness reads the QA of the exact artifacts selected.
-- **Facts staleness, fail-closed.** An artifact or QA validated against a facts revision other than the current accepted one is `STALE` for readiness until it is re-validated (Issue #56 §9).
+- **Facts staleness, fail-closed.** An artifact or QA validated against a facts revision other than the current source revision is `STALE` for readiness until it is re-validated (Issue #56 §9).
 - **Image edits have their own owner.** The Image Studio's edit lineage (`ImageEditRevision`) is a different domain owner from product enrichment (Issue #56 §4). This foundation is what it consumes.
 - **pHash.** A perceptual hash may be stored beside an asset's hash to generate grouping candidates (v3.1 §6.2). It is never an auto-merge signal.
 - **Out of M4:** marketplace upload, marketplace asset identity, and publication that no longer depends on supplier hotlinks are M5. No transformation or upload to a marketplace is authorized by M4.
@@ -347,12 +426,12 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 
 | M4 owns (PRODUCT DB) | M5 owns (REGISTER) |
 | --- | --- |
-| `SourceProduct` identity and the accepted-revision pointer | `MarketplaceListingDraft`, `DraftListingItem` and the Draft invariants |
-| `ProductGroup` (the canonical product), `GroupMember`, `GroupMembershipRevision`, `GroupChangeEvent` | category mapping, FINAL-GATE, marketplace preflight |
-| `ListingComposition` and the product-side `Item` | `RegistrationSnapshot`, `RegistrationItemSnapshot` (incl. `source_snapshot`) |
-| `SourceBinding` and the Item's current binding for pricing | `RegistrationIntent`, `RegistrationAttempt`, `MarketplaceRegistration(Item)` |
-| `PricingSnapshot` | `DuplicateOverride` and the marketplace/account `DUPLICATE` lookup |
-| product-side readiness evaluation | marketplace image upload and marketplace asset identity |
+| `SourceProduct` identity and its current source revision pointer | `MarketplaceListingDraft`, `DraftListingItem` and the Draft invariants |
+| `ProductGroup` (the canonical product), `GroupMember`, `GroupMembershipRevision`, `GroupChangeEvent` | category mapping, FINAL-GATE, registration preflight |
+| `ListingComposition` (incl. the default single-unit composition) and the product-side `Item` | `RegistrationSnapshot`, `RegistrationItemSnapshot` (incl. `source_snapshot`) |
+| `SourceBinding` (`SOURCE_OFFER` / `BASE_PRODUCT`) and the Item's current binding for pricing | `RegistrationIntent`, `RegistrationAttempt`, `MarketplaceRegistration(Item)` |
+| `PricingSnapshot` per Item and `PricingContext` | `DuplicateOverride` and the marketplace/account `DUPLICATE` lookup |
+| base readiness and per-context pricing readiness | marketplace image upload and marketplace asset identity |
 | `DerivedImageArtifact`, the image selection pointer and artifact-bound QA | publication without supplier hotlinks |
 
 M4 creates no marketplace listing and makes no marketplace call. Automatic source substitution and settlement are OPERATE (M6).
@@ -367,20 +446,25 @@ These are left to the PR that implements them, under this contract:
 - image transformation specs;
 - enrichment tasks.
 
-## Choices for review
+## Rulings (PR #81 review `5245152210`)
 
-- **A. How the accepted-revision pointer advances.**
-  - This ADR's choice: a newly `RECORDED` revision of the same source identity, with intact fingerprints, becomes current by a versioned default rule (`decided_by` = that rule). The drift classification of §3 then stales the dependents.
-  - The alternative: an explicit operator acceptance for every advance. It is slower, and it keeps downstream on older facts until someone acts.
-- **B. One sellable unit when a revision states no options and no tiers.**
-  - The case: the accepted M3 product states no options and no tiers.
-  - This ADR's choice: read its own `prices`, `shipping` and `minimum_sale_price` fields as **one implicit `SourceSKU` with one quantity-1 `QuantityOffer`**. That is a reading of what the page offers, not a fabricated SKU.
-  - A revision whose options or tiers are `REVIEW_REQUIRED` yields no implicit unit. Its pricing is `REVIEW_REQUIRED`.
-- **C. A minimum for a multi-unit composition.**
-  - The case: the source states a `minimum_sale_price` for one unit but not for the bound offer's quantity.
-  - This ADR's choice: the Pricing owner derives nothing (no `× quantity`), and the Item's pricing is `REVIEW_REQUIRED`, never silently treated as "no minimum".
-- **D. The readiness precedence** `BLOCKED > DUPLICATE > STALE > REVIEW_REQUIRED > READY`, with every reason still reported.
-- **E. The persisted name.** The entity is persisted as `ProductGroup`, following the frozen v3.1 schema, and `Product` is its name in prose and UI. The alternative is the name `Product` with v3.1's semantics. Either way there is one entity and one identifier (§1).
+The first draft raised five choices for review. The architect ruled all five and set two blockers. All of them are folded into the decision above and recorded here.
+
+- **A. Current source revision: automatic advance accepted, renamed, extractor rule added.**
+  - The pointer advances automatically to the newest eligible revision: same stable source identity, durably `RECORDED`, fingerprints intact. An unresolved identity never advances it.
+  - It is named the *current source revision*, never "accepted", because it may point to a `REVIEW_REQUIRED` revision.
+  - Across an `extractor_revision` change, fingerprints prove neither drift nor its absence. The move carries `EXTRACTOR_CHANGED` and invalidates dependents for re-evaluation (§3).
+- **B. No source entity from ABSENT: the first draft's proposal is rejected and replaced.**
+  - That draft read a product with ABSENT options and tiers as a source-side SKU and offer. Now M4 creates no `SourceSKU`, supplier SKU identifier or `QuantityOffer` for it.
+  - It materializes only a product-side default single-unit composition and Item (§5), with a `BASE_PRODUCT` binding (§6) that pricing reads from the revision's explicit base product price, shipping and minimum fields.
+  - `REVIEW_REQUIRED` option or tier evidence gives no default unit.
+- **C. Accepted.** A multi-unit composition with no source-stated minimum for its quantity derives nothing, and its pricing is `REVIEW_REQUIRED` (§7).
+- **D. Accepted within one evaluation context.** The precedence is `BLOCKED > DUPLICATE > STALE > REVIEW_REQUIRED > READY`, with every reason reported, and it never merges results across pricing contexts (§8).
+- **E. Accepted.** The entity is persisted as `ProductGroup`, and `Product` is used in prose and UI (§1).
+- **Blocker 1: pricing context.**
+  - `PricingSnapshot` is per Item **and** per explicit `PricingContext` (marketplace, account when fees or policy differ, fee table version, pricing policy version), and one Item can have several current snapshots across contexts (§7).
+  - Readiness splits into base readiness, per-context pricing readiness and M5 registration preflight (§8).
+- **Blocker 2: no fabricated source truth.** Resolved by ruling B.
 
 ## Consequences
 
@@ -389,15 +473,19 @@ These are left to the PR that implements them, under this contract:
   - the canonical pricing rule reads the same in CLAUDE.md, `docs/ARCHITECTURE.md` and this ADR;
   - no production code calls `max()` over a target-margin price and a minimum sale price;
   - the schema holds no second product root (no `products` table beside the group) and no `primary_source_id` or `allow_duplicate` column;
+  - no table carries a platform fee without a pricing context, and this ADR's `PricingSnapshot` contract never lists `platform_fee` without `pricing_context`;
+  - this ADR never reintroduces a source-side SKU or offer built from ABSENT options or tiers, and it keeps the `BASE_PRODUCT` binding;
+  - this ADR keeps readiness layered and claims no single readiness for an Item across pricing contexts;
+  - the pointer is never called an "accepted" revision in this ADR's decision;
   - this ADR is referenced from `docs/ARCHITECTURE.md` and `ROADMAP.md`.
 - **The status documents** (CLAUDE.md §11, `ROADMAP.md` §14, README) name Issue #80 and this ADR as the M4 track. M4 stays CURRENT.
 
 ## References
 
-- Issue #80 (body; kickoff `5726182664`)
+- Issue #80 (body; kickoff `5726182664`); PR #81 architect review `5245152210` (rulings A–E, blockers 1–2)
 - `docs/architecture/CANONICAL-V3.1.md` §2.2–§2.7, §3.1, §5.2, §6.1–§6.8, §7.3, §7.7, §8, §8.1–§8.2, §9.3–§9.4, §10.1, §11.5, §12–§12.2, §14
 - `ROADMAP.md` §6; `docs/ARCHITECTURE.md` §4–§6, §10–§11; CLAUDE.md §5.1, §6
 - `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` B1, B6, §8
-- ADR-0009, ADR-0010 (§1, §9), ADR-0011, ADR-0012 (§9, §14)
+- ADR-0009, ADR-0010 (§1, §6 fingerprint/extractor boundary, §9), ADR-0011, ADR-0012 (§9, §14)
 - Issue #30 (and refinement `5661813529`); Issue #56 (§1–§13)
 - `docs/acceptance/M3.md` §2 (capability boundary)

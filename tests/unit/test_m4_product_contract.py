@@ -68,6 +68,85 @@ def product_root_problems(metadata: MetaData) -> list[str]:
     return sorted(problems)
 
 
+def pricing_context_problems(metadata: MetaData) -> list[str]:
+    """A table that holds a platform fee without the pricing context that fee depends on.
+
+    ADR-0013 §7 (PR #81 review 5245152210, blocker 1): a fee varies by marketplace, account and
+    policy, so a stored fee always travels with its context: a context reference, or at least the
+    marketplace and the pricing policy version.
+    """
+    problems = []
+    for table in metadata.tables.values():
+        names = {column.name for column in table.columns}
+        if not any("platform_fee" in name for name in names):
+            continue
+        if "pricing_context_id" in names or {"marketplace_key", "pricing_policy_version"} <= names:
+            continue
+        problems.append(table.name)
+    return sorted(problems)
+
+
+def decision_section(adr: str) -> str:
+    """The binding part of the ADR: from "## Decision" up to the recorded rulings."""
+    start = adr.index("\n## Decision")
+    end = adr.index("\n## Rulings", start)
+    return adr[start:end]
+
+
+def snapshot_contract_problems(adr: str) -> list[str]:
+    """The PricingSnapshot contract block must never list a platform fee without its context."""
+    blocks = [
+        block
+        for block in re.findall(r"```text\n(.*?)```", adr, re.S)
+        if block.lstrip().startswith("PricingSnapshot")
+    ]
+    if not blocks:
+        return ["no PricingSnapshot contract block"]
+    return [
+        "platform_fee without pricing_context"
+        for block in blocks
+        if "platform_fee" in block and "pricing_context" not in block
+    ]
+
+
+# Ruling B: ABSENT options/tiers never become a source-side SKU or offer.
+FABRICATION = re.compile(
+    r"implicit\s+`?(SourceSKU|QuantityOffer)`?|quantity-1\s+`?QuantityOffer`?", re.I
+)
+
+
+def fabrication_problems(decision: str) -> list[str]:
+    problems = [f"fabricates: {m.group(0)}" for m in FABRICATION.finditer(decision)]
+    if "`BASE_PRODUCT`" not in decision:
+        problems.append("no BASE_PRODUCT binding")
+    if "creates and persists **no** `SourceSKU`" not in decision:
+        problems.append("no explicit non-fabrication rule")
+    return problems
+
+
+READINESS_LAYERS = ("**Base readiness**", "**Pricing readiness**", "**Registration preflight**")
+NO_UNIVERSAL_READINESS = "No single readiness result is claimed for an Item across pricing contexts"
+
+
+def readiness_problems(decision: str) -> list[str]:
+    problems = [f"missing layer {layer}" for layer in READINESS_LAYERS if layer not in decision]
+    if NO_UNIVERSAL_READINESS not in decision:
+        problems.append("no statement against a universal Item readiness")
+    if re.search(r"evaluated per product-side Item", decision):
+        problems.append("claims one readiness per Item")
+    return problems
+
+
+# Ruling A: the pointer may point to a REVIEW_REQUIRED revision, so it is never "accepted".
+ACCEPTED_POINTER = re.compile(
+    r"accepted[- ]revision pointer|accepted-revision|current accepted revision\b", re.I
+)
+
+
+def pointer_name_problems(decision: str) -> list[str]:
+    return [m.group(0) for m in ACCEPTED_POINTER.finditer(decision)]
+
+
 def _code() -> list[tuple[str, str]]:
     return [
         (path.relative_to(REPO_ROOT).as_posix(), path.read_text("utf-8"))
@@ -140,4 +219,64 @@ def test_the_product_root_detector_fires() -> None:
         "group_members.allow_duplicate",
         "group_members.primary_source_id",
         "table products",
+    ]
+
+
+def test_no_table_holds_a_platform_fee_without_its_pricing_context() -> None:
+    from app.db.metadata import metadata
+
+    assert pricing_context_problems(metadata) == []
+
+
+def test_the_pricing_context_detector_fires() -> None:
+    synthetic = MetaData()
+    Table(
+        "pricing_snapshots",
+        synthetic,
+        Column("id", Integer, primary_key=True),
+        Column("platform_fee", Integer),
+    )
+    Table(
+        "contextual_snapshots",
+        synthetic,
+        Column("id", Integer, primary_key=True),
+        Column("platform_fee", Integer),
+        Column("marketplace_key", Integer),
+        Column("pricing_policy_version", Integer),
+    )
+    assert pricing_context_problems(synthetic) == ["pricing_snapshots"]
+
+
+def test_the_pricing_snapshot_contract_carries_its_context() -> None:
+    adr = ADR_0013.read_text("utf-8")
+    assert snapshot_contract_problems(adr) == []
+    flat = "```text\nPricingSnapshot\n  item key\n  platform_fee\n```"
+    assert snapshot_contract_problems(flat) == ["platform_fee without pricing_context"]
+
+
+def test_absent_options_and_tiers_never_become_source_entities() -> None:
+    decision = decision_section(ADR_0013.read_text("utf-8"))
+    assert fabrication_problems(decision) == []
+    first_draft = (
+        "read its fields as **one implicit `SourceSKU` with one quantity-1 `QuantityOffer`**"
+    )
+    assert len(fabrication_problems(first_draft)) == 4
+
+
+def test_readiness_is_layered_and_never_universal_across_pricing_contexts() -> None:
+    decision = decision_section(ADR_0013.read_text("utf-8"))
+    assert readiness_problems(decision) == []
+    first_draft = (
+        "Readiness is a server-side evaluation. At M4 it is evaluated per product-side Item."
+    )
+    assert "claims one readiness per Item" in readiness_problems(first_draft)
+
+
+def test_the_current_source_revision_is_never_called_accepted() -> None:
+    decision = decision_section(ADR_0013.read_text("utf-8"))
+    assert pointer_name_problems(decision) == []
+    first_draft = "### 3. The current accepted revision is a pointer; the accepted-revision pointer"
+    assert pointer_name_problems(first_draft) == [
+        "current accepted revision",
+        "accepted-revision pointer",
     ]
