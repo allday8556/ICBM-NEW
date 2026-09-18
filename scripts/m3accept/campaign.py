@@ -36,8 +36,15 @@ from app.collect.collection import (
     SessionProvider,
     pacing_key,
 )
-from app.collect.contracts import RevisionView
-from app.collect.facts import FactsStatus, FieldLevel, FieldStatus, ImageIssue, ImageRole
+from app.collect.contracts import ImageReferenceView, RevisionView
+from app.collect.facts import (
+    FactsStatus,
+    FieldLevel,
+    FieldStatus,
+    ImageDisposition,
+    ImageIssue,
+    ImageRole,
+)
 from app.collect.models import CollectionOutcome
 from app.collect.runs import CollectionRunRecord, CollectionRunStore
 from app.config import AppConfig
@@ -322,14 +329,22 @@ def classify_pass(
         # is a safe incomplete one; the pass is not an acceptance.
         reasons.append(f"BYTE_CAP_REACHED:{len(exhausted)}")
     unresolved = [
-        r
-        for r in references
-        if r.status is FieldStatus.REVIEW_REQUIRED and r.issue is not ImageIssue.BUDGET_EXHAUSTED
+        r for r in references if _unresolved(r) and r.issue is not ImageIssue.BUDGET_EXHAUSTED
     ]
     if unresolved:
         reasons.append(
             "IMAGE_REFERENCE_UNRESOLVED:"
             + ",".join(sorted({str(r.issue.value if r.issue else "-") for r in unresolved}))
+        )
+    excluded = [r for r in references if r.disposition is ImageDisposition.EXCLUDED]
+    if excluded:
+        # Ruling 5723016554 R8: what the revision itself decided was the source's own defect is
+        # an observation, not a reason. Whether it may be tolerated was already decided by the
+        # images field (R6, R7, R9) and reaches this verdict as CORE_FACT_AMBIGUOUS when it may
+        # not. Every excluded position is counted (R10).
+        observations.append(
+            f"IMAGE_REFERENCE_EXCLUDED:{len(excluded)}:"
+            + ",".join(sorted({str(r.exclusion.value if r.exclusion else "-") for r in excluded}))
         )
     for request in RequestClass:
         # The ledger already refuses anything over the armed ceilings. This asks the same question
@@ -398,19 +413,40 @@ def closeout(ledger: CampaignLedger, env: Environment) -> dict[str, Any]:
 # ---------------------------------------------------------------- helpers
 
 
+def _unresolved(reference: ImageReferenceView) -> bool:
+    """Whether a reference is one the pass cannot accept past.
+
+    A revision decided under the acceptance model says so itself (ruling 5723016554 R1). One
+    recorded before the model carries no decision, and is read the way it was judged then: every
+    reference that was not observed is unresolved. Nothing is classified after the fact.
+    """
+    if reference.disposition is None:
+        return reference.status is FieldStatus.REVIEW_REQUIRED
+    return reference.disposition is ImageDisposition.UNRESOLVED
+
+
 def _reference_summary(revision: RevisionView | None) -> dict[str, Any]:
     if revision is None:
         return {"count": 0}
     roles: dict[str, int] = {}
     issues: dict[str, int] = {}
+    dispositions: dict[str, int] = {}
+    exclusions: dict[str, int] = {}
     for reference in revision.images:
         roles[reference.role.value] = roles.get(reference.role.value, 0) + 1
         if reference.issue is not None:
             issues[reference.issue.value] = issues.get(reference.issue.value, 0) + 1
+        if reference.disposition is not None:
+            key = reference.disposition.value
+            dispositions[key] = dispositions.get(key, 0) + 1
+        if reference.exclusion is not None:
+            exclusions[reference.exclusion.value] = exclusions.get(reference.exclusion.value, 0) + 1
     return {
         "count": len(revision.images),
         "roles": roles,
         "issues": issues,
+        "dispositions": dispositions,
+        "exclusions": exclusions,
         "order": [f"{r.role.value}:{r.ordinal}" for r in revision.images],
         "stored_bytes": sum(r.asset.byte_size for r in revision.images if r.asset is not None),
         "facts_status": revision.facts_status.value,
