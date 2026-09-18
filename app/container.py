@@ -45,7 +45,9 @@ from app.jobs.runner import JobRunner
 from app.jobs.service import JobService
 from app.jobs.worker import JobWorker
 from app.operate.service import OperateService
+from app.products.materialization import ProductMaterializer
 from app.products.service import ProductsService
+from app.products.store import ProductFoundationStore
 from app.register.service import RegisterService
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
@@ -84,6 +86,9 @@ class Container:
     revisions: ProductFactsRevisionStore
     source_truth: SourceTruthReadback
     collection: ProductCollectionService
+    product_store: ProductFoundationStore
+    products: ProductsService
+    materializer: ProductMaterializer
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -209,6 +214,10 @@ def build_container(
     source_assets = SourceAssetStore(config.source_assets_dir, db, HeaderImageDecoder(), clock)
     revisions = ProductFactsRevisionStore(db, clock)
     source_asset_recorder = SourceAssetRecorder(source_assets)
+    # PRODUCT DB (M4 PR-C): the canonical Product follows durably RECORDED source truth. It is
+    # materialized after a run is RECORDED, or by an explicit call; never by a startup sweep.
+    product_store = ProductFoundationStore(db, clock)
+    materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
     # One operator-submitted product at a time, as a durable collect.* job. The transport is
     # deferred: composing the application opens no connection, and under CI it cannot.
     collection = ProductCollectionService(
@@ -223,10 +232,11 @@ def build_container(
         collections=(
             tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
         ),
+        after_recorded=materializer.materialize_run,
     )
     registry.register(collection.job_definition())
 
-    products = ProductsService()
+    products = ProductsService(product_store)
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -259,6 +269,9 @@ def build_container(
         revisions=revisions,
         source_truth=SourceTruthReadback(revisions, source_assets),
         collection=collection,
+        product_store=product_store,
+        products=products,
+        materializer=materializer,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

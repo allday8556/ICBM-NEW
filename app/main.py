@@ -11,7 +11,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app import MILESTONE, __version__
 from app.api.errors import install_error_handlers
 from app.api.middleware import ClientHeaderGuard, RequestContextMiddleware
-from app.api.routes import collect, connect, diagnostics, screens, system
+from app.api.routes import collect, connect, diagnostics, products, screens, system
 from app.config import AppConfig
 from app.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.connect.marketplace.sources import ApplicationIdentitySource
@@ -116,6 +116,7 @@ def create_app(
     app.include_router(screens.router)
     app.include_router(connect.router)
     app.include_router(collect.router)
+    app.include_router(products.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.
     app.add_middleware(ClientHeaderGuard)

@@ -304,10 +304,11 @@ def test_the_membership_writer_detector_fires() -> None:
 
 def test_every_confirmed_set_change_in_the_store_appends_its_revision() -> None:
     changers = membership_changers((REPO_ROOT / MEMBERSHIP_OWNER).read_text("utf-8"))
-    # Exactly the two public entry points that can change a CONFIRMED set, and both append.
+    # Exactly the two methods that can change a CONFIRMED set, and both append. They live on the
+    # unit of work, which the store's single writes and PR-C's materializer both use.
     assert changers == {
-        "ProductFoundationStore.confirm_new_member": True,
-        "ProductFoundationStore.change_member_status": True,
+        "ProductFoundationUnit.confirm_new_member": True,
+        "ProductFoundationUnit.change_member_status": True,
     }
 
 

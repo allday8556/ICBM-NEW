@@ -29,7 +29,7 @@ from app.products.model import (
     MemberStatus,
     MoveReason,
 )
-from app.products.store import MembershipChange, ProductFoundationStore
+from app.products.store import MembershipChange, ProductFoundationStore, ProductFoundationUnit
 from tests.collect_support import PNG, REPRESENTATIVE, absent, base_fields, collected
 from tests.support import FakeClock
 
@@ -482,7 +482,7 @@ def test_a_failed_snapshot_rolls_the_member_change_back(
     def refuse(*args: object, **kwargs: object) -> None:
         raise RuntimeError("snapshot refused")
 
-    monkeypatch.setattr(ProductFoundationStore, "_append_membership_revision", refuse)
+    monkeypatch.setattr(ProductFoundationUnit, "_append_membership_revision", refuse)
     with pytest.raises(RuntimeError, match="snapshot refused"):
         _move(store, candidate, MemberStatus.CONFIRMED)
     with contextlib.closing(_raw(config)) as raw:

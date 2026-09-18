@@ -34,6 +34,10 @@ class AuditEventType(StrEnum):
     MARKETPLACE_CREDENTIALS_UPDATED = "MARKETPLACE_CREDENTIALS_UPDATED"
     MARKETPLACE_SESSION_COMMITTED = "MARKETPLACE_SESSION_COMMITTED"
     MARKETPLACE_ACCOUNT_BOUND = "MARKETPLACE_ACCOUNT_BOUND"
+    # M4 PR-C materialization (ADR-0013 §3, §6): identifiers, reasons and versions only, never a
+    # source fact value, page text or URL. Committed in the same unit of work as the change.
+    PRODUCT_CURRENT_SOURCE_REVISION_MOVED = "PRODUCT_CURRENT_SOURCE_REVISION_MOVED"
+    PRODUCT_MATERIALIZED = "PRODUCT_MATERIALIZED"
 
 
 class AuditOutcome(StrEnum):
