@@ -1,10 +1,13 @@
 """The M4 PRODUCT DB vocabulary and the canonical composition signature (ADR-0013 §5)."""
 
 import re
+from pathlib import Path
 
 import pytest
 
 from app.products.model import (
+    DEFAULT_SINGLE_UNIT,
+    DEFAULT_SINGLE_UNIT_SIGNATURE,
     MEMBER_TRANSITIONS,
     SIGNATURE_VERSION,
     BindingKind,
@@ -49,6 +52,20 @@ def test_unknown_is_part_of_the_signature_and_nothing_is_guessed() -> None:
     assert structure["unit_amount"] is None and structure["unit_code"] is None
     stated = CompositionSpec(quantity=1, unit_amount="90", unit_code="tablet")
     assert composition_signature(default) != composition_signature(stated)
+
+
+def test_the_migration_freezes_the_default_single_unit_signature() -> None:
+    # PR #82 review 5247426764 blocker 1: migration 0012 compares a BASE_PRODUCT Item with this
+    # literal, so the literal and the computed signature can never drift apart.
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "app/db/migrations/versions/0012_m4_product_foundation.py"
+    ).read_text("utf-8")
+    frozen = re.search(r'^_DEFAULT_SINGLE_UNIT_SIGNATURE = "([0-9a-f]{64})"$', migration, re.M)
+    assert frozen is not None
+    assert frozen.group(1) == DEFAULT_SINGLE_UNIT_SIGNATURE
+    assert composition_signature(CompositionSpec(quantity=1)) == DEFAULT_SINGLE_UNIT_SIGNATURE
+    assert CompositionSpec.default_single_unit() == DEFAULT_SINGLE_UNIT
 
 
 def test_the_signature_version_is_recorded_in_the_structure() -> None:

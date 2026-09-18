@@ -147,6 +147,72 @@ def pointer_name_problems(decision: str) -> list[str]:
     return [m.group(0) for m in ACCEPTED_POINTER.finditer(decision)]
 
 
+# PR #82 review 5247426764 blocker 2: a change to a group's CONFIRMED set and its membership
+# revision are one unit of work, and only the product store writes membership.
+MEMBERSHIP_OWNER = "app/products/store.py"
+MEMBERSHIP_MODELS = "app/products/models.py"
+MEMBERSHIP_CLASSES = frozenset({"GroupMember", "GroupMembershipRevision"})
+MEMBERSHIP_TABLES = re.compile(r"\bgroup_members\b|\bgroup_membership_revisions\b")
+APPEND_REVISION = "_append_membership_revision"
+CANDIDATE_STATUS = "MemberStatus.CANDIDATE.value"
+
+
+def membership_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Production code, other than the store, its models and the migrations, that names the
+    membership models or tables, and so could change membership without its revision."""
+    offenders = []
+    for where, source in sources:
+        if where in (MEMBERSHIP_OWNER, MEMBERSHIP_MODELS) or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            named = (
+                node.name
+                if isinstance(node, ast.alias)
+                else node.id
+                if isinstance(node, ast.Name)
+                else node.attr
+                if isinstance(node, ast.Attribute)
+                else None
+            )
+            text = node.value if isinstance(node, ast.Constant) else None
+            if named in MEMBERSHIP_CLASSES or (
+                isinstance(text, str) and MEMBERSHIP_TABLES.search(text)
+            ):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def membership_changers(source: str) -> dict[str, bool]:
+    """Every method that could change a CONFIRMED set, and whether it appends the revision.
+
+    A method changes the set when it builds a ``GroupMember`` whose status is not literally a
+    candidate, or assigns a ``status`` attribute. Building a candidate changes nothing canonical.
+    """
+    found: dict[str, bool] = {}
+    for cls in (n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)):
+        for fn in (n for n in cls.body if isinstance(n, ast.FunctionDef)):
+            if fn.name == APPEND_REVISION:
+                continue
+            changes = False
+            appends = False
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call):
+                    callee = node.func
+                    if isinstance(callee, ast.Name) and callee.id == "GroupMember":
+                        status = next((k.value for k in node.keywords if k.arg == "status"), None)
+                        if status is None or ast.unparse(status) != CANDIDATE_STATUS:
+                            changes = True
+                    if isinstance(callee, ast.Attribute) and callee.attr == APPEND_REVISION:
+                        appends = True
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(t, ast.Attribute) and t.attr == "status" for t in node.targets
+                ):
+                    changes = True
+            if changes:
+                found[f"{cls.name}.{fn.name}"] = appends
+    return found
+
+
 def _code() -> list[tuple[str, str]]:
     return [
         (path.relative_to(REPO_ROOT).as_posix(), path.read_text("utf-8"))
@@ -220,6 +286,49 @@ def test_the_product_root_detector_fires() -> None:
         "group_members.primary_source_id",
         "table products",
     ]
+
+
+def test_only_the_product_store_writes_membership() -> None:
+    assert membership_writer_problems(_code()) == []
+
+
+def test_the_membership_writer_detector_fires() -> None:
+    sources = [
+        ("app/other/mod.py", "from app.products.models import GroupMember\n"),
+        ("app/other/raw.py", "SQL = 'UPDATE group_members SET status = 1'\n"),
+        ("app/db/migrations/versions/0099_x.py", "T = 'group_members'\n"),
+        (MEMBERSHIP_OWNER, "from app.products.models import GroupMember\n"),
+    ]
+    assert membership_writer_problems(sources) == ["app/other/mod.py:1", "app/other/raw.py:1"]
+
+
+def test_every_confirmed_set_change_in_the_store_appends_its_revision() -> None:
+    changers = membership_changers((REPO_ROOT / MEMBERSHIP_OWNER).read_text("utf-8"))
+    # Exactly the two public entry points that can change a CONFIRMED set, and both append.
+    assert changers == {
+        "ProductFoundationStore.confirm_new_member": True,
+        "ProductFoundationStore.change_member_status": True,
+    }
+
+
+def test_the_unrecorded_change_detector_fires() -> None:
+    source = (
+        "class Store:\n"
+        "    def add_candidate(self):\n"
+        "        GroupMember(status=MemberStatus.CANDIDATE.value)\n"
+        "    def sneak_confirm(self):\n"
+        "        GroupMember(status=MemberStatus.CONFIRMED.value)\n"
+        "    def sneak_status(self, row):\n"
+        "        row.status = 'REJECTED'\n"
+        "    def recorded(self, row, session):\n"
+        "        row.status = 'CONFIRMED'\n"
+        "        self._append_membership_revision(session)\n"
+    )
+    assert membership_changers(source) == {
+        "Store.sneak_confirm": False,
+        "Store.sneak_status": False,
+        "Store.recorded": True,
+    }
 
 
 def test_no_table_holds_a_platform_fee_without_its_pricing_context() -> None:

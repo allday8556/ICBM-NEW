@@ -163,3 +163,12 @@ def composition_signature(spec: CompositionSpec) -> str:
         canonical_structure(spec), sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )
     return hashlib.sha256(text.encode("ascii")).hexdigest()
+
+
+# The only composition a BASE_PRODUCT binding may fulfil under the accepted M3 capability
+# (ADR-0013 §5–§6; PR #82 review 5247426764): quantity 1 and every unit and pack field unknown.
+# A quantity-1 structure that states a pack, a unit or a total is a seller configuration the
+# source never proved; binding it would turn one base unit into a pack. Migration 0012 freezes
+# this value as a literal, and a test keeps the two equal.
+DEFAULT_SINGLE_UNIT: Final = CompositionSpec.default_single_unit()
+DEFAULT_SINGLE_UNIT_SIGNATURE: Final = composition_signature(DEFAULT_SINGLE_UNIT)

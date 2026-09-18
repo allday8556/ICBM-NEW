@@ -5,6 +5,7 @@ refuses it. No supplier, marketplace or AI provider is contacted, and no campaig
 """
 
 import contextlib
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -22,8 +23,13 @@ from app.core.errors import InputValidationError, NotFoundError
 from app.db.database import Database, create_sqlite_engine
 from app.db.metadata import metadata
 from app.db.migrate import alembic_config, current_revision, upgrade_to_head
-from app.products.model import CompositionSpec, MemberStatus, MoveReason
-from app.products.store import ProductFoundationStore
+from app.products.model import (
+    DEFAULT_SINGLE_UNIT_SIGNATURE,
+    CompositionSpec,
+    MemberStatus,
+    MoveReason,
+)
+from app.products.store import MembershipChange, ProductFoundationStore
 from tests.collect_support import PNG, REPRESENTATIVE, absent, base_fields, collected
 from tests.support import FakeClock
 
@@ -108,13 +114,59 @@ def _raw(config: AppConfig) -> sqlite3.Connection:
     return raw
 
 
+def _confirm(store: ProductFoundationStore, group: str, source_uid: str) -> str:
+    return store.confirm_new_member(
+        group, source_uid, reason="MATERIALIZED", decided_by="test", correlation_id="cid"
+    ).member_id
+
+
+def _move(
+    store: ProductFoundationStore, member: str, status: MemberStatus, reason: str = "X"
+) -> MembershipChange:
+    return store.change_member_status(
+        member, status, reason=reason, decided_by="test", correlation_id="cid"
+    )
+
+
 def _single_member_item(
     store: ProductFoundationStore, source_uid: str, spec: CompositionSpec | None = None
 ) -> tuple[str, str, str]:
     group = store.create_group(decided_by="test")
-    member = store.add_member(group, source_uid, status=MemberStatus.CONFIRMED, decided_by="test")
+    member = _confirm(store, group, source_uid)
     composition = store.composition(spec or CompositionSpec.default_single_unit())
     return group, member, store.item(group, composition.composition_id).item_id
+
+
+def _membership_is_current(config: AppConfig, group: str) -> bool:
+    """The detector the atomicity rule rests on: the newest membership revision names exactly
+    the group's CONFIRMED set, and a group with a CONFIRMED member always has a revision."""
+    with contextlib.closing(_raw(config)) as raw:
+        confirmed = sorted(
+            r[0]
+            for r in raw.execute(
+                "SELECT source_product_uid FROM group_members"
+                " WHERE product_group_id = ? AND status = 'CONFIRMED'",
+                (group,),
+            )
+        )
+        latest = raw.execute(
+            "SELECT members_json FROM group_membership_revisions WHERE product_group_id = ?"
+            " ORDER BY revision_no DESC LIMIT 1",
+            (group,),
+        ).fetchone()
+    if latest is None:
+        return confirmed == []
+    return sorted(json.loads(latest[0])) == confirmed
+
+
+def _revisions(config: AppConfig, group: str) -> int:
+    with contextlib.closing(_raw(config)) as raw:
+        return int(
+            raw.execute(
+                "SELECT COUNT(*) FROM group_membership_revisions WHERE product_group_id = ?",
+                (group,),
+            ).fetchone()[0]
+        )
 
 
 # ---------------------------------------------------------------- schema shape
@@ -269,33 +321,35 @@ def test_a_pointer_move_creates_no_membership_revision(
     config: AppConfig, store: ProductFoundationStore, sources: Sources
 ) -> None:
     first = sources.base_product()
+    second = sources.base_product()
     uid = store.source_product("kmretail", "1234").source_product_uid
     group, _member, _item = _single_member_item(store, uid)
-    store.record_membership_revision(
-        group, reason="MATERIALIZED", decided_by="t", correlation_id="c"
-    )
-    with contextlib.closing(_raw(config)) as raw:
-        before = raw.execute("SELECT COUNT(*) FROM group_membership_revisions").fetchone()[0]
+    assert _revisions(config, group) == 1
     store.record_move(uid, first, reason=MoveReason.INITIAL, decided_by="t", correlation_id="c")
-    with contextlib.closing(_raw(config)) as raw:
-        after = raw.execute("SELECT COUNT(*) FROM group_membership_revisions").fetchone()[0]
-    assert after == before == 1
+    store.record_move(
+        uid, second, reason=MoveReason.NEWER_REVISION, decided_by="t", correlation_id="c"
+    )
+    assert _revisions(config, group) == 1
+    assert _membership_is_current(config, group)
 
 
 # ---------------------------------------------------------------- groups and membership
 
 
 def test_a_source_product_is_confirmed_in_at_most_one_group(
-    store: ProductFoundationStore, sources: Sources
+    config: AppConfig, store: ProductFoundationStore, sources: Sources
 ) -> None:
     sources.base_product()
     uid = store.source_product("kmretail", "1234").source_product_uid
     first, second = store.create_group(decided_by="t"), store.create_group(decided_by="t")
-    store.add_member(first, uid, status=MemberStatus.CONFIRMED, decided_by="t")
+    _confirm(store, first, uid)
     # A candidate elsewhere is fine; it is not canonical.
-    candidate = store.add_member(second, uid, status=MemberStatus.CANDIDATE, decided_by="t")
+    candidate = store.add_candidate(second, uid, decided_by="t")
     with pytest.raises(Exception, match="UNIQUE"):
-        store.change_member_status(candidate, MemberStatus.CONFIRMED, decided_by="t")
+        _move(store, candidate, MemberStatus.CONFIRMED)
+    # The refused confirmation left nothing behind: no status change and no revision.
+    assert _revisions(config, second) == 0
+    assert _membership_is_current(config, first) and _membership_is_current(config, second)
 
 
 def test_member_transitions_are_one_way_and_identity_is_fixed(
@@ -304,10 +358,10 @@ def test_member_transitions_are_one_way_and_identity_is_fixed(
     sources.base_product()
     uid = store.source_product("kmretail", "1234").source_product_uid
     group = store.create_group(decided_by="t")
-    member = store.add_member(group, uid, status=MemberStatus.CANDIDATE, decided_by="t")
-    store.change_member_status(member, MemberStatus.REJECTED, decided_by="t")
+    member = store.add_candidate(group, uid, decided_by="t")
+    _move(store, member, MemberStatus.REJECTED)
     with pytest.raises(InputValidationError):
-        store.change_member_status(member, MemberStatus.CONFIRMED, decided_by="t")
+        _move(store, member, MemberStatus.CONFIRMED)
     with contextlib.closing(_raw(config)) as raw:
         with pytest.raises(sqlite3.IntegrityError, match="transition not allowed"):
             raw.execute(
@@ -342,11 +396,11 @@ def test_a_membership_revision_is_the_complete_confirmed_set_and_immutable(
     confirmed = store.source_product("kmretail", "1234").source_product_uid
     candidate = store.source_product("kmretail", "5678").source_product_uid
     group = store.create_group(decided_by="t")
-    store.add_member(group, confirmed, status=MemberStatus.CONFIRMED, decided_by="t")
-    store.add_member(group, candidate, status=MemberStatus.CANDIDATE, decided_by="t")
-    revision = store.record_membership_revision(
-        group, reason="MATERIALIZED", decided_by="t", correlation_id="c"
-    )
+    revision = store.confirm_new_member(
+        group, confirmed, reason="MATERIALIZED", decided_by="t", correlation_id="c"
+    ).revision
+    store.add_candidate(group, candidate, decided_by="t")
+    assert revision is not None
     assert (revision.revision_no, revision.source_product_uids) == (1, (confirmed,))
     insert = (
         "INSERT INTO group_membership_revisions VALUES ('{i}', '{g}', 2, '{m}', {n},"
@@ -367,6 +421,96 @@ def test_a_membership_revision_is_the_complete_confirmed_set_and_immutable(
             raw.execute("UPDATE group_membership_revisions SET members_json = '[]'")
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             raw.execute("DELETE FROM group_membership_revisions")
+
+
+def test_every_confirmed_set_change_appends_its_revision_atomically(
+    config: AppConfig, store: ProductFoundationStore, sources: Sources
+) -> None:
+    # PR #82 review 5247426764 blocker 2: the CONFIRMED set and its newest revision never differ.
+    for product in ("1111", "2222", "3333"):
+        sources.base_product(product)
+    a, b, c = (
+        store.source_product("kmretail", p).source_product_uid for p in ("1111", "2222", "3333")
+    )
+    group = store.create_group(decided_by="t")
+    assert _revisions(config, group) == 0 and _membership_is_current(config, group)
+
+    first = store.confirm_new_member(
+        group, a, reason="MATERIALIZED", decided_by="t", correlation_id="c"
+    )
+    assert first.revision is not None and first.revision.revision_no == 1
+    assert first.revision.source_product_uids == (a,)
+    assert store.current_membership_revision(group) == first.revision
+
+    candidate = store.add_candidate(group, b, decided_by="t")  # not canonical: no revision
+    assert _revisions(config, group) == 1 and _membership_is_current(config, group)
+
+    promoted = _move(store, candidate, MemberStatus.CONFIRMED, "CONFIRMED")
+    assert promoted.revision is not None and promoted.revision.revision_no == 2
+    assert set(promoted.revision.source_product_uids) == {a, b}
+
+    rejected_candidate = store.add_candidate(group, c, decided_by="t")
+    assert _move(store, rejected_candidate, MemberStatus.REJECTED).revision is None
+    assert _revisions(config, group) == 2 and _membership_is_current(config, group)
+
+    demoted = _move(store, first.member_id, MemberStatus.REJECTED, "UNMERGED")
+    assert demoted.revision is not None and demoted.revision.revision_no == 3
+    assert demoted.revision.source_product_uids == (b,)
+    assert _membership_is_current(config, group)
+
+
+def test_a_failed_snapshot_rolls_the_member_change_back(
+    config: AppConfig,
+    store: ProductFoundationStore,
+    sources: Sources,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources.base_product("1111")
+    sources.base_product("2222")
+    a = store.source_product("kmretail", "1111").source_product_uid
+    b = store.source_product("kmretail", "2222").source_product_uid
+    group = store.create_group(decided_by="t")
+    # The database refuses the snapshot (an empty reason): the new CONFIRMED member goes too.
+    with pytest.raises(Exception, match="reason_present"):
+        store.confirm_new_member(group, a, reason="", decided_by="t", correlation_id="c")
+    with contextlib.closing(_raw(config)) as raw:
+        assert raw.execute("SELECT COUNT(*) FROM group_members").fetchone()[0] == 0
+    _confirm(store, group, a)
+    candidate = store.add_candidate(group, b, decided_by="t")
+
+    # Any failure while appending the snapshot undoes the status change as well.
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("snapshot refused")
+
+    monkeypatch.setattr(ProductFoundationStore, "_append_membership_revision", refuse)
+    with pytest.raises(RuntimeError, match="snapshot refused"):
+        _move(store, candidate, MemberStatus.CONFIRMED)
+    with contextlib.closing(_raw(config)) as raw:
+        status = raw.execute(
+            "SELECT status FROM group_members WHERE member_id = ?", (candidate,)
+        ).fetchone()[0]
+    assert status == "CANDIDATE"
+    assert _revisions(config, group) == 1 and _membership_is_current(config, group)
+
+
+def test_the_currentness_detector_fires_on_a_bypassed_change(
+    config: AppConfig, store: ProductFoundationStore, sources: Sources
+) -> None:
+    # The detector itself must be able to fail: a status change committed outside the store,
+    # with no revision, leaves the newest revision behind the CONFIRMED set.
+    sources.base_product("1111")
+    sources.base_product("2222")
+    a = store.source_product("kmretail", "1111").source_product_uid
+    b = store.source_product("kmretail", "2222").source_product_uid
+    group = store.create_group(decided_by="t")
+    _confirm(store, group, a)
+    candidate = store.add_candidate(group, b, decided_by="t")
+    with contextlib.closing(_raw(config)) as raw:
+        raw.execute(
+            f"UPDATE group_members SET status = 'CONFIRMED' WHERE member_id = '{candidate}'"
+        )
+        raw.commit()
+    assert not _membership_is_current(config, group)
 
 
 # ---------------------------------------------------------------- composition and Item
@@ -472,14 +616,69 @@ def test_base_product_needs_a_revision_stating_no_options_and_no_tiers(
         )
 
 
-def test_base_product_fulfils_only_a_single_unit_composition(
-    config: AppConfig, store: ProductFoundationStore, sources: Sources
+NON_DEFAULT_UNITS = {
+    "two units": CompositionSpec(quantity=2),
+    "one pack of two": CompositionSpec(quantity=1, pack_count=2),
+    "one with six per pack": CompositionSpec(quantity=1, pack_count=1, units_per_pack=6),
+    "one stated unit": CompositionSpec(quantity=1, unit_amount="90", unit_code="tablet"),
+    "one stated total": CompositionSpec(
+        quantity=1, unit_amount="500", unit_code="g", total_amount="1000"
+    ),
+}
+
+
+@pytest.mark.parametrize("spec", NON_DEFAULT_UNITS.values(), ids=NON_DEFAULT_UNITS.keys())
+def test_base_product_fulfils_only_the_exact_default_single_unit(
+    config: AppConfig, store: ProductFoundationStore, sources: Sources, spec: CompositionSpec
+) -> None:
+    # PR #82 review 5247426764 blocker 1: quantity 1 is not enough. A quantity-1 pack or unit
+    # structure is a seller configuration the source never proved.
+    revision = sources.base_product()
+    uid = store.source_product("kmretail", "1234").source_product_uid
+    _group, member, item = _single_member_item(store, uid, spec)
+    with pytest.raises(InputValidationError):
+        store.bind_base_product(item, member, revision, decided_by="t", correlation_id="c")
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="default single-unit composition"),
+    ):
+        raw.execute(
+            f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
+            f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+        )
+
+
+@pytest.mark.parametrize(
+    ("signature", "pack_count"),
+    [("f" * 64, "NULL"), (DEFAULT_SINGLE_UNIT_SIGNATURE, "2")],
+    ids=["default fields, forged signature", "default signature, forged pack"],
+)
+def test_a_forged_default_unit_cannot_carry_a_base_product_binding(
+    config: AppConfig,
+    store: ProductFoundationStore,
+    sources: Sources,
+    signature: str,
+    pack_count: str,
 ) -> None:
     revision = sources.base_product()
     uid = store.source_product("kmretail", "1234").source_product_uid
-    _group, member, item = _single_member_item(store, uid, CompositionSpec(quantity=2))
-    with pytest.raises(Exception, match="single-unit composition"):
-        store.bind_base_product(item, member, revision, decided_by="t", correlation_id="c")
+    group = store.create_group(decided_by="t")
+    member = _confirm(store, group, uid)
+    composition, item = str(uuid.uuid4()), str(uuid.uuid4())
+    with contextlib.closing(_raw(config)) as raw:
+        raw.execute(
+            f"INSERT INTO listing_compositions VALUES ('{composition}', 1, NULL, NULL,"
+            f" {pack_count}, NULL, NULL, '{signature}', 'composition-signature/v1', {AT})"
+        )
+        raw.execute(
+            f"INSERT INTO product_items VALUES ('{item}', '{group}', '{composition}',"
+            f" '{signature}', {AT})"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="default single-unit composition"):
+            raw.execute(
+                f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
+                f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+            )
 
 
 def test_a_binding_stays_inside_its_group_and_its_source_identity(

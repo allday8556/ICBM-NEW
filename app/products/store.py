@@ -7,9 +7,13 @@ This store writes and reads the foundation rows and nothing more. It never decid
 - a derived image: PR-E.
 
 Every cross-row invariant is enforced by the database (migration 0012), so this store is not the
-only guard. What it adds is the domain side: the canonical composition signature, the complete
-CONFIRMED snapshot of a membership revision, and a clear refusal before a write the database
-would reject anyway.
+only guard. It adds the domain side:
+- the canonical composition signature;
+- a clear refusal before a write the database would reject anyway;
+- **one unit of work for every change to a group's CONFIRMED set together with its next
+  membership revision**. A database trigger can check that a snapshot is complete, but it cannot
+  make one appear; this store is the only production writer of membership, and a repository rule
+  keeps it so.
 """
 
 import json
@@ -28,6 +32,7 @@ from app.db.database import Database
 from app.products.model import (
     BASE_PRODUCT_ABSENT_FIELDS,
     BASE_PRODUCT_PROVENANCE_FIELDS,
+    DEFAULT_SINGLE_UNIT_SIGNATURE,
     MEMBER_TRANSITIONS,
     SIGNATURE_VERSION,
     BindingKind,
@@ -73,6 +78,15 @@ class MembershipRevision:
     product_group_id: str
     revision_no: int
     source_product_uids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MembershipChange:
+    """A persisted member change, with the membership revision it appended (``None`` when the
+    CONFIRMED set did not change)."""
+
+    member_id: str
+    revision: MembershipRevision | None
 
 
 @dataclass(frozen=True)
@@ -214,17 +228,24 @@ class ProductFoundationStore:
             )
             return group_id
 
-    def add_member(
+    # A change to a group's CONFIRMED member set and the membership revision recording it are
+    # one unit of work (ADR-0013 §4; PR #82 review 5247426764). No method here can commit one
+    # without the other. A repository rule keeps this store the only production writer of
+    # membership, and requires every method here that could change the CONFIRMED set to append
+    # the revision.
+
+    def add_candidate(
         self,
         product_group_id: str,
         source_product_uid: str,
         *,
-        status: MemberStatus,
         decided_by: str,
         match_method: str | None = None,
         match_confidence: float | None = None,
         match_strategy_version: str | None = None,
     ) -> str:
+        """Record a CANDIDATE member. A candidate is never canonical: the CONFIRMED set does not
+        change, so no membership revision is appended."""
         with self._db.write() as session:
             now = self._clock.now()
             member_id = str(uuid.uuid4())
@@ -233,7 +254,7 @@ class ProductFoundationStore:
                     member_id=member_id,
                     product_group_id=product_group_id,
                     source_product_uid=source_product_uid,
-                    status=status.value,
+                    status=MemberStatus.CANDIDATE.value,
                     match_method=match_method,
                     match_confidence=match_confidence,
                     match_strategy_version=match_strategy_version,
@@ -244,62 +265,150 @@ class ProductFoundationStore:
             )
             return member_id
 
+    def confirm_new_member(
+        self,
+        product_group_id: str,
+        source_product_uid: str,
+        *,
+        reason: str,
+        decided_by: str,
+        correlation_id: str,
+        match_method: str | None = None,
+        match_confidence: float | None = None,
+        match_strategy_version: str | None = None,
+    ) -> MembershipChange:
+        """Add a CONFIRMED member and append the group's next membership revision, atomically.
+
+        The caller has decided the membership; this only persists that decision and its snapshot
+        together. If either write fails, neither is committed.
+        """
+        with self._db.write() as session:
+            now = self._clock.now()
+            member_id = str(uuid.uuid4())
+            session.add(
+                GroupMember(
+                    member_id=member_id,
+                    product_group_id=product_group_id,
+                    source_product_uid=source_product_uid,
+                    status=MemberStatus.CONFIRMED.value,
+                    match_method=match_method,
+                    match_confidence=match_confidence,
+                    match_strategy_version=match_strategy_version,
+                    decided_by=decided_by,
+                    created_at=now,
+                    decided_at=now,
+                )
+            )
+            session.flush()
+            revision = self._append_membership_revision(
+                session,
+                product_group_id,
+                reason=reason,
+                decided_by=decided_by,
+                correlation_id=correlation_id,
+            )
+            return MembershipChange(member_id, revision)
+
     def change_member_status(
-        self, member_id: str, status: MemberStatus, *, decided_by: str
-    ) -> None:
+        self,
+        member_id: str,
+        status: MemberStatus,
+        *,
+        reason: str,
+        decided_by: str,
+        correlation_id: str,
+    ) -> MembershipChange:
+        """Move a member one way, and record the canonical set if it changed.
+
+        A move into or out of CONFIRMED changes the canonical set, so the next membership
+        revision is appended in the same unit of work. ``CANDIDATE -> REJECTED`` changes nothing
+        canonical and appends none.
+        """
         with self._db.write() as session:
             row = session.get(GroupMember, member_id)
             if row is None:
                 raise NotFoundError("PRODUCTS_MEMBER_UNKNOWN", "no group member has that id")
-            if (MemberStatus(row.status), status) not in MEMBER_TRANSITIONS:
+            before = MemberStatus(row.status)
+            if (before, status) not in MEMBER_TRANSITIONS:
                 raise InputValidationError(
                     "PRODUCTS_MEMBER_TRANSITION_INVALID",
-                    f"a member does not move from {row.status} to {status.value}",
+                    f"a member does not move from {before.value} to {status.value}",
                 )
             row.status = status.value
             row.decided_by = decided_by
             row.decided_at = self._clock.now()
+            revision = None
+            if MemberStatus.CONFIRMED in (before, status):
+                session.flush()
+                revision = self._append_membership_revision(
+                    session,
+                    row.product_group_id,
+                    reason=reason,
+                    decided_by=decided_by,
+                    correlation_id=correlation_id,
+                )
+            return MembershipChange(member_id, revision)
 
-    def record_membership_revision(
-        self, product_group_id: str, *, reason: str, decided_by: str, correlation_id: str
+    def current_membership_revision(self, product_group_id: str) -> MembershipRevision | None:
+        """The group's newest membership revision, or ``None`` before its first CONFIRMED member."""
+        with self._db.read() as session:
+            row = session.scalars(
+                select(GroupMembershipRevision)
+                .where(GroupMembershipRevision.product_group_id == product_group_id)
+                .order_by(GroupMembershipRevision.revision_no.desc())
+                .limit(1)
+            ).first()
+            if row is None:
+                return None
+            return MembershipRevision(
+                row.membership_revision_id,
+                product_group_id,
+                row.revision_no,
+                tuple(json.loads(row.members_json)),
+            )
+
+    def _append_membership_revision(
+        self,
+        session: Session,
+        product_group_id: str,
+        *,
+        reason: str,
+        decided_by: str,
+        correlation_id: str,
     ) -> MembershipRevision:
-        """Snapshot the group's complete CONFIRMED member set, sorted, as its next revision.
-
-        A CANDIDATE or REJECTED member never enters a snapshot, and a move of a member's current
-        source revision never calls this.
-        """
-        with self._db.write() as session:
-            members = tuple(
-                sorted(
-                    session.scalars(
-                        select(GroupMember.source_product_uid).where(
-                            GroupMember.product_group_id == product_group_id,
-                            GroupMember.status == MemberStatus.CONFIRMED.value,
-                        )
+        """Snapshot the group's complete CONFIRMED set, sorted, as its next revision, inside the
+        caller's unit of work. It is never called on its own: only a set change calls it."""
+        members = tuple(
+            sorted(
+                session.scalars(
+                    select(GroupMember.source_product_uid).where(
+                        GroupMember.product_group_id == product_group_id,
+                        GroupMember.status == MemberStatus.CONFIRMED.value,
                     )
                 )
             )
-            last = session.scalar(
-                select(func.max(GroupMembershipRevision.revision_no)).where(
-                    GroupMembershipRevision.product_group_id == product_group_id
-                )
+        )
+        last = session.scalar(
+            select(func.max(GroupMembershipRevision.revision_no)).where(
+                GroupMembershipRevision.product_group_id == product_group_id
             )
-            row = GroupMembershipRevision(
-                membership_revision_id=str(uuid.uuid4()),
-                product_group_id=product_group_id,
-                revision_no=(last or 0) + 1,
-                members_json=json.dumps(list(members)),
-                member_count=len(members),
-                reason=reason,
-                decided_by=decided_by,
-                correlation_id=correlation_id,
-                created_at=self._clock.now(),
-            )
-            session.add(row)
-            session.flush()
-            return MembershipRevision(
-                row.membership_revision_id, product_group_id, row.revision_no, members
-            )
+        )
+        row = GroupMembershipRevision(
+            membership_revision_id=str(uuid.uuid4()),
+            product_group_id=product_group_id,
+            revision_no=(last or 0) + 1,
+            members_json=json.dumps(list(members)),
+            member_count=len(members),
+            reason=reason,
+            decided_by=decided_by,
+            correlation_id=correlation_id,
+            created_at=self._clock.now(),
+        )
+        session.add(row)
+        session.flush()
+        return MembershipRevision(
+            row.membership_revision_id, product_group_id, row.revision_no, members
+        )
 
     # ------------------------------------------------------------------ composition and Item
 
@@ -368,8 +477,20 @@ class ProductFoundationStore:
 
         The revision must state ``options`` and ``quantity_tiers`` as ABSENT. Nothing is inferred
         from them: no source SKU and no quantity offer is created, and none is referenced.
+
+        The Item must be the default single unit: quantity 1, every unit and pack field unknown
+        (PR #82 review 5247426764). A quantity-1 structure that states a pack, a unit or a total
+        is a seller configuration the source never proved, so a base product cannot fulfil it.
         """
         with self._db.write() as session:
+            signature = session.scalar(
+                select(ProductItem.composition_signature).where(ProductItem.item_id == item_id)
+            )
+            if signature != DEFAULT_SINGLE_UNIT_SIGNATURE:
+                raise InputValidationError(
+                    "PRODUCTS_BASE_PRODUCT_NOT_DEFAULT_UNIT",
+                    "a base-product binding fulfils only the default single-unit composition",
+                )
             absent = set(
                 session.scalars(
                     select(ProductFactsField.field_key).where(

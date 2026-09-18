@@ -24,7 +24,15 @@ cannot express:
 - an Item's signature is its composition's own;
 - a binding binds a CONFIRMED member of the Item's group, from a revision of that member's
   identity. A ``BASE_PRODUCT`` binding also needs that revision to state ``options`` and
-  ``quantity_tiers`` as ABSENT, and a single-unit composition.
+  ``quantity_tiers`` as ABSENT, and the Item's composition must be exactly the default single
+  unit: quantity 1, every unit and pack field NULL, and its frozen canonical signature (PR #82
+  review 5247426764). A quantity-1 pack or unit structure is a seller configuration the source
+  never proved, and is refused.
+
+The membership snapshot trigger checks that each new revision is complete. It cannot make a
+revision appear. That is the store's job: every change to the CONFIRMED set goes through one
+compound unit of work that also appends the next revision (``app.products.store``), and a
+repository rule keeps that store the only writer of membership.
 
 **What can change after a row is written.** Only three things:
 - a group may be retired;
@@ -84,6 +92,9 @@ _MEMBER_STATUSES = ("CANDIDATE", "CONFIRMED", "REJECTED")
 _CHANGE_TYPES = ("MERGE", "SPLIT")
 _BINDING_KINDS = ("SOURCE_OFFER", "BASE_PRODUCT")
 _SIGNATURE_VERSION = "composition-signature/v1"
+# The composition-signature/v1 of the default single unit (quantity 1, every unit and pack field
+# unknown), frozen here; app.products.model.DEFAULT_SINGLE_UNIT_SIGNATURE must equal it.
+_DEFAULT_SINGLE_UNIT_SIGNATURE = "ebd7462b890ae17974bb545171c4ca76d6873dca40a747f819cc400c65782299"
 
 
 def _in(column: str, values: Iterable[str]) -> str:
@@ -492,10 +503,14 @@ def _install_triggers() -> None:
             " AND f.field_key IN ('options', 'quantity_tiers') AND f.status = 'ABSENT') <> 2",
         )
         + _raise(
-            f"{BINDINGS}: BASE_PRODUCT fulfils only a single-unit composition",
-            f"NEW.binding_kind = 'BASE_PRODUCT' AND (SELECT c.quantity FROM {ITEMS} i"
+            f"{BINDINGS}: BASE_PRODUCT fulfils only the default single-unit composition",
+            f"NEW.binding_kind = 'BASE_PRODUCT' AND NOT EXISTS (SELECT 1 FROM {ITEMS} i"
             f" JOIN {COMPOSITIONS} c ON c.composition_id = i.composition_id"
-            " WHERE i.item_id = NEW.item_id) IS NOT 1",
+            " WHERE i.item_id = NEW.item_id AND c.quantity = 1 AND c.unit_amount IS NULL"
+            " AND c.unit_code IS NULL AND c.pack_count IS NULL AND c.units_per_pack IS NULL"
+            " AND c.total_amount IS NULL"
+            f" AND c.composition_signature = '{_DEFAULT_SINGLE_UNIT_SIGNATURE}'"
+            f" AND i.composition_signature = '{_DEFAULT_SINGLE_UNIT_SIGNATURE}')",
         ),
     )
     unchanged = " AND ".join(
