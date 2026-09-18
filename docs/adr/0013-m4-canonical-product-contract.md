@@ -1,6 +1,11 @@
 # ADR-0013 — M4 canonical product contract: one product identity, the current source revision, composition and Item, context-scoped pricing, layered readiness and image lineage
 
-Status: **PROPOSED**. This is PR-A of Issue #80. It becomes binding only when this line reads ACCEPTED, and that needs three things: the GPT audit, the independent Claude AI cross-audit and the user's explicit merge authorization. It authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call.
+Status: **ACCEPTED** 2026-09-18. This is PR-A of Issue #80 (PR #81).
+- GPT re-audit PASS `5245310563` and the independent Claude AI cross-audit PASS `5727333233`, both on head `bf2b699`.
+- The rulings and blockers of review `5245152210` are incorporated.
+- It lands on main with the merge of PR #81.
+
+It authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call. Each implementation PR (PR-B to PR-F) needs its own authorization.
 
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #80 body (the M4 umbrella) and the architect kickoff `5726182664`, which authorized PR-A only;

@@ -156,7 +156,7 @@ source fingerprint + field fingerprints
 ### Product
 ICBM canonical identity. References each member source product's current source facts revision, and downstream state.
 
-The M4 product contract is proposed in `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80):
+The M4 product contract is `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80):
 - The canonical `Product` **is** the Canonical v3.1 `ProductGroup`: one entity and one identifier, with no second product root. `icbm_product_id` below is that identifier.
 - Each member source product keeps its own current source revision pointer. That pointer is never an "accepted" or confirmed revision: it may point to a `REVIEW_REQUIRED` revision, and readiness carries that ambiguity.
 - A `PricingSnapshot` is per Item **and** per explicit pricing context (marketplace, account where it matters, fee and policy versions). Readiness is layered: base readiness, per-context pricing readiness, then M5 registration preflight.

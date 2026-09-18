@@ -332,7 +332,7 @@ Product
 └─ Operational State
 ```
 
-The M4 contract for this structure is proposed in `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80). The canonical Product is the Canonical v3.1 `ProductGroup`: one identity, never a second product root.
+The M4 contract for this structure is `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80). The canonical Product is the Canonical v3.1 `ProductGroup`: one identity, never a second product root.
 
 ## Core principle
 
@@ -701,7 +701,7 @@ Accepted so far:
 Next, in order:
 
 1. M4 — canonical Product DB + image pipeline + pricing/readiness foundations (§12; Issue #80). The PRs, in order:
-   - PR-A: contract (`docs/adr/0013-m4-canonical-product-contract.md`, proposed);
+   - PR-A: contract (`docs/adr/0013-m4-canonical-product-contract.md`, accepted);
    - PR-B: canonical product, group and composition models and migrations;
    - PR-C: materialization, the current-revision pointer and read-back;
    - PR-D: `PricingSnapshot` and derived readiness;
