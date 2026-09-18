@@ -1,7 +1,11 @@
 # ADR-0012 — AI runtime provider contract: provider-neutral profiles, an optional local sidecar, capability readiness and failure isolation
 
 Status: **PROPOSED**. This is the contract PR for Issue #8. It becomes binding only when this line reads ACCEPTED, and that needs three things: the GPT audit, the independent Claude AI cross-audit and the user's explicit merge authorization. Nothing in this ADR authorizes an AI call, a sidecar download, start or stop, or a provider credential.
-Decision owner: Architect (ChatGPT). Sources: the Issue #8 body, which is the contract agreed during architecture review, and the architect kickoff `5725353427` on Issue #8, which authorized this contract-only PR, fixed the number and corrected the supplier name.
+Decision owner: Architect (ChatGPT). Sources:
+- the Issue #8 body, which is the contract agreed during architecture review;
+- the architect kickoff `5725353427` on Issue #8, which authorized this contract-only PR, fixed the number and corrected the supplier name;
+- the architect's PR #79 review `5244523325`, which ruled the four former choices for review (see "Rulings");
+- Issue #30 and its refinement `5661813529`, which already fix the prompt source.
 Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
 Date: 2026-09-18
 Related:
@@ -9,7 +13,8 @@ Related:
 - ADR-0006: one owner per data directory;
 - ADR-0007 §3 (secret boundary), §6 (capability readiness separated from core readiness), §7 (egress allow-boundary);
 - ADR-0008: the `ErrorClass` taxonomy;
-- ADR-0010 §13: COLLECT works with every AI capability unavailable.
+- ADR-0010 §13: COLLECT works with every AI capability unavailable;
+- Issue #30: the M4 decision that makes the persisted Settings/`PromptTemplate` store the only prompt source, with `PlatformPolicy` kept separate.
 
 ---
 
@@ -67,7 +72,12 @@ AIProviderProfile
 ```
 
 - Changing one profile never changes another's state or results. A change to `cliproxy-dev` does not invalidate `anthropic-prod` results.
-- **No hidden prompt.** An adapter adds no hidden or provider-specific prompt text. What reaches a provider is the versioned prompt identified by `prompt_version` (§6) and the task input, nothing else. Where the operator-owned prompt text lives is Choice for review C.
+- **The prompt source is the persisted Settings/`PromptTemplate` store (Issue #30).**
+  - Runtime AI execution reads the task's prompt from the persisted `PromptTemplate` store, which the Settings UI owns for the operator.
+  - `PlatformPolicy` is separate, with its own storage and version lifecycle.
+  - An adapter or the orchestration may add transport or model framing, but never owns an independent business prompt that bypasses Settings, and no hidden task prompt exists in either.
+  - `prompt_version` (§6) identifies the persisted `PromptTemplate` revision selected for that task.
+  - This ADR does not define the `PromptTemplate` schema. That belongs to Issue #30, and a change to it needs an architecture review of Issue #30.
 
 ### 2. An optional local sidecar: lifecycle, ownership and security
 
@@ -77,7 +87,7 @@ Preferred local flow:
 the operator starts ICBM
 → ICBM checks the approved local sidecar endpoint for a configured, approved profile
 → already running?
-   ├─ yes: use it only if its identity is verified (Choice for review A), and do not claim process ownership
+   ├─ yes: use it only if the identity of the process serving it is verified, fail-closed (below), and do not claim process ownership
    └─ no:  if configured and approved, start the approved binary as a managed child
            → wait for verified readiness
            → the profile's capability becomes AVAILABLE
@@ -88,6 +98,16 @@ the operator starts ICBM
 - An open port or an answering endpoint is **not** proof of ownership. "Port 8317 is open" proves nothing about who started the process.
 - On shutdown ICBM may stop a sidecar it owns. It must **not** terminate a sidecar that was already running before it started.
 - Only the process that owns the data directory (ADR-0006) manages a sidecar on its behalf.
+
+**An unmanaged sidecar is verified fail-closed (ruling A).**
+- A sidecar that was already running, and that ICBM did not start, is used only when ICBM can verify two things:
+  - the executable identity of the process **actually serving the approved endpoint**: path, version and SHA-256, as applicable (§3);
+  - the routing identity (§4).
+- Answering on loopback is not enough.
+- If the identity of the serving process cannot be verified, the profile is not used. An approved identity is never inferred, whether from the port, from the endpoint's answer or from a previous launch.
+- Such a profile is not `AVAILABLE`:
+  - it is `VERSION_MISMATCH` when the observed identity differs from the approved one;
+  - it is `UNAVAILABLE` when the identity cannot be established at all.
 
 **No automatic acquisition.** ICBM never downloads, installs or updates a sidecar binary on its own. It starts one only when that binary's approved identity (§3) and a configured, approved profile both exist.
 
@@ -212,6 +232,11 @@ enrich_input_fingerprint = hash(
 
 `actual_model` is **not** part of it, because it is unknown until the call has run.
 
+**What `prompt_version` and `policy_version` identify (Issue #30).**
+- `prompt_version` identifies the persisted `PromptTemplate` revision selected for that task. Where Issue #30's layered composition applies (refinement `5661813529`), it stands for every persisted template revision that composed the prompt.
+- `policy_version` identifies the applicable `PlatformPolicy` revision, which Issue #30 keeps on its own lifecycle.
+- Issue #30's dependency-scoped staleness after a prompt or policy revision change is unaffected by this ADR.
+
 **Post-call execution provenance.** It is recorded separately:
 
 ```text
@@ -276,7 +301,7 @@ How a task failure caused by each state is classified:
 | `QUOTA_LIMITED` | `RATE_LIMITED` | bounded backoff and retry where policy allows |
 | `VERSION_MISMATCH` | `POLICY_BLOCKED` | none until the approved runtime is restored |
 | `ROUTING_CONFIG_MISMATCH` | `POLICY_BLOCKED` | none until the routing is reviewed and approved |
-| `UNAVAILABLE`, `DEGRADED` | the actual cause of the event (`TRANSIENT`, `AUTH`, …) | as that class allows; no fixed class is assumed (Choice for review D) |
+| `UNAVAILABLE`, `DEGRADED` | the actual cause of the event (`TRANSIENT`, `AUTH`, …) | as that class allows; no fixed class is assumed (ruling D) |
 
 Only `TRANSIENT` and `RATE_LIMITED` are ever retried automatically (ADR-0004, ADR-0005). This ADR does not change that.
 
@@ -301,7 +326,14 @@ capabilities:   ai:cliproxy-dev → not ready (runtime state VERSION_MISMATCH)
 degraded_capabilities: [ai:cliproxy-dev]
 ```
 
-A provider-neutral AI runtime status endpoint may be added, e.g. `GET /api/v1/ai/runtime/status`. It exposes safe diagnostics only: expected and actual version, binary SHA identity, routing identity, and managed or unmanaged process status. It exposes no secret. How the runtime-state vocabulary is carried in the readiness payload is Choice for review B.
+A provider-neutral AI runtime status endpoint may be added, e.g. `GET /api/v1/ai/runtime/status`. It exposes safe diagnostics only: expected and actual version, binary SHA identity, routing identity, and managed or unmanaged process status. It exposes no secret.
+
+**What readiness shows (ruling B).**
+- **Every configured or registered `AIProviderProfile`** is represented in capability diagnostics.
+- **Every such profile that is not `AVAILABLE`** appears in `degraded_capabilities`.
+- **Its AI runtime state** can be inspected without exposing a secret.
+- **When no `AIProviderProfile` exists or is configured**, readiness invents no synthetic `ai:` capability. The absence of optional AI never marks core readiness as failed or the report as degraded.
+- **The representation is left to implementation.** The AI runtime state may extend the generic capability status vocabulary (`CapabilityReport.status` today has no `VERSION_MISMATCH`, `ROUTING_CONFIG_MISMATCH` or `QUOTA_LIMITED`) or be carried beside it.
 
 ### 10. Routing approval marks results STALE; it never enqueues reprocessing
 
@@ -410,27 +442,33 @@ This ADR is a contract only. It fixes none of these, and each belongs to a later
 - the concrete provider list;
 - sidecar invocation;
 - the enrichment tasks themselves;
+- the `PromptTemplate` and `PlatformPolicy` schemas (Issue #30);
 - the M4 `Product`.
 
 The PR that records this ADR makes no AI call, handles no provider credential, downloads, starts or stops no sidecar, and changes no application code, schema or UI.
 
-## Choices for review
+## Rulings on the former choices for review (PR #79 review `5244523325`)
 
-- **A. Using an unmanaged sidecar.**
-  - The gap: Issue #8 says a sidecar that was already running is used "but do not claim process ownership". It does not say whether its identity is checked.
-  - This ADR's choice: a pre-existing sidecar is used only when the identity checks a managed launch needs (§3: approved path, version and SHA-256 of the executable actually serving the endpoint) and the routing check (§4) both succeed. Otherwise the profile is `VERSION_MISMATCH` or `UNAVAILABLE`, whichever cause applies, and is not used.
-  - The alternative: trust any loopback answer. That would make §3 decorative.
-- **B. The runtime state in readiness.**
-  - The gap: the existing `CapabilityReport.status` vocabulary (`READY`, `NOT_CONFIGURED`, `DISCONNECTED`, `CONNECTING`, `AUTH_EXPIRED`, `DEGRADED`, `PAUSED`) was built for supplier connections. It has no `VERSION_MISMATCH`, `ROUTING_CONFIG_MISMATCH` or `QUOTA_LIMITED`.
-  - This ADR's choice: leave the representation to implementation, under one invariant: every profile that is not `AVAILABLE` appears in `degraded_capabilities`, and its runtime state is visible without a secret. That can mean extending the capability status vocabulary or carrying the runtime state beside the status.
-  - Related open point: whether an ICBM with no profile configured lists an `ai:` capability at all.
-- **C. Where the prompt text comes from.**
-  - The user's recorded instruction: the prompts for each AI item are already saved in the Settings (설정) tab's AI registry, and AI must use them, not newly authored prompts.
-  - This ADR's choice: bind only what is contract-level. `prompt_version` identifies the exact operator-owned prompt text sent, and adapters add no hidden or provider-specific prompt (§1).
-  - Still open: the storage location of that saved text has to be confirmed with the user when the implementation starts. The legacy repository is not a source.
-- **D. `DEGRADED`.**
-  - The gap: Issue #8 lists `DEGRADED` as a runtime state but gives it no mapping.
-  - This ADR's choice: classify it like `UNAVAILABLE`, by the actual cause of each event, with no fixed `ErrorClass`.
+The first draft raised four points that needed an interpretation. The architect ruled all four. They are folded into the decision above and recorded here.
+
+- **A. Unmanaged sidecar: accepted, fail-closed.**
+  - A sidecar that was already running is used only if ICBM can verify two things: the executable identity of the process actually serving the approved endpoint (path, version and SHA-256, as applicable), and the routing identity.
+  - Answering on loopback is insufficient.
+  - If the serving process identity cannot be verified, the profile is not used and no approved identity is inferred (§2).
+- **B. Readiness representation: the deferral is accepted, and the no-profile point is closed.**
+  - The implementation may extend the generic capability representation or carry the AI runtime state beside it.
+  - Every configured or registered profile is represented, and every non-`AVAILABLE` one is degraded, with its state inspectable without secrets.
+  - With no profile configured, readiness invents no `ai:` capability and reports nothing as degraded merely because optional AI is absent (§9).
+- **C. Prompt source: revised to Issue #30.**
+  - Issue #30 already decides that user-editable task prompts live in a dedicated, persisted `PromptTemplate` store owned by the Settings UI, and that runtime AI execution reads that persisted value.
+  - `PlatformPolicy` has separate storage and a separate version lifecycle.
+  - Each prompt has a durable `prompt_version`, and no adapter or orchestration owns a hidden business prompt.
+  - ADR-0012 binds `prompt_version` to the persisted `PromptTemplate` revision selected for the task (§1, §6). It does not define the schema.
+  - No further confirmation is needed unless an architecture review changes Issue #30 itself.
+- **D. `DEGRADED`: accepted as written.**
+  - `DEGRADED` is a runtime state, not a fixed `ErrorClass`.
+  - A task failure under it is classified from the concrete cause of the event (§8).
+  - Only `TRANSIENT` and `RATE_LIMITED` gain automatic retry.
 
 ## Consequences
 
@@ -444,7 +482,8 @@ The PR that records this ADR makes no AI call, handles no provider credential, d
 
 ## References
 
-- Issue #8 (body; architect kickoff `5725353427`)
+- Issue #8 (body; architect kickoff `5725353427`); PR #79 architect review `5244523325` (rulings A–D)
+- Issue #30 (the persisted Settings/`PromptTemplate` prompt source, separate `PlatformPolicy`, durable `prompt_version`, no hidden adapter prompt) and its refinement `5661813529` (the ROLE / POLICY / TASK layers with independent revisions)
 - `docs/acceptance/M3.md` (AI provider calls = 0; bounded by §2)
 - ADR-0004, ADR-0005, ADR-0006, ADR-0007 (§3, §6, §7), ADR-0008, ADR-0010 (§13)
 - `app/system/readiness.py` (`ReadinessReport`: `overall`, `capabilities`, `degraded_capabilities`), `app/connect/contracts.py` (`CapabilityReport`), `app/connect/state.py` (`CapabilityStatus`), `app/core/egress.py` (the process-local guard), `app/core/net.py` (`is_loopback_host`), `app/core/errors.py` (`ErrorClass`)
