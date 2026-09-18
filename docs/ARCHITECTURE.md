@@ -156,6 +156,11 @@ source fingerprint + field fingerprints
 ### Product
 ICBM canonical identity. References the current accepted facts revision and downstream state.
 
+The M4 product contract is proposed in `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80):
+- The canonical `Product` **is** the Canonical v3.1 `ProductGroup`: one entity and one identifier, with no second product root. `icbm_product_id` below is that identifier.
+- Each member source product keeps its own current accepted-revision pointer.
+- Sellable Items are `group identifier + composition_signature`.
+
 ### MarketplaceRegistration
 Always includes:
 
