@@ -326,7 +326,8 @@ Acceptance evidence belongs in `docs/acceptance/`, not chat. It records correlat
 M0 — fresh UI shell + Phase 0 foundation   ACCEPTED 2026-09-13 (Issue #1, PR #2, docs/acceptance/M0.md)
 M1 — KM통상 CONNECT only                   ACCEPTED 2026-09-13 (Issue #7, PR #9, ADR-0007, docs/acceptance/M1.md)
 M2 — SmartStore CONNECT                    ACCEPTED 2026-09-15 (Issue #46, PR #51, docs/acceptance/M2.md)
-M3 — KM통상 one-product COLLECT             CURRENT (Issue #52, ADR-0010; PR-A contract → PR-B → PR-C → PR-D → real campaign)
+M3 — KM통상 one-product COLLECT             ACCEPTED 2026-09-18 (Issue #52, ADR-0010, docs/acceptance/M3.md; bounded by its §2)
+M4 — canonical Product DB                  CURRENT (status pointer only, Issue #52 ruling 5725017620; no M4 work is authorized yet)
 ```
 
 The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.

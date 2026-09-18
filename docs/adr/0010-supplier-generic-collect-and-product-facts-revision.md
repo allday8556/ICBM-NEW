@@ -36,6 +36,7 @@ M4 = canonical Product identity + current accepted revision link + enrichment/pr
   - the collection run that produced them.
 - M4 later creates `Product` and chooses or links the current accepted revision.
 - The runtime milestone metadata (`app.MILESTONE`) reads `M3`. It feeds `/api/health`, the screen `meta.milestone` and the UI footer. `test_active_milestone_agrees_across_the_canonical_status_documents` keeps it equal to the canonical CURRENT milestone (ruling on Q6).
+  - *Historical note (Issue #52 ruling 5725017620):* the sentence above describes the period while M3 was CURRENT. M3 was accepted on 2026-09-18, and under the same Q6 invariant the canonical pointer, and with it `app.MILESTONE`, advanced to `M4`. That is a status transition only: it changes neither this decision nor the M3/M4 boundary above.
 
 ### 2. Scope of M3
 

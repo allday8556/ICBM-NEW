@@ -634,8 +634,8 @@ Do not parallelize the core before the first vertical closes.
 M0 Foundation                                   ACCEPTED 2026-09-13
 → M1 KM통상 CONNECT                              ACCEPTED 2026-09-13
 → M2 SmartStore CONNECT                          ACCEPTED 2026-09-15
-→ M3 one-product COLLECT → ProductFactsRevision  CURRENT
-→ M4 canonical Product DB + image pipeline + pricing/readiness foundations
+→ M3 one-product COLLECT → ProductFactsRevision  ACCEPTED 2026-09-18
+→ M4 canonical Product DB + image pipeline + pricing/readiness foundations  CURRENT
 → M5 SmartStore REGISTER idempotency/reconcile/read-back
 → M6 OPERATE read-back + stock + order ingest
 → M6.5 fulfillment record + tracking
@@ -694,15 +694,11 @@ Accepted so far:
 - M0 — fresh UI shell + Phase 0 foundation (Issue #1, `docs/acceptance/M0.md`).
 - M1 — KM통상 CONNECT only (§4.1; Issue #7, ADR-0007, `docs/acceptance/M1.md`), verified against the real supplier in fresh sessions.
 - M2 — SmartStore CONNECT (§4.2; Issue #46, closeout PR #51, `docs/acceptance/M2.md`), verified against the real provider in one budgeted campaign.
+- M3 — one-product COLLECT → ProductFactsRevision (Issue #52, ADR-0010, `docs/acceptance/M3.md`), verified against the real supplier in one bounded campaign (`m3-accept-04`: two fresh-session passes and a closeout). The acceptance is bounded by M3.md §2: positive CONFIRMED option-axis/configuration support and quantity-tier values/source totals are not accepted.
 
 Next, in order:
 
-1. M3 — one-product COLLECT → ProductFactsRevision (Issue #52, ADR-0010). The PRs, in order:
-   - PR-A: contract;
-   - PR-B: source-truth model;
-   - PR-C: collection gateway and KM통상 parser;
-   - PR-D: collect job, read-back and acceptance harness;
-   - the real campaign, then closeout.
-2. The rest of the first single-product vertical (M4 → M6.5, §12).
+1. M4 — canonical Product DB + image pipeline + pricing/readiness foundations (§12). M4 is the CURRENT milestone as a status pointer only. No M4 scope, contract or implementation is authorized until it is decided in GitHub.
+2. The rest of the first single-product vertical (M5 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
