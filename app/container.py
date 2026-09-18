@@ -244,7 +244,7 @@ def build_container(
         connect=connect,
         collect=CollectService(jobs),
         products=products,
-        register=RegisterService(products),
+        register=RegisterService(),
         operate=OperateService(),
         review=ReviewService(),
         execution_mode=execution_mode,

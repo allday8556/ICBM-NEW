@@ -175,8 +175,14 @@ class ProductMaterializer:
     ) -> Materialization:
         """Materialize the source identity a durably RECORDED run appended a revision for.
 
-        The run only names the identity: the decision is the identity's, so a late or replayed run
-        resolves to that identity's newest eligible revision and never moves the pointer back.
+        The requested run must itself own the revision it names and agree with it — the revision
+        names this run back, and supplier, source identity and ``facts_status`` match — before it
+        may drive anything (PR #83 review 5253314334). A run that points at another run's revision
+        is refused with nothing written, whatever that other revision's own standing.
+
+        Once the run is proven, it only names the identity: the decision is the identity's, so a
+        late or replayed run resolves to that identity's newest eligible revision and never moves
+        the pointer back.
         """
         with self._db.read() as session:
             run = session.get(CollectionRun, collection_run_id)
@@ -191,7 +197,13 @@ class ProductMaterializer:
                 )
             revision = session.get(ProductFactsRevision, run.revision_id)
             if revision is None:
-                return self._refusal(run.supplier_key, run.source_product_id, RUN_REVISION_MISMATCH)
+                return self._refusal(
+                    run.supplier_key, run.source_product_id, RUN_REVISION_MISMATCH, run.revision_id
+                )
+            if (problem := self._run_problem(revision, run)) is not None:
+                return self._refusal(
+                    run.supplier_key, run.source_product_id, problem, run.revision_id
+                )
             supplier_key, source_product_id = revision.supplier_key, revision.source_product_id
         return self.materialize_source(
             supplier_key, source_product_id, correlation_id=correlation_id
@@ -273,6 +285,11 @@ class ProductMaterializer:
 
     @staticmethod
     def _run_problem(revision: ProductFactsRevision, run: CollectionRun) -> str | None:
+        """The first way a RECORDED run fails to own and agree with a revision, if any."""
+        # Each side must name the other. ``collection_runs.revision_id`` is only a foreign key, so
+        # a run can point at a revision another run appended; that run owns nothing.
+        if revision.collection_run_id != run.collection_run_id:
+            return RUN_REVISION_MISMATCH
         if run.revision_id != revision.revision_id:
             return RUN_REVISION_MISMATCH
         if (run.supplier_key, run.source_product_id) != (

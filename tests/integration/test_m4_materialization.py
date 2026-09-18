@@ -41,6 +41,7 @@ from app.products.materialization import (
     RULE_VERSION,
     RUN_IDENTITY_MISMATCH,
     RUN_NOT_RECORDED,
+    RUN_REVISION_MISMATCH,
     BaseProductEvidence,
     Materialization,
     MaterializationStatus,
@@ -54,6 +55,7 @@ from app.products.model import (
     MoveReason,
 )
 from app.products.store import ProductFoundationUnit
+from app.screens.contracts import EmptyReason, ScreenState
 from tests.collect_support import (
     PNG,
     REPRESENTATIVE,
@@ -490,6 +492,52 @@ def test_a_run_that_disagrees_with_its_revision_fails_closed(
     assert _nothing_materialized(config)
 
 
+FOREIGN_POINTER = {
+    "revision pointer only": (
+        "UPDATE collection_runs SET revision_id = :b WHERE collection_run_id = :a"
+    ),
+    "every other field made to agree": (
+        "UPDATE collection_runs SET revision_id = :b, source_product_id = '5678',"
+        " facts_status = :status WHERE collection_run_id = :a"
+    ),
+}
+
+
+@pytest.mark.parametrize("statement", FOREIGN_POINTER.values(), ids=FOREIGN_POINTER.keys())
+def test_a_run_pointing_at_another_runs_revision_is_refused(
+    container: Container, config: AppConfig, sources: Collections, statement: str
+) -> None:
+    # PR #83 review 5253314334 blocker 1: RECORDED run A is made to point at run B's valid
+    # revision. The requested run owns nothing, so it drives nothing: neither A's product nor B's
+    # is materialized through it.
+    run_a, _revision_a = sources.collect(no_options())
+    run_b, revision_b = sources.collect(with_options(), source_product_id="5678")
+    with contextlib.closing(_raw(config)) as raw:
+        raw.execute(
+            statement,
+            {"a": run_a, "b": revision_b.revision_id, "status": revision_b.facts_status.value},
+        )
+        raw.commit()
+    refused = container.materializer.materialize_run(run_a)
+    assert (refused.status, refused.reason) == (
+        MaterializationStatus.REFUSED,
+        RUN_REVISION_MISMATCH,
+    )
+    assert _nothing_materialized(config)
+    # A's own revision is no longer named by its run either, so A's identity fails closed too.
+    assert container.materializer.materialize_source(SUPPLIER, PRODUCT).status is (
+        MaterializationStatus.REFUSED
+    )
+    assert _nothing_materialized(config)
+
+    # Only the malformed invocation is refused: B, reached through its own run or its identity,
+    # is sound.
+    direct = _materialized(container.materializer.materialize_source(SUPPLIER, "5678"))
+    assert direct.current_source_revision_id == revision_b.revision_id
+    assert container.materializer.materialize_run(run_b).status is MaterializationStatus.UNCHANGED
+    assert container.products.product_count() == 1
+
+
 # ---------------------------------------------------------------- 8–9 drift vs extractor change
 
 
@@ -895,6 +943,25 @@ def test_product_count_and_read_back_follow_canonical_state_not_revisions(
         product_route(str(uuid.uuid4()), container)
     with pytest.raises(NotFoundError):
         product_of_source_route(SUPPLIER, "0000", container)
+
+
+def test_canonical_products_are_not_registration_candidates(
+    container: Container, config: AppConfig, sources: Collections
+) -> None:
+    # PR #83 review 5253314334 blocker 2: an ACTIVE Product is not a registration candidate.
+    # Until PR-D/M5 derive candidacy, REGISTER has none, while the product screens count the
+    # canonical Products.
+    for source_product_id, fields in (("1234", no_options()), ("5678", with_options())):
+        run_id, _revision = sources.collect(fields, source_product_id=source_product_id)
+        _materialized(container.materializer.materialize_run(run_id))
+    assert container.products.product_count() == 2
+    assert container.screens.product_db().products_total == 2
+    assert container.screens.dashboard().products_total == 2
+    assert container.screens.insight().products_total == 2
+    register = container.screens.register()
+    assert (register.registration_candidates_total, register.registrations_total) == (0, 0)
+    assert register.meta.state is ScreenState.EMPTY
+    assert register.meta.empty_reason is EmptyReason.NO_REGISTRATION_CANDIDATES
 
 
 def test_the_products_api_is_read_only(client: TestClient) -> None:
