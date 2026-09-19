@@ -23,6 +23,12 @@ it must exist, account for the current bound revision's CONFIRMED images, name o
 validated against that revision, and every selected exact binary must carry a PASS under the
 current QA rule for that revision (`app.products.images`). ``base-readiness/v2`` replaces
 PR-D's unconditional ``IMAGE_SELECTION_QA_PENDING``.
+
+**Quantity offers** (PR-Q). A SOURCE_OFFER binding that fits its exact offer is valid procurement,
+and the BASE_PRODUCT default-unit restriction does not apply to it. Every CORE, stock and image rule
+is unchanged. A new quantity Item has no image selection until an operator records one. The
+procurement state both layers fingerprint now names the binding kind, the exact offer and the
+fulfillment quantity: ``base-readiness/v3`` and ``pricing-readiness/v2``.
 """
 
 from dataclasses import dataclass
@@ -45,8 +51,8 @@ from app.products.pricing_service import (
 )
 from app.products.store import ProductFoundationStore
 
-BASE_READINESS_RULE_VERSION = "base-readiness/v2"
-PRICING_READINESS_RULE_VERSION = "pricing-readiness/v1"
+BASE_READINESS_RULE_VERSION = "base-readiness/v3"
+PRICING_READINESS_RULE_VERSION = "pricing-readiness/v2"
 
 # Reason codes: our own, never page content.
 GROUP_CANDIDATE_PENDING = "GROUP_MEMBER_CANDIDATE_PENDING"
@@ -94,6 +100,15 @@ def _procurement_state(procurement: Procurement) -> dict[str, object]:
         else procurement.group_status.value,
         "membership_revision_id": procurement.membership_revision_id,
         "binding_id": None if procurement.binding is None else procurement.binding.binding_id,
+        "binding_kind": None
+        if procurement.binding is None
+        else procurement.binding.binding_kind.value,
+        "quantity_offer_id": None
+        if procurement.binding is None
+        else procurement.binding.quantity_offer_id,
+        "fulfillment_quantity": None
+        if procurement.binding is None
+        else procurement.binding.fulfillment_quantity,
         "binding_provenance_revision_id": None
         if procurement.binding is None
         else procurement.binding.provenance_revision_id,

@@ -195,12 +195,16 @@ def test_a_source_product_holds_identity_and_no_fact() -> None:
     }
 
 
-def test_no_source_sku_or_quantity_offer_exists_to_be_fabricated() -> None:
-    # ADR-0013 §2/§6 (ruling B): nothing can hold an invented source SKU or offer, and a binding
-    # has no column that could reference one.
-    assert not [t for t in metadata.tables if "sku" in t or "offer" in t]
+def test_no_source_sku_exists_to_be_fabricated_and_offers_are_product_level() -> None:
+    # ADR-0013 §2/§6 (ruling B), clarified by ruling 5738760913 for PR-Q: nothing can hold an
+    # invented source SKU. The one offer table holds product-level offers, which have no SKU, and
+    # a binding references an offer only through its exact quantity_offer_id.
+    assert not [t for t in metadata.tables if "sku" in t]
+    assert [t for t in metadata.tables if "offer" in t] == ["quantity_offers"]
+    for table in ("quantity_offers", "source_bindings"):
+        assert not [c.name for c in metadata.tables[table].columns if "sku" in c.name], table
     binding_columns = {c.name for c in metadata.tables["source_bindings"].columns}
-    assert not [c for c in binding_columns if "sku" in c or "offer" in c]
+    assert [c for c in binding_columns if "offer" in c] == ["quantity_offer_id"]
 
 
 def test_the_m4_checks_match_the_orm(config: AppConfig) -> None:
@@ -581,20 +585,26 @@ def test_a_base_product_binding_references_no_sku_or_offer_and_creates_nothing_e
     assert binding.binding_kind == "BASE_PRODUCT"
 
 
-def test_source_offer_cannot_be_stored(
+def test_source_offer_cannot_be_stored_without_an_exact_offer(
     config: AppConfig, store: ProductFoundationStore, sources: Sources
 ) -> None:
+    # PR-Q (ruling 5738760913): SOURCE_OFFER always names its exact QuantityOffer, and a
+    # BASE_PRODUCT names none. The full SOURCE_OFFER rules are in test_m4_quantity_offers.
     revision = sources.base_product()
     uid = store.source_product("kmretail", "1234").source_product_uid
     _group, member, item = _single_member_item(store, uid)
-    with (
-        contextlib.closing(_raw(config)) as raw,
-        pytest.raises(sqlite3.IntegrityError, match="source_offer_unavailable"),
-    ):
-        raw.execute(
-            f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
-            f" 'SOURCE_OFFER', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
-        )
+    with contextlib.closing(_raw(config)) as raw:
+        with pytest.raises(sqlite3.IntegrityError, match="SOURCE_OFFER names its exact offer"):
+            raw.execute(
+                f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
+                f" 'SOURCE_OFFER', 1, '{revision}', '[\"shipping\"]', 't', 'c', {AT}, NULL, NULL)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="source_offer_names_its_offer"):
+            raw.execute(
+                f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
+                f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL,"
+                f" '{uuid.uuid4()}')"
+            )
 
 
 def test_base_product_needs_a_revision_stating_no_options_and_no_tiers(
@@ -612,7 +622,7 @@ def test_base_product_needs_a_revision_stating_no_options_and_no_tiers(
     ):
         raw.execute(
             f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
-            f" 'BASE_PRODUCT', 1, '{with_options}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+            f" 'BASE_PRODUCT', 1, '{with_options}', '[\"prices\"]', 't', 'c', {AT}, NULL, NULL)"
         )
 
 
@@ -644,7 +654,7 @@ def test_base_product_fulfils_only_the_exact_default_single_unit(
     ):
         raw.execute(
             f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
-            f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+            f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL, NULL)"
         )
 
 
@@ -677,7 +687,7 @@ def test_a_forged_default_unit_cannot_carry_a_base_product_binding(
         with pytest.raises(sqlite3.IntegrityError, match="default single-unit composition"):
             raw.execute(
                 f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
-                f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+                f" 'BASE_PRODUCT', 1, '{revision}', '[\"prices\"]', 't', 'c', {AT}, NULL, NULL)"
             )
 
 
@@ -714,7 +724,7 @@ def test_a_binding_is_only_ever_closed_with_one_open_per_item(
         with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
             raw.execute(
                 f"INSERT INTO source_bindings VALUES ('{uuid.uuid4()}', '{item}', '{member}',"
-                f" 'BASE_PRODUCT', 1, '{second}', '[\"prices\"]', 't', 'c', {AT}, NULL)"
+                f" 'BASE_PRODUCT', 1, '{second}', '[\"prices\"]', 't', 'c', {AT}, NULL, NULL)"
             )
         with pytest.raises(sqlite3.IntegrityError, match="only ever closed"):
             raw.execute("UPDATE source_bindings SET valid_to = NULL")

@@ -1197,6 +1197,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "image_selection_outputs",
         "current_image_selection_moves",
         "image_qa_results",
+        # M4 PR-Q (ruling 5738760913): immutable, revision-scoped product-level quantity offers.
+        # There is no SourceSKU table: a product-level offer has none, and none is fabricated.
+        "quantity_offers",
     }
     offenders = [
         path
