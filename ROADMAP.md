@@ -637,8 +637,8 @@ M0 Foundation                                   ACCEPTED 2026-09-13
 → M1 KM통상 CONNECT                              ACCEPTED 2026-09-13
 → M2 SmartStore CONNECT                          ACCEPTED 2026-09-15
 → M3 one-product COLLECT → ProductFactsRevision  ACCEPTED 2026-09-18
-→ M4 canonical Product DB + image pipeline + pricing/readiness foundations  CURRENT
-→ M5 SmartStore REGISTER idempotency/reconcile/read-back
+→ M4 canonical Product DB + image pipeline + pricing/readiness foundations  ACCEPTED 2026-09-19
+→ M5 SmartStore REGISTER idempotency/reconcile/read-back  CURRENT
 → M6 OPERATE read-back + stock + order ingest
 → M6.5 fulfillment record + tracking
 → FIRST VERTICAL two consecutive passes in fresh sessions
@@ -697,18 +697,11 @@ Accepted so far:
 - M1 — KM통상 CONNECT only (§4.1; Issue #7, ADR-0007, `docs/acceptance/M1.md`), verified against the real supplier in fresh sessions.
 - M2 — SmartStore CONNECT (§4.2; Issue #46, closeout PR #51, `docs/acceptance/M2.md`), verified against the real provider in one budgeted campaign.
 - M3 — one-product COLLECT → ProductFactsRevision (Issue #52, ADR-0010, `docs/acceptance/M3.md`), verified against the real supplier in one bounded campaign (`m3-accept-04`: two fresh-session passes and a closeout). The acceptance is bounded by M3.md §2: positive CONFIRMED option-axis/configuration support and quantity-tier values/source totals are not accepted.
+- M4 — canonical Product DB + image pipeline + pricing/readiness foundations (Issue #80, ADR-0013, PR #81–#87, `docs/acceptance/M4.md`), accepted on the final offline acceptance run of the merged harness at exact main `57a6676` (146/146 checks, architect acceptance 5740024056). The acceptance is bounded by M4.md §2: no source SKUs, grouping/MERGE, M5 work, provider calls or quantity resale guidance.
 
 Next, in order:
 
-1. M4 — canonical Product DB + image pipeline + pricing/readiness foundations (§12; Issue #80). The PRs, in order:
-   - PR-A: contract (`docs/adr/0013-m4-canonical-product-contract.md`, accepted);
-   - PR-B: canonical product, group and composition models and migrations;
-   - PR-C: materialization, the current-revision pointer and read-back;
-   - PR-D: `PricingSnapshot` and derived readiness;
-   - PR-E: derived image lineage;
-   - PR-F: the M4 integration and acceptance harness.
-
-   Each PR needs its own authorization in GitHub.
-2. The rest of the first single-product vertical (M5 → M6.5, §12).
+1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12). M5 is the CURRENT milestone as a status pointer only. No M5 scope, contract or implementation is authorized until it is decided in GitHub.
+2. The rest of the first single-product vertical (M6 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
