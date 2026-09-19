@@ -8,15 +8,19 @@ Every run here is the real harness:
 - the sanitized, digested report.
 
 No supplier, marketplace or AI provider is contacted, and no campaign runtime is opened. The
-module-scoped run goes through the command line exactly as an operator would run it.
+passing runs go through the command line in a fresh interpreter, exactly as an operator runs it.
 """
 
 import contextlib
 import importlib
 import json
 import socket
+import sqlite3
+import subprocess
+import sys
+import types
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +30,8 @@ from app.config import AppConfig
 from app.container import Container
 from scripts.m4_acceptance import main
 from scripts.m4accept import evidence, harness
+from scripts.m4accept.checkout import Checkout, CheckoutRefused, probe_checkout
+from scripts.m4accept.guards import forbidden
 from scripts.m4accept.harness import run_acceptance
 from scripts.m4accept.owners import open_owners
 from scripts.m4accept.root import (
@@ -48,12 +54,53 @@ class Accepted:
     exit_code: int
 
 
+# The command line in a fresh interpreter, exactly as an operator runs it, except that the checkout
+# is judged clean: these runs judge the scenarios, and a developer's uncommitted edit (or a negative
+# control) must not refuse them. The checkout gate itself is tested below, on real git checkouts.
+# Nothing else is loaded first, so the forbidden modules the run finds preloaded are the harness's.
+RUNNER = "\n".join(
+    (
+        "import sys",
+        "from dataclasses import replace",
+        "sys.path.insert(0, sys.argv[1])",
+        "from scripts.m4accept import harness",
+        "measured = harness.probe_checkout",
+        "harness.probe_checkout = lambda: replace(measured(), tracked_changes=0,"
+        " hidden_tracked_files=0, untracked_files=0, ignored_sources=0)",
+        "from scripts.m4_acceptance import main",
+        "raise SystemExit(main(sys.argv[2:]))",
+    )
+)
+CLEAN = Checkout(
+    code_sha="0" * 40,
+    tracked_changes=0,
+    hidden_tracked_files=0,
+    untracked_files=0,
+    ignored_sources=0,
+    code_outside_checkout=0,
+)
+
+
+def _command_line(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", RUNNER, str(REPO_ROOT), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
+        check=False,
+    )
+
+
 @pytest.fixture(scope="module")
 def accepted(tmp_path_factory: pytest.TempPathFactory) -> Accepted:
     root = tmp_path_factory.mktemp("m4-acceptance") / "fresh-root"
-    code = main(["--root", str(root)])
+    done = _command_line("--root", str(root))
+    assert (root / REPORT).is_file(), done.stderr[-4000:]
     report = json.loads((root / REPORT).read_text("utf-8"))
-    return Accepted(root, report, code)
+    return Accepted(root, report, done.returncode)
 
 
 def _checks(report: dict[str, Any]) -> dict[str, bool]:
@@ -151,12 +198,13 @@ REQUIRED_CHECKS = {
         "boundary.no_supplier_or_marketplace_audit",
         "boundary.no_job_ran",
     ),
-    "34 no AI or OCR": ("hard_zero.forbidden_imports",),
+    "34 no AI or OCR": ("hard_zero.forbidden_imports", "hard_zero.no_forbidden_module_preloaded"),
     "35 no external network attempt": ("hard_zero.external_network_attempts",),
     "36 no preserved campaign access": (
         "boundary.preserved_campaign_access",
         "boundary.writes_outside_root",
     ),
+    "P the checkout stays exactly its commit": ("checkout.unchanged_during_run",),
 }
 
 
@@ -206,6 +254,8 @@ def test_the_hard_zero_counters_are_measured_zero(accepted: Accepted) -> None:
     ):
         assert zero[counter] == 0, counter
     assert zero["forbidden_imports_blocked"] == zero["forbidden_modules_loaded_during_run"] == []
+    # Review 5254796929 blocker 2: nothing forbidden was loaded before the guard armed either.
+    assert zero["forbidden_modules_preloaded"] == []
     assert accepted.report["preserved_campaign_access"] == 0
     boundary = accepted.report["boundary"]
     assert (boundary["registration_candidate_count"], boundary["jobs"]) == (0, 0)
@@ -226,6 +276,13 @@ def test_the_report_is_sanitized(accepted: Accepted) -> None:
     assert text.isascii() and "://" not in text
     for local in (str(accepted.root), str(REPO_ROOT), accepted.root.name):
         assert local not in text
+    assert accepted.report["checkout"] == {
+        "tracked_changes": 0,
+        "hidden_tracked_files": 0,
+        "untracked_files": 0,
+        "ignored_sources": 0,
+        "code_outside_checkout": 0,
+    }
     assert "synthetic price" not in text and "M4 synthetic product" not in text
 
 
@@ -296,21 +353,148 @@ def test_an_initialized_root_is_accepted_once(tmp_path: Path) -> None:
     root = initialize_root(tmp_path / "prepared", {})
     assert [p.name for p in root.iterdir()] == [MARKER]
     assert root_problems(root, {}) == []
-    report = run_acceptance(root, {})
-    assert report["problems"] == []
+    done = _command_line("--root", str(root))
+    assert done.returncode == 0, done.stderr[-4000:]
+    assert json.loads((root / REPORT).read_text("utf-8"))["problems"] == []
     assert root_problems(root, {}) != []
+
+
+# ---------------------------------------------------------------- the checkout
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=m4",
+            "-c",
+            "user.email=m4@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+
+def test_the_checkout_probe_measures_a_real_git_checkout(tmp_path: Path) -> None:
+    # Review 5254796929 blocker 1: a tracked edit, a hidden edit, an untracked source and ignored
+    # code are each measured; ignored data and cached bytecode are not code the run can execute.
+    repo = tmp_path / "checkout"
+    (repo / "pkg" / "__pycache__").mkdir(parents=True)
+    (repo / ".gitignore").write_text("__pycache__/\n*.py[cod]\nvar/\n", "utf-8")
+    (repo / "pkg" / "mod.py").write_text("VALUE = 1\n", "utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "one")
+
+    def state() -> tuple[int | None, ...]:
+        c = probe_checkout(repo)
+        return c.tracked_changes, c.hidden_tracked_files, c.untracked_files, c.ignored_sources
+
+    head = probe_checkout(repo).code_sha
+    assert head is not None and len(head) == 40
+    assert state() == (0, 0, 0, 0)
+    (repo / "pkg" / "__pycache__" / "mod.cpython-313.pyc").write_bytes(b"cached")
+    (repo / "var").mkdir()
+    (repo / "var" / "notes.txt").write_text("data", "utf-8")
+    assert state() == (0, 0, 0, 0)
+    (repo / "pkg" / "mod.py").write_text("VALUE = 1  # a harmless edit\n", "utf-8")
+    assert state() == (1, 0, 0, 0)
+    _git(repo, "update-index", "--assume-unchanged", "pkg/mod.py")
+    assert state() == (0, 1, 0, 0)
+    _git(repo, "update-index", "--no-assume-unchanged", "pkg/mod.py")
+    _git(repo, "checkout", "--", "pkg/mod.py")
+    assert state() == (0, 0, 0, 0)
+    (repo / "pkg" / "extra.py").write_text("", "utf-8")
+    assert state() == (0, 0, 1, 0)
+    (repo / "pkg" / "extra.py").unlink()
+    (repo / "var" / "shadow.py").write_text("", "utf-8")
+    (repo / "pkg" / "sourceless.pyc").write_bytes(b"code")
+    assert state() == (0, 0, 0, 2)
+    # This process loaded its code from the real repository, not from this checkout.
+    assert probe_checkout(repo).code_outside_checkout > 0
+    # Only the top level of a checkout with a commit names one.
+    assert probe_checkout(repo / "pkg").code_sha is None
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert probe_checkout(plain).code_sha is None and probe_checkout(plain).problems
+
+
+def test_the_checkout_probe_reads_this_repository() -> None:
+    head = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    checkout = probe_checkout()
+    assert checkout.code_sha == head
+    assert checkout.code_outside_checkout == 0
+
+
+DIRT: dict[str, dict[str, Any]] = {
+    "no commit": {"code_sha": None},
+    "tracked change": {"tracked_changes": 1},
+    "hidden tracked file": {"hidden_tracked_files": 1},
+    "untracked file": {"untracked_files": 1},
+    "ignored source": {"ignored_sources": 1},
+    "code from outside the checkout": {"code_outside_checkout": 1},
+    "unmeasured": {"untracked_files": None},
+}
+
+
+@pytest.mark.parametrize("dirt", DIRT.values(), ids=DIRT.keys())
+def test_a_checkout_that_is_not_exactly_its_commit_is_refused_before_anything_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dirt: dict[str, Any]
+) -> None:
+    # Review 5254796929 blocker 1: never eligible for PASS, and no root, data or report is made.
+    monkeypatch.setattr(harness, "probe_checkout", lambda: replace(CLEAN, **dirt))
+    root = tmp_path / "root"
+    with pytest.raises(CheckoutRefused, match="checkout"):
+        run_acceptance(root, {})
+    assert main(["--root", str(root)]) == 2
+    assert not root.exists()
+
+
+def test_a_checkout_that_changes_during_the_run_fails_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    probes = iter([CLEAN, replace(CLEAN, tracked_changes=1)])
+    report = _failing_run(monkeypatch, tmp_path / "root", lambda _run: None, probe=probes.__next__)
+    assert "checkout.unchanged_during_run" in report["problems"]
+    marker = json.loads((tmp_path / "root" / MARKER).read_text("utf-8"))
+    assert marker["state"] == "FAILED"
 
 
 # ---------------------------------------------------------------- the guards fail the run
 
 
 def _failing_run(
-    monkeypatch: pytest.MonkeyPatch, root: Path, act: Callable[[harness.Run], None]
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+    act: Callable[[harness.Run], None],
+    *,
+    probe: Callable[[], Checkout] = lambda: CLEAN,
+    preload: tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    """An in-process run that performs ``act`` first. It starts as a fresh interpreter does: no
+    forbidden module is loaded (this test process loaded some; they are hidden for the run and put
+    back afterwards) except the ``preload`` ones, and the checkout is what ``probe`` says."""
+
     def scenario_base(run: harness.Run) -> dict[str, object]:
         act(run)
         raise harness.Failed("the injected act ends the run")
 
+    for name in [name for name in sys.modules if forbidden(name)]:
+        monkeypatch.delitem(sys.modules, name)
+    for name in preload:
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setattr(harness, "probe_checkout", probe)
     monkeypatch.setattr(harness, "scenario_base", scenario_base)
     return run_acceptance(root, {})
 
@@ -327,6 +511,7 @@ def test_an_external_network_attempt_fails_the_run(
     report = _failing_run(monkeypatch, tmp_path / "root", act)
     assert "hard_zero.external_network_attempts" in report["problems"]
     zero = report["external_hard_zero"]
+    assert zero["forbidden_modules_preloaded"] == []
     assert zero["external_network_attempts"] >= 1 and zero["supplier_writes"] is None
 
 
@@ -366,6 +551,48 @@ def test_a_write_outside_the_root_fails_the_run(
 
     report = _failing_run(monkeypatch, tmp_path / "root", act)
     assert "boundary.writes_outside_root" in report["problems"]
+
+
+def test_a_forbidden_module_loaded_before_the_run_fails_the_hard_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Review 5254796929 blocker 2: a provider module already imported when the guard arms, for
+    # example pulled in transitively by the owner graph, is evidence, never a silent baseline.
+    report = _failing_run(
+        monkeypatch, tmp_path / "root", lambda _run: None, preload=("app.ai.m4_preloaded",)
+    )
+    assert "hard_zero.no_forbidden_module_preloaded" in report["problems"]
+    zero = report["external_hard_zero"]
+    assert zero["forbidden_modules_preloaded"] == ["app.ai.m4_preloaded"]
+    assert zero["forbidden_modules_loaded_during_run"] == []
+    assert zero["ai_calls"] is None and zero["supplier_writes"] is None
+
+
+def test_a_writable_sqlite_database_outside_the_root_fails_the_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Review 5254796929 blocker 3: an ordinary SQLite connection can write, wherever it is opened.
+    def act(_run: harness.Run) -> None:
+        sqlite3.connect(tmp_path / "outside.sqlite3").close()
+
+    report = _failing_run(monkeypatch, tmp_path / "root", act)
+    assert "boundary.writes_outside_root" in report["problems"]
+    assert report["external_hard_zero"]["writes_outside_root"] == 1
+
+
+def test_a_read_only_sqlite_connection_outside_the_root_is_not_a_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The twin: only an explicit mode=ro URI is read-only, and it stays allowed.
+    database = tmp_path / "evidence.sqlite3"
+    sqlite3.connect(database).close()
+
+    def act(_run: harness.Run) -> None:
+        sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True).close()
+
+    report = _failing_run(monkeypatch, tmp_path / "root", act)
+    assert "boundary.writes_outside_root" not in report["problems"]
+    assert report["external_hard_zero"]["writes_outside_root"] == 0
 
 
 # ---------------------------------------------------------------- composition

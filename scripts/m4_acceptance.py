@@ -5,9 +5,11 @@
 
 ``--root`` names a new or empty directory dedicated to this one run. It must lie outside the
 repository and every ICBM data directory, and it must never be a preserved campaign runtime. The
-run's application data lives under ``<root>/data``. The sanitized report is written to
-``<root>/m4-acceptance-report.json`` and printed. The exit status is 0 only when the report has no
-problem.
+code must run from a clean checkout of exactly one commit: no tracked change, no untracked file and
+no ignored source. The run's application data lives under ``<root>/data``. The sanitized report is
+written to ``<root>/m4-acceptance-report.json`` and printed. The exit status is 0 only when the
+report has no problem, 1 when it has one, and 2 when the root or the checkout was refused before
+anything was created.
 
 The run is offline and synthetic. It has no provider capability, so no approval phrase exists or
 is needed. ``--verify`` recomputes a report's digest.
@@ -22,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.m4accept import evidence
+from scripts.m4accept.checkout import CheckoutRefused
 from scripts.m4accept.harness import run_acceptance
 from scripts.m4accept.root import REPORT, RootRefused
 
@@ -29,7 +32,7 @@ from scripts.m4accept.root import REPORT, RootRefused
 def cmd_run(root: Path) -> int:
     try:
         report = run_acceptance(root, dict(os.environ))
-    except RootRefused as refused:
+    except (RootRefused, CheckoutRefused) as refused:
         print(f"refused: {refused}", file=sys.stderr)
         return 2
     text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True)

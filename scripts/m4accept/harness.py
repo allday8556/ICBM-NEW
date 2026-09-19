@@ -1,7 +1,9 @@
 """The M4 offline acceptance run (Issue #80 PR-F, kickoff 5739459941).
 
-One invocation, one fresh dedicated root, no provider capability. The run proceeds in order:
-1. Claim the root, own its data directory, migrate to head.
+One invocation, one fresh dedicated root, one exact clean checkout, no provider capability. The run
+proceeds in order:
+1. Refuse a root that is not fresh and dedicated, then a checkout that is not exactly its commit
+   (``checkout.py``). Only then claim the root, own its data directory and migrate to head.
 2. **S1 BASE_PRODUCT, revision R1.**
    - Current source revision, Product, member, default Item and BASE_PRODUCT binding.
    - A context-specific snapshot whose final price is the stated minimum sale price.
@@ -19,14 +21,13 @@ One invocation, one fresh dedicated root, no provider capability. The run procee
    STALE, then refreshed.
 7. **S3.** SOLD_OUT stock and a minimum sale price that is a loss: BLOCKED.
 8. **Final restart.** The full read-back matches durable state, and replays write nothing.
-9. **Evidence.** Hard-zero, boundary and immutability evidence, and the sanitized, digested
-   report.
+9. **Evidence.** The checkout measured again, hard-zero, boundary and immutability evidence, and
+   the sanitized, digested report.
 
 Every canonical row is written by a production owner; the harness never writes SQL. A check that
 fails is a problem, and any problem fails the run.
 """
 
-import subprocess
 import traceback
 import uuid
 from collections.abc import Mapping
@@ -80,9 +81,10 @@ from app.products.readiness import (
     Readiness,
 )
 from scripts.m4accept import evidence
+from scripts.m4accept.checkout import CheckoutRefused, probe_checkout
 from scripts.m4accept.guards import GuardEvidence, offline
 from scripts.m4accept.owners import Owners, open_owners
-from scripts.m4accept.root import DATA, REPO_ROOT, claim_root, settle_root
+from scripts.m4accept.root import DATA, RootRefused, claim_root, root_problems, settle_root
 from scripts.m4accept.synthetic import SUPPLIER, Facts, png, record_revision, sha256
 
 # One explicit, invented pricing context. No marketplace fee is known to the repository.
@@ -1097,18 +1099,6 @@ def _readiness_examples(report: Mapping[str, Any]) -> dict[str, object]:
     }
 
 
-def _code_sha() -> dict[str, object]:
-    def git(*args: str) -> str:
-        done = subprocess.run(
-            ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False
-        )
-        return done.stdout.strip() if done.returncode == 0 else ""
-
-    sha = git("rev-parse", "HEAD")
-    status = git("status", "--porcelain", "--untracked-files=no")
-    return {"code_sha": sha or "unknown", "tracked_changes": len(status.splitlines())}
-
-
 # ---------------------------------------------------------------- the run
 
 
@@ -1124,6 +1114,11 @@ def hard_zero(checks: Checks, guards: GuardEvidence) -> dict[str, object]:
         "hard_zero.egress_grants",
         guards.egress_grants_opened == 0,
         count=guards.egress_grants_opened,
+    )
+    checks.check(
+        "hard_zero.no_forbidden_module_preloaded",
+        not guards.forbidden_modules_preloaded,
+        modules=list(guards.forbidden_modules_preloaded),
     )
     checks.check(
         "hard_zero.forbidden_imports",
@@ -1142,6 +1137,7 @@ def hard_zero(checks: Checks, guards: GuardEvidence) -> dict[str, object]:
     held = (
         guards.external_network_attempts == 0
         and guards.egress_grants_opened == 0
+        and not guards.forbidden_modules_preloaded
         and not guards.forbidden_imports_blocked
         and not guards.forbidden_modules_loaded_during_run
     )
@@ -1155,8 +1151,9 @@ def hard_zero(checks: Checks, guards: GuardEvidence) -> dict[str, object]:
         "basis": [
             "network: the process egress audit hook counts every blocked non-loopback attempt",
             "grants: no supplier egress grant was opened during the run",
-            "imports: the armed import guard refuses AI, OCR, marketplace, CONNECT, supplier"
-            " transport, browser and HTTP-client modules; none was loaded during the run",
+            "imports: no AI, OCR, marketplace, CONNECT, supplier transport, browser or HTTP-client"
+            " module was loaded when the guard armed; the armed guard refuses them, and none was"
+            " loaded during the run",
             "composition: no supplier gateway, collection transport, SmartStore caller, AI or"
             " OCR client exists in the run",
         ],
@@ -1199,10 +1196,16 @@ def _run_phases(run: Run, report: dict[str, Any]) -> None:
 def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
     """One full offline acceptance run on a fresh dedicated ``root``; the sanitized report.
 
-    A refused root raises ``RootRefused`` before anything is created. Everything after the claim
-    is a check: a failure of any kind is recorded as a problem, and the report says so.
+    A refused root raises ``RootRefused``, and a checkout that is not exactly its commit raises
+    ``CheckoutRefused``, both before anything is created. Everything after the claim is a check: a
+    failure of any kind is recorded as a problem, and the report says so.
     """
     run_id = str(uuid.uuid4())
+    if problems := root_problems(root, environ):
+        raise RootRefused(problems)
+    checkout = probe_checkout()
+    if checkout.problems:
+        raise CheckoutRefused(checkout.problems)
     claimed = claim_root(root, environ, run_id)
     report: dict[str, Any] = {
         "schema": evidence.REPORT_SCHEMA,
@@ -1210,7 +1213,8 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         "claim": "HARNESS_RUN: only the post-merge exact-main run, reviewed by the architect,"
         " can close M4",
         "run_id": run_id,
-        **_code_sha(),
+        "code_sha": checkout.code_sha,
+        "checkout": checkout.as_json(),
         "alembic_head": head_revision(),
         "pricing_context": {
             "marketplace_key": CONTEXT.marketplace_key,
@@ -1242,6 +1246,13 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
             if run is not None:
                 run.owners.close()
     assert guarded.evidence is not None
+    after = probe_checkout()
+    checks.check(
+        "checkout.unchanged_during_run",
+        after == checkout and not after.problems,
+        code_sha=after.code_sha,
+        **after.as_json(),
+    )
     report["external_hard_zero"] = hard_zero(checks, guarded.evidence)
     report["preserved_campaign_access"] = guarded.evidence.preserved_campaign_paths_refused
     report["checks"] = checks.items

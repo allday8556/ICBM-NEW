@@ -5,11 +5,14 @@ numbers rather than assumed ones:
 - **Network.** The process egress guard of ``app.core.egress`` blocks every non-loopback socket.
   The run's blocked attempts and any supplier egress grant opened during it are counted.
 - **Imports.** A meta-path finder refuses to load AI, OCR, marketplace, CONNECT, supplier
-  transport, browser or HTTP-client code, and counts each attempt. The modules of that kind loaded
-  during the run are listed.
+  transport, browser or HTTP-client code, and counts each attempt. A module of that kind already
+  loaded when the guard arms is listed too: the harness's own import graph is loaded before the run
+  starts, so a forbidden module it pulled in transitively can never pass as absent. The modules of
+  that kind loaded during the run are listed.
 - **Paths.** An audit hook watches file opens, directory listings and database connections. A path
   naming a preserved campaign runtime is refused and counted. Every write outside the acceptance
-  root is counted; bytecode caches are the only exception.
+  root is counted; bytecode caches are the only exception. A SQLite connection can write unless its
+  URI opens it ``mode=ro``, so every other file connection counts as a write.
 
 Audit hooks and the egress guard stay installed for the life of the process, but only an armed
 run counts or refuses anything through them.
@@ -25,6 +28,7 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any
+from urllib.parse import parse_qs, unquote
 
 from app.core.egress import EGRESS
 from scripts.m4accept.root import names_preserved_campaign
@@ -120,7 +124,10 @@ def _paths(event: str, args: tuple[Any, ...]) -> tuple[list[str], bool]:
         )
         return [_text(target)], writes
     if event == "sqlite3.connect":
-        return [_text(args[0] if args else None)], False
+        database = _text(args[0] if args else None)
+        if _in_memory(database):
+            return [], False
+        return [database], not _read_only(database)
     if event in ("os.listdir", "os.scandir"):
         return [_text(args[0] if args else None)], False
     if event in ("os.mkdir", "os.remove", "os.rmdir"):
@@ -139,10 +146,25 @@ def _text(value: object) -> str:
     return ""
 
 
+def _uri_mode(database: str) -> list[str]:
+    if not database.startswith("file:") or "?" not in database:
+        return []
+    return parse_qs(database.split("?", 1)[1]).get("mode", [])
+
+
+def _read_only(database: str) -> bool:
+    """Only a URI that opens the database ``mode=ro`` cannot write it."""
+    return _uri_mode(database) == ["ro"]
+
+
+def _in_memory(database: str) -> bool:
+    return _local(database) in ("", ":memory:") or _uri_mode(database) == ["memory"]
+
+
 def _local(text: str) -> str:
     """A database URI's file part; any other path as given."""
     if text.startswith("file:"):
-        text = text[len("file:") :].split("?", 1)[0]
+        text = unquote(text[len("file:") :].split("?", 1)[0])
         if text.startswith("///"):
             text = text[3:]
         elif text.startswith("//"):
@@ -181,6 +203,7 @@ class GuardEvidence:
     external_network_attempts: int
     egress_grants_opened: int
     forbidden_imports_blocked: tuple[str, ...]
+    forbidden_modules_preloaded: tuple[str, ...]
     forbidden_modules_loaded_during_run: tuple[str, ...]
     preserved_campaign_paths_refused: int
     writes_outside_root: int
@@ -190,6 +213,7 @@ class GuardEvidence:
             "external_network_attempts": self.external_network_attempts,
             "egress_grants_opened": self.egress_grants_opened,
             "forbidden_imports_blocked": list(self.forbidden_imports_blocked),
+            "forbidden_modules_preloaded": list(self.forbidden_modules_preloaded),
             "forbidden_modules_loaded_during_run": list(self.forbidden_modules_loaded_during_run),
             "preserved_campaign_paths_refused": self.preserved_campaign_paths_refused,
             "writes_outside_root": self.writes_outside_root,
@@ -212,7 +236,7 @@ def offline(root: Path) -> Iterator[Guarded]:
     EGRESS.install()
     _install()
     before_egress = EGRESS.snapshot()
-    before_modules = {name for name in sys.modules if forbidden(name)}
+    preloaded = tuple(sorted(name for name in sys.modules if forbidden(name)))
     _STATE.root = root
     _STATE.blocked_imports.clear()
     _STATE.preserved_paths = 0
@@ -224,14 +248,13 @@ def offline(root: Path) -> Iterator[Guarded]:
     finally:
         _STATE.armed = False
         after_egress = EGRESS.snapshot()
-        loaded = sorted(
-            name for name in sys.modules if forbidden(name) and name not in before_modules
-        )
+        loaded = sorted(name for name in sys.modules if forbidden(name) and name not in preloaded)
         guarded.evidence = GuardEvidence(
             external_network_attempts=int(after_egress["external_attempts"])
             - int(before_egress["external_attempts"]),
             egress_grants_opened=_grants(after_egress) - _grants(before_egress),
             forbidden_imports_blocked=tuple(_STATE.blocked_imports),
+            forbidden_modules_preloaded=preloaded,
             forbidden_modules_loaded_during_run=tuple(loaded),
             preserved_campaign_paths_refused=_STATE.preserved_paths,
             writes_outside_root=_STATE.writes_outside_root,
