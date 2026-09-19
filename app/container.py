@@ -53,6 +53,7 @@ from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
 from app.register.service import RegisterService
+from app.register.store import RegistrationStore
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
 from app.system.diagnostics import DiagnosticsService
@@ -96,6 +97,7 @@ class Container:
     pricing: ProductPricingService
     images: ProductImageService
     product_readiness: ProductReadinessService
+    registrations: RegistrationStore
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -260,6 +262,9 @@ def build_container(
     product_readiness = ProductReadinessService(
         store=product_store, revisions=revisions, pricing=pricing, images=images
     )
+    # M5 PR-B (ADR-0014): registration persistence only. Nothing sends, reads back or compares a
+    # listing yet, and no marketplace endpoint behind it is adopted.
+    registrations = RegistrationStore(db, clock, audit)
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -298,6 +303,7 @@ def build_container(
         pricing=pricing,
         images=images,
         product_readiness=product_readiness,
+        registrations=registrations,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

@@ -1200,6 +1200,19 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # M4 PR-Q (ruling 5738760913): immutable, revision-scoped product-level quantity offers.
         # There is no SourceSKU table: a product-level offer has none, and none is fabricated.
         "quantity_offers",
+        # M5 PR-B (ADR-0014): the registration foundation. Drafts and immutable Snapshots,
+        # Batches with no stored summary, Intents, append-only Attempts, verified Registrations
+        # and duplicate overrides. No readiness or registrability table: preflight is derived.
+        "registration_drafts",
+        "registration_draft_items",
+        "registration_snapshots",
+        "registration_item_snapshots",
+        "registration_batches",
+        "registration_intents",
+        "registration_attempts",
+        "marketplace_registrations",
+        "marketplace_registration_items",
+        "duplicate_overrides",
     }
     offenders = [
         path

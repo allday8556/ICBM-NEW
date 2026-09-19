@@ -28,6 +28,7 @@ import pytest
 
 from app.config import AppConfig
 from app.container import Container
+from app.db.migrate import head_revision
 from scripts.m4_acceptance import main
 from scripts.m4accept import evidence, harness
 from scripts.m4accept.checkout import Checkout, CheckoutRefused, probe_checkout
@@ -117,7 +118,7 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["problems"] == []
     assert report["checks_passed"] == report["checks_total"] >= 140
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
-    assert report["alembic_head"] == report["database_revision"] == "0015_m4_quantity_offers"
+    assert report["alembic_head"] == report["database_revision"] == head_revision()
     marker = json.loads((accepted.root / MARKER).read_text("utf-8"))
     assert (marker["state"], marker["run_id"]) == ("PASSED", report["run_id"])
     assert sorted(p.name for p in accepted.root.iterdir()) == sorted([DATA, MARKER, REPORT])
@@ -616,6 +617,6 @@ def test_the_harness_composes_the_owners_the_container_composes(
         ):
             assert type(getattr(owners, name)) is type(getattr(container, name)), name
         assert owners.images.qa_rule_version == container.images.qa_rule_version
-        assert owners.database_revision() == "0015_m4_quantity_offers"
+        assert owners.database_revision() == head_revision()
     finally:
         owners.close()
