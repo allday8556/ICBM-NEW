@@ -45,6 +45,8 @@ from app.jobs.runner import JobRunner
 from app.jobs.service import JobService
 from app.jobs.worker import JobWorker
 from app.operate.service import OperateService
+from app.products.image_store import DerivedImageStore
+from app.products.images import ProductImageService
 from app.products.materialization import ProductMaterializer
 from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService
@@ -92,6 +94,7 @@ class Container:
     products: ProductsService
     materializer: ProductMaterializer
     pricing: ProductPricingService
+    images: ProductImageService
     product_readiness: ProductReadinessService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
@@ -246,8 +249,16 @@ def build_container(
     pricing = ProductPricingService(
         store=product_store, revisions=revisions, audit=audit, clock=clock
     )
+    # M4 PR-E: derived image lineage, operator image selection and exact-binary QA. Derived
+    # bytes live in their own namespace, never among the source assets.
+    images = ProductImageService(
+        store=product_store,
+        artifacts=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        audit=audit,
+        clock=clock,
+    )
     product_readiness = ProductReadinessService(
-        store=product_store, revisions=revisions, pricing=pricing
+        store=product_store, revisions=revisions, pricing=pricing, images=images
     )
     screens = ScreenService(
         clock=clock,
@@ -285,6 +296,7 @@ def build_container(
         products=products,
         materializer=materializer,
         pricing=pricing,
+        images=images,
         product_readiness=product_readiness,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,

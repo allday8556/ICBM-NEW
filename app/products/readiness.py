@@ -18,9 +18,11 @@ fingerprint. Within one evaluation the status is the highest of
 layers with the marketplace/account checks, and until it exists nothing is a registration
 candidate.
 
-**Images.** The derived-image selection and its artifact-bound QA (ADR-0013 §9) arrive in PR-E.
-Until then base readiness can never be READY: ``IMAGE_SELECTION_QA_PENDING`` is always a
-REVIEW_REQUIRED reason, rather than a silent pass.
+**Images** (PR-E, ADR-0013 §9). Base readiness reads the Item's current operator image selection:
+it must exist, account for the current bound revision's CONFIRMED images, name only derivations
+validated against that revision, and every selected exact binary must carry a PASS under the
+current QA rule for that revision (`app.products.images`). ``base-readiness/v2`` replaces
+PR-D's unconditional ``IMAGE_SELECTION_QA_PENDING``.
 """
 
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from enum import StrEnum
 
 from app.collect.facts import Availability, FieldLevel, FieldStatus, StockValue
 from app.collect.revisions import ProductFactsRevisionStore
+from app.products.images import ProductImageService
 from app.products.model import (
     READINESS_PRECEDENCE,
     ReadinessStatus,
@@ -42,7 +45,7 @@ from app.products.pricing_service import (
 )
 from app.products.store import ProductFoundationStore
 
-BASE_READINESS_RULE_VERSION = "base-readiness/v1"
+BASE_READINESS_RULE_VERSION = "base-readiness/v2"
 PRICING_READINESS_RULE_VERSION = "pricing-readiness/v1"
 
 # Reason codes: our own, never page content.
@@ -50,13 +53,10 @@ GROUP_CANDIDATE_PENDING = "GROUP_MEMBER_CANDIDATE_PENDING"
 SOURCE_CORE_FIELD_REVIEW_REQUIRED = "SOURCE_CORE_FIELD_REVIEW_REQUIRED"
 SOURCE_CORE_FIELD_ABSENT = "SOURCE_CORE_FIELD_ABSENT"
 SOURCE_STOCK_SOLD_OUT = "SOURCE_STOCK_SOLD_OUT"
-IMAGE_SELECTION_QA_PENDING = "IMAGE_SELECTION_QA_PENDING"
 PRICING_SNAPSHOT_MISSING = "PRICING_SNAPSHOT_MISSING"
 PRICING_SNAPSHOT_SUPERSEDED = "PRICING_SNAPSHOT_SUPERSEDED"
 # ABSENT is a legitimate reading of these (M3 capability boundary): never a failure by itself.
 _ABSENCE_ALLOWED = frozenset({"options", "quantity_tiers"})
-# The image-selection owner of ADR-0013 §9 does not exist until PR-E.
-_IMAGE_STATE = "SELECTION_QA_PENDING"
 
 
 class ReadinessLayer(StrEnum):
@@ -108,24 +108,25 @@ class ProductReadinessService:
         store: ProductFoundationStore,
         revisions: ProductFactsRevisionStore,
         pricing: ProductPricingService,
+        images: ProductImageService,
     ) -> None:
         self._store = store
         self._revisions = revisions
         self._pricing = pricing
+        self._images = images
 
     def base_readiness(self, item_id: str) -> Readiness:
         with self._store.reading() as unit:
             procurement = current_procurement(unit, item_id)
             candidates = unit.pending_candidates(procurement.item.product_group_id)
             membership_current = unit.membership_is_current(procurement.item.product_group_id)
+            image_state = self._images.image_state(unit, item_id, procurement.current_revision_id)
         reasons = list(procurement.reasons)
         if candidates:
             reasons.append(Reason(GROUP_CANDIDATE_PENDING, ReadinessStatus.REVIEW_REQUIRED))
         if procurement.binding is not None and procurement.current_revision_id is not None:
             reasons.extend(self._source_fact_reasons(procurement.current_revision_id))
-        reasons.append(
-            Reason(IMAGE_SELECTION_QA_PENDING, ReadinessStatus.REVIEW_REQUIRED, "images")
-        )
+        reasons.extend(image_state.reasons)
         ordered = _ordered(reasons)
         return Readiness(
             layer=ReadinessLayer.BASE,
@@ -140,7 +141,7 @@ class ProductReadinessService:
                     **_procurement_state(procurement),
                     "membership_current": membership_current,
                     "pending_candidates": candidates,
-                    "image_state": _IMAGE_STATE,
+                    "images": image_state.fingerprint,
                 }
             ),
         )

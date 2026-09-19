@@ -23,11 +23,12 @@ from app.config import AppConfig
 from app.container import Container
 from app.db.database import Database, create_sqlite_engine
 from app.db.migrate import alembic_config, current_revision, head_revision, upgrade_to_head
+from app.products.images import IMAGE_SELECTION_MISSING
 from app.products.materialization import ProductMaterializer
 from app.products.model import MoveReason, ReadinessStatus
 from app.products.pricing import PriceBasis, PriceGuard, PricingMoveReason
 from app.products.pricing_service import PricingOutcome, PricingResult, ProductPricingService
-from app.products.readiness import IMAGE_SELECTION_QA_PENDING, Readiness
+from app.products.readiness import Readiness
 from app.products.store import ProductFoundationStore
 from tests.product_support import (
     PRODUCT,
@@ -493,14 +494,14 @@ def test_pricing_is_audited_with_identifiers_and_amounts_only(
 # ---------------------------------------------------------------- 26–32 base readiness
 
 
-def test_a_complete_item_is_still_not_base_ready_without_image_selection_qa(
+def test_a_complete_item_is_not_base_ready_without_an_image_selection(
     container: Container, sources: Collections
 ) -> None:
-    # Kickoff §11.31: PR-E owns image selection and its QA; until then base readiness says so.
+    # PR-D kickoff §11.31, now PR-E: without an operator image selection, base readiness says so.
     item = _item(container, sources)
     readiness = container.product_readiness.base_readiness(item)
     assert readiness.status is ReadinessStatus.REVIEW_REQUIRED
-    assert _codes(readiness) == [(IMAGE_SELECTION_QA_PENDING, "images")]
+    assert _codes(readiness) == [(IMAGE_SELECTION_MISSING, "images")]
     assert readiness.pricing_context_fingerprint is None
 
 
@@ -531,7 +532,7 @@ def test_sold_out_blocks_and_every_reason_is_kept(
     assert readiness.status is ReadinessStatus.BLOCKED
     assert _codes(readiness) == [
         ("SOURCE_STOCK_SOLD_OUT", "stock"),
-        (IMAGE_SELECTION_QA_PENDING, "images"),
+        (IMAGE_SELECTION_MISSING, "images"),
         ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "original_name"),
     ]
 
@@ -543,7 +544,7 @@ def test_every_core_field_under_review_is_named(container: Container, sources: C
     readiness = container.product_readiness.base_readiness(item)
     assert readiness.status is ReadinessStatus.REVIEW_REQUIRED
     assert _codes(readiness) == [
-        (IMAGE_SELECTION_QA_PENDING, "images"),
+        (IMAGE_SELECTION_MISSING, "images"),
         ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "original_name"),
         ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "stock"),
     ]
@@ -562,7 +563,7 @@ def test_a_coverage_field_under_review_is_not_a_base_gate(
     item = _item(container, sources, product(**{key: review(f".{key}")}))
     readiness = container.product_readiness.base_readiness(item)
     assert readiness.status is ReadinessStatus.REVIEW_REQUIRED
-    assert _codes(readiness) == [(IMAGE_SELECTION_QA_PENDING, "images")]
+    assert _codes(readiness) == [(IMAGE_SELECTION_MISSING, "images")]
 
 
 @pytest.mark.parametrize(
@@ -582,7 +583,7 @@ def test_pricing_inputs_under_review_belong_to_pricing_readiness_only(
 ) -> None:
     item = _item(container, sources, product(**{key: fact}))
     base = container.product_readiness.base_readiness(item)
-    assert _codes(base) == [(IMAGE_SELECTION_QA_PENDING, "images")]
+    assert _codes(base) == [(IMAGE_SELECTION_MISSING, "images")]
     pricing = container.product_readiness.pricing_readiness(item, context())
     assert pricing.status is ReadinessStatus.REVIEW_REQUIRED
     assert _codes(pricing) == [(code, key)]
@@ -743,7 +744,7 @@ def test_0012_to_0013_keeps_every_m4_row_and_guesses_no_price(tmp_path: Path) ->
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0013_m4_pricing_snapshots"
+        assert current_revision(engine) == head_revision()
     finally:
         engine.dispose()
     assert _rows(database) == before

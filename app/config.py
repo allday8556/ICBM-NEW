@@ -195,6 +195,12 @@ class AppConfig:
         return self.data_dir / "source-assets"
 
     @property
+    def derived_images_dir(self) -> Path:
+        """Content-addressed derived image artifacts (ADR-0013 §9): PRODUCT-owned, apart from
+        the source assets they derive from."""
+        return self.data_dir / "derived-images"
+
+    @property
     def log_dir(self) -> Path | None:
         return self.data_dir / "logs" if self.log_to_file else None
 

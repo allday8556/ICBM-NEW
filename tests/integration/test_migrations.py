@@ -44,8 +44,18 @@ CANONICAL_TABLES = (
     # M4 PR-D (ADR-0013 §7): immutable pricing snapshots and their current-pointer history.
     "pricing_snapshots",
     "current_pricing_snapshot_moves",
+    # M4 PR-E (ADR-0013 §9): derived image lineage, operator image selection, exact-binary QA.
+    "derived_image_artifacts",
+    "derived_image_derivations",
+    "derived_image_derivation_inputs",
+    "derived_image_derivation_roots",
+    "image_selection_revisions",
+    "image_selection_source_decisions",
+    "image_selection_outputs",
+    "current_image_selection_moves",
+    "image_qa_results",
 )
-HEAD = "0013_m4_pricing_snapshots"
+HEAD = "0014_m4_derived_image_lineage"
 
 
 def _url(path: Path) -> str:

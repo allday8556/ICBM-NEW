@@ -543,3 +543,117 @@ def test_the_float_detector_fires() -> None:
         ("app/products/pricing_store.py", "n = 10\n"),
     ]
     assert float_problems(sources) == ["app/products/pricing.py:1", "app/products/readiness.py:1"]
+
+
+# ---------------------------------------------------------------- PR-E images
+#
+# Issue #80 PR-E kickoff 5738166312 §K. Selection is an operator decision owned by the image
+# service, and PRODUCT code never writes COLLECT's source truth.
+
+SELECTION_OWNERS = frozenset(
+    {"app/products/images.py", "app/products/image_store.py", "app/products/image_models.py"}
+)
+SELECTION_NAMES = frozenset(
+    {
+        "record_selection",
+        "record_operator_selection",
+        "ImageSelectionRevision",
+        "ImageSelectionSourceDecision",
+        "ImageSelectionOutput",
+        "CurrentImageSelectionMove",
+    }
+)
+SELECTION_TABLES = re.compile(
+    r"\bimage_selection_revisions\b|\bimage_selection_source_decisions\b"
+    r"|\bimage_selection_outputs\b|\bcurrent_image_selection_moves\b"
+)
+SOURCE_TRUTH_WRITERS = frozenset({"SourceAssetStore", "SourceAssetRecorder"})
+SOURCE_TRUTH_MODELS = frozenset({"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"})
+
+
+def _named(node: ast.AST) -> str | None:
+    if isinstance(node, ast.alias):
+        return node.name
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def image_selection_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Production code, other than the image owner and the migrations, that could create or move
+    an image selection: no system path may select an image on an operator's behalf."""
+    offenders = []
+    for where, source in sources:
+        if where in SELECTION_OWNERS or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            text = node.value if isinstance(node, ast.Constant) else None
+            if _named(node) in SELECTION_NAMES or (
+                isinstance(text, str) and SELECTION_TABLES.search(text)
+            ):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def source_truth_write_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """PRODUCT code that could write a source asset, a source image reference or a revision:
+    a source-asset writer, a model constructor, or an update/delete/insert of those models."""
+    offenders = []
+    for where, source in sources:
+        if not where.startswith("app/products/"):
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if _named(node) in SOURCE_TRUTH_WRITERS:
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+            if not isinstance(node, ast.Call):
+                continue
+            callee = _named(node.func)
+            if callee in SOURCE_TRUTH_MODELS:
+                offenders.append(f"{where}:{node.lineno}")
+            if (
+                callee in {"update", "delete", "insert"}
+                and node.args
+                and _named(node.args[0]) in SOURCE_TRUTH_MODELS
+            ):
+                offenders.append(f"{where}:{node.lineno}")
+    return offenders
+
+
+def test_only_the_image_owner_creates_or_moves_a_selection() -> None:
+    assert image_selection_writer_problems(_code()) == []
+
+
+def test_the_image_selection_writer_detector_fires() -> None:
+    sources = [
+        ("app/products/materialization.py", "unit.record_operator_selection(item)\n"),
+        ("app/products/other.py", "from app.products.image_models import ImageSelectionOutput\n"),
+        ("app/other/raw.py", "SQL = 'INSERT INTO current_image_selection_moves VALUES (1)'\n"),
+        ("app/products/images.py", "images.record_selection(item)\n"),
+        ("app/db/migrations/versions/0099_x.py", "T = 'image_selection_outputs'\n"),
+    ]
+    assert image_selection_writer_problems(sources) == [
+        "app/products/materialization.py:1",
+        "app/products/other.py:1",
+        "app/other/raw.py:1",
+    ]
+
+
+def test_product_code_never_writes_source_truth() -> None:
+    assert source_truth_write_problems(_code()) == []
+
+
+def test_the_source_truth_writer_detector_fires() -> None:
+    sources = [
+        ("app/products/images.py", "store = SourceAssetStore(path, db, decoder, clock)\n"),
+        ("app/products/image_store.py", "session.add(SourceAsset(sha256=s))\n"),
+        ("app/products/other.py", "session.execute(update(SourceAsset).values(width=1))\n"),
+        ("app/products/fine.py", "row = session.get(SourceAsset, sha)\n"),
+        ("app/collect/assets.py", "session.add(SourceAsset(sha256=s))\n"),
+    ]
+    assert source_truth_write_problems(sources) == [
+        "app/products/images.py:1",
+        "app/products/image_store.py:1",
+        "app/products/other.py:1",
+    ]

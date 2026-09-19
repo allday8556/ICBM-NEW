@@ -42,6 +42,12 @@ class AuditEventType(StrEnum):
     # calculated amounts only. Committed with the snapshot and its current-pointer move.
     PRODUCT_PRICING_SNAPSHOT_RECORDED = "PRODUCT_PRICING_SNAPSHOT_RECORDED"
     PRODUCT_CURRENT_PRICING_SNAPSHOT_MOVED = "PRODUCT_CURRENT_PRICING_SNAPSHOT_MOVED"
+    # M4 PR-E images (ADR-0013 §9): ids, hashes, versions, roles and order, decision and verdict
+    # enums, finding codes. Never a URL, OCR or translation text, prompt or secret.
+    PRODUCT_DERIVED_IMAGE_RECORDED = "PRODUCT_DERIVED_IMAGE_RECORDED"
+    PRODUCT_IMAGE_SELECTION_RECORDED = "PRODUCT_IMAGE_SELECTION_RECORDED"
+    PRODUCT_CURRENT_IMAGE_SELECTION_MOVED = "PRODUCT_CURRENT_IMAGE_SELECTION_MOVED"
+    PRODUCT_IMAGE_QA_RECORDED = "PRODUCT_IMAGE_QA_RECORDED"
 
 
 class AuditOutcome(StrEnum):
