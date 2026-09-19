@@ -30,6 +30,7 @@ from app.register.model import (
 )
 from app.register.payload import build_payload
 from app.register.policy import (
+    AssetPolicy,
     DuplicateKeyKind,
     StaticRegistrationMetadata,
     StaticRegistrationPolicy,
@@ -659,6 +660,48 @@ def test_every_dependency_drift_refuses_the_freeze(
         builder.freeze(
             prep.service.candidate(final.request), created_by=OPERATOR, correlation_id=CID
         )
+
+
+def test_without_provider_assets_the_fingerprint_alone_guards_the_freeze(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # A target that needs no provider-issued asset has the final preflight only, so no prepared
+    # asset binds the candidate: a drift that stays READY is refused by its fingerprint alone.
+    no_assets = AssetPolicy(profile="asset-profile-test-1", provider_asset_identity_required=False)
+    prep.policies.put(target(account, asset_policy=no_assets))
+    _item, _draft_id, req = _single(container, sources, store, account)
+    first = prep.service.candidate(req)
+    req = replace(req, duplicate_evidence=no_match(first))
+    candidate = prep.service.candidate(req)
+    assert (candidate.status, candidate.upload_permitted) == (ReadinessStatus.READY, False)
+    final = prep.service.final(req)
+    assert final.status is ReadinessStatus.READY
+    prep.metadata.put(metadata(metadata_revision="metadata-test-2"))
+    drifted = prep.service.final(req)
+    assert drifted.status is ReadinessStatus.READY
+    assert drifted.dependency_fingerprint != final.dependency_fingerprint
+    _stale(_builder(container, prep), final)
+    assert count(config, "registration_snapshots") == 0
+    frozen = _builder(container, prep).freeze(drifted, created_by=OPERATOR, correlation_id=CID)
+    assert all(
+        asset["provider_asset_ref"] is None
+        for asset in json.loads(_one_item_assets(config, frozen.registration_snapshot_id))
+    )
+
+
+def _one_item_assets(config: AppConfig, snapshot_id: str) -> str:
+    with contextlib.closing(raw(config)) as connection:
+        (assets,) = connection.execute(
+            "SELECT publication_assets_json FROM registration_item_snapshots"
+            " WHERE registration_snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+    return str(assets)
 
 
 def test_secret_material_never_reaches_a_snapshot(
