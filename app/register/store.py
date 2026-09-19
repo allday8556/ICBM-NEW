@@ -34,7 +34,7 @@ It is the only production writer of the registration tables (a repository rule k
 
 import json
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -50,6 +50,7 @@ from app.core.clock import Clock
 from app.core.errors import ErrorClass, InputValidationError, NotFoundError
 from app.db.database import Database
 from app.products.models import GroupChangeEvent, PricingSnapshot, ProductItem
+from app.products.pricing_store import PricingSnapshotRecord, PricingUnit
 from app.register.model import (
     BLOCKING_STATES,
     AbsenceEvidence,
@@ -228,6 +229,14 @@ class RegistrationRecord:
     published_state: str
     lifecycle_state: RegistrationLifecycle
     items: tuple[RegistrationItemRecord, ...]
+
+
+@dataclass(frozen=True)
+class ConflictRecord:
+    """A CREATE Intent in a unit's R2 conflict scope, and its state (``SENT`` or ``UNKNOWN``)."""
+
+    intent_id: str
+    state: IntentState
 
 
 @dataclass(frozen=True)
@@ -718,25 +727,130 @@ class RegistrationUnit:
         snapshot = self.session.get(RegistrationSnapshot, registration_snapshot_id)
         if snapshot is None:
             raise NotFoundError("REGISTER_NOT_FOUND", "the Snapshot does not exist")
-        mine = self._lineage(self._groups_of(registration_snapshot_id))
+        return tuple(
+            conflict.intent_id
+            for conflict in self.conflicts_for(
+                snapshot.marketplace_key,
+                snapshot.marketplace_account_id,
+                self._groups_of(registration_snapshot_id),
+                snapshot.listing_identity,
+                exclude_snapshot_id=registration_snapshot_id,
+            )
+        )
+
+    def conflicts_for(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        groups: Iterable[str],
+        listing_identity: str,
+        *,
+        exclude_snapshot_id: str | None = None,
+    ) -> tuple["ConflictRecord", ...]:
+        """The R2 conflict scope of a provider-listing unit, prospective or frozen: every CREATE
+        Intent that is ``SENT`` or ``UNKNOWN`` in this marketplace and canonical account and
+        shares the listing identity or a group, widened by lineage. The M5 PR-C preflight reads
+        it before any Snapshot exists; the database trigger remains the durable barrier."""
+        mine = self._lineage(frozenset(groups))
         candidates = self.session.scalars(
             select(RegistrationIntent).where(
                 RegistrationIntent.operation == Operation.CREATE.value,
-                RegistrationIntent.marketplace_key == snapshot.marketplace_key,
-                RegistrationIntent.marketplace_account_id == snapshot.marketplace_account_id,
+                RegistrationIntent.marketplace_key == marketplace_key,
+                RegistrationIntent.marketplace_account_id == marketplace_account_id,
                 RegistrationIntent.state.in_([s.value for s in BLOCKING_STATES]),
-                RegistrationIntent.registration_snapshot_id != registration_snapshot_id,
             )
         ).all()
         blocking = []
         for intent in candidates:
+            if intent.registration_snapshot_id == exclude_snapshot_id:
+                continue
             other = self.session.get(RegistrationSnapshot, intent.registration_snapshot_id)
             assert other is not None
-            if other.listing_identity == snapshot.listing_identity or mine & self._lineage(
+            if other.listing_identity == listing_identity or mine & self._lineage(
                 self._groups_of(other.registration_snapshot_id)
             ):
-                blocking.append(intent.intent_id)
-        return tuple(sorted(blocking))
+                blocking.append(ConflictRecord(intent.intent_id, IntentState(intent.state)))
+        return tuple(sorted(blocking, key=lambda c: c.intent_id))
+
+    def live_registrations(
+        self, marketplace_key: str, marketplace_account_id: str, groups: Iterable[str]
+    ) -> tuple[str, ...]:
+        """The ACTIVE, verified registrations of this account with an Item whose current group
+        the unit's groups reach by lineage (§13). An externally removed one is history only."""
+        reach = self._lineage(frozenset(groups))
+        rows = self.session.execute(
+            select(
+                MarketplaceRegistration.registration_id,
+                MarketplaceRegistrationItem.current_group_id,
+            )
+            .join(
+                MarketplaceRegistrationItem,
+                MarketplaceRegistrationItem.registration_id
+                == MarketplaceRegistration.registration_id,
+            )
+            .where(
+                MarketplaceRegistration.marketplace_key == marketplace_key,
+                MarketplaceRegistration.marketplace_account_id == marketplace_account_id,
+                MarketplaceRegistration.lifecycle_state == RegistrationLifecycle.ACTIVE.value,
+            )
+        ).all()
+        return tuple(sorted({registration for registration, group in rows if group in reach}))
+
+    def pricing_pin(self, pricing_snapshot_id: str) -> PricingSnapshotRecord | None:
+        """The exact M4 PricingSnapshot a Draft Item pins, read, never priced."""
+        return PricingUnit(self.session, self._clock).snapshot(pricing_snapshot_id)
+
+    def unit_generation(self, draft_id: str, unit_key: Iterable[tuple[str, str]]) -> int:
+        """How many Snapshots of this Draft for exactly this unit (its Item keys) an Intent
+        already names: each may have reached the marketplace (§7)."""
+        wanted = sorted(unit_key)
+        generation = 0
+        for snapshot in self.session.scalars(
+            select(RegistrationSnapshot).where(RegistrationSnapshot.draft_id == draft_id)
+        ):
+            keys = sorted(
+                (group, signature)
+                for group, signature in self.session.execute(
+                    select(
+                        RegistrationItemSnapshot.group_id_at_registration,
+                        RegistrationItemSnapshot.composition_signature,
+                    ).where(
+                        RegistrationItemSnapshot.registration_snapshot_id
+                        == snapshot.registration_snapshot_id
+                    )
+                ).all()
+            )
+            named = self.session.scalar(
+                select(func.count())
+                .select_from(RegistrationIntent)
+                .where(
+                    RegistrationIntent.registration_snapshot_id == snapshot.registration_snapshot_id
+                )
+            )
+            if keys == wanted and named:
+                generation += 1
+        return generation
+
+    def matching_snapshot(
+        self,
+        draft_id: str,
+        draft_revision: int,
+        listing_identity: str,
+        preflight_fingerprint: str,
+        payload_hash: str,
+    ) -> SnapshotRecord | None:
+        """An already frozen Snapshot of exactly this preparation, if any: freezing the same
+        preparation again returns it rather than a second Snapshot."""
+        row = self.session.scalars(
+            select(RegistrationSnapshot).where(
+                RegistrationSnapshot.draft_id == draft_id,
+                RegistrationSnapshot.draft_revision == draft_revision,
+                RegistrationSnapshot.listing_identity == listing_identity,
+                RegistrationSnapshot.preflight_fingerprint == preflight_fingerprint,
+                RegistrationSnapshot.payload_hash == payload_hash,
+            )
+        ).first()
+        return None if row is None else self.snapshot(row.registration_snapshot_id)
 
     def intent(self, intent_id: str) -> IntentRecord | None:
         row = self.session.get(RegistrationIntent, intent_id)
