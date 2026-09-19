@@ -54,8 +54,10 @@ CANONICAL_TABLES = (
     "image_selection_outputs",
     "current_image_selection_moves",
     "image_qa_results",
+    # M4 PR-Q (ruling 5738760913): immutable product-level quantity offers.
+    "quantity_offers",
 )
-HEAD = "0014_m4_derived_image_lineage"
+HEAD = "0015_m4_quantity_offers"
 
 
 def _url(path: Path) -> str:

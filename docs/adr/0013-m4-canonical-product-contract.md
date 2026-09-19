@@ -7,6 +7,8 @@ Status: **ACCEPTED** 2026-09-18. This is PR-A of Issue #80 (PR #81).
 
 It authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call. Each implementation PR (PR-B to PR-F) needs its own authorization.
 
+Clarified for product-level quantity offers by Issue #80 ruling `5738760913` (PR-Q, kickoff `5738854211`): §2 and §6 only. See "Clarification" below.
+
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #80 body (the M4 umbrella) and the architect kickoff `5726182664`, which authorized PR-A only;
 - the architect's PR #81 review `5245152210`, which ruled the five former choices for review and set two blockers (see "Rulings");
@@ -81,6 +83,11 @@ This ADR is a contract. It names entities and invariants. It does not fix tables
 - **`SourceSKU` and `QuantityOffer`** are source facts. M4 reads them from a revision only where the source states them (v3.1 §5.2).
   - Quantity tiers stay original `(quantity, total_price)` facts. They are never flattened into a unit price or multiplied into new totals.
   - Atomic source SKU identity is preserved. The same weight never merges a different count, grade or pack.
+  - **Product-level offers (ruling `5738760913`, PR-Q).** A revision may state `options = ABSENT` and `quantity_tiers = CONFIRMED`. Then each confirmed tier is one immutable, revision-scoped `QuantityOffer` of the source product itself, with its exact original total.
+    - `options = ABSENT` proves that no source SKU or configuration was stated, so such an offer has **no** `SourceSKU` reference.
+    - No synthetic "base SKU" is ever created to give it one.
+    - A `SourceSKU` reference is required only for a genuinely SKU-scoped offer, one tied to a CONFIRMED atomic source configuration. PR-Q materializes none.
+    - This reads what a revision states. It widens no COLLECT capability.
 - **The M3 capability boundary carries forward unchanged** (`docs/acceptance/M3.md` §2): positive `CONFIRMED` option-axis/configuration support and positive quantity-tier values are not accepted.
 - **ABSENT is never turned into a source entity.** A revision that validly reads `options = ABSENT` and `quantity_tiers = ABSENT` states no SKU and no tier. M4 creates and persists **no** `SourceSKU`, supplier SKU identifier or `QuantityOffer` for it. The sellable unit such a product needs is represented on the product side only: a default single-unit composition and Item (§5) with a base-product binding (§6). Missing capability is not a licence to guess (M3.md §2.4).
 
@@ -196,15 +203,17 @@ SourceBinding
   source_binding_id
   group_member_id
   binding_kind             SOURCE_OFFER | BASE_PRODUCT
-  source_sku_id            SOURCE_OFFER only; none for BASE_PRODUCT
-  quantity_offer_id        SOURCE_OFFER only; none for BASE_PRODUCT
+  source_sku_id            a SKU-scoped SOURCE_OFFER only; none for a product-level offer or BASE_PRODUCT
+  quantity_offer_id        every SOURCE_OFFER, exactly one; none for BASE_PRODUCT
   fulfillment_quantity
   provenance               which source revision and which fields justify the binding
   valid_from / valid_to
 ```
 
 **The two binding kinds:**
-- **`SOURCE_OFFER`** binds a source-stated `SourceSKU` and `QuantityOffer` (v3.1 §12.1).
+- **`SOURCE_OFFER`** always binds one exact, source-stated `QuantityOffer` (v3.1 §12.1).
+  - Its `fulfillment_quantity` is that offer's quantity.
+  - It names the offer's `SourceSKU` only when the offer is SKU-scoped. A product-level offer has none (ruling `5738760913`).
 - **`BASE_PRODUCT`** binds the source product itself, when its current source revision validly states no options and no tiers (§2, §5). It references no SKU or offer identity, because none exists. Its provenance names the revision and the explicit base product price, `shipping` and `minimum_sale_price` fields it relies on.
 
 A `BASE_PRODUCT` binding fulfils only the default single-unit composition with `fulfillment_quantity = 1`. Anything more would be composed fulfillment, which is off by default (below).
@@ -470,6 +479,16 @@ The first draft raised five choices for review. The architect ruled all five and
   - `PricingSnapshot` is per Item **and** per explicit `PricingContext` (marketplace, account when fees or policy differ, fee table version, pricing policy version), and one Item can have several current snapshots across contexts (§7).
   - Readiness splits into base readiness, per-context pricing readiness and M5 registration preflight (§8).
 - **Blocker 2: no fabricated source truth.** Resolved by ruling B.
+
+## Clarification (Issue #80 ruling `5738760913`, PR-Q)
+
+The architect's product-level quantity-offer ruling, under the quantity-priced rule `5737762202`, clarifies §2 and §6. The text above now carries it:
+- a product-level `QuantityOffer` may have no `SourceSKU` when the revision states `options = ABSENT`;
+- a `SOURCE_OFFER` binding always requires an exact `QuantityOffer`;
+- a `SourceSKU` reference is required only for a genuinely SKU-scoped offer;
+- no synthetic "base SKU" is ever fabricated to satisfy a reference.
+
+Ruling C (§7) already covers the minimum sale price. A generic `minimum_sale_price` names no offer. It is never applied to every quantity and never multiplied by one, so a `SOURCE_OFFER` it would affect is `REVIEW_REQUIRED`. Nothing else in this ADR changes.
 
 ## Consequences
 

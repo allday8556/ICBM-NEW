@@ -706,18 +706,30 @@ M4_TABLES = (
 )
 
 
+def _columns(connection: sqlite3.Connection, table: str) -> str:
+    """Every column but the one migration 0015 (PR-Q) appended to ``source_bindings``, so rows
+    compare across revisions on what each of them holds."""
+    names = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
+    return ", ".join(name for name in names if name != "quantity_offer_id")
+
+
 def _rows(database: Path) -> dict[str, list[tuple[object, ...]]]:
     with contextlib.closing(sqlite3.connect(database)) as connection:
         return {
-            table: connection.execute(f"SELECT * FROM {table} ORDER BY 1, 2").fetchall()
+            table: connection.execute(
+                f"SELECT {_columns(connection, table)} FROM {table} ORDER BY 1, 2"
+            ).fetchall()
             for table in M4_TABLES
         }
 
 
 def _materialized_at_0012(tmp_path: Path) -> Path:
+    """Two BASE_PRODUCT products at revision 0012. The services write the head schema (migration
+    0015 appended a binding column), so they run at head, and the database then steps down through
+    the fail-closed downgrades, which keep every row."""
     database = tmp_path / "icbm.db"
     url = _url(database)
-    command.upgrade(alembic_config(url), "0012_m4_product_foundation")
+    upgrade_to_head(url)
     db = Database(url)
     try:
         clock = FakeClock()
@@ -733,6 +745,7 @@ def _materialized_at_0012(tmp_path: Path) -> Path:
             assert materializer.materialize_run(run_id).item_id is not None
     finally:
         db.dispose()
+    command.downgrade(alembic_config(url), "0012_m4_product_foundation")
     return database
 
 

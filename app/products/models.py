@@ -14,12 +14,18 @@ Nine tables, in the order the migration creates them:
 - ``group_change_events``: MERGE/SPLIT lineage. PR-B defines it and performs neither.
 - ``listing_compositions``: immutable seller multiplicity, identified by its canonical signature.
 - ``product_items``: the product-side Item, ``product_group_id + composition_signature``.
-- ``source_bindings``: current procurement. Only ``BASE_PRODUCT`` can be stored; ``SOURCE_OFFER``
-  needs referential source SKU and offer entities that do not exist yet.
+- ``source_bindings``: current procurement, ``BASE_PRODUCT`` or ``SOURCE_OFFER``. Migration 0015
+  (PR-Q) added ``quantity_offer_id``: a ``SOURCE_OFFER`` names exactly one ``quantity_offers`` row,
+  and a ``BASE_PRODUCT`` names none.
+
+Migration 0015 also adds ``quantity_offers``: immutable, revision-scoped product-level offers, each
+exactly one CONFIRMED tier of its revision (ruling 5738760913). No SourceSKU table or column exists:
+a product-level offer has none, and none is fabricated.
 
 CHECK constraints repeat the single-row invariants. The cross-row invariants — same source
-identity, pointer chain, complete membership snapshots, and a confirmed member bound to its own
-group's Item — are enforced by the triggers of migration 0012, so no write path can bypass them.
+identity, pointer chain, complete membership snapshots, a confirmed member bound to its own
+group's Item, and a SOURCE_OFFER bound to the exact offer, quantity and current revision it
+names — are enforced by the triggers of migrations 0012 and 0015, so no write path can bypass them.
 """
 
 from collections.abc import Iterable
@@ -304,10 +310,44 @@ class ProductItem(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
+class QuantityOffer(Base):
+    """One product-level offer: exactly one CONFIRMED tier of one immutable source revision, at its
+    source position, with its original total (ruling 5738760913).
+
+    It references no SourceSKU: the revision states ``options = ABSENT``, so no source SKU exists to
+    reference, and none is fabricated. Migration 0015's trigger refuses an offer that is not exactly
+    the tier its revision states, and every row rejects UPDATE and DELETE.
+    """
+
+    __tablename__ = "quantity_offers"
+    __table_args__ = (
+        UniqueConstraint("source_revision_id", "tier_ordinal"),
+        UniqueConstraint("source_revision_id", "quantity"),
+        CheckConstraint("tier_ordinal >= 0", name="tier_ordinal_non_negative"),
+        CheckConstraint("quantity >= 1", name="quantity_positive"),
+        CheckConstraint("total_price_krw >= 0", name="total_price_non_negative"),
+        CheckConstraint("currency = 'KRW'", name="currency_krw"),
+    )
+
+    quantity_offer_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_product_uid: Mapped[str] = mapped_column(
+        String(36), ForeignKey("source_products.source_product_uid")
+    )
+    source_revision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("product_facts_revisions.revision_id")
+    )
+    tier_ordinal: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[int] = mapped_column(Integer)
+    total_price_krw: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
 class SourceBinding(Base):
     """Where an Item is currently procured (ADR-0013 §6). A binding is closed, never edited, and
-    at most one is open per Item. There is no source SKU or offer column: a ``BASE_PRODUCT``
-    binding has none, and ``SOURCE_OFFER`` cannot be stored until referential entities exist."""
+    at most one is open per Item. A ``SOURCE_OFFER`` names its exact ``QuantityOffer`` and at most
+    one open binding names any offer; a ``BASE_PRODUCT`` names none. There is no SKU column: a
+    product-level offer has no SourceSKU (ruling 5738760913)."""
 
     __tablename__ = "source_bindings"
     __table_args__ = (
@@ -317,8 +357,17 @@ class SourceBinding(Base):
             unique=True,
             sqlite_where=text("valid_to IS NULL"),
         ),
+        Index(
+            "ux_source_bindings_one_open_per_offer",
+            "quantity_offer_id",
+            unique=True,
+            sqlite_where=text("valid_to IS NULL"),
+        ),
         CheckConstraint(_in("binding_kind", BindingKind), name="binding_kind_valid"),
-        CheckConstraint("binding_kind <> 'SOURCE_OFFER'", name="source_offer_unavailable"),
+        CheckConstraint(
+            "(binding_kind = 'SOURCE_OFFER') = (quantity_offer_id IS NOT NULL)",
+            name="source_offer_names_its_offer",
+        ),
         CheckConstraint("fulfillment_quantity >= 1", name="fulfillment_quantity_positive"),
         CheckConstraint(
             "binding_kind <> 'BASE_PRODUCT' OR fulfillment_quantity = 1",
@@ -343,6 +392,10 @@ class SourceBinding(Base):
     correlation_id: Mapped[str] = mapped_column(String(64))
     valid_from: Mapped[datetime] = mapped_column(UTCDateTime)
     valid_to: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Migration 0015: the last column, so every earlier row keeps its place.
+    quantity_offer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("quantity_offers.quantity_offer_id")
+    )
 
 
 # ---------------------------------------------------------------- pricing (migration 0013)

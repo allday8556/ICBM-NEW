@@ -25,6 +25,15 @@ gate is an exact rational comparison. Rounding is declared, not implied: v1 know
 are read only where the current source revision states them unambiguously. Anything else is a
 reason, never a guess: no price is chosen by label or order, no conditional shipping is flattened,
 and nothing is multiplied by a quantity or divided into a unit price.
+
+**Two procurements** (ADR-0013 §6–§7):
+- A ``BASE_PRODUCT`` binding reads the revision's one explicit base price, its shipping and its
+  minimum sale price.
+- A ``SOURCE_OFFER`` binding (PR-Q, ruling 5738760913) reads the bound offer's own total as the
+  purchase cost, and never a generic ``prices`` entry. Shipping follows the same rules. The generic
+  ``minimum_sale_price`` names no offer, so a SOURCE_OFFER is priced only when it is ABSENT: a
+  stated or unsettled one is REVIEW_REQUIRED. It is never applied to every quantity and never
+  multiplied by one.
 """
 
 import hashlib
@@ -34,7 +43,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
-from typing import Final, Protocol
+from typing import Final
 
 from app.collect.facts import (
     FieldStatus,
@@ -44,10 +53,17 @@ from app.collect.facts import (
     ShippingValue,
 )
 from app.products.model import ReadinessStatus, Reason
+from app.products.quantity import (
+    OfferField,
+    OfferTerms,
+    QuantityOfferEvidence,
+    product_level_offers,
+)
 
 PRICING_RULE_VERSION: Final = "pricing-rule/v1"
 CONTEXT_VERSION: Final = "pricing-context/v1"
-DEPENDENCY_VERSION: Final = "pricing-dependency/v1"
+# v2 (PR-Q): the dependency names the binding kind, the exact offer and the fulfillment quantity.
+DEPENDENCY_VERSION: Final = "pricing-dependency/v2"
 # Policy v1 (Issue #80 §7, kickoff 5737440897 §B): exact fractions, never floats.
 TARGET_NET_MARGIN: Final = Fraction(35, 100)
 MINIMUM_NET_MARGIN: Final = Fraction(10, 100)
@@ -214,19 +230,18 @@ SHIPPING_UNKNOWN = "PRICING_SHIPPING_UNKNOWN"
 MINIMUM_SALE_PRICE_UNRESOLVED = "PRICING_MINIMUM_SALE_PRICE_UNRESOLVED"
 MINIMUM_SALE_PRICE_NOT_POSITIVE = "PRICING_MINIMUM_SALE_PRICE_NOT_POSITIVE"
 TARGET_MARGIN_UNREACHABLE = "PRICING_TARGET_MARGIN_UNREACHABLE"
+# PR-Q: a SOURCE_OFFER whose offer its revision no longer states exactly, and a generic minimum
+# sale price that names no offer.
+QUANTITY_OFFER_UNRESOLVED = "PRICING_QUANTITY_OFFER_UNRESOLVED"
+MINIMUM_SALE_PRICE_NOT_OFFER_BOUND = "PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND"
 
-
-class SourceField(Protocol):
-    @property
-    def status(self) -> FieldStatus: ...
-
-    @property
-    def value(self) -> object: ...
+SourceField = OfferField
 
 
 @dataclass(frozen=True)
 class SourceInputs:
-    """What the bound current source revision states for a BASE_PRODUCT, exactly."""
+    """What the bound current source revision states for the bound procurement, exactly: a
+    BASE_PRODUCT's base price, or a SOURCE_OFFER's own offer total."""
 
     purchase_cost_krw: int
     supplier_shipping_krw: int
@@ -235,6 +250,27 @@ class SourceInputs:
 
 def _review(code: str, subject: str) -> Reason:
     return Reason(code, ReadinessStatus.REVIEW_REQUIRED, subject)
+
+
+def _supplier_shipping(fields: Mapping[str, SourceField], reasons: list[Reason]) -> int | None:
+    """The supplier shipping fee the revision states unambiguously, or ``None`` with its reason."""
+    shipping = fields.get("shipping")
+    if (
+        shipping is None
+        or shipping.status is not FieldStatus.CONFIRMED
+        or not isinstance(shipping.value, ShippingValue)
+    ):
+        reasons.append(_review(SHIPPING_UNRESOLVED, "shipping"))
+    elif shipping.value.kind is ShippingKind.FREE:
+        return 0
+    elif shipping.value.kind is ShippingKind.FIXED and shipping.value.fee_krw is not None:
+        return shipping.value.fee_krw
+    elif shipping.value.kind is ShippingKind.CONDITIONAL:
+        # Which side of the threshold an order falls on is not a source fact.
+        reasons.append(_review(SHIPPING_CONDITIONAL, "shipping"))
+    else:
+        reasons.append(_review(SHIPPING_UNKNOWN, "shipping"))
+    return None
 
 
 def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Reason, ...]:
@@ -252,23 +288,7 @@ def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Rea
     else:
         purchase = prices.value.prices[0].amount_krw
 
-    shipping_fee = None
-    shipping = fields.get("shipping")
-    if (
-        shipping is None
-        or shipping.status is not FieldStatus.CONFIRMED
-        or not isinstance(shipping.value, ShippingValue)
-    ):
-        reasons.append(_review(SHIPPING_UNRESOLVED, "shipping"))
-    elif shipping.value.kind is ShippingKind.FREE:
-        shipping_fee = 0
-    elif shipping.value.kind is ShippingKind.FIXED and shipping.value.fee_krw is not None:
-        shipping_fee = shipping.value.fee_krw
-    elif shipping.value.kind is ShippingKind.CONDITIONAL:
-        # Which side of the threshold an order falls on is not a source fact.
-        reasons.append(_review(SHIPPING_CONDITIONAL, "shipping"))
-    else:
-        reasons.append(_review(SHIPPING_UNKNOWN, "shipping"))
+    shipping_fee = _supplier_shipping(fields, reasons)
 
     minimum = None
     stated = fields.get("minimum_sale_price")
@@ -285,6 +305,34 @@ def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Rea
     if reasons or purchase is None or shipping_fee is None:
         return tuple(reasons)
     return SourceInputs(purchase, shipping_fee, minimum)
+
+
+def offer_source_inputs(
+    fields: Mapping[str, SourceField], offer: OfferTerms, currency: str
+) -> SourceInputs | tuple[Reason, ...]:
+    """The SOURCE_OFFER pricing inputs, or every reason they cannot be read unambiguously.
+
+    The purchase cost is the bound offer's own total, and only while the revision still states
+    that exact tier as a product-level offer. The generic ``prices`` field is never read.
+    """
+    reasons: list[Reason] = []
+    evidence, stated = product_level_offers(fields, currency)
+    if evidence is not QuantityOfferEvidence.PRODUCT_LEVEL or offer not in stated:
+        reasons.append(_review(QUANTITY_OFFER_UNRESOLVED, "quantity_tiers"))
+
+    shipping_fee = _supplier_shipping(fields, reasons)
+
+    minimum = fields.get("minimum_sale_price")
+    if minimum is None:
+        reasons.append(_review(MINIMUM_SALE_PRICE_UNRESOLVED, "minimum_sale_price"))
+    elif minimum.status is not FieldStatus.ABSENT:
+        # The generic minimum names no offer: it is never applied to every quantity, and never
+        # multiplied by one (ruling 5738760913 §7, ADR-0013 ruling C).
+        reasons.append(_review(MINIMUM_SALE_PRICE_NOT_OFFER_BOUND, "minimum_sale_price"))
+
+    if reasons or shipping_fee is None:
+        return tuple(reasons)
+    return SourceInputs(offer.total_price_krw, shipping_fee, None)
 
 
 # ---------------------------------------------------------------- the calculation
@@ -403,6 +451,9 @@ class PricingDependencies:
     signature_version: str
     membership_revision_id: str
     source_binding_id: str
+    binding_kind: str
+    quantity_offer_id: str | None
+    fulfillment_quantity: int
     source_revision_id: str
 
     def fingerprint(self, context: PricingContextInput) -> str:
@@ -416,6 +467,9 @@ class PricingDependencies:
                 "signature_version": self.signature_version,
                 "membership_revision_id": self.membership_revision_id,
                 "source_binding_id": self.source_binding_id,
+                "binding_kind": self.binding_kind,
+                "quantity_offer_id": self.quantity_offer_id,
+                "fulfillment_quantity": self.fulfillment_quantity,
                 "source_revision_id": self.source_revision_id,
                 "pricing_context_fingerprint": context.fingerprint,
                 "fee_table_version": context.fee_table_version,

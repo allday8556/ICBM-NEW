@@ -402,6 +402,10 @@ PRICING_MODULES = (
     "app/products/pricing_service.py",
     "app/products/pricing_store.py",
     "app/products/readiness.py",
+    # PR-Q: where offers are read, stored and materialized, no price is manufactured either.
+    "app/products/quantity.py",
+    "app/products/materialization.py",
+    "app/products/store.py",
 )
 READINESS_TRUTH = re.compile(r"registerable|readiness|(^|_)ready($|_)", re.I)
 # No marketplace is named in the Product DB (ADR-0013 §7): a fee named after one would be a
@@ -642,6 +646,138 @@ def test_the_image_selection_writer_detector_fires() -> None:
 
 def test_product_code_never_writes_source_truth() -> None:
     assert source_truth_write_problems(_code()) == []
+
+
+# ---------------------------------------------------------------- PR-Q quantity offers
+#
+# Issue #80 PR-Q kickoff 5738854211 §K, ruling 5738760913:
+# - only the product store writes an offer, and nothing else names the offer model or its table;
+# - the product layer holds no listing shape and no display text: M5 decides whether Items become
+#   one listing with quantity options, and what they are called.
+
+OFFER_OWNERS = frozenset({"app/products/store.py", "app/products/models.py"})
+OFFER_NAMES = frozenset({"QuantityOffer"})
+OFFER_TABLE = re.compile(r"\bquantity_offers\b")
+PRODUCT_SIDE_TABLES = (
+    "quantity_offers",
+    "listing_compositions",
+    "product_items",
+    "source_bindings",
+)
+LISTING_SHAPE = re.compile(r"label|display|title|option|listing_id|marketplace", re.I)
+HANGUL = re.compile("[가-힣]")
+LISTING_MODULES = re.compile(r"^(app\.(register|screens|ui|api|operate)|integrations)(\.|$)")
+
+
+def quantity_offer_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Production code, other than the product store, its models and the migrations, that names
+    the offer model or its table, and so could write an offer the store did not."""
+    offenders = []
+    for where, source in sources:
+        if where in OFFER_OWNERS or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            text = node.value if isinstance(node, ast.Constant) else None
+            if _named(node) in OFFER_NAMES or (isinstance(text, str) and OFFER_TABLE.search(text)):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def listing_shape_problems(metadata: MetaData) -> list[str]:
+    """A product-side column that would carry a listing shape, an option name or display text."""
+    return sorted(
+        f"{name}.{column.name}"
+        for name in PRODUCT_SIDE_TABLES
+        if name in metadata.tables
+        for column in metadata.tables[name].columns
+        if LISTING_SHAPE.search(column.name)
+    )
+
+
+def display_text_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """PRODUCT code that writes display text, such as a Hangul "2개" label, or that reaches a
+    listing, screen, API, OPERATE or marketplace module."""
+    offenders = []
+    for where, source in sources:
+        if not where.startswith("app/products/"):
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and HANGUL.search(node.value)
+            ):
+                offenders.append(f"{where}:{node.lineno}")
+            modules = (
+                [node.module or ""]
+                if isinstance(node, ast.ImportFrom)
+                else [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else []
+            )
+            if any(LISTING_MODULES.match(module) for module in modules):
+                offenders.append(f"{where}:{node.lineno}")
+    return offenders
+
+
+def test_only_the_product_store_writes_quantity_offers() -> None:
+    assert quantity_offer_writer_problems(_code()) == []
+
+
+def test_the_quantity_offer_writer_detector_fires() -> None:
+    sources = [
+        ("app/products/materialization.py", "from app.products.models import QuantityOffer\n"),
+        ("app/other/raw.py", "SQL = 'INSERT INTO quantity_offers VALUES (1)'\n"),
+        ("app/products/store.py", "row = QuantityOffer(quantity=2)\n"),
+        ("app/db/migrations/versions/0099_x.py", "T = 'quantity_offers'\n"),
+    ]
+    assert quantity_offer_writer_problems(sources) == [
+        "app/products/materialization.py:1",
+        "app/other/raw.py:1",
+    ]
+
+
+def test_the_product_db_holds_no_listing_shape() -> None:
+    from app.db.metadata import metadata
+
+    assert listing_shape_problems(metadata) == []
+
+
+def test_the_listing_shape_detector_fires() -> None:
+    synthetic = MetaData()
+    Table(
+        "product_items",
+        synthetic,
+        Column("item_id", Integer, primary_key=True),
+        Column("display_label", Integer),
+        Column("option_name", Integer),
+    )
+    Table("quantity_offers", synthetic, Column("marketplace_listing_id", Integer))
+    Table("pricing_snapshots", synthetic, Column("marketplace_key", Integer))
+    assert listing_shape_problems(synthetic) == [
+        "product_items.display_label",
+        "product_items.option_name",
+        "quantity_offers.marketplace_listing_id",
+    ]
+
+
+def test_product_code_writes_no_display_text_and_no_listing() -> None:
+    assert display_text_problems(_code()) == []
+
+
+def test_the_display_text_detector_fires() -> None:
+    sources = [
+        ("app/products/materialization.py", 'label = f"{quantity}개"\n'),
+        ("app/products/other.py", "from app.register.service import RegisterService\n"),
+        ("app/products/more.py", "import integrations.marketplaces.identity\n"),
+        ("app/products/fine.py", "from app.collect.facts import FieldStatus\n"),
+        ("app/screens/view.py", 'label = "2개"\n'),
+    ]
+    assert display_text_problems(sources) == [
+        "app/products/materialization.py:1",
+        "app/products/other.py:1",
+        "app/products/more.py:1",
+    ]
 
 
 def test_the_source_truth_writer_detector_fires() -> None:

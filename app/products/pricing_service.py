@@ -4,7 +4,8 @@ Issue #80 kickoff 5737440897, ADR-0013 §7. Only this owner calculates a selling
 adapter or other service re-decides one.
 
 A snapshot prices exactly the **current procurement** of an Item:
-- the Item's one open binding, which must be ``BASE_PRODUCT`` (``SOURCE_OFFER`` is unavailable);
+- the Item's one open binding: a ``BASE_PRODUCT`` on the default single unit, or (PR-Q) a
+  ``SOURCE_OFFER`` on its exact offer, whose revision, quantity and Item it must fit;
 - that binding's member, CONFIRMED in the Item's group;
 - the member's current source revision, which must be the binding's own provenance;
 - the group's current membership revision.
@@ -32,10 +33,12 @@ from app.core.errors import NotFoundError
 from app.products.model import (
     DEFAULT_SINGLE_UNIT_SIGNATURE,
     BindingKind,
+    CompositionSpec,
     GroupStatus,
     MemberStatus,
     ReadinessStatus,
     Reason,
+    composition_signature,
 )
 from app.products.pricing import (
     PRICING_RULE_VERSION,
@@ -44,6 +47,7 @@ from app.products.pricing import (
     PricingDependencies,
     SourceInputs,
     calculate,
+    offer_source_inputs,
     source_inputs,
 )
 from app.products.pricing_store import PricingMove, PricingSnapshotRecord, PricingUnit
@@ -53,6 +57,7 @@ from app.products.store import (
     MemberDetail,
     ProductFoundationStore,
     ProductFoundationUnit,
+    QuantityOfferRecord,
 )
 
 logger = logging.getLogger("icbm.products")
@@ -65,8 +70,8 @@ GROUP_RETIRED = "PRODUCT_GROUP_RETIRED"
 MEMBERSHIP_REVISION_MISSING = "MEMBERSHIP_REVISION_MISSING"
 MEMBERSHIP_REVISION_NOT_CURRENT = "MEMBERSHIP_REVISION_NOT_CURRENT"
 BINDING_MISSING = "BINDING_MISSING"
-BINDING_KIND_UNPRICEABLE = "BINDING_KIND_UNPRICEABLE"
 BINDING_COMPOSITION_INVALID = "BINDING_COMPOSITION_INVALID"
+BINDING_OFFER_INVALID = "BINDING_OFFER_INVALID"
 BINDING_MEMBER_NOT_CONFIRMED = "BINDING_MEMBER_NOT_CONFIRMED"
 BINDING_PROVENANCE_STALE = "BINDING_PROVENANCE_STALE"
 
@@ -82,6 +87,7 @@ class Procurement:
     member: MemberDetail | None
     current_revision_id: str | None
     reasons: tuple[Reason, ...]
+    offer: QuantityOfferRecord | None = None
 
     @property
     def dependencies(self) -> PricingDependencies | None:
@@ -99,8 +105,27 @@ class Procurement:
             signature_version=self.item.signature_version,
             membership_revision_id=self.membership_revision_id,
             source_binding_id=self.binding.binding_id,
+            binding_kind=self.binding.binding_kind.value,
+            quantity_offer_id=self.binding.quantity_offer_id,
+            fulfillment_quantity=self.binding.fulfillment_quantity,
             source_revision_id=self.current_revision_id,
         )
+
+
+def _offer_fits(
+    item: ItemDetail, binding: BindingRecord, offer: QuantityOfferRecord | None
+) -> bool:
+    """Whether a SOURCE_OFFER binding names an offer it can fulfil: the offer's own revision as
+    provenance, its quantity as the fulfillment quantity, and an Item of exactly that quantity with
+    every unit and pack field unknown. The database enforces the same when the binding is opened."""
+    return (
+        offer is not None
+        and offer.quantity_offer_id == binding.quantity_offer_id
+        and offer.source_revision_id == binding.provenance_revision_id
+        and offer.quantity == binding.fulfillment_quantity
+        and item.composition_signature
+        == composition_signature(CompositionSpec(quantity=offer.quantity))
+    )
 
 
 def current_procurement(unit: ProductFoundationUnit, item_id: str) -> Procurement:
@@ -118,15 +143,27 @@ def current_procurement(unit: ProductFoundationUnit, item_id: str) -> Procuremen
         reasons.append(Reason(MEMBERSHIP_REVISION_NOT_CURRENT, ReadinessStatus.REVIEW_REQUIRED))
     binding = unit.open_binding_of_item(item_id)
     member = None
+    offer = None
     current_revision = None
     if binding is None:
         reasons.append(Reason(BINDING_MISSING, ReadinessStatus.REVIEW_REQUIRED))
     else:
-        if binding.binding_kind is not BindingKind.BASE_PRODUCT:
-            reasons.append(Reason(BINDING_KIND_UNPRICEABLE, ReadinessStatus.REVIEW_REQUIRED))
-        if item.composition_signature != DEFAULT_SINGLE_UNIT_SIGNATURE:
-            reasons.append(Reason(BINDING_COMPOSITION_INVALID, ReadinessStatus.REVIEW_REQUIRED))
         member = unit.member_detail(binding.group_member_id)
+        if binding.binding_kind is BindingKind.BASE_PRODUCT:
+            # Only the default single unit: anything more would be composed fulfillment.
+            if item.composition_signature != DEFAULT_SINGLE_UNIT_SIGNATURE:
+                reasons.append(Reason(BINDING_COMPOSITION_INVALID, ReadinessStatus.REVIEW_REQUIRED))
+        else:
+            # A SOURCE_OFFER is not held to the BASE_PRODUCT composition: it fits its own offer,
+            # and that offer belongs to the member's own source product.
+            if binding.quantity_offer_id is not None:
+                offer = unit.quantity_offer_detail(binding.quantity_offer_id)
+            if not _offer_fits(item, binding, offer) or (
+                member is not None
+                and offer is not None
+                and offer.source_product_uid != member.source_product_uid
+            ):
+                reasons.append(Reason(BINDING_OFFER_INVALID, ReadinessStatus.REVIEW_REQUIRED))
         if (
             member is None
             or member.status is not MemberStatus.CONFIRMED
@@ -147,6 +184,7 @@ def current_procurement(unit: ProductFoundationUnit, item_id: str) -> Procuremen
         member=member,
         current_revision_id=current_revision,
         reasons=tuple(reasons),
+        offer=offer,
     )
 
 
@@ -237,7 +275,10 @@ class ProductPricingService:
                 inputs=evaluation.inputs,
                 calculation=evaluation.calculation,
             )
-            self._audit.append(_recorded_entry(snapshot, correlation), session=unit.session)
+            self._audit.append(
+                _recorded_entry(snapshot, evaluation.dependencies, correlation),
+                session=unit.session,
+            )
             move = pricing.record_move(
                 snapshot,
                 decided_by=DECIDED_BY,
@@ -282,7 +323,12 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - a foreign key guarantees the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
-        inputs = source_inputs(stored.fields)
+        if dependencies.binding_kind == BindingKind.SOURCE_OFFER.value:
+            # The bound offer's own total; the generic prices are never read (ruling 5738760913).
+            assert procurement.offer is not None  # no reason means the offer fits
+            inputs = offer_source_inputs(stored.fields, procurement.offer.terms, stored.currency)
+        else:
+            inputs = source_inputs(stored.fields)
         if isinstance(inputs, tuple):
             return _with(base, reasons=inputs)
         calculation = calculate(inputs, context)
@@ -311,7 +357,9 @@ def _with(evaluation: PricingEvaluation, *, reasons: Sequence[Reason]) -> Pricin
     )
 
 
-def _recorded_entry(snapshot: PricingSnapshotRecord, correlation: str) -> AuditEntry:
+def _recorded_entry(
+    snapshot: PricingSnapshotRecord, dependencies: PricingDependencies, correlation: str
+) -> AuditEntry:
     """Identifiers, versions, enums, fingerprints and the calculated amounts; no page text."""
     return AuditEntry(
         event_type=AuditEventType.PRODUCT_PRICING_SNAPSHOT_RECORDED,
@@ -332,6 +380,9 @@ def _recorded_entry(snapshot: PricingSnapshotRecord, correlation: str) -> AuditE
             "dependency_fingerprint": snapshot.dependency_fingerprint,
             "membership_revision_id": snapshot.membership_revision_id,
             "source_binding_id": snapshot.source_binding_id,
+            "binding_kind": dependencies.binding_kind,
+            "quantity_offer_id": dependencies.quantity_offer_id,
+            "fulfillment_quantity": dependencies.fulfillment_quantity,
             "source_product_facts_revision_id": snapshot.source_product_facts_revision_id,
             "price_basis": snapshot.price_basis.value,
             "guard_reasons": [reason.value for reason in snapshot.guard_reasons],

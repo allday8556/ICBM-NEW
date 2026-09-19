@@ -25,6 +25,15 @@ BASE_PRODUCT_PROVENANCE_FIELDS: Final = (
     "minimum_sale_price",
     *BASE_PRODUCT_ABSENT_FIELDS,
 )
+# The source product fields a product-level SOURCE_OFFER binding relies on (ruling 5738760913): the
+# revision states no options and confirmed tiers, and pricing reads the bound offer's own total with
+# the revision's shipping and minimum sale price. The generic ``prices`` field is never among them.
+SOURCE_OFFER_PROVENANCE_FIELDS: Final = (
+    "quantity_tiers",
+    "shipping",
+    "minimum_sale_price",
+    "options",
+)
 
 
 class GroupStatus(StrEnum):
@@ -74,8 +83,9 @@ class ChangeEventType(StrEnum):
 
 
 class BindingKind(StrEnum):
-    """ADR-0013 §6. ``SOURCE_OFFER`` is reserved: it needs referential ``SourceSKU`` and
-    ``QuantityOffer`` entities, which no accepted scope provides yet, so it cannot be stored."""
+    """ADR-0013 §6. ``SOURCE_OFFER`` always names one exact ``QuantityOffer``. PR-Q stores only
+    product-level offers, which have no SourceSKU (ruling 5738760913). ``BASE_PRODUCT`` binds the
+    source product itself, and names no offer."""
 
     SOURCE_OFFER = "SOURCE_OFFER"
     BASE_PRODUCT = "BASE_PRODUCT"

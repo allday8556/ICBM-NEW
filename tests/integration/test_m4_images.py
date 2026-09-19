@@ -1156,7 +1156,9 @@ def test_with_clean_facts_and_every_selected_binary_passing_base_is_ready(
     # Kickoff §J 40, 43, 46–49: missing selection, missing QA, then READY; the fingerprint
     # follows the selection and the QA.
     readiness = container.product_readiness.base_readiness(listing.item)
-    assert readiness.rule_version == BASE_READINESS_RULE_VERSION == "base-readiness/v2"
+    # v3 (PR-Q): the procurement state also names the binding kind, offer and quantity; every
+    # image rule is v2's.
+    assert readiness.rule_version == BASE_READINESS_RULE_VERSION == "base-readiness/v3"
     assert _codes(readiness) == [(IMAGE_SELECTION_MISSING, "images")]
     _select_all_sources(listing)
     missing = container.product_readiness.base_readiness(listing.item)
@@ -1259,10 +1261,19 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
+def _columns(connection: sqlite3.Connection, table: str) -> str:
+    """Every column but the one migration 0015 (PR-Q) appended to ``source_bindings``, so rows
+    compare across revisions on what each of them holds."""
+    names = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
+    return ", ".join(name for name in names if name != "quantity_offer_id")
+
+
 def _all_rows(database: Path, tables: Sequence[str]) -> dict[str, list[tuple[object, ...]]]:
     with contextlib.closing(sqlite3.connect(database)) as connection:
         return {
-            table: connection.execute(f"SELECT * FROM {table} ORDER BY 1, 2").fetchall()
+            table: connection.execute(
+                f"SELECT {_columns(connection, table)} FROM {table} ORDER BY 1, 2"
+            ).fetchall()
             for table in tables
         }
 
@@ -1287,9 +1298,12 @@ EARLIER_TABLES = (
 
 
 def _priced_at_0013(tmp_path: Path) -> Path:
+    """A priced BASE_PRODUCT at revision 0013. The services write the head schema (migration 0015
+    appended a binding column), so they run at head, and the database then steps down through the
+    fail-closed downgrades, which keep every row."""
     database = tmp_path / "icbm.db"
     url = _url(database)
-    command.upgrade(alembic_config(url), "0013_m4_pricing_snapshots")
+    upgrade_to_head(url)
     db = Database(url)
     try:
         clock = FakeClock()
@@ -1305,6 +1319,7 @@ def _priced_at_0013(tmp_path: Path) -> Path:
         assert pricing.price(item, context()).snapshot is not None
     finally:
         db.dispose()
+    command.downgrade(alembic_config(url), "0013_m4_pricing_snapshots")
     return database
 
 
@@ -1316,7 +1331,7 @@ def test_0013_to_0014_keeps_every_earlier_row_and_guesses_no_image(tmp_path: Pat
     upgrade_to_head(_url(database))
     engine = create_sqlite_engine(_url(database))
     try:
-        assert current_revision(engine) == head_revision() == "0014_m4_derived_image_lineage"
+        assert current_revision(engine) == head_revision()
     finally:
         engine.dispose()
     assert _all_rows(database, EARLIER_TABLES) == before

@@ -5,7 +5,18 @@ Issue #80 kickoff 5736827688, under ADR-0013 §3–§6 and ADR-0010::
     durably RECORDED ProductFactsRevision → current source revision
     → canonical ProductGroup and its CONFIRMED member
     → default product-side Item and BASE_PRODUCT binding, when the current revision proves them
+    → or: exact QuantityOffers, their quantity Items and SOURCE_OFFER bindings (PR-Q)
     → canonical read-back
+
+**Quantity offers** (PR-Q, kickoff 5738854211, ruling 5738760913). When the current revision
+states ``options`` ABSENT and ``quantity_tiers`` CONFIRMED, each confirmed tier becomes one exact,
+revision-scoped offer. Each offer quantity ``q`` gets the Item ``CompositionSpec(quantity=q)``, with
+every unstated unit and pack field unknown; ``q = 1`` is the default single-unit Item itself. Each
+such Item gets a SOURCE_OFFER binding to its exact offer, unless another member's binding holds it.
+No total is divided or multiplied, no generic price is read, and no SourceSKU is created. A newer
+revision closes every binding of the older one. A removed quantity keeps its Item, unbound. Tiers
+under review, or options that are not ABSENT, give no offer at all. An explicit
+``materialize_source`` on an already-current revision creates whatever it lacks.
 
 This module owns the automatic decisions; :class:`ProductFoundationStore` only persists them. It
 makes no supplier or marketplace request, calls no AI and copies no source fact value into the
@@ -24,9 +35,10 @@ never chosen in its place. The pointer never moves backwards automatically; a re
 resolves to the same target, so it changes nothing.
 
 **One decision, one unit of work.** The pointer move, its audit event, a new singleton group with
-its CONFIRMED member and membership revision 1, the default composition and Item, and the binding
-close/open all commit together or not at all. Anything that must write nothing — a newer current
-revision, a retired group — abandons the unit, so even the source identity row is rolled back.
+its CONFIRMED member and membership revision 1, the default composition and Item, the quantity
+offers with their compositions and Items, and the binding close/open all commit together or not at
+all. Anything that must write nothing — a newer current revision, a retired group — abandons the
+unit, so even the source identity row is rolled back.
 """
 
 import logging
@@ -37,7 +49,7 @@ from sqlalchemy import select
 
 from app.audit.models import AuditEventType, AuditOutcome
 from app.audit.service import AuditEntry, AuditLog
-from app.collect.facts import FactsStatus
+from app.collect.facts import CURRENCY, FactsStatus
 from app.collect.models import CollectionOutcome, CollectionRun, ProductFactsRevision
 from app.collect.revisions import ProductFactsRevisionStore
 from app.core.correlation import get_correlation_id, new_correlation_id
@@ -46,8 +58,14 @@ from app.db.database import Database
 from app.products.model import (
     DEFAULT_SINGLE_UNIT,
     DEFAULT_SINGLE_UNIT_SIGNATURE,
+    CompositionSpec,
     GroupStatus,
     MoveReason,
+)
+from app.products.quantity import (
+    QUANTITY_OFFER_RULE_VERSION,
+    QuantityOfferEvidence,
+    product_level_offers,
 )
 from app.products.store import ProductFoundationStore, ProductFoundationUnit
 
@@ -131,6 +149,13 @@ class Materialization:
     item_created: bool = False
     bindings_closed: tuple[str, ...] = field(default_factory=tuple)
     binding_opened: str | None = None
+    # PR-Q: the product-level offers of the current revision, in tier order, and what was new.
+    quantity_offers: QuantityOfferEvidence | None = None
+    quantity_offer_ids: tuple[str, ...] = field(default_factory=tuple)
+    quantity_offers_created: tuple[str, ...] = field(default_factory=tuple)
+    quantity_item_ids: tuple[str, ...] = field(default_factory=tuple)
+    quantity_items_created: tuple[str, ...] = field(default_factory=tuple)
+    offer_bindings_opened: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -474,7 +499,51 @@ class ProductMaterializer:
                     correlation_id=correlation,
                 ).binding_id
 
-        changed = group_created or item_created or bool(closed) or opened is not None
+        # 5. Product-level quantity offers, their quantity Items and exact SOURCE_OFFER bindings,
+        #    only when the current revision states them (ruling 5738760913). Each total is the
+        #    tier's own; nothing is divided, multiplied or read from the generic prices.
+        readings, currency = unit.offer_fields(target.revision_id)
+        quantity_evidence, terms = product_level_offers(readings, currency or "")
+        offers = []
+        offers_created = []
+        quantity_items = []
+        quantity_items_created = []
+        offer_bindings = []
+        for term in terms:
+            offer, offer_created = unit.quantity_offer(
+                uid, target.revision_id, term, currency=CURRENCY
+            )
+            offers.append(offer)
+            if offer_created:
+                offers_created.append(offer.quantity_offer_id)
+            composition = unit.composition(CompositionSpec(quantity=offer.quantity))
+            quantity_item = unit.find_item(group_id, composition.composition_signature)
+            if quantity_item is None:
+                quantity_item = unit.item(group_id, composition.composition_id)
+                quantity_items_created.append(quantity_item.item_id)
+            quantity_items.append(quantity_item)
+            # A binding this member already holds on this revision is this very offer's; another
+            # member's is left alone, since choosing between members is not this rule's decision.
+            if unit.open_binding_of_item(quantity_item.item_id) is None:
+                offer_bindings.append(
+                    unit.bind_source_offer(
+                        quantity_item.item_id,
+                        member_id,
+                        offer.quantity_offer_id,
+                        decided_by=DECIDED_BY,
+                        correlation_id=correlation,
+                    ).binding_id
+                )
+
+        changed = (
+            group_created
+            or item_created
+            or bool(closed)
+            or opened is not None
+            or bool(offers_created)
+            or bool(quantity_items_created)
+            or bool(offer_bindings)
+        )
         if changed:
             self._audit.append(
                 AuditEntry(
@@ -495,6 +564,22 @@ class ProductMaterializer:
                         "item_created": item_created,
                         "bindings_closed": closed,
                         "binding_opened": opened,
+                        # Identifiers, positions, quantities and the source's own totals only.
+                        "quantity_offer_rule_version": QUANTITY_OFFER_RULE_VERSION,
+                        "quantity_offer_evidence": quantity_evidence.value,
+                        "offers": [
+                            {
+                                "quantity_offer_id": offer.quantity_offer_id,
+                                "tier_ordinal": offer.tier_ordinal,
+                                "quantity": offer.quantity,
+                                "total_krw": offer.total_price_krw,
+                                "created": offer.quantity_offer_id in offers_created,
+                            }
+                            for offer in offers
+                        ],
+                        "quantity_items": [item.item_id for item in quantity_items],
+                        "quantity_items_created": quantity_items_created,
+                        "offer_bindings_opened": offer_bindings,
                     },
                     correlation_id=correlation,
                 ),
@@ -521,4 +606,10 @@ class ProductMaterializer:
             item_created=item_created,
             bindings_closed=tuple(closed),
             binding_opened=opened,
+            quantity_offers=quantity_evidence,
+            quantity_offer_ids=tuple(offer.quantity_offer_id for offer in offers),
+            quantity_offers_created=tuple(offers_created),
+            quantity_item_ids=tuple(item.item_id for item in quantity_items),
+            quantity_items_created=tuple(quantity_items_created),
+            offer_bindings_opened=tuple(offer_bindings),
         )

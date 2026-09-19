@@ -5,7 +5,10 @@ This store writes and reads the foundation rows and nothing more. It never decid
   the automatic rule);
 - which source products belong together: grouping, matching, merge and split belong to callers;
 - a price or a readiness: PR-D;
-- a derived image: PR-E.
+- a derived image: PR-E;
+- which tiers a revision states as offers: the materializer reads them (``app.products.quantity``).
+  This store persists each offer exactly, and the database refuses one that is not a CONFIRMED
+  tier of its revision (PR-Q, migration 0015).
 
 Every cross-row invariant is enforced by the database (migration 0012), so this store is not the
 only guard. It adds the domain side:
@@ -32,7 +35,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.collect.facts import FactsStatus, FieldStatus
+from app.collect.facts import FactsStatus, FieldStatus, value_from_json
 from app.collect.models import ProductFactsField, ProductFactsRevision
 from app.core.clock import Clock
 from app.core.errors import InputValidationError, NotFoundError
@@ -43,6 +46,7 @@ from app.products.model import (
     DEFAULT_SINGLE_UNIT_SIGNATURE,
     MEMBER_TRANSITIONS,
     SIGNATURE_VERSION,
+    SOURCE_OFFER_PROVENANCE_FIELDS,
     BindingKind,
     CompositionSpec,
     GroupStatus,
@@ -58,9 +62,14 @@ from app.products.models import (
     ListingComposition,
     ProductGroup,
     ProductItem,
+    QuantityOffer,
     SourceBinding,
     SourceProduct,
 )
+from app.products.quantity import OfferTerms
+
+# The revision fields a product-level offer is read from (ruling 5738760913).
+OFFER_FIELDS = ("options", "quantity_tiers")
 
 
 @dataclass(frozen=True)
@@ -147,6 +156,34 @@ class BindingRecord:
     binding_kind: BindingKind
     provenance_revision_id: str
     valid_from: datetime
+    fulfillment_quantity: int
+    quantity_offer_id: str | None
+
+
+@dataclass(frozen=True)
+class QuantityOfferRecord:
+    """One immutable product-level offer, as the database holds it."""
+
+    quantity_offer_id: str
+    source_product_uid: str
+    source_revision_id: str
+    tier_ordinal: int
+    quantity: int
+    total_price_krw: int
+    currency: str
+
+    @property
+    def terms(self) -> OfferTerms:
+        return OfferTerms(self.tier_ordinal, self.quantity, self.total_price_krw)
+
+
+@dataclass(frozen=True)
+class FieldReading:
+    """One stored field of a revision, read back and validated against the M3 registry again. A
+    value that does not read back is ``None``: it proves nothing."""
+
+    status: FieldStatus
+    value: object
 
 
 # ---------------------------------------------------------------- canonical read-back
@@ -177,11 +214,16 @@ class CompositionReadback:
 
 @dataclass(frozen=True)
 class BindingReadback:
+    """``quantity_offer_id`` is the exact offer a SOURCE_OFFER binds, and ``None`` for
+    BASE_PRODUCT. No source price is read or recomputed here."""
+
     binding_id: str
     binding_kind: BindingKind
     group_member_id: str
     provenance_revision_id: str
     valid_from: datetime
+    fulfillment_quantity: int
+    quantity_offer_id: str | None
 
 
 @dataclass(frozen=True)
@@ -907,6 +949,149 @@ class ProductFoundationUnit:
         )
         return absent == set(BASE_PRODUCT_ABSENT_FIELDS)
 
+    # ------------------------------------------------------------------ quantity offers (PR-Q)
+
+    def offer_fields(self, revision_id: str) -> tuple[dict[str, FieldReading], str | None]:
+        """The ``options`` and ``quantity_tiers`` fields of a revision, and its currency: all a
+        product-level offer is read from. Reading decides nothing."""
+        readings = {}
+        for key, status, value_json in self.session.execute(
+            select(
+                ProductFactsField.field_key, ProductFactsField.status, ProductFactsField.value_json
+            ).where(
+                ProductFactsField.revision_id == revision_id,
+                ProductFactsField.field_key.in_(OFFER_FIELDS),
+            )
+        ).tuples():
+            try:
+                value = value_from_json(key, value_json)
+            except ValueError:
+                value = None
+            readings[key] = FieldReading(FieldStatus(status), value)
+        currency = self.session.scalar(
+            select(ProductFactsRevision.currency).where(
+                ProductFactsRevision.revision_id == revision_id
+            )
+        )
+        return readings, currency
+
+    def quantity_offer(
+        self, source_product_uid: str, source_revision_id: str, terms: OfferTerms, *, currency: str
+    ) -> tuple[QuantityOfferRecord, bool]:
+        """The one immutable offer of this revision at this tier position, and whether it was
+        created now. Replaying the same revision reuses it. The database refuses an offer that is
+        not exactly a CONFIRMED tier of its revision."""
+        row = self.session.scalars(
+            select(QuantityOffer).where(
+                QuantityOffer.source_revision_id == source_revision_id,
+                QuantityOffer.tier_ordinal == terms.tier_ordinal,
+            )
+        ).first()
+        if row is not None:
+            record = _offer_record(row)
+            if (record.source_product_uid, record.terms) != (source_product_uid, terms):
+                raise InputValidationError(
+                    "PRODUCTS_QUANTITY_OFFER_CONFLICT",
+                    "an offer already recorded for this tier states other terms",
+                )
+            return record, False
+        row = QuantityOffer(
+            quantity_offer_id=str(uuid.uuid4()),
+            source_product_uid=source_product_uid,
+            source_revision_id=source_revision_id,
+            tier_ordinal=terms.tier_ordinal,
+            quantity=terms.quantity,
+            total_price_krw=terms.total_price_krw,
+            currency=currency,
+            created_at=self._clock.now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        return _offer_record(row), True
+
+    def quantity_offer_detail(self, quantity_offer_id: str) -> QuantityOfferRecord | None:
+        row = self.session.get(QuantityOffer, quantity_offer_id)
+        return None if row is None else _offer_record(row)
+
+    def quantity_offers_of_revision(
+        self, source_revision_id: str
+    ) -> tuple[QuantityOfferRecord, ...]:
+        return tuple(
+            _offer_record(row)
+            for row in self.session.scalars(
+                select(QuantityOffer)
+                .where(QuantityOffer.source_revision_id == source_revision_id)
+                .order_by(QuantityOffer.tier_ordinal)
+            )
+        )
+
+    def bind_source_offer(
+        self,
+        item_id: str,
+        group_member_id: str,
+        quantity_offer_id: str,
+        *,
+        decided_by: str,
+        correlation_id: str,
+    ) -> BindingRecord:
+        """Bind an Item to one exact product-level offer: the Item's current binding is closed and
+        this one opens, in one unit of work.
+
+        The offer fixes everything else. Its revision is the provenance, and must be the member's
+        current source revision. Its quantity is the fulfillment quantity. The Item must be exactly
+        that quantity with every unit and pack field unknown. No SKU is referenced: a product-level
+        offer has none (ruling 5738760913), and the generic ``prices`` field is never relied on.
+        """
+        offer = self.quantity_offer_detail(quantity_offer_id)
+        if offer is None:
+            raise NotFoundError("PRODUCTS_QUANTITY_OFFER_UNKNOWN", "no quantity offer has that id")
+        member = self.member_detail(group_member_id)
+        if member is None or member.source_product_uid != offer.source_product_uid:
+            raise InputValidationError(
+                "PRODUCTS_SOURCE_OFFER_NOT_MEMBERS",
+                "an offer is bound only by the member of its own source product",
+            )
+        current = self.current_move(member.source_product_uid)
+        if current is None or current.revision_id != offer.source_revision_id:
+            raise InputValidationError(
+                "PRODUCTS_SOURCE_OFFER_NOT_CURRENT",
+                "an offer is bound only from its member's current source revision",
+            )
+        session = self.session
+        signature = session.scalar(
+            select(ProductItem.composition_signature).where(ProductItem.item_id == item_id)
+        )
+        if signature != composition_signature(CompositionSpec(quantity=offer.quantity)):
+            raise InputValidationError(
+                "PRODUCTS_SOURCE_OFFER_COMPOSITION_MISMATCH",
+                "an offer fulfils only the Item of exactly its quantity, every unit field unknown",
+            )
+        now = self._clock.now()
+        for open_binding in session.scalars(
+            select(SourceBinding).where(
+                SourceBinding.item_id == item_id, SourceBinding.valid_to.is_(None)
+            )
+        ):
+            open_binding.valid_to = now
+        session.flush()
+        row = SourceBinding(
+            binding_id=str(uuid.uuid4()),
+            item_id=item_id,
+            group_member_id=group_member_id,
+            binding_kind=BindingKind.SOURCE_OFFER.value,
+            quantity_offer_id=offer.quantity_offer_id,
+            fulfillment_quantity=offer.quantity,
+            provenance_revision_id=offer.source_revision_id,
+            provenance_fields=json.dumps(list(SOURCE_OFFER_PROVENANCE_FIELDS)),
+            decided_by=decided_by,
+            correlation_id=correlation_id,
+            valid_from=now,
+            valid_to=None,
+        )
+        session.add(row)
+        session.flush()
+        return _binding_record(row)
+
     # ------------------------------------------------------------------ canonical read-back
 
     def readback(self, product_group_id: str) -> ProductReadback | None:
@@ -984,6 +1169,8 @@ class ProductFoundationUnit:
                         group_member_id=binding.group_member_id,
                         provenance_revision_id=binding.provenance_revision_id,
                         valid_from=binding.valid_from,
+                        fulfillment_quantity=binding.fulfillment_quantity,
+                        quantity_offer_id=binding.quantity_offer_id,
                     ),
                 )
             )
@@ -1035,4 +1222,18 @@ def _binding_record(row: SourceBinding) -> BindingRecord:
         BindingKind(row.binding_kind),
         row.provenance_revision_id,
         row.valid_from,
+        row.fulfillment_quantity,
+        row.quantity_offer_id,
+    )
+
+
+def _offer_record(row: QuantityOffer) -> QuantityOfferRecord:
+    return QuantityOfferRecord(
+        row.quantity_offer_id,
+        row.source_product_uid,
+        row.source_revision_id,
+        row.tier_ordinal,
+        row.quantity,
+        row.total_price_krw,
+        row.currency,
     )

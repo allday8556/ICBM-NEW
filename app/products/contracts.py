@@ -39,11 +39,16 @@ class CompositionView(BaseModel):
 
 
 class BindingView(BaseModel):
+    """``quantity_offer_id`` names the exact offer of a SOURCE_OFFER and is ``None`` for
+    BASE_PRODUCT; no source price is recomputed here."""
+
     binding_id: str
     binding_kind: BindingKind
     group_member_id: str
     provenance_revision_id: str
     valid_from: datetime
+    fulfillment_quantity: int
+    quantity_offer_id: str | None
 
 
 class ProductItemView(BaseModel):
@@ -106,6 +111,8 @@ def product_view(product: ProductReadback) -> ProductView:
                     group_member_id=item.current_binding.group_member_id,
                     provenance_revision_id=item.current_binding.provenance_revision_id,
                     valid_from=item.current_binding.valid_from,
+                    fulfillment_quantity=item.current_binding.fulfillment_quantity,
+                    quantity_offer_id=item.current_binding.quantity_offer_id,
                 ),
             )
             for item in product.items
