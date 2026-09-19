@@ -3,8 +3,10 @@
 Two kinds of rule:
 - **The repository.** No M5 endpoint is adopted, no migration or registration table exists,
   REGISTER does nothing and reaches no provider, and product registration write stays unproven.
-- **The decision.** ADR-0014 states each binding rule of kickoff 5740316498 and of the architect
-  addendum 5740352676 (R1-R4), and states nothing that contradicts it.
+- **The decision.** ADR-0014 states each binding rule of kickoff 5740316498, of the architect
+  addendum 5740352676 (R1-R4) and of the PR #90 review 5255157251 (B1-B4), and states nothing
+  that contradicts it. The upload gate, the resolution evidence and the durable digest fields are
+  checked as structure, not only as sentences.
 
 Each checker is a pure function. It runs against the real repository, and also against a small
 synthetic violation, so a rule that could never fire is caught as surely as a rule that fails.
@@ -351,6 +353,14 @@ EXPECTED_INVARIANTS = {
     "M5-20": "product_registration.write stays UNVERIFIED until the bounded real CREATE is proven"
     " by read-back",
     "M5-21": "M5 registers with no AI provider configured",
+    "M5-22": "no marketplace asset upload happens before a mutation-free non-asset preflight"
+    " candidate is READY; the upload is bound to that candidate's fingerprint",
+    "M5-23": "resolved_by = USER records or accepts evidence; an operator assertion alone never"
+    " establishes NOT_APPLIED_PROVEN or remote absence and never releases an UNKNOWN conflict"
+    " scope",
+    "M5-24": "every durable payload or request digest hashes the sanitized canonical"
+    " representation; secret-bearing wire bytes exist only transiently and are never persisted"
+    " or durably hashed",
 }
 
 
@@ -537,6 +547,63 @@ RULES: dict[str, Rule] = {
         ),
     ),
     "K M5 claims no M6 recurring ingest": Rule(("**M5 claims no recurring operational ingest.**",)),
+    # PR #90 GPT review 5255157251, blockers B2-B4 (B1 is the ARCHITECTURE owner list, below).
+    "B2 no marketplace asset upload before a READY non-asset candidate": Rule(
+        (
+            "**Before any marketplace asset upload, every non-provider-asset preflight dependency"
+            " of the provider-listing unit passes a mutation-free candidate evaluation.**",
+            "**If any non-asset result is `BLOCKED`, `DUPLICATE`, `STALE` or `REVIEW_REQUIRED`,"
+            " no upload is permitted.**",
+            "**The only dependency allowed to be unresolved at asset-preparation time is the"
+            " provider asset identity itself.**",
+            "**The asset preparation and upload are bound to that candidate's dependency"
+            " fingerprint**",
+            "**If any dependency changed between the candidate and the final preflight, no CREATE"
+            " follows from that upload.**",
+            "**No new readiness truth is stored for it.**",
+            "and **only after the non-asset preflight candidate is `READY` (§3)**",
+        ),
+        (
+            r"upload(ed|s)? (may|can) (happen|proceed|occur) before (the |any )?"
+            r"(preflight|candidate)",
+            r"(BLOCKED|DUPLICATE|STALE|REVIEW_REQUIRED) candidate (may|can) (upload|proceed)",
+        ),
+    ),
+    "B3 resolved_by = USER is never the evidence of a remote outcome": Rule(
+        (
+            "**An operator assertion alone never establishes `NOT_APPLIED_PROVEN` or remote"
+            " absence, and never releases an unresolved UNKNOWN conflict scope.**",
+            "**Changing `UNKNOWN` to `NOT_APPLIED_PROVEN` or absent requires evidence that"
+            " satisfies the adopted, operation-specific proof contract**",
+            "**The operator may be the actor who records or accepts that evidence, but is not"
+            " itself the evidence.**",
+            "USER: who recorded the resolution, never itself the evidence (§10)",
+        ),
+        (
+            r"(operator|user)('s)? (assertion|statement|confirmation|word)[^.]{0,80}"
+            r"(may|can) (establish|set|mark|release|free)",
+        ),
+    ),
+    "B4 durable digests hash the sanitized representation, never wire bytes": Rule(
+        (
+            "**Every durable payload or request digest (`payload_hash`, `request_payload_hash`"
+            " and any evidence digest) is computed only from the sanitized canonical evidence"
+            " representation**",
+            "**Authorization headers and session credentials are never part of a durable digest.**",
+            "Secret-bearing or tokenized material is removed **before durable hashing** as well as"
+            " before persistence.",
+            "**If the provider requires such a value on the wire, it exists only transiently in"
+            " memory for that call; its unsanitized bytes are neither persisted nor durably"
+            " hashed.**",
+            "**If sanitation would remove a field required to prove the registration contract,"
+            " the evidence is `REVIEW_REQUIRED`**",
+        ),
+        (
+            r"(payload|request)[_ ]?hash\w* (is|=) (the )?SHA-256 of the"
+            r" (raw|wire|full|unsanitized)",
+            r"(unsanitized|raw) wire bytes (are|may be) (persisted|hashed|stored)",
+        ),
+    ),
     "K execution safety: DRY_RUN, explicit bounded authorization, single canary": Rule(
         (
             "**the user explicitly authorizes that write scope**",
@@ -567,6 +634,10 @@ VIOLATIONS = {
     "K no AI": "Category selection requires an AI provider.",
     "K ADR-0011": "The raw payload is sanitized after it is hashed.",
     "K product_registration": "Here write_scope = READY implies write is READY.",
+    "B2": "A DUPLICATE candidate may proceed to the marketplace asset upload.",
+    "B3": "An operator statement that the listing was not created may establish"
+    " NOT_APPLIED_PROVEN.",
+    "B4": "The unsanitized wire bytes are hashed for the Attempt.",
 }
 
 
@@ -627,6 +698,192 @@ def test_the_addendum_rules_are_all_pinned() -> None:
     # Architect addendum 5740352676 "Required PR-A contract tests": nine rules, A1-A9.
     assert sorted(name.split(" ", 1)[0] for name in RULES if name.startswith("A")) == [
         f"A{n}" for n in range(1, 10)
+    ]
+
+
+# ---------------------------------------------------------------- PR #90 review 5255157251
+#
+# B1-B4 as machine-checked structure: the canonical owner list, the upload gate table and its
+# order, the resolution-evidence table, and every durable digest field.
+
+CANDIDATE_STATUSES = ("READY", "REVIEW_REQUIRED", "STALE", "DUPLICATE", "BLOCKED")
+
+
+def register_owner_problems(architecture: str) -> list[str]:
+    """B1: the canonical REGISTER owner list, or the image pipeline, giving binary transformation
+    to REGISTER or to a marketplace adapter instead of the M4 derived-image owner (R1)."""
+    start = architecture.index("\n### REGISTER")
+    end = architecture.index("\n### ", start + 1)
+    problems = [
+        line.strip()
+        for line in architecture[start:end].splitlines()
+        if line.startswith("- ") and re.search(r"transform", line, re.I) and "M4" not in line
+    ]
+    problems += [m.group(0) for m in re.finditer(r"variants belong to [^.;]*adapter", architecture)]
+    return problems
+
+
+def contract_block(adr: str, header: str) -> list[str]:
+    """The lines of the fenced ``text`` block whose first line starts with ``header``."""
+    for block in re.findall(r"```text\n(.*?)```", adr, re.S):
+        lines = block.strip("\n").splitlines()
+        if lines and lines[0].startswith(header):
+            return lines
+    return []
+
+
+def contract_table(adr: str, header: str) -> dict[str, str]:
+    """A two-column contract table: the first column, then the verdict after 2+ spaces."""
+    rows = {}
+    for line in contract_block(adr, header)[1:]:
+        match = re.match(r"^(.*?\S)\s{2,}(\S.*)$", line)
+        if match:
+            rows[match.group(1)] = match.group(2)
+    return rows
+
+
+def upload_gate_problems(table: Mapping[str, str]) -> list[str]:
+    """B2: only a READY non-asset candidate permits a marketplace asset upload."""
+    problems = [] if set(table) == set(CANDIDATE_STATUSES) else [f"statuses {sorted(table)}"]
+    for status, verdict in table.items():
+        if verdict.startswith("permitted") != (status == "READY"):
+            problems.append(f"{status}: {verdict}")
+    return problems
+
+
+GATE_ORDER = (
+    "non-asset preflight candidate",
+    "marketplace asset preparation / upload",
+    "final preflight",
+    "RegistrationSnapshot freeze",
+)
+
+
+def gate_order_problems(lines: list[str]) -> list[str]:
+    """B2: candidate, then upload, then final preflight, then the Snapshot."""
+    positions = [
+        next((i for i, line in enumerate(lines) if step in line), -1) for step in GATE_ORDER
+    ]
+    if -1 in positions or positions != sorted(positions):
+        return [f"order {positions}"]
+    return []
+
+
+def resolution_problems(table: Mapping[str, str]) -> list[str]:
+    """B3: an operator assertion never establishes a remote outcome; machine or provider proof
+    does. Every row is yes or no, and the operator row exists and says no."""
+    problems = [
+        f"{row}: {verdict}" for row, verdict in table.items() if verdict not in ("yes", "no")
+    ]
+    operator = [row for row in table if re.search(r"operator|USER|assertion", row)]
+    if not operator:
+        problems.append("no operator-assertion row")
+    problems += [f"{row}: {table[row]}" for row in operator if table[row] != "no"]
+    if not any(v == "yes" and "read-back" in row for row, v in table.items()):
+        problems.append("read-back is not proof")
+    return problems
+
+
+DIGEST_FIELDS = frozenset({"payload_hash", "request_payload_hash"})
+
+
+def digest_field_problems(adr: str) -> list[str]:
+    """B4: every durable ``*_hash`` field in a contract block hashes the sanitized canonical
+    representation, never wire bytes; both payload digests are present."""
+    problems = []
+    found = set()
+    for block in re.findall(r"```text\n(.*?)```", adr, re.S):
+        for line in block.splitlines():
+            field = line.split()[0] if line.split() else ""
+            if not field.endswith("_hash"):
+                continue
+            found.add(field)
+            if "sanitized canonical" not in line or "never of wire bytes" not in line:
+                problems.append(line.strip())
+    problems += [f"missing {name}" for name in sorted(DIGEST_FIELDS - found)]
+    return problems
+
+
+def test_the_canonical_register_owner_list_claims_no_image_transformation() -> None:
+    assert register_owner_problems(ARCHITECTURE_MD.read_text("utf-8")) == []
+
+
+def test_the_register_owner_detector_fires() -> None:
+    before = (
+        "\n### REGISTER\nOwns platform conversion.\n\n- category mapping\n"
+        "- image transformation/upload\n\n### OPERATE\n"
+        "Derived marketplace variants belong to the M4 image pipeline and to each marketplace"
+        " adapter/readiness contract.\n"
+    )
+    assert register_owner_problems(before) == [
+        "- image transformation/upload",
+        "variants belong to the M4 image pipeline and to each marketplace adapter",
+    ]
+
+
+def test_only_a_ready_non_asset_candidate_permits_an_upload() -> None:
+    adr = ADR_0014.read_text("utf-8")
+    assert upload_gate_problems(contract_table(adr, "non-asset candidate status")) == []
+    assert gate_order_problems(contract_block(adr, "non-asset preflight candidate")) == []
+
+
+def test_a_duplicate_or_blocked_candidate_never_proceeds_to_upload() -> None:
+    # The negative control the review asks for: a gate that lets a DUPLICATE or BLOCKED
+    # candidate upload, or uploads before the candidate, is caught.
+    leaky = {
+        "READY": "permitted, bound to the candidate fingerprint",
+        "REVIEW_REQUIRED": "forbidden",
+        "STALE": "forbidden",
+        "DUPLICATE": "permitted",
+        "BLOCKED": "permitted",
+    }
+    assert upload_gate_problems(leaky) == ["DUPLICATE: permitted", "BLOCKED: permitted"]
+    assert upload_gate_problems({"READY": "permitted"}) != []
+    upload_first = [
+        "marketplace asset preparation / upload",
+        "→ non-asset preflight candidate",
+        "→ final preflight",
+        "→ RegistrationSnapshot freeze",
+    ]
+    assert gate_order_problems(upload_first) != []
+
+
+def test_an_operator_assertion_never_establishes_a_remote_outcome() -> None:
+    adr = ADR_0014.read_text("utf-8")
+    table = contract_table(adr, "resolution evidence")
+    assert resolution_problems(table) == []
+    assert table["operator assertion alone (resolved_by = USER)"] == "no"
+
+
+def test_user_says_it_was_not_created_cannot_free_the_unknown() -> None:
+    # The negative control the review asks for: a table where the operator's word proves
+    # NOT_APPLIED_PROVEN, or where no operator row exists, is caught.
+    trusting = {
+        "provider read-back under the adopted contract": "yes",
+        "operator assertion alone (resolved_by = USER)": "yes",
+    }
+    assert resolution_problems(trusting) == ["operator assertion alone (resolved_by = USER): yes"]
+    assert resolution_problems({"provider read-back under the adopted contract": "yes"}) == [
+        "no operator-assertion row"
+    ]
+
+
+def test_every_durable_digest_field_hashes_the_sanitized_representation() -> None:
+    assert digest_field_problems(ADR_0014.read_text("utf-8")) == []
+
+
+def test_the_durable_digest_detector_fires() -> None:
+    wire = (
+        "```text\nRegistrationSnapshot\n  payload_hash                     SHA-256 of the wire"
+        " request body\n```\n```text\nRegistrationAttempt\n  request_payload_hash\n```\n"
+    )
+    assert digest_field_problems(wire) == [
+        "payload_hash                     SHA-256 of the wire request body",
+        "request_payload_hash",
+    ]
+    assert digest_field_problems("```text\nRegistrationSnapshot\n```\n") == [
+        "missing payload_hash",
+        "missing request_payload_hash",
     ]
 
 

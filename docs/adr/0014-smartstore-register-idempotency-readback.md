@@ -2,6 +2,7 @@
 
 Status: **PROPOSED**. This is PR-A of Issue #89 (kickoff `5740316498`).
 - It incorporates the architect addendum `5740352676` (rulings R1–R4) as binding decisions.
+- It is amended for the PR #90 GPT review `5255157251` (HOLD): four contract blockers B1–B4 (see "Review amendments").
 - It becomes ACCEPTED only after the GPT exact-head audit, the independent Claude AI cross-audit and the user's merge authorization.
 
 It authorizes no schema, migration, runtime code, UI, endpoint adoption, AI call, supplier request or marketplace call. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
@@ -87,6 +88,35 @@ This ADR is a contract. It names entities, owners, states and invariants. It doe
 - **Freshness is fail-closed.** A Snapshot is frozen only from a `READY` preflight whose fingerprint is current. Before a CREATE is sent, the preflight is evaluated again; if any dependency differs from the Snapshot's recorded fingerprint, that Snapshot is **not sent** and its unit is `STALE` until a new Snapshot is frozen from current truth.
 - A check that cannot be performed, or whose evidence is inconclusive, is never `READY`.
 
+**The pre-asset candidate gate (review `5255157251`, B2).** A marketplace asset upload is a protected marketplace mutation (§5). Nothing is uploaded for a provider-listing unit that could still be refused for any other reason:
+
+```text
+non-asset preflight candidate      mutation-free; every dependency except the provider asset identity
+→ READY?                           otherwise no upload
+→ marketplace asset preparation / upload      bound to the candidate dependency fingerprint
+→ final preflight                  every dependency, the provider asset identity included
+→ READY?                           otherwise no Snapshot
+→ RegistrationSnapshot freeze
+```
+
+1. **Before any marketplace asset upload, every non-provider-asset preflight dependency of the provider-listing unit passes a mutation-free candidate evaluation.**
+2. **If any non-asset result is `BLOCKED`, `DUPLICATE`, `STALE` or `REVIEW_REQUIRED`, no upload is permitted.**
+3. **The only dependency allowed to be unresolved at asset-preparation time is the provider asset identity itself.**
+4. **The asset preparation and upload are bound to that candidate's dependency fingerprint**, and the upload evidence records it.
+5. After upload, the final preflight re-evaluates every dependency, the provider asset included, and must be `READY` before the Snapshot is frozen.
+6. **If any dependency changed between the candidate and the final preflight, no CREATE follows from that upload.** The unit returns to a new candidate evaluation. An asset already uploaded stays marketplace-asset state only; it is reused only where §5 allows reuse and a final preflight proves it still corresponds.
+
+The candidate is an evaluation, like every preflight. **No new readiness truth is stored for it.** When CREATE needs no provider-issued asset, the final preflight is the only evaluation.
+
+```text
+non-asset candidate status    marketplace asset upload
+READY                         permitted, bound to the candidate fingerprint
+REVIEW_REQUIRED               forbidden
+STALE                         forbidden
+DUPLICATE                     forbidden
+BLOCKED                       forbidden
+```
+
 ### 4. Category and product-information disclosure
 
 - Platform and category required fields come from **reviewed SmartStore metadata** under an adopted endpoint contract and a recorded taxonomy revision. Nothing is guessed or hardcoded per product.
@@ -108,7 +138,7 @@ M5 target/profile requirement
 - **M4 owns** the source and derived binary identity, the transformation lineage and the exact-artifact QA. A resize, a format normalization or any other marketplace-specific binary transformation is an M4 derivation.
 - **M5 owns** the requested marketplace asset profile, the upload mutation, the provider asset identity and reference, the payload's publication choice and read-back verification.
 - **M5 does not create a second derived-image lineage owner**, and never transforms a binary itself.
-- **Before the final Snapshot.** When CREATE requires a provider-issued image identity, asset preparation and upload happen **before** the final `RegistrationSnapshot` is frozen. The Snapshot freezes both the **exact local artifact identity** and the **exact sanitized provider asset identity or reference** actually sent. Final preflight rechecks that the prepared provider asset still corresponds to the currently selected, QA-passed artifact.
+- **Before the final Snapshot.** When CREATE requires a provider-issued image identity, asset preparation and upload happen **before** the final `RegistrationSnapshot` is frozen, and **only after the non-asset preflight candidate is `READY` (§3)**. The Snapshot freezes both the **exact local artifact identity** and the **exact sanitized provider asset identity or reference** actually sent. Final preflight rechecks that the prepared provider asset still corresponds to the currently selected, QA-passed artifact.
 - **A later transformation or upload never mutates a historical Snapshot.**
 - **An upload is a marketplace mutation.** It falls under the same protected-write and audit boundary as CREATE (§24).
   - An upload success is not a listing success.
@@ -133,7 +163,9 @@ RegistrationSnapshot               immutable, one per provider-listing unit
   category / taxonomy mapping revision
   platform policy and Settings revisions (shipping, returns, templates)
   detail composition revision (§19)
-  payload_hash / asset hashes
+  sanitizer / safe-query-key profile version (§15)
+  payload_hash                     SHA-256 of the sanitized canonical evidence representation (§15), never of wire bytes
+  asset hashes                     the exact local artifact SHA-256s
   payload                          the exact outbound values, sanitized (§15)
 
 RegistrationItemSnapshot           immutable
@@ -185,12 +217,12 @@ RegistrationIntent
 ```text
 RegistrationAttempt                append-only
   attempt_id / intent_id / attempt_no
-  request_payload_hash
+  request_payload_hash             SHA-256 of the sanitized canonical request representation (§15), never of wire bytes
   response status / sanitized response digest
   error_class / error_code
   remote_outcome                   APPLIED_PROVEN | NOT_APPLIED_PROVEN | UNKNOWN
   ambiguous_result                 = (remote_outcome == UNKNOWN), a projection, never written independently
-  resolved_by                      READ_BACK | LOOKUP | USER
+  resolved_by                      READ_BACK | LOOKUP | USER: who recorded the resolution, never itself the evidence (§10)
   started_at / finished_at
 ```
 
@@ -214,6 +246,20 @@ UNKNOWN
 
 - CREATE is retried only after `NOT_APPLIED_PROVEN` is established or remote absence is deterministically proven under the listing identity.
 - **Unresolved ambiguity stays `UNKNOWN` with a `REVIEW_REQUIRED` workflow overlay. It is never silently `FAILED`.** `FAILED` requires `NOT_APPLIED_PROVEN`.
+
+**Who may resolve an UNKNOWN (review `5255157251`, B3).** `resolved_by = USER` may record a workflow or operator decision, or acknowledge and accept evidence. It is never the evidence:
+- **An operator assertion alone never establishes `NOT_APPLIED_PROVEN` or remote absence, and never releases an unresolved UNKNOWN conflict scope.**
+- **Changing `UNKNOWN` to `NOT_APPLIED_PROVEN` or absent requires evidence that satisfies the adopted, operation-specific proof contract**: a read-back, a lookup by the listing identity, transmission-precluded evidence, or another explicitly reviewed machine or provider proof.
+- **The operator may be the actor who records or accepts that evidence, but is not itself the evidence.** A resolution record always references the evidence it relies on.
+
+```text
+resolution evidence                                       may establish NOT_APPLIED_PROVEN / remote absence
+provider read-back under the adopted contract             yes
+provider lookup by the listing identity                   yes
+transmission-precluded evidence (no transport handoff)    yes
+another explicitly reviewed machine/provider proof        yes
+operator assertion alone (resolved_by = USER)             no
+```
 
 **The conflict scope.** A changed Snapshot does not escape an unresolved, possibly applied CREATE:
 
@@ -326,6 +372,13 @@ This explicit reconcile is M5 REGISTER lifecycle handling of a known registratio
   - unrelated private account data.
 
   **A later redacted view, masked render or restricted read path is not sufficient.**
+- **Durable digests (review `5255157251`, B4).**
+  - **Every durable payload or request digest (`payload_hash`, `request_payload_hash` and any evidence digest) is computed only from the sanitized canonical evidence representation**, and records the sanitizer and safe-query-key profile version.
+  - **Authorization headers and session credentials are never part of a durable digest.**
+  - Secret-bearing or tokenized material is removed **before durable hashing** as well as before persistence.
+  - **If the provider requires such a value on the wire, it exists only transiently in memory for that call; its unsanitized bytes are neither persisted nor durably hashed.** A retry rebuilds the wire request from the Snapshot's business values and the credentials of the moment.
+  - The Snapshot still freezes the exact business values and the safe provider identities needed for a retry and for read-back comparison, together with the sanitizer and profile version.
+  - **If sanitation would remove a field required to prove the registration contract, the evidence is `REVIEW_REQUIRED`**; no forbidden raw artifact or hash is kept to fill the gap.
 - **The safe-query-key contract.** Every adopted SmartStore endpoint whose response may be retained declares, with its adoption (PR-D), a **deny-by-default allow-list** of the URL query keys and response fields that may be kept. Everything not on it is removed before hashing. The profile is versioned together with the endpoint-mapping revision, and each artifact records the sanitizer version that produced it.
 - **Fail-closed.** A payload the sanitizer cannot classify is not persisted raw. The evidence gap is recorded, and the dependent verification is `REVIEW_REQUIRED`.
 - **No raw marketplace artifact is retained before this contract is implemented** for the endpoint concerned.
@@ -438,6 +491,9 @@ M5-18  REGISTER raw evidence is sanitized before it is hashed or persisted
 M5-19  no supplier hotlink is ever published
 M5-20  product_registration.write stays UNVERIFIED until the bounded real CREATE is proven by read-back
 M5-21  M5 registers with no AI provider configured
+M5-22  no marketplace asset upload happens before a mutation-free non-asset preflight candidate is READY; the upload is bound to that candidate's fingerprint
+M5-23  resolved_by = USER records or accepts evidence; an operator assertion alone never establishes NOT_APPLIED_PROVEN or remote absence and never releases an UNKNOWN conflict scope
+M5-24  every durable payload or request digest hashes the sanitized canonical representation; secret-bearing wire bytes exist only transiently and are never persisted or durably hashed
 ```
 
 ## Rulings (Issue #89 addendum `5740352676`)
@@ -449,6 +505,16 @@ The architect accepted four contract points for this ADR. Each is folded into th
 - **R3. Partial failure is defined at the provider-listing / Intent boundary** (§2, §11, §12, M5-04, M5-12–M5-14). A `SINGLE_LISTING_WITH_OPTIONS` subset read-back leaves the whole Intent not confirmed, and missing options are never resent as CREATE; any repair is a later reviewed UPDATE or reconcile. `SEPARATE_LISTINGS` and `SELECTED_OFFERS` split into one Snapshot and Intent per listing, and only there is partial success allowed. `PARTIAL` is derived.
 - **R4. Manual or external delete preserves registration history; re-registration requires proven remote absence** (§14, M5-15–M5-17). No row or evidence is deleted; an assertion is not proof; proven absence records a terminal external-absence state; unproven absence keeps duplicate protection; re-registration needs proven absence, no unresolved UNKNOWN, a fresh duplicate preflight, a new Snapshot and a new Intent. Recurring disappearance detection stays M6.
 
+## Review amendments (PR #90 GPT review `5255157251`)
+
+The review held PR-A on four contract blockers, each folded into the decision above:
+- **B1. One image owner in the canonical documents.** `docs/ARCHITECTURE.md` no longer lists "image transformation/upload" under REGISTER. REGISTER owns marketplace publication-asset requirements, upload and read-back; binary transformation itself remains the M4 derived-image owner (§5, R1). ARCHITECTURE §10 says the same.
+- **B2. The pre-asset candidate gate** (§3, §5, M5-22). No marketplace asset is uploaded before a mutation-free non-asset preflight candidate is `READY`; a `BLOCKED`, `DUPLICATE`, `STALE` or `REVIEW_REQUIRED` candidate never uploads. The upload is bound to the candidate fingerprint, the final preflight re-evaluates everything, and a dependency change in between allows no CREATE.
+- **B3. `resolved_by = USER` is never evidence** (§9, §10, M5-23). An operator assertion alone never establishes `NOT_APPLIED_PROVEN` or remote absence and never releases an UNKNOWN conflict scope; the outcome needs machine or provider proof under the adopted proof contract.
+- **B4. Sanitation before durable hashing** (§6, §9, §15, M5-24). `payload_hash`, `request_payload_hash` and every durable digest hash the sanitized canonical representation; secret-bearing wire bytes exist only transiently and are never persisted or durably hashed.
+
+The eight fail-closed readings submitted in Issue #89 comment `5740555092` were accepted by the review as written; reading 7 (sanitized upload evidence) is completed by B4.
+
 ## Consequences
 
 - **PR-B to PR-F build on this contract** (Issue #89 §20): registration foundation and migrations, preflight and the Snapshot builder, SmartStore endpoint adoption with a typed adapter and read-back normalizer, idempotent execution and reconcile, then the acceptance harness and the bounded real canary campaign.
@@ -459,7 +525,8 @@ The architect accepted four contract points for this ADR. Each is folded into th
   - no REGISTER module reaches a provider transport, an HTTP client or a SmartStore caller;
   - no stored registerable or readiness truth exists;
   - `product_registration.write` stays `UNVERIFIED` and `PRODUCT_WRITE_PROVABLE` stays `False`;
-  - this ADR's invariants block (M5-01 to M5-21) and the decision text of R1–R4, including the addendum's nine required rules, and the absence of contradicting phrasings;
+  - this ADR's invariants block (M5-01 to M5-24) and the decision text of R1–R4, including the addendum's nine required rules, and the absence of contradicting phrasings;
+  - the review amendments: the canonical REGISTER owner list claims no image transformation (B1); only a `READY` non-asset candidate permits an upload (B2); an operator assertion alone never establishes a remote outcome (B3); every durable digest field hashes the sanitized representation (B4);
   - `docs/acceptance/M5.md` stays `PENDING` and names the bounded acceptance;
   - `docs/ARCHITECTURE.md` and `ROADMAP.md` reference this ADR.
 - **The status documents** (CLAUDE.md §11, `ROADMAP.md` §14, README) name Issue #89 and this ADR as the M5 track. M5 stays CURRENT.
