@@ -660,7 +660,8 @@ def test_a_retry_after_proven_not_applied_is_a_new_attempt_of_the_same_intent(
     attempts = store.attempts(intent_id)
     assert [a.attempt_no for a in attempts] == [1, 2]
     # §15 (B4): each durable request digest is of the sanitized canonical request representation.
-    assert {a.request_payload_hash for a in attempts} == {sanitized_digest({"request": "sanitized"})}
+    request_digest = sanitized_digest({"request": "sanitized"})
+    assert {a.request_payload_hash for a in attempts} == {request_digest}
     assert (count(config, "registration_snapshots"), count(config, "registration_intents")) == (
         1,
         1,
