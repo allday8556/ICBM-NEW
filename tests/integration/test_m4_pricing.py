@@ -523,14 +523,16 @@ def test_a_retired_group_blocks(
 def test_sold_out_blocks_and_every_reason_is_kept(
     container: Container, sources: Collections
 ) -> None:
-    # Kickoff §11.27, §11.32: one precedence-selected status, all reasons.
-    item = _item(container, sources, product(stock=sold_out(), brand=review(".brand")))
+    # Kickoff §11.27, §11.32: one precedence-selected status, all reasons. The brand under review
+    # is a COVERAGE field and contributes none (PR #84 review 5253693574).
+    fields = product(stock=sold_out(), original_name=review(".name"), brand=review(".brand"))
+    item = _item(container, sources, fields)
     readiness = container.product_readiness.base_readiness(item)
     assert readiness.status is ReadinessStatus.BLOCKED
     assert _codes(readiness) == [
         ("SOURCE_STOCK_SOLD_OUT", "stock"),
         (IMAGE_SELECTION_QA_PENDING, "images"),
-        ("SOURCE_COVERAGE_FIELD_REVIEW_REQUIRED", "brand"),
+        ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "original_name"),
     ]
 
 
@@ -545,6 +547,45 @@ def test_every_core_field_under_review_is_named(container: Container, sources: C
         ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "original_name"),
         ("SOURCE_CORE_FIELD_REVIEW_REQUIRED", "stock"),
     ]
+
+
+# PR #84 review 5253693574: base readiness reads CORE facts only. A COVERAGE field under review is
+# never a universal base gate; the pricing inputs among them belong to pricing readiness, and the
+# rest to M5's per-target preflight.
+COVERAGE_UNDER_REVIEW = ("brand", "manufacturer", "origin", "notice", "detail_description")
+
+
+@pytest.mark.parametrize("key", COVERAGE_UNDER_REVIEW)
+def test_a_coverage_field_under_review_is_not_a_base_gate(
+    container: Container, sources: Collections, key: str
+) -> None:
+    item = _item(container, sources, product(**{key: review(f".{key}")}))
+    readiness = container.product_readiness.base_readiness(item)
+    assert readiness.status is ReadinessStatus.REVIEW_REQUIRED
+    assert _codes(readiness) == [(IMAGE_SELECTION_QA_PENDING, "images")]
+
+
+@pytest.mark.parametrize(
+    ("key", "fact", "code"),
+    [
+        ("shipping", review(".delivery"), "PRICING_SHIPPING_UNRESOLVED"),
+        (
+            "minimum_sale_price",
+            review(".minimum-price"),
+            "PRICING_MINIMUM_SALE_PRICE_UNRESOLVED",
+        ),
+    ],
+    ids=["shipping", "minimum sale price"],
+)
+def test_pricing_inputs_under_review_belong_to_pricing_readiness_only(
+    container: Container, sources: Collections, key: str, fact: FieldFact, code: str
+) -> None:
+    item = _item(container, sources, product(**{key: fact}))
+    base = container.product_readiness.base_readiness(item)
+    assert _codes(base) == [(IMAGE_SELECTION_QA_PENDING, "images")]
+    pricing = container.product_readiness.pricing_readiness(item, context())
+    assert pricing.status is ReadinessStatus.REVIEW_REQUIRED
+    assert _codes(pricing) == [(code, key)]
 
 
 def test_an_item_without_a_valid_binding_needs_review(

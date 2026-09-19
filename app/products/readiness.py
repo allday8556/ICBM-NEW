@@ -5,7 +5,9 @@ Issue #80 PR-D (kickoff 5737440897). This is PRODUCT-domain readiness. It is not
 
 Two separate layers, never merged into one Item readiness:
 - **Base readiness** — one Item, context-free: group, membership, binding, the bound current source
-  revision's facts, stock, and the image state.
+  revision's CORE facts, stock, and the image state. A COVERAGE field is never a base gate:
+  shipping and the minimum sale price belong to pricing readiness, and notices, category and
+  platform-dependent coverage to M5's registration preflight, per target.
 - **Pricing readiness** — one Item under one exact pricing context: the current procurement, the
   source pricing inputs, and the current PricingSnapshot for that Item and context.
 
@@ -47,7 +49,6 @@ PRICING_READINESS_RULE_VERSION = "pricing-readiness/v1"
 GROUP_CANDIDATE_PENDING = "GROUP_MEMBER_CANDIDATE_PENDING"
 SOURCE_CORE_FIELD_REVIEW_REQUIRED = "SOURCE_CORE_FIELD_REVIEW_REQUIRED"
 SOURCE_CORE_FIELD_ABSENT = "SOURCE_CORE_FIELD_ABSENT"
-SOURCE_COVERAGE_FIELD_REVIEW_REQUIRED = "SOURCE_COVERAGE_FIELD_REVIEW_REQUIRED"
 SOURCE_STOCK_SOLD_OUT = "SOURCE_STOCK_SOLD_OUT"
 IMAGE_SELECTION_QA_PENDING = "IMAGE_SELECTION_QA_PENDING"
 PRICING_SNAPSHOT_MISSING = "PRICING_SNAPSHOT_MISSING"
@@ -185,19 +186,17 @@ class ProductReadinessService:
         if stored is None:  # pragma: no cover - a foreign key guarantees the revision
             return [Reason(SOURCE_CORE_FIELD_ABSENT, ReadinessStatus.REVIEW_REQUIRED, "revision")]
         reasons = []
+        # CORE fields only (PR #84 review 5253693574). A COVERAGE field is not a universal base
+        # gate: shipping and the minimum sale price are pricing readiness's inputs, and notices,
+        # category and platform-dependent coverage are M5 preflight's, per target.
         for key, field in stored.fields.items():
+            if field.level is not FieldLevel.CORE:
+                continue
             if field.status is FieldStatus.REVIEW_REQUIRED:
-                code = (
-                    SOURCE_CORE_FIELD_REVIEW_REQUIRED
-                    if field.level is FieldLevel.CORE
-                    else SOURCE_COVERAGE_FIELD_REVIEW_REQUIRED
+                reasons.append(
+                    Reason(SOURCE_CORE_FIELD_REVIEW_REQUIRED, ReadinessStatus.REVIEW_REQUIRED, key)
                 )
-                reasons.append(Reason(code, ReadinessStatus.REVIEW_REQUIRED, key))
-            elif (
-                field.status is FieldStatus.ABSENT
-                and field.level is FieldLevel.CORE
-                and key not in _ABSENCE_ALLOWED
-            ):
+            elif field.status is FieldStatus.ABSENT and key not in _ABSENCE_ALLOWED:
                 reasons.append(
                     Reason(SOURCE_CORE_FIELD_ABSENT, ReadinessStatus.REVIEW_REQUIRED, key)
                 )
