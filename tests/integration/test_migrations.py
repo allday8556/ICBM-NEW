@@ -56,6 +56,9 @@ CANONICAL_TABLES = (
     "image_qa_results",
     # M4 PR-Q (ruling 5738760913): immutable product-level quantity offers.
     "quantity_offers",
+    # M5 PR-B: the canonical seller and marketplace account (ACCOUNT_IDENTITY §2).
+    "seller_entities",
+    "marketplace_accounts",
     # M5 PR-B (ADR-0014): the registration foundation.
     "registration_drafts",
     "registration_draft_items",

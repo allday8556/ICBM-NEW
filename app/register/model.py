@@ -197,15 +197,19 @@ def registration_item_key(
 
 
 def idempotency_key(
-    marketplace_key: str, account_id: str, operation: Operation, registration_snapshot_id: str
+    marketplace_key: str,
+    marketplace_account_id: str,
+    operation: Operation,
+    registration_snapshot_id: str,
 ) -> str:
-    """One durable idempotency identity per marketplace, account, operation and exact Snapshot
-    (§8): the same inputs always give the same key, across restarts."""
+    """One durable idempotency identity per marketplace, canonical account, operation and exact
+    Snapshot (§8): the same inputs always give the same key, across restarts. The account is the
+    ICBM ``marketplace_account_id``, never the provider's wire ``account_id``."""
     text = canonical_json(
         {
             "version": IDEMPOTENCY_VERSION,
             "marketplace_key": marketplace_key,
-            "account_id": account_id,
+            "marketplace_account_id": marketplace_account_id,
             "operation": operation.value,
             "registration_snapshot_id": registration_snapshot_id,
         }
@@ -218,6 +222,16 @@ def effective_outcome(
 ) -> RemoteOutcome | None:
     """An attempt's outcome now: its evidence-backed resolution, else what it finished with."""
     return resolved_outcome if resolved_outcome is not None else remote_outcome
+
+
+def uncovered_single_listing(open_items: Mapping[str, str], sent_items: Mapping[str, str]) -> bool:
+    """Whether a ``SINGLE_LISTING_WITH_OPTIONS`` unit fails to send exactly its Draft (§2, R3).
+
+    Both mappings are Item id → pinned ``pricing_snapshot_id``. The one provider-listing unit must
+    hold every open Item of the Draft revision with its pinned price, and nothing else; a subset
+    is never a single listing. Correspondence is by Item identity, never by position or label.
+    """
+    return dict(open_items) != dict(sent_items)
 
 
 class RegistrationConflictError(AppError):

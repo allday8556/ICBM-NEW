@@ -8,6 +8,17 @@ This store writes and reads the registration rows and nothing more. It never dec
 
 Every cross-row invariant is enforced by the database (migration 0016), so this store is not the
 only guard. It adds the domain side:
+- **the canonical account scope**: a Draft, Snapshot, Batch, Intent or override opens only for a
+  ``marketplace_account_id`` bound to its committed provider identity (``ACCOUNT_IDENTITY.md``;
+  review 5255746944, blocker 2), never for a free account string;
+- **the Draft price pin**: each Draft Item names the exact M4 PricingSnapshot of that Item in the
+  Draft's target context, a new selection is a new Draft revision, and a Snapshot freezes that
+  pinned price with the membership and facts revisions it was computed from, never a price the
+  caller hands in (§2, blocker 1);
+- **the provider-listing unit**: a ``SINGLE_LISTING_WITH_OPTIONS`` Snapshot sends exactly every
+  open Item of its Draft revision, ``SEPARATE_LISTINGS`` one Item, ``SELECTED_OFFERS`` a chosen
+  subset; an Intent opens only while its Snapshot is still its Draft's current revision (R3,
+  blocker 3);
 - the deterministic identities: each ``registration_item_key`` from the listing identity and the
   Item key, and each Intent's idempotency key (§7, §8);
 - **every durable digest from a sanitized canonical representation** it is handed, never from wire
@@ -33,11 +44,12 @@ from sqlalchemy.orm import Session
 
 from app.audit.models import AuditEventType, AuditOutcome
 from app.audit.service import AuditEntry, AuditLog
+from app.connect.accounts import require_bound
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.clock import Clock
 from app.core.errors import ErrorClass, InputValidationError, NotFoundError
 from app.db.database import Database
-from app.products.models import GroupChangeEvent, ProductItem
+from app.products.models import GroupChangeEvent, PricingSnapshot, ProductItem
 from app.register.model import (
     BLOCKING_STATES,
     AbsenceEvidence,
@@ -55,6 +67,7 @@ from app.register.model import (
     registration_item_key,
     sanitized_digest,
     summarize,
+    uncovered_single_listing,
     valid_listing_identity,
 )
 from app.register.models import (
@@ -79,6 +92,7 @@ class DraftItemRecord:
     item_id: str
     product_group_id: str
     composition_signature: str
+    pricing_snapshot_id: str
     ordinal: int
 
 
@@ -86,7 +100,7 @@ class DraftItemRecord:
 class DraftRecord:
     draft_id: str
     marketplace_key: str
-    account_id: str
+    marketplace_account_id: str
     listing_shape: ListingShape
     draft_revision: int
     items: tuple[DraftItemRecord, ...]
@@ -94,12 +108,13 @@ class DraftRecord:
 
 @dataclass(frozen=True)
 class ItemSnapshotSpec:
-    """What the caller (PR-C) froze for one Item. Every mapping is already sanitized."""
+    """What the caller (PR-C) built for one Item of the Draft. Every mapping is already sanitized.
+
+    The price, and the membership and facts revisions it was computed from, are not the caller's
+    to give: the Snapshot freezes the Draft Item's pinned PricingSnapshot (§2, blocker 1).
+    """
 
     item_id: str
-    group_membership_revision_id: str
-    source_product_facts_revision_id: str
-    pricing_snapshot_id: str
     source_snapshot: Mapping[str, Any]
     publication_assets: Sequence[Mapping[str, Any]]
     outbound_values: Mapping[str, Any]
@@ -143,7 +158,7 @@ class SnapshotRecord:
     draft_id: str
     draft_revision: int
     marketplace_key: str
-    account_id: str
+    marketplace_account_id: str
     listing_shape: ListingShape
     listing_identity: str
     preflight_fingerprint: str
@@ -157,7 +172,7 @@ class IntentRecord:
     registration_batch_id: str
     registration_snapshot_id: str
     marketplace_key: str
-    account_id: str
+    marketplace_account_id: str
     operation: Operation
     idempotency_key: str
     state: IntentState
@@ -207,7 +222,7 @@ class RegistrationRecord:
     intent_id: str
     registration_snapshot_id: str
     marketplace_key: str
-    account_id: str
+    marketplace_account_id: str
     marketplace_product_id: str
     seller_product_code: str
     published_state: str
@@ -219,7 +234,7 @@ class RegistrationRecord:
 class OverrideRecord:
     override_id: str
     marketplace_key: str
-    account_id: str
+    marketplace_account_id: str
     product_group_id: str
     listing_composition_id: str | None
     active: bool
@@ -288,18 +303,19 @@ class RegistrationUnit:
     def create_draft(
         self,
         marketplace_key: str,
-        account_id: str,
+        marketplace_account_id: str,
         listing_shape: ListingShape,
         *,
         created_by: str,
         correlation_id: str,
     ) -> DraftRecord:
-        _require_text(marketplace_key=marketplace_key, account_id=account_id, created_by=created_by)
+        _require_text(created_by=created_by)
+        require_bound(self.session, marketplace_key, marketplace_account_id)
         now = self._clock.now()
         row = RegistrationDraft(
             draft_id=str(uuid.uuid4()),
             marketplace_key=marketplace_key,
-            account_id=account_id,
+            marketplace_account_id=marketplace_account_id,
             listing_shape=ListingShape(listing_shape).value,
             draft_revision=1,
             created_by=created_by,
@@ -314,17 +330,31 @@ class RegistrationUnit:
             created_by,
             correlation_id,
             row.draft_id,
-            {"listing_shape": row.listing_shape, "draft_revision": 1},
+            {
+                "marketplace_account_id": row.marketplace_account_id,
+                "listing_shape": row.listing_shape,
+                "draft_revision": 1,
+            },
         )
         return self._draft_record(row)
 
     def add_draft_item(
-        self, draft_id: str, item_id: str, *, added_by: str, correlation_id: str
+        self,
+        draft_id: str,
+        item_id: str,
+        pricing_snapshot_id: str,
+        *,
+        added_by: str,
+        correlation_id: str,
     ) -> DraftRecord:
+        """Add an existing M4 Item, pinned to its exact PricingSnapshot for this Draft's
+        marketplace and canonical account (§2). Choosing that price is the caller's (PR-C); this
+        store only refuses a price of another Item or another target context."""
         draft = self._draft_row(draft_id)
         item = self.session.get(ProductItem, item_id)
         if item is None:
             raise NotFoundError("REGISTER_ITEM_NOT_FOUND", "the draft names no existing M4 Item")
+        self._require_price(draft, item_id, pricing_snapshot_id)
         open_items = self._open_items(draft_id)
         if any(
             row.item_id == item_id
@@ -345,6 +375,7 @@ class RegistrationUnit:
             item_id=item_id,
             product_group_id=item.product_group_id,
             composition_signature=item.composition_signature,
+            pricing_snapshot_id=pricing_snapshot_id,
             ordinal=max((r.ordinal for r in open_items), default=-1) + 1,
             added_by=added_by,
             added_at=now,
@@ -352,6 +383,51 @@ class RegistrationUnit:
         self.session.add(row)
         self.session.flush()
         return self._advance(draft, added_by, correlation_id, "add_draft_item", item_id)
+
+    def change_draft_item_price(
+        self,
+        draft_id: str,
+        item_id: str,
+        pricing_snapshot_id: str,
+        *,
+        changed_by: str,
+        correlation_id: str,
+    ) -> DraftRecord:
+        """Pin an open Item to another exact PricingSnapshot of the same Item and target (§2).
+
+        The open row is closed and a new one opens in the same position with the new price, and
+        the Draft advances one revision: a Snapshot built on the previous revision is stale, and
+        the Draft history keeps every price it held. Selecting the pinned price again changes
+        nothing.
+        """
+        draft = self._draft_row(draft_id)
+        current = next((r for r in self._open_items(draft_id) if r.item_id == item_id), None)
+        if current is None:
+            raise NotFoundError(
+                "REGISTER_DRAFT_ITEM_NOT_FOUND", "the item is not open in the draft"
+            )
+        if current.pricing_snapshot_id == pricing_snapshot_id:
+            return self._draft_record(draft)
+        self._require_price(draft, item_id, pricing_snapshot_id)
+        now = self._clock.now()
+        current.removed_by = changed_by
+        current.removed_at = now
+        self.session.flush()
+        self.session.add(
+            RegistrationDraftItem(
+                draft_item_id=str(uuid.uuid4()),
+                draft_id=draft_id,
+                item_id=item_id,
+                product_group_id=current.product_group_id,
+                composition_signature=current.composition_signature,
+                pricing_snapshot_id=pricing_snapshot_id,
+                ordinal=current.ordinal,
+                added_by=changed_by,
+                added_at=now,
+            )
+        )
+        self.session.flush()
+        return self._advance(draft, changed_by, correlation_id, "change_draft_item_price", item_id)
 
     def remove_draft_item(
         self, draft_id: str, item_id: str, *, removed_by: str, correlation_id: str
@@ -385,8 +461,15 @@ class RegistrationUnit:
     ) -> SnapshotRecord:
         """Freeze one provider-listing unit exactly as the caller built it. The caller has already
         evaluated a READY preflight for these dependencies (PR-C); this store records the
-        fingerprint it names and never re-decides it."""
+        fingerprint it names and never re-decides it.
+
+        Each Item is frozen with the Draft's pinned PricingSnapshot and the membership and facts
+        revisions that price was computed from. A ``SINGLE_LISTING_WITH_OPTIONS`` unit sends every
+        open Item of the Draft and nothing else (R3); a ``SEPARATE_LISTINGS`` unit sends one Item;
+        a ``SELECTED_OFFERS`` unit sends the Items the caller selected.
+        """
         draft = self._draft_row(spec.draft_id)
+        require_bound(self.session, draft.marketplace_key, draft.marketplace_account_id)
         if spec.draft_revision != draft.draft_revision:
             raise RegistrationConflictError(
                 "REGISTER_DRAFT_STALE", "a Snapshot freezes only the current Draft revision"
@@ -402,20 +485,25 @@ class RegistrationUnit:
                 "REGISTER_SEPARATE_LISTING_UNIT",
                 "a separate listing is one provider-listing unit with exactly one Item",
             )
-        open_items = {row.item_id for row in self._open_items(spec.draft_id)}
-        if (
-            len({i.item_id for i in spec.items}) != len(spec.items)
-            or not {i.item_id for i in spec.items} <= open_items
-        ):
+        pins = {row.item_id: row.pricing_snapshot_id for row in self._open_items(spec.draft_id)}
+        sent = [i.item_id for i in spec.items]
+        if len(set(sent)) != len(sent) or not set(sent) <= set(pins):
             raise InputValidationError(
                 "REGISTER_SNAPSHOT_ITEMS", "a Snapshot sends distinct open items of its Draft"
+            )
+        if draft.listing_shape == ListingShape.SINGLE_LISTING_WITH_OPTIONS and (
+            uncovered_single_listing(pins, {i: pins[i] for i in sent})
+        ):
+            raise InputValidationError(
+                "REGISTER_SINGLE_LISTING_COVERAGE",
+                "a single listing with options sends every open Item of its Draft revision",
             )
         snapshot = RegistrationSnapshot(
             registration_snapshot_id=str(uuid.uuid4()),
             draft_id=draft.draft_id,
             draft_revision=draft.draft_revision,
             marketplace_key=draft.marketplace_key,
-            account_id=draft.account_id,
+            marketplace_account_id=draft.marketplace_account_id,
             listing_shape=draft.listing_shape,
             listing_identity=spec.listing_identity,
             preflight_rule_version=spec.preflight_rule_version,
@@ -435,7 +523,9 @@ class RegistrationUnit:
         self.session.flush()
         for ordinal, item_spec in enumerate(spec.items):
             item = self.session.get(ProductItem, item_spec.item_id)
-            assert item is not None  # an open draft item names an existing Item
+            price = self.session.get(PricingSnapshot, pins[item_spec.item_id])
+            # An open draft item names an existing Item and an existing price (foreign keys).
+            assert item is not None and price is not None
             self.session.add(
                 RegistrationItemSnapshot(
                     item_snapshot_id=str(uuid.uuid4()),
@@ -446,13 +536,13 @@ class RegistrationUnit:
                     ordinal=ordinal,
                     item_id=item.item_id,
                     group_id_at_registration=item.product_group_id,
-                    group_membership_revision_id=item_spec.group_membership_revision_id,
+                    group_membership_revision_id=price.membership_revision_id,
                     listing_composition_id=item.composition_id,
                     composition_signature=item.composition_signature,
                     source_product_facts_revision_id_at_registration=(
-                        item_spec.source_product_facts_revision_id
+                        price.source_product_facts_revision_id
                     ),
-                    pricing_snapshot_id_at_registration=item_spec.pricing_snapshot_id,
+                    pricing_snapshot_id_at_registration=price.pricing_snapshot_id,
                     source_snapshot_json=_json(dict(item_spec.source_snapshot)),
                     publication_assets_json=_json([dict(a) for a in item_spec.publication_assets]),
                     outbound_values_json=_json(dict(item_spec.outbound_values)),
@@ -492,7 +582,7 @@ class RegistrationUnit:
             draft_id=row.draft_id,
             draft_revision=row.draft_revision,
             marketplace_key=row.marketplace_key,
-            account_id=row.account_id,
+            marketplace_account_id=row.marketplace_account_id,
             listing_shape=ListingShape(row.listing_shape),
             listing_identity=row.listing_identity,
             preflight_fingerprint=row.preflight_fingerprint,
@@ -519,13 +609,19 @@ class RegistrationUnit:
     # ------------------------------------------------------------------ batches and intents (§8)
 
     def create_batch(
-        self, marketplace_key: str, account_id: str, *, created_by: str, correlation_id: str
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        *,
+        created_by: str,
+        correlation_id: str,
     ) -> str:
-        _require_text(marketplace_key=marketplace_key, account_id=account_id, created_by=created_by)
+        _require_text(created_by=created_by)
+        require_bound(self.session, marketplace_key, marketplace_account_id)
         row = RegistrationBatch(
             registration_batch_id=str(uuid.uuid4()),
             marketplace_key=marketplace_key,
-            account_id=account_id,
+            marketplace_account_id=marketplace_account_id,
             created_by=created_by,
             correlation_id=correlation_id,
             created_at=self._clock.now(),
@@ -556,13 +652,15 @@ class RegistrationUnit:
         batch = self.session.get(RegistrationBatch, registration_batch_id)
         if snapshot is None or batch is None:
             raise NotFoundError("REGISTER_NOT_FOUND", "the Snapshot or the batch does not exist")
-        if (batch.marketplace_key, batch.account_id) != (
+        if (batch.marketplace_key, batch.marketplace_account_id) != (
             snapshot.marketplace_key,
-            snapshot.account_id,
+            snapshot.marketplace_account_id,
         ):
             raise InputValidationError(
                 "REGISTER_SCOPE_MISMATCH", "a batch and its Snapshots share one marketplace account"
             )
+        require_bound(self.session, snapshot.marketplace_key, snapshot.marketplace_account_id)
+        self._require_current_unit(snapshot)
         blocking = self.conflicting_intents(registration_snapshot_id)
         if blocking:
             raise RegistrationConflictError(
@@ -576,11 +674,11 @@ class RegistrationUnit:
             registration_batch_id=registration_batch_id,
             registration_snapshot_id=registration_snapshot_id,
             marketplace_key=snapshot.marketplace_key,
-            account_id=snapshot.account_id,
+            marketplace_account_id=snapshot.marketplace_account_id,
             operation=Operation.CREATE.value,
             idempotency_key=idempotency_key(
                 snapshot.marketplace_key,
-                snapshot.account_id,
+                snapshot.marketplace_account_id,
                 Operation.CREATE,
                 registration_snapshot_id,
             ),
@@ -612,9 +710,10 @@ class RegistrationUnit:
     def conflicting_intents(self, registration_snapshot_id: str) -> tuple[str, ...]:
         """The unresolved CREATE Intents whose conflict scope overlaps this Snapshot (§10, R2).
 
-        Overlap is the same marketplace and account, and either the same listing identity or a
-        shared group, where each side's groups are widened by the MERGE and SPLIT lineage that
-        connects them. An unclear successor therefore counts as overlapping (fail-closed).
+        Overlap is the same marketplace and canonical account, and either the same listing
+        identity or a shared group, where each side's groups are widened by the MERGE and SPLIT
+        lineage that connects them. An unclear successor therefore counts as overlapping
+        (fail-closed). One real account has one canonical id, so no label escapes the scope.
         """
         snapshot = self.session.get(RegistrationSnapshot, registration_snapshot_id)
         if snapshot is None:
@@ -624,7 +723,7 @@ class RegistrationUnit:
             select(RegistrationIntent).where(
                 RegistrationIntent.operation == Operation.CREATE.value,
                 RegistrationIntent.marketplace_key == snapshot.marketplace_key,
-                RegistrationIntent.account_id == snapshot.account_id,
+                RegistrationIntent.marketplace_account_id == snapshot.marketplace_account_id,
                 RegistrationIntent.state.in_([s.value for s in BLOCKING_STATES]),
                 RegistrationIntent.registration_snapshot_id != registration_snapshot_id,
             )
@@ -863,7 +962,7 @@ class RegistrationUnit:
             intent_id=intent.intent_id,
             registration_snapshot_id=intent.registration_snapshot_id,
             marketplace_key=intent.marketplace_key,
-            account_id=intent.account_id,
+            marketplace_account_id=intent.marketplace_account_id,
             marketplace_product_id=intent.marketplace_product_id,
             seller_product_code=snapshot.listing_identity,
             published_state=published_state,
@@ -972,7 +1071,7 @@ class RegistrationUnit:
             intent_id=row.intent_id,
             registration_snapshot_id=row.registration_snapshot_id,
             marketplace_key=row.marketplace_key,
-            account_id=row.account_id,
+            marketplace_account_id=row.marketplace_account_id,
             marketplace_product_id=row.marketplace_product_id,
             seller_product_code=row.seller_product_code,
             published_state=row.published_state,
@@ -996,7 +1095,7 @@ class RegistrationUnit:
     def record_duplicate_override(
         self,
         marketplace_key: str,
-        account_id: str,
+        marketplace_account_id: str,
         product_group_id: str,
         *,
         reason: str,
@@ -1005,17 +1104,14 @@ class RegistrationUnit:
         listing_composition_id: str | None = None,
     ) -> OverrideRecord:
         """An operator's explicit decision to allow an intentional duplicate listing in one
-        marketplace account. It never releases an unresolved UNKNOWN or an unproven removal."""
-        _require_text(
-            marketplace_key=marketplace_key,
-            account_id=account_id,
-            reason=reason,
-            approved_by=approved_by,
-        )
+        canonical marketplace account. It never releases an unresolved UNKNOWN or an unproven
+        removal."""
+        _require_text(reason=reason, approved_by=approved_by)
+        require_bound(self.session, marketplace_key, marketplace_account_id)
         row = DuplicateOverride(
             override_id=str(uuid.uuid4()),
             marketplace_key=marketplace_key,
-            account_id=account_id,
+            marketplace_account_id=marketplace_account_id,
             product_group_id=product_group_id,
             listing_composition_id=listing_composition_id,
             reason=reason,
@@ -1045,12 +1141,12 @@ class RegistrationUnit:
         return _override_record(row)
 
     def active_overrides(
-        self, marketplace_key: str, account_id: str, product_group_id: str
+        self, marketplace_key: str, marketplace_account_id: str, product_group_id: str
     ) -> tuple[OverrideRecord, ...]:
         rows = self.session.scalars(
             select(DuplicateOverride).where(
                 DuplicateOverride.marketplace_key == marketplace_key,
-                DuplicateOverride.account_id == account_id,
+                DuplicateOverride.marketplace_account_id == marketplace_account_id,
                 DuplicateOverride.product_group_id == product_group_id,
                 DuplicateOverride.revoked_at.is_(None),
             )
@@ -1077,6 +1173,51 @@ class RegistrationUnit:
             ).all()
         )
 
+    def _require_price(
+        self, draft: RegistrationDraft, item_id: str, pricing_snapshot_id: str
+    ) -> None:
+        """The price is an exact M4 PricingSnapshot of this Item for the Draft's marketplace and
+        canonical account; an account-free price applies to every account (ADR-0013 §7)."""
+        price = self.session.get(PricingSnapshot, pricing_snapshot_id)
+        if (
+            price is None
+            or price.item_id != item_id
+            or price.marketplace_key != draft.marketplace_key
+            or price.account_id not in (None, draft.marketplace_account_id)
+        ):
+            raise InputValidationError(
+                "REGISTER_DRAFT_PRICE_CONTEXT",
+                "a Draft Item is priced by an exact M4 snapshot of that Item and Draft target",
+            )
+
+    def _require_current_unit(self, snapshot: RegistrationSnapshot) -> None:
+        """An Intent opens only from a Snapshot of its Draft's current revision whose Items are
+        still open with their pinned prices; a single listing covers every open Item (R3)."""
+        draft = self._draft_row(snapshot.draft_id)
+        pins = {row.item_id: row.pricing_snapshot_id for row in self._open_items(draft.draft_id)}
+        sent = {
+            row.item_id: row.pricing_snapshot_id_at_registration
+            for row in self.session.scalars(
+                select(RegistrationItemSnapshot).where(
+                    RegistrationItemSnapshot.registration_snapshot_id
+                    == snapshot.registration_snapshot_id
+                )
+            )
+        }
+        if (
+            (snapshot.draft_revision, snapshot.listing_shape)
+            != (draft.draft_revision, draft.listing_shape)
+            or any(pins.get(item_id) != price for item_id, price in sent.items())
+            or (
+                snapshot.listing_shape == ListingShape.SINGLE_LISTING_WITH_OPTIONS
+                and uncovered_single_listing(pins, sent)
+            )
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_DRAFT_STALE",
+                "an Intent opens only from a Snapshot of its Draft's current revision",
+            )
+
     def _advance(
         self,
         draft: RegistrationDraft,
@@ -1094,6 +1235,11 @@ class RegistrationUnit:
         }
         if item_id is not None:
             details["item_id"] = item_id
+            pinned = next(
+                (r for r in self._open_items(draft.draft_id) if r.item_id == item_id), None
+            )
+            if pinned is not None:
+                details["pricing_snapshot_id"] = pinned.pricing_snapshot_id
         self._event(
             AuditEventType.REGISTRATION_DRAFT_RECORDED,
             action,
@@ -1108,7 +1254,7 @@ class RegistrationUnit:
         return DraftRecord(
             draft_id=row.draft_id,
             marketplace_key=row.marketplace_key,
-            account_id=row.account_id,
+            marketplace_account_id=row.marketplace_account_id,
             listing_shape=ListingShape(row.listing_shape),
             draft_revision=row.draft_revision,
             items=tuple(
@@ -1117,6 +1263,7 @@ class RegistrationUnit:
                     item_id=i.item_id,
                     product_group_id=i.product_group_id,
                     composition_signature=i.composition_signature,
+                    pricing_snapshot_id=i.pricing_snapshot_id,
                     ordinal=i.ordinal,
                 )
                 for i in self._open_items(row.draft_id)
@@ -1323,7 +1470,7 @@ def _intent_record(row: RegistrationIntent) -> IntentRecord:
         registration_batch_id=row.registration_batch_id,
         registration_snapshot_id=row.registration_snapshot_id,
         marketplace_key=row.marketplace_key,
-        account_id=row.account_id,
+        marketplace_account_id=row.marketplace_account_id,
         operation=Operation(row.operation),
         idempotency_key=row.idempotency_key,
         state=IntentState(row.state),
@@ -1357,7 +1504,7 @@ def _override_record(row: DuplicateOverride) -> OverrideRecord:
     return OverrideRecord(
         override_id=row.override_id,
         marketplace_key=row.marketplace_key,
-        account_id=row.account_id,
+        marketplace_account_id=row.marketplace_account_id,
         product_group_id=row.product_group_id,
         listing_composition_id=row.listing_composition_id,
         active=row.revoked_at is None,

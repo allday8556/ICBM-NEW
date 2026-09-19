@@ -3,7 +3,8 @@
 Every rule is proven twice where it can be: through the registration store, and by the raw write
 that would break it, which the database refuses on its own (migration 0016). No supplier,
 marketplace or AI provider is contacted; every marketplace, account, identity and value is
-invented, and no provider response exists anywhere in this module.
+invented, and no provider response exists anywhere in this module. A committed M2 binding unit
+is written directly as the invented state an explicit M2 binding would have left.
 """
 
 import contextlib
@@ -19,9 +20,10 @@ from sqlalchemy import CheckConstraint
 
 from app.collect.facts import FieldFact, QuantityTier, QuantityTiersValue
 from app.config import AppConfig
+from app.connect.accounts import AccountBinding
 from app.connect.marketplace.capability import RemoteOutcome
 from app.container import Container
-from app.core.errors import ErrorClass, InputValidationError, NotFoundError
+from app.core.errors import ErrorClass, InputValidationError, NotFoundError, PolicyBlockedError
 from app.db.database import Database, create_sqlite_engine
 from app.db.metadata import metadata
 from app.db.migrate import alembic_config, current_revision, upgrade_to_head
@@ -54,10 +56,12 @@ from tests.support import FakeClock
 pytestmark = pytest.mark.integration
 
 MARKET = "market_a"
-ACCOUNT = "account-1"
+OTHER_MARKET = "market_b"
 AT = "2026-09-19 00:00:00"
 CID = "cid-register"
 OPERATOR = "operator-1"
+# The canonical id of MARKET's bound account, minted per test by the autouse ``account`` fixture.
+ACCOUNT = ""
 REGISTRATION_TABLES = (
     "registration_drafts",
     "registration_draft_items",
@@ -70,17 +74,54 @@ REGISTRATION_TABLES = (
     "marketplace_registration_items",
     "duplicate_overrides",
 )
+ACCOUNT_TABLES = ("seller_entities", "marketplace_accounts")
 
 
 @dataclass(frozen=True)
 class Priced:
-    """One M4 Item priced for ``MARKET``, with the exact truth a Snapshot must name."""
+    """One M4 Item priced for ``MARKET``, with the exact truth its pinned price names."""
 
     item_id: str
     group: str
     membership_revision_id: str
     facts_revision_id: str
     pricing_snapshot_id: str
+
+
+# ---------------------------------------------------------------- canonical accounts
+
+
+def _bind(config: AppConfig, marketplace_key: str, uid: str | None) -> None:
+    """The committed M2 binding unit of ``marketplace_key`` (ACCOUNT_IDENTITY §5), or a later
+    explicit rebinding to another invented provider identity. ``None`` leaves a connection that
+    was never bound."""
+    bound = (1, 1, AT, OPERATOR) if uid is not None else (None, None, None, None)
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute(
+            "INSERT INTO marketplace_connections (marketplace_key, credential_generation_hwm,"
+            " session_generation_hwm, provider_account_uid, provider_account_id,"
+            " bound_credential_generation, bound_session_generation, bound_at, bound_by,"
+            " created_at, updated_at) VALUES (?, 1, 1, ?, NULL, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (marketplace_key) DO UPDATE SET"
+            " provider_account_uid = excluded.provider_account_uid",
+            (marketplace_key, uid, *bound, AT, AT),
+        )
+        connection.commit()
+
+
+def _establish(container: Container, config: AppConfig, marketplace_key: str, uid: str) -> str:
+    _bind(config, marketplace_key, uid)
+    seller = container.accounts.create_seller_entity(created_by=OPERATOR, correlation_id=CID)
+    return container.accounts.establish(
+        marketplace_key, seller, established_by=OPERATOR, correlation_id=CID
+    ).marketplace_account_id
+
+
+@pytest.fixture(autouse=True)
+def account(container: Container, config: AppConfig) -> str:
+    global ACCOUNT
+    ACCOUNT = _establish(container, config, MARKET, "uid-market-a-1")
+    return ACCOUNT
 
 
 @pytest.fixture
@@ -91,6 +132,9 @@ def sources(container: Container, config: AppConfig) -> Collections:
 @pytest.fixture
 def store(container: Container) -> RegistrationStore:
     return container.registrations
+
+
+# ---------------------------------------------------------------- M4 truth
 
 
 def _truth(config: AppConfig, item_id: str, snapshot_id: str, group: str) -> Priced:
@@ -115,6 +159,12 @@ def _priced(
     snapshot = container.pricing.price(result.item_id, context()).snapshot
     assert snapshot is not None
     return _truth(config, result.item_id, snapshot.pricing_snapshot_id, result.product_group_id)
+
+
+def _repriced(container: Container, config: AppConfig, item: Priced, **overrides: object) -> str:
+    snapshot = container.pricing.price(item.item_id, context(**overrides)).snapshot
+    assert snapshot is not None
+    return snapshot.pricing_snapshot_id
 
 
 def _tier_fact(*pairs: tuple[int, int]) -> FieldFact:
@@ -145,17 +195,37 @@ def _tiered(
     return priced
 
 
+# ---------------------------------------------------------------- registration steps
+
+
 def _draft(
     store: RegistrationStore,
     items: list[Priced],
     shape: ListingShape = ListingShape.SINGLE_LISTING_WITH_OPTIONS,
-    account: str = ACCOUNT,
+    account: str | None = None,
 ) -> str:
     with store.transaction() as unit:
-        draft = unit.create_draft(MARKET, account, shape, created_by=OPERATOR, correlation_id=CID)
+        draft = unit.create_draft(
+            MARKET, account or ACCOUNT, shape, created_by=OPERATOR, correlation_id=CID
+        )
         for item in items:
-            unit.add_draft_item(draft.draft_id, item.item_id, added_by=OPERATOR, correlation_id=CID)
+            unit.add_draft_item(
+                draft.draft_id,
+                item.item_id,
+                item.pricing_snapshot_id,
+                added_by=OPERATOR,
+                correlation_id=CID,
+            )
         return draft.draft_id
+
+
+def _item_spec(item: Priced, n: int = 0) -> ItemSnapshotSpec:
+    return ItemSnapshotSpec(
+        item_id=item.item_id,
+        source_snapshot={"binding": "copied at registration"},
+        publication_assets=[{"artifact_sha256": "b" * 64, "provider_asset": "asset-1"}],
+        outbound_values={"option_value": f"invented option {n}"},
+    )
 
 
 def _spec(
@@ -178,19 +248,20 @@ def _spec(
         detail_composition_revision="detail-test-1",
         sanitizer_profile_version="sanitizer-test-1",
         payload={"name": "invented listing name", "items": len(items)},
-        items=[
-            ItemSnapshotSpec(
-                item_id=item.item_id,
-                group_membership_revision_id=item.membership_revision_id,
-                source_product_facts_revision_id=item.facts_revision_id,
-                pricing_snapshot_id=item.pricing_snapshot_id,
-                source_snapshot={"binding": "copied at registration"},
-                publication_assets=[{"artifact_sha256": "b" * 64, "provider_asset": "asset-1"}],
-                outbound_values={"option_value": f"invented option {n}"},
-            )
-            for n, item in enumerate(items)
-        ],
+        items=[_item_spec(item, n) for n, item in enumerate(items)],
     )
+
+
+def _freeze_in(
+    store: RegistrationStore,
+    draft_id: str,
+    items: list[Priced],
+    listing_identity: str | None = None,
+) -> SnapshotRecord:
+    with store.transaction() as unit:
+        return unit.freeze_snapshot(
+            _spec(store, draft_id, items, listing_identity), created_by=OPERATOR, correlation_id=CID
+        )
 
 
 def _freeze(
@@ -198,17 +269,21 @@ def _freeze(
     items: list[Priced],
     shape: ListingShape = ListingShape.SINGLE_LISTING_WITH_OPTIONS,
     listing_identity: str | None = None,
+    account: str | None = None,
 ) -> SnapshotRecord:
-    draft_id = _draft(store, items, shape)
-    with store.transaction() as unit:
-        return unit.freeze_snapshot(
-            _spec(store, draft_id, items, listing_identity), created_by=OPERATOR, correlation_id=CID
-        )
+    return _freeze_in(store, _draft(store, items, shape, account), items, listing_identity)
 
 
 def _intent(store: RegistrationStore, snapshot_id: str) -> str:
+    snapshot = store.snapshot(snapshot_id)
+    assert snapshot is not None
     with store.transaction() as unit:
-        batch = unit.create_batch(MARKET, ACCOUNT, created_by=OPERATOR, correlation_id=CID)
+        batch = unit.create_batch(
+            snapshot.marketplace_key,
+            snapshot.marketplace_account_id,
+            created_by=OPERATOR,
+            correlation_id=CID,
+        )
         return unit.create_intent(
             batch, snapshot_id, created_by=OPERATOR, correlation_id=CID
         ).intent_id
@@ -272,13 +347,65 @@ def _one(config: AppConfig, sql: str, *args: object) -> tuple[object, ...]:
         return tuple(connection.execute(sql, args).fetchone())
 
 
+def _copy_unit(config: AppConfig, snapshot_id: str) -> str:
+    """A raw copy of a Snapshot row under a new id and listing identity, without its Items."""
+    copy = str(uuid.uuid4())
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute(
+            "INSERT INTO registration_snapshots SELECT ?, draft_id, draft_revision,"
+            " marketplace_key, marketplace_account_id, listing_shape, ?, preflight_rule_version,"
+            " preflight_fingerprint, category_mapping_revision, taxonomy_revision,"
+            " policy_revisions_json, detail_composition_revision, sanitizer_profile_version,"
+            " payload_hash, payload_json, created_by, correlation_id, created_at"
+            " FROM registration_snapshots WHERE registration_snapshot_id = ?",
+            (copy, f"icbm-{uuid.uuid4().hex}", snapshot_id),
+        )
+        connection.commit()
+    return copy
+
+
+_COPY_ITEM = (
+    "INSERT INTO registration_item_snapshots SELECT ?, ?, ?, ordinal, item_id,"
+    " group_id_at_registration, COALESCE(?, group_membership_revision_id),"
+    " listing_composition_id, composition_signature,"
+    " source_product_facts_revision_id_at_registration, pricing_snapshot_id_at_registration,"
+    " source_snapshot_json, publication_assets_json, outbound_values_json"
+    " FROM registration_item_snapshots WHERE registration_snapshot_id = ? AND item_id = ?"
+)
+
+
+def _copy_item_args(
+    source: str, item_id: str, target: str, membership: str | None = None
+) -> tuple[object, ...]:
+    return (str(uuid.uuid4()), target, f"rik1-{uuid.uuid4().hex}", membership, source, item_id)
+
+
+_RAW_INTENT = (
+    "INSERT INTO registration_intents (intent_id, registration_batch_id,"
+    " registration_snapshot_id, marketplace_key, marketplace_account_id, operation,"
+    " idempotency_key, state, verification_state, created_by, correlation_id, created_at,"
+    " updated_at) VALUES (?, ?, ?, ?, ?, 'CREATE', ?, 'PREPARED', 'NOT_VERIFIED', 'o', 'c', ?, ?)"
+)
+
+
+def _raw_intent_args(batch: str, snapshot_id: str, account: str) -> tuple[object, ...]:
+    return (str(uuid.uuid4()), batch, snapshot_id, MARKET, account, uuid.uuid4().hex * 2, AT, AT)
+
+
+def _batch(store: RegistrationStore, account: str | None = None) -> str:
+    with store.transaction() as unit:
+        return unit.create_batch(
+            MARKET, account or ACCOUNT, created_by=OPERATOR, correlation_id=CID
+        )
+
+
 # ---------------------------------------------------------------- schema
 
 
 def test_the_m5_checks_match_the_orm(config: AppConfig) -> None:
     # The CHECK expressions of 0016 are frozen literals; they must equal the models' expressions.
     with contextlib.closing(raw(config)) as connection:
-        for table in REGISTRATION_TABLES:
+        for table in REGISTRATION_TABLES + ACCOUNT_TABLES:
             ddl = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
             ).fetchone()[0]
@@ -296,14 +423,207 @@ def test_every_registration_table_rejects_delete(
     item = _priced(container, config, sources)
     snapshot = _freeze(store, [item])
     _intent(store, snapshot.registration_snapshot_id)
-    for table in REGISTRATION_TABLES:
+    for table in REGISTRATION_TABLES + ACCOUNT_TABLES:
         with contextlib.closing(raw(config)) as connection:
             held = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         if held:
             _refused(config, f"DELETE FROM {table}", match="never deleted")
 
 
-# ---------------------------------------------------------------- drafts (§2)
+# ---------------------------------------------------------------- canonical account (blocker 2)
+
+
+def test_registration_state_opens_only_for_a_bound_canonical_account(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    free = "account-1"  # a free caller string is no canonical account
+    assert container.accounts.binding(MARKET, free) is AccountBinding.UNKNOWN_ACCOUNT
+    with store.transaction() as unit, pytest.raises(PolicyBlockedError):
+        unit.create_draft(MARKET, free, ListingShape.SEPARATE_LISTINGS, created_by=OPERATOR,
+                          correlation_id=CID)  # fmt: skip
+    for write in (
+        lambda unit: unit.create_batch(MARKET, free, created_by=OPERATOR, correlation_id=CID),
+        lambda unit: unit.record_duplicate_override(
+            MARKET, free, item.group, reason="r", approved_by=OPERATOR, correlation_id=CID
+        ),
+        # The right account in the wrong marketplace is not that marketplace's account.
+        lambda unit: unit.create_batch(
+            OTHER_MARKET, ACCOUNT, created_by=OPERATOR, correlation_id=CID
+        ),
+    ):
+        with store.transaction() as unit, pytest.raises(PolicyBlockedError):
+            write(unit)
+    _refused(
+        config,
+        "INSERT INTO registration_drafts (draft_id, marketplace_key, marketplace_account_id,"
+        " listing_shape, draft_revision, created_by, created_at, updated_at)"
+        " VALUES (?, ?, ?, 'SEPARATE_LISTINGS', 1, 'o', ?, ?)",
+        str(uuid.uuid4()), MARKET, free, AT, AT,
+        match="not bound to its identity",
+    )  # fmt: skip
+    # A connection without a committed binding has no canonical account (§5: NOT_BOUND).
+    _bind(config, OTHER_MARKET, None)
+    seller = container.accounts.create_seller_entity(created_by=OPERATOR, correlation_id=CID)
+    with pytest.raises(PolicyBlockedError):
+        container.accounts.establish(
+            OTHER_MARKET, seller, established_by=OPERATOR, correlation_id=CID
+        )
+    _refused(
+        config,
+        "INSERT INTO marketplace_accounts (marketplace_account_id, seller_entity_id,"
+        " marketplace_key, provider_account_uid, established_by, correlation_id, established_at)"
+        " VALUES (?, ?, ?, 'uid-unbound', 'o', 'c', ?)",
+        f"mpa-{uuid.uuid4().hex}", seller, OTHER_MARKET, AT,
+        match="established only from its committed binding",
+    )  # fmt: skip
+    assert count(config, "registration_drafts") == 0
+    assert count(config, "marketplace_accounts") == 1
+
+
+def test_a_mismatched_account_opens_no_registration_state(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    draft_id = _draft(store, [item])
+    batch = _batch(store)
+    # An explicit rebinding (ACCOUNT_IDENTITY §4) now names another provider identity.
+    _bind(config, MARKET, "uid-market-a-2")
+    assert container.accounts.binding(MARKET, ACCOUNT) is AccountBinding.MISMATCHED
+    for write in (
+        lambda unit: unit.create_draft(
+            MARKET, ACCOUNT, ListingShape.SEPARATE_LISTINGS, created_by=OPERATOR,
+            correlation_id=CID,
+        ),
+        lambda unit: unit.freeze_snapshot(
+            _spec(store, draft_id, [item]), created_by=OPERATOR, correlation_id=CID
+        ),
+        lambda unit: unit.create_batch(MARKET, ACCOUNT, created_by=OPERATOR, correlation_id=CID),
+        lambda unit: unit.record_duplicate_override(
+            MARKET, ACCOUNT, item.group, reason="r", approved_by=OPERATOR, correlation_id=CID
+        ),
+    ):  # fmt: skip
+        with store.transaction() as unit, pytest.raises(PolicyBlockedError):
+            write(unit)
+    _refused(
+        config,
+        "INSERT INTO registration_batches (registration_batch_id, marketplace_key,"
+        " marketplace_account_id, created_by, correlation_id, created_at)"
+        " VALUES (?, ?, ?, 'o', 'c', ?)",
+        str(uuid.uuid4()), MARKET, ACCOUNT, AT,
+        match="not bound to its identity",
+    )  # fmt: skip
+    # The new identity gets its own canonical account; nothing is silently rebound onto the old.
+    rebound = container.accounts.establish(
+        MARKET,
+        container.accounts.create_seller_entity(created_by=OPERATOR, correlation_id=CID),
+        established_by=OPERATOR,
+        correlation_id=CID,
+    ).marketplace_account_id
+    assert rebound != ACCOUNT
+    assert container.accounts.binding(MARKET, rebound) is AccountBinding.BOUND
+    assert count(config, "registration_snapshots") == 0
+    assert _one(
+        config, "SELECT COUNT(*) FROM registration_batches WHERE registration_batch_id = ?", batch
+    ) == (1,)
+
+
+def test_one_provider_identity_is_one_canonical_account(
+    container: Container, config: AppConfig
+) -> None:
+    other_seller = container.accounts.create_seller_entity(created_by=OPERATOR, correlation_id=CID)
+    again = container.accounts.establish(
+        MARKET, other_seller, established_by=OPERATOR, correlation_id=CID
+    )
+    assert again.marketplace_account_id == ACCOUNT  # never re-minted: no alias
+    seller = _one(
+        config,
+        "SELECT seller_entity_id FROM marketplace_accounts WHERE marketplace_account_id = ?",
+        ACCOUNT,
+    )[0]
+    insert = (
+        "INSERT INTO marketplace_accounts (marketplace_account_id, seller_entity_id,"
+        " marketplace_key, provider_account_uid, established_by, correlation_id, established_at)"
+        " VALUES (?, ?, ?, ?, 'o', 'c', ?)"
+    )
+    _refused(
+        config, insert, f"mpa-{uuid.uuid4().hex}", seller, MARKET, "uid-market-a-1", AT,
+        match="UNIQUE",
+    )  # fmt: skip
+    # A canonical id is minted by ICBM: a label or a provider value is not one.
+    _refused(config, insert, "account-1", seller, MARKET, "uid-market-a-1", AT, match="CHECK")
+    _refused(
+        config,
+        "UPDATE marketplace_accounts SET provider_account_uid = 'uid-other'",
+        match="is immutable",
+    )
+    with contextlib.closing(raw(config)) as connection:
+        events = [
+            json.loads(details)
+            for (details,) in connection.execute(
+                "SELECT details_json FROM audit_events"
+                " WHERE event_type = 'MARKETPLACE_ACCOUNT_ESTABLISHED'"
+            ).fetchall()
+        ]
+    assert [e["marketplace_account_id"] for e in events] == [ACCOUNT]
+    assert "uid-market-a-1" not in json.dumps(events)  # the provider identity is not audited
+
+
+def test_an_account_label_cannot_escape_the_unknown_or_override_scope(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    first = _intent(store, _freeze(store, [item]).registration_snapshot_id)
+    _finish(store, first, RemoteOutcome.UNKNOWN)
+    with store.transaction() as unit:
+        unit.record_duplicate_override(
+            MARKET, ACCOUNT, item.group, reason="intentional", approved_by=OPERATOR,
+            correlation_id=CID,
+        )  # fmt: skip
+    # Asking for the account again gives the same canonical id, and its scope stays blocked.
+    same = _establish(container, config, MARKET, "uid-market-a-1")
+    assert same == ACCOUNT
+    with pytest.raises(RegistrationConflictError):
+        _intent(store, _freeze(store, [item], account=same).registration_snapshot_id)
+    # Another spelling of the account is no account at all.
+    for label in (ACCOUNT.upper(), f" {ACCOUNT}", "uid-market-a-1"):
+        with store.transaction() as unit, pytest.raises(PolicyBlockedError):
+            unit.create_draft(
+                MARKET, label, ListingShape.SEPARATE_LISTINGS, created_by=OPERATOR,
+                correlation_id=CID,
+            )  # fmt: skip
+        with store.transaction() as unit, pytest.raises(PolicyBlockedError):
+            unit.record_duplicate_override(
+                MARKET, label, item.group, reason="r", approved_by=OPERATOR, correlation_id=CID
+            )
+    with store.transaction() as unit, pytest.raises(Exception, match="one active override"):
+        unit.record_duplicate_override(
+            MARKET, same, item.group, reason="again", approved_by=OPERATOR, correlation_id=CID
+        )
+
+
+def test_the_same_provider_product_id_in_two_accounts_does_not_collide(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    first = _intent(store, _freeze(store, [item]).registration_snapshot_id)
+    _finish(store, first, RemoteOutcome.APPLIED_PROVEN, "mp-shared")
+    _confirm(store, first)
+    # A second canonical account (a later binding) may hold a listing with the same provider id.
+    second_account = _establish(container, config, MARKET, "uid-market-a-2")
+    second = _intent(store, _freeze(store, [item], account=second_account).registration_snapshot_id)
+    _finish(store, second, RemoteOutcome.APPLIED_PROVEN, "mp-shared")
+    _confirm(store, second)
+    assert count(config, "marketplace_registrations", "marketplace_product_id = 'mp-shared'") == 2
+    with contextlib.closing(raw(config)) as connection:
+        ddl = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'marketplace_registrations'"
+        ).fetchone()[0]
+    assert "UNIQUE (marketplace_key, marketplace_account_id, marketplace_product_id)" in ddl
+    assert "UNIQUE (marketplace_key, marketplace_product_id)" not in ddl
+
+
+# ---------------------------------------------------------------- drafts (§2, blocker 1)
 
 
 def test_a_draft_holds_existing_items_once_by_item_key(
@@ -312,21 +632,29 @@ def test_a_draft_holds_existing_items_once_by_item_key(
     item = _priced(container, config, sources)
     draft_id = _draft(store, [item])
     with store.transaction() as unit, pytest.raises(InputValidationError):
-        unit.add_draft_item(draft_id, item.item_id, added_by=OPERATOR, correlation_id=CID)
+        unit.add_draft_item(
+            draft_id, item.item_id, item.pricing_snapshot_id, added_by=OPERATOR,
+            correlation_id=CID,
+        )  # fmt: skip
     with store.transaction() as unit, pytest.raises(NotFoundError):
-        unit.add_draft_item(draft_id, str(uuid.uuid4()), added_by=OPERATOR, correlation_id=CID)
+        unit.add_draft_item(
+            draft_id, str(uuid.uuid4()), item.pricing_snapshot_id, added_by=OPERATOR,
+            correlation_id=CID,
+        )  # fmt: skip
     signature = _one(
         config, "SELECT composition_signature FROM product_items WHERE item_id = ?", item.item_id
     )[0]
     insert = (
         "INSERT INTO registration_draft_items (draft_item_id, draft_id, item_id, product_group_id,"
-        " composition_signature, ordinal, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        " composition_signature, pricing_snapshot_id, ordinal, added_by, added_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     # The same group + composition signature twice in one Draft (§2).
     _refused(
         config,
         insert,
-        str(uuid.uuid4()), draft_id, item.item_id, item.group, signature, 7, OPERATOR, AT,
+        str(uuid.uuid4()), draft_id, item.item_id, item.group, signature,
+        item.pricing_snapshot_id, 7, OPERATOR, AT,
         match="UNIQUE",
     )  # fmt: skip
     # An identity that is not the Item's own.
@@ -334,9 +662,150 @@ def test_a_draft_holds_existing_items_once_by_item_key(
     _refused(
         config,
         insert,
-        str(uuid.uuid4()), draft_id, item.item_id, other.group, signature, 8, OPERATOR, AT,
+        str(uuid.uuid4()), draft_id, item.item_id, other.group, signature,
+        item.pricing_snapshot_id, 8, OPERATOR, AT,
         match="the group and signature are the Item identity",
     )  # fmt: skip
+
+
+def test_a_draft_item_is_pinned_to_an_exact_price_of_its_item_and_target(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    other = _priced(container, config, sources, "5678")
+    wrong = {
+        "another Item's price": other.pricing_snapshot_id,
+        "a price for another marketplace": _repriced(
+            container, config, item, marketplace_key=OTHER_MARKET
+        ),
+        "a price for another account": _repriced(
+            container, config, item, account_id=f"mpa-{'0' * 32}"
+        ),
+    }
+    with store.transaction() as unit:
+        draft_id = unit.create_draft(
+            MARKET, ACCOUNT, ListingShape.SELECTED_OFFERS, created_by=OPERATOR, correlation_id=CID
+        ).draft_id
+    signature = _one(
+        config, "SELECT composition_signature FROM product_items WHERE item_id = ?", item.item_id
+    )[0]
+    for why, price in wrong.items():
+        with store.transaction() as unit, pytest.raises(InputValidationError, match="exact M4"):
+            unit.add_draft_item(
+                draft_id, item.item_id, price, added_by=OPERATOR, correlation_id=CID
+            )
+        _refused(
+            config,
+            "INSERT INTO registration_draft_items (draft_item_id, draft_id, item_id,"
+            " product_group_id, composition_signature, pricing_snapshot_id, ordinal, added_by,"
+            " added_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'o', ?)",
+            str(uuid.uuid4()), draft_id, item.item_id, item.group, signature, price, AT,
+            match="exact M4 snapshot of this Item and draft target",
+        )  # fmt: skip
+        assert count(config, "registration_draft_items") == 0, why
+    # A price for this very canonical account, or one that does not vary by account, is pinned.
+    own = _repriced(container, config, item, account_id=ACCOUNT)
+    with store.transaction() as unit:
+        draft = unit.add_draft_item(
+            draft_id, item.item_id, own, added_by=OPERATOR, correlation_id=CID
+        )
+    assert [(i.item_id, i.pricing_snapshot_id) for i in draft.items] == [(item.item_id, own)]
+
+
+def test_a_new_price_selection_is_a_new_draft_revision_that_stales_its_snapshot(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    draft_id = _draft(store, [item])
+    stale = _spec(store, draft_id, [item])
+    newer = _repriced(container, config, item, fee_table_version="fee-test-2")
+    with store.transaction() as unit:
+        draft = unit.change_draft_item_price(
+            draft_id, item.item_id, newer, changed_by=OPERATOR, correlation_id=CID
+        )
+        again = unit.change_draft_item_price(
+            draft_id, item.item_id, newer, changed_by=OPERATOR, correlation_id=CID
+        )
+    assert (draft.draft_revision, again.draft_revision) == (3, 3)
+    assert [i.pricing_snapshot_id for i in draft.items] == [newer]
+    # The Draft history keeps the price it held before.
+    assert (
+        count(
+            config,
+            "registration_draft_items",
+            "removed_at IS NOT NULL AND pricing_snapshot_id = ?",
+            item.pricing_snapshot_id,
+        )
+        == 1
+    )
+    with store.transaction() as unit, pytest.raises(RegistrationConflictError):
+        unit.freeze_snapshot(stale, created_by=OPERATOR, correlation_id=CID)
+    _refused(
+        config,
+        "UPDATE registration_draft_items SET pricing_snapshot_id = ? WHERE draft_id = ?",
+        item.pricing_snapshot_id,
+        draft_id,
+        match="only ever removed",
+    )
+    # A Snapshot freezes the pinned price and the revisions that price was computed from.
+    snapshot = _freeze_in(store, draft_id, [item])
+    (frozen,) = snapshot.items
+    newer_truth = _truth(config, item.item_id, newer, item.group)
+    assert (
+        frozen.pricing_snapshot_id,
+        frozen.group_membership_revision_id,
+        frozen.source_product_facts_revision_id,
+    ) == (newer, newer_truth.membership_revision_id, newer_truth.facts_revision_id)
+    # Selecting another price after the freeze makes that Snapshot stale for an Intent.
+    with store.transaction() as unit:
+        unit.change_draft_item_price(
+            draft_id, item.item_id, item.pricing_snapshot_id, changed_by=OPERATOR,
+            correlation_id=CID,
+        )  # fmt: skip
+    with pytest.raises(RegistrationConflictError, match="current revision"):
+        _intent(store, snapshot.registration_snapshot_id)
+    _refused(
+        config,
+        _RAW_INTENT,
+        *_raw_intent_args(_batch(store), snapshot.registration_snapshot_id, ACCOUNT),
+        match="opens from a snapshot of the current draft revision",
+    )
+
+
+def test_an_item_snapshot_is_the_exact_m4_truth_of_its_pinned_price(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    item = _priced(container, config, sources)
+    other = _priced(container, config, sources, "5678")
+    draft_id = _draft(store, [item])
+    pinned = _freeze_in(store, draft_id, [item])
+    newer = _repriced(container, config, item, fee_table_version="fee-test-2")
+    with store.transaction() as unit:
+        unit.change_draft_item_price(
+            draft_id, item.item_id, newer, changed_by=OPERATOR, correlation_id=CID
+        )
+    # Copying the old unit into the new revision sends a price that is no longer the pin.
+    current = _freeze_in(store, draft_id, [item])
+    copy = _copy_unit(config, current.registration_snapshot_id)
+    source = pinned.registration_snapshot_id
+    _refused(
+        config,
+        _COPY_ITEM,
+        *_copy_item_args(source, item.item_id, copy),
+        match="the price is the pinned exact M4 snapshot",
+    )
+    # A membership revision of another group is not this Item's.
+    _refused(
+        config,
+        _COPY_ITEM,
+        *_copy_item_args(
+            current.registration_snapshot_id, item.item_id, copy, other.membership_revision_id
+        ),
+        match="belongs to the group",
+    )
+
+
+# ---------------------------------------------------------------- snapshots (§6, §7)
 
 
 def test_the_draft_scope_is_fixed_and_every_change_advances_its_revision(
@@ -359,8 +828,9 @@ def test_the_draft_scope_is_fixed_and_every_change_advances_its_revision(
     assert count(config, "registration_draft_items", "removed_at IS NOT NULL") == 1
     _refused(
         config,
-        "UPDATE registration_drafts SET account_id = 'other', draft_revision = draft_revision + 1"
-        " WHERE draft_id = ?",
+        "UPDATE registration_drafts SET marketplace_account_id = ?,"
+        " draft_revision = draft_revision + 1 WHERE draft_id = ?",
+        f"mpa-{'f' * 32}",
         draft_id,
         match="the draft identity and scope are immutable",
     )
@@ -378,9 +848,6 @@ def test_the_draft_scope_is_fixed_and_every_change_advances_its_revision(
     )
 
 
-# ---------------------------------------------------------------- snapshots (§6, §7)
-
-
 def test_a_snapshot_freezes_exact_m4_truth_with_deterministic_item_keys(
     container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
 ) -> None:
@@ -393,10 +860,13 @@ def test_a_snapshot_freezes_exact_m4_truth_with_deterministic_item_keys(
     )[0]
     assert frozen.registration_item_key == registration_item_key(identity, item.group, signature)
     assert frozen.registration_item_key.startswith("rik1-")
-    assert (frozen.group_id_at_registration, frozen.pricing_snapshot_id) == (
-        item.group,
-        item.pricing_snapshot_id,
-    )
+    assert (
+        frozen.group_id_at_registration,
+        frozen.pricing_snapshot_id,
+        frozen.group_membership_revision_id,
+        frozen.source_product_facts_revision_id,
+    ) == (item.group, item.pricing_snapshot_id, item.membership_revision_id, item.facts_revision_id)
+    assert snapshot.marketplace_account_id == ACCOUNT
     # §15 (B4): the durable payload digest is of the sanitized canonical representation.
     payload = {"name": "invented listing name", "items": 1}
     assert snapshot.payload_hash == sanitized_digest(payload)
@@ -435,52 +905,67 @@ def test_a_snapshot_freezes_only_the_current_draft_revision(
     _refused(
         config,
         "INSERT INTO registration_snapshots (registration_snapshot_id, draft_id, draft_revision,"
-        " marketplace_key, account_id, listing_shape, listing_identity, preflight_rule_version,"
-        " preflight_fingerprint, category_mapping_revision, taxonomy_revision,"
-        " policy_revisions_json, detail_composition_revision, sanitizer_profile_version,"
-        " payload_hash, payload_json, created_by, correlation_id, created_at)"
-        " VALUES (?, ?, 1, ?, ?, 'SELECTED_OFFERS', 'icbm-listing-0002', 'p', ?, 'c', 't', '{}',"
-        " 'd', 's', ?, '{}', 'o', 'c', ?)",
+        " marketplace_key, marketplace_account_id, listing_shape, listing_identity,"
+        " preflight_rule_version, preflight_fingerprint, category_mapping_revision,"
+        " taxonomy_revision, policy_revisions_json, detail_composition_revision,"
+        " sanitizer_profile_version, payload_hash, payload_json, created_by, correlation_id,"
+        " created_at) VALUES (?, ?, 1, ?, ?, 'SELECTED_OFFERS', 'icbm-listing-0002', 'p', ?, 'c',"
+        " 't', '{}', 'd', 's', ?, '{}', 'o', 'c', ?)",
         str(uuid.uuid4()), draft_id, MARKET, ACCOUNT, "a" * 64, "a" * 64, AT,
         match="freezes the current draft revision",
     )  # fmt: skip
 
 
-def test_an_item_snapshot_names_the_exact_price_of_its_item_and_target(
+# ---------------------------------------------------------------- provider-listing units (R3)
+
+
+def test_a_single_listing_sends_every_open_item_of_its_draft(
     container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
 ) -> None:
-    item = _priced(container, config, sources)
-    other = _priced(container, config, sources, "5678")
-    elsewhere = container.pricing.price(item.item_id, context(marketplace_key="market_b")).snapshot
-    assert elsewhere is not None
-    draft_id = _draft(store, [item])
-    wrong = {
-        "another Item's price": _with_price(item, other.pricing_snapshot_id),
-        "a price for another marketplace": _with_price(item, elsewhere.pricing_snapshot_id),
-    }
-    for why, bad in wrong.items():
-        with store.transaction() as unit, pytest.raises(Exception, match="exact M4 snapshot"):
-            unit.freeze_snapshot(
-                _spec(store, draft_id, [bad]), created_by=OPERATOR, correlation_id=CID
-            )
-        assert count(config, "registration_snapshots") == 0, why
-    membership = _with_membership(item, other.membership_revision_id)
-    with store.transaction() as unit, pytest.raises(Exception, match="belongs to the group"):
+    items = _tiered(container, config, sources, "tiered-single")
+    every = [items[1], items[2], items[3]]
+    draft_id = _draft(store, every)
+    # Blocker 3: a SINGLE Draft of A/B/C never freezes A/B.
+    with store.transaction() as unit, pytest.raises(InputValidationError, match="every open Item"):
         unit.freeze_snapshot(
-            _spec(store, draft_id, [membership]), created_by=OPERATOR, correlation_id=CID
+            _spec(store, draft_id, every[:2]), created_by=OPERATOR, correlation_id=CID
         )
-
-
-def _with_price(item: Priced, snapshot_id: str) -> Priced:
-    return Priced(
-        item.item_id, item.group, item.membership_revision_id, item.facts_revision_id, snapshot_id
+    assert count(config, "registration_snapshots") == 0
+    whole = _freeze_in(store, draft_id, every)
+    assert {i.item_id for i in whole.items} == {i.item_id for i in every}
+    # The durable barrier: an A/B unit written around the store never opens an Intent.
+    partial = _copy_unit(config, whole.registration_snapshot_id)
+    with contextlib.closing(raw(config)) as connection:
+        for item in every[:2]:
+            connection.execute(
+                _COPY_ITEM, _copy_item_args(whole.registration_snapshot_id, item.item_id, partial)
+            )
+        connection.commit()
+    batch = _batch(store)
+    with (
+        store.transaction() as unit,
+        pytest.raises(RegistrationConflictError, match="current revision"),
+    ):
+        unit.create_intent(batch, partial, created_by=OPERATOR, correlation_id=CID)
+    _refused(
+        config,
+        _RAW_INTENT,
+        *_raw_intent_args(batch, partial, ACCOUNT),
+        match="a single listing sends every open Item of its draft",
     )
+    # A/B/C is one provider-listing unit and opens its one Intent.
+    assert _intent(store, whole.registration_snapshot_id)
+    assert count(config, "registration_intents") == 1
 
 
-def _with_membership(item: Priced, membership_id: str) -> Priced:
-    return Priced(
-        item.item_id, item.group, membership_id, item.facts_revision_id, item.pricing_snapshot_id
-    )
+def test_selected_offers_may_send_a_chosen_subset(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    items = _tiered(container, config, sources, "tiered-selected")
+    draft_id = _draft(store, [items[1], items[2], items[3]], ListingShape.SELECTED_OFFERS)
+    chosen = _freeze_in(store, draft_id, [items[1], items[2]])
+    assert len(chosen.items) == 2
+    assert _intent(store, chosen.registration_snapshot_id)
 
 
 def test_a_separate_listing_is_one_item_per_snapshot(
@@ -491,10 +976,7 @@ def test_a_separate_listing_is_one_item_per_snapshot(
     draft_id = _draft(store, both, ListingShape.SEPARATE_LISTINGS)
     with store.transaction() as unit, pytest.raises(InputValidationError):
         unit.freeze_snapshot(_spec(store, draft_id, both), created_by=OPERATOR, correlation_id=CID)
-    with store.transaction() as unit:
-        first = unit.freeze_snapshot(
-            _spec(store, draft_id, [items[1]]), created_by=OPERATOR, correlation_id=CID
-        )
+    first = _freeze_in(store, draft_id, [items[1]])
     _refused(
         config,
         "INSERT INTO registration_item_snapshots SELECT ?, registration_snapshot_id,"
@@ -555,9 +1037,9 @@ def test_one_intent_per_exact_snapshot_across_restarts(
     _refused(
         config,
         "INSERT INTO registration_intents SELECT ?, registration_batch_id,"
-        " registration_snapshot_id, marketplace_key, account_id, operation, ?, 'PREPARED', NULL,"
-        " NULL, 'NOT_VERIFIED', NULL, NULL, NULL, NULL, created_by, correlation_id, created_at,"
-        " updated_at FROM registration_intents",
+        " registration_snapshot_id, marketplace_key, marketplace_account_id, operation, ?,"
+        " 'PREPARED', NULL, NULL, 'NOT_VERIFIED', NULL, NULL, NULL, NULL, created_by,"
+        " correlation_id, created_at, updated_at FROM registration_intents",
         str(uuid.uuid4()), "f" * 64,
         match="UNIQUE",
     )  # fmt: skip
@@ -586,28 +1068,28 @@ def test_an_intent_opens_prepared_in_its_own_scope(
 ) -> None:
     item = _priced(container, config, sources)
     snapshot = _freeze(store, [item])
+    elsewhere = _establish(container, config, OTHER_MARKET, "uid-market-b-1")
     with store.transaction() as unit:
-        other = unit.create_batch(MARKET, "account-2", created_by=OPERATOR, correlation_id=CID)
+        other = unit.create_batch(OTHER_MARKET, elsewhere, created_by=OPERATOR, correlation_id=CID)
     with store.transaction() as unit, pytest.raises(InputValidationError):
         unit.create_intent(
             other, snapshot.registration_snapshot_id, created_by=OPERATOR, correlation_id=CID
         )
     insert = (
         "INSERT INTO registration_intents (intent_id, registration_batch_id,"
-        " registration_snapshot_id, marketplace_key, account_id, operation, idempotency_key,"
-        " state, remote_outcome, marketplace_product_id, verification_state, created_by,"
-        " correlation_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'CREATE', ?, ?, ?, ?,"
-        " 'NOT_VERIFIED', 'o', 'c', ?, ?)"
+        " registration_snapshot_id, marketplace_key, marketplace_account_id, operation,"
+        " idempotency_key, state, remote_outcome, marketplace_product_id, verification_state,"
+        " created_by, correlation_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'CREATE', ?,"
+        " ?, ?, ?, 'NOT_VERIFIED', 'o', 'c', ?, ?)"
     )
     _refused(
         config,
         insert,
-        str(uuid.uuid4()), other, snapshot.registration_snapshot_id, MARKET, "account-2",
+        str(uuid.uuid4()), other, snapshot.registration_snapshot_id, OTHER_MARKET, elsewhere,
         "1" * 64, "PREPARED", None, None, AT, AT,
         match="the intent scope is its snapshot scope",
     )  # fmt: skip
-    with store.transaction() as unit:
-        batch = unit.create_batch(MARKET, ACCOUNT, created_by=OPERATOR, correlation_id=CID)
+    batch = _batch(store)
     _refused(
         config,
         insert,
@@ -792,18 +1274,12 @@ def test_an_unresolved_unknown_blocks_a_new_snapshot_in_its_group(
     assert store.conflicting_intents(again.registration_snapshot_id) == (first,)
     with pytest.raises(RegistrationConflictError, match="unresolved CREATE"):
         _intent(store, again.registration_snapshot_id)
-    with store.transaction() as unit:
-        batch = unit.create_batch(MARKET, ACCOUNT, created_by=OPERATOR, correlation_id=CID)
     _refused(
         config,
-        "INSERT INTO registration_intents (intent_id, registration_batch_id,"
-        " registration_snapshot_id, marketplace_key, account_id, operation, idempotency_key,"
-        " state, verification_state, created_by, correlation_id, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, 'CREATE', ?, 'PREPARED', 'NOT_VERIFIED', 'o', 'c', ?, ?)",
-        str(uuid.uuid4()), batch, again.registration_snapshot_id, MARKET, ACCOUNT, "3" * 64,
-        AT, AT,
+        _RAW_INTENT,
+        *_raw_intent_args(_batch(store), again.registration_snapshot_id, ACCOUNT),
         match="an unresolved CREATE blocks its conflict scope",
-    )  # fmt: skip
+    )
 
 
 def test_an_in_flight_create_blocks_its_scope_and_a_non_overlapping_group_is_free(
@@ -956,11 +1432,11 @@ def test_a_registration_follows_only_a_verified_intent(
     _refused(
         config,
         "INSERT INTO marketplace_registrations (registration_id, intent_id,"
-        " registration_snapshot_id, marketplace_key, account_id, marketplace_product_id,"
-        " seller_product_code, published_state, lifecycle_state, comparison_contract_version,"
-        " normalizer_version, readback_evidence_digest, verified_at, last_readback_at,"
-        " created_by, correlation_id, created_at) VALUES (?, ?, ?, ?, ?, 'mp-4', ?, 'SALE',"
-        " 'ACTIVE', 'c', 'n', ?, ?, ?, 'o', 'c', ?)",
+        " registration_snapshot_id, marketplace_key, marketplace_account_id,"
+        " marketplace_product_id, seller_product_code, published_state, lifecycle_state,"
+        " comparison_contract_version, normalizer_version, readback_evidence_digest, verified_at,"
+        " last_readback_at, created_by, correlation_id, created_at) VALUES (?, ?, ?, ?, ?, 'mp-4',"
+        " ?, 'SALE', 'ACTIVE', 'c', 'n', ?, ?, ?, 'o', 'c', ?)",
         str(uuid.uuid4()), intent_id, snapshot.registration_snapshot_id, MARKET, ACCOUNT,
         snapshot.listing_identity, "8" * 64, AT, AT, AT,
         match="follows its CONFIRMED intent",
@@ -969,6 +1445,7 @@ def test_a_registration_follows_only_a_verified_intent(
     registration = store.registration(registration_id)
     assert registration is not None
     assert registration.seller_product_code == snapshot.listing_identity
+    assert registration.marketplace_account_id == ACCOUNT
     assert registration.lifecycle_state is RegistrationLifecycle.ACTIVE
     assert {i.registration_item_key for i in registration.items} == {
         i.registration_item_key for i in snapshot.items
@@ -1041,17 +1518,7 @@ def _spec_in(unit: RegistrationUnit, draft_id: str, item: Priced) -> SnapshotSpe
         detail_composition_revision="detail-test-1",
         sanitizer_profile_version="sanitizer-test-1",
         payload={"name": "invented"},
-        items=[
-            ItemSnapshotSpec(
-                item_id=item.item_id,
-                group_membership_revision_id=item.membership_revision_id,
-                source_product_facts_revision_id=item.facts_revision_id,
-                pricing_snapshot_id=item.pricing_snapshot_id,
-                source_snapshot={"binding": "copied"},
-                publication_assets=[{"artifact_sha256": "b" * 64}],
-                outbound_values={},
-            )
-        ],
+        items=[_item_spec(item)],
     )
 
 
@@ -1161,6 +1628,7 @@ def test_register_stays_zero_and_the_audit_holds_identifiers_only(
     } <= kinds
     text = " ".join(details for _kind, details in rows)
     assert "invented" not in text and "sanitized" not in text
+    assert "uid-market-a-1" not in text  # never the provider account identity
 
 
 # ---------------------------------------------------------------- migration
@@ -1175,12 +1643,25 @@ def test_0016_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     command.downgrade(alembic_config(url), "0015_m4_quantity_offers")
     command.upgrade(alembic_config(url), "head")
+    account_id = f"mpa-{'1' * 32}"
     with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
         connection.execute(
-            "INSERT INTO registration_drafts (draft_id, marketplace_key, account_id,"
+            "INSERT INTO marketplace_connections (marketplace_key, credential_generation_hwm,"
+            " session_generation_hwm, provider_account_uid, provider_account_id,"
+            " bound_credential_generation, bound_session_generation, bound_at, bound_by,"
+            " created_at, updated_at) VALUES (?, 1, 1, 'uid-x', NULL, 1, 1, ?, 'o', ?, ?)",
+            (MARKET, AT, AT, AT),
+        )
+        connection.execute("INSERT INTO seller_entities VALUES ('seller-1', 'o', 'c', ?)", (AT,))
+        connection.execute(
+            "INSERT INTO marketplace_accounts VALUES (?, 'seller-1', ?, 'uid-x', 'o', 'c', ?)",
+            (account_id, MARKET, AT),
+        )
+        connection.execute(
+            "INSERT INTO registration_drafts (draft_id, marketplace_key, marketplace_account_id,"
             " listing_shape, draft_revision, created_by, created_at, updated_at)"
             " VALUES ('d', ?, ?, 'SEPARATE_LISTINGS', 1, 'o', ?, ?)",
-            (MARKET, ACCOUNT, AT, AT),
+            (MARKET, account_id, AT, AT),
         )
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):

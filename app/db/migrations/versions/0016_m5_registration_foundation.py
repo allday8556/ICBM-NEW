@@ -8,13 +8,26 @@ Create Date: 2026-09-19
 Issue #89 PR-B, under ADR-0014. It is additive: no M0–M4 table, row or trigger is touched, and
 nothing is backfilled. No marketplace request exists behind any of it.
 
+**The account scope** (review 5255746944, blocker 2). ``seller_entities`` and
+``marketplace_accounts`` are the canonical ``SellerEntity`` / ``MarketplaceAccount`` (Canonical v3.1
+§9) with the ICBM-owned ``marketplace_account_id`` (``ACCOUNT_IDENTITY.md`` §2). An account is
+inserted only while its marketplace connection's committed binding names the same provider
+identity, one provider identity has one account per marketplace, and both tables are
+append-only. Every registration row carries ``(marketplace_key, marketplace_account_id)`` as a
+foreign key, and no Draft, Snapshot, Batch, Intent or override opens for an account that is not
+bound to its committed identity. The provider's wire ``account_id`` names nothing here.
+
 **Where invariants live.** The CHECK literals are frozen with this revision and a test compares
 them with the ORM models. The triggers enforce the cross-row invariants:
-- a draft item is exactly an M4 Item's identity; a Snapshot freezes its Draft's current revision
-  and scope; each Item Snapshot is an open item of that Draft, with the exact M4 identity,
-  membership revision and context-specific PricingSnapshot it names (§2, §6);
+- a draft item is exactly an M4 Item's identity, pinned to the exact PricingSnapshot of that Item
+  in the Draft's marketplace and canonical account (§2, blocker 1); a Snapshot freezes its Draft's
+  current revision and scope; each Item Snapshot is an open item of that Draft, with its exact M4
+  identity, the Draft's pinned price and the membership and facts revisions of that price (§6);
 - a ``SEPARATE_LISTINGS`` Snapshot holds exactly one Item, and a Snapshot is frozen once an Intent
   names it (§2, §12);
+- an Intent opens only from a Snapshot of its Draft's current revision whose Items are still open
+  with their pinned prices, and **a ``SINGLE_LISTING_WITH_OPTIONS`` Snapshot sends exactly every
+  open Item of its Draft** (R3, blocker 3); ``SELECTED_OFFERS`` may send a chosen subset;
 - **a new CREATE Intent never opens while a CREATE Intent that is ``SENT`` or ``UNKNOWN`` overlaps
   its marketplace × account × group or listing identity** (§10, R2). The registration store adds
   the merge and split lineage of those groups, fail-closed;
@@ -32,8 +45,8 @@ resolution; a registration's read-back time and external absence; a registration
 group and binding; an override's revocation. Everything else rejects UPDATE, and every table
 rejects DELETE.
 
-**Downgrade fails closed.** It refuses while any registration table holds a row: registration
-truth is never silently destroyed.
+**Downgrade fails closed.** It refuses while any of these tables holds a row: registration and
+account truth is never silently destroyed.
 """
 
 from collections.abc import Iterable, Sequence
@@ -46,6 +59,8 @@ down_revision: str | None = "0015_m4_quantity_offers"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+SELLERS = "seller_entities"
+ACCOUNTS = "marketplace_accounts"
 DRAFTS = "registration_drafts"
 DRAFT_ITEMS = "registration_draft_items"
 SNAPSHOTS = "registration_snapshots"
@@ -58,6 +73,8 @@ REGISTRATION_ITEMS = "marketplace_registration_items"
 OVERRIDES = "duplicate_overrides"
 # Creation order; dropped in reverse.
 TABLES = (
+    SELLERS,
+    ACCOUNTS,
     DRAFTS,
     DRAFT_ITEMS,
     SNAPSHOTS,
@@ -69,7 +86,10 @@ TABLES = (
     REGISTRATION_ITEMS,
     OVERRIDES,
 )
-FULLY_APPEND_ONLY = (SNAPSHOTS, ITEM_SNAPSHOTS, BATCHES)
+FULLY_APPEND_ONLY = (SELLERS, ACCOUNTS, SNAPSHOTS, ITEM_SNAPSHOTS, BATCHES)
+# Tables whose new rows open registration state in one canonical account's scope.
+ACCOUNT_SCOPED = (DRAFTS, SNAPSHOTS, BATCHES, INTENTS, OVERRIDES)
+CONNECTIONS = "marketplace_connections"
 ITEMS = "product_items"
 GROUPS = "product_groups"
 MEMBERSHIP = "group_membership_revisions"
@@ -159,6 +179,15 @@ def _unique(table: str, *columns: str) -> sa.UniqueConstraint:
     return sa.UniqueConstraint(*columns, name=op.f(f"uq_{table}_{'_'.join(columns)}"))
 
 
+def _account_fk(table: str) -> sa.ForeignKeyConstraint:
+    """The canonical marketplace account that scopes a registration row."""
+    return sa.ForeignKeyConstraint(
+        ["marketplace_key", "marketplace_account_id"],
+        [f"{ACCOUNTS}.marketplace_key", f"{ACCOUNTS}.marketplace_account_id"],
+        name=op.f(f"fk_{table}_marketplace_key_{ACCOUNTS}"),
+    )
+
+
 def _trigger(name: str, event: str, table: str, body: str) -> None:
     op.execute(f"CREATE TRIGGER {name} BEFORE {event} ON {table} BEGIN {body} END")
 
@@ -201,9 +230,14 @@ _REMOVED = (
     " AND (absence_observed_at IS NULL) = (absence_evidence_digest IS NULL)"
     " AND (absence_observed_at IS NULL) = (absence_recorded_by IS NULL)"
 )
+_ACCOUNT_ID_FORMAT = (
+    "length(marketplace_account_id) = 36 AND substr(marketplace_account_id, 1, 4) = 'mpa-'"
+    " AND substr(marketplace_account_id, 5) NOT GLOB '*[^0-9a-f]*'"
+)
 
 
 def upgrade() -> None:
+    _create_accounts()
     _create_drafts()
     _create_snapshots()
     _create_execution()
@@ -212,22 +246,54 @@ def upgrade() -> None:
     _install_triggers()
 
 
+def _create_accounts() -> None:
+    op.create_table(
+        SELLERS,
+        sa.Column("seller_entity_id", sa.String(length=36), nullable=False),
+        sa.Column("created_by", sa.String(length=64), nullable=False),
+        sa.Column("correlation_id", sa.String(length=64), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        _check(SELLERS, "created_by <> ''", "created_by_present"),
+        _check(SELLERS, "correlation_id <> ''", "correlation_present"),
+        sa.PrimaryKeyConstraint("seller_entity_id", name=op.f(f"pk_{SELLERS}")),
+    )
+    op.create_table(
+        ACCOUNTS,
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
+        sa.Column("seller_entity_id", sa.String(length=36), nullable=False),
+        sa.Column("marketplace_key", sa.String(length=40), nullable=False),
+        sa.Column("provider_account_uid", sa.String(length=100), nullable=False),
+        sa.Column("established_by", sa.String(length=64), nullable=False),
+        sa.Column("correlation_id", sa.String(length=64), nullable=False),
+        sa.Column("established_at", sa.DateTime(), nullable=False),
+        _check(ACCOUNTS, _ACCOUNT_ID_FORMAT, "account_id_format"),
+        _check(ACCOUNTS, "provider_account_uid <> ''", "provider_identity_present"),
+        _check(ACCOUNTS, "established_by <> ''", "established_by_present"),
+        _check(ACCOUNTS, "correlation_id <> ''", "correlation_present"),
+        _fk(ACCOUNTS, "seller_entity_id", SELLERS, "seller_entity_id"),
+        _fk(ACCOUNTS, "marketplace_key", CONNECTIONS, "marketplace_key"),
+        sa.PrimaryKeyConstraint("marketplace_account_id", name=op.f(f"pk_{ACCOUNTS}")),
+        _unique(ACCOUNTS, "marketplace_key", "marketplace_account_id"),
+        _unique(ACCOUNTS, "marketplace_key", "provider_account_uid"),
+    )
+
+
 def _create_drafts() -> None:
     op.create_table(
         DRAFTS,
         sa.Column("draft_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("listing_shape", sa.String(length=40), nullable=False),
         sa.Column("draft_revision", sa.Integer(), nullable=False),
         sa.Column("created_by", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         _check(DRAFTS, _present("marketplace_key"), "marketplace_key_present"),
-        _check(DRAFTS, _present("account_id"), "account_id_present"),
         _check(DRAFTS, _in("listing_shape", _SHAPES), "listing_shape_valid"),
         _check(DRAFTS, "draft_revision >= 1", "draft_revision_positive"),
         _check(DRAFTS, _present("created_by"), "created_by_present"),
+        _account_fk(DRAFTS),
         sa.PrimaryKeyConstraint("draft_id", name=op.f(f"pk_{DRAFTS}")),
     )
     op.create_table(
@@ -237,6 +303,7 @@ def _create_drafts() -> None:
         sa.Column("item_id", sa.String(length=36), nullable=False),
         sa.Column("product_group_id", sa.String(length=36), nullable=False),
         sa.Column("composition_signature", sa.String(length=64), nullable=False),
+        sa.Column("pricing_snapshot_id", sa.String(length=36), nullable=False),
         sa.Column("ordinal", sa.Integer(), nullable=False),
         sa.Column("added_by", sa.String(length=64), nullable=False),
         sa.Column("added_at", sa.DateTime(), nullable=False),
@@ -251,6 +318,7 @@ def _create_drafts() -> None:
         _fk(DRAFT_ITEMS, "draft_id", DRAFTS, "draft_id"),
         _fk(DRAFT_ITEMS, "item_id", ITEMS, "item_id"),
         _fk(DRAFT_ITEMS, "product_group_id", GROUPS, "product_group_id"),
+        _fk(DRAFT_ITEMS, "pricing_snapshot_id", PRICING, "pricing_snapshot_id"),
         sa.PrimaryKeyConstraint("draft_item_id", name=op.f(f"pk_{DRAFT_ITEMS}")),
     )
     for name, columns in (
@@ -273,7 +341,7 @@ def _create_snapshots() -> None:
         sa.Column("draft_id", sa.String(length=36), nullable=False),
         sa.Column("draft_revision", sa.Integer(), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("listing_shape", sa.String(length=40), nullable=False),
         sa.Column("listing_identity", sa.String(length=64), nullable=False),
         sa.Column("preflight_rule_version", sa.String(length=64), nullable=False),
@@ -289,7 +357,7 @@ def _create_snapshots() -> None:
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         _check(SNAPSHOTS, _present("marketplace_key"), "marketplace_key_present"),
-        _check(SNAPSHOTS, _present("account_id"), "account_id_present"),
+        _account_fk(SNAPSHOTS),
         _check(SNAPSHOTS, _in("listing_shape", _SHAPES), "listing_shape_valid"),
         _check(SNAPSHOTS, "draft_revision >= 1", "draft_revision_positive"),
         _check(SNAPSHOTS, _listing_identity("listing_identity"), "listing_identity_format"),
@@ -368,12 +436,12 @@ def _create_execution() -> None:
         BATCHES,
         sa.Column("registration_batch_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("created_by", sa.String(length=64), nullable=False),
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         _check(BATCHES, _present("marketplace_key"), "marketplace_key_present"),
-        _check(BATCHES, _present("account_id"), "account_id_present"),
+        _account_fk(BATCHES),
         _check(BATCHES, _present("created_by"), "created_by_present"),
         _check(BATCHES, _present("correlation_id"), "correlation_present"),
         sa.PrimaryKeyConstraint("registration_batch_id", name=op.f(f"pk_{BATCHES}")),
@@ -384,7 +452,7 @@ def _create_execution() -> None:
         sa.Column("registration_batch_id", sa.String(length=36), nullable=False),
         sa.Column("registration_snapshot_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("operation", sa.String(length=20), nullable=False),
         sa.Column("idempotency_key", sa.String(length=64), nullable=False),
         sa.Column("state", sa.String(length=20), nullable=False),
@@ -400,7 +468,7 @@ def _create_execution() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         _check(INTENTS, _present("marketplace_key"), "marketplace_key_present"),
-        _check(INTENTS, _present("account_id"), "account_id_present"),
+        _account_fk(INTENTS),
         _check(INTENTS, _in("operation", _OPERATIONS), "operation_create_only"),
         _check(INTENTS, _hex64("idempotency_key"), "idempotency_key_hex"),
         _check(INTENTS, _in("state", _STATES), "state_valid"),
@@ -431,7 +499,9 @@ def _create_execution() -> None:
         _unique(INTENTS, "registration_snapshot_id", "operation"),
     )
     op.create_index(
-        "ix_registration_intents_scope", INTENTS, ["marketplace_key", "account_id", "state"]
+        "ix_registration_intents_scope",
+        INTENTS,
+        ["marketplace_key", "marketplace_account_id", "state"],
     )
     op.create_table(
         ATTEMPTS,
@@ -533,7 +603,7 @@ def _create_registrations() -> None:
         sa.Column("intent_id", sa.String(length=36), nullable=False),
         sa.Column("registration_snapshot_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("marketplace_product_id", sa.String(length=64), nullable=False),
         sa.Column("seller_product_code", sa.String(length=64), nullable=False),
         sa.Column("published_state", sa.String(length=40), nullable=False),
@@ -551,7 +621,7 @@ def _create_registrations() -> None:
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         _check(REGISTRATIONS, _present("marketplace_key"), "marketplace_key_present"),
-        _check(REGISTRATIONS, _present("account_id"), "account_id_present"),
+        _account_fk(REGISTRATIONS),
         _check(REGISTRATIONS, _present("marketplace_product_id"), "provider_identity_present"),
         _check(REGISTRATIONS, _listing_identity("seller_product_code"), "seller_code_format"),
         _check(REGISTRATIONS, _present("published_state"), "published_state_present"),
@@ -586,7 +656,9 @@ def _create_registrations() -> None:
         _fk(REGISTRATIONS, "registration_snapshot_id", SNAPSHOTS, "registration_snapshot_id"),
         sa.PrimaryKeyConstraint("registration_id", name=op.f(f"pk_{REGISTRATIONS}")),
         _unique(REGISTRATIONS, "intent_id"),
-        _unique(REGISTRATIONS, "marketplace_key", "marketplace_product_id"),
+        _unique(
+            REGISTRATIONS, "marketplace_key", "marketplace_account_id", "marketplace_product_id"
+        ),
     )
     op.create_table(
         REGISTRATION_ITEMS,
@@ -621,7 +693,7 @@ def _create_overrides() -> None:
         OVERRIDES,
         sa.Column("override_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
-        sa.Column("account_id", sa.String(length=64), nullable=False),
+        sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
         sa.Column("product_group_id", sa.String(length=36), nullable=False),
         sa.Column("listing_composition_id", sa.String(length=36), nullable=True),
         sa.Column("reason", sa.Text(), nullable=False),
@@ -632,7 +704,7 @@ def _create_overrides() -> None:
         sa.Column("revoked_by", sa.String(length=64), nullable=True),
         sa.Column("revoke_reason", sa.Text(), nullable=True),
         _check(OVERRIDES, _present("marketplace_key"), "marketplace_key_present"),
-        _check(OVERRIDES, _present("account_id"), "account_id_present"),
+        _account_fk(OVERRIDES),
         _check(OVERRIDES, _present("reason"), "reason_present"),
         _check(OVERRIDES, _present("approved_by"), "approved_by_present"),
         _check(OVERRIDES, _present("correlation_id"), "correlation_present"),
@@ -660,12 +732,44 @@ def _install_triggers() -> None:
         _trigger(
             f"trg_{table}_no_delete", "DELETE", table, _raise(f"{table} is never deleted", "1")
         )
+    _install_account_rules()
     _install_draft_rules()
     _install_snapshot_rules()
     _install_intent_rules()
     _install_attempt_rules()
     _install_registration_rules()
     _install_override_rules()
+
+
+def _install_account_rules() -> None:
+    # ACCOUNT_IDENTITY §5: an account is established only from a complete committed binding (the
+    # 0006 CHECK makes a non-null provider identity a complete binding unit).
+    _trigger(
+        f"trg_{ACCOUNTS}_bound",
+        "INSERT",
+        ACCOUNTS,
+        _raise(
+            f"{ACCOUNTS}: an account is established only from its committed binding",
+            f"NOT EXISTS (SELECT 1 FROM {CONNECTIONS} c"
+            " WHERE c.marketplace_key = NEW.marketplace_key"
+            " AND c.provider_account_uid = NEW.provider_account_uid)",
+        ),
+    )
+    # ACCOUNT_IDENTITY §4: no registration state opens for an unbound or mismatched account.
+    unbound = (
+        f"NOT EXISTS (SELECT 1 FROM {ACCOUNTS} a JOIN {CONNECTIONS} c"
+        " ON c.marketplace_key = a.marketplace_key"
+        " WHERE a.marketplace_account_id = NEW.marketplace_account_id"
+        " AND a.marketplace_key = NEW.marketplace_key"
+        " AND c.provider_account_uid = a.provider_account_uid)"
+    )
+    for table in ACCOUNT_SCOPED:
+        _trigger(
+            f"trg_{table}_account_bound",
+            "INSERT",
+            table,
+            _raise(f"{table}: the marketplace account is not bound to its identity", unbound),
+        )
 
 
 def _install_draft_rules() -> None:
@@ -676,7 +780,7 @@ def _install_draft_rules() -> None:
         _raise(
             f"{DRAFTS}: the draft identity and scope are immutable",
             "NOT ("
-            + _unchanged(("draft_id", "marketplace_key", "account_id", "created_by"))
+            + _unchanged(("draft_id", "marketplace_key", "marketplace_account_id", "created_by"))
             + " AND NEW.created_at IS OLD.created_at)",
         )
         + _raise(
@@ -693,6 +797,13 @@ def _install_draft_rules() -> None:
             f"NOT EXISTS (SELECT 1 FROM {ITEMS} i WHERE i.item_id = NEW.item_id"
             " AND i.product_group_id = NEW.product_group_id"
             " AND i.composition_signature = NEW.composition_signature)",
+        )
+        + _raise(
+            f"{DRAFT_ITEMS}: the price is the exact M4 snapshot of this Item and draft target",
+            f"NOT EXISTS (SELECT 1 FROM {PRICING} p JOIN {DRAFTS} d ON d.draft_id = NEW.draft_id"
+            " WHERE p.pricing_snapshot_id = NEW.pricing_snapshot_id AND p.item_id = NEW.item_id"
+            " AND p.marketplace_key = d.marketplace_key"
+            " AND (p.account_id IS NULL OR p.account_id = d.marketplace_account_id))",
         )
         + _raise(
             f"{DRAFT_ITEMS}: an item is added open",
@@ -713,6 +824,7 @@ def _install_draft_rules() -> None:
                     "item_id",
                     "product_group_id",
                     "composition_signature",
+                    "pricing_snapshot_id",
                     "ordinal",
                     "added_by",
                     "added_at",
@@ -732,7 +844,8 @@ def _install_snapshot_rules() -> None:
         _raise(
             f"{SNAPSHOTS}: the snapshot scope is its draft scope",
             f"NOT EXISTS (SELECT 1 FROM {DRAFTS} d WHERE d.draft_id = NEW.draft_id"
-            " AND d.marketplace_key = NEW.marketplace_key AND d.account_id = NEW.account_id"
+            " AND d.marketplace_key = NEW.marketplace_key"
+            " AND d.marketplace_account_id = NEW.marketplace_account_id"
             " AND d.listing_shape = NEW.listing_shape)",
         )
         + _raise(
@@ -771,12 +884,15 @@ def _install_snapshot_rules() -> None:
             " AND m.product_group_id = NEW.group_id_at_registration)",
         )
         + _raise(
-            f"{ITEM_SNAPSHOTS}: the price is the exact M4 snapshot of this Item and target",
-            f"NOT EXISTS (SELECT 1 FROM {PRICING} p JOIN {SNAPSHOTS} s"
-            " ON s.registration_snapshot_id = NEW.registration_snapshot_id"
-            " WHERE p.pricing_snapshot_id = NEW.pricing_snapshot_id_at_registration"
+            f"{ITEM_SNAPSHOTS}: the price is the pinned exact M4 snapshot of this Item and target",
+            f"NOT EXISTS (SELECT 1 FROM {DRAFT_ITEMS} d JOIN {SNAPSHOTS} s"
+            f" ON s.draft_id = d.draft_id JOIN {PRICING} p"
+            " ON p.pricing_snapshot_id = d.pricing_snapshot_id"
+            " WHERE s.registration_snapshot_id = NEW.registration_snapshot_id"
+            " AND d.item_id = NEW.item_id AND d.removed_at IS NULL"
+            " AND d.pricing_snapshot_id = NEW.pricing_snapshot_id_at_registration"
             " AND p.item_id = NEW.item_id AND p.marketplace_key = s.marketplace_key"
-            " AND (p.account_id IS NULL OR p.account_id = s.account_id)"
+            " AND (p.account_id IS NULL OR p.account_id = s.marketplace_account_id)"
             " AND p.membership_revision_id = NEW.group_membership_revision_id"
             " AND p.source_product_facts_revision_id"
             " = NEW.source_product_facts_revision_id_at_registration)",
@@ -800,7 +916,8 @@ def _install_intent_rules() -> None:
         f"EXISTS (SELECT 1 FROM {INTENTS} o JOIN {SNAPSHOTS} os"
         " ON os.registration_snapshot_id = o.registration_snapshot_id"
         " WHERE o.operation = 'CREATE' AND o.marketplace_key = NEW.marketplace_key"
-        " AND o.account_id = NEW.account_id AND o.state IN ('SENT', 'UNKNOWN')"
+        " AND o.marketplace_account_id = NEW.marketplace_account_id"
+        " AND o.state IN ('SENT', 'UNKNOWN')"
         f" AND (os.listing_identity = {new_listing}"
         f" OR EXISTS (SELECT 1 FROM {ITEM_SNAPSHOTS} oi JOIN {ITEM_SNAPSHOTS} ni"
         " ON ni.group_id_at_registration = oi.group_id_at_registration"
@@ -816,18 +933,45 @@ def _install_intent_rules() -> None:
             f"{INTENTS}: the intent scope is its snapshot scope",
             f"NOT EXISTS (SELECT 1 FROM {SNAPSHOTS} s"
             " WHERE s.registration_snapshot_id = NEW.registration_snapshot_id"
-            " AND s.marketplace_key = NEW.marketplace_key AND s.account_id = NEW.account_id)",
+            " AND s.marketplace_key = NEW.marketplace_key"
+            " AND s.marketplace_account_id = NEW.marketplace_account_id)",
         )
         + _raise(
             f"{INTENTS}: the intent scope is its batch scope",
             f"NOT EXISTS (SELECT 1 FROM {BATCHES} b"
             " WHERE b.registration_batch_id = NEW.registration_batch_id"
-            " AND b.marketplace_key = NEW.marketplace_key AND b.account_id = NEW.account_id)",
+            " AND b.marketplace_key = NEW.marketplace_key"
+            " AND b.marketplace_account_id = NEW.marketplace_account_id)",
         )
         + _raise(
             f"{INTENTS}: a snapshot sends at least one Item",
             f"NOT EXISTS (SELECT 1 FROM {ITEM_SNAPSHOTS}"
             " WHERE registration_snapshot_id = NEW.registration_snapshot_id)",
+        )
+        + _raise(
+            f"{INTENTS}: an intent opens from a snapshot of the current draft revision",
+            f"NOT EXISTS (SELECT 1 FROM {SNAPSHOTS} s JOIN {DRAFTS} d ON d.draft_id = s.draft_id"
+            " WHERE s.registration_snapshot_id = NEW.registration_snapshot_id"
+            " AND s.draft_revision = d.draft_revision AND s.listing_shape = d.listing_shape)",
+        )
+        + _raise(
+            f"{INTENTS}: every sent Item is still open with its pinned price",
+            f"EXISTS (SELECT 1 FROM {ITEM_SNAPSHOTS} i JOIN {SNAPSHOTS} s"
+            " ON s.registration_snapshot_id = i.registration_snapshot_id"
+            " WHERE i.registration_snapshot_id = NEW.registration_snapshot_id"
+            f" AND NOT EXISTS (SELECT 1 FROM {DRAFT_ITEMS} d WHERE d.draft_id = s.draft_id"
+            " AND d.item_id = i.item_id AND d.removed_at IS NULL"
+            " AND d.pricing_snapshot_id = i.pricing_snapshot_id_at_registration))",
+        )
+        + _raise(
+            f"{INTENTS}: a single listing sends every open Item of its draft",
+            f"EXISTS (SELECT 1 FROM {SNAPSHOTS} s JOIN {DRAFT_ITEMS} d ON d.draft_id = s.draft_id"
+            " WHERE s.registration_snapshot_id = NEW.registration_snapshot_id"
+            " AND s.listing_shape = 'SINGLE_LISTING_WITH_OPTIONS' AND d.removed_at IS NULL"
+            f" AND NOT EXISTS (SELECT 1 FROM {ITEM_SNAPSHOTS} i"
+            " WHERE i.registration_snapshot_id = s.registration_snapshot_id"
+            " AND i.item_id = d.item_id"
+            " AND i.pricing_snapshot_id_at_registration = d.pricing_snapshot_id))",
         )
         + _raise(
             f"{INTENTS}: an unresolved CREATE blocks its conflict scope",
@@ -855,7 +999,7 @@ def _install_intent_rules() -> None:
                     "registration_batch_id",
                     "registration_snapshot_id",
                     "marketplace_key",
-                    "account_id",
+                    "marketplace_account_id",
                     "operation",
                     "idempotency_key",
                     "created_by",
@@ -974,7 +1118,8 @@ def _install_registration_rules() -> None:
             f"NOT EXISTS (SELECT 1 FROM {INTENTS} i WHERE i.intent_id = NEW.intent_id"
             " AND i.state = 'CONFIRMED'"
             " AND i.registration_snapshot_id = NEW.registration_snapshot_id"
-            " AND i.marketplace_key = NEW.marketplace_key AND i.account_id = NEW.account_id"
+            " AND i.marketplace_key = NEW.marketplace_key"
+            " AND i.marketplace_account_id = NEW.marketplace_account_id"
             " AND i.marketplace_product_id = NEW.marketplace_product_id"
             " AND i.comparison_contract_version = NEW.comparison_contract_version"
             " AND i.normalizer_version = NEW.normalizer_version"
@@ -994,7 +1139,7 @@ def _install_registration_rules() -> None:
         "intent_id",
         "registration_snapshot_id",
         "marketplace_key",
-        "account_id",
+        "marketplace_account_id",
         "marketplace_product_id",
         "seller_product_code",
         "published_state",
@@ -1065,7 +1210,8 @@ def _install_override_rules() -> None:
         + _raise(
             f"{OVERRIDES}: one active override per scope",
             f"EXISTS (SELECT 1 FROM {OVERRIDES} o WHERE o.revoked_at IS NULL"
-            " AND o.marketplace_key = NEW.marketplace_key AND o.account_id = NEW.account_id"
+            " AND o.marketplace_key = NEW.marketplace_key"
+            " AND o.marketplace_account_id = NEW.marketplace_account_id"
             " AND o.product_group_id = NEW.product_group_id"
             " AND o.listing_composition_id IS NEW.listing_composition_id)",
         ),
@@ -1081,7 +1227,7 @@ def _install_override_rules() -> None:
                 (
                     "override_id",
                     "marketplace_key",
-                    "account_id",
+                    "marketplace_account_id",
                     "product_group_id",
                     "listing_composition_id",
                     "reason",
@@ -1101,8 +1247,8 @@ def downgrade() -> None:
         held = bind.execute(sa.text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
         if held:
             raise RuntimeError(
-                f"cannot drop {table}: {held} row(s) of registration truth are held; "
-                "registration state is never silently destroyed"
+                f"cannot drop {table}: {held} row(s) are held; registration and account state"
+                " is never silently destroyed"
             )
     for table in reversed(TABLES):
         op.drop_table(table)

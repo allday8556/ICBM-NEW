@@ -86,6 +86,10 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "classification_basis",
         "transmission_phase",
         "transmission_events",
+        # the canonical seller and marketplace-account identity (M5 PR-B): ICBM-minted
+        # identifiers, never the provider account identifier (ACCOUNT_IDENTITY §2)
+        "seller_entity_id",
+        "marketplace_account_id",
     }
 )
 

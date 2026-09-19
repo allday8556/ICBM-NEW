@@ -34,6 +34,10 @@ class AuditEventType(StrEnum):
     MARKETPLACE_CREDENTIALS_UPDATED = "MARKETPLACE_CREDENTIALS_UPDATED"
     MARKETPLACE_SESSION_COMMITTED = "MARKETPLACE_SESSION_COMMITTED"
     MARKETPLACE_ACCOUNT_BOUND = "MARKETPLACE_ACCOUNT_BOUND"
+    # The canonical seller and marketplace-account identity (M5 PR-B, ACCOUNT_IDENTITY §2):
+    # ICBM identifiers only, never a provider account identifier or display name.
+    SELLER_ENTITY_RECORDED = "SELLER_ENTITY_RECORDED"
+    MARKETPLACE_ACCOUNT_ESTABLISHED = "MARKETPLACE_ACCOUNT_ESTABLISHED"
     # M4 PR-C materialization (ADR-0013 §3, §6): identifiers, reasons and versions only, never a
     # source fact value, page text or URL. Committed in the same unit of work as the change.
     PRODUCT_CURRENT_SOURCE_REVISION_MOVED = "PRODUCT_CURRENT_SOURCE_REVISION_MOVED"

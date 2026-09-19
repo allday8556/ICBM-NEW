@@ -4,8 +4,10 @@ Ten tables, in the order migration 0016 creates them:
 
 - ``registration_drafts``: a Draft, scoped ``marketplace × account × draft_id`` (§2). Its only
   mutable state is the listing shape and the revision counter; readiness is never stored (§3).
-- ``registration_draft_items``: a Draft's references to existing M4 Items. An open item is unique
-  per Draft by Item and by ``group + composition_signature``; removal closes it, never deletes it.
+- ``registration_draft_items``: a Draft's references to existing M4 Items, each pinned to the
+  exact M4 ``PricingSnapshot`` of that Item in the Draft's target context (§2; v3.1
+  ``DraftListingItem.pricing_snapshot_id``). An open item is unique per Draft by Item and by
+  ``group + composition_signature``; removal or a new price selection closes it, never deletes it.
 - ``registration_snapshots``: the immutable Snapshot of one provider-listing unit (§6).
 - ``registration_item_snapshots``: the immutable per-Item values that unit sent (§6, §7).
 - ``registration_batches``: a group of Intents. No status column: its summary is derived (§12).
@@ -18,10 +20,16 @@ Ten tables, in the order migration 0016 creates them:
 - ``duplicate_overrides``: an operator's intentional-duplicate decision, scoped
   ``marketplace × account × group`` (§13).
 
+**Account scope.** Every "account" here is the canonical ``marketplace_account_id`` of
+``app.connect.account_models`` (``ACCOUNT_IDENTITY.md`` §2), never a free string and never the
+provider's wire ``account_id``. Each scoped table carries the composite foreign key
+``(marketplace_key, marketplace_account_id)``, and migration 0016 opens no Draft, Snapshot, Batch,
+Intent or override for an account that is not bound to its committed provider identity.
+
 CHECK constraints repeat the single-row invariants. The cross-row invariants — a Snapshot matches
-its Draft and exactly the M4 truth it names, an Intent never opens inside an unresolved conflict
-scope, an outcome is backed by its attempt, a registration follows a verified Intent — are the
-triggers of migration 0016, so no write path can bypass them.
+its Draft and exactly the M4 truth it pins, a single listing sends its whole Draft, an Intent never
+opens inside an unresolved conflict scope, an outcome is backed by its attempt, a registration
+follows a verified Intent — are the triggers of migration 0016, so no write path can bypass them.
 
 Every digest column holds the SHA-256 of a sanitized canonical representation, never of wire bytes
 (§15, B4). ``group_membership_revision_id`` has no foreign key here on purpose: only the product
@@ -32,7 +40,16 @@ the revision exists and belongs to the Item's group.
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy import text as sql
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -89,11 +106,19 @@ def _item_key(column: str) -> str:
     )
 
 
+def _account() -> ForeignKeyConstraint:
+    """The canonical marketplace account that scopes a row (ACCOUNT_IDENTITY §2)."""
+    return ForeignKeyConstraint(
+        ["marketplace_key", "marketplace_account_id"],
+        ["marketplace_accounts.marketplace_key", "marketplace_accounts.marketplace_account_id"],
+    )
+
+
 class RegistrationDraft(Base):
     __tablename__ = "registration_drafts"
     __table_args__ = (
+        _account(),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_in("listing_shape", ListingShape), name="listing_shape_valid"),
         CheckConstraint("draft_revision >= 1", name="draft_revision_positive"),
         CheckConstraint(_present("created_by"), name="created_by_present"),
@@ -101,7 +126,7 @@ class RegistrationDraft(Base):
 
     draft_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     listing_shape: Mapped[str] = mapped_column(String(40))
     draft_revision: Mapped[int] = mapped_column(Integer)
     created_by: Mapped[str] = mapped_column(String(64))
@@ -149,6 +174,11 @@ class RegistrationDraftItem(Base):
         String(36), ForeignKey("product_groups.product_group_id")
     )
     composition_signature: Mapped[str] = mapped_column(String(64))
+    # The exact M4 price of this Item in the Draft's target context (§2). A new selection closes
+    # this row and opens another, so the Draft history keeps every price it held.
+    pricing_snapshot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("pricing_snapshots.pricing_snapshot_id")
+    )
     ordinal: Mapped[int] = mapped_column(Integer)
     added_by: Mapped[str] = mapped_column(String(64))
     added_at: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -159,8 +189,8 @@ class RegistrationDraftItem(Base):
 class RegistrationSnapshot(Base):
     __tablename__ = "registration_snapshots"
     __table_args__ = (
+        _account(),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_in("listing_shape", ListingShape), name="listing_shape_valid"),
         CheckConstraint("draft_revision >= 1", name="draft_revision_positive"),
         CheckConstraint(_listing_identity("listing_identity"), name="listing_identity_format"),
@@ -187,7 +217,7 @@ class RegistrationSnapshot(Base):
     draft_id: Mapped[str] = mapped_column(String(36), ForeignKey("registration_drafts.draft_id"))
     draft_revision: Mapped[int] = mapped_column(Integer)
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     listing_shape: Mapped[str] = mapped_column(String(40))
     listing_identity: Mapped[str] = mapped_column(String(64))
     preflight_rule_version: Mapped[str] = mapped_column(String(64))
@@ -250,15 +280,15 @@ class RegistrationItemSnapshot(Base):
 class RegistrationBatch(Base):
     __tablename__ = "registration_batches"
     __table_args__ = (
+        _account(),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_present("created_by"), name="created_by_present"),
         CheckConstraint(_present("correlation_id"), name="correlation_present"),
     )
 
     registration_batch_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     created_by: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -283,11 +313,13 @@ _VERIFIED = (
 class RegistrationIntent(Base):
     __tablename__ = "registration_intents"
     __table_args__ = (
+        _account(),
         UniqueConstraint("idempotency_key"),
         UniqueConstraint("registration_snapshot_id", "operation"),
-        Index("ix_registration_intents_scope", "marketplace_key", "account_id", "state"),
+        Index(
+            "ix_registration_intents_scope", "marketplace_key", "marketplace_account_id", "state"
+        ),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_in("operation", Operation), name="operation_create_only"),
         CheckConstraint(_hex64("idempotency_key"), name="idempotency_key_hex"),
         CheckConstraint(_in("state", IntentState), name="state_valid"),
@@ -318,7 +350,7 @@ class RegistrationIntent(Base):
         String(36), ForeignKey("registration_snapshots.registration_snapshot_id")
     )
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     operation: Mapped[str] = mapped_column(String(20))
     idempotency_key: Mapped[str] = mapped_column(String(64))
     state: Mapped[str] = mapped_column(String(20))
@@ -440,10 +472,10 @@ _REMOVED = (
 class MarketplaceRegistration(Base):
     __tablename__ = "marketplace_registrations"
     __table_args__ = (
+        _account(),
         UniqueConstraint("intent_id"),
-        UniqueConstraint("marketplace_key", "marketplace_product_id"),
+        UniqueConstraint("marketplace_key", "marketplace_account_id", "marketplace_product_id"),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_present("marketplace_product_id"), name="provider_identity_present"),
         CheckConstraint(_listing_identity("seller_product_code"), name="seller_code_format"),
         CheckConstraint(_present("published_state"), name="published_state_present"),
@@ -477,7 +509,7 @@ class MarketplaceRegistration(Base):
         String(36), ForeignKey("registration_snapshots.registration_snapshot_id")
     )
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     marketplace_product_id: Mapped[str] = mapped_column(String(64))
     # The provider-listing unit's listing identity as sent (§7). Its wire field is PR-D's.
     seller_product_code: Mapped[str] = mapped_column(String(64))
@@ -533,8 +565,8 @@ class MarketplaceRegistrationItem(Base):
 class DuplicateOverride(Base):
     __tablename__ = "duplicate_overrides"
     __table_args__ = (
+        _account(),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
-        CheckConstraint(_present("account_id"), name="account_id_present"),
         CheckConstraint(_present("reason"), name="reason_present"),
         CheckConstraint(_present("approved_by"), name="approved_by_present"),
         CheckConstraint(_present("correlation_id"), name="correlation_present"),
@@ -551,7 +583,7 @@ class DuplicateOverride(Base):
 
     override_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     marketplace_key: Mapped[str] = mapped_column(String(40))
-    account_id: Mapped[str] = mapped_column(String(64))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
     product_group_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("product_groups.product_group_id")
     )

@@ -2,6 +2,7 @@
 
 from app.audit import models as _audit_models  # noqa: F401
 from app.collect import models as _collect_models  # noqa: F401
+from app.connect import account_models as _account_models  # noqa: F401
 from app.connect import models as _connect_models  # noqa: F401
 from app.connect.marketplace import models as _marketplace_models  # noqa: F401
 from app.connect.smartstore import models as _smartstore_models  # noqa: F401
