@@ -1044,11 +1044,16 @@ def boundary(run: Run) -> dict[str, object]:
     tables, _columns = _schema_names(o)
     count = o.register.registration_candidate_count()
     c.check("boundary.registration_candidates_zero", count == 0, count=count)
+    # M5 PR-B (migration 0016) adds the registration tables. M4 registers nothing, so every one of
+    # them holds no row: the claim is the absence of registration state, not of its schema.
     registration = [
         n for n in tables if any(w in n for w in ("registration", "draft", "listing_item"))
     ]
-    c.check("boundary.no_registration_state", not registration)
     with evidence.read_only(o.database_file) as connection:
+        held = {
+            name: connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            for name in registration
+        }
         marks = ", ".join("?" for _ in PROVIDER_AUDIT)
         provider_events = connection.execute(
             f"SELECT COUNT(*) FROM audit_events WHERE event_type IN ({marks})", PROVIDER_AUDIT
@@ -1058,6 +1063,7 @@ def boundary(run: Run) -> dict[str, object]:
         "boundary.no_supplier_or_marketplace_audit", provider_events == 0, count=provider_events
     )
     c.check("boundary.no_job_ran", jobs == 0, count=jobs)
+    c.check("boundary.no_registration_state", not any(held.values()), rows=held)
     stored = evidence.file_digests(o.config.source_assets_dir)
     derived = evidence.file_digests(o.config.derived_images_dir)
     c.check(
@@ -1067,7 +1073,7 @@ def boundary(run: Run) -> dict[str, object]:
     c.check("boundary.derived_apart_from_source", not set(stored) & set(derived))
     return {
         "registration_candidate_count": count,
-        "registration_tables": registration,
+        "registration_rows": held,
         "supplier_or_marketplace_audit_events": provider_events,
         "jobs": jobs,
         "source_assets": len(stored),
@@ -1163,10 +1169,7 @@ def hard_zero(checks: Checks, guards: GuardEvidence) -> dict[str, object]:
 def _run_phases(run: Run, report: dict[str, Any]) -> None:
     checks = run.checks
     report["database_revision"] = run.owners.database_revision()
-    checks.check(
-        "schema.head_is_0015",
-        report["database_revision"] == head_revision() == "0015_m4_quantity_offers",
-    )
+    checks.check("schema.at_head", report["database_revision"] == head_revision())
     s1 = report["s1_base_product"] = scenario_base(run)
     history = evidence.snapshot(run.owners.database_file)
     stored = _state(run.owners)

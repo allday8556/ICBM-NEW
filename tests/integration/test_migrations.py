@@ -56,8 +56,22 @@ CANONICAL_TABLES = (
     "image_qa_results",
     # M4 PR-Q (ruling 5738760913): immutable product-level quantity offers.
     "quantity_offers",
+    # M5 PR-B: the canonical seller and marketplace account (ACCOUNT_IDENTITY §2).
+    "seller_entities",
+    "marketplace_accounts",
+    # M5 PR-B (ADR-0014): the registration foundation.
+    "registration_drafts",
+    "registration_draft_items",
+    "registration_snapshots",
+    "registration_item_snapshots",
+    "registration_batches",
+    "registration_intents",
+    "registration_attempts",
+    "marketplace_registrations",
+    "marketplace_registration_items",
+    "duplicate_overrides",
 )
-HEAD = "0015_m4_quantity_offers"
+HEAD = "0016_m5_registration_foundation"
 
 
 def _url(path: Path) -> str:

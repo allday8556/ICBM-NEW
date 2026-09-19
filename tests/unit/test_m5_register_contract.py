@@ -1,8 +1,13 @@
-"""Repository contract for M5 PR-A (Issue #89, ADR-0014), pinned before any M5 schema exists.
+"""Repository contract for M5 (Issue #89, ADR-0014). PR-A pinned it before any M5 schema existed;
+PR-B (migration 0016) adds exactly the registration foundation, and nothing else.
 
 Two kinds of rule:
-- **The repository.** No M5 endpoint is adopted, no migration or registration table exists,
-  REGISTER does nothing and reaches no provider, and product registration write stays unproven.
+- **The repository.** No M5 endpoint is adopted; the only M5 schema is the registration foundation
+  of migration 0016, with no stored readiness, registrability or summary; only the registration
+  store writes it; REGISTER reaches no provider; and product registration write stays unproven.
+  PR #91 review 5255746944 adds: registration state is scoped by the canonical
+  ``marketplace_account_id`` that only the CONNECT account owner mints, and a Draft Item pins its
+  exact M4 price.
 - **The decision.** ADR-0014 states each binding rule of kickoff 5740316498, of the architect
   addendum 5740352676 (R1-R4) and of the PR #90 review 5255157251 (B1-B4), and states nothing
   that contradicts it. The upload gate, the resolution evidence and the durable digest fields are
@@ -20,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, Integer, MetaData, Table
+from sqlalchemy import Column, Integer, MetaData, Table, UniqueConstraint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
@@ -95,57 +100,85 @@ def test_the_adoption_detector_fires() -> None:
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
 
-M4_HEAD = "0015_m4_quantity_offers"
+M5_HEAD = "0016_m5_registration_foundation"
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
     re.I,
 )
+# ADR-0014 §25: PR-B owns these tables, and only these (Issue #89 §20).
+REGISTRATION_TABLES = frozenset(
+    {
+        "registration_drafts",
+        "registration_draft_items",
+        "registration_snapshots",
+        "registration_item_snapshots",
+        "registration_batches",
+        "registration_intents",
+        "registration_attempts",
+        "marketplace_registrations",
+        "marketplace_registration_items",
+        "duplicate_overrides",
+    }
+)
+# ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
+# may store readiness, registrability or a PARTIAL-style summary as a truth.
+STORED_TRUTH = re.compile(
+    r"registerable|readiness|(^|_)ready($|_)|partial|summary|preflight_(status|state)", re.I
+)
 
 
 def migration_problems(names: Iterable[str]) -> list[str]:
-    """A migration after the M4 head, or one that names registration state: PR-A has no schema."""
-    head = int(M4_HEAD.split("_", 1)[0])
+    """A migration after the M5 foundation head, or a registration-named migration other than it."""
+    head = int(M5_HEAD.split("_", 1)[0])
     return [
         name
         for name in names
-        if int(name.split("_", 1)[0]) > head or REGISTRATION_STATE.search(name)
+        if int(name.split("_", 1)[0]) > head
+        or (REGISTRATION_STATE.search(name) and not name.startswith(M5_HEAD))
     ]
 
 
-def registration_schema_problems(metadata: MetaData) -> list[str]:
-    """A table or column holding registration state, or a stored registrability truth."""
-    problems = [f"table {name}" for name in metadata.tables if REGISTRATION_STATE.search(name)]
+def registration_schema_problems(
+    metadata: MetaData, expected: frozenset[str] = REGISTRATION_TABLES
+) -> list[str]:
+    """Registration tables other than exactly ``expected``, or any column storing readiness,
+    registrability or a summary as a truth."""
+    present = {name for name in metadata.tables if REGISTRATION_STATE.search(name)}
+    problems = [f"extra table {name}" for name in present - expected]
+    problems += [f"missing table {name}" for name in expected - present]
     problems += [
         f"{table.name}.{column.name}"
         for table in metadata.tables.values()
         for column in table.columns
-        if REGISTRATION_STATE.search(column.name)
+        if STORED_TRUTH.search(column.name)
     ]
     return sorted(problems)
 
 
-def test_no_migration_after_the_m4_head() -> None:
+def test_the_only_m5_migration_is_the_registration_foundation() -> None:
     from app.db.migrate import head_revision
 
     names = sorted(p.name for p in MIGRATIONS.glob("0*.py"))
     assert migration_problems(names) == []
-    assert head_revision() == M4_HEAD
+    assert f"{M5_HEAD}.py" in names
+    assert head_revision() == M5_HEAD
 
 
 def test_the_migration_detector_fires() -> None:
     names = [
         "0015_m4_quantity_offers.py",
         "0016_m5_registration_foundation.py",
+        "0017_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
-        "0016_m5_registration_foundation.py",
+        "0017_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
 
 
-def test_no_registration_state_is_stored_yet() -> None:
+def test_the_registration_schema_is_exactly_the_foundation() -> None:
     from app.db.metadata import metadata
 
     assert registration_schema_problems(metadata) == []
@@ -155,18 +188,239 @@ def test_the_registration_schema_detector_fires() -> None:
     synthetic = MetaData()
     Table("registration_intents", synthetic, Column("id", Integer, primary_key=True))
     Table(
+        "registration_batches",
+        synthetic,
+        Column("id", Integer, primary_key=True),
+        Column("partial_summary", Integer),
+    )
+    Table(
         "product_items",
         synthetic,
         Column("item_id", Integer, primary_key=True),
         Column("registerable", Integer),
     )
     Table("marketplace_asset_uploads", synthetic, Column("id", Integer, primary_key=True))
-    Table("pricing_snapshots", synthetic, Column("id", Integer, primary_key=True))
-    assert registration_schema_problems(synthetic) == [
+    expected = frozenset({"registration_intents", "registration_batches", "registration_drafts"})
+    assert registration_schema_problems(synthetic, expected) == [
+        "extra table marketplace_asset_uploads",
+        "missing table registration_drafts",
         "product_items.registerable",
-        "table marketplace_asset_uploads",
-        "table registration_intents",
+        "registration_batches.partial_summary",
     ]
+
+
+# PR-B: the registration store is the only production writer of the registration tables, so the
+# conflict scope, the idempotency identity and the sanitized digests cannot be bypassed.
+REGISTRATION_OWNERS = frozenset({"app/register/store.py", "app/register/models.py"})
+REGISTRATION_CLASSES = frozenset(
+    {
+        "RegistrationDraft",
+        "RegistrationDraftItem",
+        "RegistrationSnapshot",
+        "RegistrationItemSnapshot",
+        "RegistrationBatch",
+        "RegistrationIntent",
+        "RegistrationAttempt",
+        "MarketplaceRegistration",
+        "MarketplaceRegistrationItem",
+        "DuplicateOverride",
+    }
+)
+REGISTRATION_TABLE_NAMES = re.compile(
+    r"\b(registration_(drafts|draft_items|snapshots|item_snapshots|batches|intents|attempts)"
+    r"|marketplace_registrations|marketplace_registration_items|duplicate_overrides)\b"
+)
+
+
+def registration_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Production code, other than the registration store, its models and the migrations, that
+    names a registration model or table, and so could write around the store."""
+    offenders = []
+    for where, source in sources:
+        if where in REGISTRATION_OWNERS or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            named = (
+                node.name
+                if isinstance(node, ast.alias)
+                else node.id
+                if isinstance(node, ast.Name)
+                else node.attr
+                if isinstance(node, ast.Attribute)
+                else None
+            )
+            text = node.value if isinstance(node, ast.Constant) else None
+            if named in REGISTRATION_CLASSES or (
+                isinstance(text, str) and REGISTRATION_TABLE_NAMES.search(text)
+            ):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def test_only_the_registration_store_writes_registration_state() -> None:
+    assert registration_writer_problems(_code()) == []
+
+
+def test_the_registration_writer_detector_fires() -> None:
+    sources = [
+        ("app/register/service.py", "from app.register.models import RegistrationIntent\n"),
+        ("app/other/raw.py", "SQL = 'UPDATE registration_intents SET state = 1'\n"),
+        ("scripts/tool.py", "T = 'duplicate_overrides'\n"),
+        ("app/db/migrations/versions/0099_x.py", "T = 'registration_attempts'\n"),
+        ("app/register/store.py", "from app.register.models import RegistrationIntent\n"),
+    ]
+    assert registration_writer_problems(sources) == [
+        "app/register/service.py:1",
+        "app/other/raw.py:1",
+        "scripts/tool.py:1",
+    ]
+
+
+# ---------------------------------------------------------------- account scope and price pin
+
+# PR #91 review 5255746944: every account-scoped registration table names the canonical
+# ``marketplace_account_id`` of ACCOUNT_IDENTITY §2 through a foreign key (blocker 2), provider
+# product ids are unique per canonical account, and a Draft Item pins its exact M4 price
+# (blocker 1). The provider wire ``account_id`` names no registration column.
+ACCOUNT_SCOPED_TABLES = frozenset(
+    {
+        "registration_drafts",
+        "registration_snapshots",
+        "registration_batches",
+        "registration_intents",
+        "marketplace_registrations",
+        "duplicate_overrides",
+    }
+)
+ACCOUNT_KEY = (
+    ["marketplace_key", "marketplace_account_id"],
+    ["marketplace_accounts.marketplace_key", "marketplace_accounts.marketplace_account_id"],
+)
+PROVIDER_ID_PER_ACCOUNT = {"marketplace_key", "marketplace_account_id", "marketplace_product_id"}
+
+
+def registration_scope_problems(metadata: MetaData) -> list[str]:
+    """A registration column named ``account_id``, an account-scoped table without the canonical
+    account key, a provider product id unique beyond one account, or a Draft Item without a
+    pinned exact price."""
+    problems = []
+    for name, table in sorted(metadata.tables.items()):
+        if not REGISTRATION_STATE.search(name):
+            continue
+        if "account_id" in table.columns:
+            problems.append(f"{name}.account_id")
+        if name in ACCOUNT_SCOPED_TABLES and not any(
+            (list(fk.column_keys), [e.target_fullname for e in fk.elements]) == ACCOUNT_KEY
+            for fk in table.foreign_key_constraints
+        ):
+            problems.append(f"{name}: no canonical account key")
+    registrations = metadata.tables.get("marketplace_registrations")
+    if registrations is not None:
+        uniques = [
+            {column.name for column in constraint.columns}
+            for constraint in registrations.constraints
+            if isinstance(constraint, UniqueConstraint)
+        ]
+        if (
+            PROVIDER_ID_PER_ACCOUNT not in uniques
+            or PROVIDER_ID_PER_ACCOUNT - {"marketplace_account_id"} in uniques
+        ):
+            problems.append("marketplace_registrations: provider id not unique per account")
+    items = metadata.tables.get("registration_draft_items")
+    if items is not None:
+        pin = items.columns.get("pricing_snapshot_id")
+        if (
+            pin is None
+            or pin.nullable
+            or {fk.target_fullname for fk in pin.foreign_keys}
+            != {"pricing_snapshots.pricing_snapshot_id"}
+        ):
+            problems.append("registration_draft_items: no pinned price")
+    return problems
+
+
+def test_registration_state_is_scoped_by_the_canonical_account_and_pins_its_price() -> None:
+    from app.db.metadata import metadata
+
+    assert registration_scope_problems(metadata) == []
+
+
+def test_the_registration_scope_detector_fires() -> None:
+    synthetic = MetaData()
+    Table("pricing_snapshots", synthetic, Column("pricing_snapshot_id", Integer, primary_key=True))
+    Table(
+        "registration_drafts",
+        synthetic,
+        Column("draft_id", Integer, primary_key=True),
+        Column("marketplace_key", Integer),
+        Column("account_id", Integer),
+    )
+    Table(
+        "registration_draft_items",
+        synthetic,
+        Column("draft_item_id", Integer, primary_key=True),
+        Column("pricing_snapshot_id", Integer, nullable=True),
+    )
+    Table(
+        "marketplace_registrations",
+        synthetic,
+        Column("registration_id", Integer, primary_key=True),
+        Column("marketplace_key", Integer),
+        Column("marketplace_product_id", Integer),
+        UniqueConstraint("marketplace_key", "marketplace_product_id"),
+    )
+    assert registration_scope_problems(synthetic) == [
+        "marketplace_registrations: no canonical account key",
+        "registration_drafts.account_id",
+        "registration_drafts: no canonical account key",
+        "marketplace_registrations: provider id not unique per account",
+        "registration_draft_items: no pinned price",
+    ]
+
+
+# ACCOUNT_IDENTITY §5: only the CONNECT account owner mints a canonical account, from a committed
+# binding, so no second writer can create an alias scope. A foreign-key target such as
+# "marketplace_accounts.marketplace_key" is a schema reference, not a write.
+ACCOUNT_OWNERS = frozenset({"app/connect/accounts.py", "app/connect/account_models.py"})
+ACCOUNT_CLASSES = frozenset({"SellerEntity", "MarketplaceAccount"})
+ACCOUNT_TABLE_NAMES = re.compile(r"\b(seller_entities|marketplace_accounts)\b(?!\.)")
+
+
+def account_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    offenders = []
+    for where, source in sources:
+        if where in ACCOUNT_OWNERS or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            named = (
+                node.name
+                if isinstance(node, ast.alias)
+                else node.id
+                if isinstance(node, ast.Name)
+                else node.attr
+                if isinstance(node, ast.Attribute)
+                else None
+            )
+            text = node.value if isinstance(node, ast.Constant) else None
+            if named in ACCOUNT_CLASSES or (
+                isinstance(text, str) and ACCOUNT_TABLE_NAMES.search(text)
+            ):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def test_only_the_account_owner_writes_canonical_accounts() -> None:
+    assert account_writer_problems(_code()) == []
+
+
+def test_the_account_writer_detector_fires() -> None:
+    sources = [
+        ("app/register/store.py", "from app.connect.account_models import MarketplaceAccount\n"),
+        ("scripts/seed.py", "SQL = 'INSERT INTO marketplace_accounts VALUES (1)'\n"),
+        ("app/register/models.py", "FK = 'marketplace_accounts.marketplace_key'\n"),
+        ("app/connect/accounts.py", "from app.connect.account_models import SellerEntity\n"),
+    ]
+    assert account_writer_problems(sources) == ["app/register/store.py:1", "scripts/seed.py:1"]
 
 
 # ---------------------------------------------------------------- REGISTER does nothing yet

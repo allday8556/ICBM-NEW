@@ -1360,7 +1360,7 @@ def test_a_fresh_database_migrates_through_0015_to_head(tmp_path: Path) -> None:
     command.upgrade(alembic_config(url), "head")
     engine = create_sqlite_engine(url)
     try:
-        assert current_revision(engine) == head_revision() == "0015_m4_quantity_offers"
+        assert current_revision(engine) == head_revision()
     finally:
         engine.dispose()
     with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
