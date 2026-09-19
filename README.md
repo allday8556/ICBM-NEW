@@ -14,14 +14,17 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 - **M1** — KM통상 CONNECT only: **ACCEPTED** 2026-09-13 (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md), [`docs/acceptance/M1.md`](docs/acceptance/M1.md)).
 - **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`docs/acceptance/M2.md`](docs/acceptance/M2.md)).
 - **M3** — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls: **ACCEPTED** 2026-09-18, bounded by its §2 capability boundary (Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md), [`docs/acceptance/M3.md`](docs/acceptance/M3.md)).
-- **Current milestone:** M4 — canonical Product DB + image pipeline + pricing/readiness foundations ([`ROADMAP.md`](ROADMAP.md) §12, Issue #80). It starts with the PR-A contract ([ADR-0013](docs/adr/0013-m4-canonical-product-contract.md), accepted). No M4 behaviour is implemented yet.
+- **M4** — canonical Product DB + image pipeline + pricing/readiness foundations: **ACCEPTED** 2026-09-19 on the final offline acceptance run at exact main `57a6676`, bounded by its §2 (Issue #80, [ADR-0013](docs/adr/0013-m4-canonical-product-contract.md), [`docs/acceptance/M4.md`](docs/acceptance/M4.md)).
+- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12). This is a status pointer only: no M5 behaviour is implemented or authorized yet.
 
 External calls happen only when the operator starts an action (no call at startup), and only for these accepted flows:
 - **KM통상 CONNECT:** the application authenticates and reads the protected 마이쇼핑 page, through the common, allowlisted supplier transport.
 - **KM통상 one-product COLLECT (M3):** for one operator-supplied product URL at a time, it reads that product page and the page's own product images through the same policed transport, under the collection request controls. It stores them as an immutable `ProductFactsRevision` with its source assets, which can be read back unchanged.
 - **SmartStore CONNECT:** it uses only the two adopted endpoints (token and seller account), through the registry-gated caller.
 
-Collection is one product per operator action. There is no listing, category or bulk collection and no crawl. It does not yet create the canonical `Product` (M4). Positive `CONFIRMED` option-axis/configuration support and quantity-tier values/source totals are not claimed ([`docs/acceptance/M3.md`](docs/acceptance/M3.md) §2). The application makes **zero external business writes**. Every screen without a live contract renders the empty state reported by its application contract.
+Collection is one product per operator action. There is no listing, category or bulk collection and no crawl.
+
+A recorded collection materializes the canonical `Product` (M4): its current source revision, its Items and their source bindings, which can be read through `GET /api/v1/products/{product_group_id}`. Pricing snapshots, derived image lineage with operator selection and exact-binary QA, and derived readiness are server-owned. The offline acceptance run proved them ([`docs/acceptance/M4.md`](docs/acceptance/M4.md)). Nothing is registered to a marketplace yet (M5). Positive `CONFIRMED` option-axis/configuration support and quantity-tier values/source totals are not claimed ([`docs/acceptance/M3.md`](docs/acceptance/M3.md) §2). The application makes **zero external business writes**. Every screen without a live contract renders the empty state reported by its application contract.
 
 ## Quick start (Windows, Python 3.12)
 

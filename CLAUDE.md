@@ -327,7 +327,8 @@ M0 — fresh UI shell + Phase 0 foundation   ACCEPTED 2026-09-13 (Issue #1, PR #
 M1 — KM통상 CONNECT only                   ACCEPTED 2026-09-13 (Issue #7, PR #9, ADR-0007, docs/acceptance/M1.md)
 M2 — SmartStore CONNECT                    ACCEPTED 2026-09-15 (Issue #46, PR #51, docs/acceptance/M2.md)
 M3 — KM통상 one-product COLLECT             ACCEPTED 2026-09-18 (Issue #52, ADR-0010, docs/acceptance/M3.md; bounded by its §2)
-M4 — canonical Product DB                  CURRENT (Issue #80; PR-A contract ADR-0013 → PR-B → PR-C → PR-D → PR-E → PR-F; each PR separately authorized)
+M4 — canonical Product DB                  ACCEPTED 2026-09-19 (Issue #80, ADR-0013, PR #81–#87, docs/acceptance/M4.md; bounded by its §2)
+M5 — SmartStore REGISTER                   CURRENT (status pointer only, per the M4 closeout; no M5 work is authorized yet)
 ```
 
 The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.
