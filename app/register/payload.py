@@ -105,7 +105,13 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
                 "publication_assets": list(assets),
             }
         )
+    selected_category = {
+        "category_id": category.category_id,
+        "mapping_revision": category.mapping_revision,
+        "taxonomy_revision": category.taxonomy_revision,
+    }
     business = {
+        "category": selected_category,
         "name": listing.name.canonical(),
         "tags": sorted(set(listing.tags)),
         "attributes": {k: v.canonical() for k, v in sorted(listing.attributes.items())},
@@ -137,12 +143,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         "marketplace_account_id": unit.marketplace_account_id,
         "listing_shape": unit.listing_shape.value,
         "listing_identity": unit.listing_identity,
-        "category": {
-            "category_id": category.category_id,
-            "mapping_revision": category.mapping_revision,
-            "taxonomy_revision": category.taxonomy_revision,
-            "metadata_revision": metadata.metadata_revision,
-        },
+        "category": {**selected_category, "metadata_revision": metadata.metadata_revision},
         "name": business["name"],
         "tags": business["tags"],
         "attributes": business["attributes"],

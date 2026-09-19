@@ -68,13 +68,30 @@ def problems(value: Any, path: str = "payload") -> tuple[tuple[str, str], ...]:
     return tuple(sorted(found))
 
 
+_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def safe_label(value: str) -> bool:
+    """Whether a version or identity label is plain: label characters only, no URL, no secret."""
+    return isinstance(value, str) and bool(_LABEL.fullmatch(value)) and not problems(value)
+
+
+def hex_digest(value: str) -> bool:
+    """Whether a value is a lower-case hex SHA-256 digest."""
+    return isinstance(value, str) and bool(_HEX64.fullmatch(value))
+
+
 def safe_provider_reference(reference: str) -> bool:
-    """Whether a prepared provider asset reference is opaque and carries no signed material."""
-    return (
-        isinstance(reference, str)
-        and bool(_PROVIDER_REF.fullmatch(reference) or _safe_https(reference))
-        and not _SECRET_VALUE.search(reference)
-    )
+    """Whether a provider reference (a prepared asset or a duplicate-lookup listing) is opaque, or
+    a plain https reference, and carries no signed material. Anything URL-shaped must be a plain
+    https reference: an ``http:`` or other scheme, a protocol-relative URL, a query, a fragment or
+    user information is never accepted as "opaque"."""
+    if not isinstance(reference, str) or _SECRET_VALUE.search(reference):
+        return False
+    if _URL.search(reference) or ":/" in reference:
+        return _safe_https(reference)
+    return bool(_PROVIDER_REF.fullmatch(reference))
 
 
 def _safe_https(reference: str) -> bool:

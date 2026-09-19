@@ -427,6 +427,7 @@ def test_an_unresolved_unknown_prevents_ready_and_no_override_releases_it(
 
 def test_a_live_registration_is_duplicate_until_an_override_covers_it(
     container: Container,
+    config: AppConfig,
     sources: Collections,
     store: RegistrationStore,
     account: str,
@@ -478,6 +479,27 @@ def test_a_live_registration_is_duplicate_until_an_override_covers_it(
         )  # fmt: skip
     assert prep.service.candidate(second).status is ReadinessStatus.READY
     assert prep.service.candidate(strong).status is ReadinessStatus.READY
+    # PR #92 review 5256446628: the same covered strong match carrying a signed reference is
+    # never READY, never prepared and never frozen, and its reference is no fingerprint input.
+    signed = "https://listing.example/p/1?X-Signature=abc123def456"
+    assert strong.duplicate_evidence is not None
+    tokenized = replace(
+        strong,
+        duplicate_evidence=replace(
+            strong.duplicate_evidence,
+            matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, signed),),
+        ),
+    )
+    refused = prep.service.candidate(tokenized)
+    assert (refused.status, refused.upload_permitted) == (ReadinessStatus.BLOCKED, False)
+    assert "DUPLICATE_EVIDENCE_UNSAFE" in _codes(refused)
+    last = prep.service.final(tokenized, prepared(prep.service.candidate(strong)))
+    assert last.status is ReadinessStatus.BLOCKED
+    assert signed not in json.dumps(last.dependencies)
+    snapshots = count(config, "registration_snapshots")
+    with pytest.raises(InputValidationError, match="final READY"):
+        _builder(container, prep).freeze(last, created_by=OPERATOR, correlation_id=CID)
+    assert count(config, "registration_snapshots") == snapshots
 
 
 # ---------------------------------------------------------------- the asset gate (B2)

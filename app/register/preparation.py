@@ -142,6 +142,7 @@ DUPLICATE_EVIDENCE_MISSING: Final = "DUPLICATE_EVIDENCE_MISSING"
 DUPLICATE_EVIDENCE_INCONCLUSIVE: Final = "DUPLICATE_EVIDENCE_INCONCLUSIVE"
 DUPLICATE_EVIDENCE_INCOMPLETE: Final = "DUPLICATE_EVIDENCE_INCOMPLETE"
 DUPLICATE_EVIDENCE_SCOPE_MISMATCH: Final = "DUPLICATE_EVIDENCE_SCOPE_MISMATCH"
+DUPLICATE_EVIDENCE_UNSAFE: Final = "DUPLICATE_EVIDENCE_UNSAFE"
 M4_BASE_PREFIX: Final = "M4_BASE."
 M4_PRICING_PREFIX: Final = "M4_PRICING."
 
@@ -216,6 +217,7 @@ REASON_CODES: Final = frozenset(
         DUPLICATE_EVIDENCE_INCONCLUSIVE,
         DUPLICATE_EVIDENCE_INCOMPLETE,
         DUPLICATE_EVIDENCE_SCOPE_MISMATCH,
+        DUPLICATE_EVIDENCE_UNSAFE,
         sanitize.SECRET_MATERIAL,
         sanitize.EXTERNAL_URL,
     }
@@ -301,7 +303,12 @@ class DuplicateMatch:
 @dataclass(frozen=True)
 class DuplicateEvidence:
     """Provider duplicate-lookup evidence for one unit (ADR-0014 §13). PR-C performs no lookup:
-    this is the input contract a PR-D adapter fills, sanitized, with its evidence digest."""
+    this is the input contract a PR-D adapter fills, with the SHA-256 of its sanitized evidence.
+
+    Sanitation is enforced here, not assumed (§15, B4; PR #92 review 5256446628): evidence with any
+    field that could carry secret, signed or tokenized material is never READY, whatever override
+    covers the unit, and a raw provider listing reference never enters a fingerprint.
+    """
 
     marketplace_key: str
     marketplace_account_id: str
@@ -312,16 +319,39 @@ class DuplicateEvidence:
     keys_checked: frozenset[DuplicateKeyKind]
     matches: tuple[DuplicateMatch, ...] = ()
 
-    def canonical(self) -> dict[str, object]:
+    def unsafe_fields(self) -> tuple[str, ...]:
+        """Every field that may not reach a durable digest: an evidence digest that is not a
+        lower-case SHA-256, a contract version that is not a plain label, or a provider listing
+        reference that is not an opaque or plain https reference (no query, fragment, userinfo,
+        bearer or token material). The scope fields are only ever compared, never fingerprinted."""
+        unsafe = []
+        if not sanitize.hex_digest(self.evidence_digest):
+            unsafe.append("evidence_digest")
+        if not sanitize.safe_label(self.lookup_contract_version):
+            unsafe.append("lookup_contract_version")
+        if any(not sanitize.safe_provider_reference(m.provider_listing_ref) for m in self.matches):
+            unsafe.append("matches")
+        return tuple(unsafe)
+
+    def canonical(self, unit_scope: tuple[str, str, str]) -> dict[str, object]:
+        """The typed, sanitized identity of the evidence for the fingerprint: its digest and
+        contract version once they pass sanitation, the verdict, the keys checked, the kinds of the
+        matches and whether its scope is the unit's. Never a raw provider reference, and never a
+        field that failed sanitation."""
+        unsafe = bool(self.unsafe_fields())
         return {
-            "marketplace_key": self.marketplace_key,
-            "marketplace_account_id": self.marketplace_account_id,
-            "listing_identity": self.listing_identity,
-            "lookup_contract_version": self.lookup_contract_version,
-            "evidence_digest": self.evidence_digest,
+            "unsafe": unsafe,
+            "lookup_contract_version": None if unsafe else self.lookup_contract_version,
+            "evidence_digest": None if unsafe else self.evidence_digest,
+            "scope_matches": (
+                self.marketplace_key,
+                self.marketplace_account_id,
+                self.listing_identity,
+            )
+            == unit_scope,
             "verdict": self.verdict.value,
             "keys_checked": sorted(k.value for k in self.keys_checked),
-            "matches": sorted([m.key_kind.value, m.provider_listing_ref] for m in self.matches),
+            "match_key_kinds": sorted(m.key_kind.value for m in self.matches),
         }
 
 
@@ -999,6 +1029,10 @@ def _duplicate_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Re
         if target.duplicate_proof_required:
             reasons.append(Reason(DUPLICATE_EVIDENCE_MISSING, _R, "duplicate"))
         return reasons
+    if evidence.unsafe_fields():
+        # Before any verdict or override: unsanitized evidence is never READY (§15, B4).
+        reasons.append(Reason(DUPLICATE_EVIDENCE_UNSAFE, _B, "duplicate"))
+        return reasons
     if (evidence.marketplace_key, evidence.marketplace_account_id, evidence.listing_identity) != (
         unit.marketplace_key,
         unit.marketplace_account_id,
@@ -1027,7 +1061,9 @@ def _duplicate_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Re
 
 
 def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
-    listing = request.listing
+    """Every caller-supplied value that reaches the fingerprint or the payload is scanned: the
+    listing values, the templates, the category selection and the whole detail composition."""
+    listing, category, detail = request.listing, request.category, request.detail
     values: dict[str, Any] = {
         "name": None if listing.name is None else listing.name.value,
         "tags": sorted(listing.tags),
@@ -1035,7 +1071,16 @@ def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[R
         "notices": {k: v.value for k, v in listing.notices.items()},
         "options": {k: dict(v) for k, v in listing.options.items()},
         "templates": dict(unit.target.templates),
-        "detail": None if request.detail is None else request.detail.body,
+        "category": None
+        if category is None
+        else [category.category_id, category.mapping_revision, category.taxonomy_revision],
+        "detail": None
+        if detail is None
+        else {
+            "composition_revision": detail.composition_revision,
+            "sections": list(detail.sections),
+            "body": detail.body,
+        },
     }
     return [Reason(code, _B, where) for code, where in sanitize.problems(values, path="outbound")]
 
@@ -1176,7 +1221,11 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
             "body_digest": hashlib.sha256(detail.body.encode("utf-8")).hexdigest(),
         },
         "duplicate": {
-            "evidence": None if evidence is None else evidence.canonical(),
+            "evidence": None
+            if evidence is None
+            else evidence.canonical(
+                (unit.marketplace_key, unit.marketplace_account_id, unit.listing_identity)
+            ),
             "live_registrations": sorted(r.registration_id for r in unit.live_registrations),
         },
         "conflicts": sorted([c.intent_id, c.state] for c in unit.conflicts),

@@ -5,6 +5,7 @@ Every input is invented and fully resolved here, so each rule is proven on its o
 no provider, no AI. The DB-backed paths are in ``tests/integration/test_m5_registration_preflight``.
 """
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -702,6 +703,130 @@ def test_duplicate_evidence_without_a_covering_override_is_duplicate() -> None:
     assert codes(candidate(weak)) == {"PROVIDER_DUPLICATE_WEAK_SIGNAL"}
 
 
+COVERED = tuple(
+    replace(i, overrides=(OverrideCoverage("o-1", i.product_group_id, None),)) for i in ITEMS
+)
+# PR #92 review 5256446628: provider references that carry signed, tokenized, secret or supplier
+# material. None may reach a durable fingerprint, whatever override covers the unit.
+UNSAFE_REFERENCES = {
+    "signed url": "https://listing.example/p/1?X-Signature=abc123def456",
+    "fragment token": "https://listing.example/p/1#access_token=abc",
+    "userinfo": "https://user:secret@listing.example/p/1",
+    "bearer": "Bearer abcdefghijklmnop",
+    "json web token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghij",
+    "token parameter": "listing?access_token=abcdef",
+    "plain http": "http://supplier.example/item/1",
+    "protocol relative": "//supplier.example/item/1",
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSAFE_REFERENCES))
+def test_unsafe_duplicate_evidence_is_never_ready_even_under_a_covering_override(
+    case: str,
+) -> None:
+    reference = UNSAFE_REFERENCES[case]
+    unsafe = request(
+        duplicate_evidence=evidence(
+            verdict=DuplicateVerdict.MATCH,
+            matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, reference),),
+        )
+    )
+    first = candidate(unsafe, resolved(items=COVERED))
+    assert (first.status, codes(first), first.upload_permitted) == (
+        ReadinessStatus.BLOCKED,
+        {"DUPLICATE_EVIDENCE_UNSAFE"},
+        False,
+    )
+    last = final(unsafe, resolved(items=COVERED), prepared=prepared_for(first))
+    assert last.status is ReadinessStatus.BLOCKED
+    with pytest.raises(PayloadNotReadyError):
+        build_payload(last)
+    # The unsafe reference is not a fingerprint input at either stage.
+    for result in (first, last):
+        assert reference not in json.dumps(result.dependencies, ensure_ascii=False)
+    # The same evidence with a safe reference is covered by the override and READY.
+    safe = request(
+        duplicate_evidence=evidence(
+            verdict=DuplicateVerdict.MATCH,
+            matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, "provider-listing-1"),),
+        )
+    )
+    assert candidate(safe, resolved(items=COVERED)).status is ReadinessStatus.READY
+
+
+def test_unsafe_evidence_identities_fail_closed() -> None:
+    for unsafe in (
+        evidence(evidence_digest="not-a-digest"),
+        evidence(evidence_digest="A" * 64),
+        evidence(lookup_contract_version="lookup https://lookup.example/v1"),
+        evidence(lookup_contract_version="Bearer abcdefghijklmnop"),
+        evidence(lookup_contract_version="lookup v1"),
+    ):
+        result = candidate(request(duplicate_evidence=unsafe), resolved(items=COVERED))
+        assert (result.status, codes(result)) == (
+            ReadinessStatus.BLOCKED,
+            {"DUPLICATE_EVIDENCE_UNSAFE"},
+        ), unsafe
+        assert unsafe.lookup_contract_version not in json.dumps(result.dependencies)
+        assert unsafe.evidence_digest not in json.dumps(result.dependencies)
+
+
+def test_only_sanitized_typed_evidence_identity_enters_the_fingerprint() -> None:
+    # Option 2 of the review: the digest and typed fields, never a raw provider reference and
+    # never a raw scope string.
+    one = request(
+        duplicate_evidence=evidence(
+            verdict=DuplicateVerdict.MATCH,
+            matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, "provider-listing-7f3a"),),
+        )
+    )
+    ready = candidate(one, resolved(items=COVERED))
+    assert ready.status is ReadinessStatus.READY
+    text = json.dumps(ready.dependencies)
+    assert "provider-listing-7f3a" not in text
+    recorded = ready.dependencies["duplicate"]["evidence"]
+    assert set(recorded) == {
+        "unsafe",
+        "lookup_contract_version",
+        "evidence_digest",
+        "scope_matches",
+        "verdict",
+        "keys_checked",
+        "match_key_kinds",
+    }
+    assert (recorded["evidence_digest"], recorded["match_key_kinds"]) == ("e" * 64, ["SELLER_CODE"])
+    # The evidence identity is its sanitized digest: another digest is another fingerprint.
+    other_digest = replace(
+        one, duplicate_evidence=replace(one.duplicate_evidence, evidence_digest="f" * 64)
+    )  # type: ignore[type-var]
+    assert candidate(other_digest, resolved(items=COVERED)).candidate_fingerprint != (
+        ready.candidate_fingerprint
+    )
+    # A scope string is compared, never fingerprinted.
+    foreign = request(duplicate_evidence=evidence(marketplace_account_id="Bearer abcdefghijklmn"))
+    mismatched = candidate(foreign)
+    assert "DUPLICATE_EVIDENCE_SCOPE_MISMATCH" in codes(mismatched)
+    assert "Bearer" not in json.dumps(mismatched.dependencies)
+
+
+def test_category_and_detail_identities_are_sanitized_before_the_fingerprint() -> None:
+    hotlinked = CategorySelection(
+        "https://supplier.example/category/1",
+        "mapping-1",
+        "taxonomy-1",
+        CategoryConfirmation.OPERATOR_CONFIRMED,
+    )
+    assert sanitize.EXTERNAL_URL in codes(candidate(request(category=hotlinked)))
+    assert candidate(request(category=hotlinked)).status is ReadinessStatus.BLOCKED
+    secret_detail = DetailComposition("Bearer abcdefghijklmnop", "invented body text")
+    assert sanitize.SECRET_MATERIAL in codes(candidate(request(detail=secret_detail)))
+    # The builder refuses the same material even from a result that claims READY.
+    ready = final()
+    tampered = replace(ready, request=replace(ready.request, category=hotlinked))
+    with pytest.raises(sanitize.PayloadSanitationError):
+        build_payload(tampered)
+
+
 def test_missing_or_inconclusive_provider_evidence_is_never_ready_when_required() -> None:
     cases = {
         None: "DUPLICATE_EVIDENCE_MISSING",
@@ -942,7 +1067,13 @@ def test_secret_material_and_external_urls_never_reach_the_payload() -> None:
     with pytest.raises(sanitize.PayloadSanitationError):
         build_payload(tampered)
     assert sanitize.safe_provider_reference("https://shop-phinf.example/a/b.jpg")
-    for unsafe in ("https://x.example/a.jpg?token=1", "https://u:p@x.example/a", "a b"):
+    for unsafe in (
+        "https://x.example/a.jpg?token=1",
+        "https://u:p@x.example/a",
+        "a b",
+        "http://x.example/a.jpg",
+        "//x.example/a.jpg",
+    ):
         assert not sanitize.safe_provider_reference(unsafe)
 
 
