@@ -382,6 +382,8 @@ Atomic supplier SKU identity is preserved. Same weight does not allow flattening
 
 Goal: register a canonical product to SmartStore from scratch and verify marketplace read-back.
 
+The REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89).
+
 Pipeline:
 
 ```text
@@ -701,7 +703,15 @@ Accepted so far:
 
 Next, in order:
 
-1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12). M5 is the CURRENT milestone as a status pointer only. No M5 scope, contract or implementation is authorized until it is decided in GitHub.
+1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12; Issue #89). The PRs, in order:
+   - PR-A: contract (`docs/adr/0014-smartstore-register-idempotency-readback.md`);
+   - PR-B: registration foundation and migrations;
+   - PR-C: preflight and the payload Snapshot builder;
+   - PR-D: SmartStore endpoint adoption, typed adapter and read-back normalizer;
+   - PR-E: idempotent execution, reconcile and the durable job;
+   - PR-F: the M5 acceptance harness and the bounded real canary campaign.
+
+   Each PR needs its own authorization in GitHub. No real SmartStore write is authorized until the user authorizes a bounded canary scope.
 2. The rest of the first single-product vertical (M6 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**

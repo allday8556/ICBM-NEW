@@ -115,6 +115,11 @@ Owns platform conversion and listing creation.
 - CREATE/reconcile/read-back
 - MarketplaceRegistration
 
+The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89):
+- M4 keeps every product-side owner. Marketplace-sized binaries stay M4 derived artifacts; M5 owns the upload and the provider asset identity.
+- Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
+- An unresolved `UNKNOWN` CREATE is reconciled before any resend and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
+
 ### OPERATE
 Owns everything after publication.
 
