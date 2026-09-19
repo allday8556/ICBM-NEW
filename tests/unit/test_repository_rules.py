@@ -1186,6 +1186,17 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # of which one is current. No readiness table: readiness is derived, never stored.
         "pricing_snapshots",
         "current_pricing_snapshot_moves",
+        # M4 PR-E (ADR-0013 §9): derived artifacts and their lineage, operator image selections and
+        # exact-binary QA. PRODUCT-owned: COLLECT's source assets and references stay untouched.
+        "derived_image_artifacts",
+        "derived_image_derivations",
+        "derived_image_derivation_inputs",
+        "derived_image_derivation_roots",
+        "image_selection_revisions",
+        "image_selection_source_decisions",
+        "image_selection_outputs",
+        "current_image_selection_moves",
+        "image_qa_results",
     }
     offenders = [
         path
