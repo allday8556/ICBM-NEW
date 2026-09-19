@@ -46,6 +46,8 @@ from app.jobs.service import JobService
 from app.jobs.worker import JobWorker
 from app.operate.service import OperateService
 from app.products.materialization import ProductMaterializer
+from app.products.pricing_service import ProductPricingService
+from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
 from app.register.service import RegisterService
@@ -89,6 +91,8 @@ class Container:
     product_store: ProductFoundationStore
     products: ProductsService
     materializer: ProductMaterializer
+    pricing: ProductPricingService
+    product_readiness: ProductReadinessService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -237,6 +241,14 @@ def build_container(
     registry.register(collection.job_definition())
 
     products = ProductsService(product_store)
+    # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
+    # makes a registration candidate: that is M5's preflight.
+    pricing = ProductPricingService(
+        store=product_store, revisions=revisions, audit=audit, clock=clock
+    )
+    product_readiness = ProductReadinessService(
+        store=product_store, revisions=revisions, pricing=pricing
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -272,6 +284,8 @@ def build_container(
         product_store=product_store,
         products=products,
         materializer=materializer,
+        pricing=pricing,
+        product_readiness=product_readiness,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

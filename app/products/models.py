@@ -48,6 +48,14 @@ from app.products.model import (
     MemberStatus,
     MoveReason,
 )
+from app.products.pricing import (
+    PRICING_RULE_VERSION,
+    GuardReason,
+    PriceBasis,
+    PriceGuard,
+    PricingMoveReason,
+    Rounding,
+)
 
 
 def _in(column: str, values: Iterable[str]) -> str:
@@ -335,3 +343,197 @@ class SourceBinding(Base):
     correlation_id: Mapped[str] = mapped_column(String(64))
     valid_from: Mapped[datetime] = mapped_column(UTCDateTime)
     valid_to: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+# ---------------------------------------------------------------- pricing (migration 0013)
+#
+# One immutable, exact pricing result per Item and explicit pricing context, and the append-only
+# history of which one is current. The CHECK constraints make the canonical rule and the guards
+# structural: the final price is the minimum sale price when one exists and the target-margin price
+# otherwise, never a maximum of the two; the fee and the other policy costs are the context's exact
+# ceilings; the guard and every guard reason follow from exact integer comparisons. Migration 0013's
+# triggers make a snapshot price exactly the current procurement it names.
+
+
+def _rate(prefix: str) -> str:
+    return (
+        f"{prefix}_rate_denominator >= 1 AND {prefix}_rate_numerator >= 0"
+        f" AND {prefix}_rate_numerator < {prefix}_rate_denominator AND {prefix}_fixed_krw >= 0"
+    )
+
+
+def _ceiling_cost(column: str, prefix: str) -> str:
+    return (
+        f"{column} = ({prefix}_rate_numerator * final_sale_price_krw + {prefix}_rate_denominator"
+        f" - 1) / {prefix}_rate_denominator + {prefix}_fixed_krw"
+    )
+
+
+_LOSS = "purchase_cost_krw + supplier_shipping_krw + platform_fee_krw >= final_sale_price_krw"
+_BELOW = (
+    "expected_net_profit_krw * minimum_margin_denominator"
+    " < final_sale_price_krw * minimum_margin_numerator"
+)
+
+
+class PricingSnapshot(Base):
+    __tablename__ = "pricing_snapshots"
+    __table_args__ = (
+        Index("ix_pricing_snapshots_item_context", "item_id", "pricing_context_fingerprint"),
+        CheckConstraint("marketplace_key <> ''", name="marketplace_key_present"),
+        CheckConstraint("account_id IS NULL OR account_id <> ''", name="account_id_present"),
+        CheckConstraint("fee_table_version <> ''", name="fee_table_version_present"),
+        CheckConstraint("pricing_policy_version <> ''", name="pricing_policy_version_present"),
+        CheckConstraint(_hex64("pricing_context_fingerprint"), name="context_fingerprint_hex"),
+        CheckConstraint(
+            "json_valid(pricing_context_json) AND json_type(pricing_context_json) = 'object'",
+            name="context_is_object",
+        ),
+        CheckConstraint(_hex64("dependency_fingerprint"), name="dependency_fingerprint_hex"),
+        CheckConstraint(_hex64("composition_signature"), name="signature_hex"),
+        CheckConstraint(_in("pricing_rule_version", (PRICING_RULE_VERSION,)), name="rule_known"),
+        CheckConstraint(
+            "purchase_cost_krw >= 0 AND supplier_shipping_krw >= 0"
+            " AND (minimum_sale_price_krw IS NULL OR minimum_sale_price_krw > 0)",
+            name="source_amounts_valid",
+        ),
+        CheckConstraint(_rate("fee"), name="fee_rate_valid"),
+        CheckConstraint(_rate("other_cost"), name="other_cost_rate_valid"),
+        CheckConstraint(
+            f"{_in('cost_rounding', Rounding)} AND {_in('price_rounding', Rounding)}",
+            name="rounding_declared",
+        ),
+        CheckConstraint(
+            "target_margin_denominator >= 1 AND minimum_margin_denominator >= 1"
+            f" AND (pricing_rule_version <> '{PRICING_RULE_VERSION}'"
+            " OR (target_margin_numerator * 100 = 35 * target_margin_denominator"
+            " AND minimum_margin_numerator * 100 = 10 * minimum_margin_denominator))",
+            name="policy_margins",
+        ),
+        CheckConstraint(
+            "target_margin_price_krw >= 1 AND final_sale_price_krw >= 1", name="prices_positive"
+        ),
+        # CLAUDE.md §6.1: the minimum sale price when it exists, else the target-margin price.
+        CheckConstraint(
+            "final_sale_price_krw = COALESCE(minimum_sale_price_krw, target_margin_price_krw)"
+            " AND (minimum_sale_price_krw IS NULL) = (price_basis = 'TARGET_MARGIN')"
+            f" AND {_in('price_basis', PriceBasis)}",
+            name="canonical_rule",
+        ),
+        CheckConstraint(_ceiling_cost("platform_fee_krw", "fee"), name="platform_fee_exact"),
+        CheckConstraint(
+            _ceiling_cost("other_policy_cost_krw", "other_cost"), name="other_policy_cost_exact"
+        ),
+        CheckConstraint(
+            "expected_net_profit_krw = final_sale_price_krw - purchase_cost_krw"
+            " - supplier_shipping_krw - platform_fee_krw - other_policy_cost_krw",
+            name="profit_exact",
+        ),
+        CheckConstraint(
+            "expected_net_margin_bp * final_sale_price_krw <= expected_net_profit_krw * 10000"
+            " AND expected_net_profit_krw * 10000"
+            " < (expected_net_margin_bp + 1) * final_sale_price_krw",
+            name="margin_bp_floor",
+        ),
+        CheckConstraint(
+            f"{_in('price_guard', PriceGuard)} AND (price_guard = 'LOSS') = ({_LOSS})"
+            f" AND (price_guard = 'BELOW_MIN_MARGIN') = (NOT ({_LOSS}) AND {_BELOW})",
+            name="guard_exact",
+        ),
+        CheckConstraint(
+            "json_valid(guard_reasons_json) AND json_type(guard_reasons_json) = 'array'"
+            f" AND (instr(guard_reasons_json, '\"{GuardReason.PRICE_LOSS}\"') > 0) = ({_LOSS})"
+            f" AND (instr(guard_reasons_json, '\"{GuardReason.PRICE_BELOW_MIN_MARGIN}\"') > 0)"
+            f" = ({_BELOW})"
+            f" AND json_array_length(guard_reasons_json) = ({_LOSS}) + ({_BELOW})",
+            name="guard_reasons_exact",
+        ),
+    )
+
+    pricing_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_items.item_id"))
+    product_group_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("product_groups.product_group_id")
+    )
+    composition_signature: Mapped[str] = mapped_column(String(64))
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    account_id: Mapped[str | None] = mapped_column(String(64))
+    fee_table_version: Mapped[str] = mapped_column(String(64))
+    pricing_policy_version: Mapped[str] = mapped_column(String(64))
+    pricing_context_fingerprint: Mapped[str] = mapped_column(String(64))
+    pricing_context_json: Mapped[str] = mapped_column(Text)
+    membership_revision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("group_membership_revisions.membership_revision_id")
+    )
+    source_binding_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("source_bindings.binding_id")
+    )
+    source_product_facts_revision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("product_facts_revisions.revision_id")
+    )
+    dependency_fingerprint: Mapped[str] = mapped_column(String(64))
+    pricing_rule_version: Mapped[str] = mapped_column(String(40))
+    purchase_cost_krw: Mapped[int] = mapped_column(Integer)
+    supplier_shipping_krw: Mapped[int] = mapped_column(Integer)
+    minimum_sale_price_krw: Mapped[int | None] = mapped_column(Integer)
+    fee_rate_numerator: Mapped[int] = mapped_column(Integer)
+    fee_rate_denominator: Mapped[int] = mapped_column(Integer)
+    fee_fixed_krw: Mapped[int] = mapped_column(Integer)
+    other_cost_rate_numerator: Mapped[int] = mapped_column(Integer)
+    other_cost_rate_denominator: Mapped[int] = mapped_column(Integer)
+    other_cost_fixed_krw: Mapped[int] = mapped_column(Integer)
+    cost_rounding: Mapped[str] = mapped_column(String(20))
+    price_rounding: Mapped[str] = mapped_column(String(20))
+    target_margin_numerator: Mapped[int] = mapped_column(Integer)
+    target_margin_denominator: Mapped[int] = mapped_column(Integer)
+    minimum_margin_numerator: Mapped[int] = mapped_column(Integer)
+    minimum_margin_denominator: Mapped[int] = mapped_column(Integer)
+    platform_fee_krw: Mapped[int] = mapped_column(Integer)
+    other_policy_cost_krw: Mapped[int] = mapped_column(Integer)
+    target_margin_price_krw: Mapped[int] = mapped_column(Integer)
+    final_sale_price_krw: Mapped[int] = mapped_column(Integer)
+    price_basis: Mapped[str] = mapped_column(String(20))
+    expected_net_profit_krw: Mapped[int] = mapped_column(Integer)
+    expected_net_margin_bp: Mapped[int] = mapped_column(Integer)
+    price_guard: Mapped[str] = mapped_column(String(20))
+    guard_reasons_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class CurrentPricingSnapshotMove(Base):
+    __tablename__ = "current_pricing_snapshot_moves"
+    __table_args__ = (
+        UniqueConstraint("item_id", "pricing_context_fingerprint", "sequence"),
+        CheckConstraint("sequence >= 1", name="sequence_positive"),
+        CheckConstraint(_in("reason", PricingMoveReason), name="reason_valid"),
+        CheckConstraint(
+            "(sequence = 1) = (previous_pricing_snapshot_id IS NULL)",
+            name="first_move_has_no_previous",
+        ),
+        CheckConstraint("(reason = 'INITIAL') = (sequence = 1)", name="initial_opens_history"),
+        CheckConstraint(
+            "previous_pricing_snapshot_id IS NULL"
+            " OR previous_pricing_snapshot_id <> pricing_snapshot_id",
+            name="move_changes_snapshot",
+        ),
+        CheckConstraint(_hex64("pricing_context_fingerprint"), name="context_fingerprint_hex"),
+        CheckConstraint("rule_version <> ''", name="rule_version_present"),
+        CheckConstraint("decided_by <> ''", name="decided_by_present"),
+        CheckConstraint("correlation_id <> ''", name="correlation_present"),
+    )
+
+    move_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_items.item_id"))
+    pricing_context_fingerprint: Mapped[str] = mapped_column(String(64))
+    sequence: Mapped[int] = mapped_column(Integer)
+    pricing_snapshot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("pricing_snapshots.pricing_snapshot_id")
+    )
+    previous_pricing_snapshot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("pricing_snapshots.pricing_snapshot_id")
+    )
+    reason: Mapped[str] = mapped_column(String(20))
+    rule_version: Mapped[str] = mapped_column(String(40))
+    decided_by: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    moved_at: Mapped[datetime] = mapped_column(UTCDateTime)

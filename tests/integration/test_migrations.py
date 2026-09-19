@@ -41,8 +41,11 @@ CANONICAL_TABLES = (
     "listing_compositions",
     "product_items",
     "source_bindings",
+    # M4 PR-D (ADR-0013 §7): immutable pricing snapshots and their current-pointer history.
+    "pricing_snapshots",
+    "current_pricing_snapshot_moves",
 )
-HEAD = "0012_m4_product_foundation"
+HEAD = "0013_m4_pricing_snapshots"
 
 
 def _url(path: Path) -> str:

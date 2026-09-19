@@ -1182,6 +1182,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "listing_compositions",
         "product_items",
         "source_bindings",
+        # M4 PR-D (ADR-0013 §7): pricing snapshots per Item and explicit context, and the history
+        # of which one is current. No readiness table: readiness is derived, never stored.
+        "pricing_snapshots",
+        "current_pricing_snapshot_moves",
     }
     offenders = [
         path

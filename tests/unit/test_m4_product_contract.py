@@ -390,3 +390,156 @@ def test_the_current_source_revision_is_never_called_accepted() -> None:
         "current accepted revision",
         "accepted-revision pointer",
     ]
+
+
+# ---------------------------------------------------------------- PR-D pricing and readiness
+#
+# Issue #80 PR-D kickoff 5737440897 §L. Each rule runs on the real repository and on a synthetic
+# violation, so a rule that could never fire is caught as surely as one that fails.
+
+PRICING_MODULES = (
+    "app/products/pricing.py",
+    "app/products/pricing_service.py",
+    "app/products/pricing_store.py",
+    "app/products/readiness.py",
+)
+READINESS_TRUTH = re.compile(r"registerable|readiness|(^|_)ready($|_)", re.I)
+# No marketplace is named in the Product DB (ADR-0013 §7): a fee named after one would be a
+# hardcoded fee table, and no fee table is accepted in the repository.
+MARKETPLACE_NAMES = re.compile(
+    r"smart_?store|coupang|11st|eleven_?st|gmarket|auction|lotteon|interpark|wemakeprice|tmon",
+    re.I,
+)
+MANUFACTURED = re.compile(r"minimum_sale|quantity|purchase_cost|amount_krw")
+
+
+def readiness_truth_problems(metadata: MetaData) -> list[str]:
+    """A table or column that would store readiness or registrability as a truth (ADR-0013 §8)."""
+    problems = [f"table {name}" for name in metadata.tables if READINESS_TRUTH.search(name)]
+    problems += [
+        f"{table.name}.{column.name}"
+        for table in metadata.tables.values()
+        for column in table.columns
+        if READINESS_TRUTH.search(column.name)
+    ]
+    return sorted(problems)
+
+
+def marketplace_named_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    offenders = []
+    for where, source in sources:
+        if not where.startswith("app/products/"):
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and MARKETPLACE_NAMES.search(node.value)
+            ):
+                offenders.append(f"{where}:{node.lineno}")
+    return offenders
+
+
+def manufactured_price_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """A multiplication or division involving a source amount, a minimum or a quantity: no
+    ``minimum_sale_price × quantity`` and no unit price is ever manufactured (ADR-0013 §7)."""
+    offenders = []
+    for where, source in sources:
+        if where not in PRICING_MODULES:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.BinOp) and isinstance(
+                node.op, ast.Mult | ast.Div | ast.FloorDiv
+            ):
+                operands = f"{ast.unparse(node.left)} {ast.unparse(node.right)}"
+                if MANUFACTURED.search(operands):
+                    offenders.append(f"{where}:{node.lineno}")
+    return offenders
+
+
+def float_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """A float anywhere money, a rate or a margin is computed or compared."""
+    offenders = []
+    for where, source in sources:
+        if where not in PRICING_MODULES:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, float):
+                offenders.append(f"{where}:{node.lineno}")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "float"
+            ):
+                offenders.append(f"{where}:{node.lineno}")
+    return offenders
+
+
+def test_no_readiness_or_registrability_is_stored() -> None:
+    from app.db.metadata import metadata
+
+    assert readiness_truth_problems(metadata) == []
+
+
+def test_the_readiness_truth_detector_fires() -> None:
+    synthetic = MetaData()
+    Table(
+        "pricing_snapshots",
+        synthetic,
+        Column("id", Integer, primary_key=True),
+        Column("registerable", Integer),
+        Column("is_ready", Integer),
+    )
+    Table("item_readiness", synthetic, Column("id", Integer, primary_key=True))
+    Table("already_there", synthetic, Column("id", Integer, primary_key=True))
+    assert readiness_truth_problems(synthetic) == [
+        "pricing_snapshots.is_ready",
+        "pricing_snapshots.registerable",
+        "table item_readiness",
+    ]
+
+
+def test_no_marketplace_is_named_in_the_product_db() -> None:
+    assert marketplace_named_problems(_code()) == []
+
+
+def test_the_marketplace_name_detector_fires() -> None:
+    sources = [
+        ("app/products/pricing.py", "FEES = {'smartstore': '0.0563'}\n"),
+        ("app/products/other.py", "KEY = 'Coupang'\n"),
+        ("app/products/fine.py", "KEY = 'market_a'\n"),
+        ("integrations/marketplaces/x.py", "KEY = 'smartstore'\n"),
+    ]
+    assert marketplace_named_problems(sources) == [
+        "app/products/pricing.py:1",
+        "app/products/other.py:1",
+    ]
+
+
+def test_no_price_is_manufactured_from_a_quantity_or_divided_into_a_unit() -> None:
+    assert manufactured_price_problems(_code()) == []
+
+
+def test_the_manufactured_price_detector_fires() -> None:
+    sources = [
+        ("app/products/pricing.py", "final = inputs.minimum_sale_price_krw * item_quantity\n"),
+        ("app/products/pricing_service.py", "unit = offer.amount_krw / tier.quantity\n"),
+        ("app/products/readiness.py", "fee = rate * final_sale_price\n"),
+    ]
+    assert manufactured_price_problems(sources) == [
+        "app/products/pricing.py:1",
+        "app/products/pricing_service.py:1",
+    ]
+
+
+def test_no_float_enters_pricing() -> None:
+    assert float_problems(_code()) == []
+
+
+def test_the_float_detector_fires() -> None:
+    sources = [
+        ("app/products/pricing.py", "below = 1 - cost / final < 0.1\n"),
+        ("app/products/readiness.py", "m = float(profit) / final\n"),
+        ("app/products/pricing_store.py", "n = 10\n"),
+    ]
+    assert float_problems(sources) == ["app/products/pricing.py:1", "app/products/readiness.py:1"]
