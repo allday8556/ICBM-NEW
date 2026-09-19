@@ -1,9 +1,10 @@
 # ADR-0014 — M5 SmartStore REGISTER contract: owner boundary, provider-listing units, derived preflight, immutable Snapshot, idempotent CREATE, UNKNOWN reconcile and read-back proof
 
-Status: **PROPOSED**. This is PR-A of Issue #89 (kickoff `5740316498`).
+Status: **ACCEPTED** 2026-09-19. This is PR-A of Issue #89 (kickoff `5740316498`, PR #90).
+- GPT exact-head re-audit PASS review `5255222454` and the independent Claude AI exact-head cross-audit PASS `5740785909`, both on the audited head `c6d3426034333061932d3df1bc85d3c657a8e7e2`.
 - It incorporates the architect addendum `5740352676` (rulings R1–R4) as binding decisions.
 - It is amended for the PR #90 GPT review `5255157251` (HOLD): four contract blockers B1–B4 (see "Review amendments").
-- It becomes ACCEPTED only after the GPT exact-head audit, the independent Claude AI cross-audit and the user's merge authorization.
+- It lands on main with the merge of PR #90.
 
 It authorizes no schema, migration, runtime code, UI, endpoint adoption, AI call, supplier request or marketplace call. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
 
