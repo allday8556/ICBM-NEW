@@ -13,8 +13,9 @@ reference: those stay COLLECT's immutable truth.
 **Derivation.** The output SHA is computed from the bytes; a caller's digest is only checked
 against it. Every source input must be a CONFIRMED image of the revision the derivation was
 validated against; every derived input is the artifact of a complete parent derivation validated
-against that same revision. The deterministic identity is the recipe and its output, so a retry is
-one derivation, and two different recipes producing equal bytes are two — sharing one artifact.
+against that same revision. The deterministic identity is the recipe, its canonical execution
+provenance and its output: a retry of one completed derivation is one, while another recipe or
+another completed execution producing equal bytes is another derivation sharing one artifact.
 
 **Selection** is an operator decision, never a default: nothing selects an image when a Product
 materializes. It accounts for every CONFIRMED source image of the Item's current bound revision,
@@ -148,6 +149,8 @@ class ProductImageService:
             transformation_spec=completed.transformation_spec,
             transformation_version=completed.transformation_version,
             policy_version=completed.policy_version,
+            operations=completed.operations,
+            produced_at=completed.produced_at,
             artifact_sha256=artifact.sha256,
         )
         with self._store.reading() as foundation:

@@ -4,10 +4,10 @@
 ``<derived-images>/sha256/<aa>/<sha256>``, apart from COLLECT's source assets, following the
 proven source-asset pattern: the SHA-256 is computed here from the bytes and never taken from a
 caller; MIME and dimensions come from decoding those same bytes; unsupported bytes are refused
-before anything is written; the file is written atomically before its row; an existing file is
-only ever replaced by bytes matching its name; every read verifies the checksum again. A file left
-behind by a rolled-back decision is not a truth row: the same bytes land at the same path, and a
-retry reuses it.
+before anything is written; the file is written atomically before its row; a file already at the
+address is reused only when its bytes match it, and anything else there fails closed and is left
+untouched; every read verifies the checksum again. A file left behind by a rolled-back decision is
+not a truth row: the same bytes land at the same path, and a retry reuses it.
 
 **Rows.** :class:`ImageUnit` writes and reads the image tables inside a caller's unit of work and
 decides nothing: the image service validates, and migration 0014 refuses any row that breaks
@@ -38,12 +38,14 @@ from app.products.image_model import (
     DecisionOrigin,
     DerivationInput,
     ImageAssetKind,
+    OperationRecord,
     QaVerdict,
     SelectedOutput,
     SelectionMoveReason,
     SourceDecision,
     SourceDecisionKind,
     SourceRef,
+    operation_from_canonical,
 )
 from app.products.image_models import (
     CurrentImageSelectionMove,
@@ -119,14 +121,24 @@ class DerivedImageStore:
         )
 
     def write(self, artifact: StoredArtifact, data: bytes) -> None:
-        """Place the bytes at their content address, atomically; an existing correct file stays."""
+        """Place the bytes at their content address, atomically.
+
+        An existing file whose bytes match the address is reused. Anything else already at that
+        address is evidence that storage integrity is broken, so the write fails closed and leaves
+        it exactly as it is (PR #85 review 5254146288): it is never repaired by overwriting.
+        """
         if hashlib.sha256(data).hexdigest() != artifact.sha256:
             raise DerivedImageIntegrityError(
                 "PRODUCTS_IMAGE_CHECKSUM_MISMATCH", "the bytes do not match their description"
             )
         path = self.path(artifact.sha256)
-        if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == artifact.sha256:
-            return
+        if path.exists():
+            if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == artifact.sha256:
+                return
+            raise DerivedImageIntegrityError(
+                "PRODUCTS_IMAGE_PATH_CONFLICT",
+                "a different object already occupies this content address; it is left untouched",
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(f".{artifact.sha256}.{uuid.uuid4().hex}.tmp")
         try:
@@ -174,6 +186,7 @@ class DerivationRecord:
     roots: tuple[str, ...]
     transformation_version: str
     policy_version: str | None
+    operations: tuple[OperationRecord, ...]
     produced_at: datetime
 
 
@@ -373,6 +386,9 @@ class ImageUnit:
             roots=roots,
             transformation_version=row.transformation_version,
             policy_version=row.policy_version,
+            operations=tuple(
+                operation_from_canonical(item) for item in json.loads(row.operations_json)
+            ),
             produced_at=row.produced_at,
         )
 

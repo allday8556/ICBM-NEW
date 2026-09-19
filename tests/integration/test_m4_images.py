@@ -14,7 +14,7 @@ import uuid
 import zlib
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -544,6 +544,67 @@ def test_a_retried_completed_derivation_is_one_derivation(
     again = container.images.record_completed_derivation(manifest, decided_by="editor")
     assert again == first
     assert _counts(config) == before
+
+
+def test_distinct_completed_executions_are_distinct_derivations_of_one_artifact(
+    container: Container, config: AppConfig, listing: Listing
+) -> None:
+    # PR #85 review 5254146288 blocker 1: the same recipe and bytes executed LOCAL, then CLOUD,
+    # then CLOUD again later, are three derivations of one artifact, each with its own provenance.
+    output = png("same")
+    local = completed(listing.revision.revision_id, [source_input(listing.images[0])], output)
+    cloud = replace(
+        local,
+        operations=(
+            replace(
+                operation(output),
+                execution_class=ExecutionClass.CLOUD,
+                provider="provider-x",
+                model="model-y",
+            ),
+        ),
+    )
+    later = replace(
+        cloud, operations=(replace(cloud.operations[0], executed_at=AT + timedelta(minutes=5)),)
+    )
+    records = [
+        container.images.record_completed_derivation(manifest, decided_by="editor")
+        for manifest in (local, cloud, later)
+    ]
+    assert len({record.derivation_id for record in records}) == 3
+    assert {record.artifact_sha256 for record in records} == {sha(output)}
+    assert count(config, "derived_image_artifacts") == 1
+    assert count(config, "derived_image_derivations") == 3
+    read = [container.images.read_derivation(record.derivation_id) for record in records]
+    assert [(r.operations[0].execution_class, r.operations[0].provider) for r in read] == [
+        (ExecutionClass.LOCAL, None),
+        (ExecutionClass.CLOUD, "provider-x"),
+        (ExecutionClass.CLOUD, "provider-x"),
+    ]
+    assert read[1].operations[0].model == "model-y"
+    assert [r.operations[0].executed_at for r in read] == [AT, AT, AT + timedelta(minutes=5)]
+    # Retrying any one of them exactly is still that one derivation.
+    before = _counts(config)
+    assert container.images.record_completed_derivation(cloud, decided_by="editor") == records[1]
+    assert _counts(config) == before
+
+
+def test_a_conflicting_file_at_the_content_address_fails_closed_untouched(
+    container: Container, config: AppConfig, listing: Listing
+) -> None:
+    # PR #85 review 5254146288 blocker 2: whatever already occupies the address is evidence of
+    # broken storage. It is never overwritten, and nothing is recorded.
+    output = png("target")
+    path = container.images._artifacts.path(sha(output))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"conflicting bytes")
+    with pytest.raises(DerivedImageIntegrityError, match="content address"):
+        container.images.record_completed_derivation(
+            completed(listing.revision.revision_id, [source_input(listing.images[0])], output),
+            decided_by="editor",
+        )
+    assert path.read_bytes() == b"conflicting bytes"
+    assert not any(_counts(config).values())
 
 
 # ---------------------------------------------------------------- 17–28 operator selection

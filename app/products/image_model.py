@@ -248,10 +248,19 @@ def derivation_fingerprint(
     transformation_spec: Mapping[str, object],
     transformation_version: str,
     policy_version: str | None,
+    operations: Sequence[OperationRecord],
+    produced_at: datetime,
     artifact_sha256: str,
 ) -> str:
-    """The deterministic identity of one completed derivation: the recipe and its output. Two
-    different recipes that produce equal bytes are two derivations; a retry of one is one."""
+    """The deterministic identity of one completed derivation: its recipe, its canonical
+    execution provenance and its output (PR #85 review 5254146288).
+
+    Retrying the same completed derivation — the same recipe, the same operations with the same
+    capability, execution class, digests, times and provider/model, the same output — is one
+    derivation. Another completed execution is another derivation even when the recipe and the
+    output bytes are identical: provenance is never lost because an artifact dedupes. Two such
+    derivations share one artifact.
+    """
     return digest(
         {
             "version": DERIVATION_VERSION,
@@ -260,8 +269,26 @@ def derivation_fingerprint(
             "transformation_spec": transformation_spec,
             "transformation_version": transformation_version,
             "policy_version": policy_version,
+            "operations": [operation.canonical() for operation in operations],
+            "produced_at": produced_at.isoformat(),
             "artifact_sha256": artifact_sha256,
         }
+    )
+
+
+def operation_from_canonical(value: Mapping[str, object]) -> OperationRecord:
+    """Read back one recorded operation. Only completed operations are ever recorded."""
+    provider = value.get("provider")
+    model = value.get("model")
+    return OperationRecord(
+        capability=str(value["capability"]),
+        execution_class=ExecutionClass(str(value["execution_class"])),
+        outcome=OperationOutcome.COMPLETED,
+        input_digest=str(value["input_digest"]),
+        output_digest=str(value["output_digest"]),
+        executed_at=datetime.fromisoformat(str(value["executed_at"])),
+        provider=None if provider is None else str(provider),
+        model=None if model is None else str(model),
     )
 
 
