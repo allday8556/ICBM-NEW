@@ -15,7 +15,7 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 - **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`docs/acceptance/M2.md`](docs/acceptance/M2.md)).
 - **M3** — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls: **ACCEPTED** 2026-09-18, bounded by its §2 capability boundary (Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md), [`docs/acceptance/M3.md`](docs/acceptance/M3.md)).
 - **M4** — canonical Product DB + image pipeline + pricing/readiness foundations: **ACCEPTED** 2026-09-19 on the final offline acceptance run at exact main `57a6676`, bounded by its §2 (Issue #80, [ADR-0013](docs/adr/0013-m4-canonical-product-contract.md), [`docs/acceptance/M4.md`](docs/acceptance/M4.md)).
-- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12). This is a status pointer only: no M5 behaviour is implemented or authorized yet.
+- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12, Issue #89). It starts with the PR-A contract ([ADR-0014](docs/adr/0014-smartstore-register-idempotency-readback.md)). No M5 behaviour is implemented yet, and no SmartStore write is authorized.
 
 External calls happen only when the operator starts an action (no call at startup), and only for these accepted flows:
 - **KM통상 CONNECT:** the application authenticates and reads the protected 마이쇼핑 page, through the common, allowlisted supplier transport.

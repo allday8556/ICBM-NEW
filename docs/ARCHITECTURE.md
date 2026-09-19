@@ -109,11 +109,16 @@ Owns platform conversion and listing creation.
 
 - category mapping
 - compliance gate
-- image transformation/upload
+- marketplace publication-asset requirements, upload and read-back (binary transformation itself remains the M4 derived-image owner)
 - readiness
 - RegistrationAttempt/idempotency
 - CREATE/reconcile/read-back
 - MarketplaceRegistration
+
+The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89):
+- M4 keeps every product-side owner. Marketplace-sized binaries stay M4 derived artifacts; M5 owns the upload and the provider asset identity.
+- Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
+- An unresolved `UNKNOWN` CREATE is reconciled before any resend and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 
 ### OPERATE
 Owns everything after publication.
@@ -309,7 +314,7 @@ COLLECT covers only the first three steps for *source* assets (ADR-0010 §9):
 - It keeps the original bytes unmodified, with role/order, dimensions, MIME type, size and SHA-256.
 - It never transforms them.
 
-Derived marketplace variants belong to the M4 image pipeline and to each marketplace adapter/readiness contract.
+Derived marketplace variants (the transformed binary, its lineage and its QA) belong to the M4 derived-image owner. The marketplace adapter supplies only the target profile requirement; REGISTER uploads that exact artifact and owns the provider asset identity and read-back (ADR-0014 §5).
 
 ## 11. Source drift
 
