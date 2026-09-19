@@ -36,7 +36,9 @@ _SECRET_VALUE = re.compile(
     re.I,
 )
 _URL = re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://|(^|[\s\"'(=])//[^\s/]|\bwww\.[a-z0-9-]+\.)")
-_PROVIDER_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+# An opaque reference or label cannot express a URI: no colon, so no scheme and no authority.
+_PROVIDER_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$")
 
 
 def _walk(value: Any, path: str) -> Iterator[tuple[str, str | None, Any]]:
@@ -68,13 +70,23 @@ def problems(value: Any, path: str = "payload") -> tuple[tuple[str, str], ...]:
     return tuple(sorted(found))
 
 
-_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _uri_like(value: str) -> bool:
+    """Whether some parser could read the value as a URI reference, in any of its shapes:
+    a ``scheme:`` prefix with or without ``//``, a protocol-relative ``//host`` form, or a bare
+    host. Each clause stands on its own, so widening one grammar never reopens the others."""
+    return bool(_SCHEME.match(value)) or ":" in value or bool(_URL.search(value))
+
+
 def safe_label(value: str) -> bool:
-    """Whether a version or identity label is plain: label characters only, no URL, no secret."""
-    return isinstance(value, str) and bool(_LABEL.fullmatch(value)) and not problems(value)
+    """Whether a version or identity label is plain: label characters only, never URI-like (a
+    ``scheme:`` prefix included), no URL and no secret."""
+    if not isinstance(value, str) or _uri_like(value):
+        return False
+    return bool(_LABEL.fullmatch(value)) and not problems(value)
 
 
 def hex_digest(value: str) -> bool:
@@ -84,12 +96,18 @@ def hex_digest(value: str) -> bool:
 
 def safe_provider_reference(reference: str) -> bool:
     """Whether a provider reference (a prepared asset or a duplicate-lookup listing) is opaque, or
-    a plain https reference, and carries no signed material. Anything URL-shaped must be a plain
-    https reference: an ``http:`` or other scheme, a protocol-relative URL, a query, a fragment or
-    user information is never accepted as "opaque"."""
+    a plain https reference, and carries no signed material.
+
+    **Anything URI-like must be an exact plain https reference.** A ``scheme:`` prefix is refused
+    before the opaque fallback whether or not it carries ``//``, so ``http:example.com/x``,
+    ``ftp:example.com/x`` and a malformed ``https:example.com/x`` are never "opaque"; nor is a
+    protocol-relative URL, a query, a fragment or user information. A provider contract that
+    needs a colon-namespaced opaque id gets an explicit allow-list when that contract is adopted
+    (PR-D), never an arbitrary scheme.
+    """
     if not isinstance(reference, str) or _SECRET_VALUE.search(reference):
         return False
-    if _URL.search(reference) or ":/" in reference:
+    if _uri_like(reference):
         return _safe_https(reference)
     return bool(_PROVIDER_REF.fullmatch(reference))
 

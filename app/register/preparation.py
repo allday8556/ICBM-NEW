@@ -371,14 +371,21 @@ class PreparedAsset:
     def key(self) -> tuple[str, str, str]:
         return (self.asset_kind.value, self.sha256, self.derivation_id or "")
 
+    def unsafe(self) -> bool:
+        """Whether the provider reference may not enter a durable fingerprint or payload: it is
+        ``PREPARED_ASSET_REF_UNSAFE`` and only its absence is recorded (§15, B4)."""
+        return not sanitize.safe_provider_reference(self.provider_asset_ref)
+
     def canonical(self) -> dict[str, object]:
+        unsafe = self.unsafe()
         return {
             "asset_kind": self.asset_kind.value,
             "sha256": self.sha256,
             "derivation_id": self.derivation_id,
             "asset_profile": self.asset_profile,
             "candidate_fingerprint": self.candidate_fingerprint,
-            "provider_asset_ref": self.provider_asset_ref,
+            "unsafe": unsafe,
+            "provider_asset_ref": None if unsafe else self.provider_asset_ref,
         }
 
 
@@ -1113,7 +1120,7 @@ def _prepared_reasons(
             reasons.append(Reason(PREPARED_ASSET_CANDIDATE_MISMATCH, _S, subject))
         if found.asset_profile != policy.profile:
             reasons.append(Reason(PREPARED_ASSET_PROFILE_MISMATCH, _S, subject))
-        if not sanitize.safe_provider_reference(found.provider_asset_ref):
+        if found.unsafe():
             reasons.append(Reason(PREPARED_ASSET_REF_UNSAFE, _B, subject))
     reasons.extend(
         Reason(PREPARED_ASSET_NOT_SELECTED, _S, f"asset:{key[1]}")

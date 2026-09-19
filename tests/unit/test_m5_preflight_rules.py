@@ -717,6 +717,10 @@ UNSAFE_REFERENCES = {
     "token parameter": "listing?access_token=abcdef",
     "plain http": "http://supplier.example/item/1",
     "protocol relative": "//supplier.example/item/1",
+    # Review 5257966787: a scheme without ``//`` is still a URI, never an opaque reference.
+    "scheme http": "http:supplier.example/item/1",
+    "scheme ftp": "ftp:supplier.example/item/1",
+    "scheme https malformed": "https:supplier.example/item/1",
 }
 
 
@@ -761,6 +765,9 @@ def test_unsafe_evidence_identities_fail_closed() -> None:
         evidence(lookup_contract_version="lookup https://lookup.example/v1"),
         evidence(lookup_contract_version="Bearer abcdefghijklmnop"),
         evidence(lookup_contract_version="lookup v1"),
+        # Review 5257966787: a label is never URI-like either, ``//`` or not.
+        evidence(lookup_contract_version="http:lookup.example/v1"),
+        evidence(lookup_contract_version="ftp:lookup.example/v1"),
     ):
         result = candidate(request(duplicate_evidence=unsafe), resolved(items=COVERED))
         assert (result.status, codes(result)) == (
@@ -898,6 +905,46 @@ def test_the_final_preflight_needs_every_provider_asset_bound_to_this_candidate(
     assert codes(final(prepared=extra)) == {"PREPARED_ASSET_NOT_SELECTED"}
     with pytest.raises(ValueError, match="without any provider asset"):
         evaluate(request(), resolved(), PreflightStage.CANDIDATE, prepared_for(ready))
+
+
+# PR #92 review 5257966787: ``safe_provider_reference`` also guards the prepared asset, so a
+# scheme-without-``//`` reference must not ride into a durable fingerprint or payload either.
+UNSAFE_ASSET_REFERENCES = {
+    "scheme http": "http:cdn.example/a.jpg",
+    "scheme ftp": "ftp:cdn.example/a.jpg",
+    "scheme https malformed": "https:cdn.example/a.jpg",
+    "signed url": "https://cdn.example/a.jpg?sig=abc",
+    "protocol relative": "//cdn.example/a.jpg",
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSAFE_ASSET_REFERENCES))
+def test_an_unsafe_prepared_asset_reference_is_never_final_ready_and_never_durable(
+    case: str,
+) -> None:
+    reference = UNSAFE_ASSET_REFERENCES[case]
+    ready = candidate()
+    assert ready.status is ReadinessStatus.READY
+    unsafe = final(prepared=prepared_for(ready, ref=reference))
+    assert (unsafe.status, codes(unsafe)) == (
+        ReadinessStatus.BLOCKED,
+        {"PREPARED_ASSET_REF_UNSAFE"},
+    )
+    # The raw reference is no fingerprint input: only its absence is recorded.
+    assert reference not in json.dumps(unsafe.dependencies, ensure_ascii=False)
+    recorded = unsafe.dependencies["prepared_assets"]
+    assert recorded and all(
+        (asset["unsafe"], asset["provider_asset_ref"]) == (True, None) for asset in recorded
+    )
+    with pytest.raises(PayloadNotReadyError):
+        build_payload(unsafe)
+    # Nor does the builder let it through a result that claims READY.
+    tampered = replace(final(), prepared_assets=prepared_for(ready, ref=reference))
+    with pytest.raises(sanitize.PayloadSanitationError):
+        build_payload(tampered)
+    # A safe opaque reference and a plain https one still pass.
+    for safe in (f"provider-asset-{case.replace(' ', '-')}", "https://cdn.example/a/b.jpg"):
+        assert final(prepared=prepared_for(ready, ref=safe)).status is ReadinessStatus.READY
 
 
 def test_prepared_assets_under_drifted_dependencies_are_stale() -> None:
@@ -1067,14 +1114,23 @@ def test_secret_material_and_external_urls_never_reach_the_payload() -> None:
     with pytest.raises(sanitize.PayloadSanitationError):
         build_payload(tampered)
     assert sanitize.safe_provider_reference("https://shop-phinf.example/a/b.jpg")
+    assert sanitize.safe_provider_reference("provider-asset-1/a_b.jpg")
     for unsafe in (
         "https://x.example/a.jpg?token=1",
         "https://u:p@x.example/a",
         "a b",
         "http://x.example/a.jpg",
         "//x.example/a.jpg",
+        # Review 5257966787: a scheme is a scheme with or without ``//``.
+        "http:x.example/a.jpg",
+        "ftp:x.example/a.jpg",
+        "https:x.example/a.jpg",
+        "HTTP:x.example/a.jpg",
+        "urn:provider:asset:1",
     ):
-        assert not sanitize.safe_provider_reference(unsafe)
+        assert not sanitize.safe_provider_reference(unsafe), unsafe
+        assert not sanitize.safe_label(unsafe), unsafe
+    assert sanitize.safe_label("lookup-contract/v1") and not sanitize.safe_label("a:b")
 
 
 # ---------------------------------------------------------------- the payload (§6, §7)

@@ -374,7 +374,7 @@ def prepared(result: PreflightResult, **overrides: str) -> tuple[PreparedAsset, 
             derivation_id=image.derivation_id,
             asset_profile=overrides.get("asset_profile", "asset-profile-test-1"),
             candidate_fingerprint=overrides.get("fingerprint", result.candidate_fingerprint),
-            provider_asset_ref=f"provider-asset-{image.sha256[:12]}",
+            provider_asset_ref=overrides.get("ref", f"provider-asset-{image.sha256[:12]}"),
         )
         for _key, image in sorted(images.items())
     )

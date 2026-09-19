@@ -533,6 +533,51 @@ def test_prepared_assets_bind_to_their_candidate_and_drift_is_stale(
     assert prep.service.final(req, prepared(renewed)).status is ReadinessStatus.READY
 
 
+@pytest.mark.parametrize(
+    "reference", ["http:cdn.example/a.jpg", "ftp:cdn.example/a.jpg", "https:cdn.example/a.jpg"]
+)
+def test_an_unsafe_provider_asset_reference_never_reaches_a_snapshot(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+    reference: str,
+) -> None:
+    # PR #92 review 5257966787: a scheme without ``//`` was accepted as an opaque reference, and
+    # the same grammar guards PreparedAsset, so it could have been frozen into a Snapshot.
+    _item, _draft_id, req = _single(container, sources, store, account)
+    first = prep.service.candidate(req)
+    req = replace(req, duplicate_evidence=no_match(first))
+    candidate = prep.service.candidate(req)
+    assert candidate.upload_permitted
+    unsafe = prep.service.final(req, prepared(candidate, ref=reference))
+    assert (unsafe.status, _codes(unsafe)) == (
+        ReadinessStatus.BLOCKED,
+        {"PREPARED_ASSET_REF_UNSAFE"},
+    )
+    assert reference not in json.dumps(unsafe.dependencies)
+    snapshots = count(config, "registration_snapshots")
+    with pytest.raises(InputValidationError, match="final READY"):
+        _builder(container, prep).freeze(unsafe, created_by=OPERATOR, correlation_id=CID)
+    assert count(config, "registration_snapshots") == snapshots
+    # The same unit with an opaque reference still freezes, and the durable rows never hold it.
+    safe = prep.service.final(req, prepared(candidate))
+    assert safe.status is ReadinessStatus.READY
+    snapshot = _builder(container, prep).freeze(safe, created_by=OPERATOR, correlation_id=CID)
+    assert count(config, "registration_snapshots") == snapshots + 1
+    with contextlib.closing(raw(config)) as connection:
+        payload_json, assets_json = connection.execute(
+            "SELECT s.payload_json, i.publication_assets_json"
+            " FROM registration_snapshots s JOIN registration_item_snapshots i"
+            " ON i.registration_snapshot_id = s.registration_snapshot_id"
+            " WHERE s.registration_snapshot_id = ?",
+            (snapshot.registration_snapshot_id,),
+        ).fetchone()
+    assert reference not in payload_json and reference not in assets_json
+
+
 # ---------------------------------------------------------------- units and shapes (R3)
 
 
