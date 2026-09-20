@@ -105,6 +105,8 @@ class FakeCapability:
         write_scope: WriteScopeStatus = WriteScopeStatus.UNKNOWN,
         overlays: tuple[tuple[WorkflowScope, WorkflowState], ...] = (),
         updated_at: datetime | None = None,
+        auth_verified_at: datetime | None = None,
+        freshness_recorded_at: datetime | None = None,
     ) -> None:
         self.auth = auth
         self.write_scope = write_scope
@@ -112,18 +114,22 @@ class FakeCapability:
         # What the capability owner last recorded. An audited operator resolution or a fresh
         # authentication moves it, which is how an execution scope resumes (M5 PR-E).
         self.updated_at = updated_at
+        # The one accepted recovery event of a registration execution scope: it moves only when
+        # the account authenticates again (capability A1), never on an unrelated change.
+        self.auth_verified_at = auth_verified_at
+        self.freshness_recorded_at = freshness_recorded_at
 
     def capability(self, marketplace_key: str) -> MarketplaceCapabilityView:
         return MarketplaceCapabilityView(
             marketplace_key=marketplace_key,
             auth=self.auth,
-            auth_verified_at=None,
+            auth_verified_at=self.auth_verified_at,
             write_scope=WriteScopeView(
                 status=self.write_scope, evidence_strength=None, evidence_grade=None
             ),
             write=WriteView(status=WriteStatus.UNVERIFIED),
             contract_freshness=ContractFreshness.CURRENT,
-            contract_freshness_recorded_at=None,
+            contract_freshness_recorded_at=self.freshness_recorded_at,
             workflow=[
                 WorkflowOverlayView(
                     workflow_state=state, workflow_scope=scope, reason_code=None, resolution=None

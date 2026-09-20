@@ -913,6 +913,76 @@ def test_a_second_enqueue_never_bypasses_the_first_job_backoff(
     assert [a.attempt_no for a in store.attempts(ready.intent_id)] == [1, 2]
 
 
+def test_two_concurrent_enqueues_leave_exactly_one_live_job(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    import threading
+
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.TRANSIENT,
+            error_code="PROVIDER_TIMEOUT",
+        ),
+    )
+    _jobs(container, run)
+
+    started = threading.Barrier(2)
+    queued: list[str] = []
+    failures: list[BaseException] = []
+
+    def enqueue() -> None:
+        started.wait(timeout=5)
+        try:
+            queued.append(
+                enqueue_create(
+                    container.jobs,
+                    container.registrations,
+                    intent_id=ready.intent_id,
+                    request=ready.request,
+                    frozen=ready.final,
+                )
+            )
+        except BaseException as error:
+            failures.append(error)
+
+    threads = [threading.Thread(target=enqueue) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    # The check and the insert are one unit of work, so the second caller sees the first's job.
+    assert failures == []
+    assert len(set(queued)) == 1
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 1
+    # The first attempt fails retryably, so the one job waits out its backoff...
+    result = container.runner.run_next()
+    assert result is not None and result.state is JobState.RETRY_SCHEDULED
+    # ...and a caller arriving now cannot create a due job that would run the CREATE early.
+    assert (
+        enqueue_create(
+            container.jobs,
+            container.registrations,
+            intent_id=ready.intent_id,
+            request=ready.request,
+            frozen=ready.final,
+        )
+        == queued[0]
+    )
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 1
+    assert container.runner.run_next() is None
+    assert len(run.sender.calls) == 1
+    assert len(store.attempts(ready.intent_id)) == 1
+
+
 def test_an_unknown_intent_can_never_be_queued_until_evidence_frees_it(
     container: Container,
     sources: Collections,
@@ -1187,11 +1257,23 @@ def test_an_auth_pause_is_released_by_the_capability_owners_own_reset(
     # its audited ``resolve`` is the only way a workflow overlay is lifted — and every such
     # transition moves the capability's own ``updated_at``. Nothing here invents a second state.
     assert callable(container.marketplace_capability.resolve)
+    assert callable(container.marketplace_capability.observe_auth)
     container.clock.advance(120)
+    # An unrelated capability change is not a recovery: a reviewed contract-freshness recording
+    # or a permission refresh moves the capability row, and the scope stays paused.
     prep.capability.updated_at = container.clock.now()
+    prep.capability.freshness_recorded_at = container.clock.now()
+    still_paused = run.service.budget(MARKET, account)
+    assert still_paused.paused_by is ErrorClass.AUTH and not still_paused.sends_allowed
+    with pytest.raises(ExecutionRefused) as again:
+        run.service.run(context(second))
+    assert again.value.code == "REGISTER_SCOPE_PAUSED"
+    # The accepted recovery event is the account authenticating again.
+    container.clock.advance(60)
+    prep.capability.auth_verified_at = container.clock.now()
     resumed = run.service.budget(MARKET, account)
     assert resumed.paused_by is None and resumed.sends_allowed
-    assert resumed.reset_at == prep.capability.updated_at
+    assert resumed.reset_at == prep.capability.auth_verified_at
     # The failed attempt itself is untouched: a release re-reads history, it never rewrites it.
     attempts = store.attempts(ready.intent_id)
     assert len(attempts) == 1
@@ -1230,7 +1312,10 @@ def test_a_budget_breach_is_released_by_the_same_reset(
             run.service.run(context(ready))
     assert run.service.budget(MARKET, account).exhausted
     container.clock.advance(300)
+    # The same rule: an unrelated capability change releases nothing.
     prep.capability.updated_at = container.clock.now()
+    assert run.service.budget(MARKET, account).exhausted
+    prep.capability.auth_verified_at = container.clock.now()
     released = run.service.budget(MARKET, account)
     assert not released.exhausted and released.sends_allowed
     # Both attempts are still there, unchanged: only the window moved.

@@ -403,11 +403,12 @@ class ExecutionPolicy:
     ) -> "BudgetState":
         """The budget of one scope, read from its attempt history newest-first.
 
-        ``since`` is the scope's last durable reset — the CONNECT capability owner's own
-        ``updated_at``, which moves when an operator resolves the marketplace's workflow overlay
-        or when the account re-authenticates. Attempts older than it are history, not pressure:
-        that is what makes a pause **resumable** without a second authoritative state and without
-        touching, deleting or rewriting a single past attempt (v3.1 §11.2).
+        ``since`` is the scope's last accepted recovery event: the CONNECT capability owner's
+        ``auth_verified_at``, which moves only on a fresh authentication proof for that account.
+        Attempts older than it are history, not pressure — that is what makes a pause
+        **resumable** without a second authoritative state and without touching, deleting or
+        rewriting a single past attempt (v3.1 §11.2). A proven success in the scope releases it
+        too; nothing else does, and an unrelated capability change never does.
         """
         consecutive = 0
         paused_by: ErrorClass | None = None
@@ -445,7 +446,8 @@ class BudgetState:
     consecutive_failures: int
     exhausted: bool
     paused_by: ErrorClass | None
-    # The scope reset this budget was read against: everything older is history, not pressure.
+    # The accepted recovery event this budget was read against — a fresh authentication proof.
+    # Everything older than it is history, not pressure.
     reset_at: datetime | None = None
 
     @property
@@ -864,21 +866,28 @@ class RegistrationExecutionService:
     def budget(self, marketplace_key: str, marketplace_account_id: str) -> BudgetState:
         """The failure budget of one scope: durable attempts, read against the scope's own reset.
 
-        The reset is the CONNECT capability owner's ``updated_at``. That owner already holds the
-        only durable pause this domain has — a PRODUCT_REGISTRATION workflow overlay, which its
-        audited ``resolve`` is the only way to lift — and every such transition, or a fresh
-        authentication, moves ``updated_at``. So an AUTH or policy pause here is released by the
-        same operator action that releases the capability, no second state is invented, and the
-        failed attempts themselves stay exactly as they were recorded.
+        The reset is the CONNECT capability owner's ``auth_verified_at`` — the durable proof that
+        this account authenticated again, which is the recovery an AUTH pause waits for. It moves
+        on nothing else: a reviewed contract-freshness recording or a permission refresh leaves it
+        where it was, so neither can release a paused scope. The other release is a proven success
+        in the scope. No second state is invented, and the failed attempts themselves stay exactly
+        as they were recorded.
         """
         attempts = self._registrations.scope_attempts(marketplace_key, marketplace_account_id)
         return self._policy.budget(attempts, since=self._scope_reset(marketplace_key))
 
     def _scope_reset(self, marketplace_key: str) -> datetime | None:
+        """The one accepted recovery event of this scope: a **fresh authentication proof**.
+
+        ``auth_verified_at`` moves only when the account authenticates again and no AUTHENTICATION
+        overlay stands in the way (capability A1). It is deliberately *not* the capability row's
+        ``updated_at``: that moves on unrelated changes — a reviewed contract-freshness recording,
+        a permission-metadata refresh — none of which prove the registration scope recovered.
+        """
         try:
-            return self._capability.capability(marketplace_key).updated_at
+            return self._capability.capability(marketplace_key).auth_verified_at
         except AppError:
-            # A capability that cannot be read resets nothing: the budget then reads the whole
+            # A capability that cannot be read releases nothing: the budget then reads the whole
             # history, which is the fail-closed direction.
             return None
 
@@ -998,35 +1007,44 @@ def enqueue_create(
     be queued. An UNKNOWN Intent is never queueable: it is reconciled with provider evidence
     first, which is what moves it to FAILED (§10).
     """
-    intent = registrations.intent(intent_id)
-    if intent is None:
-        raise ExecutionRefused(
-            "REGISTER_INTENT_UNKNOWN", f"no Intent {intent_id!r}", error_class=ErrorClass.NOT_FOUND
-        )
-    if intent.state not in SENDABLE_STATES:
-        raise ExecutionRefused(
-            "REGISTER_INTENT_NOT_SENDABLE",
-            "only a PREPARED Intent, or one proven not applied, may be queued",
-            details={"intent_id": intent_id, "state": intent.state.value},
-        )
-    live = registrations.active_job(CREATE_JOB_TYPE, intent_id, ACTIVE_JOB_STATES)
-    if live is not None:
-        logger.info(
-            "register.create_job_reused",
-            extra={"job_id": live, "intent_id": intent_id},
-        )
-        return live
-    record = jobs.enqueue(
-        CREATE_JOB_TYPE,
-        payload=encode_send_request(
-            intent_id,
-            request,
-            frozen.prepared_assets,
-            listing_identity=frozen.resolved.listing_identity,
-            identity_generation=frozen.resolved.identity_generation,
-        ),
-        target_ref=target_ref(intent_id),
+    payload = encode_send_request(
+        intent_id,
+        request,
+        frozen.prepared_assets,
+        listing_identity=frozen.resolved.listing_identity,
+        identity_generation=frozen.resolved.identity_generation,
     )
+    # The check and the insert are **one** unit of work: two callers that both found no live job
+    # would otherwise both queue one, and the second would run a CREATE while the first is still
+    # waiting out its backoff. The job row joins this transaction (``session=``), so the worker is
+    # notified only after it commits.
+    with registrations.transaction() as unit:
+        intent = unit.intent(intent_id)
+        if intent is None:
+            raise ExecutionRefused(
+                "REGISTER_INTENT_UNKNOWN",
+                f"no Intent {intent_id!r}",
+                error_class=ErrorClass.NOT_FOUND,
+            )
+        if intent.state not in SENDABLE_STATES:
+            raise ExecutionRefused(
+                "REGISTER_INTENT_NOT_SENDABLE",
+                "only a PREPARED Intent, or one proven not applied, may be queued",
+                details={"intent_id": intent_id, "state": intent.state.value},
+            )
+        live = unit.active_job(CREATE_JOB_TYPE, intent_id, ACTIVE_JOB_STATES)
+        if live is not None:
+            logger.info(
+                "register.create_job_reused", extra={"job_id": live, "intent_id": intent_id}
+            )
+            return live
+        record = jobs.enqueue(
+            CREATE_JOB_TYPE,
+            payload=payload,
+            target_ref=target_ref(intent_id),
+            session=unit.session,
+        )
+    jobs.notify_worker()
     return record.job_id
 
 
