@@ -600,11 +600,6 @@ class RegistrationExecutionService:
                 "a dependency moved since the Snapshot was frozen",
                 details={"snapshot": snapshot.preflight_fingerprint},
             )
-        if fresh.resolved.marketplace_account_id != intent.marketplace_account_id:
-            raise ExecutionRefused(
-                "REGISTER_SEND_SCOPE_MISMATCH",
-                "the resolved canonical account is not the Intent's",
-            )
         return fresh
 
     # ------------------------------------------------------------------ read-back (§11)
