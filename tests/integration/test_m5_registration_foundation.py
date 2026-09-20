@@ -2003,6 +2003,49 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         engine.dispose()
 
 
+def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+    # §27: the preparation owner adds four tables, touches nothing else, round-trips, and never
+    # lets an authored preparation be dropped silently.
+    url = _url(tmp_path / "icbm.db")
+    upgrade_to_head(url)
+    before = _tables(tmp_path / "icbm.db")
+    command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
+    assert before - _tables(tmp_path / "icbm.db") == set(PREPARATION_TABLES)
+    command.upgrade(alembic_config(url), "head")
+    assert _tables(tmp_path / "icbm.db") == before
+    account_id = f"mpa-{'1' * 32}"
+    with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
+        connection.execute(
+            "INSERT INTO marketplace_connections (marketplace_key, credential_generation_hwm,"
+            " session_generation_hwm, provider_account_uid, provider_account_id,"
+            " bound_credential_generation, bound_session_generation, bound_at, bound_by,"
+            " created_at, updated_at) VALUES (?, 1, 1, 'uid-x', NULL, 1, 1, ?, 'o', ?, ?)",
+            (MARKET, AT, AT, AT),
+        )
+        connection.execute("INSERT INTO seller_entities VALUES ('seller-1', 'o', 'c', ?)", (AT,))
+        connection.execute(
+            "INSERT INTO marketplace_accounts VALUES (?, 'seller-1', ?, 'uid-x', 'o', 'c', ?)",
+            (account_id, MARKET, AT),
+        )
+        connection.execute(
+            "INSERT INTO registration_drafts VALUES"
+            " ('draft-1', ?, ?, 'SINGLE_LISTING_WITH_OPTIONS', 1, 'o', ?, ?)",
+            (MARKET, account_id, AT, AT),
+        )
+        connection.execute(
+            f"INSERT INTO {PREPARATIONS} VALUES ('prep-1', 'draft-1', ?, ?, 'o', ?)",
+            (MARKET, account_id, AT),
+        )
+        connection.commit()
+    with pytest.raises(RuntimeError, match="never silently destroyed"):
+        command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
+    engine = create_sqlite_engine(url)
+    try:
+        assert current_revision(engine) == "0018_m5_registration_preparation"
+    finally:
+        engine.dispose()
+
+
 def _tables(database: Path) -> set[str]:
     with contextlib.closing(sqlite3.connect(database)) as connection:
         return {
