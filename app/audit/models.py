@@ -62,6 +62,11 @@ class AuditEventType(StrEnum):
     REGISTRATION_VERIFICATION_RECORDED = "REGISTRATION_VERIFICATION_RECORDED"
     REGISTRATION_EXTERNAL_ABSENCE_RECORDED = "REGISTRATION_EXTERNAL_ABSENCE_RECORDED"
     REGISTRATION_DUPLICATE_OVERRIDE_RECORDED = "REGISTRATION_DUPLICATE_OVERRIDE_RECORDED"
+    # M5 PR-E (ADR-0014 §26): the REGISTER send brake of one execution scope. Scope key, cause,
+    # policy version, generation and safe actor/reason labels only — the authoritative state is
+    # the registration_execution_scopes row, and this is its history.
+    REGISTRATION_EXECUTION_SCOPE_PAUSED = "REGISTRATION_EXECUTION_SCOPE_PAUSED"
+    REGISTRATION_EXECUTION_SCOPE_RESUMED = "REGISTRATION_EXECUTION_SCOPE_RESUMED"
 
 
 class AuditOutcome(StrEnum):

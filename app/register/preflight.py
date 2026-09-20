@@ -50,9 +50,9 @@ from app.register.preparation import (
     ResolvedItem,
     ResolvedUnit,
     evaluate,
-    listing_identity,
     resolve_unit,
 )
+from app.register.preparation import listing_identity as _identity
 from app.register.store import RegistrationStore, RegistrationUnit
 
 
@@ -96,14 +96,32 @@ class RegistrationPreflightService:
         return evaluate(request, self.resolve(request), PreflightStage.CANDIDATE)
 
     def final(
-        self, request: PreflightRequest, prepared_assets: Sequence[PreparedAsset] = ()
+        self,
+        request: PreflightRequest,
+        prepared_assets: Sequence[PreparedAsset] = (),
+        *,
+        identity_generation: int | None = None,
     ) -> PreflightResult:
-        """Every dependency, the prepared provider assets included: READY freezes a Snapshot."""
-        return evaluate(request, self.resolve(request), PreflightStage.FINAL, prepared_assets)
+        """Every dependency, the prepared provider assets included: READY freezes a Snapshot.
+
+        ``identity_generation`` re-evaluates an **already frozen** unit. A unit's identity is
+        derived from its generation — the number of its Snapshots an Intent names (§7) — so once
+        an Intent exists, deriving it again would name the *next* unit, not this one. A send gate
+        re-checks the same frozen unit under current truth (PR-E) and passes the generation the
+        Snapshot was frozen at; a fresh preparation passes nothing and gets the next one.
+        """
+        return evaluate(
+            request,
+            self.resolve(request, identity_generation=identity_generation),
+            PreflightStage.FINAL,
+            prepared_assets,
+        )
 
     # ------------------------------------------------------------------ gathering
 
-    def resolve(self, request: PreflightRequest) -> ResolvedUnit:
+    def resolve(
+        self, request: PreflightRequest, *, identity_generation: int | None = None
+    ) -> ResolvedUnit:
         with self._registrations.reading() as unit:
             draft = unit.draft(request.unit.draft_id)
             if draft is None:
@@ -133,8 +151,12 @@ class RegistrationPreflightService:
         unit_key = [item.key for item in items]
         groups = {item.product_group_id for item in items}
         with self._registrations.reading() as unit:
-            generation = unit.unit_generation(draft.draft_id, unit_key)
-            identity = listing_identity(
+            generation = (
+                unit.unit_generation(draft.draft_id, unit_key)
+                if identity_generation is None
+                else identity_generation
+            )
+            identity = _identity(
                 draft.marketplace_key,
                 draft.marketplace_account_id,
                 draft.draft_id,

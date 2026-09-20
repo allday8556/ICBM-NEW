@@ -5,8 +5,9 @@ Status: **ACCEPTED** 2026-09-19. This is PR-A of Issue #89 (kickoff `5740316498`
 - It incorporates the architect addendum `5740352676` (rulings R1–R4) as binding decisions.
 - It is amended for the PR #90 GPT review `5255157251` (HOLD): four contract blockers B1–B4 (see "Review amendments").
 - It lands on main with the merge of PR #90.
+- It is extended by the architect decision `5749504280` (PR-E review `5260076445`): §26 and invariants M5-25–M5-27 add the REGISTER execution-scope send brake, the one owner PR-E was missing, together with the migration that owner needs.
 
-It authorizes no schema, migration, runtime code, UI, endpoint adoption, AI call, supplier request or marketplace call. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
+Apart from the migration §26 names, it authorizes no schema, migration, runtime code, UI, endpoint adoption, AI call, supplier request or marketplace call. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
 
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #89 body (the M5 umbrella) and the architect kickoff `5740316498`, which authorized PR-A only and listed the twenty decisions this ADR freezes;
@@ -230,7 +231,7 @@ RegistrationAttempt                append-only
 - `error_class` (the cause) and `remote_outcome` (whether the mutation happened) are independent axes (`ERRORS.md` §2). `ambiguous_result` is derived from `remote_outcome` (`ERRORS.md` §3).
 - **Automatic retry** is permitted only for `TRANSIENT` and `RATE_LIMITED` (ADR-0004, ADR-0008), **and only when `remote_outcome = NOT_APPLIED_PROVEN`**. A transient cause never implies a safe replay: `TRANSIENT` with `remote_outcome = UNKNOWN` is reconciled, never resent.
 - `UNKNOWN`, `VALIDATION`, `POLICY_BLOCKED` and any write whose outcome cannot be proven are never retried automatically.
-- A retry obeys the failure budget and rate limiter scoped to `marketplace × account × endpoint group` (v3.1 §11.2–§11.4).
+- A retry obeys the failure budget and rate limiter scoped to `marketplace × account × endpoint group` (v3.1 §11.2–§11.4). That scope's pause and its accepted release are owned by §26.
 
 ### 10. An UNKNOWN write outcome, and its conflict scope (ruling R2)
 
@@ -463,8 +464,31 @@ These are left to the PR that implements them, under this contract:
 - tables, columns, enum spellings and migrations (PR-B), including the external-absence state (§14) and the mismatch verification state (§11);
 - the preflight rule details and dependency-fingerprint encoding (PR-C);
 - the wire representation of the listing identity and `registration_item_key`, the per-endpoint safe-query-key allow-lists, the read-back normalizer and comparison encodings, and endpoint adoption (PR-D);
-- the execution job, failure budget and rate-limit values (PR-E);
+- the execution job, failure budget and rate-limit values (PR-E), within the scope ownership §26 decides;
 - the acceptance harness and the real canary campaign (PR-F).
+
+### 26. The REGISTER execution-scope send brake (architect decision `5749504280`)
+
+Entering a pause is derivable from durable attempt history; **leaving one is not**, because a release is a fact about an operator action or an authentication proof, and no attempt records that. PR-E therefore owns one minimal durable control, and only this one:
+
+```text
+RegistrationExecutionScope     one row per marketplace_key × marketplace_account_id × endpoint_group
+  state                        ACTIVE | PAUSED
+  pause_reason                 AUTH | POLICY | FAILURE_BUDGET, with its ErrorClass, its time and the policy version that judged it
+  resume_generation/resumed_at the durable boundary the failure budget counts attempts after
+  resumed_by / resume_reason   who accepted the release and why, as safe labels only
+```
+
+- **This owner is not capability truth.** CONNECT keeps account binding, authentication, permission and write scope, workflow overlays and contract freshness; REGISTER keeps Intents, Attempts, retry, reconcile, read-back, the failure budget and this brake. **Neither owner re-decides the other's state**, and no second queue, retry clock or authoritative status is introduced.
+- **Entering `PAUSED`** happens only from durable execution evidence: `AUTH` with `NOT_APPLIED_PROVEN` engages `AUTH`; `POLICY_BLOCKED` with `NOT_APPLIED_PROVEN` engages `POLICY`; a versioned failure-budget breach engages `FAILURE_BUDGET`. It is idempotent for the same cause and it is audited. **An `UNKNOWN` outcome is governed by its Intent conflict scope (§10) and neither spends nor resets this budget.**
+- **An `AUTH` pause may resume automatically, and only then**, on a CONNECT authentication proof **newer than the `paused_at` it answers**. REGISTER records that release in its own owner — actor `system`, the proof's own time, the next generation. The proof itself stays CONNECT's truth. **An `AUTH` pause is not an operator's to release**: an operator action is not an authentication proof, so the explicit resume answers `POLICY` and `FAILURE_BUDGET` only. The two authorities are disjoint, and neither can reach the other's cause.
+- **A `POLICY` or `FAILURE_BUDGET` pause is never released by authentication.** Each requires an explicit audited REGISTER-scope resume after review or investigation. **A resume means "resume sending in this execution scope and re-evaluate current gates". It never claims that a remote mutation happened or that provider policy is factually absent.** The next send still runs the complete send-time gate (§3), and a repeated refusal pauses the scope again at a later boundary. **No time-only cooldown releases a scope.**
+- **A budget the current policy has spent is recorded before the send is refused.** The budget is counted under the *current* versioned policy, so a lowered threshold, a policy revision or a restart can exhaust a scope that was never paused. The evaluation that refuses the send records what it found, as `FAILURE_BUDGET` with no measured class, so the scope an operator must resume exists instead of being a permanent stop with nothing to release.
+- **A brake records only the class that caused it**: `AUTH` with an `AUTH` failure, `POLICY` with a `POLICY_BLOCKED` one, and `FAILURE_BUDGET` with neither — the class of the failure that spent the budget, or none when a policy revision alone did.
+- **A scope's budget is counted from that scope's own history**: the attempts of the operation that sends to that endpoint group. M5 sends one operation, `CREATE`, so its execution owner refuses any other endpoint group rather than counting a history that is not its own; other groups' scope rows exist and stay independent.
+- **The failure budget counts attempts only after that scope's latest accepted resume boundary.** Nothing else resets it: not a capability `updated_at`, not an authentication proof for a non-`AUTH` cause, not a permission refresh, a contract-freshness recording, a job, a batch or a Draft. An `APPLIED_PROVEN` attempt clears the derived consecutive count, and a scope that is already `PAUSED` still needs its own recorded release.
+- **A resume never rewrites history.** It moves a window: no `RegistrationAttempt` is deleted, edited or re-classified. The audit records each pause and resume as history, and the `RegistrationExecutionScope` row stays the authoritative state — the audit log is never control truth.
+- **The release is scoped exactly.** Releasing one marketplace × canonical account × endpoint group releases that scope and no other.
 
 ## Invariants
 
@@ -495,6 +519,11 @@ M5-21  M5 registers with no AI provider configured
 M5-22  no marketplace asset upload happens before a mutation-free non-asset preflight candidate is READY; the upload is bound to that candidate's fingerprint
 M5-23  resolved_by = USER records or accepts evidence; an operator assertion alone never establishes NOT_APPLIED_PROVEN or remote absence and never releases an UNKNOWN conflict scope
 M5-24  every durable payload or request digest hashes the sanitized canonical representation; secret-bearing wire bytes exist only transiently and are never persisted or durably hashed
+M5-25  the REGISTER execution-scope brake is one row per marketplace, canonical account and endpoint group; it is REGISTER's own control and never capability truth
+M5-26  an AUTH pause releases only on a CONNECT authentication proof newer than that pause and never on an operator action; a POLICY or FAILURE_BUDGET pause never releases on authentication and needs an explicit audited REGISTER resume
+M5-27  the failure budget counts attempts only after the scope's latest accepted resume boundary, and a resume deletes, rewrites or re-classifies no RegistrationAttempt
+M5-28  a scope's budget is counted from that scope's own operation history, and a budget the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is refused
+M5-29  a brake reason is recorded only with the measured class that caused it
 ```
 
 ## Rulings (Issue #89 addendum `5740352676`)

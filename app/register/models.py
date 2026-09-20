@@ -1,6 +1,7 @@
 """Persistence of the M5 registration foundation (Issue #89 PR-B, ADR-0014).
 
-Ten tables, in the order migration 0016 creates them:
+Ten tables, in the order migration 0016 creates them, and one execution-scope owner added by
+migration 0017 (§26, architect decision `5749504280`):
 
 - ``registration_drafts``: a Draft, scoped ``marketplace × account × draft_id`` (§2). Its only
   mutable state is the listing shape and the revision counter; readiness is never stored (§3).
@@ -19,6 +20,9 @@ Ten tables, in the order migration 0016 creates them:
   verification (§11), and a proven external absence (§14, R4).
 - ``duplicate_overrides``: an operator's intentional-duplicate decision, scoped
   ``marketplace × account × group`` (§13).
+- ``registration_execution_scopes`` (migration 0017): REGISTER's own send brake for one
+  ``marketplace × account × endpoint group``, with the durable resume boundary the failure budget
+  counts attempts after (§26). It is not capability truth and owns nothing CONNECT owns.
 
 **Account scope.** Every "account" here is the canonical ``marketplace_account_id`` of
 ``app.connect.account_models`` (``ACCOUNT_IDENTITY.md`` §2), never a free string and never the
@@ -59,12 +63,14 @@ from app.db.base import Base
 from app.db.types import UTCDateTime
 from app.register.model import (
     AbsenceEvidence,
+    ExecutionScopeState,
     IntentState,
     ListingShape,
     Operation,
     RegistrationLifecycle,
     ResolutionEvidence,
     ResolvedBy,
+    ScopePauseReason,
     VerificationState,
 )
 
@@ -597,3 +603,92 @@ class DuplicateOverride(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     revoked_by: Mapped[str | None] = mapped_column(String(64))
     revoke_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class RegistrationExecutionScope(Base):
+    """The REGISTER send brake of one execution scope (§26, migration 0017).
+
+    One row per ``marketplace_key × marketplace_account_id × endpoint_group`` — the scope the
+    failure budget and the rate limiter already use (§9, v3.1 §11.2). It is **not** capability
+    truth and duplicates nothing CONNECT owns: it says only whether this owner may keep sending
+    in that scope, and it carries the durable boundary (``resumed_at`` / ``resume_generation``)
+    that the budget counts attempts after. A row exists only once the scope has been paused; an
+    absent row is an ACTIVE scope with no boundary.
+
+    ``resumed_at`` is the *accepted* release time — for an AUTH pause the CONNECT proof's own
+    time, for an explicit operator resume the time it was recorded — so a resume never fabricates
+    a provider fact and never rewrites one recorded attempt (§26).
+    """
+
+    __tablename__ = "registration_execution_scopes"
+    __table_args__ = (
+        _account(),
+        CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
+        CheckConstraint(_present("endpoint_group"), name="endpoint_group_present"),
+        CheckConstraint(_in("state", ExecutionScopeState), name="state_valid"),
+        CheckConstraint(
+            f"pause_reason IS NULL OR {_in('pause_reason', ScopePauseReason)}",
+            name="pause_reason_valid",
+        ),
+        CheckConstraint(
+            f"pause_error_class IS NULL OR {_in('pause_error_class', ErrorClass)}",
+            name="pause_error_class_valid",
+        ),
+        # ACTIVE holds no open pause; PAUSED names its cause, its time and the policy that judged
+        # it. The two halves together are the "no half-recorded brake" invariant of §26.
+        CheckConstraint(
+            "state <> 'ACTIVE' OR (pause_reason IS NULL AND paused_at IS NULL"
+            " AND pause_policy_version IS NULL AND pause_error_class IS NULL)",
+            name="active_holds_no_pause",
+        ),
+        CheckConstraint(
+            "state <> 'PAUSED' OR (pause_reason IS NOT NULL AND paused_at IS NOT NULL"
+            " AND pause_policy_version IS NOT NULL AND pause_policy_version <> '')",
+            name="paused_states_its_cause",
+        ),
+        # A reason is never paired with a class that did not cause it: an AUTH brake is an AUTH
+        # failure, a POLICY brake a POLICY_BLOCKED one, and a spent budget is neither — it carries
+        # the class of the failure that spent it, or none when a policy revision alone did.
+        CheckConstraint(
+            "pause_reason IS NULL"
+            " OR (pause_reason = 'AUTH' AND pause_error_class = 'AUTH')"
+            " OR (pause_reason = 'POLICY' AND pause_error_class = 'POLICY_BLOCKED')"
+            " OR (pause_reason = 'FAILURE_BUDGET'"
+            " AND (pause_error_class IS NULL"
+            " OR pause_error_class NOT IN ('AUTH', 'POLICY_BLOCKED')))",
+            name="pause_class_is_its_cause",
+        ),
+        CheckConstraint("resume_generation >= 0", name="resume_generation_non_negative"),
+        # Every accepted resume moves the boundary and names who accepted it and why; generation 0
+        # is a scope that has never been resumed.
+        CheckConstraint(
+            "(resume_generation = 0) = (resumed_at IS NULL)"
+            " AND (resumed_at IS NULL) = (resumed_by IS NULL)"
+            " AND (resumed_at IS NULL) = (resume_reason IS NULL)",
+            name="resume_boundary_complete",
+        ),
+        CheckConstraint(
+            "resumed_by IS NULL OR (resumed_by <> '' AND resume_reason <> '')",
+            name="resume_actor_present",
+        ),
+        # A pause recorded after a resume is a *later* boundary: history only moves forward.
+        CheckConstraint(
+            "paused_at IS NULL OR resumed_at IS NULL OR paused_at >= resumed_at",
+            name="pause_follows_resume",
+        ),
+    )
+
+    marketplace_key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    marketplace_account_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    endpoint_group: Mapped[str] = mapped_column(String(40), primary_key=True)
+    state: Mapped[str] = mapped_column(String(10))
+    pause_reason: Mapped[str | None] = mapped_column(String(20))
+    pause_error_class: Mapped[str | None] = mapped_column(String(20))
+    paused_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    pause_policy_version: Mapped[str | None] = mapped_column(String(64))
+    resume_generation: Mapped[int] = mapped_column(Integer)
+    resumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    resumed_by: Mapped[str | None] = mapped_column(String(64))
+    resume_reason: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)

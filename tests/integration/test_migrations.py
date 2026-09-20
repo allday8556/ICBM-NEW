@@ -70,8 +70,10 @@ CANONICAL_TABLES = (
     "marketplace_registrations",
     "marketplace_registration_items",
     "duplicate_overrides",
+    # M5 PR-E (ADR-0014 26): the REGISTER execution-scope send brake and its resume boundary.
+    "registration_execution_scopes",
 )
-HEAD = "0016_m5_registration_foundation"
+HEAD = "0017_m5_registration_execution_scope"
 
 
 def _url(path: Path) -> str:
