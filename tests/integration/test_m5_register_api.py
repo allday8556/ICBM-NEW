@@ -674,6 +674,31 @@ def test_an_operator_authors_a_preparation_that_the_server_keeps_and_evaluates(
     assert body["revisions"][0]["inputs_fingerprint"] != body["revisions"][1]["inputs_fingerprint"]
 
 
+def test_a_preparation_carrying_unsafe_material_is_refused_before_it_is_stored(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # ADR-0014 §15: a business value carrying a URL or secret-shaped material never reaches a
+    # durable row or a digest. The preparation is sanitized by the same typed boundary.
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    refused = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id],
+            "actor": OPERATOR,
+            "inputs": _inputs(item, name={"value": "see https://supplier.example/hotlink.jpg"}),
+        },
+        headers=CLIENT,
+    )
+    assert refused.status_code >= 400
+    assert container.registrations.preparations_of_draft(draft_id) == ()
+
+
 def test_an_authored_preparation_freezes_its_unit_through_the_existing_owners(
     api: TestClient,
     container: Container,
