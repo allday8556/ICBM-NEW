@@ -480,6 +480,9 @@ def test_the_screen_shows_the_servers_own_preflight_category_price_and_qa(
     assert fields["color"]["required"] is False and fields["color"]["provided"] is False
     notice = {field["key"]: field for field in category["notice_fields"]}
     assert notice["manufacturer"]["provided"] is True and notice["origin"]["provided"] is True
+    # What the category's own policy says about options, and the option fields this unit froze.
+    assert category["options_supported"] is True and category["max_options"] == 5
+    assert unit["items"][0]["option_keys"] == []
     # The pinned price, the current M4 price and the server's own comparison of the two.
     item = unit["items"][0]
     assert item["sale_price_krw"] == item["current_sale_price_krw"] > 0

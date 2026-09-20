@@ -123,6 +123,9 @@ class ItemView(BaseModel):
     price_basis: str | None
     registration_item_key: str | None
     publication_assets: tuple[AssetView, ...] = ()
+    # The option fields this Item was frozen with, by name only (§4). Empty for a preparation:
+    # nothing durable holds an option an operator has not frozen yet.
+    option_keys: tuple[str, ...] = ()
     # The M4 target price now, and whether the pin is still it (server verdicts, §22).
     current_pricing_snapshot_id: str | None = None
     current_sale_price_krw: int | None = None
@@ -169,6 +172,9 @@ class CategoryView(BaseModel):
     notice_type: str | None = None
     attributes: tuple[FieldStateView, ...] = ()
     notice_fields: tuple[FieldStateView, ...] = ()
+    # Whether this category's listings may carry several Items as options, and how many (§4).
+    options_supported: bool | None = None
+    max_options: int | None = None
 
 
 class PreflightView(BaseModel):

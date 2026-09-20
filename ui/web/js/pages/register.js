@@ -135,7 +135,12 @@ function itemRow(item) {
   return h(
     'tr',
     { 'data-item': item.item_id, 'data-price-current': String(item.price_pin_current) },
-    h('td', {}, item.item_id),
+    h(
+      'td',
+      {},
+      item.item_id,
+      ...(item.option_keys ?? []).map((key) => h('span', { class: 'mini', 'data-option': key }, key)),
+    ),
     h('td', {}, won(item.sale_price_krw)),
     h('td', {}, item.price_basis ?? '—'),
     // The current M4 price of the same Item: a pin that is no longer current is visible here,
@@ -181,6 +186,9 @@ function categoryBlock(category) {
     kv('카테고리', category.category_id),
     kv('분류 리비전', category.taxonomy_revision),
     category.notice_type ? kv('정보고시', category.notice_type) : null,
+    category.options_supported === null
+      ? null
+      : kv('옵션', category.options_supported ? `최대 ${category.max_options}개` : '미지원'),
     fields.length ? h('ul', { class: 'requirement-list' }, ...fields.map(fieldRow)) : null,
   );
 }

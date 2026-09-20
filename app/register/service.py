@@ -513,6 +513,7 @@ class RegisterService:
         that is not in this Snapshot belongs to another unit and no key is derived for it.
         """
         assets = _frozen_assets(payload)
+        options = _frozen_options(payload)
         return tuple(
             self._item_view(
                 item_id=row.item_id,
@@ -522,6 +523,7 @@ class RegisterService:
                 pricing_snapshot_id=row.pricing_snapshot_id,
                 registration_item_key=row.registration_item_key,
                 publication_assets=assets.get(row.item_id, ()),
+                option_keys=options.get(row.item_id, ()),
                 fact=facts.get(row.item_id),
             )
             for row in snapshot.items
@@ -554,6 +556,7 @@ class RegisterService:
         pricing_snapshot_id: str,
         registration_item_key: str | None,
         publication_assets: tuple[AssetView, ...],
+        option_keys: tuple[str, ...] = (),
         fact: Any,
     ) -> ItemView:
         """One Item's durable facts: the pinned price, the M4 price now, and M4's own readiness."""
@@ -571,6 +574,7 @@ class RegisterService:
             price_basis=None if pin is None else pin.price_basis.value,
             registration_item_key=registration_item_key,
             publication_assets=publication_assets,
+            option_keys=option_keys,
             current_pricing_snapshot_id=current_id,
             current_sale_price_krw=None if current is None else current.final_sale_price_krw,
             current_price_basis=None if current is None else current.price_basis.value,
@@ -631,6 +635,8 @@ class RegisterService:
                 () if metadata is None or metadata.notice is None else metadata.notice.fields,
                 provided_notice,
             ),
+            options_supported=None if metadata is None else metadata.options.options_supported,
+            max_options=None if metadata is None else metadata.options.max_options,
         )
 
     def _preflight_of(
@@ -834,6 +840,21 @@ def _frozen_assets(payload: Mapping[str, Any]) -> dict[str, tuple[AssetView, ...
             if isinstance(asset, Mapping)
         )
     return frozen
+
+
+def _frozen_options(payload: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
+    """The option fields each Item was frozen with, by name (§4). Values are product text and the
+    screen shows the product for that; what the surface owes is which fields were sent."""
+    items = payload.get("items")
+    if not isinstance(items, list):  # pragma: no cover - a Snapshot always has its items
+        return {}
+    return {
+        str(item.get("item_id")): tuple(sorted(options))
+        for item in items
+        if isinstance(item, Mapping)
+        for options in [item.get("options")]
+        if isinstance(options, Mapping)
+    }
 
 
 def _current_assets(fact: Any) -> tuple[AssetView, ...]:
