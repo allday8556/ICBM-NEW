@@ -88,6 +88,43 @@ def _registration_adoption() -> dict[str, bool]:
     return {name: bool(adoption.get(name, False)) for name in REGISTRATION_ENDPOINTS}
 
 
+# Why each seam of this run is a **declaration** rather than a proof. These are different gaps and
+# the report keeps them apart, because a PASS here proves a different thing about each:
+# - `ENDPOINT_NOT_ADOPTED`: the adapter has not adopted that endpoint contract, so nothing may be
+#   sent through it at all;
+# - `OFFLINE_SYNTHETIC_PROVIDER_RESPONSE`: the contract **is** adopted, and the declaration exists
+#   only because a provider-zero run has no provider to answer it;
+# - `WIRE_CONTRACT_UNPROVEN`: PR-D's real wire projection cannot prove this unit sendable;
+# - `PUBLISHED_STATE_UNPROVEN`: the adopted read-back carries no published state — a field of the
+#   comparison, never an endpoint.
+# The endpoint-adoption snapshot stays the authoritative adoption fact; these name the reason.
+ENDPOINT_NOT_ADOPTED = "ENDPOINT_NOT_ADOPTED"
+OFFLINE_PROVIDER_RESPONSE = "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
+WIRE_CONTRACT_UNPROVEN = "WIRE_CONTRACT_UNPROVEN"
+PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
+
+DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
+    "CREATE_HANDOFF": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_CREATE_V2"),
+    "RECONCILE_LOOKUP": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_SEARCH"),
+    "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
+    "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
+    "PUBLISHED_STATE": (PUBLISHED_STATE_UNPROVEN, None),
+    "ACCOUNT_BINDING": (OFFLINE_PROVIDER_RESPONSE, None),
+}
+
+
+def _declarations() -> dict[str, dict[str, object]]:
+    adoption = _registration_adoption()
+    return {
+        seam: {
+            "reason": reason,
+            "endpoint_id": endpoint,
+            "endpoint_adopted": None if endpoint is None else adoption.get(endpoint, False),
+        }
+        for seam, (reason, endpoint) in DECLARED_SEAMS.items()
+    }
+
+
 # The owners this run drives, and so the only rows it may change: the registration tables, the
 # CONNECT rows it feeds typed evidence to, the job system and the audit log.
 OWNED_BY_THIS_RUN = ("app.register", "app.connect", "app.jobs", "app.audit")
@@ -814,6 +851,19 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
             f"SELECT COUNT(*) FROM audit_events WHERE event_type IN ({marks})", PROVIDER_AUDIT
         ).fetchone()[0]
     checks.check("boundary.no_provider_audit_event", provider_events == 0, count=provider_events)
+    # Every declaration names its own gap: only a seam whose endpoint the adapter has not adopted
+    # may claim `ENDPOINT_NOT_ADOPTED`, so an adopted contract is never described as unadopted.
+    declarations = _declarations()
+    misnamed = sorted(
+        seam
+        for seam, fact in declarations.items()
+        if (fact["reason"] == ENDPOINT_NOT_ADOPTED) is not (fact["endpoint_adopted"] is False)
+    )
+    checks.check(
+        "boundary.declarations_name_their_own_gap",
+        not misnamed and all(fact["reason"] for fact in declarations.values()),
+        misnamed=misnamed,
+    )
     # 17: the source, Product, pricing and image histories this run read are exactly as they
     # were. Only the registration owners it drove, and the CONNECT capability it fed typed
     # evidence to, changed.
@@ -929,15 +979,10 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         "execution_mode": "DRY_RUN",
         "execution_policy_version": ExecutionPolicy().version,
         "endpoint_adoption": _registration_adoption(),
-        # What this run declared because its contract is unadopted, and therefore what a PASS
-        # here does not prove about the provider.
-        "declared_seams": [
-            "CREATE_HANDOFF",
-            "READ_BACK",
-            "RECONCILE_LOOKUP",
-            "WIRE_PROJECTION",
-            "PUBLISHED_STATE",
-        ],
+        # What this run declared instead of proving, each with the reason it is a declaration:
+        # an unadopted endpoint, an adopted contract with no provider to answer it offline, an
+        # unproven wire contract, or a field the adopted read-back does not carry.
+        "declared_seams": _declarations(),
     }
     checks = Checks()
     with offline(claimed, modules=FORBIDDEN_MODULES) as guarded:

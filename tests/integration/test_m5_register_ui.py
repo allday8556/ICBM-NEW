@@ -80,7 +80,8 @@ def account(container: Container, config: AppConfig) -> str:
 
 @pytest.fixture
 def prep(container: Container, account: str) -> Preparation:
-    return preparation(container, account)
+    # The screen reads the served application's own preflight owner (see the API tests).
+    return preparation(container, account, served=True)
 
 
 @contextmanager
@@ -214,6 +215,42 @@ def test_an_auth_brake_is_shown_and_never_offered_a_resume(
         ).resume_generation
         == 0
     )
+
+
+def test_each_unit_of_a_draft_is_its_own_panel_with_the_servers_facts(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    from tests.integration.test_m5_register_api import _separate_listings
+
+    _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=1)
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        # Two provider-listing units of one Draft are two panels, each with its own identity.
+        panels = page.locator(".register-unit")
+        assert panels.count() == 2
+        first = page.locator(f".register-unit[data-unit='{frozen[0].listing_identity}']")
+        second = page.locator(f".register-unit[data-unit='{frozen[1].listing_identity}']")
+        assert first.count() == 1 and second.count() == 1
+        assert first.get_attribute("data-preparation") == "INTENT_OPEN"
+        assert second.get_attribute("data-preparation") == "SNAPSHOT_FROZEN"
+        # Neither panel shows the other's Item or the key it was frozen under.
+        assert frozen[1].item.item_id not in first.inner_text()
+        assert frozen[1].item_key not in first.inner_text()
+        assert frozen[0].item_key not in second.inner_text()
+        # The server's own facts are rendered: the category, its required fields, the QA verdict
+        # of the selected asset, and the reason no preflight evaluation exists yet.
+        assert first.locator("li[data-field='brand'][data-provided='true']").count() == 1
+        assert first.locator("li[data-field='color'][data-provided='false']").count() == 1
+        assert first.locator("td[data-assets='1'] span[data-qa='PASS']").count() == 1
+        preflight = first.locator(".register-preflight").first
+        assert preflight.get_attribute("data-preflight") == "UNAVAILABLE"
+        assert "Preflight 입력" in preflight.inner_text()
+        assert writes == []
 
 
 def test_the_page_keeps_no_registration_state_of_its_own(

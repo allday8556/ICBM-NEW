@@ -9,6 +9,7 @@ canary readiness is a derived read that authorizes nothing.
 """
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,9 +20,11 @@ from app.container import Container
 from app.core.clock import Clock
 from app.core.errors import AppError, ErrorClass
 from app.main import create_app
+from app.register.builder import RegistrationSnapshotBuilder
 from app.register.contracts import RegisterAction
 from app.register.execution import CREATE_ENDPOINT_GROUP, enqueue_create
-from app.register.model import IntentState, ScopePauseReason
+from app.register.model import IntentState, ListingShape, ScopePauseReason
+from app.register.preparation import UnitRequest
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
@@ -32,8 +35,21 @@ from tests.integration.test_m5_register_execution import (
     execution,
     prepare,
 )
-from tests.product_support import Collections
-from tests.register_support import MARKET, OPERATOR, Preparation, establish, preparation
+from tests.product_support import Collections, product
+from tests.register_support import (
+    CATEGORY,
+    CID,
+    MARKET,
+    OPERATOR,
+    Preparation,
+    ReadyItem,
+    draft,
+    establish,
+    preparation,
+    ready_final,
+    ready_item,
+    request,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -68,7 +84,80 @@ def account(container: Container, config: AppConfig) -> str:
 
 @pytest.fixture
 def prep(container: Container, account: str) -> Preparation:
-    return preparation(container, account)
+    # The served application re-evaluates through its **own** preflight owner, so this test
+    # configures that owner's sources rather than only its own.
+    return preparation(container, account, served=True)
+
+
+@dataclass(frozen=True)
+class Frozen:
+    """One provider-listing unit this test froze, and the Intent it opened for it (if any)."""
+
+    item: ReadyItem
+    snapshot_id: str
+    listing_identity: str
+    item_key: str
+    intent_id: str | None
+
+
+def _separate_listings(
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+    *,
+    intents: int,
+) -> tuple[str, list[Frozen]]:
+    """One `SEPARATE_LISTINGS` Draft holding two Items: **two** provider-listing units (§2, R3).
+
+    Each is frozen as its own Snapshot with its own `registration_item_key`; ``intents`` says how
+    many of them also open an Intent, so a Snapshot without one can be shown as well.
+    """
+    store = container.registrations
+    builder = RegistrationSnapshotBuilder(preflight=prep.service, registrations=store)
+    items = [
+        ready_item(container, sources, "1234"),
+        ready_item(container, sources, "5678"),
+    ]
+    draft_id = draft(store, account, items, ListingShape.SEPARATE_LISTINGS)
+    current = store.draft(draft_id)
+    assert current is not None
+    frozen: list[Frozen] = []
+    for position, item in enumerate(items):
+        req = request(
+            store,
+            draft_id,
+            account,
+            [item],
+            unit=UnitRequest(draft_id, current.draft_revision, (item.item_id,)),
+        )
+        req, final = ready_final(prep, req)
+        snapshot = builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
+        intent_id = None
+        if position < intents:
+            with store.transaction() as work:
+                batch = work.create_batch(MARKET, account, created_by=OPERATOR, correlation_id=CID)
+                intent = work.create_intent(
+                    batch,
+                    snapshot.registration_snapshot_id,
+                    created_by=OPERATOR,
+                    correlation_id=CID,
+                )
+            intent_id = intent.intent_id
+        frozen.append(
+            Frozen(
+                item,
+                snapshot.registration_snapshot_id,
+                snapshot.listing_identity,
+                snapshot.items[0].registration_item_key,
+                intent_id,
+            )
+        )
+    return draft_id, frozen
+
+
+def _by_ref(units: list[dict]) -> dict[str, dict]:
+    return {str(unit["unit_ref"]): unit for unit in units}
 
 
 def _get(api: TestClient, path: str) -> dict:
@@ -282,6 +371,165 @@ def test_a_policy_brake_is_resumed_by_the_operator_through_the_server(
     assert _unit(api)["scope"]["state"] == "ACTIVE"
 
 
+def test_each_provider_listing_unit_of_one_draft_is_its_own_row(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # ADR-0014 §2 (R3): a SEPARATE_LISTINGS Draft with two Items is two provider-listing units.
+    _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=2)
+    units = _by_ref(_get(api, OVERVIEW)["units"])
+    assert set(units) == {unit.listing_identity for unit in frozen}
+    for unit in frozen:
+        view = units[unit.listing_identity]
+        # Each unit carries its own Snapshot, Intent and Item — and only its own.
+        assert view["snapshot"]["registration_snapshot_id"] == unit.snapshot_id
+        assert view["intent"]["intent_id"] == unit.intent_id
+        assert [item["item_id"] for item in view["items"]] == [unit.item.item_id]
+        assert view["items"][0]["registration_item_key"] == unit.item_key
+        assert view["preparation"] == "INTENT_OPEN"
+    # No sibling leaks into the other panel: neither the Item nor the key it was frozen under.
+    first, second = (units[unit.listing_identity] for unit in frozen)
+    keys = [item["registration_item_key"] for view in (first, second) for item in view["items"]]
+    assert len(set(keys)) == 2
+    assert first["intent"]["intent_id"] != second["intent"]["intent_id"]
+
+
+def test_a_multi_unit_draft_never_passes_the_single_canary_unit_gate(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    draft_id, _frozen = _separate_listings(container, sources, account, prep, intents=2)
+    canary = _get(api, f"{CANARY}?draft_id={draft_id}")
+    assert canary["verdict"] == "BLOCKED"
+    # The Draft holds two provider-listing units, so it is not one canary unit — the gate counts
+    # units, never Draft panels.
+    assert "SINGLE_UNIT" in canary["missing"]
+    missing = {item["requirement"]: item for item in canary["requirements"]}
+    assert missing["SINGLE_UNIT"]["reason_code"] == "MORE_THAN_ONE_UNIT_SELECTED"
+
+
+def test_a_frozen_unit_without_an_intent_is_shown_and_survives_a_reload(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=1)
+    units = _by_ref(_get(api, OVERVIEW)["units"])
+    waiting = units[frozen[1].listing_identity]
+    assert frozen[1].intent_id is None
+    # A Snapshot an Intent does not yet name is still a unit, and it says exactly that.
+    assert waiting["preparation"] == "SNAPSHOT_FROZEN"
+    assert waiting["intent"] is None
+    assert waiting["snapshot"]["registration_snapshot_id"] == frozen[1].snapshot_id
+    assert [item["item_id"] for item in waiting["items"]] == [frozen[1].item.item_id]
+    assert units[frozen[0].listing_identity]["preparation"] == "INTENT_OPEN"
+    # A reload rebuilds it from the durable rows, with nothing held in a page or this process.
+    again = RegisterService(
+        registrations=RegistrationStore(container.db, container.clock, container.audit),
+        execution=container.registration_execution,
+        preflight=container.registration_preflight,
+        accounts=container.accounts,
+        jobs=container.jobs,
+        capability=container.marketplace_capability,
+        adoption=SmartStoreAdoption(),
+    ).overview()
+    reloaded = {unit.unit_ref: unit for unit in again.units}
+    assert reloaded[frozen[1].listing_identity].preparation.value == "SNAPSHOT_FROZEN"
+
+
+def test_the_screen_shows_the_servers_own_preflight_category_price_and_qa(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    # The preflight is recomputed from the operator's frozen inputs, and the only durable copy of
+    # them is the send request a CREATE job carries.
+    enqueue_create(
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
+    )
+    unit = _unit(api)
+    preflight = unit["preflight"]
+    assert preflight["status"] == "READY" and preflight["reason_codes"] == []
+    assert preflight["fingerprint_matches_snapshot"] is True
+    assert unit["preflight_unavailable_reason"] is None
+    # The category and what its reviewed metadata requires, with what the Snapshot actually sent.
+    category = unit["category"]
+    assert category["category_id"] == CATEGORY and category["reviewed"] is True
+    fields = {field["key"]: field for field in category["attributes"]}
+    assert fields["brand"] == {
+        "key": "brand",
+        "required": True,
+        "provided": True,
+        "detail_page_reference_allowed": False,
+    }
+    assert fields["color"]["required"] is False and fields["color"]["provided"] is False
+    notice = {field["key"]: field for field in category["notice_fields"]}
+    assert notice["manufacturer"]["provided"] is True and notice["origin"]["provided"] is True
+    # The pinned price, the current M4 price and the server's own comparison of the two.
+    item = unit["items"][0]
+    assert item["sale_price_krw"] == item["current_sale_price_krw"] > 0
+    assert item["price_basis"] == item["current_price_basis"]
+    assert item["price_pin_current"] is True
+    assert item["base_status"] == "READY" and item["pricing_status"] == "READY"
+    # The selected publication assets are identities with their M4 QA, never a count.
+    asset = item["publication_assets"][0]
+    assert len(asset["sha256"]) == 64 and asset["qa_verdict"] == "PASS"
+    assert asset["provider_asset_prepared"] is True
+
+
+def test_a_reprice_shows_a_stale_pin_and_the_preflight_reason_codes(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    enqueue_create(
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
+    )
+    before = _unit(api)["items"][0]
+    # The same source product collected again at another price: M4 moves, the Draft pin does not.
+    run_id, _revision = sources.collect(product(price=24500), source_product_id="1234")
+    result = container.materializer.materialize_run(run_id)
+    assert result.item_id == before["item_id"]
+    repriced = container.pricing.price(
+        result.item_id, prep.policies.target(MARKET, account).pricing_context
+    )
+    assert repriced.snapshot is not None
+    item = _unit(api)["items"][0]
+    # The screen shows both prices and the server's verdict that the pin is no longer current.
+    assert item["sale_price_krw"] == before["sale_price_krw"]
+    assert item["current_pricing_snapshot_id"] == repriced.snapshot.pricing_snapshot_id
+    assert item["current_sale_price_krw"] != item["sale_price_krw"]
+    assert item["price_pin_current"] is False
+    # Every reason the owners returned is carried: the M4 layers and the preflight that refuses.
+    unit = _unit(api)
+    assert unit["preflight"]["status"] != "READY"
+    assert unit["preflight"]["reason_codes"]
+    assert unit["preflight"]["fingerprint_matches_snapshot"] is False
+    assert item["base_reason_codes"] or item["pricing_reason_codes"]
+
+
 def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     api: TestClient,
     container: Container,
@@ -323,6 +571,7 @@ def test_a_reload_reconstructs_the_same_view_from_durable_rows(
     again = RegisterService(
         registrations=RegistrationStore(container.db, container.clock, container.audit),
         execution=container.registration_execution,
+        preflight=container.registration_preflight,
         accounts=container.accounts,
         jobs=container.jobs,
         capability=container.marketplace_capability,

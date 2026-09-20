@@ -220,6 +220,7 @@ def open_owners(
             register=RegisterService(
                 registrations=registrations,
                 execution=execution,
+                preflight=preflight,
                 accounts=accounts,
                 jobs=jobs,
                 capability=capability,

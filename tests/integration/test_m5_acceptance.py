@@ -119,6 +119,7 @@ REQUIRED_CHECKS = {
     "16 a replay after confirmation is a no-op": ("s16.replay_is_a_no_op",),
     "17 the upstream histories are unchanged": ("s17.upstream_history_unchanged",),
     "the provider boundary": (
+        "boundary.declarations_name_their_own_gap",
         "boundary.provider_transport_unloadable",
         "boundary.real_wire_projection_refuses",
         "boundary.create_not_adopted",
@@ -190,15 +191,38 @@ def test_each_required_proof_is_a_passing_check(accepted: Accepted, names: tuple
 
 def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Accepted) -> None:
     report = accepted.report
-    # What is declared because its contract is unadopted — and therefore what a PASS here does
-    # not prove about the provider.
-    assert set(report["declared_seams"]) == {
+    # What is declared instead of proven, and **why** each one is a declaration: the gaps are
+    # different, and a PASS here proves a different thing about each.
+    declared = report["declared_seams"]
+    assert set(declared) == {
         "CREATE_HANDOFF",
         "READ_BACK",
         "RECONCILE_LOOKUP",
         "WIRE_PROJECTION",
         "PUBLISHED_STATE",
+        "ACCOUNT_BINDING",
     }
+    assert declared["CREATE_HANDOFF"] == {
+        "reason": "ENDPOINT_NOT_ADOPTED",
+        "endpoint_id": "SMARTSTORE_PRODUCT_CREATE_V2",
+        "endpoint_adopted": False,
+    }
+    assert declared["RECONCILE_LOOKUP"]["reason"] == "ENDPOINT_NOT_ADOPTED"
+    # The read-back contract **is** adopted: it is declared because an offline run has no provider
+    # to answer it, and it is never reported as unadopted.
+    assert declared["READ_BACK"] == {
+        "reason": "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE",
+        "endpoint_id": "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
+        "endpoint_adopted": True,
+    }
+    # A wire contract and a published state are gaps of their own, not endpoints.
+    assert declared["WIRE_PROJECTION"]["reason"] == "WIRE_CONTRACT_UNPROVEN"
+    assert declared["PUBLISHED_STATE"] == {
+        "reason": "PUBLISHED_STATE_UNPROVEN",
+        "endpoint_id": None,
+        "endpoint_adopted": None,
+    }
+    assert declared["ACCOUNT_BINDING"]["reason"] == "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
     assert report["account_scope"]["synthetic_connect_binding"] is True
     adoption = report["endpoint_adoption"]
     assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is False

@@ -366,6 +366,14 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.conflicting_intents(registration_snapshot_id)
 
+    def snapshots_of_draft(self, draft_id: str, *, limit: int = 50) -> tuple[SnapshotRecord, ...]:
+        with self.reading() as unit:
+            return unit.snapshots_of_draft(draft_id, limit=limit)
+
+    def pricing_pin(self, pricing_snapshot_id: str) -> PricingSnapshotRecord | None:
+        with self.reading() as unit:
+            return unit.pricing_pin(pricing_snapshot_id)
+
     def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
         with self.reading() as unit:
             return unit.snapshot_payload(registration_snapshot_id)
@@ -809,6 +817,25 @@ class RegistrationUnit:
                 for i in items
             ),
         )
+
+    def snapshots_of_draft(self, draft_id: str, *, limit: int = 50) -> tuple[SnapshotRecord, ...]:
+        """Every Snapshot this Draft has frozen, newest first.
+
+        A Draft holds **one Snapshot per provider-listing unit** (§2, R3): `SEPARATE_LISTINGS`
+        freezes one per Item, and re-freezing a unit adds a generation. The operator surface reads
+        them all, so no unit of a Draft is hidden behind another.
+        """
+        rows = self.session.scalars(
+            select(RegistrationSnapshot.registration_snapshot_id)
+            .where(RegistrationSnapshot.draft_id == draft_id)
+            .order_by(
+                RegistrationSnapshot.created_at.desc(),
+                RegistrationSnapshot.registration_snapshot_id,
+            )
+            .limit(limit)
+        ).all()
+        found = [self.snapshot(snapshot_id) for snapshot_id in rows]
+        return tuple(record for record in found if record is not None)
 
     def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
         """The frozen canonical payload of one Snapshot — what was actually sent (§6).

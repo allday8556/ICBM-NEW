@@ -87,8 +87,32 @@ class AttemptView(BaseModel):
     started_at: datetime | None
 
 
+class AssetView(BaseModel):
+    """One selected publication asset of an Item, by its exact local identity (§5, R1).
+
+    The identity is the M4 artifact's own: the role it publishes in, its kind, the exact binary and
+    the derivation that produced it. The QA verdict is the M4 image owner's, for **that** binary
+    under the selection's validated revision — never a count and never a provider URL.
+    """
+
+    role: str
+    asset_kind: str
+    sha256: str
+    derivation_id: str | None
+    qa_verdict: str | None
+    qa_result_id: str | None
+    # Whether a provider-issued identity was frozen for it. The reference itself is never exposed.
+    provider_asset_prepared: bool = False
+
+
 class ItemView(BaseModel):
-    """One Item of the unit, with the exact M4 price the Draft pinned (§2)."""
+    """One Item of the unit: its pinned price, the current M4 price, its M4 readiness and assets.
+
+    The pinned price is the exact `PricingSnapshot` the Draft froze (§2); the current one is what
+    the M4 pricing owner holds for the account's target context **now**. Both are shown because a
+    reprice makes them differ, and `price_pin_current` is the server's own comparison — the screen
+    never computes it.
+    """
 
     item_id: str
     product_group_id: str
@@ -98,7 +122,17 @@ class ItemView(BaseModel):
     sale_price_krw: int | None
     price_basis: str | None
     registration_item_key: str | None
-    publication_assets: int
+    publication_assets: tuple[AssetView, ...] = ()
+    # The M4 target price now, and whether the pin is still it (server verdicts, §22).
+    current_pricing_snapshot_id: str | None = None
+    current_sale_price_krw: int | None = None
+    current_price_basis: str | None = None
+    price_pin_current: bool | None = None
+    # The M4 owners' own readiness for this Item, with every reason code they returned.
+    base_status: str | None = None
+    base_reason_codes: tuple[str, ...] = ()
+    pricing_status: str | None = None
+    pricing_reason_codes: tuple[str, ...] = ()
 
 
 class SnapshotView(BaseModel):
@@ -107,6 +141,49 @@ class SnapshotView(BaseModel):
     preflight_fingerprint: str
     payload_hash: str
     draft_revision: int
+
+
+class FieldStateView(BaseModel):
+    """One field the category or the platform declares, and whether the unit carries it (§4).
+
+    `provided` is read from the Snapshot's frozen payload — what was actually sent — never from a
+    guess about what an operator would type. Only the key is shown: a value is product text and
+    the screen has the product for that.
+    """
+
+    key: str
+    required: bool
+    provided: bool
+    detail_page_reference_allowed: bool = False
+
+
+class CategoryView(BaseModel):
+    """The unit's category and the required-field state under its reviewed metadata (§4)."""
+
+    category_id: str
+    mapping_revision: str
+    taxonomy_revision: str
+    metadata_revision: str | None = None
+    # None when the metadata source has no reviewed entry for this taxonomy revision.
+    reviewed: bool | None = None
+    notice_type: str | None = None
+    attributes: tuple[FieldStateView, ...] = ()
+    notice_fields: tuple[FieldStateView, ...] = ()
+
+
+class PreflightView(BaseModel):
+    """The preflight re-evaluated from current truth, by the owner that decides it (§3).
+
+    It is derived, never stored. `fingerprint_matches_snapshot` is the same comparison the send
+    gate makes: a false one means a dependency moved since the Snapshot was frozen, which is why
+    the status and **every** reason code are carried with it.
+    """
+
+    status: str
+    reason_codes: tuple[str, ...]
+    rule_version: str
+    dependency_fingerprint: str
+    fingerprint_matches_snapshot: bool | None = None
 
 
 class IntentView(BaseModel):
@@ -122,8 +199,15 @@ class IntentView(BaseModel):
 
 
 class UnitView(BaseModel):
-    """One provider-listing unit as the server holds it, from Draft to verified registration."""
+    """One **provider-listing unit** as the server holds it, from Draft to verified registration.
 
+    A Draft may hold several (§2, R3): `SEPARATE_LISTINGS` gives one per Item, each with its own
+    Snapshot, Intent, Attempts and actions. Each is its own row here — a Draft is never collapsed
+    into one panel — and a frozen unit's Items are exactly the Snapshot's, never the Draft's.
+    """
+
+    # Stable within a Draft: the frozen unit's listing identity, or the prospective unit's Items.
+    unit_ref: str
     draft_id: str
     draft_revision: int
     listing_shape: ListingShape
@@ -132,6 +216,13 @@ class UnitView(BaseModel):
     account_binding: AccountBinding
     preparation: PreparationState
     items: tuple[ItemView, ...]
+    category: CategoryView | None = None
+    preflight: PreflightView | None = None
+    # Why no preflight is shown, as a server code: its operator inputs are durable only in the
+    # frozen send request a CREATE job carries, so a unit without one has no evaluation to show.
+    preflight_unavailable_reason: str | None = None
+    # Why the per-Item M4 facts are absent, as the owner that refused them named it.
+    item_facts_unavailable_reason: str | None = None
     snapshot: SnapshotView | None
     intent: IntentView | None
     registration_id: str | None

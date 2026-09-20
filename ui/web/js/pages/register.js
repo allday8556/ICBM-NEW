@@ -82,6 +82,9 @@ const REASON_COPY = {
   REGISTER_SCOPE_NOT_PAUSED: '중단된 범위가 없습니다.',
   REGISTER_SCOPE_RESUME_NOT_PERMITTED: '인증 중단은 재인증으로만 풀립니다.',
   REGISTER_ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
+  REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE:
+    '이 단위의 Preflight 입력이 서버에 남아 있지 않아 지금 평가를 보여줄 수 없습니다.',
+  REGISTER_TARGET_POLICY_MISSING: '이 계정의 등록 정책이 아직 설정되지 않았습니다.',
   ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
   PROOF_NOT_AVAILABLE_IN_PROCESS: '실행 중인 앱에서는 증명할 수 없는 항목입니다.',
   ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
@@ -115,15 +118,94 @@ function table(headers, rows) {
   );
 }
 
+function won(amount) {
+  return amount === null || amount === undefined ? '—' : `${amount.toLocaleString('ko-KR')}원`;
+}
+
+function statusChip(status, codes) {
+  if (!status) return '—';
+  return fragment(
+    chip(status, status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
+    ...(codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, code)),
+  );
+}
+
 function itemRow(item) {
+  const assets = item.publication_assets ?? [];
   return h(
     'tr',
-    {},
+    { 'data-item': item.item_id, 'data-price-current': String(item.price_pin_current) },
     h('td', {}, item.item_id),
-    h('td', {}, item.sale_price_krw === null ? '—' : `${item.sale_price_krw.toLocaleString('ko-KR')}원`),
+    h('td', {}, won(item.sale_price_krw)),
     h('td', {}, item.price_basis ?? '—'),
+    // The current M4 price of the same Item: a pin that is no longer current is visible here,
+    // and whether it is current is the server's own verdict.
+    h(
+      'td',
+      {},
+      won(item.current_sale_price_krw),
+      item.price_pin_current === false ? chip('고정가 아님', 'warn') : null,
+    ),
+    h('td', {}, statusChip(item.base_status, item.base_reason_codes)),
+    h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes)),
     h('td', {}, item.registration_item_key ?? '—'),
-    h('td', {}, String(item.publication_assets)),
+    h(
+      'td',
+      { 'data-assets': String(assets.length) },
+      ...assets.map((asset) =>
+        h(
+          'span',
+          { class: 'mini', 'data-asset': asset.sha256, 'data-qa': asset.qa_verdict ?? 'NONE' },
+          `${asset.role} ${asset.sha256.slice(0, 8)} ${asset.qa_verdict ?? 'QA 없음'}`,
+        ),
+      ),
+    ),
+  );
+}
+
+function fieldRow(field) {
+  return h(
+    'li',
+    { 'data-field': field.key, 'data-provided': field.provided ? 'true' : 'false' },
+    h('span', {}, field.key),
+    chip(field.provided ? '입력됨' : '없음', field.provided ? 'good' : field.required ? 'bad' : 'warn'),
+    field.required ? chip('필수') : null,
+  );
+}
+
+function categoryBlock(category) {
+  const fields = [...category.attributes, ...category.notice_fields];
+  return h(
+    'div',
+    { class: 'register-category', 'data-category': category.category_id },
+    kv('카테고리', category.category_id),
+    kv('분류 리비전', category.taxonomy_revision),
+    category.notice_type ? kv('정보고시', category.notice_type) : null,
+    fields.length ? h('ul', { class: 'requirement-list' }, ...fields.map(fieldRow)) : null,
+  );
+}
+
+function preflightBlock(unit) {
+  if (!unit.preflight) {
+    return h(
+      'div',
+      { class: 'register-preflight', 'data-preflight': 'UNAVAILABLE' },
+      kv('Preflight', '평가 없음'),
+      reason(unit.preflight_unavailable_reason),
+    );
+  }
+  const preflight = unit.preflight;
+  return h(
+    'div',
+    { class: 'register-preflight', 'data-preflight': preflight.status },
+    h(
+      'div',
+      { class: 'supplier-head-row' },
+      h('b', {}, 'Preflight'),
+      chip(preflight.status, preflight.status === 'READY' ? 'good' : 'warn'),
+      preflight.fingerprint_matches_snapshot === false ? chip('스냅샷과 다름', 'warn') : null,
+    ),
+    ...preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, code)),
   );
 }
 
@@ -192,6 +274,7 @@ function actionCell(unit, action, onDone) {
       disabled: !action.enabled,
       'data-action': action.action,
       'data-draft': unit.draft_id,
+      'data-unit': unit.unit_ref,
       onclick: () => run(unit, action, button, onDone),
     },
     ACTION_LABEL[action.action] ?? action.action,
@@ -203,14 +286,20 @@ function unitPanel(unit, onDone) {
   const intent = unit.intent;
   return h(
     'section',
-    { class: 'panel register-unit', 'data-draft': unit.draft_id },
+    {
+      class: 'panel register-unit',
+      'data-draft': unit.draft_id,
+      'data-unit': unit.unit_ref,
+      'data-preparation': unit.preparation,
+    },
     h(
       'div',
       { class: 'supplier-head-row' },
-      h('h2', { class: 'panel-title' }, unit.draft_id),
+      h('h2', { class: 'panel-title' }, unit.unit_ref),
       chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
       intent ? chip(INTENT_LABEL[intent.state] ?? intent.state, INTENT_TONE[intent.state]) : null,
     ),
+    kv('초안', unit.draft_id),
     kv('리스팅 형태', unit.listing_shape),
     kv('판매 계정', unit.marketplace_account_id),
     kv('계정 연결', unit.account_binding),
@@ -221,7 +310,13 @@ function unitPanel(unit, onDone) {
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
     unit.conflicting_intents.length ? kv('충돌 중인 요청', String(unit.conflicting_intents.length)) : null,
-    table(['품목', '판매가', '가격 근거', '등록 품목 키', '이미지'], unit.items.map(itemRow)),
+    unit.category ? categoryBlock(unit.category) : null,
+    preflightBlock(unit),
+    unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
+    table(
+      ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],
+      unit.items.map(itemRow),
+    ),
     intent && intent.attempts.length
       ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], intent.attempts.map(attemptRow))
       : null,

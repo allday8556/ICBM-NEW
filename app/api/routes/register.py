@@ -45,8 +45,9 @@ def canary(container: ContainerDep, draft_id: str | None = None) -> CanaryReadin
 
 
 @router.get("/units/{draft_id}")
-def unit(container: ContainerDep, draft_id: str) -> UnitView:
-    return container.register.unit(draft_id)
+def units(container: ContainerDep, draft_id: str) -> tuple[UnitView, ...]:
+    """Every provider-listing unit of one Draft: a Draft is never one row (ADR-0014 §2, R3)."""
+    return container.register.units(draft_id)
 
 
 @router.post("/intents/{intent_id}/create")

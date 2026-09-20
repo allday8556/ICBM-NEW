@@ -329,6 +329,7 @@ def build_container(
     register_service = RegisterService(
         registrations=registrations,
         execution=registration_execution,
+        preflight=registration_preflight,
         accounts=accounts,
         jobs=jobs,
         capability=marketplace_capability,

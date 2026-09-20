@@ -173,7 +173,14 @@ class Preparation:
     policies: StaticRegistrationPolicy
 
 
-def preparation(container: Container, account: str) -> Preparation:
+def preparation(container: Container, account: str, *, served: bool = False) -> Preparation:
+    """A preflight owner over this container's real owners, with test-owned sources.
+
+    With ``served``, the **application's own** preflight owner is pointed at the same sources, the
+    way a deployment configures them. The Registration Management surface re-evaluates a unit
+    through that owner, so without this it would read an account with no registration policy and
+    report that instead of the truth this preparation froze.
+    """
     capability = FakeCapability()
     entries = StaticRegistrationMetadata((metadata(),))
     policies = StaticRegistrationPolicy((target(account),))
@@ -186,6 +193,11 @@ def preparation(container: Container, account: str) -> Preparation:
         metadata=entries,
         policies=policies,
     )
+    if served:
+        deployed = container.registration_preflight
+        deployed._policies = policies
+        deployed._metadata = entries
+        deployed._capability = capability
     return Preparation(service, capability, entries, policies)
 
 

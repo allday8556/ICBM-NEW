@@ -40,9 +40,13 @@ from app.register.canary import (
 from app.register.contracts import (
     ActionResult,
     ActionView,
+    AssetView,
     AttemptView,
+    CategoryView,
+    FieldStateView,
     IntentView,
     ItemView,
+    PreflightView,
     PreparationState,
     RegisterAction,
     RegisterOverview,
@@ -55,6 +59,8 @@ from app.register.execution import (
     CREATE_JOB_TYPE,
     BudgetState,
     RegistrationExecutionService,
+    decode_send_request,
+    frozen_unit_identity,
     queue_send_request,
     target_ref,
 )
@@ -63,11 +69,11 @@ from app.register.model import (
     IntentState,
     ScopePauseReason,
     VerificationState,
-    registration_item_key,
 )
-from app.register.preflight import CapabilityReader
+from app.register.preflight import CapabilityReader, RegistrationPreflightService
 from app.register.store import (
     AttemptRecord,
+    DraftItemRecord,
     DraftRecord,
     IntentRecord,
     RegistrationStore,
@@ -91,6 +97,12 @@ SCOPE_ACTIVE = "REGISTER_SCOPE_NOT_PAUSED"
 RESUME_NOT_PERMITTED = "REGISTER_SCOPE_RESUME_NOT_PERMITTED"
 ACCOUNT_NOT_BOUND = "REGISTER_ACCOUNT_NOT_BOUND"
 
+# Why a derived value is absent. A preflight is recomputed from the operator's own inputs, and the
+# only durable copy of those is the frozen send request a CREATE job carries: a unit without one
+# has no evaluation to show, and this surface names that rather than omitting the row (PR-F §B).
+PREFLIGHT_INPUTS_NOT_DURABLE = "REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE"
+PREFLIGHT_OWNER_ABSENT = "REGISTER_PREFLIGHT_NOT_WIRED"
+
 # The execution scope this surface acts in, the one marketplace M5 registers to, and the default
 # external-write mode (ADR-0014 §24). None of them is a decision this owner makes.
 _CREATE_GROUP = "product_registration"
@@ -106,6 +118,7 @@ class RegisterService:
         *,
         registrations: RegistrationStore | None = None,
         execution: RegistrationExecutionService | None = None,
+        preflight: RegistrationPreflightService | None = None,
         accounts: MarketplaceAccountStore | None = None,
         jobs: JobService | None = None,
         capability: CapabilityReader | None = None,
@@ -115,6 +128,7 @@ class RegisterService:
     ) -> None:
         self._registrations = registrations
         self._execution = execution
+        self._preflight = preflight
         self._accounts = accounts
         self._jobs = jobs
         self._capability = capability
@@ -137,9 +151,8 @@ class RegisterService:
     def overview(self, *, limit: int = 50) -> RegisterOverview:
         store = self._require_store()
         drafts = store.drafts(limit=limit)
-        snapshots = {s.draft_id: s for s in self._snapshots_of(drafts)}
-        intents = {i.registration_snapshot_id: i for i in store.intents(limit=limit * 2)}
-        units = tuple(self._unit(draft, snapshots.get(draft.draft_id), intents) for draft in drafts)
+        intents = {i.registration_snapshot_id: i for i in store.intents(limit=limit * 4)}
+        units = tuple(unit for draft in drafts for unit in self._units_of(draft, intents))
         return RegisterOverview(
             registration_candidates_total=self.registration_candidate_count(),
             registrations_total=self.registration_count(),
@@ -154,7 +167,7 @@ class RegisterService:
         an unadopted endpoint as **not adopted**, never as absent or unnecessary — and a running
         application cannot prove its own checkout, so that requirement stays unproven here.
         """
-        units = self.overview().units if draft_id is None else (self.unit(draft_id),)
+        units = self.overview().units if draft_id is None else self.units(draft_id)
         selected = [u for u in units if u.intent is not None] or list(units)
         unit = selected[0] if len(selected) == 1 else None
         capability = self._capability_facts()
@@ -182,14 +195,14 @@ class RegisterService:
             write_status=capability[2],
         )
 
-    def unit(self, draft_id: str) -> UnitView:
+    def units(self, draft_id: str) -> tuple[UnitView, ...]:
+        """Every provider-listing unit of one Draft (§2, R3), frozen or still a preparation."""
         store = self._require_store()
         draft = store.draft(draft_id)
         if draft is None:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "no such registration draft")
-        snapshot = next((s for s in self._snapshots_of([draft])), None)
         intents = {i.registration_snapshot_id: i for i in store.intents(limit=200)}
-        return self._unit(draft, snapshot, intents)
+        return self._units_of(draft, intents)
 
     # ------------------------------------------------------------------ actions (§22, PR-F §B)
 
@@ -267,14 +280,107 @@ class RegisterService:
 
     # ------------------------------------------------------------------ views
 
-    def _unit(
-        self,
-        draft: DraftRecord,
-        snapshot: SnapshotRecord | None,
-        intents: Mapping[str, IntentRecord],
+    def _units_of(
+        self, draft: DraftRecord, intents: Mapping[str, IntentRecord]
+    ) -> tuple[UnitView, ...]:
+        """One view per provider-listing unit of this Draft — never one row for the Draft (§2).
+
+        A frozen unit is its newest Snapshot for exactly that set of Items, with that Snapshot's
+        own Intent, Attempts and actions; an older generation of the same unit stays history, and
+        an unresolved one is still named by the conflict scope. The Items the shape would still
+        form, and that no current-revision Snapshot covers, are shown separately as preparations:
+        a prospective unit never borrows a frozen unit's identity, keys or actions.
+        """
+        store = self._require_store()
+        newest: dict[tuple[str, ...], SnapshotRecord] = {}
+        for snapshot in store.snapshots_of_draft(draft.draft_id):
+            newest.setdefault(_unit_items(snapshot), snapshot)
+        frozen = [
+            self._frozen_unit(draft, snapshot, intents.get(snapshot.registration_snapshot_id))
+            for snapshot in newest.values()
+        ]
+        covered = {
+            key
+            for key, snapshot in newest.items()
+            if snapshot.draft_revision == draft.draft_revision
+        }
+        drafted = [
+            self._drafted_unit(draft, item_ids)
+            for item_ids in self._prospective_units(draft)
+            if tuple(sorted(item_ids)) not in covered
+        ]
+        return tuple(frozen + drafted)
+
+    def _prospective_units(self, draft: DraftRecord) -> tuple[tuple[str, ...], ...]:
+        """What the preflight owner says this Draft's open Items would form (§2). Never derived
+        here: without that owner no preparation is shown rather than a composition being guessed."""
+        if self._preflight is None:
+            return ()
+        try:
+            return self._preflight.prospective_units(draft.draft_id)
+        except AppError:  # pragma: no cover - the Draft was read a moment ago
+            return ()
+
+    def _frozen_unit(
+        self, draft: DraftRecord, snapshot: SnapshotRecord, intent: IntentRecord | None
     ) -> UnitView:
         store = self._require_store()
-        intent = None if snapshot is None else intents.get(snapshot.registration_snapshot_id)
+        payload = store.snapshot_payload(snapshot.registration_snapshot_id) or {}
+        facts, facts_problem = self._item_facts(draft.draft_id, _unit_items(snapshot))
+        preflight, preflight_problem = self._preflight_of(snapshot, intent)
+        return self._unit_view(
+            draft,
+            unit_ref=snapshot.listing_identity,
+            preparation=(
+                PreparationState.INTENT_OPEN
+                if intent is not None
+                else PreparationState.SNAPSHOT_FROZEN
+            ),
+            items=self._frozen_items(snapshot, payload, facts),
+            category=self._category_of(payload),
+            preflight=preflight,
+            preflight_unavailable_reason=preflight_problem,
+            item_facts_unavailable_reason=facts_problem,
+            snapshot=snapshot,
+            intent=intent,
+            conflicting_intents=store.conflicting_intents(snapshot.registration_snapshot_id),
+        )
+
+    def _drafted_unit(self, draft: DraftRecord, item_ids: Sequence[str]) -> UnitView:
+        """A unit that exists only as a preparation: no Snapshot froze it, so it has no listing
+        identity, no `registration_item_key` and no Intent — and none is invented for it."""
+        chosen = [item for item in draft.items if item.item_id in set(item_ids)]
+        facts, facts_problem = self._item_facts(draft.draft_id, tuple(sorted(item_ids)))
+        return self._unit_view(
+            draft,
+            unit_ref=f"{draft.draft_id}:{'+'.join(str(item.ordinal) for item in chosen)}",
+            preparation=PreparationState.DRAFTED,
+            items=self._drafted_items(chosen, facts),
+            category=None,
+            preflight=None,
+            preflight_unavailable_reason=PREFLIGHT_INPUTS_NOT_DURABLE,
+            item_facts_unavailable_reason=facts_problem,
+            snapshot=None,
+            intent=None,
+            conflicting_intents=(),
+        )
+
+    def _unit_view(
+        self,
+        draft: DraftRecord,
+        *,
+        unit_ref: str,
+        preparation: PreparationState,
+        items: tuple[ItemView, ...],
+        category: CategoryView | None,
+        preflight: PreflightView | None,
+        preflight_unavailable_reason: str | None,
+        item_facts_unavailable_reason: str | None,
+        snapshot: SnapshotRecord | None,
+        intent: IntentRecord | None,
+        conflicting_intents: tuple[str, ...],
+    ) -> UnitView:
+        store = self._require_store()
         attempts = () if intent is None else store.attempts(intent.intent_id)
         scope = self._scope_record(draft.marketplace_key, draft.marketplace_account_id)
         budget = self._budget_of(draft.marketplace_key, draft.marketplace_account_id, scope)
@@ -282,20 +388,19 @@ class RegisterService:
         registration = self._registration_of(intent)
         live = self._live_job(intent)
         return UnitView(
+            unit_ref=unit_ref,
             draft_id=draft.draft_id,
             draft_revision=draft.draft_revision,
             listing_shape=draft.listing_shape,
             marketplace_key=draft.marketplace_key,
             marketplace_account_id=draft.marketplace_account_id,
             account_binding=binding,
-            preparation=(
-                PreparationState.DRAFTED
-                if snapshot is None
-                else PreparationState.INTENT_OPEN
-                if intent is not None
-                else PreparationState.SNAPSHOT_FROZEN
-            ),
-            items=self._items(draft, snapshot),
+            preparation=preparation,
+            items=items,
+            category=category,
+            preflight=preflight,
+            preflight_unavailable_reason=preflight_unavailable_reason,
+            item_facts_unavailable_reason=item_facts_unavailable_reason,
             snapshot=None if snapshot is None else _snapshot_view(snapshot),
             intent=(
                 None
@@ -313,11 +418,7 @@ class RegisterService:
             ),
             registration_id=None if registration is None else registration[0],
             published_state=None if registration is None else registration[1],
-            conflicting_intents=(
-                ()
-                if snapshot is None
-                else store.conflicting_intents(snapshot.registration_snapshot_id)
-            ),
+            conflicting_intents=conflicting_intents,
             scope=self._scope_view(scope, budget=budget),
             actions=self._actions(intent, scope, budget, binding, live),
         )
@@ -399,55 +500,174 @@ class RegisterService:
             return RESUME_NOT_PERMITTED
         return None
 
-    def _items(self, draft: DraftRecord, snapshot: SnapshotRecord | None) -> tuple[ItemView, ...]:
-        store = self._require_store()
-        frozen = {} if snapshot is None else {i.item_id: i for i in snapshot.items}
-        assets = _asset_counts(
-            None if snapshot is None else store.snapshot_payload(snapshot.registration_snapshot_id)
+    def _frozen_items(
+        self,
+        snapshot: SnapshotRecord,
+        payload: Mapping[str, Any],
+        facts: Mapping[str, Any],
+    ) -> tuple[ItemView, ...]:
+        """The unit's Items exactly as the Snapshot froze them (§6, §7).
+
+        Every row here is an `ItemSnapshot` of **this** Snapshot: its own registration item key,
+        its own pinned price and the publication assets the frozen payload carries. A Draft Item
+        that is not in this Snapshot belongs to another unit and no key is derived for it.
+        """
+        assets = _frozen_assets(payload)
+        return tuple(
+            self._item_view(
+                item_id=row.item_id,
+                product_group_id=row.group_id_at_registration,
+                composition_signature=row.composition_signature,
+                ordinal=row.ordinal,
+                pricing_snapshot_id=row.pricing_snapshot_id,
+                registration_item_key=row.registration_item_key,
+                publication_assets=assets.get(row.item_id, ()),
+                fact=facts.get(row.item_id),
+            )
+            for row in snapshot.items
         )
-        views = []
-        with store.reading() as unit:
-            for item in draft.items:
-                pin = unit.pricing_pin(item.pricing_snapshot_id)
-                sent = frozen.get(item.item_id)
-                views.append(
-                    ItemView(
-                        item_id=item.item_id,
-                        product_group_id=item.product_group_id,
-                        composition_signature=item.composition_signature,
-                        ordinal=item.ordinal,
-                        pricing_snapshot_id=item.pricing_snapshot_id,
-                        sale_price_krw=None if pin is None else pin.final_sale_price_krw,
-                        price_basis=None if pin is None else pin.price_basis.value,
-                        registration_item_key=(
-                            sent.registration_item_key
-                            if sent is not None
-                            else None
-                            if snapshot is None
-                            else registration_item_key(
-                                snapshot.listing_identity,
-                                item.product_group_id,
-                                item.composition_signature,
-                            )
-                        ),
-                        publication_assets=assets.get(item.item_id, 0),
-                    )
-                )
-        return tuple(views)
+
+    def _drafted_items(
+        self, items: Sequence[DraftItemRecord], facts: Mapping[str, Any]
+    ) -> tuple[ItemView, ...]:
+        return tuple(
+            self._item_view(
+                item_id=item.item_id,
+                product_group_id=item.product_group_id,
+                composition_signature=item.composition_signature,
+                ordinal=item.ordinal,
+                pricing_snapshot_id=item.pricing_snapshot_id,
+                registration_item_key=None,
+                publication_assets=_current_assets(facts.get(item.item_id)),
+                fact=facts.get(item.item_id),
+            )
+            for item in items
+        )
+
+    def _item_view(
+        self,
+        *,
+        item_id: str,
+        product_group_id: str,
+        composition_signature: str,
+        ordinal: int,
+        pricing_snapshot_id: str,
+        registration_item_key: str | None,
+        publication_assets: tuple[AssetView, ...],
+        fact: Any,
+    ) -> ItemView:
+        """One Item's durable facts: the pinned price, the M4 price now, and M4's own readiness."""
+        store = self._require_store()
+        pin = store.pricing_pin(pricing_snapshot_id)
+        current_id = None if fact is None else fact.current_price_id
+        current = None if current_id is None else store.pricing_pin(current_id)
+        return ItemView(
+            item_id=item_id,
+            product_group_id=product_group_id,
+            composition_signature=composition_signature,
+            ordinal=ordinal,
+            pricing_snapshot_id=pricing_snapshot_id,
+            sale_price_krw=None if pin is None else pin.final_sale_price_krw,
+            price_basis=None if pin is None else pin.price_basis.value,
+            registration_item_key=registration_item_key,
+            publication_assets=publication_assets,
+            current_pricing_snapshot_id=current_id,
+            current_sale_price_krw=None if current is None else current.final_sale_price_krw,
+            current_price_basis=None if current is None else current.price_basis.value,
+            price_pin_current=None if fact is None else current_id == pricing_snapshot_id,
+            base_status=None if fact is None else fact.base.status.value,
+            base_reason_codes=() if fact is None else _codes(fact.base),
+            pricing_status=None if fact is None else fact.pricing.status.value,
+            pricing_reason_codes=() if fact is None else _codes(fact.pricing),
+        )
+
+    def _item_facts(
+        self, draft_id: str, item_ids: Sequence[str]
+    ) -> tuple[Mapping[str, Any], str | None]:
+        """The M4 truth of these Items now, gathered by the preflight owner (§3). It decides
+        nothing here: the readiness, the price and the QA are each their own owner's verdict."""
+        if self._preflight is None:
+            return {}, PREFLIGHT_OWNER_ABSENT
+        try:
+            resolved = self._preflight.unit_truth(draft_id, item_ids=list(item_ids))
+        except AppError as refused:
+            # A target policy the account does not have, a Draft that moved: named, never hidden.
+            return {}, refused.code
+        return {item.item_id: item for item in resolved.items}, None
+
+    def _category_of(self, payload: Mapping[str, Any]) -> CategoryView | None:
+        """The category the Snapshot froze, with the required-field state of its reviewed
+        metadata (§4). What is `provided` is read from the frozen payload, never assumed."""
+        category = payload.get("category")
+        if not isinstance(category, Mapping):
+            return None
+        taxonomy, category_id = (
+            str(category.get("taxonomy_revision", "")),
+            str(category.get("category_id", "")),
+        )
+        metadata = (
+            None
+            if self._preflight is None or not (taxonomy and category_id)
+            else self._preflight.category_metadata(taxonomy, category_id)
+        )
+        attributes = payload.get("attributes")
+        notice = payload.get("notice")
+        provided = set(attributes) if isinstance(attributes, Mapping) else set()
+        notice_fields = notice.get("fields") if isinstance(notice, Mapping) else None
+        provided_notice = set(notice_fields) if isinstance(notice_fields, Mapping) else set()
+        return CategoryView(
+            category_id=category_id,
+            mapping_revision=str(category.get("mapping_revision", "")),
+            taxonomy_revision=taxonomy,
+            metadata_revision=(
+                str(category["metadata_revision"]) if "metadata_revision" in category else None
+            ),
+            reviewed=None if metadata is None else metadata.reviewed,
+            notice_type=(
+                None if metadata is None or metadata.notice is None else metadata.notice.notice_type
+            ),
+            attributes=_fields(() if metadata is None else metadata.attributes, provided),
+            notice_fields=_fields(
+                () if metadata is None or metadata.notice is None else metadata.notice.fields,
+                provided_notice,
+            ),
+        )
+
+    def _preflight_of(
+        self, snapshot: SnapshotRecord, intent: IntentRecord | None
+    ) -> tuple[PreflightView | None, str | None]:
+        """Re-evaluate this frozen unit from current truth, by the owner that decides it (§3).
+
+        The evaluation needs the operator's preflight inputs, and the only durable copy of them is
+        the **frozen send request** a CREATE job carries (`registration-send-request/v1`). A unit
+        with no such job therefore has no evaluation to show, and says so with a code rather than
+        showing a status it cannot stand behind.
+        """
+        if self._preflight is None:
+            return None, PREFLIGHT_OWNER_ABSENT
+        payload = None if intent is None else self._send_request(intent.intent_id)
+        if payload is None:
+            return None, PREFLIGHT_INPUTS_NOT_DURABLE
+        try:
+            request, prepared = decode_send_request(payload)
+            _identity, generation = frozen_unit_identity(payload)
+            fresh = self._preflight.final(request, prepared, identity_generation=generation)
+        except AppError as refused:
+            return None, refused.code
+        return (
+            PreflightView(
+                status=fresh.status.value,
+                reason_codes=tuple(sorted(set(fresh.codes))),
+                rule_version=fresh.rule_version,
+                dependency_fingerprint=fresh.dependency_fingerprint,
+                fingerprint_matches_snapshot=(
+                    fresh.dependency_fingerprint == snapshot.preflight_fingerprint
+                ),
+            ),
+            None,
+        )
 
     # ------------------------------------------------------------------ owner reads
-
-    def _snapshots_of(self, drafts: Sequence[DraftRecord]) -> list[SnapshotRecord]:
-        """The newest frozen Snapshot of each Draft, when one exists."""
-        store = self._require_store()
-        found: dict[str, SnapshotRecord] = {}
-        for intent in store.intents(limit=400):
-            if intent.registration_snapshot_id in found:
-                continue
-            snapshot = store.snapshot(intent.registration_snapshot_id)
-            if snapshot is not None:
-                found.setdefault(snapshot.draft_id, snapshot)
-        return [found[d.draft_id] for d in drafts if d.draft_id in found]
 
     def _registration_of(self, intent: IntentRecord | None) -> tuple[str, str] | None:
         if intent is None or intent.state is not IntentState.CONFIRMED:
@@ -564,19 +784,77 @@ class RegisterService:
         return intent
 
 
-def _asset_counts(payload: Mapping[str, Any] | None) -> dict[str, int]:
-    """How many publication assets the frozen payload sends for each Item (§6)."""
-    if payload is None:
-        return {}
+def _unit_items(snapshot: SnapshotRecord) -> tuple[str, ...]:
+    """The Items one provider-listing unit holds: its identity within a Draft (§2, §7)."""
+    return tuple(sorted(item.item_id for item in snapshot.items))
+
+
+def _codes(readiness: Any) -> tuple[str, ...]:
+    """Every reason code an M4 owner returned, in its own order."""
+    return tuple(reason.code for reason in readiness.reasons)
+
+
+def _fields(rules: Sequence[Any], provided: set[str]) -> tuple[FieldStateView, ...]:
+    return tuple(
+        FieldStateView(
+            key=rule.key,
+            required=rule.required,
+            provided=rule.key in provided,
+            detail_page_reference_allowed=rule.detail_page_reference_allowed,
+        )
+        for rule in rules
+    )
+
+
+def _frozen_assets(payload: Mapping[str, Any]) -> dict[str, tuple[AssetView, ...]]:
+    """The publication assets the Snapshot froze for each Item, by their exact identity (§5).
+
+    The provider reference itself is never exposed — only whether one was frozen — so no provider
+    URL or opaque credential-shaped value reaches the screen.
+    """
     items = payload.get("items")
     if not isinstance(items, list):  # pragma: no cover - a Snapshot always has its items
         return {}
-    counts: dict[str, int] = {}
+    frozen: dict[str, tuple[AssetView, ...]] = {}
     for item in items:
-        if isinstance(item, Mapping):
-            sent = item.get("publication_assets")
-            counts[str(item.get("item_id"))] = len(sent) if isinstance(sent, list) else 0
-    return counts
+        if not isinstance(item, Mapping):  # pragma: no cover - the payload is a frozen document
+            continue
+        assets = item.get("publication_assets")
+        frozen[str(item.get("item_id"))] = tuple(
+            AssetView(
+                role=str(asset.get("role", "")),
+                asset_kind=str(asset.get("asset_kind", "")),
+                sha256=str(asset.get("sha256", "")),
+                derivation_id=_text(asset.get("derivation_id")),
+                qa_verdict=_text(asset.get("qa_verdict")),
+                qa_result_id=_text(asset.get("qa_result_id")),
+                provider_asset_prepared=asset.get("provider_asset_ref") is not None,
+            )
+            for asset in (assets if isinstance(assets, list) else [])
+            if isinstance(asset, Mapping)
+        )
+    return frozen
+
+
+def _current_assets(fact: Any) -> tuple[AssetView, ...]:
+    """The Item's current operator image selection and its exact-binary QA (M4 owner)."""
+    if fact is None:
+        return ()
+    return tuple(
+        AssetView(
+            role=image.role.value,
+            asset_kind=image.asset_kind.value,
+            sha256=image.sha256,
+            derivation_id=image.derivation_id,
+            qa_verdict=None if image.qa_verdict is None else image.qa_verdict.value,
+            qa_result_id=image.qa_result_id,
+        )
+        for image in fact.images
+    )
+
+
+def _text(value: Any) -> str | None:
+    return None if value is None else str(value)
 
 
 def _snapshot_view(snapshot: SnapshotRecord) -> SnapshotView:
