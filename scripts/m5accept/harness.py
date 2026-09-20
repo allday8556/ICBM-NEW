@@ -267,6 +267,25 @@ def _context(run: Run, unit: Unit) -> Any:
     )
 
 
+def _failing(run: Run, error_class: Any, error_code: str) -> None:
+    """Declare the next handoff a proven failure of this class. Every field is set, because a
+    restart opens a new seam with its own defaults."""
+    sender = run.owners.sender
+    sender.outcome = RemoteOutcome.NOT_APPLIED_PROVEN
+    sender.product_id = None
+    sender.error_class = error_class
+    sender.error_code = error_code
+
+
+def _unproven(run: Run, error_code: str) -> None:
+    """Declare the next handoff unproven: the outcome the provider never confirmed."""
+    sender = run.owners.sender
+    sender.outcome = RemoteOutcome.UNKNOWN
+    sender.product_id = None
+    sender.error_class = None
+    sender.error_code = error_code
+
+
 def _applied(run: Run, product_id: str = "9900112233") -> None:
     run.owners.sender.outcome = RemoteOutcome.APPLIED_PROVEN
     run.owners.sender.product_id = product_id
@@ -333,10 +352,7 @@ def scenario_identity(run: Run, unit: Unit) -> dict[str, object]:
 def scenario_double_dispatch(run: Run, unit: Unit) -> dict[str, object]:
     """2: a double dispatch neither competes for an Attempt nor bypasses the backoff."""
     checks, owners = run.checks, run.owners
-    owners.sender.outcome = RemoteOutcome.NOT_APPLIED_PROVEN
-    owners.sender.product_id = None
-    owners.sender.error_class = _transient()
-    owners.sender.error_code = "M5_ACCEPTANCE_TRANSIENT"
+    _failing(run, _transient(), "M5_ACCEPTANCE_TRANSIENT")
     first, again = _queue(run, unit), _queue(run, unit)
     checks.check(
         "s2.one_live_job", first == again, jobs=owners.jobs.count(job_type_prefix="register.")
@@ -364,10 +380,7 @@ def _transient() -> Any:
 def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
     """3, 13: an UNKNOWN is never resent, blocks its conflict scope, and needs real evidence."""
     checks, owners = run.checks, run.owners
-    owners.sender.outcome = RemoteOutcome.UNKNOWN
-    owners.sender.product_id = None
-    owners.sender.error_class = None
-    owners.sender.error_code = "M5_ACCEPTANCE_AMBIGUOUS"
+    _unproven(run, "M5_ACCEPTANCE_AMBIGUOUS")
     _send(run, unit)
     intent = owners.registrations.intent(unit.intent_id)
     checks.require("s3.intent_unknown", intent is not None and intent.state is IntentState.UNKNOWN)
@@ -505,10 +518,7 @@ def scenario_separate_listings(run: Run) -> dict[str, object]:
     assert payload is not None
     owners.readback.retained = _retained(first, payload)
     _send(run, first)
-    owners.sender.outcome = RemoteOutcome.NOT_APPLIED_PROVEN
-    owners.sender.product_id = None
-    owners.sender.error_class = _transient()
-    owners.sender.error_code = "M5_ACCEPTANCE_TRANSIENT"
+    _failing(run, _transient(), "M5_ACCEPTANCE_TRANSIENT")
     _send(run, second)
     confirmed = owners.registrations.intent(first.intent_id)
     failed = owners.registrations.intent(second.intent_id)
@@ -663,10 +673,7 @@ def scenario_brakes(run: Run) -> dict[str, object]:
     from app.core.errors import ErrorClass
 
     unit = _prepare(run, product="s15-brake", sequence=110)
-    owners.sender.outcome = RemoteOutcome.NOT_APPLIED_PROVEN
-    owners.sender.product_id = None
-    owners.sender.error_class = ErrorClass.POLICY_BLOCKED
-    owners.sender.error_code = "M5_ACCEPTANCE_POLICY"
+    _failing(run, ErrorClass.POLICY_BLOCKED, "M5_ACCEPTANCE_POLICY")
     _send(run, unit)
     scope = owners.registrations.execution_scope(MARKETPLACE, run.account, CREATE_ENDPOINT_GROUP)
     checks.require(
@@ -704,8 +711,7 @@ def scenario_brakes(run: Run) -> dict[str, object]:
         owners.registrations.attempts(unit.intent_id) == attempts_before,
     )
     # An AUTH brake is not an operator's to release.
-    owners.sender.error_class = ErrorClass.AUTH
-    owners.sender.error_code = "M5_ACCEPTANCE_AUTH"
+    _failing(run, ErrorClass.AUTH, "M5_ACCEPTANCE_AUTH")
     auth_send = _send(run, unit)
     auth = owners.registrations.execution_scope(MARKETPLACE, run.account, CREATE_ENDPOINT_GROUP)
     checks.check(
