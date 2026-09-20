@@ -68,6 +68,7 @@ from app.register.preparation import (
     Provenance,
     UnitRequest,
 )
+from scripts.m4accept import operator
 from scripts.m4accept.synthetic import Facts, fields, png
 from scripts.m5accept.owners import MARKETPLACE, Owners
 
@@ -190,7 +191,8 @@ def ready_item(
 def select_and_pass(owners: Owners, item_id: str, revision: StoredRevision) -> None:
     """The operator's image selection and a PASS for its exact binary (M4 image owner)."""
     image = revision.images[0]
-    owners.images.record_operator_selection(
+    operator.scripted_selection(
+        owners.images,
         item_id,
         source_revision_id=revision.revision_id,
         decisions=[

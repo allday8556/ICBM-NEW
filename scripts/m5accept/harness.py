@@ -88,39 +88,30 @@ def _registration_adoption() -> dict[str, bool]:
     return {name: bool(adoption.get(name, False)) for name in REGISTRATION_ENDPOINTS}
 
 
-# The histories this run reads and must never change: COLLECT source truth, the canonical Product
-# foundation, pricing snapshots with their pointer history, and the image lineage.
-UPSTREAM_TABLES = frozenset(
-    {
-        "product_facts_revisions",
-        "product_facts_fields",
-        "product_facts_evidence",
-        "product_facts_image_refs",
-        "source_assets",
-        "collection_runs",
-        "source_products",
-        "current_source_revision_moves",
-        "product_groups",
-        "group_members",
-        "group_membership_revisions",
-        "group_change_events",
-        "listing_compositions",
-        "product_items",
-        "source_bindings",
-        "quantity_offers",
-        "pricing_snapshots",
-        "current_pricing_snapshot_moves",
-        "derived_image_artifacts",
-        "derived_image_derivations",
-        "derived_image_derivation_inputs",
-        "derived_image_derivation_roots",
-        "image_selection_revisions",
-        "image_selection_source_decisions",
-        "image_selection_outputs",
-        "current_image_selection_moves",
-        "image_qa_results",
-    }
-)
+# The owners this run drives, and so the only rows it may change: the registration tables, the
+# CONNECT rows it feeds typed evidence to, the job system and the audit log.
+OWNED_BY_THIS_RUN = ("app.register", "app.connect", "app.jobs", "app.audit")
+
+
+def _upstream_tables() -> frozenset[str]:
+    """The histories this run reads and must never change (case 17): COLLECT source truth, the
+    canonical Product foundation, pricing with its pointer history, and the image lineage.
+
+    Derived from the models rather than listed here, so an upstream table is covered the day it is
+    added, and this harness names no table another milestone's owner owns.
+    """
+    from app.db.base import Base
+    from app.db.metadata import metadata  # noqa: F401  — imports every model
+
+    return frozenset(
+        table.name
+        for mapper in Base.registry.mappers
+        if not mapper.class_.__module__.startswith(OWNED_BY_THIS_RUN)
+        for table in mapper.tables
+    )
+
+
+UPSTREAM_TABLES = _upstream_tables()
 
 
 class Failed(Exception):

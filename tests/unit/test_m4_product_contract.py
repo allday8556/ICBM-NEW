@@ -571,10 +571,12 @@ SELECTION_TABLES = re.compile(
     r"\bimage_selection_revisions\b|\bimage_selection_source_decisions\b"
     r"|\bimage_selection_outputs\b|\bcurrent_image_selection_moves\b"
 )
-# The one scripted operator (PR-F kickoff 5739459941 §F): the M4 acceptance harness records an
+# The one scripted operator (PR-F kickoff 5739459941 §F): an acceptance harness records an
 # explicit OPERATOR selection through the image owner's own operator entry point, and nothing more.
-# The selection models and tables stay forbidden to it like to any other module.
-SELECTION_OPERATORS = {"scripts/m4accept/harness.py": frozenset({"record_operator_selection"})}
+# It stays **one** place for every harness — the M5 harness (Issue #89 PR-F §A) calls the same one
+# rather than becoming a second operator — and the selection models and tables stay forbidden to it
+# like to any other module.
+SELECTION_OPERATORS = {"scripts/m4accept/operator.py": frozenset({"record_operator_selection"})}
 SOURCE_TRUTH_WRITERS = frozenset({"SourceAssetStore", "SourceAssetRecorder"})
 SOURCE_TRUTH_MODELS = frozenset({"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"})
 
@@ -640,19 +642,21 @@ def test_the_image_selection_writer_detector_fires() -> None:
         ("app/other/raw.py", "SQL = 'INSERT INTO current_image_selection_moves VALUES (1)'\n"),
         ("app/products/images.py", "images.record_selection(item)\n"),
         ("app/db/migrations/versions/0099_x.py", "T = 'image_selection_outputs'\n"),
-        ("scripts/m4accept/harness.py", "images.record_operator_selection(item)\n"),
+        ("scripts/m4accept/operator.py", "images.record_operator_selection(item)\n"),
         (
-            "scripts/m4accept/harness.py",
+            "scripts/m4accept/operator.py",
             "from app.products.image_models import ImageSelectionOutput\n",
         ),
-        ("scripts/m4accept/other.py", "images.record_operator_selection(item)\n"),
+        ("scripts/m4accept/harness.py", "images.record_operator_selection(item)\n"),
+        ("scripts/m5accept/synthetic.py", "images.record_operator_selection(item)\n"),
     ]
     assert image_selection_writer_problems(sources) == [
         "app/products/materialization.py:1",
         "app/products/other.py:1",
         "app/other/raw.py:1",
+        "scripts/m4accept/operator.py:1",
         "scripts/m4accept/harness.py:1",
-        "scripts/m4accept/other.py:1",
+        "scripts/m5accept/synthetic.py:1",
     ]
 
 
