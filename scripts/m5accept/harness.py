@@ -159,10 +159,15 @@ def _prepare(
     shape: ListingShape = ListingShape.SINGLE_LISTING_WITH_OPTIONS,
     items: int = 1,
     batch: str | None = None,
+    reuse: list[synthetic.ReadyItem] | None = None,
 ) -> Unit:
-    """Synthetic source truth → M4 Item(s) → Draft → READY preflight → Snapshot → Intent."""
+    """Synthetic source truth → M4 Item(s) → Draft → READY preflight → Snapshot → Intent.
+
+    ``reuse`` covers exactly the same M4 Items again, which is how a second Draft lands in an
+    existing unit's conflict scope (R2).
+    """
     owners = run.owners
-    ready = [
+    ready = reuse or [
         synthetic.ready_item(owners, product=f"{product}-{n}", sequence=sequence + n)
         for n in range(items)
     ]
@@ -338,10 +343,10 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
         isinstance(queued, AppError) and len(owners.sender.calls) == sent,
         code=getattr(queued, "code", None),
     )
-    # A new Snapshot of the same unit does not escape the conflict scope (R2).
+    # A new Draft and a new Snapshot over the same M4 Items do not escape the conflict scope (R2).
     blocked = "none"
     try:
-        _prepare(run, product="s3-overlap", sequence=40)
+        _prepare(run, product="s3-overlap", sequence=40, reuse=unit.items)
     except Exception as refused:
         blocked = getattr(refused, "code", type(refused).__name__)
     checks.check("s3.overlapping_snapshot_blocked", blocked != "none", refusal=blocked)
@@ -351,13 +356,25 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
         "USER" not in {kind.value for kind in ResolutionEvidence}
         and ResolvedBy.USER in set(ResolvedBy),
     )
-    reconciled = owners.execution.reconcile(unit.intent_id, correlation_id=CID)
+    reconcile_refusal = "none"
+    try:
+        owners.execution.reconcile(unit.intent_id, correlation_id=CID)
+    except AppError as refused:
+        reconcile_refusal = refused.code
+    after = owners.registrations.intent(unit.intent_id)
     checks.check(
         "s13.unadopted_lookup_resolves_nothing",
-        isinstance(reconciled, AppError) or True,
-        state=owners.registrations.intent(unit.intent_id).state.value,  # type: ignore[union-attr]
+        reconcile_refusal == "REGISTER_RECONCILE_UNAVAILABLE"
+        and after is not None
+        and after.state is IntentState.UNKNOWN,
+        refusal=reconcile_refusal,
+        state=None if after is None else after.state.value,
     )
-    return {"create_calls": sent, "conflict_refusal": blocked}
+    return {
+        "create_calls": sent,
+        "conflict_refusal": blocked,
+        "reconcile_refusal": reconcile_refusal,
+    }
 
 
 def scenario_free_group(run: Run) -> dict[str, object]:
