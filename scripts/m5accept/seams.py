@@ -102,6 +102,10 @@ class DeclaredComparison:
     def verdict(self) -> Any:
         return self.inner.verdict
 
+    def __getattr__(self, name: str) -> Any:
+        # Everything else — the contract and normalizer versions, the reasons — is PR-D's own.
+        return getattr(self.inner, name)
+
     def canonical(self) -> dict[str, Any]:
         evidence = dict(self.inner.canonical())
         normalized = dict(evidence.get("normalized") or {})
