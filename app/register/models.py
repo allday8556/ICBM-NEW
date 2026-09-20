@@ -646,6 +646,18 @@ class RegistrationExecutionScope(Base):
             " AND pause_policy_version IS NOT NULL AND pause_policy_version <> '')",
             name="paused_states_its_cause",
         ),
+        # A reason is never paired with a class that did not cause it: an AUTH brake is an AUTH
+        # failure, a POLICY brake a POLICY_BLOCKED one, and a spent budget is neither — it carries
+        # the class of the failure that spent it, or none when a policy revision alone did.
+        CheckConstraint(
+            "pause_reason IS NULL"
+            " OR (pause_reason = 'AUTH' AND pause_error_class = 'AUTH')"
+            " OR (pause_reason = 'POLICY' AND pause_error_class = 'POLICY_BLOCKED')"
+            " OR (pause_reason = 'FAILURE_BUDGET'"
+            " AND (pause_error_class IS NULL"
+            " OR pause_error_class NOT IN ('AUTH', 'POLICY_BLOCKED')))",
+            name="pause_class_is_its_cause",
+        ),
         CheckConstraint("resume_generation >= 0", name="resume_generation_non_negative"),
         # Every accepted resume moves the boundary and names who accepted it and why; generation 0
         # is a scope that has never been resumed.

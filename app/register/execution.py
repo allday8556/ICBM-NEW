@@ -41,14 +41,14 @@ so `JobRunner.reconcile_terminal_owners()` converges after any crash.
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Final
 
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.clock import Clock
-from app.core.errors import AppError, ErrorClass
+from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.jobs.models import JobState
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, TerminalJob
@@ -56,6 +56,7 @@ from app.jobs.service import JobService
 from app.products.image_model import ImageAssetKind
 from app.products.model import ReadinessStatus
 from app.register.model import (
+    OPERATOR_RESUMABLE,
     IntentState,
     ResolutionEvidence,
     ResolvedBy,
@@ -399,9 +400,11 @@ PAUSE_CAUSES: Final[Mapping[ErrorClass, ScopePauseReason]] = MappingProxyType(
     }
 )
 # The actor and reason of the one automatic release: a CONNECT authentication proof newer than
-# the AUTH pause it answers (§26). Nothing else is ever released without an operator.
+# the AUTH pause it answers (§26). Nothing else is ever released without an operator, and an
+# operator never releases this one — the two authorities are disjoint (M5-26).
 SYSTEM_ACTOR: Final = "system"
 FRESH_AUTH_PROOF: Final = "FRESH_AUTH_PROOF"
+AUTH_RESUMABLE: Final = frozenset({ScopePauseReason.AUTH})
 
 
 @dataclass(frozen=True)
@@ -419,6 +422,19 @@ class ExecutionPolicy:
     version: str = EXECUTION_POLICY_VERSION
     endpoint_group: str = CREATE_ENDPOINT_GROUP
     max_proven_failures: int = 3
+
+    def __post_init__(self) -> None:
+        # M5 sends one operation, CREATE, to one endpoint group, and the budget it counts is that
+        # operation's attempt history (`scope_attempts`). Another group would count a history that
+        # is not its own, so this owner refuses it outright rather than mixing two scopes; the
+        # scope rows of other groups exist and stay independent, and their execution owner is the
+        # PR that adopts them (§26).
+        if self.endpoint_group != CREATE_ENDPOINT_GROUP:
+            raise InputValidationError(
+                "REGISTER_ENDPOINT_GROUP_UNSUPPORTED",
+                "this owner executes the CREATE endpoint group only",
+                details={"endpoint_group": self.endpoint_group},
+            )
 
     def pause_reason_for(self, error_class: ErrorClass | None) -> ScopePauseReason | None:
         """The brake this proven cause engages by itself, if any (§26)."""
@@ -580,6 +596,10 @@ class RegistrationExecutionService:
         )
         budget = self.budget(intent.marketplace_key, intent.marketplace_account_id, scope=scope)
         if not budget.sends_allowed:
+            # A budget the current policy says is spent becomes the durable brake it implies,
+            # before the refusal: otherwise a scope stopped by a policy revision or a restart
+            # would have nothing an operator could resume (§26).
+            budget = self._materialize(intent, scope, budget, correlation_id)
             raise ExecutionRefused(
                 # A spent budget keeps its own code, whether the brake already recorded it or the
                 # count alone reached it; an AUTH or POLICY brake says so instead.
@@ -955,8 +975,8 @@ class RegistrationExecutionService:
                 actor=SYSTEM_ACTOR,
                 reason=FRESH_AUTH_PROOF,
                 correlation_id=correlation_id,
+                allowed_reasons=AUTH_RESUMABLE,
                 at=proof,
-                expected_reason=ScopePauseReason.AUTH,
             )
         logger.info(
             "register.scope_resumed",
@@ -983,6 +1003,10 @@ class RegistrationExecutionService:
         It claims nothing about the provider and proves no remote fact: it releases the automatic
         send brake and lets the next send re-run the complete send-time gate. If the provider
         refuses again, the scope pauses again with a later boundary. Past attempts are untouched.
+
+        **An `AUTH` pause is not an operator's to release** (M5-26): it ends when the account
+        authenticates again, and an operator action is not that proof. The store refuses it, so
+        the rule holds for every caller and not only for this one.
         """
         with self._registrations.transaction() as unit:
             resumed = unit.resume_scope(
@@ -992,6 +1016,7 @@ class RegistrationExecutionService:
                 actor=actor,
                 reason=reason,
                 correlation_id=correlation_id,
+                allowed_reasons=OPERATOR_RESUMABLE,
             )
         logger.info(
             "register.scope_resumed",
@@ -1003,6 +1028,45 @@ class RegistrationExecutionService:
             },
         )
         return resumed
+
+    def _materialize(
+        self,
+        intent: IntentRecord,
+        scope: ScopeRecord,
+        budget: BudgetState,
+        correlation_id: str,
+    ) -> BudgetState:
+        """Record the brake a spent budget implies, before the send is refused (§26).
+
+        The budget is counted under the *current* versioned policy, so a scope can be exhausted
+        without a brake ever having been recorded: a lowered threshold, a policy revision or a
+        restart is enough. Refusing on that alone would stop the scope with nothing to resume —
+        `REGISTER_SCOPE_NOT_PAUSED` — so the evaluation that refuses also records what it found,
+        as `FAILURE_BUDGET` with no measured class, because no single provider verdict caused it.
+        Not one recorded attempt is read differently, changed or removed.
+        """
+        if scope.paused or not budget.exhausted:
+            return budget
+        with self._registrations.transaction() as unit:
+            paused = unit.pause_scope(
+                intent.marketplace_key,
+                intent.marketplace_account_id,
+                self._policy.endpoint_group,
+                reason=ScopePauseReason.FAILURE_BUDGET,
+                policy_version=self._policy.version,
+                actor=self._actor,
+                correlation_id=correlation_id,
+            )
+        logger.warning(
+            "register.scope_paused",
+            extra={
+                "marketplace_key": intent.marketplace_key,
+                "endpoint_group": self._policy.endpoint_group,
+                "pause_reason": ScopePauseReason.FAILURE_BUDGET.value,
+                "policy_version": self._policy.version,
+            },
+        )
+        return replace(budget, paused_by=paused.pause_reason)
 
     def _record_pressure(
         self,

@@ -139,6 +139,31 @@ class ScopePauseReason(StrEnum):
     FAILURE_BUDGET = "FAILURE_BUDGET"
 
 
+# M5-26: the causes an operator may release. `AUTH` is deliberately absent — an authentication
+# pause ends when the account authenticates again, and an operator action is not that proof.
+OPERATOR_RESUMABLE: Final = frozenset({ScopePauseReason.POLICY, ScopePauseReason.FAILURE_BUDGET})
+# M5-25: the measured cause each brake reason is recorded with, so a durable row can never pair a
+# reason with a class that did not cause it. `FAILURE_BUDGET` is a policy threshold, not one
+# provider verdict: it carries the class of the failure that spent the last of the budget, or
+# none at all when a policy revision alone exhausted it, and never a cause that pauses by itself.
+PAUSE_CAUSE_CLASSES: Final[Mapping[ScopePauseReason, frozenset[ErrorClass] | None]] = {
+    ScopePauseReason.AUTH: frozenset({ErrorClass.AUTH}),
+    ScopePauseReason.POLICY: frozenset({ErrorClass.POLICY_BLOCKED}),
+    ScopePauseReason.FAILURE_BUDGET: None,
+}
+
+
+def pause_class_allowed(reason: ScopePauseReason, error_class: ErrorClass | None) -> bool:
+    """Whether this measured class may be recorded with this brake reason (§26)."""
+    allowed = PAUSE_CAUSE_CLASSES[reason]
+    if allowed is None:
+        return error_class is None or error_class not in {
+            ErrorClass.AUTH,
+            ErrorClass.POLICY_BLOCKED,
+        }
+    return error_class in allowed
+
+
 class BatchSummary(StrEnum):
     """ADR-0014 §12: a batch's summary is derived from its child Intents, never stored."""
 

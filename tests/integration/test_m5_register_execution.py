@@ -10,6 +10,7 @@ The numbered comments name the kickoff §13 behaviours each test pins.
 
 import contextlib
 import json
+import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
@@ -25,9 +26,7 @@ from app.jobs.models import JobState
 from app.products.model import ReadinessStatus
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.execution import (
-    CREATE_ENDPOINT_GROUP as ENDPOINT_GROUP,
-)
-from app.register.execution import (
+    AUTH_RESUMABLE,
     CREATE_JOB_TYPE,
     CREATE_POLICY,
     AttemptFailed,
@@ -39,9 +38,14 @@ from app.register.execution import (
     enqueue_create,
     target_ref,
 )
+from app.register.execution import (
+    CREATE_ENDPOINT_GROUP as ENDPOINT_GROUP,
+)
 from app.register.model import (
+    OPERATOR_RESUMABLE,
     ExecutionScopeState,
     IntentState,
+    Operation,
     ScopePauseReason,
     VerificationState,
 )
@@ -78,6 +82,9 @@ from tests.register_support import (
 pytestmark = pytest.mark.integration
 
 PRODUCT_NO = "9900112233"
+# A second endpoint group, owned by the scope owner but executed by no owner in M5.
+OTHER_GROUP = "product_inquiry"
+AT = "2026-09-20 00:00:00"
 
 
 # ---------------------------------------------------------------- fake provider seams
@@ -348,6 +355,21 @@ def failing(
 
 def scope_of(store: RegistrationStore, account: str, group: str = ENDPOINT_GROUP) -> ScopeRecord:
     return store.execution_scope(MARKET, account, group)
+
+
+def _pause(store: RegistrationStore, account: str, group: str) -> None:
+    """Engage one scope's brake through the owner itself: M5 executes only the CREATE group."""
+    with store.transaction() as unit:
+        unit.pause_scope(
+            MARKET,
+            account,
+            group,
+            reason=ScopePauseReason.POLICY,
+            policy_version=ExecutionPolicy().version,
+            error_class=ErrorClass.POLICY_BLOCKED,
+            actor=OPERATOR,
+            correlation_id=CID,
+        )
 
 
 def context(ready: Prepared, *, attempt_no: int = 1) -> Any:
@@ -1356,6 +1378,183 @@ def test_an_auth_pause_is_released_only_by_a_newer_authentication_proof(
     assert run.service.run(context(second)).intent_state is IntentState.CONFIRMED
 
 
+def test_an_auth_pause_is_not_an_operators_to_release(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # M5-26 / B1: an AUTH pause ends when the account authenticates again. An operator action is
+    # not that proof, so the explicit resume refuses it and the brake does not move at all.
+    ready = prepare(container, sources, store, account, prep)
+    run = failing(container, prep, ErrorClass.AUTH, "PROVIDER_AUTH")
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    paused = scope_of(store, account)
+    assert paused.pause_reason is ScopePauseReason.AUTH
+    with pytest.raises(AppError) as refused:
+        run.service.resume_scope(
+            MARKET, account, actor=OPERATOR, reason="OPERATOR-DECIDED", correlation_id=CID
+        )
+    assert refused.value.code == "REGISTER_SCOPE_RESUME_NOT_PERMITTED"
+    # The owner refuses it for every caller, not only through this service.
+    with pytest.raises(AppError) as direct, store.transaction() as unit:
+        unit.resume_scope(
+            MARKET,
+            account,
+            ENDPOINT_GROUP,
+            actor=OPERATOR,
+            reason="OPERATOR-DECIDED",
+            correlation_id=CID,
+            allowed_reasons=OPERATOR_RESUMABLE,
+        )
+    assert direct.value.code == "REGISTER_SCOPE_RESUME_NOT_PERMITTED"
+    assert scope_of(store, account) == paused  # nothing moved: state, boundary, generation
+    # A stale proof, and a proof exactly as old as the pause, leave it paused.
+    for proof in (paused.paused_at - timedelta(seconds=1), paused.paused_at):
+        prep.capability.auth_verified_at = proof
+        assert run.service.refresh_scope(MARKET, account, correlation_id=CID).paused
+        assert scope_of(store, account).resume_generation == 0
+    # Only a strictly newer authentication proof releases it.
+    container.clock.advance(60)
+    prep.capability.auth_verified_at = container.clock.now()
+    released = run.service.refresh_scope(MARKET, account, correlation_id=CID)
+    assert (released.state, released.resume_generation) == (ExecutionScopeState.ACTIVE, 1)
+    assert released.resumed_by == "system" and released.resume_reason == "FRESH_AUTH_PROOF"
+
+
+def test_a_spent_budget_becomes_a_durable_brake_before_the_send_is_refused(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §26 / B2: the budget is counted under the *current* policy, so a lowered threshold, a policy
+    # revision or a restart can exhaust a scope that was never paused. The evaluation that refuses
+    # the send records what it found, so the scope an operator must resume actually exists.
+    ready = prepare(container, sources, store, account, prep)
+    lenient = failing(
+        container,
+        prep,
+        ErrorClass.TRANSIENT,
+        "PROVIDER_TIMEOUT",
+        policy=ExecutionPolicy(max_proven_failures=3),
+    )
+    for _ in range(2):
+        with pytest.raises(AttemptFailed):
+            lenient.service.run(context(ready))
+    assert lenient.service.budget(MARKET, account).sends_allowed
+    assert not scope_of(store, account).paused  # still ACTIVE: two of three spent
+    before = store.attempts(ready.intent_id)
+    # A policy revision and a restart: the same history, a lower threshold.
+    strict = failing(
+        container,
+        prep,
+        ErrorClass.TRANSIENT,
+        "PROVIDER_TIMEOUT",
+        policy=ExecutionPolicy(max_proven_failures=2),
+    )
+    second = prepare(container, sources, store, account, prep, source_product_id="5678")
+    with pytest.raises(ExecutionRefused) as refused:
+        strict.service.run(context(second))
+    assert refused.value.code == "REGISTER_FAILURE_BUDGET_EXHAUSTED"
+    paused = scope_of(store, account)
+    assert (paused.state, paused.pause_reason) == (
+        ExecutionScopeState.PAUSED,
+        ScopePauseReason.FAILURE_BUDGET,
+    )
+    # No single provider verdict caused it, so none is recorded; the policy that judged it is.
+    assert paused.pause_error_class is None
+    assert paused.pause_policy_version == ExecutionPolicy().version
+    assert store.attempts(second.intent_id) == ()  # refused before any attempt
+    # And the operator can now resume it — which is what the missing row made impossible.
+    container.clock.advance(60)
+    released = strict.service.resume_scope(
+        MARKET, account, actor=OPERATOR, reason="INVESTIGATED", correlation_id=CID
+    )
+    assert (released.state, released.resume_generation) == (ExecutionScopeState.ACTIVE, 1)
+    assert strict.service.budget(MARKET, account).sends_allowed
+    # §26 test 11: the recorded attempts are exactly what they were.
+    assert store.attempts(ready.intent_id) == before
+
+
+def test_a_recorded_brake_keeps_the_cause_that_engaged_it(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §26: a scope already stopped by AUTH is not re-labelled `FAILURE_BUDGET` because its
+    # history is also spent. The recorded cause is what the operator and the automatic release
+    # both answer, so a later evaluation never overwrites it.
+    ready = prepare(container, sources, store, account, prep)
+    run = failing(
+        container,
+        prep,
+        ErrorClass.AUTH,
+        "PROVIDER_AUTH",
+        policy=ExecutionPolicy(max_proven_failures=1),
+    )
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    paused = scope_of(store, account)
+    assert (paused.pause_reason, paused.pause_error_class) == (
+        ScopePauseReason.AUTH,
+        ErrorClass.AUTH,
+    )
+    assert run.service.budget(MARKET, account).exhausted  # the history is spent as well
+    second = prepare(container, sources, store, account, prep, source_product_id="5678")
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(second))
+    assert refused.value.code == "REGISTER_SCOPE_PAUSED"
+    assert scope_of(store, account) == paused  # cause, time, policy version and generation
+
+
+def test_a_brake_never_records_a_class_that_did_not_cause_it(
+    container: Container,
+    config: AppConfig,
+    store: RegistrationStore,
+    account: str,
+) -> None:
+    # §26 hardening: a reason and its measured class belong together. The owner refuses the pair,
+    # and the schema refuses it again, so no write path can store `AUTH` + `POLICY_BLOCKED`.
+    for reason, cause in (
+        (ScopePauseReason.AUTH, ErrorClass.POLICY_BLOCKED),
+        (ScopePauseReason.AUTH, None),
+        (ScopePauseReason.POLICY, ErrorClass.AUTH),
+        (ScopePauseReason.FAILURE_BUDGET, ErrorClass.AUTH),
+        (ScopePauseReason.FAILURE_BUDGET, ErrorClass.POLICY_BLOCKED),
+    ):
+        with pytest.raises(AppError) as refused, store.transaction() as unit:
+            unit.pause_scope(
+                MARKET,
+                account,
+                ENDPOINT_GROUP,
+                reason=reason,
+                policy_version=ExecutionPolicy().version,
+                error_class=cause,
+                actor=OPERATOR,
+                correlation_id=CID,
+            )
+        assert refused.value.code == "REGISTER_SCOPE_CAUSE_MISMATCH"
+    assert not scope_of(store, account).paused
+    with (
+        contextlib.closing(raw(config)) as connection,
+        pytest.raises(sqlite3.IntegrityError, match="pause_class_is_its_cause"),
+    ):
+        connection.execute(
+            "INSERT INTO registration_execution_scopes (marketplace_key,"
+            " marketplace_account_id, endpoint_group, state, pause_reason, pause_error_class,"
+            " paused_at, pause_policy_version, resume_generation, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'PAUSED', 'AUTH', 'POLICY_BLOCKED', ?, 'p/v1', 0, ?, ?)",
+            (MARKET, account, ENDPOINT_GROUP, AT, AT, AT),
+        )
+        connection.commit()
+
+
 def test_a_policy_pause_is_never_released_by_authentication(
     container: Container,
     sources: Collections,
@@ -1392,9 +1591,9 @@ def test_a_policy_pause_is_never_released_by_authentication(
             actor="system",
             reason="FRESH_AUTH_PROOF",
             correlation_id=CID,
-            expected_reason=ScopePauseReason.AUTH,
+            allowed_reasons=AUTH_RESUMABLE,
         )
-    assert mismatch.value.code == "REGISTER_SCOPE_REASON_MISMATCH"
+    assert mismatch.value.code == "REGISTER_SCOPE_RESUME_NOT_PERMITTED"
     # §26 test 6: only an explicit audited REGISTER resume releases it, and the next send runs the
     # whole gate again — the resume claims nothing about the provider.
     released = run.service.resume_scope(
@@ -1486,38 +1685,62 @@ def test_a_resume_releases_that_scope_and_no_other(
     run = failing(container, prep, ErrorClass.POLICY_BLOCKED, "PROVIDER_POLICY")
     with pytest.raises(AttemptFailed):
         run.service.run(context(ready))
-    # The same account, a second endpoint group: its own brake, engaged by its own failure.
-    other_group = failing(
-        container,
-        prep,
-        ErrorClass.POLICY_BLOCKED,
-        "PROVIDER_POLICY",
-        policy=ExecutionPolicy(endpoint_group="product_inquiry"),
-    )
-    second = prepare(container, sources, store, account, prep, source_product_id="5678")
-    with pytest.raises(AttemptFailed):
-        other_group.service.run(context(second))
-    # A second canonical account of the same marketplace, paused on its own.
+    # The same account, a second endpoint group, and a second canonical account: each is its own
+    # brake in the owner. Their execution owner is the PR that adopts them — this one sends only
+    # CREATE — so they are engaged here through the scope owner itself.
+    _pause(store, account, OTHER_GROUP)
     other_account = establish(container, config, MARKET, "uid-market-a-2")
-    with store.transaction() as unit:
-        unit.pause_scope(
-            MARKET,
-            other_account,
-            ENDPOINT_GROUP,
-            reason=ScopePauseReason.POLICY,
-            policy_version=ExecutionPolicy().version,
-            actor=OPERATOR,
-            correlation_id=CID,
-        )
+    _pause(store, other_account, ENDPOINT_GROUP)
+    assert store.execution_scope(MARKET, account, OTHER_GROUP).paused
     assert store.execution_scope(MARKET, other_account, ENDPOINT_GROUP).paused
     # §26 tests 9 and 10: releasing one scope releases exactly that scope.
     run.service.resume_scope(
         MARKET, account, actor=OPERATOR, reason="POLICY-REVIEWED", correlation_id=CID
     )
     assert not scope_of(store, account).paused
-    assert store.execution_scope(MARKET, account, "product_inquiry").paused
+    assert store.execution_scope(MARKET, account, OTHER_GROUP).paused
     assert store.execution_scope(MARKET, other_account, ENDPOINT_GROUP).paused
-    assert not other_group.service.budget(MARKET, account).sends_allowed
+    # And a release in one group never moves another group's boundary.
+    with store.transaction() as unit:
+        unit.resume_scope(
+            MARKET,
+            account,
+            OTHER_GROUP,
+            actor=OPERATOR,
+            reason="POLICY-REVIEWED",
+            correlation_id=CID,
+            allowed_reasons=OPERATOR_RESUMABLE,
+        )
+    assert store.execution_scope(MARKET, account, OTHER_GROUP).resume_generation == 1
+    assert store.execution_scope(MARKET, other_account, ENDPOINT_GROUP).resume_generation == 0
+    assert scope_of(store, account).resume_generation == 1
+
+
+def test_this_owner_executes_the_create_endpoint_group_only(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §26 / B3: the budget of a scope is counted from that scope's own attempt history. M5 sends
+    # one operation, CREATE, so this owner refuses any other endpoint group outright rather than
+    # counting a history that is not its own.
+    with pytest.raises(AppError) as refused:
+        ExecutionPolicy(endpoint_group=OTHER_GROUP)
+    assert refused.value.code == "REGISTER_ENDPOINT_GROUP_UNSUPPORTED"
+    # The history it counts is exactly the CREATE attempts of that marketplace and account, and
+    # CREATE is the whole operation vocabulary M5 has — the schema refuses any other, so no other
+    # operation's attempts exist to mix in. The store filters on it all the same, so the claim
+    # stays true of the code and not only of today's vocabulary.
+    assert set(Operation) == {Operation.CREATE}
+    ready = prepare(container, sources, store, account, prep)
+    run = failing(container, prep, ErrorClass.TRANSIENT, "PROVIDER_TIMEOUT")
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    counted = store.scope_attempts(MARKET, account)
+    assert [a.attempt_no for a in counted] == [1]
+    assert store.scope_attempts(MARKET, account, operation=Operation.CREATE) == counted
 
 
 @pytest.mark.parametrize(
@@ -1581,8 +1804,8 @@ def test_a_release_older_than_the_pause_it_answers_is_refused(
             actor="system",
             reason="FRESH_AUTH_PROOF",
             correlation_id=CID,
+            allowed_reasons=AUTH_RESUMABLE,
             at=paused_at - timedelta(seconds=1),
-            expected_reason=ScopePauseReason.AUTH,
         )
     assert refused.value.code == "REGISTER_SCOPE_RELEASE_NOT_NEWER"
     assert scope_of(store, account).paused

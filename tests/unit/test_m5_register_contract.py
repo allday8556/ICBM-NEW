@@ -639,10 +639,14 @@ EXPECTED_INVARIANTS = {
     "M5-25": "the REGISTER execution-scope brake is one row per marketplace, canonical account"
     " and endpoint group; it is REGISTER's own control and never capability truth",
     "M5-26": "an AUTH pause releases only on a CONNECT authentication proof newer than that"
-    " pause; a POLICY or FAILURE_BUDGET pause never releases on authentication and needs an"
-    " explicit audited REGISTER resume",
+    " pause and never on an operator action; a POLICY or FAILURE_BUDGET pause never releases on"
+    " authentication and needs an explicit audited REGISTER resume",
     "M5-27": "the failure budget counts attempts only after the scope's latest accepted resume"
     " boundary, and a resume deletes, rewrites or re-classifies no RegistrationAttempt",
+    "M5-28": "a scope's budget is counted from that scope's own operation history, and a budget"
+    " the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is"
+    " refused",
+    "M5-29": "a brake reason is recorded only with the measured class that caused it",
 }
 
 
@@ -910,6 +914,8 @@ RULES: dict[str, Rule] = {
         (
             "**An `AUTH` pause may resume automatically, and only then**",
             "newer than the `paused_at` it answers",
+            "**An `AUTH` pause is not an operator's to release**",
+            "the explicit resume answers `POLICY` and `FAILURE_BUDGET` only",
             "**A `POLICY` or `FAILURE_BUDGET` pause is never released by authentication.**",
             '**A resume means "resume sending in this execution scope and re-evaluate current'
             ' gates". It never claims that a remote mutation happened or that provider policy is'
@@ -920,7 +926,18 @@ RULES: dict[str, Rule] = {
             r"(fresh )?authentication (releases|clears|resumes) (a |the )?"
             r"(POLICY|FAILURE_BUDGET|budget)",
             r"after (a |the )?cooldown[, ]+(the )?scope (resumes|is released)",
+            r"(an? |the )?operator (may|can) (release|resume) (an? |the )?AUTH",
         ),
+    ),
+    "D4 a spent budget is recorded, its history is its own, and a class matches its cause": Rule(
+        (
+            "**A budget the current policy has spent is recorded before the send is refused.**",
+            "**A brake records only the class that caused it**",
+            "**A scope's budget is counted from that scope's own history**",
+            "its execution owner refuses any other endpoint group rather than counting a history"
+            " that is not its own",
+        ),
+        (r"budget is counted (across|over) (all|every) endpoint groups?",),
     ),
     "D3 the budget counts after the accepted boundary and rewrites no attempt": Rule(
         (
@@ -964,6 +981,7 @@ VIOLATIONS = {
     "D1": "CONNECT owns the REGISTER execution-scope brake for that account.",
     "D2": "After a cooldown, the scope resumes without any operator action.",
     "D3": "A resume rewrites the recorded attempt it forgives.",
+    "D4": "The budget is counted across all endpoint groups of the account.",
 }
 
 

@@ -23,8 +23,9 @@ and contract freshness; REGISTER keeps Intents, Attempts, retry, reconcile, read
 budget and this brake. No provider wire identity, no secret and no payload value belongs here.
 
 **Invariants in the schema.** ACTIVE holds no open pause; PAUSED names its cause, its time and the
-policy version that judged it; a resume boundary is complete (time, actor and reason together) and
-exists exactly when `resume_generation > 0`; a pause recorded after a resume is later than it. The
+policy version that judged it; a reason is never paired with a class that did not cause it; a
+resume boundary is complete (time, actor and reason together) and exists exactly when
+`resume_generation > 0`; a pause recorded after a resume is later than it. The
 triggers add the cross-row half: the scope key and the creation time never change, the generation
 only ever moves forward by one, a generation move is an accepted release (ACTIVE with a boundary),
 `resumed_at` never goes backwards, and the row is never deleted. A resume therefore cannot rewrite
@@ -122,6 +123,15 @@ def upgrade() -> None:
             "state <> 'PAUSED' OR (pause_reason IS NOT NULL AND paused_at IS NOT NULL"
             " AND pause_policy_version IS NOT NULL AND pause_policy_version <> '')",
             "paused_states_its_cause",
+        ),
+        _check(
+            "pause_reason IS NULL"
+            " OR (pause_reason = 'AUTH' AND pause_error_class = 'AUTH')"
+            " OR (pause_reason = 'POLICY' AND pause_error_class = 'POLICY_BLOCKED')"
+            " OR (pause_reason = 'FAILURE_BUDGET'"
+            " AND (pause_error_class IS NULL"
+            " OR pause_error_class NOT IN ('AUTH', 'POLICY_BLOCKED')))",
+            "pause_class_is_its_cause",
         ),
         _check("resume_generation >= 0", "resume_generation_non_negative"),
         _check(

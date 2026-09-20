@@ -70,6 +70,7 @@ from app.register.model import (
     VerificationState,
     effective_outcome,
     idempotency_key,
+    pause_class_allowed,
     registration_item_key,
     sanitized_digest,
     summarize,
@@ -370,10 +371,17 @@ class RegistrationStore:
             return unit.snapshot_payload(registration_snapshot_id)
 
     def scope_attempts(
-        self, marketplace_key: str, marketplace_account_id: str, *, limit: int = 50
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        *,
+        operation: Operation = Operation.CREATE,
+        limit: int = 50,
     ) -> tuple[AttemptRecord, ...]:
         with self.reading() as unit:
-            return unit.scope_attempts(marketplace_key, marketplace_account_id, limit=limit)
+            return unit.scope_attempts(
+                marketplace_key, marketplace_account_id, operation=operation, limit=limit
+            )
 
     def jobs_with_open_attempts(
         self, job_type: str, terminal_states: Sequence[str], *, limit: int = 500
@@ -1139,18 +1147,29 @@ class RegistrationUnit:
         )
 
     def scope_attempts(
-        self, marketplace_key: str, marketplace_account_id: str, *, limit: int = 50
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        *,
+        operation: Operation = Operation.CREATE,
+        limit: int = 50,
     ) -> tuple[AttemptRecord, ...]:
-        """The most recent attempts of one marketplace and canonical account, newest first.
+        """The most recent attempts of one marketplace, canonical account and operation, newest
+        first.
 
-        The execution failure budget (PR-E) is derived from exactly this history, so no second
-        authoritative state exists to disagree with the attempts themselves (ADR-0014 §9)."""
+        The failure budget of an execution scope is counted from exactly this history, so the
+        history must be the **same scope**: the attempts of one operation, which is the one
+        endpoint group that operation sends to (ADR-0014 §9, §26). M5 has only ``CREATE``, and
+        this filter keeps it that way — a later operation's attempts can never spend the CREATE
+        budget, and no second authoritative state is introduced.
+        """
         rows = self.session.scalars(
             select(RegistrationAttempt)
             .join(RegistrationIntent, RegistrationIntent.intent_id == RegistrationAttempt.intent_id)
             .where(
                 RegistrationIntent.marketplace_key == marketplace_key,
                 RegistrationIntent.marketplace_account_id == marketplace_account_id,
+                RegistrationIntent.operation == Operation(operation).value,
             )
             .order_by(RegistrationAttempt.started_at.desc(), RegistrationAttempt.attempt_no.desc())
             .limit(limit)
@@ -1218,6 +1237,19 @@ class RegistrationUnit:
         _require_text(endpoint_group=endpoint_group, policy_version=policy_version)
         _require_label(actor=actor)
         cause = ScopePauseReason(reason)
+        measured = None if error_class is None else ErrorClass(error_class)
+        if not pause_class_allowed(cause, measured):
+            # A durable row never pairs a reason with a class that did not cause it: an AUTH brake
+            # is an AUTH failure, a POLICY brake a POLICY_BLOCKED one, and a spent budget is
+            # neither (§26). The schema repeats this, so no write path can store the pair.
+            raise InputValidationError(
+                "REGISTER_SCOPE_CAUSE_MISMATCH",
+                "the recorded class is not a cause of this brake",
+                details={
+                    "pause_reason": cause.value,
+                    "pause_error_class": None if measured is None else measured.value,
+                },
+            )
         row = self.session.get(
             RegistrationExecutionScope,
             (marketplace_key, marketplace_account_id, endpoint_group),
@@ -1239,7 +1271,7 @@ class RegistrationUnit:
             self.session.add(row)
         row.state = ExecutionScopeState.PAUSED.value
         row.pause_reason = cause.value
-        row.pause_error_class = None if error_class is None else ErrorClass(error_class).value
+        row.pause_error_class = None if measured is None else measured.value
         # A brake is never dated before the release it follows: the row's own history only moves
         # forward, and a recorded release is never made to look later than it was.
         row.paused_at = now if row.resumed_at is None else max(now, row.resumed_at)
@@ -1264,8 +1296,8 @@ class RegistrationUnit:
         actor: str,
         reason: str,
         correlation_id: str,
+        allowed_reasons: frozenset[ScopePauseReason],
         at: datetime | None = None,
-        expected_reason: ScopePauseReason | None = None,
     ) -> ScopeRecord:
         """Release this scope's send brake, and move its durable boundary (§26).
 
@@ -1273,10 +1305,11 @@ class RegistrationUnit:
         the next send re-runs the complete send-time gate. It never deletes or rewrites one
         recorded attempt — the budget simply counts what happened *after* ``resumed_at``.
 
-        ``expected_reason`` pins a release to the cause it answers, so the automatic path (a fresh
-        authentication proof) can never release a `POLICY` or `FAILURE_BUDGET` pause. ``at`` is the
-        accepted release time — the proof's own time for that path — and must not predate the
-        pause it releases.
+        ``allowed_reasons`` is the caller's authority, and it is **required**: the automatic path
+        may release only an `AUTH` pause (a fresh authentication proof), and an operator may
+        release only a `POLICY` or `FAILURE_BUDGET` one (`OPERATOR_RESUMABLE`). Neither can reach
+        the other's cause, whatever the caller believes. ``at`` is the accepted release time — the
+        proof's own time for the automatic path — and must not predate the pause it releases.
         """
         _require_label(actor=actor, reason=reason)
         row = self.session.get(
@@ -1289,16 +1322,14 @@ class RegistrationUnit:
                 "only a paused execution scope is resumed",
                 details={"endpoint_group": endpoint_group},
             )
-        if (
-            expected_reason is not None
-            and row.pause_reason != ScopePauseReason(expected_reason).value
-        ):
+        permitted = {ScopePauseReason(r).value for r in allowed_reasons}
+        if row.pause_reason not in permitted:
             raise RegistrationConflictError(
-                "REGISTER_SCOPE_REASON_MISMATCH",
+                "REGISTER_SCOPE_RESUME_NOT_PERMITTED",
                 "this release does not answer the cause that paused the scope",
                 details={
                     "pause_reason": row.pause_reason,
-                    "expected_reason": ScopePauseReason(expected_reason).value,
+                    "allowed_reasons": sorted(permitted),
                 },
             )
         now = self._clock.now()
