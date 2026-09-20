@@ -15,6 +15,7 @@ real write: the bounded canary readiness result it records is `BLOCKED` while th
 needs are unadopted.
 """
 
+import importlib
 import traceback
 import uuid
 from collections.abc import Mapping
@@ -46,12 +47,12 @@ from app.register.model import (
 )
 from app.register.preparation import DuplicateVerdict, FieldValue
 from app.register.sanitize import PayloadSanitationError
-from integrations.marketplaces.smartstore.execution import SmartStoreAdoption
+from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from scripts.m4accept import evidence
 from scripts.m4accept.checkout import CheckoutRefused, probe_checkout
 from scripts.m5accept import synthetic
-from scripts.m5accept.guards import FORBIDDEN_MODULES, offline
-from scripts.m5accept.owners import MARKETPLACE, Owners, open_owners, production_seams
+from scripts.m5accept.guards import FORBIDDEN_MODULES, SMARTSTORE_CALLER, offline
+from scripts.m5accept.owners import MARKETPLACE, Owners, open_owners
 from scripts.m5accept.root import DATA, RootRefused, claim_root, root_problems, settle_root
 from scripts.m5accept.synthetic import CID, OPERATOR
 
@@ -687,9 +688,16 @@ def scenario_replay(run: Run, confirmed_intent: str) -> dict[str, object]:
 def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     """17, and the provider boundary: what this run touched, and what it never could."""
     checks, owners = run.checks, run.owners
-    sender, lookup = production_seams()
-    checks.check("boundary.production_create_unavailable", sender.available() is False)
-    checks.check("boundary.production_lookup_unavailable", lookup.available() is False)
+    # The module that could reach a marketplace cannot even be loaded while the run is armed:
+    # this is the positive proof behind "provider-zero", and the only import this run probes.
+    refusal = "none"
+    try:
+        importlib.import_module(SMARTSTORE_CALLER)
+    except ImportError as refused:
+        refusal = type(refused).__name__
+    checks.check(
+        "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
+    )
     adoption = _registration_adoption()
     checks.check(
         "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
@@ -864,12 +872,19 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         and guarded.evidence.egress_grants_opened == 0,
         **{k: guard_evidence[k] for k in ("external_network_attempts", "egress_grants_opened")},
     )
+    # Nothing provider-shaped was loaded, and the only import the guard refused is the probe the
+    # boundary phase makes on purpose.
     checks.check(
         "hard_zero.no_provider_module_loaded",
         not guarded.evidence.forbidden_modules_loaded_during_run
-        and not guarded.evidence.forbidden_imports_blocked,
+        and set(guarded.evidence.forbidden_imports_blocked) <= {SMARTSTORE_CALLER},
         loaded=list(guarded.evidence.forbidden_modules_loaded_during_run),
         blocked=list(guarded.evidence.forbidden_imports_blocked),
+    )
+    checks.check(
+        "hard_zero.nothing_provider_shaped_preloaded",
+        not guarded.evidence.forbidden_modules_preloaded,
+        preloaded=list(guarded.evidence.forbidden_modules_preloaded)[:5],
     )
     checks.check(
         "hard_zero.no_write_outside_the_root",

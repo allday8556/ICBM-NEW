@@ -28,7 +28,6 @@ from app.collect.revisions import ProductFactsRevisionStore
 from app.collect.runs import CollectionRunStore
 from app.config import AppConfig, database_path
 from app.connect.accounts import MarketplaceAccountStore
-from app.connect.marketplace.attestation_service import PermissionAttestationService
 from app.connect.marketplace.service import MarketplaceCapabilityService
 from app.core.clock import Clock, SystemClock
 from app.core.ownership import DataDirLease, acquire_data_dir
@@ -58,11 +57,7 @@ from app.register.service import RegisterService
 from app.register.store import RegistrationStore
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
-from integrations.marketplaces.smartstore.execution import (
-    SmartStoreAdoption,
-    SmartStoreCreateSender,
-    SmartStoreReconcileLookup,
-)
+from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from scripts.m5accept.seams import FakeReadback, FakeSender, RecordingLookup
 
 MARKETPLACE = "smartstore"
@@ -87,7 +82,6 @@ class Owners:
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     capability: MarketplaceCapabilityService
-    attestations: PermissionAttestationService
     registrations: RegistrationStore
     preflight: RegistrationPreflightService
     builder: RegistrationSnapshotBuilder
@@ -146,13 +140,9 @@ def open_owners(
         products = ProductsService(product_store)
         accounts = MarketplaceAccountStore(db, the_clock, audit)
         capability = MarketplaceCapabilityService(db=db, clock=the_clock, audit=audit)
-        attestations = PermissionAttestationService(
-            db=db, clock=the_clock, audit=audit, capability=capability
-        )
         registrations = RegistrationStore(db, the_clock, audit)
         preflight = RegistrationPreflightService(
             registrations=registrations,
-            products=products,
             readiness=readiness,
             pricing=pricing,
             images=images,
@@ -214,7 +204,6 @@ def open_owners(
             product_readiness=readiness,
             accounts=accounts,
             capability=capability,
-            attestations=attestations,
             registrations=registrations,
             preflight=preflight,
             builder=builder,
@@ -237,8 +226,3 @@ def open_owners(
     except BaseException:
         lease.release()
         raise
-
-
-def production_seams() -> tuple[SmartStoreCreateSender, SmartStoreReconcileLookup]:
-    """The seams production wires. The run asks them what they allow; they allow nothing."""
-    return SmartStoreCreateSender(), SmartStoreReconcileLookup()
