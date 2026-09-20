@@ -45,7 +45,11 @@ from app.register.model import (
     VerificationState,
     sanitized_digest,
 )
-from app.register.preparation import DuplicateVerdict, FieldValue
+from app.register.preparation import (
+    UNRESOLVED_CREATE_CONFLICT,
+    DuplicateVerdict,
+    FieldValue,
+)
 from app.register.sanitize import PayloadSanitationError
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
@@ -396,13 +400,15 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
     overlap_draft = synthetic.draft(owners, run.account, unit.items)
     overlap = owners.preflight.candidate(synthetic.request(owners, overlap_draft, unit.items))
     codes = [reason.code for reason in overlap.reasons]
+    # Not merely "not READY": the unresolved CREATE itself must be the reason, so a unit that is
+    # blocked for some unrelated gap cannot stand in for the conflict scope.
     checks.check(
         "s3.overlapping_snapshot_blocked",
-        overlap.status is not ReadinessStatus.READY and bool(codes),
+        overlap.status is not ReadinessStatus.READY and UNRESOLVED_CREATE_CONFLICT in codes,
         status=overlap.status.value,
         reasons=codes[:3],
     )
-    blocked = codes[0] if codes else "none"
+    blocked = UNRESOLVED_CREATE_CONFLICT if UNRESOLVED_CREATE_CONFLICT in codes else "none"
     # Only machine or provider evidence resolves it; the vocabulary has no operator assertion.
     checks.check(
         "s13.no_operator_assertion_evidence",
