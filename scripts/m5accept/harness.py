@@ -84,6 +84,41 @@ def _registration_adoption() -> dict[str, bool]:
     return {name: bool(adoption.get(name, False)) for name in REGISTRATION_ENDPOINTS}
 
 
+# The histories this run reads and must never change: COLLECT source truth, the canonical Product
+# foundation, pricing snapshots with their pointer history, and the image lineage.
+UPSTREAM_TABLES = frozenset(
+    {
+        "product_facts_revisions",
+        "product_facts_fields",
+        "product_facts_evidence",
+        "product_facts_image_refs",
+        "source_assets",
+        "collection_runs",
+        "source_products",
+        "current_source_revision_moves",
+        "product_groups",
+        "group_members",
+        "group_membership_revisions",
+        "group_change_events",
+        "listing_compositions",
+        "product_items",
+        "source_bindings",
+        "quantity_offers",
+        "pricing_snapshots",
+        "current_pricing_snapshot_moves",
+        "derived_image_artifacts",
+        "derived_image_derivations",
+        "derived_image_derivation_inputs",
+        "derived_image_derivation_roots",
+        "image_selection_revisions",
+        "image_selection_source_decisions",
+        "image_selection_outputs",
+        "current_image_selection_moves",
+        "image_qa_results",
+    }
+)
+
+
 class Failed(Exception):
     """A phase could not go on: the checks already recorded say why."""
 
@@ -594,8 +629,21 @@ def scenario_upload_gate(run: Run) -> dict[str, object]:
         candidate.status is not ReadinessStatus.READY and not candidate.upload_permitted,
         status=candidate.status.value,
     )
-    # 12: a dependency that moved between candidate and send stops the CREATE at the gate.
-    owners.pricing.price(unit.items[0].item_id, replace(synthetic.CONTEXT, fee_rate="0.3"))
+    # 12: a dependency that moved between candidate and send stops the CREATE at the gate. The
+    # Draft Item is re-pinned to a new M4 price, which opens a new Draft revision; the Snapshot
+    # was frozen at the old one.
+    repriced = owners.pricing.price(
+        unit.items[0].item_id, replace(synthetic.CONTEXT, fee_rate="0.3")
+    )
+    assert repriced.snapshot is not None
+    with owners.registrations.transaction() as work:
+        work.change_draft_item_price(
+            unit.draft_id,
+            unit.items[0].item_id,
+            repriced.snapshot.pricing_snapshot_id,
+            changed_by=OPERATOR,
+            correlation_id=CID,
+        )
     _applied(run, "9900112277")
     sent = len(owners.sender.calls)
     outcome = _send(run, unit)
@@ -658,8 +706,14 @@ def scenario_brakes(run: Run) -> dict[str, object]:
     # An AUTH brake is not an operator's to release.
     owners.sender.error_class = ErrorClass.AUTH
     owners.sender.error_code = "M5_ACCEPTANCE_AUTH"
-    _send(run, unit)
+    auth_send = _send(run, unit)
     auth = owners.registrations.execution_scope(MARKETPLACE, run.account, CREATE_ENDPOINT_GROUP)
+    checks.check(
+        "s15.auth_failure_pauses_the_scope",
+        auth.paused and auth.pause_reason is ScopePauseReason.AUTH,
+        send=getattr(auth_send, "code", type(auth_send).__name__),
+        reason=None if auth.pause_reason is None else auth.pause_reason.value,
+    )
     refusal = "none"
     try:
         owners.execution.resume_scope(
@@ -757,22 +811,19 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
             f"SELECT COUNT(*) FROM audit_events WHERE event_type IN ({marks})", PROVIDER_AUDIT
         ).fetchone()[0]
     checks.check("boundary.no_provider_audit_event", provider_events == 0, count=provider_events)
-    # 17: nothing outside the registration owners changed while the scenarios ran.
+    # 17: the source, Product, pricing and image histories this run read are exactly as they
+    # were. Only the registration owners it drove, and the CONNECT capability it fed typed
+    # evidence to, changed.
     after = evidence.snapshot(owners.database_file)
-    owned = (
-        "registration_",
-        "marketplace_registration",
-        "duplicate_overrides",
-        "jobs",
-        "job_attempts",
-        "audit_events",
-        "pricing_snapshots",
-        "current_pricing_snapshot_moves",
+    upstream_before = {name: rows for name, rows in before.items() if name in UPSTREAM_TABLES}
+    upstream_after = {name: rows for name, rows in after.items() if name in UPSTREAM_TABLES}
+    changes = evidence.history_changes(upstream_before, upstream_after)
+    checks.check(
+        "s17.upstream_history_unchanged",
+        not changes,
+        tables=len(upstream_before),
+        changes=changes[:5],
     )
-    changes = [
-        change for change in evidence.history_changes(before, after) if not change.startswith(owned)
-    ]
-    checks.check("s17.upstream_history_unchanged", not changes, changes=changes[:5])
     return {
         "marketplace_mutations": 0,
         "real_wire_projection_sendable": False,
