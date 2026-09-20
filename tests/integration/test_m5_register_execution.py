@@ -9,7 +9,7 @@ The numbered comments name the kickoff §13 behaviours each test pins.
 """
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -42,7 +42,7 @@ from app.register.preparation import (
     PreparedAsset,
 )
 from app.register.provider import CreateHandoff
-from app.register.store import RegistrationStore
+from app.register.store import RegistrationStore, RegistrationUnit
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.execution import (
     CreateNotAdoptedError,
@@ -919,6 +919,7 @@ def test_two_concurrent_enqueues_leave_exactly_one_live_job(
     store: RegistrationStore,
     account: str,
     prep: Preparation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import threading
 
@@ -934,6 +935,27 @@ def test_two_concurrent_enqueues_leave_exactly_one_live_job(
         ),
     )
     _jobs(container, run)
+
+    # Force the interleaving the guard exists for: the first caller does not leave its check
+    # until the second has had its chance to check too. When the check and the insert share one
+    # transaction the second caller cannot even reach its check until the first commits, so this
+    # wait times out harmlessly; when they do not, both callers see "no live job" and both queue.
+    first_checked = threading.Event()
+    second_checked = threading.Event()
+    original = RegistrationUnit.active_job
+
+    def interleaved(
+        self: RegistrationUnit, job_type: str, intent_id: str, states: Sequence[str]
+    ) -> str | None:
+        answer = original(self, job_type, intent_id, states)
+        if not first_checked.is_set():
+            first_checked.set()
+            second_checked.wait(timeout=0.5)
+        else:
+            second_checked.set()
+        return answer
+
+    monkeypatch.setattr(RegistrationUnit, "active_job", interleaved)
 
     started = threading.Barrier(2)
     queued: list[str] = []
