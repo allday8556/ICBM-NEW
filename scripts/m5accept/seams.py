@@ -66,6 +66,32 @@ class FakeReadback:
 
 
 @dataclass
+class DeclaredProjection:
+    sendable: bool = True
+    gaps: tuple[str, ...] = ()
+
+
+@dataclass
+class DeclaredProjector:
+    """The wire projection a scenario declares sendable.
+
+    PR-D's real projection reports named gaps — the CREATE request media type and the image
+    container shape are not proven — so it is **not sendable**, which is what stops a send in
+    production. A run that must exercise the outcome state machine therefore declares a sendable
+    projection, and the boundary phase asks the real one and records that it still refuses.
+    """
+
+    sendable: bool = True
+    calls: int = 0
+
+    def __call__(self, payload: Mapping[str, Any]) -> DeclaredProjection:
+        self.calls += 1
+        return DeclaredProjection(
+            sendable=self.sendable, gaps=() if self.sendable else ("declared gap",)
+        )
+
+
+@dataclass
 class RecordingLookup:
     """The reconcile lookup. Unavailable by default, exactly as production is (§10)."""
 

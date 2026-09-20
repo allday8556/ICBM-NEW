@@ -47,6 +47,7 @@ from app.register.model import (
 )
 from app.register.preparation import DuplicateVerdict, FieldValue
 from app.register.sanitize import PayloadSanitationError
+from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from scripts.m4accept import evidence
 from scripts.m4accept.checkout import CheckoutRefused, probe_checkout
@@ -265,21 +266,16 @@ def scenario_identity(run: Run, unit: Unit) -> dict[str, object]:
     checks, owners = run.checks, run.owners
     intent = owners.registrations.intent(unit.intent_id)
     assert intent is not None
-    second: str | None = None
-    try:
-        with owners.registrations.transaction() as work:
-            batch = work.create_batch(
-                MARKETPLACE, run.account, created_by=OPERATOR, correlation_id=CID
-            )
-            second = work.create_intent(
-                batch, unit.snapshot_id, created_by=OPERATOR, correlation_id=CID
-            ).intent_id
-    except Exception as refused:  # a second CREATE Intent for the same Snapshot is refused
-        second = None
-        refusal = type(refused).__name__
-    else:
-        refusal = "none"
-    checks.check("s1.one_intent_per_snapshot", second is None, refusal=refusal)
+    # §8: asking again for the Intent of this exact Snapshot returns the same Intent and the same
+    # idempotency identity. A retry, a restart or a second operator never opens a competing one.
+    with owners.registrations.transaction() as work:
+        batch = work.create_batch(MARKETPLACE, run.account, created_by=OPERATOR, correlation_id=CID)
+        again = work.create_intent(batch, unit.snapshot_id, created_by=OPERATOR, correlation_id=CID)
+    checks.check(
+        "s1.one_intent_per_snapshot",
+        again.intent_id == unit.intent_id and again.idempotency_key == intent.idempotency_key,
+        same_intent=again.intent_id == unit.intent_id,
+    )
     run.restart()
     after = run.owners.registrations.intent(unit.intent_id)
     checks.check(
@@ -288,7 +284,10 @@ def scenario_identity(run: Run, unit: Unit) -> dict[str, object]:
         and after.idempotency_key == intent.idempotency_key
         and after.state is intent.state,
     )
-    return {"idempotency_key": intent.idempotency_key, "second_intent_refused": second is None}
+    return {
+        "idempotency_key": intent.idempotency_key,
+        "second_request_returns_same_intent": again.intent_id == unit.intent_id,
+    }
 
 
 def scenario_double_dispatch(run: Run, unit: Unit) -> dict[str, object]:
@@ -685,6 +684,15 @@ def scenario_replay(run: Run, confirmed_intent: str) -> dict[str, object]:
     return {"create_calls": sent}
 
 
+def _any_payload(owners: Owners) -> Mapping[str, Any]:
+    """One frozen Snapshot payload of this run, to ask the real projection about."""
+    for intent in owners.registrations.intents(limit=10):
+        payload = owners.registrations.snapshot_payload(intent.registration_snapshot_id)
+        if payload is not None:
+            return payload
+    raise Failed("boundary.no_payload_to_project")
+
+
 def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     """17, and the provider boundary: what this run touched, and what it never could."""
     checks, owners = run.checks, run.owners
@@ -697,6 +705,14 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         refusal = type(refused).__name__
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
+    )
+    # PR-D's real wire projection is not sendable while the CREATE contract is unproven: the
+    # scenarios above declared one so the state machine could be exercised at all.
+    unsent = smartstore_product.project(_any_payload(owners))
+    checks.check(
+        "boundary.real_wire_projection_refuses",
+        not unsent.sendable and bool(unsent.gaps),
+        gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()
     checks.check(
@@ -736,6 +752,7 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check("s17.upstream_history_unchanged", not changes, changes=changes[:5])
     return {
         "marketplace_mutations": 0,
+        "real_wire_projection_sendable": False,
         "fake_create_handoffs": len(owners.sender.calls),
         "fake_readbacks": owners.readback.calls,
         "provider_audit_events": provider_events,
@@ -834,6 +851,9 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         "execution_mode": "DRY_RUN",
         "execution_policy_version": ExecutionPolicy().version,
         "endpoint_adoption": _registration_adoption(),
+        # What this run declared because its contract is unadopted, and therefore what a PASS
+        # here does not prove about the provider.
+        "declared_seams": ["CREATE_HANDOFF", "READ_BACK", "RECONCILE_LOOKUP", "WIRE_PROJECTION"],
     }
     checks = Checks()
     with offline(claimed, modules=FORBIDDEN_MODULES) as guarded:

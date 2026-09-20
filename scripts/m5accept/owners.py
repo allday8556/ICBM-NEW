@@ -55,10 +55,14 @@ from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPo
 from app.register.preflight import RegistrationPreflightService
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
-from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
-from scripts.m5accept.seams import FakeReadback, FakeSender, RecordingLookup
+from scripts.m5accept.seams import (
+    DeclaredProjector,
+    FakeReadback,
+    FakeSender,
+    RecordingLookup,
+)
 
 MARKETPLACE = "smartstore"
 
@@ -93,6 +97,7 @@ class Owners:
     sender: FakeSender
     readback: FakeReadback
     lookup: RecordingLookup
+    projector: DeclaredProjector
 
     @property
     def database_file(self) -> Path:
@@ -152,6 +157,7 @@ def open_owners(
         )
         builder = RegistrationSnapshotBuilder(preflight=preflight, registrations=registrations)
         sender, readback, lookup = FakeSender(), FakeReadback(), RecordingLookup()
+        projector = DeclaredProjector()
         execution = RegistrationExecutionService(
             registrations=registrations,
             preflight=preflight,
@@ -160,7 +166,7 @@ def open_owners(
             lookup=lookup,
             capability=capability,
             compare=smartstore_readback,
-            projection=smartstore_product.project,
+            projection=projector,
             clock=the_clock,
             policy=policy or ExecutionPolicy(),
         )
@@ -222,6 +228,7 @@ def open_owners(
             sender=sender,
             readback=readback,
             lookup=lookup,
+            projector=projector,
         )
     except BaseException:
         lease.release()
