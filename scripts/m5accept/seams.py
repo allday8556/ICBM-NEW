@@ -92,6 +92,48 @@ class DeclaredProjector:
 
 
 @dataclass
+class DeclaredComparison:
+    """PR-D's own comparison, with the one field its contract does not prove declared."""
+
+    inner: Any
+    published_state: str
+
+    @property
+    def verdict(self) -> Any:
+        return self.inner.verdict
+
+    def canonical(self) -> dict[str, Any]:
+        evidence = dict(self.inner.canonical())
+        normalized = dict(evidence.get("normalized") or {})
+        normalized.setdefault("published_state", self.published_state)
+        evidence["normalized"] = normalized
+        return evidence
+
+
+@dataclass
+class DeclaredComparator:
+    """The read-back comparison, run for real, with a declared published state.
+
+    The adopted read-back contract proves no published state (PR-D), so the execution owner
+    refuses to confirm a registration rather than invent one. A run that must reach CONFIRMED
+    therefore declares that one field and lets **PR-D's real normalizer and comparison** decide
+    everything else — the verdict, the per-Item correspondence and the subset rule are not faked.
+    """
+
+    inner: Any
+    published_state: str = "DECLARED_ON_SALE"
+    calls: int = 0
+
+    def compare(
+        self, snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]
+    ) -> DeclaredComparison:
+        self.calls += 1
+        return DeclaredComparison(
+            self.inner.compare(snapshot_payload, retained), self.published_state
+        )
+
+
+@dataclass
 class RecordingLookup:
     """The reconcile lookup. Unavailable by default, exactly as production is (§10)."""
 

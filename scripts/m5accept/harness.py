@@ -343,13 +343,18 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
         isinstance(queued, AppError) and len(owners.sender.calls) == sent,
         code=getattr(queued, "code", None),
     )
-    # A new Draft and a new Snapshot over the same M4 Items do not escape the conflict scope (R2).
-    blocked = "none"
-    try:
-        _prepare(run, product="s3-overlap", sequence=40, reuse=unit.items)
-    except Exception as refused:
-        blocked = getattr(refused, "code", type(refused).__name__)
-    checks.check("s3.overlapping_snapshot_blocked", blocked != "none", refusal=blocked)
+    # A new Draft over the same M4 Items does not escape the conflict scope: the preflight of the
+    # overlapping unit is not READY, and it says why (R2).
+    overlap_draft = synthetic.draft(owners, run.account, unit.items)
+    overlap = owners.preflight.candidate(synthetic.request(owners, overlap_draft, unit.items))
+    codes = [reason.code for reason in overlap.reasons]
+    checks.check(
+        "s3.overlapping_snapshot_blocked",
+        overlap.status is not ReadinessStatus.READY and bool(codes),
+        status=overlap.status.value,
+        reasons=codes[:3],
+    )
+    blocked = codes[0] if codes else "none"
     # Only machine or provider evidence resolves it; the vocabulary has no operator assertion.
     checks.check(
         "s13.no_operator_assertion_evidence",
@@ -770,6 +775,7 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     return {
         "marketplace_mutations": 0,
         "real_wire_projection_sendable": False,
+        "readback_comparisons": owners.comparator.calls,
         "fake_create_handoffs": len(owners.sender.calls),
         "fake_readbacks": owners.readback.calls,
         "provider_audit_events": provider_events,
@@ -870,7 +876,13 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         "endpoint_adoption": _registration_adoption(),
         # What this run declared because its contract is unadopted, and therefore what a PASS
         # here does not prove about the provider.
-        "declared_seams": ["CREATE_HANDOFF", "READ_BACK", "RECONCILE_LOOKUP", "WIRE_PROJECTION"],
+        "declared_seams": [
+            "CREATE_HANDOFF",
+            "READ_BACK",
+            "RECONCILE_LOOKUP",
+            "WIRE_PROJECTION",
+            "PUBLISHED_STATE",
+        ],
     }
     checks = Checks()
     with offline(claimed, modules=FORBIDDEN_MODULES) as guarded:
