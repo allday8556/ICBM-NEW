@@ -20,6 +20,7 @@ for the caller when no transport is passed. The live factory refuses to exist un
 """
 
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -48,6 +49,14 @@ class LiveProviderRefused(RuntimeError):
     """The live SmartStore transport was requested where it may never exist."""
 
 
+def _path_pattern(base_path: str, template: str) -> re.Pattern[bytes]:
+    """The exact path of one adopted endpoint. A templated segment matches one conservative
+    segment only — the same shape the caller allows — so nothing wider is ever recognized."""
+    parts = [re.escape(part) for part in re.split(r"\{[A-Za-z][A-Za-z0-9]*\}", template)]
+    pattern = "[A-Za-z0-9_-]{1,64}".join(parts)
+    return re.compile(f"^{re.escape(base_path)}{pattern}$".encode("ascii"))
+
+
 def resolve_target(request: httpx.Request) -> str:
     """The adopted endpoint id this exact request is, or ``UNRECOGNIZED``."""
     base = httpx.URL(BASE_URL)
@@ -55,8 +64,8 @@ def resolve_target(request: httpx.Request) -> str:
     if (url.scheme, url.host, url.port, url.userinfo) != (base.scheme, base.host, base.port, b""):
         return UNRECOGNIZED
     for contract in ADOPTED.values():
-        path = f"{base.path}{contract.path}".encode("ascii")
-        if request.method == contract.method.value and url.raw_path == path:
+        pattern = _path_pattern(base.path, contract.path)
+        if request.method == contract.method.value and pattern.fullmatch(url.raw_path):
             return contract.endpoint_id.value
     return UNRECOGNIZED
 

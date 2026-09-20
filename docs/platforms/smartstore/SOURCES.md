@@ -238,6 +238,31 @@ At consolidation time the official current Commerce API page reports `2.88.0 (20
 
 This is documentation provenance, not runtime verification.
 
+### 5.1 M5 PR-D source packet (`2.89.0`)
+
+The implementation session could not reach the provider's documentation host, so PR-D stopped
+under §11.4 (Issue #89 comment 5746470583) and the architect supplied an official-source packet
+instead (Issue #89 comment **5746489554**), reviewed against release **2.89.0 (2026-09-15)**.
+
+| Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-PACKET-289` | Issue #89 comment 5746489554 (architect-reviewed extract of the official 2.89.0 reference, the auth page, the AI-use guide and the 원상품 정보 구조체 schema) | the M5 PR-D endpoint adoption, the `상품` API group, the proven product-structure field names and bounds | `ENDPOINT_MATRIX.md` §4.1, `integrations/marketplaces/smartstore/{registry,product,readback}.py` | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+
+Packet scope, and what it deliberately does **not** license:
+
+- proven and used: method and path of the product endpoints; bearer auth with `AUTH_MODE=SELF`
+  unchanged; API group `상품`; `multipart/form-data` for image upload; the product-structure
+  field names `name`, `detailContent`, `images`(`.url`), `salePrice`, `stockQuantity`,
+  `sellerCodeInfo.sellerManagementCode`, option `sellerManagerCode`, `productInfoProvidedNotice`;
+  the bounds 999,999,990 / 99,999,999 / ≤3 option dimensions / 1 representative + ≤9 optional
+  images; and that notice fields are category-specific with conditional fields omitted;
+- **not proven, so fail-closed**: the CREATE request media type and response envelope, the image
+  upload part name, the product-search request schema (no strong duplicate key), the category
+  query keys of the attribute/option reads, and any response field of the category/notice reads.
+
+`AUTH_MODE` stays `SELF`: the packet's Commerce Solution `SELLER` guidance is solution-specific and
+is not applicable evidence for ICBM's own-store application (§11.4 — unknown beats invention).
+
 ---
 
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)

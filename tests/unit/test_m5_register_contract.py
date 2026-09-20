@@ -54,40 +54,52 @@ def _code() -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- endpoints (ADR-0014 §17)
 
 M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
-M5_ENDPOINTS = frozenset(
+# M5 PR-D adopts these two reads (packet 5746489554); nothing else, and nothing mutating.
+M5_ADOPTED = frozenset({"SMARTSTORE_ORIGIN_PRODUCT_READ_V2", "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"})
+M5_UNPROVEN = frozenset(
     {
         "SMARTSTORE_PRODUCT_CREATE_V2",
-        "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
-        "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+        "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
         "SMARTSTORE_STANDARD_OPTIONS",
         "SMARTSTORE_NOTICE_TYPES",
+        "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M2_MAPPING_REVISION = "m2-connect-r1"
+M5_MAPPING_REVISION = "m5-register-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
-    """An adopted SmartStore endpoint beyond the two M2 CONNECT endpoints: PR-A adopts nothing."""
-    return sorted(set(adopted) - M2_ENDPOINTS)
+    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the M5 PR-D read-backs."""
+    return sorted(set(adopted) - M2_ENDPOINTS - M5_ADOPTED)
 
 
-def test_the_m5_endpoints_stay_not_adopted_and_fail_locally() -> None:
+def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
     from integrations.marketplaces.smartstore import registry
 
     assert adoption_problems(e.value for e in registry.ADOPTED) == []
-    assert {e.value for e in registry.NOT_ADOPTED} == M5_ENDPOINTS
+    assert {e.value for e in registry.NOT_ADOPTED} == M5_UNPROVEN
     for endpoint in registry.NOT_ADOPTED:
         with pytest.raises(registry.EndpointNotAdoptedError):
             registry.resolve(endpoint)
-    # The endpoint-mapping revision and its fingerprint are unchanged: adoption bumps both (§17).
-    assert registry.SMARTSTORE_ENDPOINT_MAPPING_REVISION == M2_MAPPING_REVISION
-    assert list(registry.MAPPING_FINGERPRINTS) == [M2_MAPPING_REVISION]
-    assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M2_MAPPING_REVISION]
+    # §17: adoption bumps the mapping revision and its fingerprint in the same change.
+    assert registry.SMARTSTORE_ENDPOINT_MAPPING_REVISION == M5_MAPPING_REVISION
+    assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
+
+
+def test_no_mutating_endpoint_is_adopted() -> None:
+    # ADR-0014 §24 and PR-D §2: adoption creates no mutation authority. CREATE and image upload
+    # stay unadopted, so no production path can reach a SmartStore mutation at all.
+    from integrations.marketplaces.smartstore import registry
+
+    assert [c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating] == []
+    assert {"SMARTSTORE_PRODUCT_CREATE_V2", "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"} <= {
+        e.value for e in registry.NOT_ADOPTED
+    }
 
 
 def test_the_adoption_detector_fires() -> None:

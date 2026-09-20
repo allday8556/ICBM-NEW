@@ -26,28 +26,38 @@ from integrations.marketplaces.smartstore.registry import (
 
 TOKEN = EndpointId.SMARTSTORE_AUTH_TOKEN
 ACCOUNT = EndpointId.SMARTSTORE_SELLER_ACCOUNT
-M5_CANDIDATES = {
+ORIGIN_READ = EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2
+CHANNEL_READ = EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2
+# M5 PR-D adopts the two product read-backs; everything else the 2.89.0 packet leaves unproven
+# stays NOT_ADOPTED with a named gap (registry.ADOPTION_GAPS).
+STILL_NOT_ADOPTED = {
     "SMARTSTORE_PRODUCT_CREATE_V2",
-    "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
-    "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
     "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+    "SMARTSTORE_PRODUCT_SEARCH",
     "SMARTSTORE_CATEGORY_LIST",
     "SMARTSTORE_CATEGORY_READ",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
     "SMARTSTORE_STANDARD_OPTIONS",
     "SMARTSTORE_NOTICE_TYPES",
+    "SMARTSTORE_NOTICE_TYPE_READ",
 }
 
 
 # ---------------------------------------------------------------- adoption
 
 
-def test_em13_1_the_runtime_registry_adopts_exactly_the_two_m2_endpoints() -> None:
-    assert set(ADOPTED) == {TOKEN, ACCOUNT}
-    assert {e.value for e in NOT_ADOPTED} == M5_CANDIDATES
+def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_read_backs() -> None:
+    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ}
+    assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
     assert not set(ADOPTED) & NOT_ADOPTED
+
+
+def test_every_not_adopted_endpoint_records_why_it_is_not_adopted() -> None:
+    # PR-D §1: reviewing a candidate and declining it is an evidence act, not a silent omission.
+    assert set(registry.ADOPTION_GAPS) == NOT_ADOPTED
+    assert all(gap.strip() for gap in registry.ADOPTION_GAPS.values())
 
 
 @pytest.mark.parametrize("endpoint", sorted(NOT_ADOPTED))
@@ -102,11 +112,65 @@ def test_em13_7_every_adopted_endpoint_is_no_follow() -> None:
     assert {c.redirect for c in ADOPTED.values()} == {RedirectPolicy.NO_FOLLOW}
 
 
-def test_em5_the_adopted_group_union_is_seller_info_and_nothing_mutates() -> None:
+def test_em5_the_adopted_group_union_is_seller_info_and_product_and_nothing_mutates() -> None:
     union = set().union(*(c.required_groups for c in ADOPTED.values()))
-    assert union == {"판매자정보"}
+    # The packet's AI-use guide gives the API group 상품 for the product reads; no narrower
+    # permission name is invented from it.
+    assert union == {"판매자정보", "상품"}
     assert resolve(TOKEN).required_groups == frozenset()
+    assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
+    # No mutating SmartStore endpoint is adopted at all, so no code path can mutate the provider.
     assert not any(c.mutating for c in ADOPTED.values())
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "path", "placeholder"),
+    [
+        (ORIGIN_READ, "/v2/products/origin-products/{originProductNo}", "originProductNo"),
+        (CHANNEL_READ, "/v2/products/channel-products/{channelProductNo}", "channelProductNo"),
+    ],
+)
+def test_the_adopted_read_backs_carry_exactly_the_packet_contract(
+    endpoint: EndpointId, path: str, placeholder: str
+) -> None:
+    contract = resolve(endpoint)
+    assert (contract.method, contract.path, contract.content_type) == (Method.GET, path, None)
+    assert (contract.requires_bearer, contract.mutating) == (True, False)
+    assert contract.required_groups == frozenset({"상품"})
+    assert contract.redirect is RedirectPolicy.NO_FOLLOW
+    assert (contract.connect_timeout_s, contract.read_timeout_s) == (5.0, 15.0)
+    assert contract.path_params == frozenset({placeholder})
+    # Deny-by-default: neither read-back may send any query key at all.
+    assert contract.safe_query_keys == frozenset()
+    # Only leaves the packet proves may be retained from a read-back.
+    assert contract.retained_response_fields == frozenset(
+        {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"safe_query_keys": frozenset({"page"})},
+        {"retained_response_fields": frozenset({"name", "detailContent"})},
+        {"content_type": "application/json"},
+        {"requires_bearer": False},
+    ],
+)
+def test_the_safe_retention_profile_is_bound_to_the_mapping_fingerprint(
+    monkeypatch: pytest.MonkeyPatch, change: dict[str, object]
+) -> None:
+    # ADR-0014 §15: the profile is versioned with the mapping revision, so it cannot drift alone.
+    before = mapping_fingerprint()
+    changed = dataclasses.replace(ADOPTED[ORIGIN_READ], **change)  # type: ignore[arg-type]
+    monkeypatch.setitem(registry.ADOPTED, ORIGIN_READ, changed)  # type: ignore[arg-type]
+    assert mapping_fingerprint() != before
+
+
+def test_the_profile_version_itself_is_in_the_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    before = mapping_fingerprint()
+    monkeypatch.setattr(registry, "SAFE_RETENTION_PROFILE_VERSION", "smartstore-safe-retention/v2")
+    assert mapping_fingerprint() != before
 
 
 def test_em13_8_every_adopted_endpoint_has_a_success_predicate() -> None:
@@ -186,7 +250,9 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m2-connect-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-register-r1"
+    # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
+    assert set(MAPPING_FINGERPRINTS) == {"m2-connect-r1", "m5-register-r1"}
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     assert RegistryMappingRevision().current_revision() == SMARTSTORE_ENDPOINT_MAPPING_REVISION
 
