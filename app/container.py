@@ -54,6 +54,11 @@ from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
 from app.register.builder import RegistrationSnapshotBuilder
+from app.register.execution import (
+    CREATE_POLICY,
+    RegistrationExecutionService,
+    create_job_definition,
+)
 from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
 from app.register.preflight import RegistrationPreflightService
 from app.register.service import RegisterService
@@ -64,7 +69,14 @@ from app.system.diagnostics import DiagnosticsService
 from app.system.execution_mode import ExecutionModeService
 from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
+from integrations.marketplaces.smartstore import product as smartstore_product
+from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.execution import (
+    SmartStoreCreateSender,
+    SmartStoreReadback,
+    SmartStoreReconcileLookup,
+)
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import SupplierCollection
@@ -105,6 +117,7 @@ class Container:
     registrations: RegistrationStore
     registration_preflight: RegistrationPreflightService
     registration_builder: RegistrationSnapshotBuilder
+    registration_execution: RegistrationExecutionService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -290,6 +303,23 @@ def build_container(
     registration_builder = RegistrationSnapshotBuilder(
         preflight=registration_preflight, registrations=registrations
     )
+    # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
+    # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
+    # no code path here can mutate the marketplace; the read-back seam is PR-D's adopted one.
+    registration_execution = RegistrationExecutionService(
+        registrations=registrations,
+        preflight=registration_preflight,
+        sender=SmartStoreCreateSender(),
+        readback=SmartStoreReadback(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=lambda: None,
+        ),
+        lookup=SmartStoreReconcileLookup(),
+        compare=smartstore_readback,
+        projection=smartstore_product.project,
+        clock=clock,
+    )
+    registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -332,6 +362,7 @@ def build_container(
         registrations=registrations,
         registration_preflight=registration_preflight,
         registration_builder=registration_builder,
+        registration_execution=registration_execution,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

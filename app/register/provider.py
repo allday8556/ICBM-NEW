@@ -15,8 +15,11 @@ Each seam is written so that *not having* the capability is expressible without 
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from app.connect.marketplace.capability import RemoteOutcome
+from app.core.errors import ErrorClass
 from app.register.preparation import DuplicateEvidence, PreparedAsset
 
 
@@ -62,10 +65,86 @@ class ReadbackComparator(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class CreateHandoff:
+    """What one CREATE handoff proved (ADR-0014 §9; PR-E kickoff §4).
+
+    ``error_class`` (the cause) and ``remote_outcome`` (whether the mutation happened) are
+    independent axes. A sender that cannot prove the mutation did not happen reports
+    ``UNKNOWN``; it must never infer ``NOT_APPLIED_PROVEN`` from a timeout, a 5xx or an
+    exception type. ``marketplace_product_id`` exists exactly when the outcome is applied.
+
+    Both mappings are the **sanitized** canonical representations the durable digests are taken
+    over (§15): never wire bytes, never a header, never a token.
+    """
+
+    remote_outcome: RemoteOutcome
+    sanitized_request: Mapping[str, Any]
+    marketplace_product_id: str | None = None
+    response_status: int | None = None
+    sanitized_response: Mapping[str, Any] | None = None
+    error_class: ErrorClass | None = None
+    error_code: str | None = None
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class CreateSender(Protocol):
+    """The provider CREATE handoff. Unavailable until the provider contract is adopted."""
+
+    def available(self) -> bool:
+        """Whether a CREATE may be handed off at all. ``False`` keeps the caller fail-closed."""
+        ...
+
+    def send(
+        self, *, payload: Mapping[str, Any], idempotency_key: str, listing_identity: str
+    ) -> CreateHandoff:
+        """Hand one frozen Snapshot payload to the provider, or raise before any transport."""
+        ...
+
+
+@runtime_checkable
+class ReadbackSource(Protocol):
+    """The adopted read-back of a known provider product identity (PR-D)."""
+
+    def available(self) -> bool: ...
+
+    def read(self, *, marketplace_product_id: str) -> Mapping[str, Any]:
+        """The retained, sanitized response of one read-back."""
+        ...
+
+
+@runtime_checkable
+class WireProjector(Protocol):
+    """The provider wire projection of one frozen Snapshot payload (PR-D)."""
+
+    def __call__(self, payload: Mapping[str, Any]) -> Any:
+        """A projection whose ``sendable`` is false while any documented gap remains."""
+        ...
+
+
+@runtime_checkable
+class ReconcileLookup(Protocol):
+    """A lookup by the stable listing identity, for reconciling an UNKNOWN CREATE (§10)."""
+
+    def available(self) -> bool:
+        """``False`` where no lookup contract is adopted: the UNKNOWN then stays unresolved."""
+        ...
+
+    def find(self, *, marketplace_account_id: str, listing_identity: str) -> Mapping[str, Any]:
+        """The retained evidence of one lookup, or a raised error. Never a fabricated absence."""
+        ...
+
+
 __all__ = [
+    "CreateHandoff",
+    "CreateSender",
     "DuplicateEvidence",
     "DuplicateLookupSource",
     "PreparedAsset",
     "ProviderAssetSource",
     "ReadbackComparator",
+    "ReadbackSource",
+    "ReconcileLookup",
+    "WireProjector",
 ]

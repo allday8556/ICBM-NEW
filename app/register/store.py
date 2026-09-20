@@ -49,6 +49,7 @@ from app.connect.marketplace.capability import RemoteOutcome
 from app.core.clock import Clock
 from app.core.errors import ErrorClass, InputValidationError, NotFoundError
 from app.db.database import Database
+from app.jobs.models import Job
 from app.products.models import GroupChangeEvent, PricingSnapshot, ProductItem
 from app.products.pricing_store import PricingSnapshotRecord, PricingUnit
 from app.register.model import (
@@ -193,6 +194,9 @@ class AttemptRecord:
     resolved_outcome: RemoteOutcome | None
     resolved_by: ResolvedBy | None
     resolution_evidence_kind: ResolutionEvidence | None
+    # The cause the attempt finished with, independent of whether the mutation happened (§9).
+    error_class: ErrorClass | None = None
+    error_code: str | None = None
 
     @property
     def outcome(self) -> RemoteOutcome | None:
@@ -296,6 +300,22 @@ class RegistrationStore:
     def conflicting_intents(self, registration_snapshot_id: str) -> tuple[str, ...]:
         with self.reading() as unit:
             return unit.conflicting_intents(registration_snapshot_id)
+
+    def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
+        with self.reading() as unit:
+            return unit.snapshot_payload(registration_snapshot_id)
+
+    def scope_attempts(
+        self, marketplace_key: str, marketplace_account_id: str, *, limit: int = 50
+    ) -> tuple[AttemptRecord, ...]:
+        with self.reading() as unit:
+            return unit.scope_attempts(marketplace_key, marketplace_account_id, limit=limit)
+
+    def jobs_with_open_attempts(
+        self, job_type: str, terminal_states: Sequence[str], *, limit: int = 500
+    ) -> tuple[str, ...]:
+        with self.reading() as unit:
+            return unit.jobs_with_open_attempts(job_type, terminal_states, limit=limit)
 
 
 class RegistrationUnit:
@@ -614,6 +634,18 @@ class RegistrationUnit:
                 for i in items
             ),
         )
+
+    def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
+        """The frozen canonical payload of one Snapshot — what was actually sent (§6).
+
+        It is read-only truth: the wire projection and the read-back comparison both expect this
+        exact document, never the current Draft.
+        """
+        row = self.session.get(RegistrationSnapshot, registration_snapshot_id)
+        if row is None:
+            return None
+        payload = json.loads(row.payload_json)
+        return payload if isinstance(payload, dict) else None
 
     # ------------------------------------------------------------------ batches and intents (§8)
 
@@ -1013,6 +1045,51 @@ class RegistrationUnit:
             .order_by(RegistrationAttempt.attempt_no)
         ).all()
         return tuple(_attempt_record(row) for row in rows)
+
+    def scope_attempts(
+        self, marketplace_key: str, marketplace_account_id: str, *, limit: int = 50
+    ) -> tuple[AttemptRecord, ...]:
+        """The most recent attempts of one marketplace and canonical account, newest first.
+
+        The execution failure budget (PR-E) is derived from exactly this history, so no second
+        authoritative state exists to disagree with the attempts themselves (ADR-0014 §9)."""
+        rows = self.session.scalars(
+            select(RegistrationAttempt)
+            .join(RegistrationIntent, RegistrationIntent.intent_id == RegistrationAttempt.intent_id)
+            .where(
+                RegistrationIntent.marketplace_key == marketplace_key,
+                RegistrationIntent.marketplace_account_id == marketplace_account_id,
+            )
+            .order_by(RegistrationAttempt.started_at.desc(), RegistrationAttempt.attempt_no.desc())
+            .limit(limit)
+        ).all()
+        return tuple(_attempt_record(row) for row in rows)
+
+    def jobs_with_open_attempts(
+        self, job_type: str, terminal_states: Sequence[str], *, limit: int = 500
+    ) -> tuple[str, ...]:
+        """The jobs of ``job_type`` that a still-open attempt of this owner is waiting on.
+
+        Registration rows carry no ``job_id``; a CREATE job names its Intent in ``target_ref``
+        (``intent:<intent_id>``), so the join is on that. The terminal-state filter is applied in
+        the query, before the bound, so a page of results can never hide the rest behind jobs that
+        are still running (``JobDefinition.unsettled_owned_jobs``).
+        """
+        rows = self.session.scalars(
+            select(Job.job_id)
+            .join(
+                RegistrationAttempt,
+                Job.target_ref == "intent:" + RegistrationAttempt.intent_id,
+            )
+            .where(
+                Job.job_type == job_type,
+                Job.state.in_(tuple(terminal_states)),
+                RegistrationAttempt.finished_at.is_(None),
+            )
+            .order_by(RegistrationAttempt.started_at)
+            .limit(limit)
+        ).all()
+        return tuple(dict.fromkeys(rows))
 
     # ------------------------------------------------------------------ verification (§11)
 
@@ -1611,6 +1688,8 @@ def _attempt_record(row: RegistrationAttempt) -> AttemptRecord:
             if row.resolution_evidence_kind is None
             else ResolutionEvidence(row.resolution_evidence_kind)
         ),
+        error_class=None if row.error_class is None else ErrorClass(row.error_class),
+        error_code=row.error_code,
     )
 
 
