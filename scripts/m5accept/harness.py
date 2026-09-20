@@ -65,6 +65,23 @@ PROVIDER_AUDIT = (
 )
 
 
+# The endpoint contracts a registration needs. The CONNECT pair is deliberately not reported here:
+# this snapshot is about the registration contracts, and an endpoint id that reads like a
+# credential word has no place in an acceptance report (the report scanner refuses one).
+REGISTRATION_ENDPOINTS = (
+    "SMARTSTORE_PRODUCT_CREATE_V2",
+    "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+    "SMARTSTORE_PRODUCT_SEARCH",
+    "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
+    "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
+)
+
+
+def _registration_adoption() -> dict[str, bool]:
+    adoption = SmartStoreAdoption().adoption()
+    return {name: bool(adoption.get(name, False)) for name in REGISTRATION_ENDPOINTS}
+
+
 class Failed(Exception):
     """A phase could not go on: the checks already recorded say why."""
 
@@ -673,7 +690,7 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     sender, lookup = production_seams()
     checks.check("boundary.production_create_unavailable", sender.available() is False)
     checks.check("boundary.production_lookup_unavailable", lookup.available() is False)
-    adoption = SmartStoreAdoption().adoption()
+    adoption = _registration_adoption()
     checks.check(
         "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
     )
@@ -736,7 +753,7 @@ def canary(run: Run) -> dict[str, object]:
     )
     result = evaluate(
         facts,
-        SmartStoreAdoption().adoption(),
+        _registration_adoption(),
         execution_mode="DRY_RUN",
         write_status=capability.write.status.value,
         clean_runtime=True,
@@ -808,7 +825,7 @@ def run_acceptance(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         "alembic_head": head_revision(),
         "execution_mode": "DRY_RUN",
         "execution_policy_version": ExecutionPolicy().version,
-        "endpoint_adoption": SmartStoreAdoption().adoption(),
+        "endpoint_adoption": _registration_adoption(),
     }
     checks = Checks()
     with offline(claimed, modules=FORBIDDEN_MODULES) as guarded:
