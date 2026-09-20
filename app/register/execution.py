@@ -1241,6 +1241,31 @@ def enqueue_create(
         listing_identity=frozen.resolved.listing_identity,
         identity_generation=frozen.resolved.identity_generation,
     )
+    return queue_send_request(jobs, registrations, intent_id=intent_id, payload=payload)
+
+
+def queue_send_request(
+    jobs: JobService,
+    registrations: RegistrationStore,
+    *,
+    intent_id: str,
+    payload: Mapping[str, Any],
+) -> str:
+    """Queue one CREATE job for an Intent from an already-encoded send request.
+
+    The operator surface (PR-F) re-queues the **frozen** request a durable job already carries,
+    rather than rebuilding inputs it no longer holds: the payload is decoded first, so a payload
+    of another version, another Intent or another unit is refused before any job exists.
+    """
+    request, prepared = decode_send_request(payload)
+    _ = request, prepared  # decoded to refuse a payload this owner cannot execute
+    frozen_unit_identity(payload)
+    if str(payload.get("intent_id", "")) != intent_id:
+        raise ExecutionRefused(
+            "REGISTER_SEND_SCOPE_MISMATCH",
+            "the send request names another Intent",
+            details={"intent_id": intent_id},
+        )
     # The check and the insert are **one** unit of work: two callers that both found no live job
     # would otherwise both queue one, and the second would run a CREATE while the first is still
     # waiting out its backoff. The job row joins this transaction (``session=``), so the worker is
@@ -1267,7 +1292,7 @@ def enqueue_create(
             return live
         record = jobs.enqueue(
             CREATE_JOB_TYPE,
-            payload=payload,
+            payload=dict(payload),
             target_ref=target_ref(intent_id),
             session=unit.session,
         )
@@ -1293,5 +1318,6 @@ __all__ = [
     "encode_send_request",
     "enqueue_create",
     "frozen_unit_identity",
+    "queue_send_request",
     "target_ref",
 ]

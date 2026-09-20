@@ -399,6 +399,30 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.execution_scope(marketplace_key, marketplace_account_id, endpoint_group)
 
+    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+        with self.reading() as unit:
+            return unit.drafts(limit=limit)
+
+    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+        with self.reading() as unit:
+            return unit.intents(limit=limit)
+
+    def registrations(self, *, limit: int = 200) -> tuple[RegistrationRecord, ...]:
+        with self.reading() as unit:
+            return unit.registrations(limit=limit)
+
+    def open_draft_count(self) -> int:
+        with self.reading() as unit:
+            return unit.open_draft_count()
+
+    def active_registration_count(self) -> int:
+        with self.reading() as unit:
+            return unit.active_registration_count()
+
+    def paused_scopes(self, *, limit: int = 50) -> tuple[ScopeRecord, ...]:
+        with self.reading() as unit:
+            return unit.paused_scopes(limit=limit)
+
 
 class RegistrationUnit:
     """The registration writes and reads over one caller-owned session. It never commits: the
@@ -564,6 +588,75 @@ class RegistrationUnit:
     def draft(self, draft_id: str) -> DraftRecord | None:
         row = self.session.get(RegistrationDraft, draft_id)
         return None if row is None else self._draft_record(row)
+
+    # ------------------------------------------------------------------ operator reads (§22)
+
+    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+        """Every Draft, newest first. A read for the operator surface: it decides nothing."""
+        rows = self.session.scalars(
+            select(RegistrationDraft)
+            .order_by(RegistrationDraft.created_at.desc(), RegistrationDraft.draft_id)
+            .limit(limit)
+        ).all()
+        return tuple(self._draft_record(row) for row in rows)
+
+    def open_draft_count(self) -> int:
+        """Drafts that still hold an open Item: a registration candidate is a prepared unit, never
+        a Product (PR #83 review 5253314334)."""
+        return int(
+            self.session.scalar(
+                select(func.count(func.distinct(RegistrationDraftItem.draft_id))).where(
+                    RegistrationDraftItem.removed_at.is_(None)
+                )
+            )
+            or 0
+        )
+
+    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+        rows = self.session.scalars(
+            select(RegistrationIntent)
+            .order_by(RegistrationIntent.created_at.desc(), RegistrationIntent.intent_id)
+            .limit(limit)
+        ).all()
+        return tuple(_intent_record(row) for row in rows)
+
+    def registrations(self, *, limit: int = 200) -> tuple[RegistrationRecord, ...]:
+        rows = self.session.scalars(
+            select(MarketplaceRegistration.registration_id)
+            .order_by(
+                MarketplaceRegistration.created_at.desc(),
+                MarketplaceRegistration.registration_id,
+            )
+            .limit(limit)
+        ).all()
+        found = [self.registration(registration_id) for registration_id in rows]
+        return tuple(record for record in found if record is not None)
+
+    def active_registration_count(self) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(MarketplaceRegistration)
+                .where(
+                    MarketplaceRegistration.lifecycle_state == RegistrationLifecycle.ACTIVE.value
+                )
+            )
+            or 0
+        )
+
+    def paused_scopes(self, *, limit: int = 50) -> tuple[ScopeRecord, ...]:
+        """The execution scopes whose send brake is engaged (§26)."""
+        rows = self.session.scalars(
+            select(RegistrationExecutionScope)
+            .where(RegistrationExecutionScope.state == ExecutionScopeState.PAUSED.value)
+            .order_by(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+                RegistrationExecutionScope.endpoint_group,
+            )
+            .limit(limit)
+        ).all()
+        return tuple(_scope_record(row) for row in rows)
 
     # ------------------------------------------------------------------ snapshots (§6, §7)
 

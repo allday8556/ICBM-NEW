@@ -25,7 +25,7 @@ from integrations.marketplaces.smartstore.caller import (
     ProductReadRequest,
     SmartStoreEndpointCaller,
 )
-from integrations.marketplaces.smartstore.registry import ADOPTION_GAPS, EndpointId
+from integrations.marketplaces.smartstore.registry import ADOPTED, ADOPTION_GAPS, EndpointId
 
 MARKETPLACE_KEY: Final = "smartstore"
 # The committed CONNECT session a read-back is made with, or None when there is none.
@@ -111,11 +111,27 @@ class SmartStoreReconcileLookup:
         raise ReconcileLookupNotAdoptedError()
 
 
+class SmartStoreAdoption:
+    """What this adapter proves about its own endpoint contracts, for the canary plan (PR-F §C).
+
+    It reads the registry and nothing else: an endpoint is adopted when the registry adopted it,
+    and the gap of an unadopted one is the registry's own recorded reason. It judges nothing of its
+    own, reaches no transport, and never reports a missing contract as "not needed".
+    """
+
+    def adoption(self) -> Mapping[str, bool]:
+        return {endpoint.value: endpoint in ADOPTED for endpoint in EndpointId}
+
+    def gaps(self) -> Mapping[str, str]:
+        return {endpoint.value: gap for endpoint, gap in ADOPTION_GAPS.items()}
+
+
 __all__ = [
     "MARKETPLACE_KEY",
     "BearerSource",
     "CreateNotAdoptedError",
     "ReconcileLookupNotAdoptedError",
+    "SmartStoreAdoption",
     "SmartStoreCreateSender",
     "SmartStoreReadback",
     "SmartStoreReconcileLookup",

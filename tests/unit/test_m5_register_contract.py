@@ -444,9 +444,15 @@ def test_the_account_writer_detector_fires() -> None:
     assert account_writer_problems(sources) == ["app/register/store.py:1", "scripts/seed.py:1"]
 
 
-# ---------------------------------------------------------------- REGISTER does nothing yet
+# ------------------------------------------------- REGISTER reads truth and decides nothing (PR-F)
 
 REGISTER_COUNTS = frozenset({"registration_candidate_count", "registration_count"})
+# The evaluators the Registration Management owner may never import: a price, a readiness, a
+# preflight, a payload or a policy is decided by its own owner and only read here (PR-F 짠B).
+SERVICE_EVALUATORS = re.compile(
+    r"^app\.(products\.(pricing|pricing_service|readiness)"
+    r"|register\.(preparation|payload|policy|builder|preflight_rules))(\.|$)"
+)
 PROVIDER_REACH = re.compile(
     r"^(httpx|requests|urllib3|aiohttp|playwright|integrations\.(marketplaces|suppliers)"
     r"|app\.connect\.(smartstore|marketplace)\.(service|caller|credentials))(\.|$)"
@@ -454,30 +460,34 @@ PROVIDER_REACH = re.compile(
 
 
 def register_service_problems(source: str) -> list[str]:
-    """``RegisterService`` may only report zero: another public method, a count other than the
-    literal 0, or an import is REGISTER behaviour PR-A does not authorize."""
+    """The Registration Management owner reads and hands over; it never decides or writes.
+
+    Two structural rules (PR-F 짠B): it opens no write transaction of its own, so no registration
+    row is written outside the store and the owners that call it, and it imports no evaluator, so
+    a price, a readiness, a preflight, a payload or a policy can only be read from the owner that
+    decided it.
+    """
     problems = []
     tree = ast.parse(source)
-    problems += [
-        f"import at {node.lineno}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import | ast.ImportFrom)
-    ]
-    for cls in (
-        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "RegisterService"
-    ):
-        for fn in (n for n in cls.body if isinstance(n, ast.FunctionDef)):
-            if fn.name.startswith("_"):
-                continue
-            body = [n for n in fn.body if not isinstance(n, ast.Expr)]
-            returns_zero = (
-                len(body) == 1
-                and isinstance(body[0], ast.Return)
-                and isinstance(body[0].value, ast.Constant)
-                and body[0].value.value == 0
-            )
-            if fn.name not in REGISTER_COUNTS or not returns_zero:
-                problems.append(f"RegisterService.{fn.name}")
+    for node in ast.walk(tree):
+        modules = (
+            [node.module or ""]
+            if isinstance(node, ast.ImportFrom)
+            else [alias.name for alias in node.names]
+            if isinstance(node, ast.Import)
+            else []
+        )
+        problems += [
+            f"evaluator import at {node.lineno}"
+            for module in modules
+            if SERVICE_EVALUATORS.match(module)
+        ]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "transaction"
+        ):
+            problems.append(f"write transaction at {node.lineno}")
     return problems
 
 
@@ -500,31 +510,32 @@ def register_reach_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
     return offenders
 
 
-def test_register_service_stays_unimplemented() -> None:
+def test_the_register_service_reads_truth_and_decides_nothing() -> None:
     from app.register.service import RegisterService
 
     assert register_service_problems((REPO_ROOT / REGISTER_SERVICE).read_text("utf-8")) == []
+    # Unwired, it reports nothing rather than inventing a number (PR #83 review 5253314334).
     service = RegisterService()
     assert service.registration_candidate_count() == 0
     assert service.registration_count() == 0
+    public = {name for name in dir(service) if not name.startswith("_")}
+    assert public >= REGISTER_COUNTS
 
 
 def test_the_register_service_detector_fires() -> None:
     source = (
-        "import httpx\n"
+        "from app.products.pricing import calculate\n"
+        "from app.register.payload import build_payload\n"
+        "from app.register.store import RegistrationStore\n"
         "class RegisterService:\n"
-        "    def registration_count(self) -> int:\n"
-        "        return 1\n"
-        "    def create(self, snapshot):\n"
-        "        return 0\n"
-        "    def registration_candidate_count(self) -> int:\n"
-        '        """Zero."""\n'
-        "        return 0\n"
+        "    def confirm(self, store):\n"
+        "        with store.transaction() as unit:\n"
+        "            return unit\n"
     )
     assert register_service_problems(source) == [
-        "import at 1",
-        "RegisterService.registration_count",
-        "RegisterService.create",
+        "evaluator import at 1",
+        "evaluator import at 2",
+        "write transaction at 6",
     ]
 
 

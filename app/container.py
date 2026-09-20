@@ -73,6 +73,7 @@ from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.execution import (
+    SmartStoreAdoption,
     SmartStoreCreateSender,
     SmartStoreReadback,
     SmartStoreReconcileLookup,
@@ -118,6 +119,7 @@ class Container:
     registration_preflight: RegistrationPreflightService
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
+    register: RegisterService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -321,6 +323,18 @@ def build_container(
         clock=clock,
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
+    # M5 PR-F (ADR-0014 §22, §24): the Registration Management read model and its operator
+    # actions. It owns no truth of its own — it reads the owners above and hands each action to
+    # the owner of that action — and its canary readiness is derived and read-only.
+    register_service = RegisterService(
+        registrations=registrations,
+        execution=registration_execution,
+        accounts=accounts,
+        jobs=jobs,
+        capability=marketplace_capability,
+        adoption=SmartStoreAdoption(),
+        execution_mode=execution_mode.state().mode.value,
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -328,7 +342,7 @@ def build_container(
         connect=connect,
         collect=CollectService(jobs),
         products=products,
-        register=RegisterService(),
+        register=register_service,
         operate=OperateService(),
         review=ReviewService(),
         execution_mode=execution_mode,
@@ -364,6 +378,7 @@ def build_container(
         registration_preflight=registration_preflight,
         registration_builder=registration_builder,
         registration_execution=registration_execution,
+        register=register_service,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

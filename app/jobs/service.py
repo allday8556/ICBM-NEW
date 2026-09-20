@@ -105,6 +105,30 @@ class JobService:
             record.attempts = [JobAttemptRecord.model_validate(a) for a in attempts]
             return record
 
+    def payload(self, job_id: str) -> Mapping[str, Any]:
+        """The durable payload a job was queued with.
+
+        A job owner that re-queues the same work sends exactly what was recorded, rather than
+        rebuilding inputs it no longer has. The job system owns this row, so it is read here.
+        """
+        with self._db.read() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise NotFoundError("JOB_NOT_FOUND", f"job {job_id} does not exist")
+            decoded = json.loads(job.payload_json)
+            return decoded if isinstance(decoded, dict) else {}
+
+    def latest_job(self, job_type: str, target_ref: str) -> JobRecord | None:
+        """The newest job of this type for one owner's target, in any state."""
+        with self._db.read() as session:
+            job = session.scalars(
+                select(Job)
+                .where(Job.job_type == job_type, Job.target_ref == target_ref)
+                .order_by(Job.created_at.desc(), Job.job_id)
+                .limit(1)
+            ).first()
+            return None if job is None else JobRecord.model_validate(job)
+
     def list_jobs(self, *, state: JobState | None = None, limit: int = 50) -> list[JobRecord]:
         query = select(Job).order_by(Job.created_at.desc()).limit(limit)
         if state is not None:

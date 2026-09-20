@@ -271,6 +271,7 @@ class Prepared:
     request: PreflightRequest
     assets: tuple[PreparedAsset, ...]
     final: PreflightResult
+    draft_id: str = ""
 
 
 def prepare(
@@ -300,6 +301,7 @@ def prepare(
         req,
         tuple(prepared(final)),
         final,
+        draft_id,
     )
 
 
@@ -329,7 +331,7 @@ def prepare_without_assets(
         intent = unit.create_intent(
             batch, snapshot.registration_snapshot_id, created_by=OPERATOR, correlation_id=CID
         )
-    return Prepared(intent.intent_id, snapshot.registration_snapshot_id, req, (), final)
+    return Prepared(intent.intent_id, snapshot.registration_snapshot_id, req, (), final, draft_id)
 
 
 def failing(
