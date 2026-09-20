@@ -428,15 +428,16 @@ def scenario_subset_mismatch(run: Run) -> dict[str, object]:
         after is not None and after.verification_state is VerificationState.PASS,
         verification=None if after is None else after.verification_state.value,
     )
-    # 8: the comparison is against the immutable Snapshot, not today's product state.
+    # 8: the comparison is against the immutable Snapshot, not today's product state. The current
+    # price moves; the frozen payload does not, and the same read-back still matches it.
     moved = owners.pricing.price(unit.items[0].item_id, replace(synthetic.CONTEXT, fee_rate="0.2"))
-    owners.readback.retained = _retained(unit, payload, reverse=True)
-    owners.execution.verify(unit.intent_id, correlation_id=CID)
-    again = owners.registrations.intent(unit.intent_id)
+    frozen_again = owners.registrations.snapshot_payload(unit.snapshot_id)
+    comparison = owners.comparator.compare(payload, _retained(unit, payload))
     checks.check(
         "s8.readback_compares_to_the_frozen_snapshot",
-        again is not None and again.verification_state is VerificationState.PASS,
+        frozen_again == payload and comparison.verdict.value == "MATCH",
         current_price_moved=moved.snapshot is not None,
+        verdict=comparison.verdict.value,
     )
     return {"intent_id": unit.intent_id, "items": len(unit.items)}
 
