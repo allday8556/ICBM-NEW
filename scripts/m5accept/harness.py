@@ -181,6 +181,11 @@ class Run:
     owners: Owners
     checks: Checks = field(default_factory=Checks)
     account: str = ""
+    # How often this run used each fake seam, across every restart: a restart opens new fakes, and
+    # the report counts the run, not the last process.
+    fakes: dict[str, int] = field(
+        default_factory=lambda: {"create": 0, "readback": 0, "compare": 0}
+    )
 
     @property
     def data_dir(self) -> Path:
@@ -190,9 +195,23 @@ class Run:
         """Close every owner and open them again over the same root: what a restart leaves."""
         policy = self.owners.execution._policy  # the same versioned policy, re-armed
         clock = self.owners.clock
+        self._keep_fakes()
         self.owners.close()
         self.owners = open_owners(self.data_dir, migrate=False, clock=clock, policy=policy)
         _install_policy(self.owners, self.account)
+
+    def _keep_fakes(self) -> None:
+        self.fakes["create"] += len(self.owners.sender.calls)
+        self.fakes["readback"] += self.owners.readback.calls
+        self.fakes["compare"] += self.owners.comparator.calls
+
+    def fake_calls(self) -> dict[str, int]:
+        """The run's total, the owners it holds now included."""
+        return {
+            "create": self.fakes["create"] + len(self.owners.sender.calls),
+            "readback": self.fakes["readback"] + self.owners.readback.calls,
+            "compare": self.fakes["compare"] + self.owners.comparator.calls,
+        }
 
 
 def _install_policy(owners: Owners, account: str) -> None:
@@ -957,12 +976,13 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         tables=len(upstream_before),
         changes=changes[:5],
     )
+    fakes = run.fake_calls()
     return {
         "marketplace_mutations": 0,
         "real_wire_projection_sendable": False,
-        "readback_comparisons": owners.comparator.calls,
-        "fake_create_handoffs": len(owners.sender.calls),
-        "fake_readbacks": owners.readback.calls,
+        "readback_comparisons": fakes["compare"],
+        "fake_create_handoffs": fakes["create"],
+        "fake_readbacks": fakes["readback"],
         "provider_audit_events": provider_events,
     }
 
