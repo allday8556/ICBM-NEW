@@ -413,6 +413,13 @@ def test_an_unambiguous_upload_becomes_exactly_one_prepared_asset() -> None:
         ({}, "UPLOAD_NO_REFERENCE_RETURNED"),
         ({"images": []}, "UPLOAD_NO_REFERENCE_RETURNED"),
         ({"images": [{"url": REF_MAIN}, {"url": REF_DETAIL}]}, "UPLOAD_REFERENCE_NOT_UNIQUE"),
+        # Review of 3484434: two references are two, even when they carry the same string. The
+        # upload proved two, so one artifact's provider identity is not established.
+        ({"images": [{"url": REF_MAIN}, {"url": REF_MAIN}]}, "UPLOAD_REFERENCE_NOT_UNIQUE"),
+        (
+            {"images": [{"url": REF_MAIN}], "thumbnails": [{"url": REF_MAIN}]},
+            "UPLOAD_REFERENCE_NOT_UNIQUE",
+        ),
         ({"images": [{"url": "https://cdn.example/a.jpg?sig=abc"}]}, "UPLOAD_REFERENCE_UNSAFE"),
     ],
 )

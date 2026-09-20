@@ -89,13 +89,16 @@ def promote(
 ) -> UploadOutcome:
     """The provider asset identity of exactly one uploaded artifact, or an ambiguous outcome.
 
-    An upload that returns no reference, or more than one for a single artifact, or a reference
-    that fails sanitation, proves nothing about which provider asset now exists.
+    An upload that returns no reference, or more than one for a single artifact — **two equal
+    references included** — or a reference that fails sanitation, proves nothing about which
+    provider asset now exists.
     """
     references = _references(retained)
     if not references:
         return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_NO_REFERENCE_RETURNED")
-    if len(set(references)) != 1:
+    # Exactly one reference for exactly one artifact: two references are ambiguous even when
+    # they happen to carry the same string, because the upload proved two, not one.
+    if len(references) != 1:
         return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_REFERENCE_NOT_UNIQUE")
     reference = references[0]
     if not safe_provider_reference(reference):
