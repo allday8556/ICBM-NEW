@@ -1039,6 +1039,35 @@ def test_an_auth_failure_pauses_the_scope_instead_of_spinning_through_items(
     assert len(run.sender.calls) == 1
 
 
+def test_a_budget_of_one_account_never_stops_another(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.AUTH,
+            error_code="PROVIDER_AUTH",
+        ),
+        policy=ExecutionPolicy(max_proven_failures=1),
+    )
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    # The budget is scoped to marketplace x canonical account x endpoint group: another
+    # account's history is not this one's, in either direction.
+    other_account = establish(container, config, MARKET, "uid-market-a-2")
+    assert not run.service.budget(MARKET, account).sends_allowed
+    assert run.service.budget(MARKET, other_account).sends_allowed
+
+
 def test_a_failure_budget_breach_stops_further_sends_in_the_scope(
     container: Container,
     sources: Collections,

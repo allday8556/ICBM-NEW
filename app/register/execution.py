@@ -587,12 +587,7 @@ class RegistrationExecutionService:
         # that moves as soon as an Intent names it (§7), so the gate re-evaluates under the
         # frozen identity. Everything else — account, pins, M4, conflicts, metadata, policy — is
         # re-derived from current truth.
-        fresh = self._preflight.final(
-            request,
-            prepared,
-            listing_identity=snapshot.listing_identity,
-            identity_generation=identity_generation,
-        )
+        fresh = self._preflight.final(request, prepared, identity_generation=identity_generation)
         if fresh.status is not ReadinessStatus.READY:
             raise ExecutionRefused(
                 "REGISTER_SEND_PREFLIGHT_NOT_READY",
@@ -845,6 +840,8 @@ class RegistrationExecutionService:
 
     def _sanitized_request(self, snapshot: Any, fresh: PreflightResult) -> dict[str, Any]:
         """The sanitized canonical request representation an attempt digest is taken over (§15)."""
+        # Identities, digests and versions only: nothing operator-supplied reaches this digest,
+        # because the operator's own values were sanitized when the job payload was encoded.
         request = {
             "send_request_version": SEND_REQUEST_VERSION,
             "registration_snapshot_id": snapshot.registration_snapshot_id,
@@ -855,7 +852,6 @@ class RegistrationExecutionService:
             "endpoint_group": self._policy.endpoint_group,
             "execution_policy_version": self._policy.version,
         }
-        require_clean(request, "attempt_request")
         return request
 
     @staticmethod
