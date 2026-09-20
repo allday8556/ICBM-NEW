@@ -8,6 +8,7 @@ capability is a fixed read model.
 
 import contextlib
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 from app.collect.facts import FieldFact, ImageRole, QuantityTier, QuantityTiersValue
@@ -103,10 +104,14 @@ class FakeCapability:
         auth: AuthStatus = AuthStatus.READY,
         write_scope: WriteScopeStatus = WriteScopeStatus.UNKNOWN,
         overlays: tuple[tuple[WorkflowScope, WorkflowState], ...] = (),
+        updated_at: datetime | None = None,
     ) -> None:
         self.auth = auth
         self.write_scope = write_scope
         self.overlays = overlays
+        # What the capability owner last recorded. An audited operator resolution or a fresh
+        # authentication moves it, which is how an execution scope resumes (M5 PR-E).
+        self.updated_at = updated_at
 
     def capability(self, marketplace_key: str) -> MarketplaceCapabilityView:
         return MarketplaceCapabilityView(
@@ -127,7 +132,7 @@ class FakeCapability:
             ],
             error_class=None,
             remote_outcome=None,
-            updated_at=None,
+            updated_at=self.updated_at,
         )
 
 

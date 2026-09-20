@@ -315,6 +315,7 @@ def build_container(
             bearer=lambda: None,
         ),
         lookup=SmartStoreReconcileLookup(),
+        capability=marketplace_capability,
         compare=smartstore_readback,
         projection=smartstore_product.project,
         clock=clock,

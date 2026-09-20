@@ -236,6 +236,7 @@ def execution(container: Container, prep: Preparation, **overrides: Any) -> Exec
         sender=sender,
         readback=readback,
         lookup=lookup,
+        capability=prep.capability,
         compare=comparator,
         projection=projector,
         clock=container.clock,
@@ -845,6 +846,107 @@ def test_a_second_dispatch_cannot_open_a_competing_attempt(
     assert run.sender.calls == []
 
 
+def test_a_second_enqueue_never_bypasses_the_first_job_backoff(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.TRANSIENT,
+            error_code="PROVIDER_TIMEOUT",
+        ),
+    )
+    _jobs(container, run)
+    first = enqueue_create(
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
+    )
+    # A double enqueue is the same queued work, never a second job that could run at once.
+    assert (
+        enqueue_create(
+            container.jobs,
+            container.registrations,
+            intent_id=ready.intent_id,
+            request=ready.request,
+            frozen=ready.final,
+        )
+        == first
+    )
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 1
+    result = container.runner.run_next()
+    assert result is not None and result.state is JobState.RETRY_SCHEDULED
+    scheduled = container.jobs.get(first).next_attempt_at
+    assert scheduled is not None
+    assert (scheduled - container.clock.now()).total_seconds() == pytest.approx(60.0)
+    # Enqueuing again while the first job waits out its backoff yields that same job, and the
+    # runner has nothing due, so no CREATE happens before the policy says so.
+    assert (
+        enqueue_create(
+            container.jobs,
+            container.registrations,
+            intent_id=ready.intent_id,
+            request=ready.request,
+            frozen=ready.final,
+        )
+        == first
+    )
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 1
+    assert container.runner.run_next() is None
+    assert len(run.sender.calls) == 1
+    assert len(store.attempts(ready.intent_id)) == 1
+    # Once the backoff has elapsed the same job runs attempt 2 — the retry schedule is the job
+    # system's, and nothing bypassed it.
+    container.clock.advance(60)
+    assert container.runner.run_next() is not None
+    assert len(run.sender.calls) == 2
+    assert [a.attempt_no for a in store.attempts(ready.intent_id)] == [1, 2]
+
+
+def test_an_unknown_intent_can_never_be_queued_until_evidence_frees_it(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    with pytest.raises(ExecutionRefused) as refused:
+        enqueue_create(
+            container.jobs,
+            container.registrations,
+            intent_id=ready.intent_id,
+            request=ready.request,
+            frozen=ready.final,
+        )
+    assert refused.value.code == "REGISTER_INTENT_NOT_SENDABLE"
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 0
+    # Provider evidence that proves the CREATE was not applied moves the Intent to FAILED, and
+    # only then may a job be queued again.
+    run.lookup.is_available = True
+    run.lookup.found = {"absence_proven": True, "evidence": "sanitized"}
+    run.service.reconcile(ready.intent_id, correlation_id=CID)
+    job_id = enqueue_create(
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
+    )
+    assert container.jobs.get(job_id).state == JobState.QUEUED
+
+
 def test_a_crash_after_start_attempt_converges_on_unknown(
     container: Container,
     sources: Collections,
@@ -856,7 +958,11 @@ def test_a_crash_after_start_attempt_converges_on_unknown(
     run = execution(container, prep)
     _jobs(container, run)
     job_id = enqueue_create(
-        container.jobs, intent_id=ready.intent_id, request=ready.request, frozen=ready.final
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
     )
     # The worker dies mid-attempt: the job stays RUNNING and the attempt stays open.
     claimed = container.runner._claim()
@@ -896,7 +1002,11 @@ def test_a_missed_settlement_converges_on_the_next_reconcile_sweep(
     run = execution(container, prep)
     _jobs(container, run)
     job_id = enqueue_create(
-        container.jobs, intent_id=ready.intent_id, request=ready.request, frozen=ready.final
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
     )
     claimed = container.runner._claim()
     assert claimed is not None
@@ -965,7 +1075,11 @@ def test_a_transient_not_applied_failure_schedules_a_retry_through_the_job_polic
     )
     _jobs(container, run)
     enqueue_create(
-        container.jobs, intent_id=ready.intent_id, request=ready.request, frozen=ready.final
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
     )
     result = container.runner.run_next()
     assert result is not None
@@ -996,7 +1110,11 @@ def test_an_unknown_outcome_dead_letters_the_job_instead_of_retrying(
     )
     _jobs(container, run)
     enqueue_create(
-        container.jobs, intent_id=ready.intent_id, request=ready.request, frozen=ready.final
+        container.jobs,
+        container.registrations,
+        intent_id=ready.intent_id,
+        request=ready.request,
+        frozen=ready.final,
     )
     result = container.runner.run_next()
     assert result is not None
@@ -1037,6 +1155,86 @@ def test_an_auth_failure_pauses_the_scope_instead_of_spinning_through_items(
     assert refused.value.code == "REGISTER_SCOPE_PAUSED"
     assert store.attempts(other.intent_id) == ()
     assert len(run.sender.calls) == 1
+
+
+def test_an_auth_pause_is_released_by_the_capability_owners_own_reset(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.AUTH,
+            error_code="PROVIDER_AUTH",
+        ),
+    )
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    paused = run.service.budget(MARKET, account)
+    assert paused.paused_by is ErrorClass.AUTH and not paused.sends_allowed
+    second = prepare(container, sources, store, account, prep, source_product_id="5678")
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(second))
+    assert refused.value.code == "REGISTER_SCOPE_PAUSED"
+    # v3.1 §11.2: a pause is resumable. The CONNECT capability owner holds the only durable one —
+    # its audited ``resolve`` is the only way a workflow overlay is lifted — and every such
+    # transition moves the capability's own ``updated_at``. Nothing here invents a second state.
+    assert callable(container.marketplace_capability.resolve)
+    container.clock.advance(120)
+    prep.capability.updated_at = container.clock.now()
+    resumed = run.service.budget(MARKET, account)
+    assert resumed.paused_by is None and resumed.sends_allowed
+    assert resumed.reset_at == prep.capability.updated_at
+    # The failed attempt itself is untouched: a release re-reads history, it never rewrites it.
+    attempts = store.attempts(ready.intent_id)
+    assert len(attempts) == 1
+    assert (attempts[0].outcome, attempts[0].error_class) == (
+        RemoteOutcome.NOT_APPLIED_PROVEN,
+        ErrorClass.AUTH,
+    )
+    # And a send in the scope is possible again: the gate is reached, not the pause.
+    run.sender.outcome = RemoteOutcome.APPLIED_PROVEN
+    run.sender.product_id = PRODUCT_NO
+    run.sender.error_class = None
+    assert run.service.run(context(second)).intent_state is IntentState.CONFIRMED
+
+
+def test_a_budget_breach_is_released_by_the_same_reset(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.TRANSIENT,
+            error_code="PROVIDER_TIMEOUT",
+        ),
+        policy=ExecutionPolicy(max_proven_failures=2),
+    )
+    ready = prepare(container, sources, store, account, prep)
+    for _ in range(2):
+        with pytest.raises(AttemptFailed):
+            run.service.run(context(ready))
+    assert run.service.budget(MARKET, account).exhausted
+    container.clock.advance(300)
+    prep.capability.updated_at = container.clock.now()
+    released = run.service.budget(MARKET, account)
+    assert not released.exhausted and released.sends_allowed
+    # Both attempts are still there, unchanged: only the window moved.
+    assert len(store.attempts(ready.intent_id)) == 2
 
 
 def test_a_budget_of_one_account_never_stops_another(

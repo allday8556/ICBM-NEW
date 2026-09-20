@@ -37,6 +37,7 @@ import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -197,6 +198,8 @@ class AttemptRecord:
     # The cause the attempt finished with, independent of whether the mutation happened (§9).
     error_class: ErrorClass | None = None
     error_code: str | None = None
+    # When the attempt opened: what windows an execution policy against a scope reset (PR-E).
+    started_at: datetime | None = None
 
     @property
     def outcome(self) -> RemoteOutcome | None:
@@ -316,6 +319,10 @@ class RegistrationStore:
     ) -> tuple[str, ...]:
         with self.reading() as unit:
             return unit.jobs_with_open_attempts(job_type, terminal_states, limit=limit)
+
+    def active_job(self, job_type: str, intent_id: str, states: Sequence[str]) -> str | None:
+        with self.reading() as unit:
+            return unit.active_job(job_type, intent_id, states)
 
 
 class RegistrationUnit:
@@ -1046,6 +1053,24 @@ class RegistrationUnit:
         ).all()
         return tuple(_attempt_record(row) for row in rows)
 
+    def active_job(self, job_type: str, intent_id: str, states: Sequence[str]) -> str | None:
+        """The job of ``job_type`` that is still working on this Intent, if any.
+
+        One Intent has at most one live CREATE job: the job system already owns when that job
+        next runs, so a second job would bypass its retry schedule. The states that count as
+        live are handed in, because they are the job system's to define and never this owner's.
+        """
+        return self.session.scalar(
+            select(Job.job_id)
+            .where(
+                Job.job_type == job_type,
+                Job.target_ref == f"intent:{intent_id}",
+                Job.state.in_(tuple(states)),
+            )
+            .order_by(Job.created_at)
+            .limit(1)
+        )
+
     def scope_attempts(
         self, marketplace_key: str, marketplace_account_id: str, *, limit: int = 50
     ) -> tuple[AttemptRecord, ...]:
@@ -1690,6 +1715,7 @@ def _attempt_record(row: RegistrationAttempt) -> AttemptRecord:
         ),
         error_class=None if row.error_class is None else ErrorClass(row.error_class),
         error_code=row.error_code,
+        started_at=row.started_at,
     )
 
 

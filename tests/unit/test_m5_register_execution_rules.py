@@ -141,6 +141,74 @@ def test_forbidden_material_never_reaches_a_durable_job_payload(listing: Listing
         _encoded(listing=listing)
 
 
+@pytest.mark.parametrize(
+    "reference",
+    ["provider-asset-1", "https://provider.example/a.jpg", "https://shop-phinf.example/a/b.jpg"],
+)
+def test_a_safe_provider_reference_passes_the_send_codec(reference: str) -> None:
+    # PR-C/PR-D allow an opaque reference or a plain https one; the Snapshot builder already
+    # judges them by that rule, and the send codec applies exactly the same typed boundary.
+    payload = encode_send_request(
+        "intent-1",
+        _request(),
+        (_asset(reference),),
+        listing_identity=IDENTITY,
+        identity_generation=0,
+    )
+    assert payload["prepared_assets"][0]["provider_asset_ref"] == reference  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "https://cdn.example/a.jpg?sig=abc",
+        "https://cdn.example/a.jpg#access_token=abc",
+        "https://user:secret@cdn.example/a.jpg",
+        "http://cdn.example/a.jpg",
+        "http:cdn.example/a.jpg",
+        "ftp:cdn.example/a.jpg",
+        "//cdn.example/a.jpg",
+        "Bearer abcdefghijklmnop",
+    ],
+)
+def test_an_unsafe_provider_reference_never_passes_the_send_codec(reference: str) -> None:
+    with pytest.raises(PayloadSanitationError):
+        encode_send_request(
+            "intent-1",
+            _request(),
+            (_asset(reference),),
+            listing_identity=IDENTITY,
+            identity_generation=0,
+        )
+
+
+def test_duplicate_evidence_identities_are_judged_by_their_own_rules() -> None:
+    # The evidence carries a provider listing reference and a digest, so it is judged the way
+    # PR-C judges it — never by the business-value rule that refuses every URL.
+    safe = _request(
+        duplicate_evidence=replace(
+            _request().duplicate_evidence,  # type: ignore[arg-type]
+            matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, "https://listing.example/p/1"),),
+        )
+    )
+    assert encode_send_request(
+        "intent-1", safe, (_asset(),), listing_identity=IDENTITY, identity_generation=0
+    )["duplicate_evidence"]["matches"][0]["provider_listing_ref"] == (  # type: ignore[index]
+        "https://listing.example/p/1"
+    )
+    for bad in ("https://listing.example/p/1?sig=abc", "http:listing.example/p/1"):
+        unsafe = _request(
+            duplicate_evidence=replace(
+                _request().duplicate_evidence,  # type: ignore[arg-type]
+                matches=(DuplicateMatch(DuplicateKeyKind.SELLER_CODE, bad),),
+            )
+        )
+        with pytest.raises(PayloadSanitationError):
+            encode_send_request(
+                "intent-1", unsafe, (_asset(),), listing_identity=IDENTITY, identity_generation=0
+            )
+
+
 def test_the_job_names_its_intent_in_the_target_ref() -> None:
     # The owner and the job find each other through this, with no second link.
     assert target_ref("intent-1") == "intent:intent-1"
@@ -235,10 +303,16 @@ def test_an_auth_or_policy_cause_pauses_the_scope_rather_than_counting() -> None
         assert state.canonical()["paused_by"] == cause.value
 
 
-def test_an_unknown_outcome_neither_pauses_nor_frees_the_scope() -> None:
-    # An UNKNOWN is reconciled, not budgeted: it is a proven failure of nothing.
-    state = ExecutionPolicy().budget([_attempt(RemoteOutcome.UNKNOWN, ErrorClass.TRANSIENT)])
-    assert state.consecutive_failures == 1 and state.paused_by is None
+def test_an_unknown_outcome_is_not_budgeted_and_neither_pauses_nor_frees_the_scope() -> None:
+    # An UNKNOWN is reconciled (§10), not budgeted: it proves no failure, so it spends nothing,
+    # and it clears nothing either — its own Intent already blocks its conflict scope.
+    policy = ExecutionPolicy(max_proven_failures=2)
+    unknown = _attempt(RemoteOutcome.UNKNOWN, ErrorClass.TRANSIENT)
+    assert policy.budget([unknown]).consecutive_failures == 0
+    assert policy.budget([unknown]).paused_by is None
+    failure = _attempt(RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.TRANSIENT)
+    # Sitting between two proven failures, it neither adds to them nor resets them.
+    assert policy.budget([failure, unknown, failure]).exhausted
 
 
 # ---------------------------------------------------------------- resolution vocabulary (§10)

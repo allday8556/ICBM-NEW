@@ -42,11 +42,13 @@ so `JobRunner.reconcile_terminal_owners()` converges after any crash.
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Final
 
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.clock import Clock
 from app.core.errors import AppError, ErrorClass
+from app.jobs.models import JobState
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, TerminalJob
 from app.jobs.service import JobService
@@ -59,7 +61,7 @@ from app.register.model import (
     VerificationState,
 )
 from app.register.policy import DuplicateKeyKind, Provenance
-from app.register.preflight import RegistrationPreflightService
+from app.register.preflight import CapabilityReader, RegistrationPreflightService
 from app.register.preparation import (
     CategoryConfirmation,
     CategorySelection,
@@ -81,7 +83,14 @@ from app.register.provider import (
     ReconcileLookup,
     WireProjector,
 )
-from app.register.sanitize import require_clean
+from app.register.sanitize import (
+    SECRET_MATERIAL,
+    PayloadSanitationError,
+    hex_digest,
+    require_clean,
+    safe_label,
+    safe_provider_reference,
+)
 from app.register.store import AttemptRecord, IntentRecord, RegistrationStore
 
 logger = logging.getLogger("icbm.register.execution")
@@ -96,6 +105,14 @@ EXECUTION_POLICY_VERSION: Final = "registration-execution-policy/v1"
 # One API group is involved in a registration CREATE and its read-back, so the failure-budget
 # scope of ADR-0014 §9 / v3.1 §11.2-§11.4 is this constant per marketplace and canonical account.
 CREATE_ENDPOINT_GROUP: Final = "product_registration"
+# The job states in which a CREATE job is still the queued work of its Intent (ADR-0005).
+ACTIVE_JOB_STATES: Final = (
+    JobState.QUEUED.value,
+    JobState.RUNNING.value,
+    JobState.RETRY_SCHEDULED.value,
+)
+# The Intent states a CREATE may be queued for: everything else is reconciled or done (§8-§10).
+SENDABLE_STATES: Final = (IntentState.PREPARED, IntentState.FAILED)
 
 
 # ---------------------------------------------------------------- failures
@@ -179,10 +196,32 @@ def encode_send_request(
             },
         },
         "detail": _encode_detail(request.detail),
-        "duplicate_evidence": _encode_evidence(request.duplicate_evidence),
-        "prepared_assets": [_encode_asset(asset) for asset in prepared],
     }
+    # The same typed boundary the Snapshot builder uses (PR-C): business values are refused when
+    # they carry secret or URL-shaped material, while a provider reference is judged by the
+    # provider-reference rule — opaque, or plain https with no query, fragment or userinfo.
     require_clean(payload, "send_request")
+    payload["duplicate_evidence"] = _encode_evidence(request.duplicate_evidence)
+    payload["prepared_assets"] = [_encode_asset(asset) for asset in prepared]
+    unsafe = [
+        asset["provider_asset_ref"]
+        for asset in payload["prepared_assets"]
+        if not safe_provider_reference(str(asset["provider_asset_ref"]))
+    ]
+    evidence = payload["duplicate_evidence"]
+    if evidence is not None:
+        unsafe += [
+            match["provider_listing_ref"]
+            for match in evidence["matches"]
+            if not safe_provider_reference(str(match["provider_listing_ref"]))
+        ]
+        safe_identity = safe_label(evidence["lookup_contract_version"]) and hex_digest(
+            evidence["evidence_digest"]
+        )
+        if not safe_identity:
+            unsafe.append(evidence["lookup_contract_version"])
+    if unsafe:
+        raise PayloadSanitationError(((SECRET_MATERIAL, "send_request.provider_reference"),))
     return payload
 
 
@@ -359,15 +398,30 @@ class ExecutionPolicy:
     max_proven_failures: int = 3
     pause_classes: frozenset[ErrorClass] = frozenset({ErrorClass.AUTH, ErrorClass.POLICY_BLOCKED})
 
-    def budget(self, attempts: Sequence[AttemptRecord]) -> "BudgetState":
-        """The budget of one scope, read from its attempt history newest-first."""
+    def budget(
+        self, attempts: Sequence[AttemptRecord], *, since: datetime | None = None
+    ) -> "BudgetState":
+        """The budget of one scope, read from its attempt history newest-first.
+
+        ``since`` is the scope's last durable reset — the CONNECT capability owner's own
+        ``updated_at``, which moves when an operator resolves the marketplace's workflow overlay
+        or when the account re-authenticates. Attempts older than it are history, not pressure:
+        that is what makes a pause **resumable** without a second authoritative state and without
+        touching, deleting or rewriting a single past attempt (v3.1 §11.2).
+        """
         consecutive = 0
         paused_by: ErrorClass | None = None
         for attempt in attempts:
             if not attempt.finished:
                 continue
+            if since is not None and attempt.started_at is not None and attempt.started_at < since:
+                break
             if attempt.outcome is RemoteOutcome.APPLIED_PROVEN:
                 break
+            if attempt.outcome is RemoteOutcome.UNKNOWN:
+                # An unproven outcome is not a proven failure: it is reconciled (§10), and its
+                # Intent already blocks its own conflict scope. It never spends this budget.
+                continue
             if attempt.error_class is not None and attempt.error_class in self.pause_classes:
                 paused_by = attempt.error_class
                 break
@@ -380,6 +434,7 @@ class ExecutionPolicy:
             consecutive_failures=consecutive,
             exhausted=consecutive >= self.max_proven_failures,
             paused_by=paused_by,
+            reset_at=since,
         )
 
 
@@ -390,6 +445,8 @@ class BudgetState:
     consecutive_failures: int
     exhausted: bool
     paused_by: ErrorClass | None
+    # The scope reset this budget was read against: everything older is history, not pressure.
+    reset_at: datetime | None = None
 
     @property
     def sends_allowed(self) -> bool:
@@ -402,6 +459,7 @@ class BudgetState:
             "consecutive_failures": self.consecutive_failures,
             "exhausted": self.exhausted,
             "paused_by": None if self.paused_by is None else self.paused_by.value,
+            "reset_at": None if self.reset_at is None else self.reset_at.isoformat(),
         }
 
 
@@ -433,6 +491,7 @@ class RegistrationExecutionService:
         sender: CreateSender,
         readback: ReadbackSource,
         lookup: ReconcileLookup,
+        capability: CapabilityReader,
         compare: ReadbackComparator,
         projection: WireProjector,
         clock: Clock,
@@ -444,6 +503,7 @@ class RegistrationExecutionService:
         self._sender = sender
         self._readback = readback
         self._lookup = lookup
+        self._capability = capability
         self._compare = compare
         self._projection = projection
         self._clock = clock
@@ -802,9 +862,25 @@ class RegistrationExecutionService:
     # ------------------------------------------------------------------ helpers
 
     def budget(self, marketplace_key: str, marketplace_account_id: str) -> BudgetState:
-        """The failure budget of one scope, derived from durable attempts only."""
+        """The failure budget of one scope: durable attempts, read against the scope's own reset.
+
+        The reset is the CONNECT capability owner's ``updated_at``. That owner already holds the
+        only durable pause this domain has — a PRODUCT_REGISTRATION workflow overlay, which its
+        audited ``resolve`` is the only way to lift — and every such transition, or a fresh
+        authentication, moves ``updated_at``. So an AUTH or policy pause here is released by the
+        same operator action that releases the capability, no second state is invented, and the
+        failed attempts themselves stay exactly as they were recorded.
+        """
         attempts = self._registrations.scope_attempts(marketplace_key, marketplace_account_id)
-        return self._policy.budget(attempts)
+        return self._policy.budget(attempts, since=self._scope_reset(marketplace_key))
+
+    def _scope_reset(self, marketplace_key: str) -> datetime | None:
+        try:
+            return self._capability.capability(marketplace_key).updated_at
+        except AppError:
+            # A capability that cannot be read resets nothing: the budget then reads the whole
+            # history, which is the fail-closed direction.
+            return None
 
     def _intent(self, intent_id: str) -> IntentRecord:
         intent = self._registrations.intent(intent_id)
@@ -903,6 +979,7 @@ def _run(service: RegistrationExecutionService, context: JobContext) -> None:
 
 def enqueue_create(
     jobs: JobService,
+    registrations: RegistrationStore,
     *,
     intent_id: str,
     request: PreflightRequest,
@@ -912,7 +989,33 @@ def enqueue_create(
 
     ``frozen`` is the final READY result the Snapshot was frozen from, so the job carries exactly
     the inputs and the unit the Snapshot names — never a later preparation's.
+
+    **One live job per Intent.** The job system owns when the next attempt runs, so a second job
+    for the same Intent would run a CREATE while the first is still waiting out its backoff. If a
+    job of this type is QUEUED, RUNNING or RETRY_SCHEDULED for the Intent, that job *is* the
+    queued work and its id comes back unchanged; only once it is terminal, and the Intent is
+    sendable again (PREPARED, or FAILED because a CREATE was proven not applied), may a new one
+    be queued. An UNKNOWN Intent is never queueable: it is reconciled with provider evidence
+    first, which is what moves it to FAILED (§10).
     """
+    intent = registrations.intent(intent_id)
+    if intent is None:
+        raise ExecutionRefused(
+            "REGISTER_INTENT_UNKNOWN", f"no Intent {intent_id!r}", error_class=ErrorClass.NOT_FOUND
+        )
+    if intent.state not in SENDABLE_STATES:
+        raise ExecutionRefused(
+            "REGISTER_INTENT_NOT_SENDABLE",
+            "only a PREPARED Intent, or one proven not applied, may be queued",
+            details={"intent_id": intent_id, "state": intent.state.value},
+        )
+    live = registrations.active_job(CREATE_JOB_TYPE, intent_id, ACTIVE_JOB_STATES)
+    if live is not None:
+        logger.info(
+            "register.create_job_reused",
+            extra={"job_id": live, "intent_id": intent_id},
+        )
+        return live
     record = jobs.enqueue(
         CREATE_JOB_TYPE,
         payload=encode_send_request(
@@ -928,6 +1031,7 @@ def enqueue_create(
 
 
 __all__ = [
+    "ACTIVE_JOB_STATES",
     "CREATE_ENDPOINT_GROUP",
     "CREATE_JOB_TYPE",
     "CREATE_POLICY",
