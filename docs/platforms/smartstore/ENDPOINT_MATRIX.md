@@ -5,12 +5,12 @@
 | Field | Value |
 | --- | --- |
 | Provider | NAVER SmartStore / Commerce API |
-| Contract status | `M2_CONNECT_ADOPTED_SET_FROZEN_FOR_REVIEW` |
+| Contract status | `M5_PRD_READBACK_ADOPTED_FROZEN_FOR_REVIEW` |
 | M2 integration mode | `OWN_STORE_SELF` |
-| Adopted endpoint count | `2` |
-| M5 endpoints | `NOT_ADOPTED` |
+| Adopted endpoint count | `4` (2 M2 CONNECT + 2 M5 read-backs) |
+| M5 endpoints | `2 ADOPTED (read-back), 9 NOT_ADOPTED with recorded gaps` |
 | Runtime verification | `PENDING` |
-| Upstream version | `2.88.0` |
+| Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554) |
 | Retrieved at | `2026-09-14` |
 | Verified at | `null` |
 | Review due | `2026-10-14` |
@@ -108,18 +108,48 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v2/products` | Product CREATE | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | Yes |
-| `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back candidate | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
-| `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back candidate | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
-| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v1/product-images/upload` | Image upload | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | Side effect; not frozen |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes |
+| `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v1/product-images/upload` | Image upload (`multipart/form-data`) | `OWN_STORE_SELF` | `상품` | Side effect; not frozen |
 | `SMARTSTORE_CATEGORY_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories` | Category discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attribute-values` | Attribute-value discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_STANDARD_OPTIONS` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/options/standard-options` | Standard-option discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
-| `SMARTSTORE_NOTICE_TYPES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice` | Notice-type discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
+| `SMARTSTORE_NOTICE_TYPES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice` | Notice-type discovery | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_NOTICE_TYPE_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | Notice-type read | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_PRODUCT_SEARCH` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v1/products/search` | Duplicate lookup candidate | `OWN_STORE_SELF` | `상품` | No |
 
-The M5 list is planning metadata only. Presence does not imply eventual adoption.
+The remaining M5 rows are planning metadata only. Presence does not imply eventual adoption.
+
+### 4.1 M5 PR-D adoption and its recorded gaps (packet 5746489554, release 2.89.0)
+
+PR-D adopts the two product read-backs and nothing else. **No mutating endpoint is adopted**, so
+no code path can mutate the marketplace, and `product_registration.write` stays `UNVERIFIED`.
+
+| Endpoint | Why it is still `NOT_ADOPTED` |
+| --- | --- |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | the packet proves method, path, group and the request/response product structure, but neither the request media type nor the response envelope |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | media type proven, but not the multipart part name, so no request can be composed without inventing it |
+| `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
+| `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
+| `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
+
+Adopted read-back contract, in the registry and pinned by tests:
+
+| Field | Both read-backs |
+| --- | --- |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged |
+| Content type | none (no request body) |
+| Timeouts | connect `5s`, read `15s` (ICBM policy) |
+| Redirect | `NO_FOLLOW` |
+| Success predicate | HTTP 200 AND the body parses as a JSON object (`m5d-origin-read-r1`, `m5d-channel-read-r1`) |
+| Safe query keys | **none** (deny-by-default) |
+| Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
+
+`endpoint_mapping_revision = m5-register-r1`, bound to the registry fingerprint, which now also
+covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15).
 
 ---
 

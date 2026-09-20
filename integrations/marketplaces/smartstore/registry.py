@@ -1,4 +1,5 @@
-"""The SmartStore M2 endpoint registry (docs/platforms/smartstore/ENDPOINT_MATRIX.md; M2 PR-A).
+"""The SmartStore endpoint registry (docs/platforms/smartstore/ENDPOINT_MATRIX.md; M2 PR-A, M5
+PR-D).
 
 This is the single source of the provider host, the base URL, and every endpoint's method, path,
 content type, timeouts, redirect policy, bearer requirement and success predicate (EM §3, §6, §7,
@@ -6,19 +7,38 @@ content type, timeouts, redirect policy, bearer requirement and success predicat
 network I/O (EM §2; CAPABILITY_MAPPING E1, §17 #8). No other module may spell the host, the base URL
 or a SmartStore path; only the caller composes a URL, from this contract.
 
-The registry also owns the endpoint-mapping revision (M2 instructions §5). It is a human-readable
+Each endpoint also declares its **deny-by-default** safe query keys and retained response fields
+(ADR-0011 §3, ADR-0014 §15). Nothing outside those sets may be sent as a query or kept from a
+response, and the profile is versioned with the mapping revision below.
+
+The registry owns the endpoint-mapping revision (M2 instructions §5). It is a human-readable
 revision bound to a fingerprint of the permission-relevant registry content, so a mapping change
 without a revision bump fails CI (§5.3). The revision is never derived from documentation at
 runtime.
+
+**M5 PR-D adoption evidence.** Every provider fact below comes from the architect-supplied
+official-source packet for Naver Commerce API **2.89.0 (2026-09-15)** (Issue #89 comment
+5746489554): the method, the path, the bearer, the ``상품`` API group and the response fields a
+read-back may keep. Timeouts, the redirect policy and the success predicates are ICBM policy over
+the JSON-object response convention ENDPOINT_MATRIX.md already accepts, never provider facts.
+
+PR-D adopts the **two product read-backs only**. Everything the packet leaves unproven stays
+NOT_ADOPTED with its gap named in ``ADOPTION_GAPS`` — including product CREATE and image upload, so
+**no mutating SmartStore endpoint is adopted and no code path can reach one**. The domain block on
+the provider's documentation is not permission to infer the rest (SOURCES.md §11.4).
 """
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 PROVIDER = "SMARTSTORE"
+# The provider API group the packet's AI-use guide gives for product registration, lookup and the
+# category/attribute reads. No narrower permission name is invented from it (kickoff note).
+PRODUCT_GROUP = "상품"
 # AUTH.md §2.1: M2 uses the SELF token type only. Switching to SELLER needs its own ADR (§2.2).
 AUTH_MODE = "SELF"
 PROVIDER_HOST = "api.commerce.naver.com"
@@ -29,17 +49,21 @@ class EndpointId(StrEnum):
     # ADOPTED for M2 (EM §4).
     SMARTSTORE_AUTH_TOKEN = "SMARTSTORE_AUTH_TOKEN"
     SMARTSTORE_SELLER_ACCOUNT = "SMARTSTORE_SELLER_ACCOUNT"
-    # NOT_ADOPTED: M5 planning metadata only (EM §4); never callable in M2.
-    SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
+    # ADOPTED for M5 PR-D: the two product read-backs. Both are reads; **no mutating SmartStore
+    # endpoint is adopted**, so no code path can mutate the marketplace at all.
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
+    # NOT_ADOPTED: the packet does not prove the whole transport contract (see ADOPTION_GAPS).
+    SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
     SMARTSTORE_CATEGORY_LIST = "SMARTSTORE_CATEGORY_LIST"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
     SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES = "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES"
     SMARTSTORE_STANDARD_OPTIONS = "SMARTSTORE_STANDARD_OPTIONS"
     SMARTSTORE_NOTICE_TYPES = "SMARTSTORE_NOTICE_TYPES"
+    SMARTSTORE_NOTICE_TYPE_READ = "SMARTSTORE_NOTICE_TYPE_READ"
 
 
 class Method(StrEnum):
@@ -86,6 +110,17 @@ def account_succeeded(status: int, body: object) -> bool:
     return isinstance(uid, str) and uid.strip() != ""
 
 
+def product_read_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND the body parses as a JSON object.
+
+    The packet proves the read-back endpoints and the product structure's fields, not the envelope
+    those fields arrive in, so the predicate asserts nothing about the shape. Whether the response
+    actually carries the product is decided by the read-back normalizer, which fails closed
+    (``readback.py``); a call that passes here is never by itself a confirmation (ADR-0014 §11).
+    """
+    return status == 200 and isinstance(body, dict)
+
+
 @dataclass(frozen=True)
 class EndpointContract:
     endpoint_id: EndpointId
@@ -104,6 +139,27 @@ class EndpointContract:
     success_predicate: SuccessPredicate
     # Revision of the frozen success predicate, recorded in evidence (ERRORS.md §6).
     predicate_revision: str
+    # ADR-0011 §3 / ADR-0014 §15, deny-by-default: the only URL query keys this endpoint may send
+    # and the only response leaves that may be retained. Empty means none at all.
+    safe_query_keys: frozenset[str] = frozenset()
+    retained_response_fields: frozenset[str] = frozenset()
+
+    @property
+    def path_params(self) -> frozenset[str]:
+        """The placeholders of the path template; the caller must supply exactly these."""
+        return frozenset(_PATH_PARAM.findall(self.path))
+
+
+_PATH_PARAM = re.compile(r"\{([A-Za-z][A-Za-z0-9]*)\}")
+
+# The fields a product read-back may keep. Only names the 2.89.0 packet proves: the product's own
+# ``name``, ``salePrice`` and ``stockQuantity``, the seller-owned codes, and image ``url`` values.
+# Everything else in a response is dropped before anything is hashed or stored.
+_PRODUCT_READ_FIELDS = frozenset(
+    {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
+)
+# Category and notice metadata: only the identifiers and labels a selection is made of. The packet
+# names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
 
 ADOPTED: Mapping[EndpointId, EndpointContract] = {
@@ -135,9 +191,85 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         success_predicate=account_succeeded,
         predicate_revision="em7-account-r1",
     ),
+    # ---- M5 PR-D (packet 5746489554). Group 상품; bearer per the current auth page.
+    EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2,
+        method=Method.GET,
+        path="/v2/products/origin-products/{originProductNo}",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=15.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=product_read_succeeded,
+        predicate_revision="m5d-origin-read-r1",
+        retained_response_fields=_PRODUCT_READ_FIELDS,
+    ),
+    EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2,
+        method=Method.GET,
+        path="/v2/products/channel-products/{channelProductNo}",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=15.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=product_read_succeeded,
+        predicate_revision="m5d-channel-read-r1",
+        retained_response_fields=_PRODUCT_READ_FIELDS,
+    ),
 }
 
 NOT_ADOPTED: frozenset[EndpointId] = frozenset(EndpointId) - frozenset(ADOPTED)
+
+# Why each remaining endpoint is still NOT_ADOPTED after the 2.89.0 packet. Adoption needs the
+# whole transport contract — kickoff §1 lists the request media type and the query contract among
+# the facts that must come from the official documentation — and the packet stops short of them.
+_NO_RESPONSE_CONTRACT = (
+    "the packet proves the endpoint exists but names no response field, so a deny-by-default"
+    " retention profile would keep nothing and no typed metadata could be derived from a read"
+)
+
+ADOPTION_GAPS: Mapping[EndpointId, str] = {
+    EndpointId.SMARTSTORE_PRODUCT_CREATE_V2: (
+        "the packet proves the method, the path, the 상품 group and the request/response product"
+        " structure, but neither the request media type nor the response envelope; the wire"
+        " document is encoded and pinned by product.py and stays unsent"
+    ),
+    EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: (
+        "the packet proves the method, the path, multipart/form-data and the 상품 group, and that"
+        " the returned URL is used directly as the product image URL, but not the multipart part"
+        " name the API expects, so a request cannot be composed without inventing it; assets.py"
+        " still fixes what a returned reference must satisfy before it becomes a PreparedAsset"
+    ),
+    EndpointId.SMARTSTORE_PRODUCT_SEARCH: (
+        "existence only: the packet does not prove the request schema, so no strong duplicate key"
+        " (sellerManagementCode, barcode/GTIN) and no normalized-name filter is proven; duplicate"
+        " lookup stays fail-closed (lookup.py)"
+    ),
+    EndpointId.SMARTSTORE_PRODUCT_ATTRIBUTE_LIST: (
+        "카테고리별 조회 needs a category query key the packet does not name; under a"
+        " deny-by-default allow-list the endpoint could only ever be called without it"
+    ),
+    EndpointId.SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES: (
+        "카테고리별 조회 needs a category query key the packet does not name"
+    ),
+    EndpointId.SMARTSTORE_STANDARD_OPTIONS: (
+        "카테고리별 표준형 옵션 조회 needs a category query key the packet does not name"
+    ),
+    # The metadata reads: the packet names the endpoints but no response field of either, so a
+    # deny-by-default retention profile would keep nothing and no typed metadata could be derived.
+    # Category, attribute, option and notice metadata therefore stay operator-reviewed Settings
+    # data (PR-C ``RegistrationMetadataSource``) until a response contract is proven.
+    EndpointId.SMARTSTORE_CATEGORY_LIST: _NO_RESPONSE_CONTRACT,
+    EndpointId.SMARTSTORE_CATEGORY_READ: _NO_RESPONSE_CONTRACT,
+    EndpointId.SMARTSTORE_NOTICE_TYPES: _NO_RESPONSE_CONTRACT,
+    EndpointId.SMARTSTORE_NOTICE_TYPE_READ: _NO_RESPONSE_CONTRACT,
+}
 
 
 class EndpointNotAdoptedError(LookupError):
@@ -154,30 +286,42 @@ def resolve(endpoint_id: object) -> EndpointContract:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m2-connect-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-register-r1"
+
+# ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
+# the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
+SAFE_RETENTION_PROFILE_VERSION = "smartstore-safe-retention/v1"
 
 # M2 instructions §5.3: each revision is bound to the fingerprint of the permission-relevant
 # registry content it names. Changing that content changes the fingerprint, and CI fails until a
-# new revision and its fingerprint are added here in the same PR.
+# new revision and its fingerprint are added here in the same PR. Superseded revisions stay, so a
+# stored evidence revision can still be resolved.
 MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m2-connect-r1": "17d3dfe97b2f4a6c5e0b363c9c83cba014c018619c6197d54cfa395277016ca9",
+    "m5-register-r1": "fbf07a8784557b45c5e282464a20d2b41534642a34076e1827b656fba8710648",
 }
 
 
 def mapping_fingerprint() -> str:
-    """SHA-256 of the permission-relevant registry content: provider, auth mode, base URL, and
-    each endpoint's id, adoption, method, path, required groups and mutability."""
+    """SHA-256 of the permission-relevant registry content: provider, auth mode, base URL, the
+    safe-retention profile version, and each endpoint's id, adoption, method, path, media type,
+    bearer requirement, required groups, mutability and safe query/retention allow-lists."""
     content = {
         "provider": PROVIDER,
         "auth_mode": AUTH_MODE,
         "base_url": BASE_URL,
+        "safe_retention_profile_version": SAFE_RETENTION_PROFILE_VERSION,
         "adopted": [
             {
                 "id": c.endpoint_id.value,
                 "method": c.method.value,
                 "path": c.path,
+                "content_type": c.content_type,
+                "requires_bearer": c.requires_bearer,
                 "required_groups": sorted(c.required_groups),
                 "mutating": c.mutating,
+                "safe_query_keys": sorted(c.safe_query_keys),
+                "retained_response_fields": sorted(c.retained_response_fields),
             }
             for c in sorted(ADOPTED.values(), key=lambda c: c.endpoint_id.value)
         ],

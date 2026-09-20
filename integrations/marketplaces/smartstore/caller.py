@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, cast, overload
@@ -39,6 +40,7 @@ from integrations.marketplaces.smartstore.registry import (
     EndpointNotAdoptedError,
     resolve,
 )
+from integrations.marketplaces.smartstore.retention import retain
 from integrations.marketplaces.smartstore.signing import (
     TOKEN_FORM_FIELDS,
     ApplicationCredentials,
@@ -61,6 +63,12 @@ _BEARER = re.compile(r"^[\x21-\x7e]+$")
 # Provider codes and trace ids are kept only in this shape; anything else is dropped.
 _PROVIDER_MARKER = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
 _TRACE_HEADER = "GNCP-GW-Trace-ID"
+# A path placeholder value: one conservative URL segment, so nothing needs escaping and no value
+# can traverse or extend the adopted path. This is a local safety bound, not a provider claim.
+_PATH_VALUE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_PRODUCT_READS = frozenset(
+    {EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2, EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2}
+)
 
 
 # ---------------------------------------------------------------- requests and results
@@ -102,6 +110,34 @@ class SellerAccount:
     account_id: str | None = field(repr=False)
     credential_generation: int
     session_generation: int
+
+
+@dataclass(frozen=True)
+class ProductReadRequest:
+    """Read one product back by its provider number (M5 PR-D; packet 5746489554).
+
+    ``product_no`` fills the single path placeholder of the adopted read-back. It is the provider's
+    own identifier, so it is accepted only in the conservative shape below; the request carries no
+    query at all, because both endpoints declare an empty safe query-key allow-list."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    product_no: str
+
+
+@dataclass(frozen=True)
+class ProductReadback:
+    """A read-back response reduced to the endpoint's retained-field allow-list.
+
+    Nothing else survives this boundary: the caller never hands a raw provider body to REGISTER,
+    so no unlisted field can reach a digest, a durable row or a log (ADR-0011 §3, ADR-0014 §15).
+    """
+
+    endpoint_id: EndpointId
+    product_no: str
+    retained: Mapping[str, object]
+    http_status: int
 
 
 class SmartStoreCallError(AppError):
@@ -153,13 +189,44 @@ def _endpoint_name(endpoint_id: object) -> str:
 def _generations(request: object) -> tuple[int | None, int | None]:
     if isinstance(request, TokenRequest):
         return request.credentials.credential_generation, None
-    if isinstance(request, AccountRequest):
+    if isinstance(request, AccountRequest | ProductReadRequest):
         return request.credential_generation, request.session_generation
     return None, None
 
 
-def _compose(contract: EndpointContract, request: object) -> tuple[dict[str, str], dict[str, str]]:
-    """Headers and form body for one adopted endpoint, validated before any transport exists."""
+@dataclass(frozen=True)
+class _Wire:
+    """One composed request: the path this call uses, its headers and its form body."""
+
+    path: str
+    headers: dict[str, str]
+    form: dict[str, str]
+
+
+def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
+    if not _BEARER.fullmatch(token):
+        raise _Preflight("SMARTSTORE_BEARER_UNUSABLE")
+    if credentials < 1 or session < 1:
+        raise _Preflight("SMARTSTORE_SESSION_NOT_COMMITTED")
+    headers["Authorization"] = f"Bearer {token}"
+
+
+def _path(contract: EndpointContract, **params: str) -> str:
+    """The endpoint path with its placeholders filled. A value outside the conservative shape, or
+    a placeholder set that does not match the template exactly, never reaches the transport."""
+    if set(params) != contract.path_params:
+        raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+    if any(not _PATH_VALUE.fullmatch(value) for value in params.values()):
+        raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+    path = contract.path
+    for name, value in params.items():
+        path = path.replace("{" + name + "}", value)
+    return path
+
+
+def _compose(contract: EndpointContract, request: object) -> _Wire:
+    """Headers, path and form body for one adopted endpoint, validated before any transport
+    exists."""
     headers = {"Accept": "application/json"}
     if contract.endpoint_id is EndpointId.SMARTSTORE_AUTH_TOKEN:
         if not isinstance(request, TokenRequest):
@@ -175,16 +242,22 @@ def _compose(contract: EndpointContract, request: object) -> tuple[dict[str, str
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
         assert contract.content_type is not None
         headers["Content-Type"] = contract.content_type
-        return headers, form
+        return _Wire(contract.path, headers, form)
     if contract.endpoint_id is EndpointId.SMARTSTORE_SELLER_ACCOUNT:
         if not isinstance(request, AccountRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
-        if not _BEARER.fullmatch(request.access_token):
-            raise _Preflight("SMARTSTORE_BEARER_UNUSABLE")
-        if request.credential_generation < 1 or request.session_generation < 1:
-            raise _Preflight("SMARTSTORE_SESSION_NOT_COMMITTED")
-        headers["Authorization"] = f"Bearer {request.access_token}"
-        return headers, {}
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        return _Wire(contract.path, headers, {})
+    if contract.endpoint_id in _PRODUCT_READS:
+        if not isinstance(request, ProductReadRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        (placeholder,) = contract.path_params
+        return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
     raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
 
 
@@ -200,10 +273,19 @@ def _marker(value: object) -> str | None:
 
 
 def _result(
-    contract: EndpointContract, request: object, body: object
-) -> TokenGrant | SellerAccount:
+    contract: EndpointContract, request: object, body: object, status: int
+) -> TokenGrant | SellerAccount | ProductReadback:
     """The typed result of a response that passed the endpoint's success predicate."""
     fields = cast(dict[str, object], body)
+    if contract.endpoint_id in _PRODUCT_READS:
+        assert isinstance(request, ProductReadRequest)
+        # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
+        return ProductReadback(
+            endpoint_id=contract.endpoint_id,
+            product_no=request.product_no,
+            retained=retain(contract, fields),
+            http_status=status,
+        )
     if contract.endpoint_id is EndpointId.SMARTSTORE_AUTH_TOKEN:
         assert isinstance(request, TokenRequest)
         return TokenGrant(
@@ -239,27 +321,41 @@ class SmartStoreEndpointCaller:
     ) -> SellerAccount: ...
 
     @overload
-    def call(self, endpoint_id: object, request: object) -> TokenGrant | SellerAccount: ...
+    def call(
+        self,
+        endpoint_id: Literal[
+            EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2,
+            EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2,
+        ],
+        request: ProductReadRequest,
+    ) -> ProductReadback: ...
 
-    def call(self, endpoint_id: object, request: object) -> TokenGrant | SellerAccount:
+    @overload
+    def call(
+        self, endpoint_id: object, request: object
+    ) -> TokenGrant | SellerAccount | ProductReadback: ...
+
+    def call(
+        self, endpoint_id: object, request: object
+    ) -> TokenGrant | SellerAccount | ProductReadback:
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
         contract: EndpointContract | None = None
         status: int | None = None
         trace_id: str | None = None
-        result: TokenGrant | SellerAccount | None = None
+        result: TokenGrant | SellerAccount | ProductReadback | None = None
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
-            headers, form = _compose(contract, request)
+            wire = _compose(contract, request)
         except EndpointNotAdoptedError as exc:
             error = self._local(endpoint, "SMARTSTORE_ENDPOINT_NOT_ADOPTED", exc)
         except _Preflight as exc:
             error = self._local(endpoint, exc.code, exc)
         else:
             try:
-                response = self._send(contract, headers, form, recorder)
+                response = self._send(contract, wire, recorder)
             except Exception as exc:  # every failure without a response is classified by phase
                 phase = transmission_phase(recorder.events, exc)
                 error = SmartStoreCallError(
@@ -279,7 +375,7 @@ class SmartStoreEndpointCaller:
                     response.headers.get(_TRACE_HEADER)
                 )
                 if contract.success_predicate(status, body):
-                    result = _result(contract, request, body)
+                    result = _result(contract, request, body, status)
                 else:
                     error = SmartStoreCallError(
                         endpoint,
@@ -334,11 +430,7 @@ class SmartStoreEndpointCaller:
         return error
 
     def _send(
-        self,
-        contract: EndpointContract,
-        headers: dict[str, str],
-        form: dict[str, str],
-        recorder: TraceRecorder,
+        self, contract: EndpointContract, wire: _Wire, recorder: TraceRecorder
     ) -> httpx.Response:
         # EM §10: the endpoint's own timeouts, never library defaults. The contract fixes connect
         # and read; writing the small request and waiting for a pooled slot use the connect bound.
@@ -359,9 +451,9 @@ class SmartStoreEndpointCaller:
         ):
             request = client.build_request(
                 contract.method.value,
-                BASE_URL + contract.path,
-                headers=headers,
-                data=form or None,
+                BASE_URL + wire.path,
+                headers=wire.headers,
+                data=wire.form or None,
                 extensions={"trace": recorder},
             )
             return client.send(request, follow_redirects=False)

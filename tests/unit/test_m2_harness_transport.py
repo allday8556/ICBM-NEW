@@ -15,7 +15,13 @@ from integrations.marketplaces.smartstore.caller import (
     SmartStoreEndpointCaller,
     TokenRequest,
 )
-from integrations.marketplaces.smartstore.registry import ADOPTED, BASE_URL, NOT_ADOPTED, EndpointId
+from integrations.marketplaces.smartstore.registry import (
+    ADOPTED,
+    BASE_URL,
+    NOT_ADOPTED,
+    EndpointContract,
+    EndpointId,
+)
 from integrations.marketplaces.smartstore.signing import ApplicationCredentials
 from integrations.marketplaces.smartstore.transmission import Phase as Transmission
 from scripts.m2harness import transport
@@ -154,10 +160,27 @@ def test_a_forbidden_target_never_reaches_a_transport(
     assert ledger.campaign().state is State.BUDGET_EXHAUSTED
 
 
+def _wire_path(contract: EndpointContract, value: str = "1234567890") -> str:
+    """The endpoint's path with each placeholder filled, as the caller would compose it."""
+    path = contract.path
+    for name in contract.path_params:
+        path = path.replace("{" + name + "}", value)
+    return path
+
+
 def test_the_adopted_registry_endpoints_are_the_only_recognized_targets() -> None:
     for contract in ADOPTED.values():
-        request = httpx.Request(contract.method.value, BASE_URL + contract.path)
+        request = httpx.Request(contract.method.value, BASE_URL + _wire_path(contract))
         assert resolve_target(request) == contract.endpoint_id.value
+
+
+@pytest.mark.parametrize("value", ["", "a/b", "../../v1/seller/account", "x" * 65])
+def test_a_templated_target_is_recognized_only_for_one_conservative_segment(value: str) -> None:
+    # The harness recognizes exactly what the caller may send: one safe path segment, never a
+    # wider match that would let an unadopted path be counted as an adopted one.
+    contract = ADOPTED[EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2]
+    request = httpx.Request(contract.method.value, BASE_URL + _wire_path(contract, value))
+    assert resolve_target(request) == UNRECOGNIZED
 
 
 @pytest.mark.parametrize("endpoint", sorted(NOT_ADOPTED))
