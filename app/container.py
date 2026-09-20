@@ -53,6 +53,9 @@ from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
+from app.register.builder import RegistrationSnapshotBuilder
+from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
+from app.register.preflight import RegistrationPreflightService
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
 from app.review.service import ReviewService
@@ -100,6 +103,8 @@ class Container:
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
+    registration_preflight: RegistrationPreflightService
+    registration_builder: RegistrationSnapshotBuilder
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -270,6 +275,21 @@ def build_container(
     # ACCOUNT_IDENTITY §2): established only from a committed M2 binding, with no provider call.
     accounts = MarketplaceAccountStore(db, clock, audit)
     registrations = RegistrationStore(db, clock, audit)
+    # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
+    # either. The metadata and policy sources start empty: every category fails closed until PR-D
+    # adopts the reviewed marketplace metadata, and every account until Settings owns its policy.
+    registration_preflight = RegistrationPreflightService(
+        registrations=registrations,
+        readiness=product_readiness,
+        pricing=pricing,
+        images=images,
+        capability=marketplace_capability,
+        metadata=StaticRegistrationMetadata(),
+        policies=StaticRegistrationPolicy(),
+    )
+    registration_builder = RegistrationSnapshotBuilder(
+        preflight=registration_preflight, registrations=registrations
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -310,6 +330,8 @@ def build_container(
         product_readiness=product_readiness,
         accounts=accounts,
         registrations=registrations,
+        registration_preflight=registration_preflight,
+        registration_builder=registration_builder,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
