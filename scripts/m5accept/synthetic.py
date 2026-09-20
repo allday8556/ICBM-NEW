@@ -31,6 +31,7 @@ from app.collect.facts import FieldStatus as CollectFieldStatus
 from app.collect.revisions import StoredRevision
 from app.connect.marketplace.capability import (
     AuthEvidence,
+    ContractFreshness,
     EvidenceStrength,
     Generations,
     IdentityProof,
@@ -246,6 +247,11 @@ def authenticate(owners: Owners, uid: str = "m5-acceptance-uid-1") -> None:
     CONNECT run would hand it — a committed binding and one protected identity proof — with no
     provider call anywhere.
     """
+    # The reviewed contract-freshness determination a local operator records (F8). Without it the
+    # capability owner refuses to widen anything, which is exactly its contract.
+    owners.capability.record_contract_freshness(
+        MARKETPLACE, ContractFreshness.CURRENT, actor=OPERATOR
+    )
     generations = Generations(credential=1, session=1)
     owners.capability.observe_auth(
         MARKETPLACE,
