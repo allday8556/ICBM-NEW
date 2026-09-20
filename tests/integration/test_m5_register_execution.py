@@ -35,7 +35,12 @@ from app.register.execution import (
     target_ref,
 )
 from app.register.model import IntentState, VerificationState
-from app.register.preparation import PreflightRequest, PreflightResult, PreparedAsset
+from app.register.preparation import (
+    FieldValue,
+    PreflightRequest,
+    PreflightResult,
+    PreparedAsset,
+)
 from app.register.provider import CreateHandoff
 from app.register.store import RegistrationStore
 from integrations.marketplaces.smartstore import readback as smartstore_readback
@@ -280,6 +285,35 @@ def prepare(
     )
 
 
+def prepare_without_assets(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> Prepared:
+    """One frozen Snapshot of a target that needs no provider-issued asset (PR-C's asset-free
+    path): nothing binds the candidate, so the fingerprint alone guards a drift."""
+    from tests.register_support import no_match
+
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(store, account, [item])
+    req = request(store, draft_id, account, [item])
+    req = replace(req, duplicate_evidence=no_match(prep.service.candidate(req)))
+    final = prep.service.final(req, ())
+    assert final.status is ReadinessStatus.READY, final.reasons
+    builder = RegistrationSnapshotBuilder(preflight=prep.service, registrations=store)
+    snapshot = builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
+    with store.transaction() as unit:
+        batch = unit.create_batch(
+            MARKET, snapshot.marketplace_account_id, created_by=OPERATOR, correlation_id=CID
+        )
+        intent = unit.create_intent(
+            batch, snapshot.registration_snapshot_id, created_by=OPERATOR, correlation_id=CID
+        )
+    return Prepared(intent.intent_id, snapshot.registration_snapshot_id, req, (), final)
+
+
 def context(ready: Prepared, *, attempt_no: int = 1) -> Any:
     from app.jobs.registry import JobContext
 
@@ -381,7 +415,41 @@ def test_the_gate_blocks_before_any_attempt_or_provider_call(
     assert run.sender.calls == []
 
 
-def test_a_drifted_dependency_blocks_the_send(
+def test_a_dependency_that_moved_blocks_the_send_on_the_fingerprint(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # A target that needs no provider-issued asset has no prepared asset binding the candidate,
+    # so a drift that stays READY is caught by the fingerprint alone — the same guard PR-C's
+    # builder relies on.
+    from app.register.policy import AssetPolicy
+    from tests.register_support import target
+
+    prep.policies.put(
+        target(
+            account,
+            asset_policy=AssetPolicy(
+                profile="asset-profile-test-1", provider_asset_identity_required=False
+            ),
+        )
+    )
+    ready = prepare_without_assets(container, sources, store, account, prep)
+    run = execution(container, prep)
+    renamed = replace(
+        ready.request,
+        listing=replace(ready.request.listing, name=FieldValue("완전히 다른 이름")),
+    )
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(replace(ready, request=renamed)))
+    assert refused.value.code == "REGISTER_SEND_FINGERPRINT_DRIFT"
+    assert store.attempts(ready.intent_id) == ()
+    assert run.sender.calls == []
+
+
+def test_a_preflight_that_is_no_longer_ready_blocks_the_send(
     container: Container,
     sources: Collections,
     store: RegistrationStore,
@@ -390,16 +458,14 @@ def test_a_drifted_dependency_blocks_the_send(
 ) -> None:
     ready = prepare(container, sources, store, account, prep)
     run = execution(container, prep)
-    # The target policy moves after the Snapshot was frozen: the fingerprint no longer matches.
+    # The account's registration policy moved after the Snapshot was frozen, so the assets the
+    # Snapshot named no longer bind to the current candidate: current truth is not READY.
     from tests.register_support import target
 
     prep.policies.put(target(account, policy_revision="policy-test-2"))
     with pytest.raises(ExecutionRefused) as refused:
         run.service.run(context(ready))
-    assert refused.value.code in {
-        "REGISTER_SEND_FINGERPRINT_DRIFT",
-        "REGISTER_SEND_PREFLIGHT_NOT_READY",
-    }
+    assert refused.value.code == "REGISTER_SEND_PREFLIGHT_NOT_READY"
     assert store.attempts(ready.intent_id) == ()
     assert run.sender.calls == []
 
@@ -419,10 +485,26 @@ def test_a_prepared_asset_that_is_not_the_snapshots_blocks_the_send(
     job = context(replace(ready, assets=foreign))
     with pytest.raises(ExecutionRefused) as refused:
         run.service.run(job)
-    assert refused.value.code in {
-        "REGISTER_SEND_ASSET_DRIFT",
-        "REGISTER_SEND_FINGERPRINT_DRIFT",
-    }
+    # Checked directly against the durable Snapshot, before anything is re-derived.
+    assert refused.value.code == "REGISTER_SEND_ASSET_DRIFT"
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+
+
+def test_a_send_request_naming_another_unit_blocks_the_send(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(container, prep)
+    job = context(ready)
+    payload = dict(job.payload)
+    payload["unit_identity"] = {"listing_identity": "icbm-" + "f" * 32, "generation": 0}
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(replace(job, payload=payload))
+    assert refused.value.code == "REGISTER_SEND_SCOPE_MISMATCH"
     assert store.attempts(ready.intent_id) == () and run.sender.calls == []
 
 
@@ -633,6 +715,54 @@ def test_without_an_adopted_lookup_the_unknown_stays_unresolved(
     assert intent is not None and intent.state is IntentState.UNKNOWN
 
 
+def test_a_lookup_that_proves_neither_leaves_the_unknown_unresolved(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = {"searched": True}
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_RECONCILE_INCONCLUSIVE"
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+
+
+def test_only_an_unknown_intent_is_reconciled(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(container, prep)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_NOT_UNKNOWN"
+
+
+def test_a_read_back_needs_the_provider_identity(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(container, prep)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.verify(ready.intent_id, correlation_id=CID)
+    # §11: without the provider product identity there is nothing to read back.
+    assert refused.value.code == "REGISTER_NO_PROVIDER_IDENTITY"
+    assert run.readback.calls == 0
+
+
 def test_an_operator_assertion_alone_cannot_resolve_an_unknown(
     container: Container,
     sources: Collections,
@@ -738,6 +868,12 @@ def test_a_crash_after_start_attempt_converges_on_unknown(
             sanitizer_profile_version="sanitizer-test-1",
             correlation_id=CID,
         )
+    # While the job is still RUNNING the owner is not waiting on a *terminal* job, so the sweep
+    # has nothing to settle: the terminal filter belongs in the query, before any bound.
+    from app.jobs.models import TERMINAL_STATE_NAMES
+
+    assert store.jobs_with_open_attempts(CREATE_JOB_TYPE, TERMINAL_STATE_NAMES) == ()
+    assert container.runner.reconcile_terminal_owners() == 0
     # 15 + 16: recovery dead-letters the non-idempotent job as UNKNOWN and never re-runs CREATE.
     assert container.runner.recover_interrupted() == 1
     job = container.jobs.get(job_id)
@@ -790,6 +926,23 @@ def test_a_missed_settlement_converges_on_the_next_reconcile_sweep(
     # Repeating the sweep finds nothing: the owner is waiting on nothing any more.
     assert container.runner.reconcile_terminal_owners() == 0
     assert len(store.attempts(ready.intent_id)) == 1
+    # Settling the same terminal job twice settles nothing new and raises nothing: the hook is
+    # safe to call again, which is what makes the sweep safe to repeat.
+    from app.jobs.registry import TerminalJob
+
+    terminal = TerminalJob(
+        job_id=job_id,
+        job_type=CREATE_JOB_TYPE,
+        state=JobState.DEAD.value,
+        attempt_no=1,
+        correlation_id=CID,
+        target_ref=target_ref(ready.intent_id),
+        error_class=ErrorClass.UNKNOWN.value,
+        error_code="INTERRUPTED_OUTCOME_UNKNOWN",
+    )
+    run.service.settle_terminal(terminal)
+    assert len(store.attempts(ready.intent_id)) == 1
+    assert store.attempts(ready.intent_id)[-1].outcome is RemoteOutcome.UNKNOWN
 
 
 def test_a_transient_not_applied_failure_schedules_a_retry_through_the_job_policy(

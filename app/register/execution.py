@@ -568,6 +568,21 @@ class RegistrationExecutionService:
                 "the provider CREATE contract is not adopted; nothing may be sent",
                 details={"intent_id": intent.intent_id},
             )
+        # Directly against the durable Snapshot, before anything is re-derived: the assets that
+        # would be sent are exactly the sanitized provider references it froze (§3, B2).
+        frozen_refs = self._frozen_refs(snapshot.registration_snapshot_id)
+        if frozen_refs != tuple(sorted(a.provider_asset_ref for a in prepared)):
+            raise ExecutionRefused(
+                "REGISTER_SEND_ASSET_DRIFT",
+                "the prepared provider assets are not the ones the Snapshot froze",
+            )
+        projection = self._projection(self._payload_of(snapshot.registration_snapshot_id))
+        if not projection.sendable:
+            raise ExecutionRefused(
+                "REGISTER_WIRE_NOT_SENDABLE",
+                "the wire projection is not sendable under the adopted provider contract",
+                details={"gaps": list(projection.gaps)[:4]},
+            )
         # The unit is the Snapshot's, not the next one: a unit's identity carries a generation
         # that moves as soon as an Intent names it (§7), so the gate re-evaluates under the
         # frozen identity. Everything else — account, pins, M4, conflicts, metadata, policy — is
@@ -590,27 +605,10 @@ class RegistrationExecutionService:
                 "a dependency moved since the Snapshot was frozen",
                 details={"snapshot": snapshot.preflight_fingerprint},
             )
-        resolved = fresh.resolved
-        if (resolved.marketplace_account_id, resolved.listing_identity) != (
-            intent.marketplace_account_id,
-            snapshot.listing_identity,
-        ):
+        if fresh.resolved.marketplace_account_id != intent.marketplace_account_id:
             raise ExecutionRefused(
                 "REGISTER_SEND_SCOPE_MISMATCH",
-                "the resolved account or listing identity is not the Snapshot's",
-            )
-        frozen_refs = self._frozen_refs(snapshot.registration_snapshot_id)
-        if frozen_refs != tuple(sorted(a.provider_asset_ref for a in prepared)):
-            raise ExecutionRefused(
-                "REGISTER_SEND_ASSET_DRIFT",
-                "the prepared provider assets are not the ones the Snapshot froze",
-            )
-        projection = self._projection(self._payload_of(snapshot.registration_snapshot_id))
-        if not projection.sendable:
-            raise ExecutionRefused(
-                "REGISTER_WIRE_NOT_SENDABLE",
-                "the wire projection is not sendable under the adopted provider contract",
-                details={"gaps": list(projection.gaps)[:4]},
+                "the resolved canonical account is not the Intent's",
             )
         return fresh
 
