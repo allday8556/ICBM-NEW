@@ -72,8 +72,14 @@ CANONICAL_TABLES = (
     "duplicate_overrides",
     # M5 PR-E (ADR-0014 26): the REGISTER execution-scope send brake and its resume boundary.
     "registration_execution_scopes",
+    # M5 PR-F (ADR-0014 27, decision 5751540323): the operator-authored preparation, revisioned
+    # and append-only, and the provenance link proving which revision froze a Snapshot.
+    "registration_preparations",
+    "registration_preparation_revisions",
+    "registration_preparation_items",
+    "registration_snapshot_preparations",
 )
-HEAD = "0017_m5_registration_execution_scope"
+HEAD = "0018_m5_registration_preparation"
 
 
 def _url(path: Path) -> str:

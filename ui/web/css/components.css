@@ -752,6 +752,22 @@
   border-radius: var(--radius-md);
 }
 
+.register-authoring {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.register-authoring input,
+.register-authoring textarea {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
 .register-category,
 .register-preflight {
   margin-top: 10px;

@@ -134,7 +134,17 @@ REQUIRED_CHECKS = {
         "hard_zero.nothing_provider_shaped_preloaded",
         "hard_zero.no_write_outside_the_root",
     ),
-    "the canary plan": ("canary.blocked_while_contracts_are_unadopted",),
+    "18 the durable preparation is authored, survives a restart and needs no job": (
+        "s18.preparation_survives_restart",
+        "s18.evaluated_without_a_job",
+        "s18.authored_inputs_reach_ready",
+        "s18.snapshot_proves_its_authored_revision",
+        "s18.edit_appends_and_never_rewrites",
+    ),
+    "the canary plan": (
+        "canary.many_units_exist_and_one_is_named",
+        "canary.blocked_while_contracts_are_unadopted",
+    ),
 }
 
 
@@ -180,7 +190,7 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["checks_passed"] == report["checks_total"] >= 50
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
     assert report["execution_mode"] == "DRY_RUN"
-    assert report["database_revision"] == "0017_m5_registration_execution_scope"
+    assert report["database_revision"] == "0018_m5_registration_preparation"
 
 
 @pytest.mark.parametrize("names", REQUIRED_CHECKS.values(), ids=REQUIRED_CHECKS.keys())

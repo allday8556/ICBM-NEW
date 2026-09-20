@@ -44,6 +44,7 @@ from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
+from app.register.authoring import RegistrationPreparationService
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.execution import (
     CREATE_POLICY,
@@ -90,6 +91,7 @@ class Owners:
     registrations: RegistrationStore
     preflight: RegistrationPreflightService
     builder: RegistrationSnapshotBuilder
+    preparations: RegistrationPreparationService
     execution: RegistrationExecutionService
     register: RegisterService
     jobs: JobService
@@ -158,6 +160,9 @@ def open_owners(
             policies=StaticRegistrationPolicy(),
         )
         builder = RegistrationSnapshotBuilder(preflight=preflight, registrations=registrations)
+        preparations = RegistrationPreparationService(
+            registrations=registrations, preflight=preflight, builder=builder
+        )
         sender, readback, lookup = FakeSender(), FakeReadback(), RecordingLookup()
         projector = DeclaredProjector()
         comparator = DeclaredComparator(smartstore_readback)
@@ -217,10 +222,12 @@ def open_owners(
             preflight=preflight,
             builder=builder,
             execution=execution,
+            preparations=preparations,
             register=RegisterService(
                 registrations=registrations,
                 execution=execution,
                 preflight=preflight,
+                authoring=preparations,
                 accounts=accounts,
                 jobs=jobs,
                 capability=capability,

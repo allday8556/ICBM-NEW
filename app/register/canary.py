@@ -54,6 +54,7 @@ UNIT_NOT_PREPARED = "NO_PREPARED_INTENT"
 CONFLICT_OPEN = "UNRESOLVED_CONFLICT"
 SCOPE_STOPPED = "EXECUTION_SCOPE_STOPPED"
 MORE_THAN_ONE_UNIT = "MORE_THAN_ONE_UNIT_SELECTED"
+NO_UNIT = "NO_UNIT_SELECTED"
 
 
 class AdoptionFacts(Protocol):
@@ -145,7 +146,12 @@ def evaluate(
             CONFLICT_OPEN,
         ),
         _requirement(CanaryRequirement.SCOPE_SENDS_ALLOWED, facts.sends_allowed, SCOPE_STOPPED),
-        _requirement(CanaryRequirement.SINGLE_UNIT, facts.units_selected == 1, MORE_THAN_ONE_UNIT),
+        # A canary is one exact provider-listing unit: none named is as unready as several.
+        _requirement(
+            CanaryRequirement.SINGLE_UNIT,
+            facts.units_selected == 1,
+            MORE_THAN_ONE_UNIT if facts.units_selected > 1 else NO_UNIT,
+        ),
     ]
     if facts.requires_image_upload:
         # Only a unit that must publish a provider-hosted asset waits for the upload contract.

@@ -233,8 +233,8 @@ def test_each_unit_of_a_draft_is_its_own_panel_with_the_servers_facts(
         # Two provider-listing units of one Draft are two panels, each with its own identity.
         panels = page.locator(".register-unit")
         assert panels.count() == 2
-        first = page.locator(f".register-unit[data-unit='{frozen[0].listing_identity}']")
-        second = page.locator(f".register-unit[data-unit='{frozen[1].listing_identity}']")
+        first = page.locator(f".register-unit[data-unit='{frozen[0].snapshot_id}']")
+        second = page.locator(f".register-unit[data-unit='{frozen[1].snapshot_id}']")
         assert first.count() == 1 and second.count() == 1
         assert first.get_attribute("data-preparation") == "INTENT_OPEN"
         assert second.get_attribute("data-preparation") == "SNAPSHOT_FROZEN"
@@ -251,6 +251,47 @@ def test_each_unit_of_a_draft_is_its_own_panel_with_the_servers_facts(
         assert preflight.get_attribute("data-preflight") == "UNAVAILABLE"
         assert "Preflight 입력" in preflight.inner_text()
         assert writes == []
+
+
+def test_an_operator_authors_a_preparation_in_the_screen(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    from tests.register_support import draft, ready_item
+
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        unit = page.locator(".register-unit[data-preparation='DRAFTED']")
+        assert unit.count() == 1
+        # Nothing is authored yet, so the server says so and offers no freeze.
+        assert page.locator(".register-authoring[data-preparation='']").count() == 1
+        assert _action(page, "EVALUATE")["disabled"] is True
+        assert _action(page, "FREEZE")["disabled"] is True
+        # The operator authors the unit in the screen, and the server keeps it.
+        page.fill("input[name='category_id']", "cat-1")
+        page.fill("input[name='name']", "브라우저가 저장한 상품명")
+        page.fill("input[name='brand']", "브랜드")
+        page.fill("textarea[name='detail_body']", "상세 본문")
+        page.locator("button[data-action='SAVE_PREPARATION']").first.click()
+        page.wait_for_selector(".register-canary", timeout=15_000)
+        assert writes == [("POST", "/api/v1/register/preparations")]
+        # A reload rebuilds the same authored inputs from the durable rows.
+        stored = container.registrations.preparations_of_draft(draft_id)
+        assert len(stored) == 1 and stored[0].current.revision_no == 1
+        page.reload()
+        page.wait_for_selector(".register-canary", timeout=15_000)
+        saved = page.locator(f".register-authoring[data-preparation='{stored[0].preparation_id}']")
+        assert saved.count() == 1
+        assert saved.locator("input[name='name']").input_value() == "브라우저가 저장한 상품명"
+        # The server evaluated those inputs, with no CREATE job anywhere.
+        assert page.locator(".register-preflight[data-preflight='CANDIDATE']").count() >= 0
+        assert container.jobs.count(job_type_prefix="register.create") == 0
 
 
 def test_the_page_keeps_no_registration_state_of_its_own(

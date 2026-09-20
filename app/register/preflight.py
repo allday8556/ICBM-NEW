@@ -94,9 +94,19 @@ class RegistrationPreflightService:
         self._metadata = metadata
         self._policies = policies
 
-    def candidate(self, request: PreflightRequest) -> PreflightResult:
-        """The mutation-free non-asset candidate: only its READY permits an asset upload."""
-        return evaluate(request, self.resolve(request), PreflightStage.CANDIDATE)
+    def candidate(
+        self, request: PreflightRequest, *, identity_generation: int | None = None
+    ) -> PreflightResult:
+        """The mutation-free non-asset candidate: only its READY permits an asset upload.
+
+        ``identity_generation`` re-evaluates an **already frozen** unit under the generation it
+        was frozen at, exactly as :meth:`final` does; a fresh preparation passes nothing.
+        """
+        return evaluate(
+            request,
+            self.resolve(request, identity_generation=identity_generation),
+            PreflightStage.CANDIDATE,
+        )
 
     def final(
         self,

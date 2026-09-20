@@ -490,6 +490,24 @@ RegistrationExecutionScope     one row per marketplace_key × marketplace_accoun
 - **A resume never rewrites history.** It moves a window: no `RegistrationAttempt` is deleted, edited or re-classified. The audit records each pause and resume as history, and the `RegistrationExecutionScope` row stays the authoritative state — the audit log is never control truth.
 - **The release is scoped exactly.** Releasing one marketplace × canonical account × endpoint group releases that scope and no other.
 
+### 27. The durable registration preparation (architect decision `5751540323`)
+
+A preflight is derived (§3), but the **inputs** it is derived from are an operator's own work: the category selection, the listing values and the detail composition of one provider-listing unit. They had no application-owned durable source — they survived only inside a queued `register.create` job's payload, which is execution and scheduler state. PR-F therefore owns one more durable control, and only this one:
+
+```text
+RegistrationPreparation            one preparation per provider-listing unit of a Draft
+  revisions                        append-only authored revisions, each with its own sanitized fingerprint
+  items                            the exact Item membership of that revision
+Snapshot provenance                which exact revision, and which fingerprint, froze a Snapshot
+```
+
+- **It stores inputs only.** The Draft and Draft revision they were authored against, the Item membership, the category selection with its mapping, taxonomy and confirmation provenance, the listing values with their own provenance, and the detail composition. It stores **no** readiness, status or reason code, no Product, price, image or QA truth, no capability or auth truth, no provider duplicate outcome, no marketplace asset identity, no Snapshot, Intent, Attempt or Registration truth, and no retry or queue state. **No stored `REGISTERABLE` truth exists** (§3, M5-03), and no second unit identity exists beside the listing identity (§7).
+- **Preflight stays derived**, from the durable preparation inputs, current owner truth and provider evidence where an adopted contract exists. A preparation is never a verdict.
+- **Revisions are append-only and auditable.** Editing appends the next revision; an authored revision that has already frozen a Snapshot is never edited in place, so the Snapshot's provenance keeps its meaning.
+- **A Snapshot proves which exact preparation revision and fingerprint produced it.** The link is its own row, so `registration_snapshots` stays immutable with its triggers intact and a Snapshot frozen before this owner existed stays valid with no provenance row. Authoring truth is never reconstructed by inverting `payload_json`.
+- **The job payload stays an execution copy.** A `register.create` job may carry a frozen copy for crash-safe send-time revalidation, and it pins the same unit identity the Snapshot and Intent hold; it is never the authoring source. **No job is required to display or evaluate a preparation**, and changing a preparation later mutates no earlier Snapshot and no earlier job.
+- **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). It never opens a provider mutation while CREATE, image upload and product search are `NOT_ADOPTED` (§17, §24).
+
 ## Invariants
 
 The binding invariants of this ADR, in one place. The contract tests pin this block.
@@ -524,6 +542,7 @@ M5-26  an AUTH pause releases only on a CONNECT authentication proof newer than 
 M5-27  the failure budget counts attempts only after the scope's latest accepted resume boundary, and a resume deletes, rewrites or re-classifies no RegistrationAttempt
 M5-28  a scope's budget is counted from that scope's own operation history, and a budget the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is refused
 M5-29  a brake reason is recorded only with the measured class that caused it
+M5-30  the registration preparation stores the operator's authored inputs only, append-only, and a Snapshot proves which exact revision froze it; a job payload is an execution copy and never the authoring source
 ```
 
 ## Rulings (Issue #89 addendum `5740352676`)

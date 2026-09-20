@@ -33,8 +33,15 @@ class RegistrationSnapshotBuilder:
         self._registrations = registrations
 
     def freeze(
-        self, ready: PreflightResult, *, created_by: str, correlation_id: str
+        self,
+        ready: PreflightResult,
+        *,
+        created_by: str,
+        correlation_id: str,
+        preparation_revision_id: str | None = None,
     ) -> SnapshotRecord:
+        """``preparation_revision_id`` names the authored revision these inputs came from (§27),
+        so the immutable Snapshot can prove it. A caller holding its own inputs passes none."""
         if ready.stage is not PreflightStage.FINAL or ready.status is not ReadinessStatus.READY:
             raise InputValidationError(
                 "REGISTER_PREFLIGHT_NOT_READY",
@@ -63,6 +70,16 @@ class RegistrationSnapshotBuilder:
                 outbound.payload_digest,
             )
             if existing is not None:
+                if preparation_revision_id is not None and (
+                    registrations.snapshot_preparation(existing.registration_snapshot_id) is None
+                ):
+                    # The same unit, frozen again from an authored revision: record the provenance
+                    # the first freeze had no owner for, and change nothing else.
+                    registrations.record_snapshot_preparation(
+                        existing.registration_snapshot_id,
+                        preparation_revision_id,
+                        identity_generation=unit.identity_generation,
+                    )
                 return existing
             return registrations.freeze_snapshot(
                 SnapshotSpec(
@@ -86,6 +103,8 @@ class RegistrationSnapshotBuilder:
                         )
                         for item in outbound.items
                     ],
+                    preparation_revision_id=preparation_revision_id,
+                    identity_generation=unit.identity_generation,
                 ),
                 created_by=created_by,
                 correlation_id=correlation_id,

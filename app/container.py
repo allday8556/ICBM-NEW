@@ -53,6 +53,7 @@ from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
+from app.register.authoring import RegistrationPreparationService
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.execution import (
     CREATE_POLICY,
@@ -117,6 +118,7 @@ class Container:
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
     registration_preflight: RegistrationPreflightService
+    registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
     register: RegisterService
@@ -305,6 +307,13 @@ def build_container(
     registration_builder = RegistrationSnapshotBuilder(
         preflight=registration_preflight, registrations=registrations
     )
+    # M5 PR-F (ADR-0014 §27, decision 5751540323): the durable operator-authored preparation. It
+    # owns inputs only; the preflight still derives every verdict, and the builder still freezes.
+    registration_preparations = RegistrationPreparationService(
+        registrations=registrations,
+        preflight=registration_preflight,
+        builder=registration_builder,
+    )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
     # no code path here can mutate the marketplace; the read-back seam is PR-D's adopted one.
@@ -330,6 +339,7 @@ def build_container(
         registrations=registrations,
         execution=registration_execution,
         preflight=registration_preflight,
+        authoring=registration_preparations,
         accounts=accounts,
         jobs=jobs,
         capability=marketplace_capability,
@@ -377,6 +387,7 @@ def build_container(
         accounts=accounts,
         registrations=registrations,
         registration_preflight=registration_preflight,
+        registration_preparations=registration_preparations,
         registration_builder=registration_builder,
         registration_execution=registration_execution,
         register=register_service,

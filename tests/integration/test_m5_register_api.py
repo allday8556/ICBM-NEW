@@ -41,6 +41,7 @@ from tests.register_support import (
     CID,
     MARKET,
     OPERATOR,
+    TAXONOMY,
     Preparation,
     ReadyItem,
     draft,
@@ -381,9 +382,9 @@ def test_each_provider_listing_unit_of_one_draft_is_its_own_row(
     # ADR-0014 §2 (R3): a SEPARATE_LISTINGS Draft with two Items is two provider-listing units.
     _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=2)
     units = _by_ref(_get(api, OVERVIEW)["units"])
-    assert set(units) == {unit.listing_identity for unit in frozen}
+    assert set(units) == {unit.snapshot_id for unit in frozen}
     for unit in frozen:
-        view = units[unit.listing_identity]
+        view = units[unit.snapshot_id]
         # Each unit carries its own Snapshot, Intent and Item — and only its own.
         assert view["snapshot"]["registration_snapshot_id"] == unit.snapshot_id
         assert view["intent"]["intent_id"] == unit.intent_id
@@ -391,7 +392,7 @@ def test_each_provider_listing_unit_of_one_draft_is_its_own_row(
         assert view["items"][0]["registration_item_key"] == unit.item_key
         assert view["preparation"] == "INTENT_OPEN"
     # No sibling leaks into the other panel: neither the Item nor the key it was frozen under.
-    first, second = (units[unit.listing_identity] for unit in frozen)
+    first, second = (units[unit.snapshot_id] for unit in frozen)
     keys = [item["registration_item_key"] for view in (first, second) for item in view["items"]]
     assert len(set(keys)) == 2
     assert first["intent"]["intent_id"] != second["intent"]["intent_id"]
@@ -404,14 +405,59 @@ def test_a_multi_unit_draft_never_passes_the_single_canary_unit_gate(
     account: str,
     prep: Preparation,
 ) -> None:
-    draft_id, _frozen = _separate_listings(container, sources, account, prep, intents=2)
-    canary = _get(api, f"{CANARY}?draft_id={draft_id}")
+    _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=1)
+    # Two provider-listing units and exactly one Intent: the gate must not pick the one that
+    # happens to have an Intent. Without an exact unit it fails closed.
+    canary = _get(api, CANARY)
     assert canary["verdict"] == "BLOCKED"
-    # The Draft holds two provider-listing units, so it is not one canary unit — the gate counts
-    # units, never Draft panels.
     assert "SINGLE_UNIT" in canary["missing"]
     missing = {item["requirement"]: item for item in canary["requirements"]}
     assert missing["SINGLE_UNIT"]["reason_code"] == "MORE_THAN_ONE_UNIT_SELECTED"
+    # Named exactly, the unit is one unit — and the plan is still BLOCKED by the contracts.
+    named = _get(api, f"{CANARY}?unit_ref={frozen[0].snapshot_id}")
+    assert named["verdict"] == "BLOCKED"
+    assert "SINGLE_UNIT" not in named["missing"]
+    assert "CREATE_ADOPTED" in named["missing"]
+    # A unit that does not exist is refused, never quietly answered for another one.
+    assert api.get(f"{CANARY}?unit_ref=not-a-unit", headers=CLIENT).status_code >= 400
+
+
+def test_two_listings_of_the_same_items_are_each_their_own_unit(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # A legal intentional duplicate or re-registration (§13): the same Items, a second provider
+    # listing with its own listing identity, Snapshot and Intent. Neither may hide the other.
+    store = container.registrations
+    first = prepare(container, sources, store, account, prep)
+    builder = RegistrationSnapshotBuilder(preflight=prep.service, registrations=store)
+    _again, final = ready_final(prep, first.request)
+    second = builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
+    assert second.registration_snapshot_id != first.snapshot_id
+    assert second.listing_identity != store.snapshot(first.snapshot_id).listing_identity
+    with store.transaction() as work:
+        batch = work.create_batch(MARKET, account, created_by=OPERATOR, correlation_id=CID)
+        other = work.create_intent(
+            batch, second.registration_snapshot_id, created_by=OPERATOR, correlation_id=CID
+        )
+    units = _by_ref(_get(api, OVERVIEW)["units"])
+    assert {first.snapshot_id, second.registration_snapshot_id} <= set(units)
+    assert units[first.snapshot_id]["intent"]["intent_id"] == first.intent_id
+    assert units[second.registration_snapshot_id]["intent"]["intent_id"] == other.intent_id
+    # Same Items, two listings: each row carries its own listing identity and its own key.
+    identities = {
+        units[ref]["snapshot"]["listing_identity"]
+        for ref in (first.snapshot_id, second.registration_snapshot_id)
+    }
+    assert len(identities) == 2
+    keys = {
+        units[ref]["items"][0]["registration_item_key"]
+        for ref in (first.snapshot_id, second.registration_snapshot_id)
+    }
+    assert len(keys) == 2
 
 
 def test_a_frozen_unit_without_an_intent_is_shown_and_survives_a_reload(
@@ -423,14 +469,14 @@ def test_a_frozen_unit_without_an_intent_is_shown_and_survives_a_reload(
 ) -> None:
     _draft_id, frozen = _separate_listings(container, sources, account, prep, intents=1)
     units = _by_ref(_get(api, OVERVIEW)["units"])
-    waiting = units[frozen[1].listing_identity]
+    waiting = units[frozen[1].snapshot_id]
     assert frozen[1].intent_id is None
     # A Snapshot an Intent does not yet name is still a unit, and it says exactly that.
     assert waiting["preparation"] == "SNAPSHOT_FROZEN"
     assert waiting["intent"] is None
     assert waiting["snapshot"]["registration_snapshot_id"] == frozen[1].snapshot_id
     assert [item["item_id"] for item in waiting["items"]] == [frozen[1].item.item_id]
-    assert units[frozen[0].listing_identity]["preparation"] == "INTENT_OPEN"
+    assert units[frozen[0].snapshot_id]["preparation"] == "INTENT_OPEN"
     # A reload rebuilds it from the durable rows, with nothing held in a page or this process.
     again = RegisterService(
         registrations=RegistrationStore(container.db, container.clock, container.audit),
@@ -442,7 +488,7 @@ def test_a_frozen_unit_without_an_intent_is_shown_and_survives_a_reload(
         adoption=SmartStoreAdoption(),
     ).overview()
     reloaded = {unit.unit_ref: unit for unit in again.units}
-    assert reloaded[frozen[1].listing_identity].preparation.value == "SNAPSHOT_FROZEN"
+    assert reloaded[frozen[1].snapshot_id].preparation.value == "SNAPSHOT_FROZEN"
 
 
 def test_the_screen_shows_the_servers_own_preflight_category_price_and_qa(
@@ -531,6 +577,161 @@ def test_a_reprice_shows_a_stale_pin_and_the_preflight_reason_codes(
     assert unit["preflight"]["reason_codes"]
     assert unit["preflight"]["fingerprint_matches_snapshot"] is False
     assert item["base_reason_codes"] or item["pricing_reason_codes"]
+
+
+def _inputs(item: ReadyItem, **overrides: object) -> dict:
+    """One operator's authored inputs, in the API's own shape."""
+    body: dict = {
+        "category": {
+            "category_id": CATEGORY,
+            "mapping_revision": "mapping-test-1",
+            "taxonomy_revision": TAXONOMY,
+            "confirmation": "OPERATOR_CONFIRMED",
+        },
+        "name": {"value": "authored listing name", "provenance": "OPERATOR_CONFIRMED"},
+        "tags": ["authored-tag"],
+        "attributes": {"brand": {"value": "authored brand"}},
+        "notices": {
+            "manufacturer": {"value": "authored maker", "provenance": "SOURCE_FACT"},
+            "origin": {"detail_page_reference": True},
+        },
+        "options": {},
+        "detail_composition_revision": "detail-test-1",
+        "detail_body": "authored body text",
+        "detail_sections": ["BODY"],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_an_operator_authors_a_preparation_that_the_server_keeps_and_evaluates(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # ADR-0014 §27: the preparation is the durable source of the operator's preflight inputs.
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    created = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id],
+            "actor": OPERATOR,
+            "inputs": _inputs(item),
+        },
+        headers=CLIENT,
+    )
+    assert created.status_code == 200, created.text
+    preparation_id = created.json()["preparation_id"]
+    # A reload reads exactly what was authored, from the durable rows.
+    stored = _get(api, f"/api/v1/register/preparations/{preparation_id}")
+    assert stored["revision_no"] == 1 and stored["item_ids"] == [item.item_id]
+    assert stored["inputs"]["name"]["value"] == "authored listing name"
+    assert stored["inputs"]["category"]["category_id"] == CATEGORY
+    assert stored["inputs"]["notices"]["origin"]["detail_page_reference"] is True
+    assert len(stored["inputs_fingerprint"]) == 64
+    # The unit is evaluated from that preparation — with **no job anywhere**.
+    unit = next(u for u in _get(api, OVERVIEW)["units"] if u["unit_ref"] == preparation_id)
+    assert unit["preparation"] == "DRAFTED" and unit["snapshot"] is None
+    assert unit["authored"]["preparation_id"] == preparation_id
+    assert unit["preflight"]["source"] == "PREPARATION"
+    assert unit["preflight"]["stage"] == "CANDIDATE"
+    assert unit["preflight_unavailable_reason"] is None
+    assert container.jobs.count(job_type_prefix="register.create") == 0
+    # The provider duplicate lookup is NOT_ADOPTED, so the preflight is not READY and says why —
+    # and the server refuses the freeze for exactly that reason.
+    assert unit["preflight"]["status"] != "READY"
+    assert "DUPLICATE_EVIDENCE_MISSING" in unit["preflight"]["reason_codes"]
+    freeze = _action(unit, RegisterAction.FREEZE)
+    assert freeze == {
+        "action": "FREEZE",
+        "enabled": False,
+        "reason_code": "REGISTER_PREFLIGHT_NOT_READY",
+    }
+    refused = api.post(
+        f"/api/v1/register/preparations/{preparation_id}/freeze",
+        json={"actor": OPERATOR},
+        headers=CLIENT,
+    )
+    assert refused.status_code >= 400
+    # Editing appends a revision; the first one stays exactly as it was authored.
+    revised = api.post(
+        f"/api/v1/register/preparations/{preparation_id}",
+        json={
+            "item_ids": [item.item_id],
+            "actor": OPERATOR,
+            "inputs": _inputs(item, name={"value": "a second authored name"}),
+        },
+        headers=CLIENT,
+    )
+    assert revised.status_code == 200, revised.text
+    body = revised.json()
+    assert body["revision_no"] == 2 and len(body["revisions"]) == 2
+    assert body["inputs"]["name"]["value"] == "a second authored name"
+    assert body["revisions"][0]["inputs_fingerprint"] != body["revisions"][1]["inputs_fingerprint"]
+
+
+def test_an_authored_preparation_freezes_its_unit_through_the_existing_owners(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    from tests.register_support import no_match, prepared
+
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    created = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id],
+            "actor": OPERATOR,
+            "inputs": _inputs(item),
+        },
+        headers=CLIENT,
+    )
+    preparation_id = created.json()["preparation_id"]
+    authoring = container.registration_preparations
+    # The provider evidence an adopted lookup would supply, and the provider asset identities an
+    # adopted upload would prepare: both are inputs to the owners, never invented by this surface.
+    candidate = authoring.evaluate(preparation_id)
+    evidence = no_match(candidate)
+    ready = authoring.evaluate(preparation_id, duplicate_evidence=evidence)
+    assert ready.status.value == "READY", ready.codes
+    frozen = authoring.freeze(
+        preparation_id,
+        actor=OPERATOR,
+        duplicate_evidence=evidence,
+        prepared_assets=prepared(ready),
+    )
+    # The Snapshot proves which exact authored revision produced it.
+    provenance = container.registrations.snapshot_preparation(
+        frozen.snapshot.registration_snapshot_id
+    )
+    assert provenance is not None
+    assert provenance.preparation_revision_id == frozen.preparation_revision_id
+    stored = _get(api, f"/api/v1/register/preparations/{preparation_id}")
+    assert provenance.inputs_fingerprint == stored["inputs_fingerprint"]
+    # The screen now shows the frozen unit, its Intent and the preparation behind it.
+    unit = next(
+        u
+        for u in _get(api, OVERVIEW)["units"]
+        if u["unit_ref"] == frozen.snapshot.registration_snapshot_id
+    )
+    assert unit["preparation"] == "INTENT_OPEN"
+    assert unit["intent"]["intent_id"] == frozen.intent.intent_id
+    assert unit["authored"]["preparation_id"] == preparation_id
+    # Its preflight is re-evaluated from that revision, with no CREATE job in existence.
+    assert unit["preflight"]["source"] == "PREPARATION"
+    assert container.jobs.count(job_type_prefix="register.create") == 0
+    # A frozen unit is not frozen again, and nothing was sent.
+    assert _action(unit, RegisterAction.FREEZE)["reason_code"] == "REGISTER_UNIT_ALREADY_FROZEN"
+    assert container.registrations.attempts(frozen.intent.intent_id) == ()
 
 
 def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(

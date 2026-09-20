@@ -32,6 +32,8 @@ from app.register.model import (
 class RegisterAction(StrEnum):
     """What an operator may ask of one unit. The server decides whether each is available."""
 
+    EVALUATE = "EVALUATE"
+    FREEZE = "FREEZE"
     CREATE_ENQUEUE = "CREATE_ENQUEUE"
     RECONCILE = "RECONCILE"
     VERIFY = "VERIFY"
@@ -177,18 +179,84 @@ class CategoryView(BaseModel):
     max_options: int | None = None
 
 
+class FieldValueView(BaseModel):
+    """One authored outbound value and its provenance (§4). The operator's own, read back."""
+
+    value: str = ""
+    provenance: str = "OPERATOR_CONFIRMED"
+    detail_page_reference: bool = False
+
+
+class CategoryChoiceView(BaseModel):
+    """The category an operator chose, with the revisions it was chosen under (§4)."""
+
+    category_id: str
+    mapping_revision: str
+    taxonomy_revision: str
+    confirmation: str = "OPERATOR_CONFIRMED"
+
+
+class AuthoredInputsView(BaseModel):
+    """What an operator authored for one provider-listing unit (§27).
+
+    The same shape is read back and written: a client fills the form from what is stored and sends
+    it back. It carries **inputs only** — no status, no readiness and nothing derived.
+    """
+
+    category: CategoryChoiceView | None = None
+    name: FieldValueView | None = None
+    tags: tuple[str, ...] = ()
+    attributes: dict[str, FieldValueView] = {}
+    notices: dict[str, FieldValueView] = {}
+    # Item id → option dimension → option value. Display values only, never an identity.
+    options: dict[str, dict[str, str]] = {}
+    detail_composition_revision: str | None = None
+    detail_body: str | None = None
+    detail_sections: tuple[str, ...] = ("BODY",)
+
+
+class PreparationRevisionView(BaseModel):
+    """One authored revision in the preparation's history. Append-only, so this never changes."""
+
+    preparation_revision_id: str
+    revision_no: int
+    draft_revision: int
+    inputs_fingerprint: str
+    authored_by: str
+    authored_at: datetime
+    item_ids: tuple[str, ...]
+
+
+class PreparationView(BaseModel):
+    """The durable preparation of one provider-listing unit, and what is authored now (§27)."""
+
+    preparation_id: str
+    draft_id: str
+    marketplace_key: str
+    marketplace_account_id: str
+    revision_no: int
+    item_ids: tuple[str, ...]
+    inputs: AuthoredInputsView
+    inputs_fingerprint: str
+    revisions: tuple[PreparationRevisionView, ...]
+
+
 class PreflightView(BaseModel):
     """The preflight re-evaluated from current truth, by the owner that decides it (§3).
 
-    It is derived, never stored. `fingerprint_matches_snapshot` is the same comparison the send
-    gate makes: a false one means a dependency moved since the Snapshot was frozen, which is why
-    the status and **every** reason code are carried with it.
+    It is derived, never stored. `source` says what was evaluated: the **frozen send request** a
+    CREATE job carries, which is the exact check the send gate makes and the only one that can
+    compare fingerprints with the Snapshot, or the durable **preparation**, which is evaluated as
+    a mutation-free candidate — every dependency except the provider asset identity (§3).
     """
 
     status: str
+    stage: str
+    source: str
     reason_codes: tuple[str, ...]
     rule_version: str
     dependency_fingerprint: str
+    # Only a final evaluation of a frozen unit can answer this; a candidate leaves it unanswered.
     fingerprint_matches_snapshot: bool | None = None
 
 
@@ -223,6 +291,8 @@ class UnitView(BaseModel):
     preparation: PreparationState
     items: tuple[ItemView, ...]
     category: CategoryView | None = None
+    # The durable preparation this unit is authored in, when one exists (§27).
+    authored: PreparationView | None = None
     preflight: PreflightView | None = None
     # Why no preflight is shown, as a server code: its operator inputs are durable only in the
     # frozen send request a CREATE job carries, so a unit without one has no evaluation to show.
@@ -256,3 +326,7 @@ class ActionResult(BaseModel):
     intent_state: IntentState | None = None
     verification_state: VerificationState | None = None
     scope: ScopeBrakeView | None = None
+    preparation_id: str | None = None
+    registration_snapshot_id: str | None = None
+    # The owner's own evaluation, when the action was one that asks for it.
+    preflight: PreflightView | None = None

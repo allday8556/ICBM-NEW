@@ -42,6 +42,7 @@ from app.products.image_model import ImageRole as ProductImageRole
 from app.products.image_model import QaVerdict, SelectedOutput, SourceDecision, SourceDecisionKind
 from app.products.model import ReadinessStatus
 from app.products.pricing import PricingContextInput, Rounding
+from app.register.authoring import AuthoredInputs
 from app.register.model import ListingShape
 from app.register.policy import (
     AssetPolicy,
@@ -357,6 +358,27 @@ def request(
     }
     values.update(overrides)
     return PreflightRequest(**values)
+
+
+def authored_inputs(**overrides: Any) -> AuthoredInputs:
+    """What an operator authors for one provider-listing unit (§27). Invented, and explicit."""
+    name = str(overrides.get("name", "invented authored listing"))
+    return AuthoredInputs(
+        category=CategorySelection(
+            CATEGORY, "m5-acceptance-mapping-1", TAXONOMY, CategoryConfirmation.OPERATOR_CONFIRMED
+        ),
+        listing=ListingValues(
+            name=FieldValue(name),
+            tags=frozenset({"invented-tag"}),
+            attributes={"brand": FieldValue("invented brand")},
+            notices={
+                "manufacturer": FieldValue("invented maker", Provenance.SOURCE_FACT),
+                "origin": FieldValue(detail_page_reference=True),
+            },
+            options={},
+        ),
+        detail=DetailComposition("m5-acceptance-detail-1", "invented body text"),
+    )
 
 
 def no_match(result: PreflightResult) -> DuplicateEvidence:

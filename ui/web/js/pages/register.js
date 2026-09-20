@@ -62,11 +62,15 @@ const PAUSE_LABEL = {
 };
 
 const ACTION_LABEL = {
+  EVALUATE: 'Preflight 평가',
+  FREEZE: '스냅샷 고정',
   CREATE_ENQUEUE: '등록 전송',
   RECONCILE: '결과 대조',
   VERIFY: '읽기 확인',
   RESUME_SCOPE: '전송 재개',
 };
+
+const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
@@ -85,6 +89,10 @@ const REASON_COPY = {
   REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE:
     '이 단위의 Preflight 입력이 서버에 남아 있지 않아 지금 평가를 보여줄 수 없습니다.',
   REGISTER_TARGET_POLICY_MISSING: '이 계정의 등록 정책이 아직 설정되지 않았습니다.',
+  REGISTER_PREPARATION_ABSENT: '아직 등록 준비 내용이 저장되지 않았습니다.',
+  REGISTER_PREFLIGHT_NOT_READY: 'Preflight가 READY가 아니어서 스냅샷을 고정할 수 없습니다.',
+  REGISTER_UNIT_ALREADY_FROZEN: '이미 스냅샷이 고정된 단위입니다.',
+  DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
   ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
   PROOF_NOT_AVAILABLE_IN_PROCESS: '실행 중인 앱에서는 증명할 수 없는 항목입니다.',
   ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
@@ -193,6 +201,79 @@ function categoryBlock(category) {
   );
 }
 
+function field(label, name, value, type = 'input') {
+  const control = h(type, { name, value: value ?? '', rows: type === 'textarea' ? '3' : null });
+  if (type === 'textarea') control.value = value ?? '';
+  return h('label', { class: 'kv' }, h('span', {}, label), control);
+}
+
+// The authoring form of one provider-listing unit (§27). It collects the operator's own inputs
+// and sends them; it computes no readiness and stores nothing of its own — the server keeps them.
+function authoringForm(unit, onDone) {
+  const authored = unit.authored;
+  const inputs = authored?.inputs ?? {};
+  const form = h(
+    'form',
+    { class: 'register-authoring', 'data-preparation': authored?.preparation_id ?? '' },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
+      authored ? chip(`리비전 ${authored.revision_no}`) : chip('미저장', 'warn')),
+    field('카테고리', 'category_id', inputs.category?.category_id),
+    field('상품명', 'name', inputs.name?.value),
+    field('브랜드', 'brand', inputs.attributes?.brand?.value),
+    field('제조사', 'manufacturer', inputs.notices?.manufacturer?.value),
+    field('상세 본문', 'detail_body', inputs.detail_body, 'textarea'),
+    h(
+      'button',
+      {
+        type: 'submit',
+        class: 'btn blue',
+        'data-action': 'SAVE_PREPARATION',
+        'data-unit': unit.unit_ref,
+      },
+      authored ? '준비 내용 저장' : '준비 내용 만들기',
+    ),
+  );
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(form).entries());
+    const body = {
+      actor: OPERATOR,
+      item_ids: unit.items.map((item) => item.item_id),
+      inputs: {
+        category: values.category_id
+          ? {
+              category_id: values.category_id,
+              mapping_revision: inputs.category?.mapping_revision ?? 'operator',
+              taxonomy_revision: inputs.category?.taxonomy_revision ?? 'operator',
+              confirmation: 'OPERATOR_CONFIRMED',
+            }
+          : null,
+        name: values.name ? { value: values.name } : null,
+        tags: inputs.tags ?? [],
+        attributes: values.brand ? { brand: { value: values.brand } } : {},
+        notices: values.manufacturer ? { manufacturer: { value: values.manufacturer } } : {},
+        options: inputs.options ?? {},
+        detail_composition_revision: inputs.detail_composition_revision ?? 'operator',
+        detail_body: values.detail_body || null,
+        detail_sections: inputs.detail_sections ?? ['BODY'],
+      },
+    };
+    try {
+      if (authored) {
+        await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}`, body);
+      } else {
+        await sendJson('POST', '/api/v1/register/preparations', { ...body, draft_id: unit.draft_id });
+      }
+      toast('등록 준비 내용을 저장했습니다');
+      onDone();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+    }
+  });
+  return form;
+}
+
 function preflightBlock(unit) {
   if (!unit.preflight) {
     return h(
@@ -265,8 +346,14 @@ function call(unit, action, intentId) {
     return sendJson('POST', '/api/v1/register/scopes/resume', {
       marketplace_key: unit.scope.marketplace_key,
       marketplace_account_id: unit.scope.marketplace_account_id,
-      actor: 'operator',
+      actor: OPERATOR,
       reason: 'OPERATOR-REVIEWED',
+    });
+  }
+  if (action === 'EVALUATE' || action === 'FREEZE') {
+    const step = action === 'EVALUATE' ? 'evaluate' : 'freeze';
+    return sendJson('POST', `/api/v1/register/preparations/${unit.authored.preparation_id}/${step}`, {
+      actor: OPERATOR,
     });
   }
   const path = { CREATE_ENQUEUE: 'create', RECONCILE: 'reconcile', VERIFY: 'verify' }[action];
@@ -319,6 +406,8 @@ function unitPanel(unit, onDone) {
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
     unit.conflicting_intents.length ? kv('충돌 중인 요청', String(unit.conflicting_intents.length)) : null,
     unit.category ? categoryBlock(unit.category) : null,
+    unit.snapshot ? null : authoringForm(unit, onDone),
+    unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
     preflightBlock(unit),
     unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
     table(

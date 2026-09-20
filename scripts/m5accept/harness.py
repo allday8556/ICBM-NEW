@@ -464,6 +464,86 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
     }
 
 
+def scenario_preparation(run: Run) -> dict[str, object]:
+    """18 (§27): the operator-authored preparation is durable, append-only, and needs no job.
+
+    It is authored, read back **after a restart**, evaluated from current truth with no CREATE job
+    in existence, frozen into a Snapshot that proves which revision produced it, and then edited —
+    which appends a revision and leaves the frozen Snapshot exactly as it was.
+    """
+    checks, owners = run.checks, run.owners
+    ready = [synthetic.ready_item(owners, product="s18-authored", sequence=140)]
+    draft_id = synthetic.draft(owners, run.account, ready)
+    authored = synthetic.authored_inputs()
+    record = owners.preparations.create(
+        draft_id,
+        item_ids=[ready[0].item_id],
+        inputs=authored,
+        actor=OPERATOR,
+        correlation_id=CID,
+    )
+    run.restart()
+    reopened = run.owners.preparations.preparation(record.preparation_id)
+    checks.require(
+        "s18.preparation_survives_restart",
+        reopened.current.item_ids == (ready[0].item_id,)
+        and reopened.current.inputs_fingerprint == record.current.inputs_fingerprint,
+    )
+    owners = run.owners
+    # Evaluated from current truth. This unit has no Intent, so it can have no CREATE job at all,
+    # and the evaluation queues none: a job is an execution copy, never what is evaluated.
+    before_jobs = owners.jobs.count(job_type_prefix=CREATE_JOB_TYPE)
+    candidate = owners.preparations.evaluate(record.preparation_id)
+    checks.check(
+        "s18.evaluated_without_a_job",
+        owners.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == before_jobs
+        and candidate.rule_version != "",
+        jobs=before_jobs,
+    )
+    evidence = synthetic.no_match(candidate)
+    fresh = owners.preparations.evaluate(record.preparation_id, duplicate_evidence=evidence)
+    checks.require(
+        "s18.authored_inputs_reach_ready",
+        fresh.status is ReadinessStatus.READY,
+    )
+    frozen = owners.preparations.freeze(
+        record.preparation_id,
+        actor=OPERATOR,
+        duplicate_evidence=evidence,
+        prepared_assets=synthetic.prepared_assets(fresh),
+    )
+    provenance = owners.registrations.snapshot_preparation(frozen.snapshot.registration_snapshot_id)
+    checks.check(
+        "s18.snapshot_proves_its_authored_revision",
+        provenance is not None
+        and provenance.preparation_revision_id == frozen.preparation_revision_id
+        and provenance.inputs_fingerprint == reopened.current.inputs_fingerprint,
+    )
+    # An edit appends a revision; the frozen Snapshot keeps the revision it was frozen from.
+    owners.preparations.update(
+        record.preparation_id,
+        item_ids=[ready[0].item_id],
+        inputs=synthetic.authored_inputs(name="a second authored name"),
+        actor=OPERATOR,
+        correlation_id=CID,
+    )
+    after = owners.preparations.preparation(record.preparation_id)
+    still = owners.registrations.snapshot_preparation(frozen.snapshot.registration_snapshot_id)
+    checks.check(
+        "s18.edit_appends_and_never_rewrites",
+        len(after.revisions) == 2
+        and after.current.revision_no == 2
+        and still is not None
+        and still.preparation_revision_id == frozen.preparation_revision_id,
+        revisions=len(after.revisions),
+    )
+    return {
+        "preparation_id": record.preparation_id,
+        "revisions": len(after.revisions),
+        "intent_id": frozen.intent.intent_id,
+    }
+
+
 def scenario_free_group(run: Run) -> dict[str, object]:
     """4: a non-overlapping group is not blocked by another group's UNKNOWN."""
     checks = run.checks
@@ -888,11 +968,17 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
 
 
 def canary(run: Run) -> dict[str, object]:
-    """§C: the derived readiness of a bounded real canary, from this run's own facts."""
+    """§C: the derived readiness of a bounded real canary, for **one named** provider-listing unit.
+
+    The unit is named explicitly, never inferred from which one happens to hold an Intent: this
+    run holds many, and a canary is one. The plan is still `BLOCKED` by the unadopted contracts.
+    """
     owners = run.owners
     units = owners.register.overview().units
-    prepared = [u for u in units if u.intent is not None]
-    unit = prepared[0] if len(prepared) == 1 else None
+    unit = next((u for u in units if u.intent is not None), None)
+    run.checks.check(
+        "canary.many_units_exist_and_one_is_named", len(units) > 1 and unit is not None
+    )
     capability = owners.capability.capability(MARKETPLACE)
     facts = UnitFacts(
         account_bound=unit is not None and unit.account_binding.value == "BOUND",
@@ -902,7 +988,8 @@ def canary(run: Run) -> dict[str, object]:
         requires_image_upload=True,
         unresolved_conflicts=0 if unit is None else len(unit.conflicting_intents),
         sends_allowed=unit is not None and unit.scope.sends_allowed,
-        units_selected=len(prepared),
+        # One named unit is one unit, however many this run holds.
+        units_selected=1 if unit is not None else len(units),
     )
     result = evaluate(
         facts,
@@ -954,6 +1041,7 @@ def _run_phases(run: Run, report: dict[str, Any]) -> None:
     report["s11_upload_gate"] = scenario_upload_gate(run)
     report["s15_brakes"] = scenario_brakes(run)
     report["s16_replay"] = scenario_replay(run, str(separate["confirmed"]))
+    report["s18_preparation"] = scenario_preparation(run)
     report["canary_readiness"] = canary(run)
     report["boundary"] = boundary(run, upstream)
 

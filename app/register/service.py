@@ -31,6 +31,12 @@ from app.connect.marketplace.capability import (
 )
 from app.core.errors import AppError, NotFoundError
 from app.jobs.service import JobService
+from app.register.authoring import (
+    RegistrationPreparationService,
+    decode_inputs,
+    inputs_from_view,
+    preflight_request,
+)
 from app.register.canary import (
     AdoptionFacts,
     CanaryReadinessView,
@@ -42,12 +48,17 @@ from app.register.contracts import (
     ActionView,
     AssetView,
     AttemptView,
+    AuthoredInputsView,
+    CategoryChoiceView,
     CategoryView,
     FieldStateView,
+    FieldValueView,
     IntentView,
     ItemView,
     PreflightView,
+    PreparationRevisionView,
     PreparationState,
+    PreparationView,
     RegisterAction,
     RegisterOverview,
     ScopeBrakeView,
@@ -76,8 +87,11 @@ from app.register.store import (
     DraftItemRecord,
     DraftRecord,
     IntentRecord,
+    PreparationRecord,
+    PreparationRevisionRecord,
     RegistrationStore,
     ScopeRecord,
+    SnapshotProvenance,
     SnapshotRecord,
 )
 
@@ -102,6 +116,15 @@ ACCOUNT_NOT_BOUND = "REGISTER_ACCOUNT_NOT_BOUND"
 # has no evaluation to show, and this surface names that rather than omitting the row (PR-F §B).
 PREFLIGHT_INPUTS_NOT_DURABLE = "REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE"
 PREFLIGHT_OWNER_ABSENT = "REGISTER_PREFLIGHT_NOT_WIRED"
+PREPARATION_ABSENT = "REGISTER_PREPARATION_ABSENT"
+PREFLIGHT_NOT_READY = "REGISTER_PREFLIGHT_NOT_READY"
+ALREADY_FROZEN = "REGISTER_UNIT_ALREADY_FROZEN"
+READY = "READY"
+
+# What an evaluation was made from: the frozen request a CREATE job carries, or the durable
+# preparation an operator authored. Both are server-owned; neither is the screen's.
+SEND_REQUEST_SOURCE = "SEND_REQUEST"
+PREPARATION_SOURCE = "PREPARATION"
 
 # The execution scope this surface acts in, the one marketplace M5 registers to, and the default
 # external-write mode (ADR-0014 §24). None of them is a decision this owner makes.
@@ -119,6 +142,7 @@ class RegisterService:
         registrations: RegistrationStore | None = None,
         execution: RegistrationExecutionService | None = None,
         preflight: RegistrationPreflightService | None = None,
+        authoring: RegistrationPreparationService | None = None,
         accounts: MarketplaceAccountStore | None = None,
         jobs: JobService | None = None,
         capability: CapabilityReader | None = None,
@@ -129,6 +153,7 @@ class RegisterService:
         self._registrations = registrations
         self._execution = execution
         self._preflight = preflight
+        self._authoring = authoring
         self._accounts = accounts
         self._jobs = jobs
         self._capability = capability
@@ -160,16 +185,27 @@ class RegisterService:
             paused_scopes=tuple(self._scope_view(scope) for scope in store.paused_scopes()),
         )
 
-    def canary_readiness(self, draft_id: str | None = None) -> CanaryReadinessView:
+    def canary_readiness(self, unit_ref: str | None = None) -> CanaryReadinessView:
         """The derived, read-only plan result for a bounded real canary (§C, ADR-0014 §24).
+
+        A canary is **one exact provider-listing unit**, named by its `unit_ref`. Nothing is
+        inferred from which unit happens to have an Intent: without an explicitly resolvable unit
+        this fails closed, and the single-unit requirement stays unsatisfied.
 
         It authorizes nothing and writes nothing. Every missing proof is reported as missing —
         an unadopted endpoint as **not adopted**, never as absent or unnecessary — and a running
         application cannot prove its own checkout, so that requirement stays unproven here.
         """
-        units = self.overview().units if draft_id is None else self.units(draft_id)
-        selected = [u for u in units if u.intent is not None] or list(units)
-        unit = selected[0] if len(selected) == 1 else None
+        units = self.overview().units
+        if unit_ref is not None:
+            unit = next((u for u in units if u.unit_ref == unit_ref), None)
+            if unit is None:
+                raise NotFoundError("REGISTER_UNIT_NOT_FOUND", "no such provider-listing unit")
+            selected = [unit]
+        else:
+            # One unit in the whole surface is unambiguous; anything else must be named.
+            selected = list(units)
+            unit = units[0] if len(units) == 1 else None
         capability = self._capability_facts()
         facts = UnitFacts(
             account_bound=unit is not None and unit.account_binding is AccountBinding.BOUND,
@@ -203,6 +239,83 @@ class RegisterService:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "no such registration draft")
         intents = {i.registration_snapshot_id: i for i in store.intents(limit=200)}
         return self._units_of(draft, intents)
+
+    # ------------------------------------------------------------------ authoring (§27)
+
+    def create_preparation(
+        self,
+        draft_id: str,
+        *,
+        item_ids: Sequence[str],
+        inputs: AuthoredInputsView,
+        actor: str,
+        correlation_id: str,
+    ) -> PreparationView:
+        """Record what an operator authored for one provider-listing unit. Nothing is evaluated
+        here: the preparation owner stores inputs, and a verdict is asked for separately (§3)."""
+        record = self._require_authoring().create(
+            draft_id,
+            item_ids=item_ids,
+            inputs=inputs_from_view(inputs),
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        return _preparation_view(record)
+
+    def update_preparation(
+        self,
+        preparation_id: str,
+        *,
+        item_ids: Sequence[str],
+        inputs: AuthoredInputsView,
+        actor: str,
+        correlation_id: str,
+    ) -> PreparationView:
+        record = self._require_authoring().update(
+            preparation_id,
+            item_ids=item_ids,
+            inputs=inputs_from_view(inputs),
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        return _preparation_view(record)
+
+    def preparation(self, preparation_id: str) -> PreparationView:
+        """What is authored now, and the revisions behind it. A reload reads exactly this."""
+        return _preparation_view(self._require_authoring().preparation(preparation_id))
+
+    def evaluate_preparation(self, preparation_id: str) -> ActionResult:
+        """Ask the preflight owner what these inputs are worth against current truth (§3).
+
+        No job exists yet and none is needed, nothing is stored, and the status and every reason
+        code are the owner's own.
+        """
+        result = self._require_authoring().evaluate(preparation_id)
+        return ActionResult(
+            action=RegisterAction.EVALUATE,
+            preparation_id=preparation_id,
+            preflight=_preflight_view(result, source=PREPARATION_SOURCE, matches=None),
+        )
+
+    def freeze_preparation(
+        self, preparation_id: str, *, actor: str, correlation_id: str
+    ) -> ActionResult:
+        """Freeze the unit this preparation authored and open its CREATE Intent.
+
+        Every rule stays with its owner: the final preflight must be READY under current truth,
+        the builder refuses a drifted one, and the store's invariants guard the write. Nothing is
+        sent — a CREATE is queued only by its own action, and the endpoint is still NOT_ADOPTED.
+        """
+        frozen = self._require_authoring().freeze(
+            preparation_id, actor=actor, correlation_id=correlation_id
+        )
+        return ActionResult(
+            action=RegisterAction.FREEZE,
+            preparation_id=preparation_id,
+            registration_snapshot_id=frozen.snapshot.registration_snapshot_id,
+            intent_id=frozen.intent.intent_id,
+            intent_state=frozen.intent.state,
+        )
 
     # ------------------------------------------------------------------ actions (§22, PR-F §B)
 
@@ -285,31 +398,43 @@ class RegisterService:
     ) -> tuple[UnitView, ...]:
         """One view per provider-listing unit of this Draft — never one row for the Draft (§2).
 
-        A frozen unit is its newest Snapshot for exactly that set of Items, with that Snapshot's
-        own Intent, Attempts and actions; an older generation of the same unit stays history, and
-        an unresolved one is still named by the conflict scope. The Items the shape would still
-        form, and that no current-revision Snapshot covers, are shown separately as preparations:
-        a prospective unit never borrows a frozen unit's identity, keys or actions.
+        A frozen unit is identified by **its own durable Snapshot** — its listing identity, not its
+        Item membership. Two provider listings may legally hold the same Items under distinct
+        listing identities (an intentional duplicate or a re-registration, §13), and neither hides
+        the other here. Item membership decides only whether a preparation still needs showing.
+
+        A Snapshot an Intent names is always its own row. Only a **superseded** freeze — a later
+        Snapshot for the same listing identity that no Intent names — steps aside, because it is a
+        re-freeze of the same unit rather than another listing.
+
+        What is authored but not yet frozen is shown separately, as a preparation: it has no
+        listing identity, no `registration_item_key` and no Intent, and none is invented for it.
         """
         store = self._require_store()
-        newest: dict[tuple[str, ...], SnapshotRecord] = {}
+        frozen: list[UnitView] = []
+        seen: set[str] = set()
+        covered: set[tuple[str, ...]] = set()
         for snapshot in store.snapshots_of_draft(draft.draft_id):
-            newest.setdefault(_unit_items(snapshot), snapshot)
-        frozen = [
-            self._frozen_unit(draft, snapshot, intents.get(snapshot.registration_snapshot_id))
-            for snapshot in newest.values()
-        ]
-        covered = {
-            key
-            for key, snapshot in newest.items()
-            if snapshot.draft_revision == draft.draft_revision
+            intent = intents.get(snapshot.registration_snapshot_id)
+            if intent is None and snapshot.listing_identity in seen:
+                continue
+            seen.add(snapshot.listing_identity)
+            frozen.append(self._frozen_unit(draft, snapshot, intent))
+            if snapshot.draft_revision == draft.draft_revision:
+                covered.add(_unit_items(snapshot))
+        authored = {
+            tuple(sorted(record.current.item_ids)): record
+            for record in store.preparations_of_draft(draft.draft_id)
         }
         drafted = [
-            self._drafted_unit(draft, item_ids)
-            for item_ids in self._prospective_units(draft)
-            if tuple(sorted(item_ids)) not in covered
+            self._drafted_unit(draft, key, authored.get(key))
+            for key in sorted(set(authored) | self._prospective_keys(draft))
+            if key not in covered
         ]
         return tuple(frozen + drafted)
+
+    def _prospective_keys(self, draft: DraftRecord) -> set[tuple[str, ...]]:
+        return {tuple(sorted(item_ids)) for item_ids in self._prospective_units(draft)}
 
     def _prospective_units(self, draft: DraftRecord) -> tuple[tuple[str, ...], ...]:
         """What the preflight owner says this Draft's open Items would form (§2). Never derived
@@ -327,17 +452,25 @@ class RegisterService:
         store = self._require_store()
         payload = store.snapshot_payload(snapshot.registration_snapshot_id) or {}
         facts, facts_problem = self._item_facts(draft.draft_id, _unit_items(snapshot))
-        preflight, preflight_problem = self._preflight_of(snapshot, intent)
+        provenance = store.snapshot_preparation(snapshot.registration_snapshot_id)
+        authored = (
+            None
+            if provenance is None
+            else store.preparation_of_revision(provenance.preparation_revision_id)
+        )
+        preflight, preflight_problem = self._preflight_of(snapshot, intent, authored, provenance)
         return self._unit_view(
             draft,
-            unit_ref=snapshot.listing_identity,
-            preparation=(
+            # A frozen unit is its own Snapshot: two listings may legally hold the same Items.
+            unit_ref=snapshot.registration_snapshot_id,
+            state=(
                 PreparationState.INTENT_OPEN
                 if intent is not None
                 else PreparationState.SNAPSHOT_FROZEN
             ),
             items=self._frozen_items(snapshot, payload, facts),
             category=self._category_of(payload),
+            authored=None if authored is None else _preparation_view(authored),
             preflight=preflight,
             preflight_unavailable_reason=preflight_problem,
             item_facts_unavailable_reason=facts_problem,
@@ -346,19 +479,34 @@ class RegisterService:
             conflicting_intents=store.conflicting_intents(snapshot.registration_snapshot_id),
         )
 
-    def _drafted_unit(self, draft: DraftRecord, item_ids: Sequence[str]) -> UnitView:
-        """A unit that exists only as a preparation: no Snapshot froze it, so it has no listing
-        identity, no `registration_item_key` and no Intent — and none is invented for it."""
+    def _drafted_unit(
+        self,
+        draft: DraftRecord,
+        item_ids: Sequence[str],
+        authored: PreparationRecord | None,
+    ) -> UnitView:
+        """A unit no Snapshot has frozen: it has no listing identity, no `registration_item_key`
+        and no Intent, and none is invented for it.
+
+        When it is authored, its preparation is shown and its preflight is the candidate
+        evaluation of exactly those inputs — no job, and nothing stored (§3, §27).
+        """
         chosen = [item for item in draft.items if item.item_id in set(item_ids)]
         facts, facts_problem = self._item_facts(draft.draft_id, tuple(sorted(item_ids)))
+        preflight, preflight_problem = self._candidate_of(authored)
         return self._unit_view(
             draft,
-            unit_ref=f"{draft.draft_id}:{'+'.join(str(item.ordinal) for item in chosen)}",
-            preparation=PreparationState.DRAFTED,
+            unit_ref=(
+                authored.preparation_id
+                if authored is not None
+                else f"{draft.draft_id}:{'+'.join(str(item.ordinal) for item in chosen)}"
+            ),
+            state=PreparationState.DRAFTED,
             items=self._drafted_items(chosen, facts),
             category=None,
-            preflight=None,
-            preflight_unavailable_reason=PREFLIGHT_INPUTS_NOT_DURABLE,
+            authored=None if authored is None else _preparation_view(authored),
+            preflight=preflight,
+            preflight_unavailable_reason=preflight_problem,
             item_facts_unavailable_reason=facts_problem,
             snapshot=None,
             intent=None,
@@ -370,9 +518,10 @@ class RegisterService:
         draft: DraftRecord,
         *,
         unit_ref: str,
-        preparation: PreparationState,
+        state: PreparationState,
         items: tuple[ItemView, ...],
         category: CategoryView | None,
+        authored: PreparationView | None,
         preflight: PreflightView | None,
         preflight_unavailable_reason: str | None,
         item_facts_unavailable_reason: str | None,
@@ -395,9 +544,10 @@ class RegisterService:
             marketplace_key=draft.marketplace_key,
             marketplace_account_id=draft.marketplace_account_id,
             account_binding=binding,
-            preparation=preparation,
+            preparation=state,
             items=items,
             category=category,
+            authored=authored,
             preflight=preflight,
             preflight_unavailable_reason=preflight_unavailable_reason,
             item_facts_unavailable_reason=item_facts_unavailable_reason,
@@ -420,7 +570,16 @@ class RegisterService:
             published_state=None if registration is None else registration[1],
             conflicting_intents=conflicting_intents,
             scope=self._scope_view(scope, budget=budget),
-            actions=self._actions(intent, scope, budget, binding, live),
+            actions=self._actions(
+                intent,
+                scope,
+                budget,
+                binding,
+                live,
+                authored=authored,
+                preflight=preflight,
+                frozen=snapshot is not None,
+            ),
         )
 
     def _actions(
@@ -430,9 +589,22 @@ class RegisterService:
         budget: BudgetState,
         binding: AccountBinding,
         live_job: str | None,
+        authored: PreparationView | None = None,
+        preflight: PreflightView | None = None,
+        frozen: bool = False,
     ) -> tuple[ActionView, ...]:
         """What the server will accept for this unit now, each with its own reason code."""
         return (
+            ActionView(
+                action=RegisterAction.EVALUATE,
+                enabled=authored is not None,
+                reason_code=None if authored is not None else PREPARATION_ABSENT,
+            ),
+            ActionView(
+                action=RegisterAction.FREEZE,
+                enabled=self._freeze_reason(authored, preflight, frozen) is None,
+                reason_code=self._freeze_reason(authored, preflight, frozen),
+            ),
             ActionView(
                 action=RegisterAction.CREATE_ENQUEUE,
                 enabled=self._create_reason(intent, budget, binding, live_job) is None,
@@ -480,6 +652,21 @@ class RegisterService:
             return SCOPE_PAUSED if budget.paused_by is not None else BUDGET_EXHAUSTED
         if self._send_request(intent.intent_id) is None:
             return NO_SEND_REQUEST
+        return None
+
+    @staticmethod
+    def _freeze_reason(
+        authored: PreparationView | None, preflight: PreflightView | None, frozen: bool
+    ) -> str | None:
+        """A Snapshot is frozen from a READY preparation, and a frozen unit is not frozen again."""
+        if authored is None:
+            return PREPARATION_ABSENT
+        if frozen:
+            return ALREADY_FROZEN
+        if preflight is None:
+            return PREFLIGHT_INPUTS_NOT_DURABLE
+        if preflight.status != READY:
+            return PREFLIGHT_NOT_READY
         return None
 
     @staticmethod
@@ -640,38 +827,91 @@ class RegisterService:
         )
 
     def _preflight_of(
-        self, snapshot: SnapshotRecord, intent: IntentRecord | None
+        self,
+        snapshot: SnapshotRecord,
+        intent: IntentRecord | None,
+        authored: PreparationRecord | None,
+        provenance: SnapshotProvenance | None,
     ) -> tuple[PreflightView | None, str | None]:
         """Re-evaluate this frozen unit from current truth, by the owner that decides it (§3).
 
-        The evaluation needs the operator's preflight inputs, and the only durable copy of them is
-        the **frozen send request** a CREATE job carries (`registration-send-request/v1`). A unit
-        with no such job therefore has no evaluation to show, and says so with a code rather than
-        showing a status it cannot stand behind.
+        Two durable sources, in this order:
+
+        1. the **frozen send request** a CREATE job carries, which holds the prepared provider
+           assets and the exact generation this unit was frozen at — the same evaluation the send
+           gate makes, and the only one whose fingerprint may be compared with the Snapshot's;
+        2. the **preparation revision** that froze it, evaluated as a mutation-free candidate:
+           every dependency except the provider asset identity (§3), which no owner holds durably
+           outside the Snapshot it was frozen into.
+
+        A unit with neither says so with a code rather than showing a status it cannot stand
+        behind.
         """
         if self._preflight is None:
             return None, PREFLIGHT_OWNER_ABSENT
         payload = None if intent is None else self._send_request(intent.intent_id)
-        if payload is None:
-            return None, PREFLIGHT_INPUTS_NOT_DURABLE
-        try:
-            request, prepared = decode_send_request(payload)
-            _identity, generation = frozen_unit_identity(payload)
-            fresh = self._preflight.final(request, prepared, identity_generation=generation)
-        except AppError as refused:
-            return None, refused.code
-        return (
-            PreflightView(
-                status=fresh.status.value,
-                reason_codes=tuple(sorted(set(fresh.codes))),
-                rule_version=fresh.rule_version,
-                dependency_fingerprint=fresh.dependency_fingerprint,
-                fingerprint_matches_snapshot=(
-                    fresh.dependency_fingerprint == snapshot.preflight_fingerprint
+        if payload is not None:
+            try:
+                request, prepared = decode_send_request(payload)
+                _identity, generation = frozen_unit_identity(payload)
+                fresh = self._preflight.final(request, prepared, identity_generation=generation)
+            except AppError as refused:
+                return None, refused.code
+            return (
+                _preflight_view(
+                    fresh,
+                    source=SEND_REQUEST_SOURCE,
+                    matches=fresh.dependency_fingerprint == snapshot.preflight_fingerprint,
                 ),
+                None,
+            )
+        if authored is None or provenance is None:
+            return None, PREFLIGHT_INPUTS_NOT_DURABLE
+        revision = next(
+            (
+                r
+                for r in authored.revisions
+                if r.preparation_revision_id == provenance.preparation_revision_id
             ),
             None,
         )
+        if revision is None:  # pragma: no cover - a link names a revision of its own preparation
+            return None, PREFLIGHT_INPUTS_NOT_DURABLE
+        return self._candidate(authored, revision, generation=provenance.identity_generation)
+
+    def _candidate_of(
+        self, authored: PreparationRecord | None
+    ) -> tuple[PreflightView | None, str | None]:
+        """The candidate evaluation of what a preparation authors now (§3). No job is needed."""
+        if self._preflight is None:
+            return None, PREFLIGHT_OWNER_ABSENT
+        if authored is None:
+            return None, PREPARATION_ABSENT
+        return self._candidate(authored, authored.current, generation=None)
+
+    def _candidate(
+        self,
+        authored: PreparationRecord,
+        revision: PreparationRevisionRecord,
+        *,
+        generation: int | None,
+    ) -> tuple[PreflightView | None, str | None]:
+        if self._preflight is None:  # pragma: no cover - every caller checks it first
+            return None, PREFLIGHT_OWNER_ABSENT
+        try:
+            request = preflight_request(
+                authored, revision, draft_revision=self._draft_revision(authored.draft_id)
+            )
+            result = self._preflight.candidate(request, identity_generation=generation)
+        except AppError as refused:
+            return None, refused.code
+        return _preflight_view(result, source=PREPARATION_SOURCE, matches=None), None
+
+    def _draft_revision(self, draft_id: str) -> int:
+        draft = self._require_store().draft(draft_id)
+        if draft is None:  # pragma: no cover - the preparation names an existing Draft
+            raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "no such registration draft")
+        return draft.draft_revision
 
     # ------------------------------------------------------------------ owner reads
 
@@ -778,6 +1018,11 @@ class RegisterService:
             raise NotFoundError("REGISTER_NOT_WIRED", "the execution owner is not wired")
         return self._execution
 
+    def _require_authoring(self) -> RegistrationPreparationService:
+        if self._authoring is None:  # pragma: no cover - the container always wires it
+            raise NotFoundError("REGISTER_NOT_WIRED", "the preparation owner is not wired")
+        return self._authoring
+
     def _require_jobs(self) -> JobService:
         if self._jobs is None:  # pragma: no cover - the container always wires it
             raise NotFoundError("REGISTER_NOT_WIRED", "the job owner is not wired")
@@ -788,6 +1033,77 @@ class RegisterService:
         if intent is None:
             raise NotFoundError("REGISTER_INTENT_NOT_FOUND", "no such registration intent")
         return intent
+
+
+def _preflight_view(result: Any, *, source: str, matches: bool | None) -> PreflightView:
+    """The owner's verdict, rendered. Every reason code it returned is carried."""
+    return PreflightView(
+        status=result.status.value,
+        stage=result.stage.value,
+        source=source,
+        reason_codes=tuple(sorted(set(result.codes))),
+        rule_version=result.rule_version,
+        dependency_fingerprint=result.dependency_fingerprint,
+        fingerprint_matches_snapshot=matches,
+    )
+
+
+def _preparation_view(record: PreparationRecord) -> PreparationView:
+    """The durable preparation, with what is authored now and the history behind it (§27)."""
+    current = record.current
+    inputs = decode_inputs(current)
+    listing = inputs.listing
+    return PreparationView(
+        preparation_id=record.preparation_id,
+        draft_id=record.draft_id,
+        marketplace_key=record.marketplace_key,
+        marketplace_account_id=record.marketplace_account_id,
+        revision_no=current.revision_no,
+        item_ids=current.item_ids,
+        inputs=AuthoredInputsView(
+            category=(
+                None
+                if inputs.category is None
+                else CategoryChoiceView(
+                    category_id=inputs.category.category_id,
+                    mapping_revision=inputs.category.mapping_revision,
+                    taxonomy_revision=inputs.category.taxonomy_revision,
+                    confirmation=inputs.category.confirmation.value,
+                )
+            ),
+            name=None if listing.name is None else _field_view(listing.name),
+            tags=tuple(sorted(listing.tags)),
+            attributes={key: _field_view(value) for key, value in listing.attributes.items()},
+            notices={key: _field_view(value) for key, value in listing.notices.items()},
+            options={item: dict(values) for item, values in listing.options.items()},
+            detail_composition_revision=(
+                None if inputs.detail is None else inputs.detail.composition_revision
+            ),
+            detail_body=None if inputs.detail is None else inputs.detail.body,
+            detail_sections=() if inputs.detail is None else tuple(inputs.detail.sections),
+        ),
+        inputs_fingerprint=current.inputs_fingerprint,
+        revisions=tuple(
+            PreparationRevisionView(
+                preparation_revision_id=revision.preparation_revision_id,
+                revision_no=revision.revision_no,
+                draft_revision=revision.draft_revision,
+                inputs_fingerprint=revision.inputs_fingerprint,
+                authored_by=revision.authored_by,
+                authored_at=revision.authored_at,
+                item_ids=revision.item_ids,
+            )
+            for revision in record.revisions
+        ),
+    )
+
+
+def _field_view(value: Any) -> FieldValueView:
+    return FieldValueView(
+        value=value.value,
+        provenance=value.provenance.value,
+        detail_page_reference=value.detail_page_reference,
+    )
 
 
 def _unit_items(snapshot: SnapshotRecord) -> tuple[str, ...]:

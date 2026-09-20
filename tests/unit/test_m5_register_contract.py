@@ -113,17 +113,20 @@ def test_the_adoption_detector_fires() -> None:
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
 
 M5_FOUNDATION = "0016_m5_registration_foundation"
-# ADR-0014 §26 (architect decision 5749504280): the execution-scope owner is the second, and only
-# other, M5 migration. Everything else registration-shaped is still forbidden.
-M5_HEAD = "0017_m5_registration_execution_scope"
-M5_MIGRATIONS = (M5_FOUNDATION, M5_HEAD)
+M5_EXECUTION_SCOPE = "0017_m5_registration_execution_scope"
+# ADR-0014 §26 (decision 5749504280) added the execution-scope owner, and §27 (decision
+# 5751540323) the durable preparation owner. Those three are the only M5 migrations; everything
+# else registration-shaped is still forbidden.
+M5_HEAD = "0018_m5_registration_preparation"
+M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
     re.I,
 )
-# ADR-0014 §25: PR-B owns these tables, and §26 adds the one execution-scope owner PR-E needed
-# (Issue #89 §20, architect decision 5749504280). Nothing else registration-shaped exists.
+# ADR-0014 §25: PR-B owns these tables, §26 adds the one execution-scope owner PR-E needed
+# (decision 5749504280), and §27 the preparation owner PR-F needed (decision 5751540323).
+# Nothing else registration-shaped exists.
 REGISTRATION_TABLES = frozenset(
     {
         "registration_drafts",
@@ -137,6 +140,10 @@ REGISTRATION_TABLES = frozenset(
         "marketplace_registration_items",
         "duplicate_overrides",
         "registration_execution_scopes",
+        "registration_preparations",
+        "registration_preparation_revisions",
+        "registration_preparation_items",
+        "registration_snapshot_preparations",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -190,11 +197,12 @@ def test_the_migration_detector_fires() -> None:
         "0015_m4_quantity_offers.py",
         "0016_m5_registration_foundation.py",
         "0017_m5_registration_execution_scope.py",
-        "0018_m5_registration_more.py",
+        "0018_m5_registration_preparation.py",
+        "0019_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
-        "0018_m5_registration_more.py",
+        "0019_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
 
@@ -658,6 +666,9 @@ EXPECTED_INVARIANTS = {
     " the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is"
     " refused",
     "M5-29": "a brake reason is recorded only with the measured class that caused it",
+    "M5-30": "the registration preparation stores the operator's authored inputs only,"
+    " append-only, and a Snapshot proves which exact revision froze it; a job payload is an"
+    " execution copy and never the authoring source",
 }
 
 
