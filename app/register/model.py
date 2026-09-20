@@ -116,6 +116,29 @@ class AbsenceEvidence(StrEnum):
     PROVIDER_LOOKUP = "PROVIDER_LOOKUP"
 
 
+class ExecutionScopeState(StrEnum):
+    """ADR-0014 §26: whether one execution scope's automatic send brake is engaged.
+
+    This is REGISTER's own operational control, never capability truth: CONNECT still owns the
+    binding, the auth, the permission scope, its workflow overlays and contract freshness.
+    """
+
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+
+
+class ScopePauseReason(StrEnum):
+    """ADR-0014 §26: why the send brake of one execution scope is engaged.
+
+    Each cause has its own accepted release (§26): only ``AUTH`` is ever released automatically,
+    and then only by a CONNECT authentication proof newer than the pause itself.
+    """
+
+    AUTH = "AUTH"
+    POLICY = "POLICY"
+    FAILURE_BUDGET = "FAILURE_BUDGET"
+
+
 class BatchSummary(StrEnum):
     """ADR-0014 §12: a batch's summary is derived from its child Intents, never stored."""
 

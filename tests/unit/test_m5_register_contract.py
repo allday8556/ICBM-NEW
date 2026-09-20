@@ -112,13 +112,18 @@ def test_the_adoption_detector_fires() -> None:
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
 
-M5_HEAD = "0016_m5_registration_foundation"
+M5_FOUNDATION = "0016_m5_registration_foundation"
+# ADR-0014 §26 (architect decision 5749504280): the execution-scope owner is the second, and only
+# other, M5 migration. Everything else registration-shaped is still forbidden.
+M5_HEAD = "0017_m5_registration_execution_scope"
+M5_MIGRATIONS = (M5_FOUNDATION, M5_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
     re.I,
 )
-# ADR-0014 §25: PR-B owns these tables, and only these (Issue #89 §20).
+# ADR-0014 §25: PR-B owns these tables, and §26 adds the one execution-scope owner PR-E needed
+# (Issue #89 §20, architect decision 5749504280). Nothing else registration-shaped exists.
 REGISTRATION_TABLES = frozenset(
     {
         "registration_drafts",
@@ -131,6 +136,7 @@ REGISTRATION_TABLES = frozenset(
         "marketplace_registrations",
         "marketplace_registration_items",
         "duplicate_overrides",
+        "registration_execution_scopes",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -141,13 +147,15 @@ STORED_TRUTH = re.compile(
 
 
 def migration_problems(names: Iterable[str]) -> list[str]:
-    """A migration after the M5 foundation head, or a registration-named migration other than it."""
+    """A migration after the M5 head, or a registration-named one that is not an authorized M5
+    migration: the PR-B foundation, or the PR-E execution-scope owner (§25, §26)."""
     head = int(M5_HEAD.split("_", 1)[0])
+    authorized = {f"{name}.py" for name in M5_MIGRATIONS}
     return [
         name
         for name in names
         if int(name.split("_", 1)[0]) > head
-        or (REGISTRATION_STATE.search(name) and not name.startswith(M5_HEAD))
+        or (REGISTRATION_STATE.search(name) and name not in authorized)
     ]
 
 
@@ -168,12 +176,12 @@ def registration_schema_problems(
     return sorted(problems)
 
 
-def test_the_only_m5_migration_is_the_registration_foundation() -> None:
+def test_the_m5_migrations_are_exactly_the_two_authorized_ones() -> None:
     from app.db.migrate import head_revision
 
     names = sorted(p.name for p in MIGRATIONS.glob("0*.py"))
     assert migration_problems(names) == []
-    assert f"{M5_HEAD}.py" in names
+    assert {f"{name}.py" for name in M5_MIGRATIONS} <= set(names)
     assert head_revision() == M5_HEAD
 
 
@@ -181,11 +189,12 @@ def test_the_migration_detector_fires() -> None:
     names = [
         "0015_m4_quantity_offers.py",
         "0016_m5_registration_foundation.py",
-        "0017_m5_registration_more.py",
+        "0017_m5_registration_execution_scope.py",
+        "0018_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
-        "0017_m5_registration_more.py",
+        "0018_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
 
@@ -627,6 +636,13 @@ EXPECTED_INVARIANTS = {
     "M5-24": "every durable payload or request digest hashes the sanitized canonical"
     " representation; secret-bearing wire bytes exist only transiently and are never persisted"
     " or durably hashed",
+    "M5-25": "the REGISTER execution-scope brake is one row per marketplace, canonical account"
+    " and endpoint group; it is REGISTER's own control and never capability truth",
+    "M5-26": "an AUTH pause releases only on a CONNECT authentication proof newer than that"
+    " pause; a POLICY or FAILURE_BUDGET pause never releases on authentication and needs an"
+    " explicit audited REGISTER resume",
+    "M5-27": "the failure budget counts attempts only after the scope's latest accepted resume"
+    " boundary, and a resume deletes, rewrites or re-classifies no RegistrationAttempt",
 }
 
 
@@ -879,6 +895,47 @@ RULES: dict[str, Rule] = {
             " identity.**",
         ),
     ),
+    "D1 the execution-scope brake is REGISTER's own owner, never capability truth": Rule(
+        (
+            "**This owner is not capability truth.**",
+            "**Neither owner re-decides the other's state**",
+            "**The release is scoped exactly.**",
+        ),
+        (
+            r"(the )?(scope|brake|pause) (is|becomes) (a |the )?capability",
+            r"CONNECT (owns|decides|holds) (the )?(REGISTER )?(execution[- ]scope|send brake)",
+        ),
+    ),
+    "D2 only a newer authentication proof releases AUTH; POLICY and budget need a resume": Rule(
+        (
+            "**An `AUTH` pause may resume automatically, and only then**",
+            "newer than the `paused_at` it answers",
+            "**A `POLICY` or `FAILURE_BUDGET` pause is never released by authentication.**",
+            '**A resume means "resume sending in this execution scope and re-evaluate current'
+            ' gates". It never claims that a remote mutation happened or that provider policy is'
+            " factually absent.**",
+            "**No time-only cooldown releases a scope.**",
+        ),
+        (
+            r"(fresh )?authentication (releases|clears|resumes) (a |the )?"
+            r"(POLICY|FAILURE_BUDGET|budget)",
+            r"after (a |the )?cooldown[, ]+(the )?scope (resumes|is released)",
+        ),
+    ),
+    "D3 the budget counts after the accepted boundary and rewrites no attempt": Rule(
+        (
+            "**The failure budget counts attempts only after that scope's latest accepted resume"
+            " boundary.**",
+            "**A resume never rewrites history.**",
+            "the audit log is never control truth",
+            "**An `UNKNOWN` outcome is governed by its Intent conflict scope (§10) and neither"
+            " spends nor resets this budget.**",
+        ),
+        (
+            r"resume (deletes|rewrites|re-?classifies) ((a|an|the|one) )?(recorded )?attempt",
+            r"`?updated_at`? (resets|releases|clears) (the )?(scope|budget)",
+        ),
+    ),
 }
 
 # One affirmative sentence per rule that has forbidden phrasings: each must be caught.
@@ -904,6 +961,9 @@ VIOLATIONS = {
     "B3": "An operator statement that the listing was not created may establish"
     " NOT_APPLIED_PROVEN.",
     "B4": "The unsanitized wire bytes are hashed for the Attempt.",
+    "D1": "CONNECT owns the REGISTER execution-scope brake for that account.",
+    "D2": "After a cooldown, the scope resumes without any operator action.",
+    "D3": "A resume rewrites the recorded attempt it forgives.",
 }
 
 

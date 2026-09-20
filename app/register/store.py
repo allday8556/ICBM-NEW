@@ -33,6 +33,7 @@ It is the only production writer of the registration tables (a repository rule k
 """
 
 import json
+import re
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -57,6 +58,7 @@ from app.register.model import (
     BLOCKING_STATES,
     AbsenceEvidence,
     BatchSummary,
+    ExecutionScopeState,
     IntentState,
     ListingShape,
     Operation,
@@ -64,6 +66,7 @@ from app.register.model import (
     RegistrationLifecycle,
     ResolutionEvidence,
     ResolvedBy,
+    ScopePauseReason,
     VerificationState,
     effective_outcome,
     idempotency_key,
@@ -81,10 +84,12 @@ from app.register.models import (
     RegistrationBatch,
     RegistrationDraft,
     RegistrationDraftItem,
+    RegistrationExecutionScope,
     RegistrationIntent,
     RegistrationItemSnapshot,
     RegistrationSnapshot,
 )
+from app.register.sanitize import problems
 
 # ---------------------------------------------------------------- records
 
@@ -256,6 +261,62 @@ class OverrideRecord:
     active: bool
 
 
+@dataclass(frozen=True)
+class ScopeRecord:
+    """The REGISTER send brake of one execution scope (§26), as the caller reads it.
+
+    An absent row is an ACTIVE scope that has never been paused, so the reader never has to know
+    whether a row exists: :meth:`active` is that scope.
+    """
+
+    marketplace_key: str
+    marketplace_account_id: str
+    endpoint_group: str
+    state: ExecutionScopeState
+    pause_reason: ScopePauseReason | None = None
+    pause_error_class: ErrorClass | None = None
+    paused_at: datetime | None = None
+    pause_policy_version: str | None = None
+    resume_generation: int = 0
+    resumed_at: datetime | None = None
+    resumed_by: str | None = None
+    resume_reason: str | None = None
+
+    @classmethod
+    def active(
+        cls, marketplace_key: str, marketplace_account_id: str, endpoint_group: str
+    ) -> "ScopeRecord":
+        return cls(
+            marketplace_key=marketplace_key,
+            marketplace_account_id=marketplace_account_id,
+            endpoint_group=endpoint_group,
+            state=ExecutionScopeState.ACTIVE,
+        )
+
+    @property
+    def paused(self) -> bool:
+        return self.state is ExecutionScopeState.PAUSED
+
+    def canonical(self) -> dict[str, Any]:
+        """The scope's safe evidence shape: identities, enums, versions and its boundary."""
+        return {
+            "marketplace_key": self.marketplace_key,
+            "marketplace_account_id": self.marketplace_account_id,
+            "endpoint_group": self.endpoint_group,
+            "state": self.state.value,
+            "pause_reason": None if self.pause_reason is None else self.pause_reason.value,
+            "pause_error_class": (
+                None if self.pause_error_class is None else self.pause_error_class.value
+            ),
+            "paused_at": None if self.paused_at is None else self.paused_at.isoformat(),
+            "pause_policy_version": self.pause_policy_version,
+            "resume_generation": self.resume_generation,
+            "resumed_at": None if self.resumed_at is None else self.resumed_at.isoformat(),
+            "resumed_by": self.resumed_by,
+            "resume_reason": self.resume_reason,
+        }
+
+
 # ---------------------------------------------------------------- the store
 
 
@@ -323,6 +384,12 @@ class RegistrationStore:
     def active_job(self, job_type: str, intent_id: str, states: Sequence[str]) -> str | None:
         with self.reading() as unit:
             return unit.active_job(job_type, intent_id, states)
+
+    def execution_scope(
+        self, marketplace_key: str, marketplace_account_id: str, endpoint_group: str
+    ) -> ScopeRecord:
+        with self.reading() as unit:
+            return unit.execution_scope(marketplace_key, marketplace_account_id, endpoint_group)
 
 
 class RegistrationUnit:
@@ -1116,6 +1183,151 @@ class RegistrationUnit:
         ).all()
         return tuple(dict.fromkeys(rows))
 
+    # ------------------------------------------------------------------ execution scope (§26)
+
+    def execution_scope(
+        self, marketplace_key: str, marketplace_account_id: str, endpoint_group: str
+    ) -> ScopeRecord:
+        """This scope's send brake. A scope that was never paused is ACTIVE with no boundary."""
+        row = self.session.get(
+            RegistrationExecutionScope,
+            (marketplace_key, marketplace_account_id, endpoint_group),
+        )
+        if row is None:
+            return ScopeRecord.active(marketplace_key, marketplace_account_id, endpoint_group)
+        return _scope_record(row)
+
+    def pause_scope(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        endpoint_group: str,
+        *,
+        reason: ScopePauseReason,
+        policy_version: str,
+        error_class: ErrorClass | None = None,
+        actor: str,
+        correlation_id: str,
+    ) -> ScopeRecord:
+        """Engage this scope's send brake for a cause proven by durable execution evidence (§26).
+
+        **Idempotent for the same cause**: a scope already paused by this reason keeps its first
+        boundary, and nothing is recorded twice. A different cause replaces the reason and dates
+        the pause now, because that is a new brake for a new reason.
+        """
+        _require_text(endpoint_group=endpoint_group, policy_version=policy_version)
+        _require_label(actor=actor)
+        cause = ScopePauseReason(reason)
+        row = self.session.get(
+            RegistrationExecutionScope,
+            (marketplace_key, marketplace_account_id, endpoint_group),
+        )
+        now = self._clock.now()
+        if row is not None and row.state == ExecutionScopeState.PAUSED.value:
+            if row.pause_reason == cause.value:
+                return _scope_record(row)
+        elif row is None:
+            row = RegistrationExecutionScope(
+                marketplace_key=marketplace_key,
+                marketplace_account_id=marketplace_account_id,
+                endpoint_group=endpoint_group,
+                state=ExecutionScopeState.ACTIVE.value,
+                resume_generation=0,
+                created_at=now,
+                updated_at=now,
+            )
+            self.session.add(row)
+        row.state = ExecutionScopeState.PAUSED.value
+        row.pause_reason = cause.value
+        row.pause_error_class = None if error_class is None else ErrorClass(error_class).value
+        # A brake is never dated before the release it follows: the row's own history only moves
+        # forward, and a recorded release is never made to look later than it was.
+        row.paused_at = now if row.resumed_at is None else max(now, row.resumed_at)
+        row.pause_policy_version = policy_version
+        row.updated_at = now
+        self.session.flush()
+        self._scope_event(
+            AuditEventType.REGISTRATION_EXECUTION_SCOPE_PAUSED,
+            "pause_scope",
+            row,
+            actor,
+            correlation_id,
+        )
+        return _scope_record(row)
+
+    def resume_scope(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        endpoint_group: str,
+        *,
+        actor: str,
+        reason: str,
+        correlation_id: str,
+        at: datetime | None = None,
+        expected_reason: ScopePauseReason | None = None,
+    ) -> ScopeRecord:
+        """Release this scope's send brake, and move its durable boundary (§26).
+
+        A resume claims nothing about the provider: it says the automatic brake is released and
+        the next send re-runs the complete send-time gate. It never deletes or rewrites one
+        recorded attempt — the budget simply counts what happened *after* ``resumed_at``.
+
+        ``expected_reason`` pins a release to the cause it answers, so the automatic path (a fresh
+        authentication proof) can never release a `POLICY` or `FAILURE_BUDGET` pause. ``at`` is the
+        accepted release time — the proof's own time for that path — and must not predate the
+        pause it releases.
+        """
+        _require_label(actor=actor, reason=reason)
+        row = self.session.get(
+            RegistrationExecutionScope,
+            (marketplace_key, marketplace_account_id, endpoint_group),
+        )
+        if row is None or row.state != ExecutionScopeState.PAUSED.value:
+            raise RegistrationConflictError(
+                "REGISTER_SCOPE_NOT_PAUSED",
+                "only a paused execution scope is resumed",
+                details={"endpoint_group": endpoint_group},
+            )
+        if (
+            expected_reason is not None
+            and row.pause_reason != ScopePauseReason(expected_reason).value
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_SCOPE_REASON_MISMATCH",
+                "this release does not answer the cause that paused the scope",
+                details={
+                    "pause_reason": row.pause_reason,
+                    "expected_reason": ScopePauseReason(expected_reason).value,
+                },
+            )
+        now = self._clock.now()
+        boundary = now if at is None else at
+        if row.paused_at is not None and boundary < row.paused_at:
+            raise InputValidationError(
+                "REGISTER_SCOPE_RELEASE_NOT_NEWER",
+                "a release older than the pause it answers is not a release",
+            )
+        row.state = ExecutionScopeState.ACTIVE.value
+        row.pause_reason = None
+        row.pause_error_class = None
+        row.paused_at = None
+        row.pause_policy_version = None
+        row.resume_generation += 1
+        row.resumed_at = boundary
+        row.resumed_by = actor
+        row.resume_reason = reason
+        row.updated_at = now
+        self.session.flush()
+        self._scope_event(
+            AuditEventType.REGISTRATION_EXECUTION_SCOPE_RESUMED,
+            "resume_scope",
+            row,
+            actor,
+            correlation_id,
+        )
+        return _scope_record(row)
+
     # ------------------------------------------------------------------ verification (§11)
 
     def record_mismatch(
@@ -1649,6 +1861,34 @@ class RegistrationUnit:
             },
         )
 
+    def _scope_event(
+        self,
+        event_type: AuditEventType,
+        action: str,
+        row: RegistrationExecutionScope,
+        actor: str,
+        correlation_id: str,
+    ) -> None:
+        """The history of one brake transition. The row itself stays the authoritative state."""
+        self._event(
+            event_type,
+            action,
+            actor,
+            correlation_id,
+            f"scope:{row.marketplace_key}:{row.marketplace_account_id}:{row.endpoint_group}",
+            {
+                "marketplace_key": row.marketplace_key,
+                "marketplace_account_id": row.marketplace_account_id,
+                "endpoint_group": row.endpoint_group,
+                "state": row.state,
+                "pause_reason": row.pause_reason,
+                "pause_error_class": row.pause_error_class,
+                "pause_policy_version": row.pause_policy_version,
+                "resume_generation": row.resume_generation,
+                "resume_reason": row.resume_reason,
+            },
+        )
+
     def _override_event(
         self, action: str, row: DuplicateOverride, actor: str, correlation_id: str
     ) -> None:
@@ -1678,6 +1918,25 @@ def _require_text(**values: str) -> None:
     empty = sorted(name for name, value in values.items() if not value or not value.strip())
     if empty:
         raise InputValidationError("REGISTER_VALUE_MISSING", f"required: {', '.join(empty)}")
+
+
+# An actor or reason recorded on the execution-scope brake is a plain label, never operator prose
+# and never wire content: two independent layers, a deny-by-default grammar and the outbound
+# sanitizer, keep a URL, a token or a payload value out of the durable row (§15, §26).
+_SCOPE_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}[A-Za-z0-9]$")
+
+
+def _require_label(**values: str) -> None:
+    bad = sorted(
+        name
+        for name, value in values.items()
+        if not isinstance(value, str) or not _SCOPE_LABEL.fullmatch(value) or problems(value)
+    )
+    if bad:
+        raise InputValidationError(
+            "REGISTER_SCOPE_LABEL_UNSAFE",
+            f"a plain label is required: {', '.join(bad)}",
+        )
 
 
 def _intent_record(row: RegistrationIntent) -> IntentRecord:
@@ -1716,6 +1975,25 @@ def _attempt_record(row: RegistrationAttempt) -> AttemptRecord:
         error_class=None if row.error_class is None else ErrorClass(row.error_class),
         error_code=row.error_code,
         started_at=row.started_at,
+    )
+
+
+def _scope_record(row: RegistrationExecutionScope) -> ScopeRecord:
+    return ScopeRecord(
+        marketplace_key=row.marketplace_key,
+        marketplace_account_id=row.marketplace_account_id,
+        endpoint_group=row.endpoint_group,
+        state=ExecutionScopeState(row.state),
+        pause_reason=None if row.pause_reason is None else ScopePauseReason(row.pause_reason),
+        pause_error_class=(
+            None if row.pause_error_class is None else ErrorClass(row.pause_error_class)
+        ),
+        paused_at=row.paused_at,
+        pause_policy_version=row.pause_policy_version,
+        resume_generation=row.resume_generation,
+        resumed_at=row.resumed_at,
+        resumed_by=row.resumed_by,
+        resume_reason=row.resume_reason,
     )
 
 

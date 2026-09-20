@@ -43,6 +43,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, Final
 
 from app.connect.marketplace.capability import RemoteOutcome
@@ -58,6 +59,7 @@ from app.register.model import (
     IntentState,
     ResolutionEvidence,
     ResolvedBy,
+    ScopePauseReason,
     VerificationState,
 )
 from app.register.policy import DuplicateKeyKind, Provenance
@@ -91,7 +93,13 @@ from app.register.sanitize import (
     safe_label,
     safe_provider_reference,
 )
-from app.register.store import AttemptRecord, IntentRecord, RegistrationStore
+from app.register.store import (
+    AttemptRecord,
+    IntentRecord,
+    RegistrationStore,
+    RegistrationUnit,
+    ScopeRecord,
+)
 
 logger = logging.getLogger("icbm.register.execution")
 
@@ -382,36 +390,50 @@ def _decode_asset(asset: Mapping[str, Any]) -> PreparedAsset:
 # ---------------------------------------------------------------- execution policy
 
 
+# The causes that stop a scope by themselves, and the brake reason each one engages (§26). Every
+# other proven failure only spends the budget, and stops the scope when that is exhausted.
+PAUSE_CAUSES: Final[Mapping[ErrorClass, ScopePauseReason]] = MappingProxyType(
+    {
+        ErrorClass.AUTH: ScopePauseReason.AUTH,
+        ErrorClass.POLICY_BLOCKED: ScopePauseReason.POLICY,
+    }
+)
+# The actor and reason of the one automatic release: a CONNECT authentication proof newer than
+# the AUTH pause it answers (§26). Nothing else is ever released without an operator.
+SYSTEM_ACTOR: Final = "system"
+FRESH_AUTH_PROOF: Final = "FRESH_AUTH_PROOF"
+
+
 @dataclass(frozen=True)
 class ExecutionPolicy:
     """Versioned application policy for registration execution — never a provider fact.
 
-    The failure budget is *derived* from the durable attempt history of its scope
-    (marketplace × canonical account × endpoint group), so it adds no second authoritative state:
-    ``max_proven_failures`` consecutive proven failures in the scope stop further sends until an
-    attempt in that scope succeeds or an operator intervenes. ``pause_classes`` are the causes
-    that pause a scope outright rather than being retried per Item.
+    The failure budget is *counted* from the durable attempt history of its scope
+    (marketplace × canonical account × endpoint group), after that scope's latest accepted resume
+    boundary: ``max_proven_failures`` consecutive proven failures stop further sends. Whether the
+    scope is stopped is not re-derived here — it is the `RegistrationExecutionScope` row (§26),
+    the one authoritative brake, because a release is an operator or authentication fact that no
+    attempt history contains.
     """
 
     version: str = EXECUTION_POLICY_VERSION
     endpoint_group: str = CREATE_ENDPOINT_GROUP
     max_proven_failures: int = 3
-    pause_classes: frozenset[ErrorClass] = frozenset({ErrorClass.AUTH, ErrorClass.POLICY_BLOCKED})
 
-    def budget(
-        self, attempts: Sequence[AttemptRecord], *, since: datetime | None = None
-    ) -> "BudgetState":
-        """The budget of one scope, read from its attempt history newest-first.
+    def pause_reason_for(self, error_class: ErrorClass | None) -> ScopePauseReason | None:
+        """The brake this proven cause engages by itself, if any (§26)."""
+        return None if error_class is None else PAUSE_CAUSES.get(error_class)
 
-        ``since`` is the scope's last accepted recovery event: the CONNECT capability owner's
-        ``auth_verified_at``, which moves only on a fresh authentication proof for that account.
-        Attempts older than it are history, not pressure — that is what makes a pause
-        **resumable** without a second authoritative state and without touching, deleting or
-        rewriting a single past attempt (v3.1 §11.2). A proven success in the scope releases it
-        too; nothing else does, and an unrelated capability change never does.
+    def budget(self, attempts: Sequence[AttemptRecord], *, scope: ScopeRecord) -> "BudgetState":
+        """The budget of one scope: its authoritative brake, plus the pressure since its boundary.
+
+        ``scope.resumed_at`` is the last **accepted** release of this scope — a CONNECT
+        authentication proof for an AUTH pause, or an explicit audited operator resume for a
+        `POLICY` or `FAILURE_BUDGET` one (§26). Attempts before it are history, not pressure:
+        nothing is deleted, rewritten or re-classified, the window simply starts there.
         """
+        since = scope.resumed_at
         consecutive = 0
-        paused_by: ErrorClass | None = None
         for attempt in attempts:
             if not attempt.finished:
                 continue
@@ -423,9 +445,6 @@ class ExecutionPolicy:
                 # An unproven outcome is not a proven failure: it is reconciled (§10), and its
                 # Intent already blocks its own conflict scope. It never spends this budget.
                 continue
-            if attempt.error_class is not None and attempt.error_class in self.pause_classes:
-                paused_by = attempt.error_class
-                break
             consecutive += 1
             if consecutive >= self.max_proven_failures:
                 break
@@ -434,8 +453,9 @@ class ExecutionPolicy:
             endpoint_group=self.endpoint_group,
             consecutive_failures=consecutive,
             exhausted=consecutive >= self.max_proven_failures,
-            paused_by=paused_by,
+            paused_by=scope.pause_reason,
             reset_at=since,
+            resume_generation=scope.resume_generation,
         )
 
 
@@ -445,10 +465,11 @@ class BudgetState:
     endpoint_group: str
     consecutive_failures: int
     exhausted: bool
-    paused_by: ErrorClass | None
-    # The accepted recovery event this budget was read against — a fresh authentication proof.
-    # Everything older than it is history, not pressure.
+    # The authoritative brake of this scope, from its own row — never re-derived from history.
+    paused_by: ScopePauseReason | None
+    # The accepted release this budget was counted after, and which release it was.
     reset_at: datetime | None = None
+    resume_generation: int = 0
 
     @property
     def sends_allowed(self) -> bool:
@@ -462,6 +483,7 @@ class BudgetState:
             "exhausted": self.exhausted,
             "paused_by": None if self.paused_by is None else self.paused_by.value,
             "reset_at": None if self.reset_at is None else self.reset_at.isoformat(),
+            "resume_generation": self.resume_generation,
         }
 
 
@@ -551,11 +573,18 @@ class RegistrationExecutionService:
                 "REGISTER_SEND_SCOPE_MISMATCH",
                 "the send request names another unit than the Snapshot",
             )
-        budget = self.budget(intent.marketplace_key, intent.marketplace_account_id)
+        # The brake first: an AUTH pause that a newer authentication proof already answered is
+        # released here, and nothing else is (§26).
+        scope = self.refresh_scope(
+            intent.marketplace_key, intent.marketplace_account_id, correlation_id=correlation_id
+        )
+        budget = self.budget(intent.marketplace_key, intent.marketplace_account_id, scope=scope)
         if not budget.sends_allowed:
             raise ExecutionRefused(
+                # A spent budget keeps its own code, whether the brake already recorded it or the
+                # count alone reached it; an AUTH or POLICY brake says so instead.
                 "REGISTER_FAILURE_BUDGET_EXHAUSTED"
-                if budget.exhausted
+                if budget.paused_by in (None, ScopePauseReason.FAILURE_BUDGET)
                 else "REGISTER_SCOPE_PAUSED",
                 "further sends in this marketplace/account/endpoint-group scope are stopped",
                 details=budget.canonical(),
@@ -584,6 +613,14 @@ class RegistrationExecutionService:
                 sanitized_response=handoff.sanitized_response,
                 error_class=handoff.error_class,
                 error_code=handoff.error_code,
+            )
+            # The brake follows the attempt in the same unit of work, never after it (§26).
+            self._record_pressure(
+                unit,
+                settled,
+                remote_outcome=handoff.remote_outcome,
+                error_class=handoff.error_class,
+                correlation_id=correlation_id,
             )
         return self._after_handoff(settled, attempt, handoff, correlation_id)
 
@@ -863,32 +900,158 @@ class RegistrationExecutionService:
 
     # ------------------------------------------------------------------ helpers
 
-    def budget(self, marketplace_key: str, marketplace_account_id: str) -> BudgetState:
-        """The failure budget of one scope: durable attempts, read against the scope's own reset.
+    # ------------------------------------------------------------------ the scope brake (§26)
 
-        The reset is the CONNECT capability owner's ``auth_verified_at`` — the durable proof that
-        this account authenticated again, which is the recovery an AUTH pause waits for. It moves
-        on nothing else: a reviewed contract-freshness recording or a permission refresh leaves it
-        where it was, so neither can release a paused scope. The other release is a proven success
-        in the scope. No second state is invented, and the failed attempts themselves stay exactly
-        as they were recorded.
+    def scope(self, marketplace_key: str, marketplace_account_id: str) -> ScopeRecord:
+        """The authoritative send brake of this marketplace × account × endpoint group."""
+        return self._registrations.execution_scope(
+            marketplace_key, marketplace_account_id, self._policy.endpoint_group
+        )
+
+    def budget(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        *,
+        scope: ScopeRecord | None = None,
+    ) -> BudgetState:
+        """The failure budget of one scope: its own brake, and the attempts since its boundary.
+
+        The brake is the `RegistrationExecutionScope` row, the single authoritative REGISTER
+        control for that scope (§26). Nothing else releases it: not a capability ``updated_at``,
+        not a permission refresh, not a contract-freshness recording, and — for a `POLICY` or
+        `FAILURE_BUDGET` pause — not an authentication proof either. The recorded attempts stay
+        exactly as they were; only the window they are counted in moves.
         """
         attempts = self._registrations.scope_attempts(marketplace_key, marketplace_account_id)
-        return self._policy.budget(attempts, since=self._scope_reset(marketplace_key))
+        return self._policy.budget(
+            attempts, scope=scope or self.scope(marketplace_key, marketplace_account_id)
+        )
 
-    def _scope_reset(self, marketplace_key: str) -> datetime | None:
-        """The one accepted recovery event of this scope: a **fresh authentication proof**.
+    def refresh_scope(
+        self, marketplace_key: str, marketplace_account_id: str, *, correlation_id: str
+    ) -> ScopeRecord:
+        """Apply the one automatic release this owner accepts, and return the current brake.
 
-        ``auth_verified_at`` moves only when the account authenticates again and no AUTHENTICATION
-        overlay stands in the way (capability A1). It is deliberately *not* the capability row's
-        ``updated_at``: that moves on unrelated changes — a reviewed contract-freshness recording,
-        a permission-metadata refresh — none of which prove the registration scope recovered.
+        **Only an AUTH pause, and only a CONNECT authentication proof newer than the pause it
+        answers** (§26). The proof stays CONNECT's truth — REGISTER records that its own brake was
+        released because of it, at the proof's own time, as its next resume generation. A `POLICY`
+        or `FAILURE_BUDGET` pause is never touched here: re-authenticating proves nothing about a
+        marketplace policy refusal or a run of failures, so those wait for an explicit audited
+        resume. The store pins that with ``expected_reason``, so this path cannot release them
+        even if this check were wrong.
+        """
+        scope = self.scope(marketplace_key, marketplace_account_id)
+        if scope.pause_reason is not ScopePauseReason.AUTH or scope.paused_at is None:
+            return scope
+        proof = self._auth_proof(marketplace_key)
+        if proof is None or proof <= scope.paused_at:
+            return scope
+        with self._registrations.transaction() as unit:
+            resumed = unit.resume_scope(
+                marketplace_key,
+                marketplace_account_id,
+                self._policy.endpoint_group,
+                actor=SYSTEM_ACTOR,
+                reason=FRESH_AUTH_PROOF,
+                correlation_id=correlation_id,
+                at=proof,
+                expected_reason=ScopePauseReason.AUTH,
+            )
+        logger.info(
+            "register.scope_resumed",
+            extra={
+                "marketplace_key": marketplace_key,
+                "endpoint_group": self._policy.endpoint_group,
+                "resume_generation": resumed.resume_generation,
+                "resume_reason": FRESH_AUTH_PROOF,
+            },
+        )
+        return resumed
+
+    def resume_scope(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        *,
+        actor: str,
+        reason: str,
+        correlation_id: str,
+    ) -> ScopeRecord:
+        """The explicit, audited operator release of this scope's brake (§26).
+
+        It claims nothing about the provider and proves no remote fact: it releases the automatic
+        send brake and lets the next send re-run the complete send-time gate. If the provider
+        refuses again, the scope pauses again with a later boundary. Past attempts are untouched.
+        """
+        with self._registrations.transaction() as unit:
+            resumed = unit.resume_scope(
+                marketplace_key,
+                marketplace_account_id,
+                self._policy.endpoint_group,
+                actor=actor,
+                reason=reason,
+                correlation_id=correlation_id,
+            )
+        logger.info(
+            "register.scope_resumed",
+            extra={
+                "marketplace_key": marketplace_key,
+                "endpoint_group": self._policy.endpoint_group,
+                "resume_generation": resumed.resume_generation,
+                "resume_reason": resumed.resume_reason,
+            },
+        )
+        return resumed
+
+    def _record_pressure(
+        self,
+        unit: RegistrationUnit,
+        intent: IntentRecord,
+        *,
+        remote_outcome: RemoteOutcome,
+        error_class: ErrorClass | None,
+        correlation_id: str,
+    ) -> None:
+        """Engage the scope brake when this settled attempt proves a cause for it (§26).
+
+        Only a **proven** failure counts. An `APPLIED_PROVEN` attempt is no pressure at all, and an
+        `UNKNOWN` one is reconciled, never budgeted: it neither engages nor releases the brake. An
+        `AUTH` or `POLICY_BLOCKED` cause stops the scope by itself; any other proven failure stops
+        it only once the versioned budget is spent. This is written in the same unit of work as
+        the attempt it follows, so a brake can never be lost between the two.
+        """
+        if remote_outcome is not RemoteOutcome.NOT_APPLIED_PROVEN:
+            return
+        reason = self._policy.pause_reason_for(error_class)
+        if reason is None:
+            scope = unit.execution_scope(
+                intent.marketplace_key, intent.marketplace_account_id, self._policy.endpoint_group
+            )
+            attempts = unit.scope_attempts(intent.marketplace_key, intent.marketplace_account_id)
+            if not self._policy.budget(attempts, scope=scope).exhausted:
+                return
+            reason = ScopePauseReason.FAILURE_BUDGET
+        unit.pause_scope(
+            intent.marketplace_key,
+            intent.marketplace_account_id,
+            self._policy.endpoint_group,
+            reason=reason,
+            policy_version=self._policy.version,
+            error_class=error_class,
+            actor=self._actor,
+            correlation_id=correlation_id,
+        )
+
+    def _auth_proof(self, marketplace_key: str) -> datetime | None:
+        """The CONNECT authentication proof of this account, if the capability can be read.
+
+        ``auth_verified_at`` moves only in ``observe_auth``, on a fresh proof with no standing
+        AUTHENTICATION overlay (capability A1). A capability that cannot be read releases nothing.
         """
         try:
             return self._capability.capability(marketplace_key).auth_verified_at
         except AppError:
-            # A capability that cannot be read releases nothing: the budget then reads the whole
-            # history, which is the fail-closed direction.
             return None
 
     def _intent(self, intent_id: str) -> IntentRecord:

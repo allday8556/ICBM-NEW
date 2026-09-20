@@ -5,6 +5,8 @@ owner makes before and after it talks to anything (kickoff §4, §5, §9, §10).
 """
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -24,7 +26,12 @@ from app.register.execution import (
     frozen_unit_identity,
     target_ref,
 )
-from app.register.model import ResolutionEvidence, ResolvedBy
+from app.register.model import (
+    ExecutionScopeState,
+    ResolutionEvidence,
+    ResolvedBy,
+    ScopePauseReason,
+)
 from app.register.policy import DuplicateKeyKind, Provenance
 from app.register.preparation import (
     CategoryConfirmation,
@@ -40,10 +47,14 @@ from app.register.preparation import (
     UnitRequest,
 )
 from app.register.sanitize import PayloadSanitationError
-from app.register.store import AttemptRecord
+from app.register.store import AttemptRecord, ScopeRecord
 
 IDENTITY = "icbm-0123456789abcdef0123456789abcdef"
 FINGERPRINT = "c" * 64
+MARKET = "smartstore"
+ACCOUNT = "mpa-0123456789abcdef0123456789abcdef"
+NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+BEFORE = NOW - timedelta(hours=1)
 
 
 def _request(**overrides: object) -> PreflightRequest:
@@ -218,7 +229,11 @@ def test_the_job_names_its_intent_in_the_target_ref() -> None:
 # ---------------------------------------------------------------- the retry matrix (§9, §10)
 
 
-def _attempt(outcome: RemoteOutcome | None, error_class: ErrorClass | None) -> AttemptRecord:
+def _attempt(
+    outcome: RemoteOutcome | None,
+    error_class: ErrorClass | None,
+    started_at: datetime | None = None,
+) -> AttemptRecord:
     return AttemptRecord(
         attempt_id="a-1",
         intent_id="intent-1",
@@ -230,6 +245,7 @@ def _attempt(outcome: RemoteOutcome | None, error_class: ErrorClass | None) -> A
         resolved_by=None,
         resolution_evidence_kind=None,
         error_class=error_class,
+        started_at=started_at,
     )
 
 
@@ -273,34 +289,66 @@ def test_the_matrix_of_error_class_and_remote_outcome(
 # ---------------------------------------------------------------- the failure budget (§10)
 
 
+ACTIVE_SCOPE = ScopeRecord.active(MARKET, ACCOUNT, CREATE_ENDPOINT_GROUP)
+
+
+def _budget(policy: ExecutionPolicy, attempts: list[Any], scope: ScopeRecord = ACTIVE_SCOPE) -> Any:
+    return policy.budget(attempts, scope=scope)
+
+
 def test_the_policy_is_versioned_application_policy_scoped_to_one_endpoint_group() -> None:
     policy = ExecutionPolicy()
     assert (policy.version, policy.endpoint_group) == (
         EXECUTION_POLICY_VERSION,
         CREATE_ENDPOINT_GROUP,
     )
-    assert policy.pause_classes == frozenset({ErrorClass.AUTH, ErrorClass.POLICY_BLOCKED})
+    # §26: the causes that stop a scope by themselves, each mapped to the brake it engages.
+    assert {
+        c: policy.pause_reason_for(c) for c in (ErrorClass.AUTH, ErrorClass.POLICY_BLOCKED)
+    } == {
+        ErrorClass.AUTH: ScopePauseReason.AUTH,
+        ErrorClass.POLICY_BLOCKED: ScopePauseReason.POLICY,
+    }
+    assert policy.pause_reason_for(ErrorClass.TRANSIENT) is None
+    assert policy.pause_reason_for(None) is None
 
 
 def test_the_budget_counts_consecutive_proven_failures_only() -> None:
     policy = ExecutionPolicy(max_proven_failures=2)
     failure = _attempt(RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.TRANSIENT)
-    assert policy.budget([failure]).sends_allowed
-    exhausted = policy.budget([failure, failure])
+    assert _budget(policy, [failure]).sends_allowed
+    exhausted = _budget(policy, [failure, failure])
     assert (exhausted.exhausted, exhausted.consecutive_failures) == (True, 2)
     # A success in the scope clears what came before it.
     applied = _attempt(RemoteOutcome.APPLIED_PROVEN, None)
-    assert policy.budget([applied, failure, failure]).sends_allowed
+    assert _budget(policy, [applied, failure, failure]).sends_allowed
     # An attempt still open proves nothing either way and is not counted.
-    assert policy.budget([_attempt(None, None), failure]).consecutive_failures == 1
+    assert _budget(policy, [_attempt(None, None), failure]).consecutive_failures == 1
 
 
-def test_an_auth_or_policy_cause_pauses_the_scope_rather_than_counting() -> None:
-    policy = ExecutionPolicy()
-    for cause in (ErrorClass.AUTH, ErrorClass.POLICY_BLOCKED):
-        state = policy.budget([_attempt(RemoteOutcome.NOT_APPLIED_PROVEN, cause)])
-        assert state.paused_by is cause and not state.sends_allowed
-        assert state.canonical()["paused_by"] == cause.value
+def test_the_brake_of_the_scope_is_read_from_its_own_row_not_from_history() -> None:
+    # §26: entering a pause is derived from attempts, but *being* paused is the scope row — the
+    # one authoritative REGISTER control. History alone never releases and never re-engages it.
+    policy = ExecutionPolicy(max_proven_failures=2)
+    for reason in ScopePauseReason:
+        paused = replace(
+            ACTIVE_SCOPE,
+            state=ExecutionScopeState.PAUSED,
+            pause_reason=reason,
+            paused_at=NOW,
+            pause_policy_version=policy.version,
+        )
+        state = _budget(policy, [], paused)
+        assert state.paused_by is reason and not state.sends_allowed
+        assert state.canonical()["paused_by"] == reason.value
+    # An ACTIVE scope with a boundary counts only what happened after it.
+    resumed = replace(ACTIVE_SCOPE, resume_generation=3, resumed_at=NOW)
+    older = _attempt(RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.TRANSIENT, started_at=BEFORE)
+    newer = _attempt(RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.TRANSIENT, started_at=NOW)
+    state = _budget(policy, [newer, older, older], resumed)
+    assert (state.consecutive_failures, state.exhausted) == (1, False)
+    assert state.canonical()["resume_generation"] == 3
+    assert state.canonical()["reset_at"] == NOW.isoformat()
 
 
 def test_an_unknown_outcome_is_not_budgeted_and_neither_pauses_nor_frees_the_scope() -> None:
@@ -308,11 +356,11 @@ def test_an_unknown_outcome_is_not_budgeted_and_neither_pauses_nor_frees_the_sco
     # and it clears nothing either — its own Intent already blocks its conflict scope.
     policy = ExecutionPolicy(max_proven_failures=2)
     unknown = _attempt(RemoteOutcome.UNKNOWN, ErrorClass.TRANSIENT)
-    assert policy.budget([unknown]).consecutive_failures == 0
-    assert policy.budget([unknown]).paused_by is None
+    assert _budget(policy, [unknown]).consecutive_failures == 0
+    assert _budget(policy, [unknown]).paused_by is None
     failure = _attempt(RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.TRANSIENT)
     # Sitting between two proven failures, it neither adds to them nor resets them.
-    assert policy.budget([failure, unknown, failure]).exhausted
+    assert _budget(policy, [failure, unknown, failure]).exhausted
 
 
 # ---------------------------------------------------------------- resolution vocabulary (§10)

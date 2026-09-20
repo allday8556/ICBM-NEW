@@ -73,6 +73,8 @@ REGISTRATION_TABLES = (
     "marketplace_registrations",
     "marketplace_registration_items",
     "duplicate_overrides",
+    # M5 PR-E (migration 0017, ADR-0014 §26): the REGISTER execution-scope send brake.
+    "registration_execution_scopes",
 )
 ACCOUNT_TABLES = ("seller_entities", "marketplace_accounts")
 
@@ -428,6 +430,152 @@ def test_every_registration_table_rejects_delete(
             held = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         if held:
             _refused(config, f"DELETE FROM {table}", match="never deleted")
+
+
+# ------------------------------------------------ the execution-scope brake (§26, migration 0017)
+
+SCOPES = "registration_execution_scopes"
+GROUP = "product_registration"
+_SCOPE_COLUMNS = (
+    "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"
+    " pause_error_class, paused_at, pause_policy_version, resume_generation, resumed_at,"
+    " resumed_by, resume_reason, created_at, updated_at"
+)
+
+
+def _paused_row(account: str, *, at: str = AT) -> tuple[object, ...]:
+    return (MARKET, account, GROUP, "PAUSED", "POLICY", "POLICY_BLOCKED", at, "policy/v1", 0,
+            None, None, None, AT, AT)  # fmt: skip
+
+
+def _insert_scope(config: AppConfig, row: tuple[object, ...]) -> None:
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute(
+            f"INSERT INTO {SCOPES} ({_SCOPE_COLUMNS}) VALUES ({', '.join('?' for _ in row)})",
+            row,
+        )
+        connection.commit()
+
+
+def _scope_refused(config: AppConfig, row: tuple[object, ...], *, match: str) -> None:
+    _refused(
+        config,
+        f"INSERT INTO {SCOPES} ({_SCOPE_COLUMNS}) VALUES ({', '.join('?' for _ in row)})",
+        *row,
+        match=match,
+    )
+
+
+def test_an_execution_scope_opens_only_for_a_bound_canonical_account(
+    container: Container, config: AppConfig, account: str
+) -> None:
+    # §26 keeps PR-B's account rule: the brake is scoped by a canonical account, never a free
+    # string, and the scope key is exactly marketplace x account x endpoint group.
+    _scope_refused(config, _paused_row("account-1"), match="not bound to its identity")
+    _insert_scope(config, _paused_row(account))
+    assert _one(config, f"SELECT COUNT(*) FROM {SCOPES}") == (1,)
+    _refused(
+        config,
+        f"INSERT INTO {SCOPES} ({_SCOPE_COLUMNS})"
+        f" VALUES ({', '.join('?' for _ in _paused_row(account))})",
+        *_paused_row(account),
+        match="UNIQUE",
+    )
+    # Another endpoint group of the same account is another row, not the same brake.
+    other = (*_paused_row(account)[:2], "product_inquiry", *_paused_row(account)[3:])
+    _insert_scope(config, other)
+    assert _one(config, f"SELECT COUNT(*) FROM {SCOPES}") == (2,)
+
+
+def test_an_execution_scope_row_is_never_half_recorded(config: AppConfig, account: str) -> None:
+    paused = list(_paused_row(account))
+    # ACTIVE holds no open pause.
+    active_with_pause = (*paused[:3], "ACTIVE", *paused[4:])
+    _scope_refused(config, active_with_pause, match="active_holds_no_pause")
+    # PAUSED names its cause, its time and the policy that judged it.
+    for index in (4, 6, 7):  # pause_reason, paused_at, pause_policy_version
+        missing = list(paused)
+        missing[index] = None
+        _scope_refused(config, tuple(missing), match="paused_states_its_cause")
+    # A resume boundary is complete, and exists exactly when the generation has moved.
+    ungenerated = list(paused)
+    ungenerated[9], ungenerated[10], ungenerated[11] = AT, "operator-1", "REVIEWED"
+    _scope_refused(config, tuple(ungenerated), match="resume_boundary_complete")
+    counted = list(paused)
+    counted[8] = 1
+    _scope_refused(config, tuple(counted), match="no resume boundary")
+    # A negative generation never reaches its CHECK: on INSERT the scope claims a release it
+    # never had, and on UPDATE the generation would fall. Both triggers refuse it first, and the
+    # CHECK stands behind them (``test_the_m5_checks_match_the_orm`` proves it is installed).
+    negative = list(paused)
+    negative[8] = -1
+    _scope_refused(config, tuple(negative), match="no resume boundary")
+    _insert_scope(config, tuple(paused))
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET resume_generation = -1 WHERE endpoint_group = '{GROUP}'",
+        match="only move forward",
+    )
+    # A scope opens with no resume behind it.
+    resumed_at_open = list(paused)
+    resumed_at_open[8], resumed_at_open[9] = 1, "2026-09-18 00:00:00"
+    resumed_at_open[10], resumed_at_open[11] = "operator-1", "REVIEWED"
+    _scope_refused(config, tuple(resumed_at_open), match="no resume boundary")
+
+
+def test_an_execution_scope_history_only_moves_forward(config: AppConfig, account: str) -> None:
+    _insert_scope(config, _paused_row(account))
+    where = f"WHERE marketplace_key = '{MARKET}' AND endpoint_group = '{GROUP}'"
+    # The scope key and the creation time never change.
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET endpoint_group = 'other' {where}",
+        match="only move forward",
+    )
+    # Leaving PAUSED is a resume, never a quiet clearing of the brake.
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET state = 'ACTIVE', pause_reason = NULL, pause_error_class = NULL,"
+        f" paused_at = NULL, pause_policy_version = NULL {where}",
+        match="only move forward",
+    )
+    # A generation never falls, never skips, and a move is an accepted release with its own time.
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET state = 'ACTIVE', pause_reason = NULL, pause_error_class = NULL,"
+        f" paused_at = NULL, pause_policy_version = NULL, resume_generation = 2 {where}",
+        match="only move forward",
+    )
+    resume = (
+        f"UPDATE {SCOPES} SET state = 'ACTIVE', pause_reason = NULL, pause_error_class = NULL,"
+        " paused_at = NULL, pause_policy_version = NULL, resume_generation = 1,"
+        " resumed_at = ?, resumed_by = 'operator-1', resume_reason = 'REVIEWED',"
+        f" updated_at = ? {where}"
+    )
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute(resume, ("2026-09-20 00:00:00", "2026-09-20 00:00:00"))
+        connection.commit()
+    assert _one(config, f"SELECT state, resume_generation FROM {SCOPES} {where}") == ("ACTIVE", 1)
+    # A later boundary never moves backwards, and the generation never falls back.
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET resume_generation = 2, resumed_at = '2026-09-19 00:00:00' {where}",
+        match="only move forward",
+    )
+    _refused(
+        config, f"UPDATE {SCOPES} SET resume_generation = 0 {where}", match="only move forward"
+    )
+    # And the recorded release is never quietly rewritten without a new generation.
+    _refused(
+        config,
+        f"UPDATE {SCOPES} SET resumed_by = 'someone-else' {where}",
+        match="only move forward",
+    )
+
+
+def test_an_execution_scope_is_never_deleted(config: AppConfig, account: str) -> None:
+    _insert_scope(config, _paused_row(account))
+    _refused(config, f"DELETE FROM {SCOPES}", match="never deleted")
 
 
 # ---------------------------------------------------------------- canonical account (blocker 2)
@@ -1636,6 +1784,53 @@ def test_register_stays_zero_and_the_audit_holds_identifiers_only(
 
 def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
+
+
+def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+    # §26: the execution-scope owner adds one table and touches nothing else, round-trips, and
+    # never lets an engaged brake be dropped silently.
+    url = _url(tmp_path / "icbm.db")
+    upgrade_to_head(url)
+    before = _tables(tmp_path / "icbm.db")
+    command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
+    assert before - _tables(tmp_path / "icbm.db") == {SCOPES}
+    command.upgrade(alembic_config(url), "head")
+    assert _tables(tmp_path / "icbm.db") == before
+    account_id = f"mpa-{'1' * 32}"
+    with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
+        connection.execute(
+            "INSERT INTO marketplace_connections (marketplace_key, credential_generation_hwm,"
+            " session_generation_hwm, provider_account_uid, provider_account_id,"
+            " bound_credential_generation, bound_session_generation, bound_at, bound_by,"
+            " created_at, updated_at) VALUES (?, 1, 1, 'uid-x', NULL, 1, 1, ?, 'o', ?, ?)",
+            (MARKET, AT, AT, AT),
+        )
+        connection.execute("INSERT INTO seller_entities VALUES ('seller-1', 'o', 'c', ?)", (AT,))
+        connection.execute(
+            "INSERT INTO marketplace_accounts VALUES (?, 'seller-1', ?, 'uid-x', 'o', 'c', ?)",
+            (account_id, MARKET, AT),
+        )
+        connection.execute(
+            f"INSERT INTO {SCOPES} ({_SCOPE_COLUMNS})"
+            f" VALUES ({', '.join('?' for _ in _paused_row(account_id))})",
+            _paused_row(account_id),
+        )
+        connection.commit()
+    with pytest.raises(RuntimeError, match="never silently destroyed"):
+        command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
+    engine = create_sqlite_engine(url)
+    try:
+        assert current_revision(engine) == "0017_m5_registration_execution_scope"
+    finally:
+        engine.dispose()
+
+
+def _tables(database: Path) -> set[str]:
+    with contextlib.closing(sqlite3.connect(database)) as connection:
+        return {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
 
 
 def test_0016_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:

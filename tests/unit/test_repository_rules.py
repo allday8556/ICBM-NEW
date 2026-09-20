@@ -1217,6 +1217,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "marketplace_registrations",
         "marketplace_registration_items",
         "duplicate_overrides",
+        # M5 PR-E (ADR-0014 26, architect decision 5749504280): REGISTER's own send brake for one
+        # marketplace x canonical account x endpoint group, with its durable resume boundary. It
+        # is not capability truth and holds no provider identity.
+        "registration_execution_scopes",
     }
     offenders = [
         path
