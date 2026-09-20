@@ -183,6 +183,21 @@ def test_an_unprepared_or_unsafe_image_is_never_projected() -> None:
     assert unsafe.value.code == "WIRE_IMAGE_REFERENCE_UNSAFE"
 
 
+def test_a_listing_without_a_representative_image_is_refused() -> None:
+    # The packet proves a representative image is required; a detail image never stands in.
+    details = payload(
+        items=[
+            {
+                **_item(KEY_A, 19900),
+                "publication_assets": [_asset("DETAIL", "2" * 64, REF_DETAIL)],
+            }
+        ]
+    )
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(details)
+    assert refused.value.code == "WIRE_REPRESENTATIVE_IMAGE_MISSING"
+
+
 def test_more_images_than_the_provider_allows_is_refused() -> None:
     many = [_asset("REPRESENTATIVE", "1" * 64, REF_MAIN)] + [
         _asset("DETAIL", f"{i}" * 64, f"https://shop-phinf.example/a/{i}.jpg") for i in range(10)
@@ -287,10 +302,29 @@ def test_an_exact_read_back_matches_the_snapshot() -> None:
 
 def test_normalization_is_deterministic_across_envelopes_and_orderings() -> None:
     contract = resolve(ORIGIN_READ)
+    expected = readback.normalize(retain(contract, _provider_body()))
+    # No envelope is proven, so the same leaves normalize identically however they are nested —
+    # including an envelope that names neither originProduct nor channelProduct.
     nested = {"channelProducts": [_provider_body()]}
-    assert readback.normalize(retain(contract, nested)) == readback.normalize(
-        retain(contract, _provider_body())
+    flat = _provider_body()["originProduct"]
+    other = {"result": {"data": [flat]}}
+    assert readback.normalize(retain(contract, nested)) == expected
+    assert readback.normalize(retain(contract, dict(flat))) == expected
+    assert readback.normalize(retain(contract, other)) == expected
+
+
+def test_a_value_outside_a_proven_bound_is_not_a_number_this_contract_understands() -> None:
+    # The read-back carries a price above the proven maximum: it is dropped, so the comparison
+    # cannot silently accept it as the Snapshot's price.
+    out_of_range = _compare(price=product.MAX_SALE_PRICE + 10)
+    assert out_of_range.normalized["sale_price"] is None
+    assert out_of_range.verdict is readback.ReadbackVerdict.MISMATCH
+    assert "SALE_PRICE_MISMATCH" in out_of_range.reasons
+    contract = resolve(ORIGIN_READ)
+    huge_stock = readback.normalize(
+        retain(contract, _provider_body() | {"stockQuantity": product.MAX_STOCK_QUANTITY + 1})
     )
+    assert huge_stock.stock_quantity is None
 
 
 @pytest.mark.parametrize(

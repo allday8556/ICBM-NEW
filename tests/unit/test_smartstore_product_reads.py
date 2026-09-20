@@ -204,6 +204,20 @@ def test_an_unusable_path_value_fails_before_the_transport(
 
 
 @pytest.mark.parametrize(
+    "params",
+    [{}, {"originProductNo": PRODUCT_NO, "extra": "1"}, {"channelProductNo": PRODUCT_NO}],
+)
+def test_the_path_placeholders_must_match_the_template_exactly(params: dict[str, str]) -> None:
+    # A composed path fills exactly the template's placeholders: never fewer, never more, and
+    # never one belonging to another endpoint.
+    from integrations.marketplaces.smartstore.caller import _path
+
+    with pytest.raises(Exception, match="SMARTSTORE_REQUEST_CONTRACT_VIOLATION"):
+        _path(resolve(ORIGIN), **params)
+    assert _path(resolve(ORIGIN), originProductNo=PRODUCT_NO).endswith(f"/{PRODUCT_NO}")
+
+
+@pytest.mark.parametrize(
     "request_object",
     [object(), None, "1234567890"],
 )
