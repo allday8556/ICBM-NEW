@@ -24,7 +24,7 @@ from app.register.execution import CREATE_ENDPOINT_GROUP, enqueue_create
 from app.register.model import IntentState, ScopePauseReason
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
-from integrations.marketplaces.smartstore.execution import SmartStoreAdoption
+from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from tests.conftest import LOCAL
 from tests.integration.test_m5_register_execution import (
     FakeSender,
