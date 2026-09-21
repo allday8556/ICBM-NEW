@@ -85,8 +85,12 @@ FORBIDDEN_MODULES = (
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
 
-def forbidden(name: str) -> bool:
-    return any(name == f or name.startswith(f"{f}.") for f in FORBIDDEN_MODULES)
+def forbidden(name: str, modules: Sequence[str] | None = None) -> bool:
+    """Whether loading ``name`` is refused by the armed run's list (the M4 default by default)."""
+    return any(
+        name == f or name.startswith(f"{f}.")
+        for f in (FORBIDDEN_MODULES if modules is None else modules)
+    )
 
 
 @dataclass
@@ -96,6 +100,9 @@ class _State:
     blocked_imports: list[str] = field(default_factory=list)
     preserved_paths: int = 0
     writes_outside_root: int = 0
+    # The provider surface the armed run may not load. M4 uses the default above; a later
+    # milestone whose owners legitimately import an adapter arms its own list (M5 PR-F).
+    modules: tuple[str, ...] = FORBIDDEN_MODULES
 
 
 _STATE = _State()
@@ -109,9 +116,9 @@ class _ImportGuard(importlib.abc.MetaPathFinder):
         path: Sequence[str] | None,
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
-        if _STATE.armed and forbidden(fullname):
+        if _STATE.armed and forbidden(fullname, _STATE.modules):
             _STATE.blocked_imports.append(fullname)
-            raise ImportError(f"the M4 acceptance run may not import {fullname}")
+            raise ImportError(f"this acceptance run may not import {fullname}")
         return None
 
 
@@ -182,7 +189,7 @@ def _hook(event: str, args: tuple[Any, ...]) -> None:
             continue
         if names_preserved_campaign(PurePath(text)):
             _STATE.preserved_paths += 1
-            raise PermissionError("the M4 acceptance run never touches a preserved campaign")
+            raise PermissionError("an acceptance run never touches a preserved campaign")
         if writes and _STATE.root is not None:
             absolute = Path(os.path.abspath(text))
             inside = absolute == _STATE.root or absolute.is_relative_to(_STATE.root)
@@ -231,12 +238,17 @@ def _grants(snapshot: dict[str, Any]) -> int:
 
 
 @contextmanager
-def offline(root: Path) -> Iterator[Guarded]:
-    """Arm every guard for the block; the evidence is filled in when it ends."""
+def offline(root: Path, *, modules: Sequence[str] = FORBIDDEN_MODULES) -> Iterator[Guarded]:
+    """Arm every guard for the block; the evidence is filled in when it ends.
+
+    ``modules`` is the provider surface this run may not load. It is the M4 list by default; a
+    run whose own owners import an adapter passes the list that is forbidden to *it*.
+    """
     EGRESS.install()
     _install()
+    _STATE.modules = tuple(modules)
     before_egress = EGRESS.snapshot()
-    preloaded = tuple(sorted(name for name in sys.modules if forbidden(name)))
+    preloaded = tuple(sorted(name for name in sys.modules if forbidden(name, modules)))
     _STATE.root = root
     _STATE.blocked_imports.clear()
     _STATE.preserved_paths = 0
@@ -248,7 +260,9 @@ def offline(root: Path) -> Iterator[Guarded]:
     finally:
         _STATE.armed = False
         after_egress = EGRESS.snapshot()
-        loaded = sorted(name for name in sys.modules if forbidden(name) and name not in preloaded)
+        loaded = sorted(
+            name for name in sys.modules if forbidden(name, modules) and name not in preloaded
+        )
         guarded.evidence = GuardEvidence(
             external_network_attempts=int(after_egress["external_attempts"])
             - int(before_egress["external_attempts"]),

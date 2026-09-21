@@ -23,6 +23,12 @@ migration 0017 (§26, architect decision `5749504280`):
 - ``registration_execution_scopes`` (migration 0017): REGISTER's own send brake for one
   ``marketplace × account × endpoint group``, with the durable resume boundary the failure budget
   counts attempts after (§26). It is not capability truth and owns nothing CONNECT owns.
+- ``registration_preparations``, ``registration_preparation_revisions``,
+  ``registration_preparation_items`` and ``registration_snapshot_preparations`` (migration 0018,
+  §27, architect decision `5751540323`): the **operator-authored inputs** of one provider-listing
+  unit, revisioned and append-only, and the link proving which exact revision froze a Snapshot. It
+  stores inputs only: no readiness, no status, no reason code, no price, no image, no capability
+  and no provider fact — a preflight stays derived from these inputs and current owner truth (§3).
 
 **Account scope.** Every "account" here is the canonical ``marketplace_account_id`` of
 ``app.connect.account_models`` (``ACCOUNT_IDENTITY.md`` §2), never a free string and never the
@@ -692,3 +698,137 @@ class RegistrationExecutionScope(Base):
     resume_reason: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class RegistrationPreparation(Base):
+    """The operator-authored preparation of one provider-listing unit (§27, decision `5751540323`).
+
+    A preflight is derived from the operator's own inputs and current owner truth (§3). Those
+    inputs — the category selection, the listing values and the detail composition — had no
+    durable owner: they survived only inside a queued CREATE job's payload, which is execution
+    state and may not be the authoring truth. This is that owner, and it holds **inputs only**.
+
+    One row per preparation; its Items and authored values live in its revisions, so the row
+    itself never changes after it is opened.
+    """
+
+    __tablename__ = "registration_preparations"
+    __table_args__ = (
+        _account(),
+        UniqueConstraint("draft_id", "unit_membership_fingerprint"),
+        CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
+        CheckConstraint(
+            _hex64("unit_membership_fingerprint"), name="unit_membership_fingerprint_hex"
+        ),
+        CheckConstraint(_present("created_by"), name="created_by_present"),
+    )
+
+    preparation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(String(36), ForeignKey("registration_drafts.draft_id"))
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
+    # Immutable identity of the exact Item membership within this Draft. It is deliberately not
+    # a provider listing identity: it only gives the authoring owner one row per resolved unit.
+    unit_membership_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class RegistrationPreparationRevision(Base):
+    """One authored revision of a preparation: append-only, and never edited in place (§27).
+
+    A revision that froze a Snapshot stays exactly as it was authored, so the Snapshot's
+    provenance keeps meaning. Editing a preparation appends the next revision instead.
+
+    The three value columns are the sanitized canonical inputs, and nothing else: no readiness, no
+    status, no reason code, no price, no image identity, no capability and no provider response.
+    """
+
+    __tablename__ = "registration_preparation_revisions"
+    __table_args__ = (
+        UniqueConstraint("preparation_id", "revision_no"),
+        CheckConstraint("revision_no >= 1", name="revision_no_positive"),
+        CheckConstraint("draft_revision >= 1", name="draft_revision_positive"),
+        CheckConstraint(
+            f"category_json IS NULL OR ({_json_object('category_json')})",
+            name="category_is_object",
+        ),
+        CheckConstraint(_json_object("listing_json"), name="listing_is_object"),
+        CheckConstraint(
+            f"detail_json IS NULL OR ({_json_object('detail_json')})", name="detail_is_object"
+        ),
+        CheckConstraint(_hex64("inputs_fingerprint"), name="inputs_fingerprint_hex"),
+        CheckConstraint(_present("authored_by"), name="authored_by_present"),
+        CheckConstraint(_present("correlation_id"), name="correlation_present"),
+    )
+
+    preparation_revision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    preparation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("registration_preparations.preparation_id")
+    )
+    revision_no: Mapped[int] = mapped_column(Integer)
+    # The Draft revision these inputs were authored against: a Draft that moves makes them stale,
+    # which the preflight decides — this owner only records what was authored, and when.
+    draft_revision: Mapped[int] = mapped_column(Integer)
+    category_json: Mapped[str | None] = mapped_column(Text)
+    listing_json: Mapped[str] = mapped_column(Text)
+    detail_json: Mapped[str | None] = mapped_column(Text)
+    # SHA-256 over the sanitized canonical inputs (§15): what the Snapshot's provenance names.
+    inputs_fingerprint: Mapped[str] = mapped_column(String(64))
+    authored_by: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    authored_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class RegistrationPreparationItem(Base):
+    """The exact Item membership of one preparation revision (§2, R3).
+
+    The unit a preparation authors is its Items, in their order. Membership belongs to the
+    revision, so changing it is a new revision and an already frozen Snapshot keeps the exact
+    membership it was frozen from.
+    """
+
+    __tablename__ = "registration_preparation_items"
+    __table_args__ = (
+        UniqueConstraint("preparation_revision_id", "item_id"),
+        UniqueConstraint("preparation_revision_id", "ordinal"),
+        CheckConstraint("ordinal >= 0", name="ordinal_non_negative"),
+    )
+
+    preparation_item_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    preparation_revision_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("registration_preparation_revisions.preparation_revision_id"),
+    )
+    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_items.item_id"))
+    ordinal: Mapped[int] = mapped_column(Integer)
+
+
+class RegistrationSnapshotPreparation(Base):
+    """Which exact preparation revision produced one immutable Snapshot (§27).
+
+    A separate row rather than a column on the Snapshot: `registration_snapshots` is immutable and
+    its triggers are the durable barrier, and a Snapshot frozen before this owner existed keeps
+    working with no provenance row. One row per Snapshot, written once and never changed.
+    """
+
+    __tablename__ = "registration_snapshot_preparations"
+    __table_args__ = (
+        CheckConstraint(_hex64("inputs_fingerprint"), name="inputs_fingerprint_hex"),
+        CheckConstraint("identity_generation >= 0", name="identity_generation_non_negative"),
+    )
+
+    registration_snapshot_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("registration_snapshots.registration_snapshot_id"),
+        primary_key=True,
+    )
+    preparation_revision_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("registration_preparation_revisions.preparation_revision_id"),
+    )
+    inputs_fingerprint: Mapped[str] = mapped_column(String(64))
+    # The generation this unit's listing identity was frozen at (§7). Evaluating the same frozen
+    # unit again needs it: deriving it afresh would name the *next* unit, not this one.
+    identity_generation: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)

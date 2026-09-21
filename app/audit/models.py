@@ -67,6 +67,11 @@ class AuditEventType(StrEnum):
     # the registration_execution_scopes row, and this is its history.
     REGISTRATION_EXECUTION_SCOPE_PAUSED = "REGISTRATION_EXECUTION_SCOPE_PAUSED"
     REGISTRATION_EXECUTION_SCOPE_RESUMED = "REGISTRATION_EXECUTION_SCOPE_RESUMED"
+    # M5 PR-F (ADR-0014 §27): the operator-authored preparation of one provider-listing unit.
+    # Identifiers, revision numbers, Item counts and the inputs fingerprint only — never an
+    # authored value, which lives in the revision row and never in the audit log.
+    REGISTRATION_PREPARATION_RECORDED = "REGISTRATION_PREPARATION_RECORDED"
+    REGISTRATION_PREPARATION_REVISED = "REGISTRATION_PREPARATION_REVISED"
 
 
 class AuditOutcome(StrEnum):

@@ -80,7 +80,7 @@ from app.products.readiness import (
     SOURCE_STOCK_SOLD_OUT,
     Readiness,
 )
-from scripts.m4accept import evidence
+from scripts.m4accept import evidence, operator
 from scripts.m4accept.checkout import CheckoutRefused, probe_checkout
 from scripts.m4accept.guards import GuardEvidence, offline
 from scripts.m4accept.owners import Owners, open_owners
@@ -334,7 +334,8 @@ def _select_and_qa(
     outputs = [
         SelectedOutput(role=d.role, source_role=d.role, source_ordinal=d.ordinal) for d in decisions
     ]
-    selection, move = o.images.record_operator_selection(
+    selection, move = operator.scripted_selection(
+        o.images,
         item,
         source_revision_id=revision,
         decisions=decisions,

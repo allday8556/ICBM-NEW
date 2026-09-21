@@ -44,6 +44,7 @@ from app.register.model import (
 from app.register.service import RegisterService
 from app.register.store import (
     ItemSnapshotSpec,
+    PreparationInputs,
     RegistrationStore,
     RegistrationUnit,
     SnapshotRecord,
@@ -75,6 +76,12 @@ REGISTRATION_TABLES = (
     "duplicate_overrides",
     # M5 PR-E (migration 0017, ADR-0014 §26): the REGISTER execution-scope send brake.
     "registration_execution_scopes",
+    # M5 PR-F (migration 0018, ADR-0014 §27): the operator-authored preparation and the
+    # provenance of the Snapshot it froze.
+    "registration_preparations",
+    "registration_preparation_revisions",
+    "registration_preparation_items",
+    "registration_snapshot_preparations",
 )
 ACCOUNT_TABLES = ("seller_entities", "marketplace_accounts")
 
@@ -435,6 +442,13 @@ def test_every_registration_table_rejects_delete(
 # ------------------------------------------------ the execution-scope brake (§26, migration 0017)
 
 SCOPES = "registration_execution_scopes"
+# M5 PR-F (migration 0018, §27): the preparation owner and the Snapshot provenance it records.
+PREPARATION_TABLES = (
+    "registration_preparations",
+    "registration_preparation_revisions",
+    "registration_preparation_items",
+    "registration_snapshot_preparations",
+)
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
     "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"
@@ -1779,6 +1793,209 @@ def test_register_stays_zero_and_the_audit_holds_identifiers_only(
     assert "uid-market-a-1" not in text  # never the provider account identity
 
 
+# ------------------------------------------- the preparation owner (§27, migration 0018)
+
+PREPARATIONS, REVISIONS, PREP_ITEMS, LINKS = PREPARATION_TABLES
+
+
+def _authored(**overrides: object) -> PreparationInputs:
+    values: dict[str, object] = {
+        "category": {"category_id": "cat-1", "confirmation": "OPERATOR_CONFIRMED"},
+        "listing": {"name": {"value": "authored name"}, "tags": [], "attributes": {}},
+        "detail": {"composition_revision": "detail-1", "body": "authored body"},
+        "fingerprint": "c" * 64,
+    }
+    values.update(overrides)
+    return PreparationInputs(**values)  # type: ignore[arg-type]
+
+
+def _prepared_draft(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> tuple[str, str, str]:
+    """A Draft holding one open Item, and a preparation authored for it."""
+    item = _priced(container, config, sources)
+    with store.transaction() as unit:
+        draft_id = unit.create_draft(
+            MARKET,
+            ACCOUNT,
+            ListingShape.SINGLE_LISTING_WITH_OPTIONS,
+            created_by=OPERATOR,
+            correlation_id=CID,
+        ).draft_id
+        unit.add_draft_item(
+            draft_id,
+            item.item_id,
+            item.pricing_snapshot_id,
+            added_by=OPERATOR,
+            correlation_id=CID,
+        )
+        record = unit.create_preparation(
+            draft_id,
+            item_ids=[item.item_id],
+            inputs=_authored(),
+            created_by=OPERATOR,
+            correlation_id=CID,
+        )
+    return draft_id, item.item_id, record.preparation_id
+
+
+def test_a_preparation_records_its_authored_inputs_and_keeps_every_revision(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    # §27: inputs only, append-only, and each revision with its own fingerprint.
+    _draft_id, item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    with store.transaction() as unit:
+        unit.revise_preparation(
+            preparation_id,
+            item_ids=[item_id],
+            inputs=_authored(fingerprint="d" * 64),
+            authored_by=OPERATOR,
+            correlation_id=CID,
+        )
+    record = store.preparation(preparation_id)
+    assert record is not None
+    assert [revision.revision_no for revision in record.revisions] == [1, 2]
+    assert record.current.inputs_fingerprint == "d" * 64
+    assert record.revisions[0].inputs_fingerprint == "c" * 64
+    assert record.current.item_ids == (item_id,)
+    assert record.current.listing["name"]["value"] == "authored name"
+    # Every write is audited, with identifiers and the fingerprint only.
+    kinds = {kind for kind, _details in _audit_rows(config, "REGISTRATION_PREPARATION_%")}
+    assert kinds == {"REGISTRATION_PREPARATION_RECORDED", "REGISTRATION_PREPARATION_REVISED"}
+
+
+def test_one_preparation_owns_a_draft_unit_and_its_membership_never_moves(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    draft_id, item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    with (
+        store.transaction() as unit,
+        pytest.raises(RegistrationConflictError, match="already has a preparation"),
+    ):
+        unit.create_preparation(
+            draft_id,
+            item_ids=[item_id],
+            inputs=_authored(fingerprint="d" * 64),
+            created_by=OPERATOR,
+            correlation_id=CID,
+        )
+    other = _priced(container, config, sources, "5678")
+    with store.transaction() as unit:
+        unit.add_draft_item(
+            draft_id,
+            other.item_id,
+            other.pricing_snapshot_id,
+            added_by=OPERATOR,
+            correlation_id=CID,
+        )
+    with (
+        store.transaction() as unit,
+        pytest.raises(RegistrationConflictError, match="original exact Item membership"),
+    ):
+        unit.revise_preparation(
+            preparation_id,
+            item_ids=[item_id, other.item_id],
+            inputs=_authored(fingerprint="e" * 64),
+            authored_by=OPERATOR,
+            correlation_id=CID,
+        )
+    assert len(store.preparations_of_draft(draft_id)) == 1
+    stored = store.preparation(preparation_id)
+    assert stored is not None and stored.current.item_ids == (item_id,)
+
+
+def test_an_authored_revision_is_never_edited_or_deleted(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    _draft_id, _item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    record = store.preparation(preparation_id)
+    assert record is not None
+    revision_id = record.current.preparation_revision_id
+    _refused(
+        config,
+        f"UPDATE {REVISIONS} SET listing_json = '{{}}' WHERE preparation_revision_id = ?",
+        revision_id,
+        match="never updated",
+    )
+    _refused(
+        config,
+        f"DELETE FROM {REVISIONS} WHERE preparation_revision_id = ?",
+        revision_id,
+        match="never deleted",
+    )
+    _refused(
+        config,
+        f"DELETE FROM {PREP_ITEMS} WHERE preparation_revision_id = ?",
+        revision_id,
+        match="never deleted",
+    )
+    _refused(
+        config,
+        f"DELETE FROM {PREPARATIONS} WHERE preparation_id = ?",
+        preparation_id,
+        match="never deleted",
+    )
+
+
+def test_a_revision_follows_the_one_before_it_and_names_open_items(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    _draft_id, _item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    # A revision number that skips or repeats is refused by the database itself.
+    _refused(
+        config,
+        f"INSERT INTO {REVISIONS} (preparation_revision_id, preparation_id, revision_no,"
+        " draft_revision, category_json, listing_json, detail_json, inputs_fingerprint,"
+        " authored_by, correlation_id, authored_at)"
+        " VALUES (?, ?, 5, 1, NULL, '{}', NULL, ?, 'o', 'c', ?)",
+        str(uuid.uuid4()),
+        preparation_id,
+        "e" * 64,
+        AT,
+        match="follows the one before it",
+    )
+    # An Item of another Draft is refused: a preparation prepares its own Draft's Items.
+    other = _priced(container, config, sources, "5678")
+    record = store.preparation(preparation_id)
+    assert record is not None
+    _refused(
+        config,
+        f"INSERT INTO {PREP_ITEMS} VALUES (?, ?, ?, 9)",
+        str(uuid.uuid4()),
+        record.current.preparation_revision_id,
+        other.item_id,
+        match="not an open Item",
+    )
+
+
+def test_a_snapshot_provenance_names_the_fingerprint_its_revision_holds(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    _draft_id, _item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    record = store.preparation(preparation_id)
+    assert record is not None
+    # A provenance row whose fingerprint is not the revision's own is refused.
+    _refused(
+        config,
+        f"INSERT INTO {LINKS} VALUES ('not-a-snapshot', ?, ?, 0, ?)",
+        record.current.preparation_revision_id,
+        "f" * 64,
+        AT,
+        match="the one the named revision holds",
+    )
+
+
+def _audit_rows(config: AppConfig, like: str) -> list[tuple[str, str]]:
+    with contextlib.closing(raw(config)) as connection:
+        return [
+            (str(kind), str(details))
+            for kind, details in connection.execute(
+                "SELECT event_type, details_json FROM audit_events WHERE event_type LIKE ?",
+                (like,),
+            ).fetchall()
+        ]
+
+
 # ---------------------------------------------------------------- migration
 
 
@@ -1793,7 +2010,8 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
-    assert before - _tables(tmp_path / "icbm.db") == {SCOPES}
+    # 0017 owns exactly the scope table; the preparation tables 0018 adds step down with it.
+    assert before - _tables(tmp_path / "icbm.db") == {SCOPES} | set(PREPARATION_TABLES)
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     account_id = f"mpa-{'1' * 32}"
@@ -1821,6 +2039,51 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     engine = create_sqlite_engine(url)
     try:
         assert current_revision(engine) == "0017_m5_registration_execution_scope"
+    finally:
+        engine.dispose()
+
+
+def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+    # §27: the preparation owner adds four tables, touches nothing else, round-trips, and never
+    # lets an authored preparation be dropped silently.
+    url = _url(tmp_path / "icbm.db")
+    upgrade_to_head(url)
+    before = _tables(tmp_path / "icbm.db")
+    command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
+    assert before - _tables(tmp_path / "icbm.db") == set(PREPARATION_TABLES)
+    command.upgrade(alembic_config(url), "head")
+    assert _tables(tmp_path / "icbm.db") == before
+    account_id = f"mpa-{'1' * 32}"
+    with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
+        connection.execute(
+            "INSERT INTO marketplace_connections (marketplace_key, credential_generation_hwm,"
+            " session_generation_hwm, provider_account_uid, provider_account_id,"
+            " bound_credential_generation, bound_session_generation, bound_at, bound_by,"
+            " created_at, updated_at) VALUES (?, 1, 1, 'uid-x', NULL, 1, 1, ?, 'o', ?, ?)",
+            (MARKET, AT, AT, AT),
+        )
+        connection.execute("INSERT INTO seller_entities VALUES ('seller-1', 'o', 'c', ?)", (AT,))
+        connection.execute(
+            "INSERT INTO marketplace_accounts VALUES (?, 'seller-1', ?, 'uid-x', 'o', 'c', ?)",
+            (account_id, MARKET, AT),
+        )
+        connection.execute(
+            "INSERT INTO registration_drafts VALUES"
+            " ('draft-1', ?, ?, 'SINGLE_LISTING_WITH_OPTIONS', 1, 'o', ?, ?)",
+            (MARKET, account_id, AT, AT),
+        )
+        connection.execute(
+            f"INSERT INTO {PREPARATIONS} (preparation_id, draft_id, marketplace_key,"
+            " marketplace_account_id, unit_membership_fingerprint, created_by, created_at)"
+            " VALUES ('prep-1', 'draft-1', ?, ?, ?, 'o', ?)",
+            (MARKET, account_id, "1" * 64, AT),
+        )
+        connection.commit()
+    with pytest.raises(RuntimeError, match="never silently destroyed"):
+        command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
+    engine = create_sqlite_engine(url)
+    try:
+        assert current_revision(engine) == "0018_m5_registration_preparation"
     finally:
         engine.dispose()
 

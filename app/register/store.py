@@ -88,8 +88,13 @@ from app.register.models import (
     RegistrationExecutionScope,
     RegistrationIntent,
     RegistrationItemSnapshot,
+    RegistrationPreparation,
+    RegistrationPreparationItem,
+    RegistrationPreparationRevision,
     RegistrationSnapshot,
+    RegistrationSnapshotPreparation,
 )
+from app.register.preparation import listing_identity as expected_listing_identity
 from app.register.sanitize import problems
 
 # ---------------------------------------------------------------- records
@@ -145,6 +150,11 @@ class SnapshotSpec:
     sanitizer_profile_version: str
     payload: Mapping[str, Any]
     items: Sequence[ItemSnapshotSpec]
+    # Which authored revision produced this Snapshot, and the generation of its listing identity
+    # (§7, §27). Absent for a Snapshot frozen by a caller that holds its own inputs, and for every
+    # Snapshot frozen before that owner existed.
+    preparation_revision_id: str | None = None
+    identity_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -159,6 +169,62 @@ class ItemSnapshotRecord:
     composition_signature: str
     source_product_facts_revision_id: str
     pricing_snapshot_id: str
+
+
+@dataclass(frozen=True)
+class PreparationInputs:
+    """The sanitized canonical inputs of one authored revision, with their digest (§15, §27).
+
+    The owner that encodes them is the one that sanitizes and fingerprints them; this store
+    records exactly what it is handed and adds no value of its own.
+    """
+
+    category: Mapping[str, Any] | None
+    listing: Mapping[str, Any]
+    detail: Mapping[str, Any] | None
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class PreparationRevisionRecord:
+    """One authored revision as it was recorded: inputs, Items and who authored it."""
+
+    preparation_revision_id: str
+    revision_no: int
+    draft_revision: int
+    category: Mapping[str, Any] | None
+    listing: Mapping[str, Any]
+    detail: Mapping[str, Any] | None
+    inputs_fingerprint: str
+    authored_by: str
+    authored_at: datetime
+    item_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SnapshotProvenance:
+    """Which authored revision produced one Snapshot, and the unit generation it was frozen at."""
+
+    preparation_revision_id: str
+    inputs_fingerprint: str
+    identity_generation: int
+
+
+@dataclass(frozen=True)
+class PreparationRecord:
+    """A preparation and its revisions, oldest first. The last one is what is authored now."""
+
+    preparation_id: str
+    draft_id: str
+    marketplace_key: str
+    marketplace_account_id: str
+    unit_membership_fingerprint: str
+    created_by: str
+    revisions: tuple[PreparationRevisionRecord, ...]
+
+    @property
+    def current(self) -> PreparationRevisionRecord:
+        return self.revisions[-1]
 
 
 @dataclass(frozen=True)
@@ -366,6 +432,30 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.conflicting_intents(registration_snapshot_id)
 
+    def snapshots_of_draft(self, draft_id: str, *, limit: int = 50) -> tuple[SnapshotRecord, ...]:
+        with self.reading() as unit:
+            return unit.snapshots_of_draft(draft_id, limit=limit)
+
+    def preparation(self, preparation_id: str) -> PreparationRecord | None:
+        with self.reading() as unit:
+            return unit.preparation(preparation_id)
+
+    def preparations_of_draft(self, draft_id: str) -> tuple[PreparationRecord, ...]:
+        with self.reading() as unit:
+            return unit.preparations_of_draft(draft_id)
+
+    def preparation_of_revision(self, preparation_revision_id: str) -> PreparationRecord | None:
+        with self.reading() as unit:
+            return unit.preparation_of_revision(preparation_revision_id)
+
+    def snapshot_preparation(self, registration_snapshot_id: str) -> SnapshotProvenance | None:
+        with self.reading() as unit:
+            return unit.snapshot_preparation(registration_snapshot_id)
+
+    def pricing_pin(self, pricing_snapshot_id: str) -> PricingSnapshotRecord | None:
+        with self.reading() as unit:
+            return unit.pricing_pin(pricing_snapshot_id)
+
     def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
         with self.reading() as unit:
             return unit.snapshot_payload(registration_snapshot_id)
@@ -398,6 +488,30 @@ class RegistrationStore:
     ) -> ScopeRecord:
         with self.reading() as unit:
             return unit.execution_scope(marketplace_key, marketplace_account_id, endpoint_group)
+
+    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+        with self.reading() as unit:
+            return unit.drafts(limit=limit)
+
+    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+        with self.reading() as unit:
+            return unit.intents(limit=limit)
+
+    def registrations(self, *, limit: int = 200) -> tuple[RegistrationRecord, ...]:
+        with self.reading() as unit:
+            return unit.registrations(limit=limit)
+
+    def open_draft_count(self) -> int:
+        with self.reading() as unit:
+            return unit.open_draft_count()
+
+    def active_registration_count(self) -> int:
+        with self.reading() as unit:
+            return unit.active_registration_count()
+
+    def paused_scopes(self, *, limit: int = 50) -> tuple[ScopeRecord, ...]:
+        with self.reading() as unit:
+            return unit.paused_scopes(limit=limit)
 
 
 class RegistrationUnit:
@@ -565,6 +679,75 @@ class RegistrationUnit:
         row = self.session.get(RegistrationDraft, draft_id)
         return None if row is None else self._draft_record(row)
 
+    # ------------------------------------------------------------------ operator reads (§22)
+
+    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+        """Every Draft, newest first. A read for the operator surface: it decides nothing."""
+        rows = self.session.scalars(
+            select(RegistrationDraft)
+            .order_by(RegistrationDraft.created_at.desc(), RegistrationDraft.draft_id)
+            .limit(limit)
+        ).all()
+        return tuple(self._draft_record(row) for row in rows)
+
+    def open_draft_count(self) -> int:
+        """Drafts that still hold an open Item: a registration candidate is a prepared unit, never
+        a Product (PR #83 review 5253314334)."""
+        return int(
+            self.session.scalar(
+                select(func.count(func.distinct(RegistrationDraftItem.draft_id))).where(
+                    RegistrationDraftItem.removed_at.is_(None)
+                )
+            )
+            or 0
+        )
+
+    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+        rows = self.session.scalars(
+            select(RegistrationIntent)
+            .order_by(RegistrationIntent.created_at.desc(), RegistrationIntent.intent_id)
+            .limit(limit)
+        ).all()
+        return tuple(_intent_record(row) for row in rows)
+
+    def registrations(self, *, limit: int = 200) -> tuple[RegistrationRecord, ...]:
+        rows = self.session.scalars(
+            select(MarketplaceRegistration.registration_id)
+            .order_by(
+                MarketplaceRegistration.created_at.desc(),
+                MarketplaceRegistration.registration_id,
+            )
+            .limit(limit)
+        ).all()
+        found = [self.registration(registration_id) for registration_id in rows]
+        return tuple(record for record in found if record is not None)
+
+    def active_registration_count(self) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(MarketplaceRegistration)
+                .where(
+                    MarketplaceRegistration.lifecycle_state == RegistrationLifecycle.ACTIVE.value
+                )
+            )
+            or 0
+        )
+
+    def paused_scopes(self, *, limit: int = 50) -> tuple[ScopeRecord, ...]:
+        """The execution scopes whose send brake is engaged (§26)."""
+        rows = self.session.scalars(
+            select(RegistrationExecutionScope)
+            .where(RegistrationExecutionScope.state == ExecutionScopeState.PAUSED.value)
+            .order_by(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+                RegistrationExecutionScope.endpoint_group,
+            )
+            .limit(limit)
+        ).all()
+        return tuple(_scope_record(row) for row in rows)
+
     # ------------------------------------------------------------------ snapshots (§6, §7)
 
     def freeze_snapshot(
@@ -662,6 +845,13 @@ class RegistrationUnit:
             self.session.flush()
         record = self.snapshot(snapshot.registration_snapshot_id)
         assert record is not None
+        if spec.preparation_revision_id is not None:
+            # The Snapshot and the proof of which authored revision produced it are one write.
+            self.record_snapshot_preparation(
+                record.registration_snapshot_id,
+                spec.preparation_revision_id,
+                identity_generation=spec.identity_generation,
+            )
         self._event(
             AuditEventType.REGISTRATION_SNAPSHOT_FROZEN,
             "freeze_snapshot",
@@ -716,6 +906,339 @@ class RegistrationUnit:
                 for i in items
             ),
         )
+
+    # ------------------------------------------------------------------ preparations (§27)
+
+    def create_preparation(
+        self,
+        draft_id: str,
+        *,
+        item_ids: Sequence[str],
+        inputs: "PreparationInputs",
+        created_by: str,
+        correlation_id: str,
+    ) -> "PreparationRecord":
+        """Open a preparation for one provider-listing unit of a Draft, with its first revision.
+
+        The inputs are the operator's own, already sanitized and fingerprinted by the owner that
+        encodes them (§15): this store records them, scopes them to the Draft's canonical account
+        and refuses an Item the Draft does not hold open. It decides nothing about readiness.
+        """
+        _require_text(created_by=created_by, correlation_id=correlation_id)
+        draft = self._draft_row(draft_id)
+        require_bound(self.session, draft.marketplace_key, draft.marketplace_account_id)
+        chosen = self._ordered_preparation_items(draft, item_ids)
+        membership = _unit_membership_fingerprint(chosen)
+        existing = self.session.scalar(
+            select(RegistrationPreparation).where(
+                RegistrationPreparation.draft_id == draft.draft_id,
+                RegistrationPreparation.unit_membership_fingerprint == membership,
+            )
+        )
+        if existing is not None:
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_UNIT_EXISTS",
+                "this Draft unit already has a preparation",
+                details={"preparation_id": existing.preparation_id},
+            )
+        row = RegistrationPreparation(
+            preparation_id=str(uuid.uuid4()),
+            draft_id=draft.draft_id,
+            marketplace_key=draft.marketplace_key,
+            marketplace_account_id=draft.marketplace_account_id,
+            unit_membership_fingerprint=membership,
+            created_by=created_by,
+            created_at=self._clock.now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        revision = self._append_revision(
+            row, draft, chosen, inputs, authored_by=created_by, correlation_id=correlation_id
+        )
+        self._event(
+            AuditEventType.REGISTRATION_PREPARATION_RECORDED,
+            "create_preparation",
+            created_by,
+            correlation_id,
+            row.preparation_id,
+            {
+                "draft_id": row.draft_id,
+                "marketplace_account_id": row.marketplace_account_id,
+                "revision_no": revision.revision_no,
+                "inputs_fingerprint": revision.inputs_fingerprint,
+                "items": len(revision.item_ids),
+            },
+        )
+        return self._preparation_record(row)
+
+    def revise_preparation(
+        self,
+        preparation_id: str,
+        *,
+        item_ids: Sequence[str],
+        inputs: "PreparationInputs",
+        authored_by: str,
+        correlation_id: str,
+    ) -> "PreparationRecord":
+        """Append the next authored revision. Nothing already recorded changes: a revision that
+        froze a Snapshot keeps exactly the values it was frozen from (§27)."""
+        _require_text(authored_by=authored_by, correlation_id=correlation_id)
+        row = self._preparation_row(preparation_id)
+        draft = self._draft_row(row.draft_id)
+        chosen = self._ordered_preparation_items(draft, item_ids)
+        first = self._revision_items(
+            self.session.scalar(
+                select(RegistrationPreparationRevision.preparation_revision_id).where(
+                    RegistrationPreparationRevision.preparation_id == preparation_id,
+                    RegistrationPreparationRevision.revision_no == 1,
+                )
+            )
+            or ""
+        )
+        if (
+            chosen != first
+            or _unit_membership_fingerprint(chosen) != row.unit_membership_fingerprint
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_UNIT_IMMUTABLE",
+                "a preparation revision must keep its original exact Item membership",
+            )
+        revision = self._append_revision(
+            row, draft, chosen, inputs, authored_by=authored_by, correlation_id=correlation_id
+        )
+        self._event(
+            AuditEventType.REGISTRATION_PREPARATION_REVISED,
+            "revise_preparation",
+            authored_by,
+            correlation_id,
+            row.preparation_id,
+            {
+                "draft_id": row.draft_id,
+                "revision_no": revision.revision_no,
+                "inputs_fingerprint": revision.inputs_fingerprint,
+                "items": len(revision.item_ids),
+            },
+        )
+        return self._preparation_record(row)
+
+    def _append_revision(
+        self,
+        preparation: RegistrationPreparation,
+        draft: RegistrationDraft,
+        item_ids: Sequence[str],
+        inputs: "PreparationInputs",
+        *,
+        authored_by: str,
+        correlation_id: str,
+    ) -> "PreparationRevisionRecord":
+        chosen = tuple(item_ids)
+        revision = RegistrationPreparationRevision(
+            preparation_revision_id=str(uuid.uuid4()),
+            preparation_id=preparation.preparation_id,
+            revision_no=self._next_revision_no(preparation.preparation_id),
+            draft_revision=draft.draft_revision,
+            category_json=None if inputs.category is None else _json(inputs.category),
+            listing_json=_json(inputs.listing),
+            detail_json=None if inputs.detail is None else _json(inputs.detail),
+            inputs_fingerprint=inputs.fingerprint,
+            authored_by=authored_by,
+            correlation_id=correlation_id,
+            authored_at=self._clock.now(),
+        )
+        self.session.add(revision)
+        self.session.flush()
+        for ordinal, item_id in enumerate(chosen):
+            self.session.add(
+                RegistrationPreparationItem(
+                    preparation_item_id=str(uuid.uuid4()),
+                    preparation_revision_id=revision.preparation_revision_id,
+                    item_id=item_id,
+                    ordinal=ordinal,
+                )
+            )
+        self.session.flush()
+        return _revision_record(revision, tuple(chosen))
+
+    def _ordered_preparation_items(
+        self, draft: RegistrationDraft, item_ids: Sequence[str]
+    ) -> tuple[str, ...]:
+        requested = tuple(item_ids)
+        if not requested:
+            raise InputValidationError(
+                "REGISTER_PREPARATION_EMPTY", "a preparation names at least one Item"
+            )
+        if len(set(requested)) != len(requested):
+            raise InputValidationError(
+                "REGISTER_PREPARATION_ITEMS", "a preparation cannot name an Item twice"
+            )
+        open_items = tuple(row.item_id for row in self._open_items(draft.draft_id))
+        if not set(requested) <= set(open_items):
+            raise InputValidationError(
+                "REGISTER_PREPARATION_ITEMS",
+                "a preparation names open Items of its own Draft",
+            )
+        return tuple(item_id for item_id in open_items if item_id in set(requested))
+
+    def _next_revision_no(self, preparation_id: str) -> int:
+        current = self.session.scalar(
+            select(func.max(RegistrationPreparationRevision.revision_no)).where(
+                RegistrationPreparationRevision.preparation_id == preparation_id
+            )
+        )
+        return int(current or 0) + 1
+
+    def record_snapshot_preparation(
+        self,
+        registration_snapshot_id: str,
+        preparation_revision_id: str,
+        *,
+        identity_generation: int,
+    ) -> None:
+        """Record which exact authored revision froze this Snapshot, and at which generation of
+        its listing identity (§7, §27). Written once and never changed.
+
+        SQLite guards scope, Draft revision, membership and fingerprint. Generation also affects
+        the hashed listing identity, so this sole production writer recomputes that identity before
+        insert; the repository contract forbids an alternate ORM or raw-SQL production writer.
+        """
+        revision = self.session.get(RegistrationPreparationRevision, preparation_revision_id)
+        if revision is None:
+            raise NotFoundError(
+                "REGISTER_PREPARATION_REVISION_NOT_FOUND", "the preparation revision does not exist"
+            )
+        snapshot = self.snapshot(registration_snapshot_id)
+        if snapshot is None:
+            raise NotFoundError("REGISTER_SNAPSHOT_NOT_FOUND", "the Snapshot does not exist")
+        preparation = self._preparation_row(revision.preparation_id)
+        revision_items = self._revision_items(preparation_revision_id)
+        snapshot_items = tuple(item.item_id for item in snapshot.items)
+        expected_identity = expected_listing_identity(
+            snapshot.marketplace_key,
+            snapshot.marketplace_account_id,
+            snapshot.draft_id,
+            (
+                (item.group_id_at_registration, item.composition_signature)
+                for item in snapshot.items
+            ),
+            identity_generation,
+        )
+        if (
+            snapshot.draft_id != preparation.draft_id
+            or snapshot.marketplace_key != preparation.marketplace_key
+            or snapshot.marketplace_account_id != preparation.marketplace_account_id
+            or snapshot.draft_revision != revision.draft_revision
+            or snapshot_items != revision_items
+            or snapshot.listing_identity != expected_identity
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_SNAPSHOT_PREPARATION_SCOPE_MISMATCH",
+                "the Snapshot was not produced by this exact preparation revision and generation",
+            )
+        self.session.add(
+            RegistrationSnapshotPreparation(
+                registration_snapshot_id=registration_snapshot_id,
+                preparation_revision_id=preparation_revision_id,
+                inputs_fingerprint=revision.inputs_fingerprint,
+                identity_generation=identity_generation,
+                recorded_at=self._clock.now(),
+            )
+        )
+        self.session.flush()
+
+    def intent_of_snapshot(self, registration_snapshot_id: str) -> IntentRecord | None:
+        """The CREATE Intent of this exact Snapshot, when one is already open (§8)."""
+        row = self.session.scalar(
+            select(RegistrationIntent).where(
+                RegistrationIntent.registration_snapshot_id == registration_snapshot_id,
+                RegistrationIntent.operation == Operation.CREATE.value,
+            )
+        )
+        return None if row is None else _intent_record(row)
+
+    def preparation(self, preparation_id: str) -> "PreparationRecord | None":
+        row = self.session.get(RegistrationPreparation, preparation_id)
+        return None if row is None else self._preparation_record(row)
+
+    def preparations_of_draft(self, draft_id: str) -> tuple["PreparationRecord", ...]:
+        rows = self.session.scalars(
+            select(RegistrationPreparation)
+            .where(RegistrationPreparation.draft_id == draft_id)
+            .order_by(RegistrationPreparation.created_at, RegistrationPreparation.preparation_id)
+        ).all()
+        return tuple(self._preparation_record(row) for row in rows)
+
+    def preparation_of_revision(self, preparation_revision_id: str) -> "PreparationRecord | None":
+        """The preparation one authored revision belongs to."""
+        revision = self.session.get(RegistrationPreparationRevision, preparation_revision_id)
+        return None if revision is None else self.preparation(revision.preparation_id)
+
+    def snapshot_preparation(self, registration_snapshot_id: str) -> "SnapshotProvenance | None":
+        """Which authored revision froze this Snapshot, when it has that provenance (§27)."""
+        row = self.session.get(RegistrationSnapshotPreparation, registration_snapshot_id)
+        return (
+            None
+            if row is None
+            else SnapshotProvenance(
+                preparation_revision_id=row.preparation_revision_id,
+                inputs_fingerprint=row.inputs_fingerprint,
+                identity_generation=row.identity_generation,
+            )
+        )
+
+    def _preparation_row(self, preparation_id: str) -> RegistrationPreparation:
+        row = self.session.get(RegistrationPreparation, preparation_id)
+        if row is None:
+            raise NotFoundError("REGISTER_PREPARATION_NOT_FOUND", "the preparation does not exist")
+        return row
+
+    def _preparation_record(self, row: RegistrationPreparation) -> "PreparationRecord":
+        revisions = self.session.scalars(
+            select(RegistrationPreparationRevision)
+            .where(RegistrationPreparationRevision.preparation_id == row.preparation_id)
+            .order_by(RegistrationPreparationRevision.revision_no)
+        ).all()
+        return PreparationRecord(
+            preparation_id=row.preparation_id,
+            draft_id=row.draft_id,
+            marketplace_key=row.marketplace_key,
+            marketplace_account_id=row.marketplace_account_id,
+            unit_membership_fingerprint=row.unit_membership_fingerprint,
+            created_by=row.created_by,
+            revisions=tuple(
+                _revision_record(revision, self._revision_items(revision.preparation_revision_id))
+                for revision in revisions
+            ),
+        )
+
+    def _revision_items(self, preparation_revision_id: str) -> tuple[str, ...]:
+        return tuple(
+            self.session.scalars(
+                select(RegistrationPreparationItem.item_id)
+                .where(
+                    RegistrationPreparationItem.preparation_revision_id == preparation_revision_id
+                )
+                .order_by(RegistrationPreparationItem.ordinal)
+            ).all()
+        )
+
+    def snapshots_of_draft(self, draft_id: str, *, limit: int = 50) -> tuple[SnapshotRecord, ...]:
+        """Every Snapshot this Draft has frozen, newest first.
+
+        A Draft holds **one Snapshot per provider-listing unit** (§2, R3): `SEPARATE_LISTINGS`
+        freezes one per Item, and re-freezing a unit adds a generation. The operator surface reads
+        them all, so no unit of a Draft is hidden behind another.
+        """
+        rows = self.session.scalars(
+            select(RegistrationSnapshot.registration_snapshot_id)
+            .where(RegistrationSnapshot.draft_id == draft_id)
+            .order_by(
+                RegistrationSnapshot.created_at.desc(),
+                RegistrationSnapshot.registration_snapshot_id,
+            )
+            .limit(limit)
+        ).all()
+        found = [self.snapshot(snapshot_id) for snapshot_id in rows]
+        return tuple(record for record in found if record is not None)
 
     def snapshot_payload(self, registration_snapshot_id: str) -> Mapping[str, Any] | None:
         """The frozen canonical payload of one Snapshot — what was actually sent (§6).
@@ -1941,6 +2464,13 @@ class RegistrationUnit:
 # ---------------------------------------------------------------- helpers
 
 
+def _unit_membership_fingerprint(item_ids: Sequence[str]) -> str:
+    """Stable authoring-unit membership. This is never a marketplace listing identity."""
+    return sanitized_digest(
+        {"version": "registration-preparation-unit/v1", "item_ids": sorted(item_ids)}
+    )
+
+
 def _json(value: Mapping[str, Any] | list[Any]) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -1968,6 +2498,23 @@ def _require_label(**values: str) -> None:
             "REGISTER_SCOPE_LABEL_UNSAFE",
             f"a plain label is required: {', '.join(bad)}",
         )
+
+
+def _revision_record(
+    row: RegistrationPreparationRevision, item_ids: tuple[str, ...]
+) -> PreparationRevisionRecord:
+    return PreparationRevisionRecord(
+        preparation_revision_id=row.preparation_revision_id,
+        revision_no=row.revision_no,
+        draft_revision=row.draft_revision,
+        category=None if row.category_json is None else json.loads(row.category_json),
+        listing=json.loads(row.listing_json),
+        detail=None if row.detail_json is None else json.loads(row.detail_json),
+        inputs_fingerprint=row.inputs_fingerprint,
+        authored_by=row.authored_by,
+        authored_at=row.authored_at,
+        item_ids=item_ids,
+    )
 
 
 def _intent_record(row: RegistrationIntent) -> IntentRecord:

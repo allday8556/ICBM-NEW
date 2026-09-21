@@ -59,9 +59,13 @@ def _marker_state(path: Path) -> str | None:
     return state if isinstance(state, str) else None
 
 
-def root_problems(root: Path, environ: Mapping[str, str]) -> list[str]:
-    """Why ``root`` is not a fresh dedicated M4 acceptance root; empty when it is. The messages
-    never repeat the path."""
+def root_problems(root: Path, environ: Mapping[str, str], *, marker: str = MARKER) -> list[str]:
+    """Why ``root`` is not a fresh dedicated acceptance root; empty when it is. The messages never
+    repeat the path.
+
+    ``marker`` is the run kind's own marker file, so one milestone's used root is never another's
+    fresh one (M4 by default; M5 PR-F passes its own).
+    """
     if names_preserved_campaign(PurePath(str(root))):
         return ["the root names a preserved campaign runtime"]
     resolved = root.resolve()
@@ -87,43 +91,61 @@ def root_problems(root: Path, environ: Mapping[str, str]) -> list[str]:
     entries = sorted(entry.name for entry in resolved.iterdir())
     if not entries:
         return []
-    if entries == [MARKER] and _marker_state(resolved / MARKER) == INITIALIZED:
+    if entries == [marker] and _marker_state(resolved / marker) == INITIALIZED:
         return []
-    if MARKER in entries:
+    if marker in entries:
         return ["this acceptance root has already been used; every run needs a fresh root"]
-    return ["the root is not empty and is not a fresh M4 acceptance root"]
+    return ["the root is not empty and is not a fresh acceptance root"]
 
 
-def _write_marker(root: Path, state: str, run_id: str) -> None:
-    marker = {
-        "schema": MARKER_SCHEMA,
+def _write_marker(
+    root: Path, state: str, run_id: str, *, marker: str = MARKER, schema: str = MARKER_SCHEMA
+) -> None:
+    content = {
+        "schema": schema,
         "state": state,
         "run_id": run_id,
         "updated_at": datetime.now(UTC).isoformat(),
     }
-    (root / MARKER).write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", "utf-8")
+    (root / marker).write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", "utf-8")
 
 
-def initialize_root(root: Path, environ: Mapping[str, str]) -> Path:
+def initialize_root(
+    root: Path, environ: Mapping[str, str], *, marker: str = MARKER, schema: str = MARKER_SCHEMA
+) -> Path:
     """Create a fresh root holding only the marker, for an operator who prepares it ahead."""
-    if problems := root_problems(root, environ):
+    if problems := root_problems(root, environ, marker=marker):
         raise RootRefused(problems)
     resolved = root.resolve()
     resolved.mkdir(parents=True, exist_ok=True)
-    _write_marker(resolved, INITIALIZED, str(uuid.uuid4()))
+    _write_marker(resolved, INITIALIZED, str(uuid.uuid4()), marker=marker, schema=schema)
     return resolved
 
 
-def claim_root(root: Path, environ: Mapping[str, str], run_id: str) -> Path:
+def claim_root(
+    root: Path,
+    environ: Mapping[str, str],
+    run_id: str,
+    *,
+    marker: str = MARKER,
+    schema: str = MARKER_SCHEMA,
+) -> Path:
     """Refuse anything but a fresh dedicated root, then mark it as this run's before any data is
     written."""
-    if problems := root_problems(root, environ):
+    if problems := root_problems(root, environ, marker=marker):
         raise RootRefused(problems)
     resolved = root.resolve()
     resolved.mkdir(parents=True, exist_ok=True)
-    _write_marker(resolved, RUNNING, run_id)
+    _write_marker(resolved, RUNNING, run_id, marker=marker, schema=schema)
     return resolved
 
 
-def settle_root(root: Path, run_id: str, *, passed: bool) -> None:
-    _write_marker(root, PASSED if passed else FAILED, run_id)
+def settle_root(
+    root: Path,
+    run_id: str,
+    *,
+    passed: bool,
+    marker: str = MARKER,
+    schema: str = MARKER_SCHEMA,
+) -> None:
+    _write_marker(root, PASSED if passed else FAILED, run_id, marker=marker, schema=schema)

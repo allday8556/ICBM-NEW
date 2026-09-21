@@ -28,7 +28,9 @@ from app.core.errors import AppError, NotFoundError, PolicyBlockedError
 from app.products.images import ProductImageService
 from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService, Readiness
+from app.register.model import ListingShape
 from app.register.policy import (
+    CategoryMetadata,
     RegistrationMetadataSource,
     RegistrationPolicySource,
     TargetPolicy,
@@ -36,6 +38,7 @@ from app.register.policy import (
 from app.register.preparation import (
     AccountState,
     BindingCopy,
+    CategorySelection,
     ConflictState,
     DraftItemState,
     LiveRegistration,
@@ -91,9 +94,19 @@ class RegistrationPreflightService:
         self._metadata = metadata
         self._policies = policies
 
-    def candidate(self, request: PreflightRequest) -> PreflightResult:
-        """The mutation-free non-asset candidate: only its READY permits an asset upload."""
-        return evaluate(request, self.resolve(request), PreflightStage.CANDIDATE)
+    def candidate(
+        self, request: PreflightRequest, *, identity_generation: int | None = None
+    ) -> PreflightResult:
+        """The mutation-free non-asset candidate: only its READY permits an asset upload.
+
+        ``identity_generation`` re-evaluates an **already frozen** unit under the generation it
+        was frozen at, exactly as :meth:`final` does; a fresh preparation passes nothing.
+        """
+        return evaluate(
+            request,
+            self.resolve(request, identity_generation=identity_generation),
+            PreflightStage.CANDIDATE,
+        )
 
     def final(
         self,
@@ -122,8 +135,32 @@ class RegistrationPreflightService:
     def resolve(
         self, request: PreflightRequest, *, identity_generation: int | None = None
     ) -> ResolvedUnit:
+        return self.unit_truth(
+            request.unit.draft_id,
+            item_ids=request.unit.item_ids,
+            category=request.category,
+            identity_generation=identity_generation,
+        )
+
+    def unit_truth(
+        self,
+        draft_id: str,
+        *,
+        item_ids: Sequence[str] | None = None,
+        category: CategorySelection | None = None,
+        identity_generation: int | None = None,
+    ) -> ResolvedUnit:
+        """The current truth of one provider-listing unit, gathered and not judged.
+
+        This is what an evaluation reads, and it is the same gathering the evaluation uses: the M4
+        base and pricing readiness of each Item, its pinned and current price, its selected images
+        with their exact-binary QA, the account state, the conflict scope and the account's target
+        policy. The operator surface (PR-F §B) reads it to show server-owned facts without asking
+        for a verdict — the verdict stays :meth:`candidate` and :meth:`final`, which is why the
+        category is optional here: a unit whose operator inputs are not durable still has M4 truth.
+        """
         with self._registrations.reading() as unit:
-            draft = unit.draft(request.unit.draft_id)
+            draft = unit.draft(draft_id)
             if draft is None:
                 raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
             binding = binding_state(
@@ -140,7 +177,7 @@ class RegistrationPreflightService:
             DraftItemState(i.item_id, i.ordinal, i.pricing_snapshot_id) for i in draft.items
         )
         unit_ids, _problems = resolve_unit(
-            draft.listing_shape, [i.item_id for i in open_items], request.unit.item_ids
+            draft.listing_shape, [i.item_id for i in open_items], item_ids
         )
         pins = {i.item_id: i.pricing_snapshot_id for i in open_items}
         ordinals = {i.item_id: i.ordinal for i in open_items}
@@ -169,7 +206,6 @@ class RegistrationPreflightService:
             live = unit.live_registrations(
                 draft.marketplace_key, draft.marketplace_account_id, groups
             )
-        category = request.category
         metadata = (
             None
             if category is None
@@ -192,6 +228,43 @@ class RegistrationPreflightService:
             metadata=metadata,
             target=target,
         )
+
+    def prospective_units(self, draft_id: str) -> tuple[tuple[str, ...], ...]:
+        """The provider-listing units this Draft's open Items would form under its shape (§2, R3).
+
+        The composition rule stays :func:`~app.register.preparation.resolve_unit`'s, so the
+        operator surface never decides it: `SINGLE_LISTING_WITH_OPTIONS` is one unit of every open
+        Item, `SEPARATE_LISTINGS` one per Item. `SELECTED_OFFERS` is the operator's own subset and
+        no durable row holds it, so the smallest valid unit is listed — Items are never merged
+        into one prospective listing on a guess.
+        """
+        with self._registrations.reading() as unit:
+            draft = unit.draft(draft_id)
+        if draft is None:
+            raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
+        open_ids = [item.item_id for item in draft.items]
+        if not open_ids:
+            return ()
+        if draft.listing_shape is ListingShape.SINGLE_LISTING_WITH_OPTIONS:
+            chosen, _problems = resolve_unit(draft.listing_shape, open_ids, None)
+            return (chosen,) if chosen else ()
+        return tuple(resolve_unit(draft.listing_shape, open_ids, [item])[0] for item in open_ids)
+
+    def category_metadata(
+        self, taxonomy_revision: str, category_id: str
+    ) -> CategoryMetadata | None:
+        """The reviewed metadata of one category, as the metadata source holds it (§4).
+
+        A read-through: the operator surface shows which fields a category requires without
+        reaching the metadata source itself, and nothing here decides whether they are satisfied.
+        """
+        return self._metadata.category(taxonomy_revision, category_id)
+
+    def target_policy(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> TargetPolicy | None:
+        """The account's current Settings/platform registration policy (§21). A read-through."""
+        return self._policies.target(marketplace_key, marketplace_account_id)
 
     def _account(self, marketplace_key: str, binding: AccountBinding) -> AccountState:
         try:

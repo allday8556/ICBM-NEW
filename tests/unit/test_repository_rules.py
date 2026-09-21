@@ -1221,6 +1221,13 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # marketplace x canonical account x endpoint group, with its durable resume boundary. It
         # is not capability truth and holds no provider identity.
         "registration_execution_scopes",
+        # M5 PR-F (ADR-0014 27, architect decision 5751540323): the operator-authored preparation
+        # of one provider-listing unit, append-only, and the provenance of the Snapshot it froze.
+        # It stores inputs only: no readiness, no status and no reason code.
+        "registration_preparations",
+        "registration_preparation_revisions",
+        "registration_preparation_items",
+        "registration_snapshot_preparations",
     }
     offenders = [
         path

@@ -726,3 +726,83 @@
   font-size: 9.5px;
   font-weight: var(--fw-bold);
 }
+
+/* ---------- Registration management (M5 PR-F) ---------- */
+/* The register screen reuses the panel, chip, table and kv system; only the unit spacing, the
+   scope block and the canary requirement list are its own. */
+.register-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.register-unit {
+  margin-bottom: var(--space-5);
+}
+
+.register-unit .table {
+  margin-top: 10px;
+}
+
+.register-scope {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.register-authoring {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.register-authoring input,
+.register-authoring textarea {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.register-category,
+.register-preflight {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.register-unit td .mini {
+  display: block;
+}
+
+.register-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.requirement-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.requirement-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-md);
+}
+
+.requirement-list li[data-satisfied='false'] {
+  color: var(--color-text-strong);
+}

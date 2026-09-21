@@ -7,7 +7,7 @@ capability is a fixed read model.
 """
 
 import contextlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -142,6 +142,38 @@ class FakeCapability:
         )
 
 
+@dataclass
+class FakeDuplicateLookup:
+    """Provider-neutral deterministic evidence for first-copy tests; it performs no I/O."""
+
+    available_result: bool = True
+    return_none: bool = False
+    evidence_digest: str = "e" * 64
+    marketplace_key: str = MARKET
+    marketplace_account_id: str | None = None
+    listing_identity: str | None = None
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def available(self) -> bool:
+        return self.available_result
+
+    def evidence(
+        self, *, marketplace_account_id: str, listing_identity: str
+    ) -> DuplicateEvidence | None:
+        self.calls.append((marketplace_account_id, listing_identity))
+        if self.return_none:
+            return None
+        return DuplicateEvidence(
+            marketplace_key=self.marketplace_key,
+            marketplace_account_id=self.marketplace_account_id or marketplace_account_id,
+            listing_identity=self.listing_identity or listing_identity,
+            lookup_contract_version="lookup-test-1",
+            evidence_digest=self.evidence_digest,
+            verdict=DuplicateVerdict.NO_MATCH,
+            keys_checked=frozenset({DuplicateKeyKind.SELLER_CODE}),
+        )
+
+
 def metadata(**overrides: Any) -> CategoryMetadata:
     values: dict[str, Any] = {
         "taxonomy_revision": TAXONOMY,
@@ -173,7 +205,14 @@ class Preparation:
     policies: StaticRegistrationPolicy
 
 
-def preparation(container: Container, account: str) -> Preparation:
+def preparation(container: Container, account: str, *, served: bool = False) -> Preparation:
+    """A preflight owner over this container's real owners, with test-owned sources.
+
+    With ``served``, the **application's own** preflight owner is pointed at the same sources, the
+    way a deployment configures them. The Registration Management surface re-evaluates a unit
+    through that owner, so without this it would read an account with no registration policy and
+    report that instead of the truth this preparation froze.
+    """
     capability = FakeCapability()
     entries = StaticRegistrationMetadata((metadata(),))
     policies = StaticRegistrationPolicy((target(account),))
@@ -186,6 +225,11 @@ def preparation(container: Container, account: str) -> Preparation:
         metadata=entries,
         policies=policies,
     )
+    if served:
+        deployed = container.registration_preflight
+        deployed._policies = policies
+        deployed._metadata = entries
+        deployed._capability = capability
     return Preparation(service, capability, entries, policies)
 
 
@@ -198,6 +242,8 @@ def target(account: str, **overrides: Any) -> TargetPolicy:
         "pricing_context": context(),
         "sanitizer_profile_version": "sanitizer-test-1",
         "asset_policy": AssetPolicy(profile="asset-profile-test-1"),
+        "category_mapping_revision": "mapping-test-1",
+        "detail_composition_revision": "detail-test-1",
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
     }
     values.update(overrides)

@@ -66,6 +66,43 @@ jobs:
           alembic upgrade head
           alembic check
 
+  m5-offline-acceptance:
+    name: M5 offline acceptance (provider-zero, clean checkout)
+    needs: [quality, tests, migrations]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c constraints.txt -e ".[dev]"
+      # A fresh dedicated root outside the checkout and every data directory. The run refuses a
+      # dirty checkout itself, and its report states the measured provider counters.
+      - name: Run the M5 offline acceptance harness
+        run: python scripts/m5_acceptance.py --root "${{ runner.temp }}/m5-acceptance"
+      - name: Verify the report digest
+        run: >-
+          python scripts/m5_acceptance.py --verify
+          "${{ runner.temp }}/m5-acceptance/m5-acceptance-report.json"
+      - name: Prove the run reached no marketplace and mutated nothing
+        run: >-
+          python -c "import json,sys;
+          r=json.load(open(sys.argv[1]));
+          g=r['guards'];
+          assert r['problems']==[], r['problems'];
+          assert r['boundary']['marketplace_mutations']==0;
+          assert g['external_network_attempts']==0 and g['egress_grants_opened']==0;
+          assert g['forbidden_modules_loaded_during_run']==[];
+          assert r['canary_readiness']['verdict']=='BLOCKED';
+          print('outbound marketplace mutations:', r['boundary']['marketplace_mutations'])"
+          "${{ runner.temp }}/m5-acceptance/m5-acceptance-report.json"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: m5-offline-acceptance-evidence
+          path: ${{ runner.temp }}/m5-acceptance/m5-acceptance-report.json
+          if-no-files-found: error
+
   acceptance:
     name: M0 acceptance (Windows, clean checkout)
     needs: [quality, tests, migrations]

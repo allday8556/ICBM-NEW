@@ -193,18 +193,18 @@ def encode_send_request(
             "expected_draft_revision": request.unit.expected_draft_revision,
             "item_ids": None if request.unit.item_ids is None else list(request.unit.item_ids),
         },
-        "category": _encode_category(request.category),
+        "category": encode_category(request.category),
         "listing": {
-            "name": None if listing.name is None else _encode_field(listing.name),
+            "name": None if listing.name is None else encode_field(listing.name),
             "tags": sorted(listing.tags),
-            "attributes": {k: _encode_field(v) for k, v in sorted(listing.attributes.items())},
-            "notices": {k: _encode_field(v) for k, v in sorted(listing.notices.items())},
+            "attributes": {k: encode_field(v) for k, v in sorted(listing.attributes.items())},
+            "notices": {k: encode_field(v) for k, v in sorted(listing.notices.items())},
             "options": {
                 item: dict(sorted(values.items()))
                 for item, values in sorted(listing.options.items())
             },
         },
-        "detail": _encode_detail(request.detail),
+        "detail": encode_detail(request.detail),
     }
     # The same typed boundary the Snapshot builder uses (PR-C): business values are refused when
     # they carry secret or URL-shaped material, while a provider reference is judged by the
@@ -252,15 +252,15 @@ def decode_send_request(
             expected_draft_revision=unit["expected_draft_revision"],
             item_ids=None if unit["item_ids"] is None else tuple(unit["item_ids"]),
         ),
-        category=_decode_category(payload["category"]),
+        category=decode_category(payload["category"]),
         listing=ListingValues(
-            name=None if listing["name"] is None else _decode_field(listing["name"]),
+            name=None if listing["name"] is None else decode_field(listing["name"]),
             tags=frozenset(listing["tags"]),
-            attributes={k: _decode_field(v) for k, v in listing["attributes"].items()},
-            notices={k: _decode_field(v) for k, v in listing["notices"].items()},
+            attributes={k: decode_field(v) for k, v in listing["attributes"].items()},
+            notices={k: decode_field(v) for k, v in listing["notices"].items()},
             options={item: dict(values) for item, values in listing["options"].items()},
         ),
-        detail=_decode_detail(payload["detail"]),
+        detail=decode_detail(payload["detail"]),
         duplicate_evidence=_decode_evidence(payload["duplicate_evidence"]),
     )
     return request, tuple(_decode_asset(a) for a in payload["prepared_assets"])
@@ -272,7 +272,7 @@ def frozen_unit_identity(payload: Mapping[str, Any]) -> tuple[str, int]:
     return str(identity["listing_identity"]), int(identity["generation"])
 
 
-def _encode_field(value: FieldValue) -> dict[str, Any]:
+def encode_field(value: FieldValue) -> dict[str, Any]:
     return {
         "value": value.value,
         "provenance": value.provenance.value,
@@ -280,7 +280,7 @@ def _encode_field(value: FieldValue) -> dict[str, Any]:
     }
 
 
-def _decode_field(value: Mapping[str, Any]) -> FieldValue:
+def decode_field(value: Mapping[str, Any]) -> FieldValue:
     return FieldValue(
         value=value["value"],
         provenance=Provenance(value["provenance"]),
@@ -288,7 +288,7 @@ def _decode_field(value: Mapping[str, Any]) -> FieldValue:
     )
 
 
-def _encode_category(category: CategorySelection | None) -> dict[str, Any] | None:
+def encode_category(category: CategorySelection | None) -> dict[str, Any] | None:
     if category is None:
         return None
     return {
@@ -299,7 +299,7 @@ def _encode_category(category: CategorySelection | None) -> dict[str, Any] | Non
     }
 
 
-def _decode_category(category: Mapping[str, Any] | None) -> CategorySelection | None:
+def decode_category(category: Mapping[str, Any] | None) -> CategorySelection | None:
     if category is None:
         return None
     return CategorySelection(
@@ -310,7 +310,7 @@ def _decode_category(category: Mapping[str, Any] | None) -> CategorySelection | 
     )
 
 
-def _encode_detail(detail: DetailComposition | None) -> dict[str, Any] | None:
+def encode_detail(detail: DetailComposition | None) -> dict[str, Any] | None:
     if detail is None:
         return None
     return {
@@ -320,7 +320,7 @@ def _encode_detail(detail: DetailComposition | None) -> dict[str, Any] | None:
     }
 
 
-def _decode_detail(detail: Mapping[str, Any] | None) -> DetailComposition | None:
+def decode_detail(detail: Mapping[str, Any] | None) -> DetailComposition | None:
     if detail is None:
         return None
     return DetailComposition(
@@ -1241,6 +1241,31 @@ def enqueue_create(
         listing_identity=frozen.resolved.listing_identity,
         identity_generation=frozen.resolved.identity_generation,
     )
+    return queue_send_request(jobs, registrations, intent_id=intent_id, payload=payload)
+
+
+def queue_send_request(
+    jobs: JobService,
+    registrations: RegistrationStore,
+    *,
+    intent_id: str,
+    payload: Mapping[str, Any],
+) -> str:
+    """Queue one CREATE job for an Intent from an already-encoded send request.
+
+    The operator surface (PR-F) re-queues the **frozen** request a durable job already carries,
+    rather than rebuilding inputs it no longer holds: the payload is decoded first, so a payload
+    of another version, another Intent or another unit is refused before any job exists.
+    """
+    request, prepared = decode_send_request(payload)
+    _ = request, prepared  # decoded to refuse a payload this owner cannot execute
+    frozen_unit_identity(payload)
+    if str(payload.get("intent_id", "")) != intent_id:
+        raise ExecutionRefused(
+            "REGISTER_SEND_SCOPE_MISMATCH",
+            "the send request names another Intent",
+            details={"intent_id": intent_id},
+        )
     # The check and the insert are **one** unit of work: two callers that both found no live job
     # would otherwise both queue one, and the second would run a CREATE while the first is still
     # waiting out its backoff. The job row joins this transaction (``session=``), so the worker is
@@ -1267,7 +1292,7 @@ def enqueue_create(
             return live
         record = jobs.enqueue(
             CREATE_JOB_TYPE,
-            payload=payload,
+            payload=dict(payload),
             target_ref=target_ref(intent_id),
             session=unit.session,
         )
@@ -1293,5 +1318,6 @@ __all__ = [
     "encode_send_request",
     "enqueue_create",
     "frozen_unit_identity",
+    "queue_send_request",
     "target_ref",
 ]

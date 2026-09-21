@@ -113,17 +113,20 @@ def test_the_adoption_detector_fires() -> None:
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
 
 M5_FOUNDATION = "0016_m5_registration_foundation"
-# ADR-0014 §26 (architect decision 5749504280): the execution-scope owner is the second, and only
-# other, M5 migration. Everything else registration-shaped is still forbidden.
-M5_HEAD = "0017_m5_registration_execution_scope"
-M5_MIGRATIONS = (M5_FOUNDATION, M5_HEAD)
+M5_EXECUTION_SCOPE = "0017_m5_registration_execution_scope"
+# ADR-0014 §26 (decision 5749504280) added the execution-scope owner, and §27 (decision
+# 5751540323) the durable preparation owner. Those three are the only M5 migrations; everything
+# else registration-shaped is still forbidden.
+M5_HEAD = "0018_m5_registration_preparation"
+M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
     re.I,
 )
-# ADR-0014 §25: PR-B owns these tables, and §26 adds the one execution-scope owner PR-E needed
-# (Issue #89 §20, architect decision 5749504280). Nothing else registration-shaped exists.
+# ADR-0014 §25: PR-B owns these tables, §26 adds the one execution-scope owner PR-E needed
+# (decision 5749504280), and §27 the preparation owner PR-F needed (decision 5751540323).
+# Nothing else registration-shaped exists.
 REGISTRATION_TABLES = frozenset(
     {
         "registration_drafts",
@@ -137,6 +140,10 @@ REGISTRATION_TABLES = frozenset(
         "marketplace_registration_items",
         "duplicate_overrides",
         "registration_execution_scopes",
+        "registration_preparations",
+        "registration_preparation_revisions",
+        "registration_preparation_items",
+        "registration_snapshot_preparations",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -190,11 +197,12 @@ def test_the_migration_detector_fires() -> None:
         "0015_m4_quantity_offers.py",
         "0016_m5_registration_foundation.py",
         "0017_m5_registration_execution_scope.py",
-        "0018_m5_registration_more.py",
+        "0018_m5_registration_preparation.py",
+        "0019_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
-        "0018_m5_registration_more.py",
+        "0019_m5_registration_more.py",
         "0009_duplicate_override.py",
     ]
 
@@ -444,9 +452,15 @@ def test_the_account_writer_detector_fires() -> None:
     assert account_writer_problems(sources) == ["app/register/store.py:1", "scripts/seed.py:1"]
 
 
-# ---------------------------------------------------------------- REGISTER does nothing yet
+# ------------------------------------------------- REGISTER reads truth and decides nothing (PR-F)
 
 REGISTER_COUNTS = frozenset({"registration_candidate_count", "registration_count"})
+# The evaluators the Registration Management owner may never import: a price, a readiness, a
+# preflight, a payload or a policy is decided by its own owner and only read here (PR-F 짠B).
+SERVICE_EVALUATORS = re.compile(
+    r"^app\.(products\.(pricing|pricing_service|readiness)"
+    r"|register\.(preparation|payload|policy|builder|preflight_rules))(\.|$)"
+)
 PROVIDER_REACH = re.compile(
     r"^(httpx|requests|urllib3|aiohttp|playwright|integrations\.(marketplaces|suppliers)"
     r"|app\.connect\.(smartstore|marketplace)\.(service|caller|credentials))(\.|$)"
@@ -454,30 +468,34 @@ PROVIDER_REACH = re.compile(
 
 
 def register_service_problems(source: str) -> list[str]:
-    """``RegisterService`` may only report zero: another public method, a count other than the
-    literal 0, or an import is REGISTER behaviour PR-A does not authorize."""
+    """The Registration Management owner reads and hands over; it never decides or writes.
+
+    Two structural rules (PR-F 짠B): it opens no write transaction of its own, so no registration
+    row is written outside the store and the owners that call it, and it imports no evaluator, so
+    a price, a readiness, a preflight, a payload or a policy can only be read from the owner that
+    decided it.
+    """
     problems = []
     tree = ast.parse(source)
-    problems += [
-        f"import at {node.lineno}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import | ast.ImportFrom)
-    ]
-    for cls in (
-        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "RegisterService"
-    ):
-        for fn in (n for n in cls.body if isinstance(n, ast.FunctionDef)):
-            if fn.name.startswith("_"):
-                continue
-            body = [n for n in fn.body if not isinstance(n, ast.Expr)]
-            returns_zero = (
-                len(body) == 1
-                and isinstance(body[0], ast.Return)
-                and isinstance(body[0].value, ast.Constant)
-                and body[0].value.value == 0
-            )
-            if fn.name not in REGISTER_COUNTS or not returns_zero:
-                problems.append(f"RegisterService.{fn.name}")
+    for node in ast.walk(tree):
+        modules = (
+            [node.module or ""]
+            if isinstance(node, ast.ImportFrom)
+            else [alias.name for alias in node.names]
+            if isinstance(node, ast.Import)
+            else []
+        )
+        problems += [
+            f"evaluator import at {node.lineno}"
+            for module in modules
+            if SERVICE_EVALUATORS.match(module)
+        ]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "transaction"
+        ):
+            problems.append(f"write transaction at {node.lineno}")
     return problems
 
 
@@ -500,36 +518,59 @@ def register_reach_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
     return offenders
 
 
-def test_register_service_stays_unimplemented() -> None:
+def test_the_register_service_reads_truth_and_decides_nothing() -> None:
     from app.register.service import RegisterService
 
     assert register_service_problems((REPO_ROOT / REGISTER_SERVICE).read_text("utf-8")) == []
+    # Unwired, it reports nothing rather than inventing a number (PR #83 review 5253314334).
     service = RegisterService()
     assert service.registration_candidate_count() == 0
     assert service.registration_count() == 0
+    public = {name for name in dir(service) if not name.startswith("_")}
+    assert public >= REGISTER_COUNTS
 
 
 def test_the_register_service_detector_fires() -> None:
     source = (
-        "import httpx\n"
+        "from app.products.pricing import calculate\n"
+        "from app.register.payload import build_payload\n"
+        "from app.register.store import RegistrationStore\n"
         "class RegisterService:\n"
-        "    def registration_count(self) -> int:\n"
-        "        return 1\n"
-        "    def create(self, snapshot):\n"
-        "        return 0\n"
-        "    def registration_candidate_count(self) -> int:\n"
-        '        """Zero."""\n'
-        "        return 0\n"
+        "    def confirm(self, store):\n"
+        "        with store.transaction() as unit:\n"
+        "            return unit\n"
     )
     assert register_service_problems(source) == [
-        "import at 1",
-        "RegisterService.registration_count",
-        "RegisterService.create",
+        "evaluator import at 1",
+        "evaluator import at 2",
+        "write transaction at 6",
     ]
 
 
 def test_no_register_module_reaches_a_provider() -> None:
     assert register_reach_problems(_code()) == []
+
+
+def test_the_store_is_the_only_production_writer_of_snapshot_preparation_provenance() -> None:
+    orm_writers = []
+    raw_writers = []
+    for path, source in _code():
+        for line_no, line in enumerate(source.splitlines(), 1):
+            stripped = line.strip()
+            if "RegistrationSnapshotPreparation(" in line and not stripped.startswith("class "):
+                orm_writers.append(f"{path}:{line_no}")
+            if re.search(r"INSERT\s+INTO\s+registration_snapshot_preparations", line, re.I):
+                raw_writers.append(f"{path}:{line_no}")
+    assert orm_writers == [
+        next(
+            f"app/register/store.py:{line_no}"
+            for line_no, line in enumerate(
+                (REPO_ROOT / "app/register/store.py").read_text("utf-8").splitlines(), 1
+            )
+            if "RegistrationSnapshotPreparation(" in line
+        )
+    ]
+    assert raw_writers == []
 
 
 def test_the_register_reach_detector_fires() -> None:
@@ -647,6 +688,9 @@ EXPECTED_INVARIANTS = {
     " the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is"
     " refused",
     "M5-29": "a brake reason is recorded only with the measured class that caused it",
+    "M5-30": "the registration preparation stores the operator's authored inputs only,"
+    " append-only, and a Snapshot proves which exact revision froze it; a job payload is an"
+    " execution copy and never the authoring source",
 }
 
 

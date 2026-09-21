@@ -53,6 +53,7 @@ from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService
 from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
+from app.register.authoring import RegistrationPreparationService
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.execution import (
     CREATE_POLICY,
@@ -71,12 +72,14 @@ from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
+from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
     SmartStoreReadback,
     SmartStoreReconcileLookup,
 )
+from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import SupplierCollection
@@ -116,8 +119,10 @@ class Container:
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
     registration_preflight: RegistrationPreflightService
+    registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
+    register: RegisterService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -303,6 +308,14 @@ def build_container(
     registration_builder = RegistrationSnapshotBuilder(
         preflight=registration_preflight, registrations=registrations
     )
+    # M5 PR-F (ADR-0014 §27, decision 5751540323): the durable operator-authored preparation. It
+    # owns inputs only; the preflight still derives every verdict, and the builder still freezes.
+    registration_preparations = RegistrationPreparationService(
+        registrations=registrations,
+        preflight=registration_preflight,
+        builder=registration_builder,
+        duplicate_lookup=SmartStoreDuplicateLookup(),
+    )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
     # no code path here can mutate the marketplace; the read-back seam is PR-D's adopted one.
@@ -321,6 +334,20 @@ def build_container(
         clock=clock,
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
+    # M5 PR-F (ADR-0014 §22, §24): the Registration Management read model and its operator
+    # actions. It owns no truth of its own — it reads the owners above and hands each action to
+    # the owner of that action — and its canary readiness is derived and read-only.
+    register_service = RegisterService(
+        registrations=registrations,
+        execution=registration_execution,
+        preflight=registration_preflight,
+        authoring=registration_preparations,
+        accounts=accounts,
+        jobs=jobs,
+        capability=marketplace_capability,
+        adoption=SmartStoreAdoption(),
+        execution_mode=execution_mode.state().mode.value,
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -328,7 +355,7 @@ def build_container(
         connect=connect,
         collect=CollectService(jobs),
         products=products,
-        register=RegisterService(),
+        register=register_service,
         operate=OperateService(),
         review=ReviewService(),
         execution_mode=execution_mode,
@@ -362,8 +389,10 @@ def build_container(
         accounts=accounts,
         registrations=registrations,
         registration_preflight=registration_preflight,
+        registration_preparations=registration_preparations,
         registration_builder=registration_builder,
         registration_execution=registration_execution,
+        register=register_service,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
