@@ -19,8 +19,8 @@ from scripts.m4accept.guards import FORBIDDEN_MODULES as M4_FORBIDDEN
 from scripts.m4accept.guards import Guarded, GuardEvidence, forbidden, offline
 
 # The adapters M5's own owners import. They hold no transport: the registry is a frozen contract
-# table, the projection and normalizer are pure, and the execution seams refuse locally while
-# CREATE, image upload and product search are NOT_ADOPTED.
+# table, the projection and normalizer are pure, and the execution seams refuse locally. IMAGE
+# UPLOAD is adopted but the caller that could execute it remains forbidden for provider-zero.
 ALLOWED_FOR_M5: Final = (
     "integrations.marketplaces",
     "app.connect.marketplace.service",

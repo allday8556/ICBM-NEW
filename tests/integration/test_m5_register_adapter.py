@@ -3,8 +3,8 @@ read back through a fake provider, compared, and recorded.
 
 The Snapshot comes from the real PR-C path (preflight → builder → store), so the adapter is fed
 the exact canonical payload production would freeze — never a hand-written stand-in. No test here
-mutates the marketplace: no mutating endpoint is adopted, every call goes through a fake
-transport, and ``product_registration.write`` stays UNVERIFIED throughout.
+mutates the marketplace: IMAGE UPLOAD is adopted but not invoked here, every read call goes through
+a fake transport, and ``product_registration.write`` stays UNVERIFIED throughout.
 """
 
 import contextlib
@@ -145,13 +145,14 @@ def _read(body: dict[str, Any]) -> Any:
 # ---------------------------------------------------------------- the adopted surface
 
 
-def test_adoption_is_read_only_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-register-r1"
+def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-image-upload-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
-    assert [c.endpoint_id.value for c in ADOPTED.values() if c.mutating] == []
+    assert [c.endpoint_id.value for c in ADOPTED.values() if c.mutating] == [
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    ]
     for endpoint in (
         EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
-        EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
         EndpointId.SMARTSTORE_PRODUCT_SEARCH,
     ):
         with pytest.raises(EndpointNotAdoptedError):

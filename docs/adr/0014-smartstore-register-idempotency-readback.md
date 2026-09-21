@@ -410,6 +410,19 @@ This explicit reconcile is M5 REGISTER lifecycle handling of a known registratio
 - Adoption (PR-D) requires: the current official Naver Commerce API documentation; the app mode and required permission groups; method, path, auth, content type, timeouts, redirect policy and success predicate; request and result types; provider error mapping; idempotency and read-back behaviour; a new endpoint-mapping revision and fingerprint in the same PR; and negative tests proving an unadopted or unknown endpoint fails locally.
 - No SmartStore path is generalized outside the registry.
 
+#### 17.1 IMAGE UPLOAD amendment (Issue #89 `5765557497`, `5765663972`)
+
+`SMARTSTORE_PRODUCT_IMAGE_UPLOAD` alone is `ADOPTED` from the official Commerce API 2.89.0
+contract. One exact artifact is one `POST /v1/product-images/upload` request with one
+`imageFiles` multipart part. A successful `images[].url` may cross the existing `PreparedAsset`
+boundary only when exactly one safe URL corresponds to that artifact and candidate fingerprint.
+
+This amendment adds no migration, durable upload owner, cache or ledger. It authorizes no real
+upload: execution remains `DRY_RUN` and provider-zero. There is no automatic retry. Any possibly
+transmitted failure is `UPLOAD_UNKNOWN`, which is not `RegistrationIntent.UNKNOWN`. CREATE and
+SEARCH remain `NOT_ADOPTED`; `product_registration.write` remains `UNVERIFIED`; LIVE, real canary
+and M5 acceptance remain forbidden.
+
 ### 18. AI is optional
 
 - **M5 registers with no AI provider configured.** An operator-confirmed or manual category or field value completes the first vertical without AI.
@@ -506,7 +519,7 @@ Snapshot provenance                which exact revision, and which fingerprint, 
 - **Revisions are append-only and auditable.** Editing appends the next revision; an authored revision that has already frozen a Snapshot is never edited in place, so the Snapshot's provenance keeps its meaning.
 - **A Snapshot proves which exact preparation revision and fingerprint produced it.** The link is its own row, so `registration_snapshots` stays immutable with its triggers intact and a Snapshot frozen before this owner existed stays valid with no provenance row. Authoring truth is never reconstructed by inverting `payload_json`.
 - **The job payload stays an execution copy.** A `register.create` job may carry a frozen copy for crash-safe send-time revalidation, and it pins the same unit identity the Snapshot and Intent hold; it is never the authoring source. **No job is required to display or evaluate a preparation**, and changing a preparation later mutates no earlier Snapshot and no earlier job.
-- **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). It never opens a provider mutation while CREATE, image upload and product search are `NOT_ADOPTED` (§17, §24).
+- **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). IMAGE UPLOAD adoption adds no operator route or LIVE authority; CREATE and product search remain `NOT_ADOPTED` (§17, §24).
 
 ## Invariants
 

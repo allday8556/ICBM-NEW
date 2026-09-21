@@ -22,10 +22,11 @@ official-source packet for Naver Commerce API **2.89.0 (2026-09-15)** (Issue #89
 read-back may keep. Timeouts, the redirect policy and the success predicates are ICBM policy over
 the JSON-object response convention ENDPOINT_MATRIX.md already accepts, never provider facts.
 
-PR-D adopts the **two product read-backs only**. Everything the packet leaves unproven stays
-NOT_ADOPTED with its gap named in ``ADOPTION_GAPS`` — including product CREATE and image upload, so
-**no mutating SmartStore endpoint is adopted and no code path can reach one**. The domain block on
-the provider's documentation is not permission to infer the rest (SOURCES.md §11.4).
+PR-D adopted the two product read-backs. The later IMAGE UPLOAD amendment (Issue #89 comments
+5765557497 and 5765663972) adopts only the official one-artifact ``imageFiles`` request and its
+returned ``images[].url`` identity. Product CREATE and search remain NOT_ADOPTED. Adoption is not
+LIVE authority: the application remains DRY_RUN/provider-zero and no application route invokes the
+upload caller.
 """
 
 import hashlib
@@ -49,11 +50,11 @@ class EndpointId(StrEnum):
     # ADOPTED for M2 (EM §4).
     SMARTSTORE_AUTH_TOKEN = "SMARTSTORE_AUTH_TOKEN"
     SMARTSTORE_SELLER_ACCOUNT = "SMARTSTORE_SELLER_ACCOUNT"
-    # ADOPTED for M5 PR-D: the two product read-backs. Both are reads; **no mutating SmartStore
-    # endpoint is adopted**, so no code path can mutate the marketplace at all.
+    # ADOPTED for M5 PR-D: the two product read-backs.
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
-    # NOT_ADOPTED: the packet does not prove the whole transport contract (see ADOPTION_GAPS).
+    # CREATE/search and metadata reads remain NOT_ADOPTED (see ADOPTION_GAPS). IMAGE UPLOAD was
+    # adopted by the later, bounded M5 amendment; adoption does not grant LIVE authority.
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
@@ -121,6 +122,20 @@ def product_read_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+def image_upload_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 plus the documented ``images[].url`` response shape.
+
+    Exactly-one correspondence is enforced by the adapter's promotion boundary. The endpoint
+    predicate only establishes that a typed response can be handed to it.
+    """
+    if status != 200 or not isinstance(body, dict):
+        return False
+    images = body.get("images")
+    return isinstance(images, list) and all(
+        isinstance(image, dict) and isinstance(image.get("url"), str) for image in images
+    )
+
+
 @dataclass(frozen=True)
 class EndpointContract:
     endpoint_id: EndpointId
@@ -158,6 +173,7 @@ _PATH_PARAM = re.compile(r"\{([A-Za-z][A-Za-z0-9]*)\}")
 _PRODUCT_READ_FIELDS = frozenset(
     {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
 )
+_IMAGE_UPLOAD_FIELDS = frozenset({"url"})
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
@@ -222,6 +238,22 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5d-channel-read-r1",
         retained_response_fields=_PRODUCT_READ_FIELDS,
     ),
+    # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
+    EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
+        method=Method.POST,
+        path="/v1/product-images/upload",
+        content_type="multipart/form-data",
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=True,
+        success_predicate=image_upload_succeeded,
+        predicate_revision="m5-image-upload-r1",
+        retained_response_fields=_IMAGE_UPLOAD_FIELDS,
+    ),
 }
 
 NOT_ADOPTED: frozenset[EndpointId] = frozenset(EndpointId) - frozenset(ADOPTED)
@@ -239,12 +271,6 @@ ADOPTION_GAPS: Mapping[EndpointId, str] = {
         "the packet proves the method, the path, the 상품 group and the request/response product"
         " structure, but neither the request media type nor the response envelope; the wire"
         " document is encoded and pinned by product.py and stays unsent"
-    ),
-    EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: (
-        "the packet proves the method, the path, multipart/form-data and the 상품 group, and that"
-        " the returned URL is used directly as the product image URL, but not the multipart part"
-        " name the API expects, so a request cannot be composed without inventing it; assets.py"
-        " still fixes what a returned reference must satisfy before it becomes a PreparedAsset"
     ),
     EndpointId.SMARTSTORE_PRODUCT_SEARCH: (
         "existence only: the packet does not prove the request schema, so no strong duplicate key"
@@ -286,7 +312,7 @@ def resolve(endpoint_id: object) -> EndpointContract:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-register-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-image-upload-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -299,6 +325,8 @@ SAFE_RETENTION_PROFILE_VERSION = "smartstore-safe-retention/v1"
 MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m2-connect-r1": "17d3dfe97b2f4a6c5e0b363c9c83cba014c018619c6197d54cfa395277016ca9",
     "m5-register-r1": "fbf07a8784557b45c5e282464a20d2b41534642a34076e1827b656fba8710648",
+    # Filled from ``mapping_fingerprint()`` in the same reviewed change.
+    "m5-image-upload-r1": "4717169646fe3b53725a4c31ff93e15d657dc6a85b29295a8d955969f090d02b",
 }
 
 

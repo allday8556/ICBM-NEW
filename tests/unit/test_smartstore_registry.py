@@ -19,6 +19,7 @@ from integrations.marketplaces.smartstore.registry import (
     RedirectPolicy,
     RegistryMappingRevision,
     account_succeeded,
+    image_upload_succeeded,
     mapping_fingerprint,
     resolve,
     token_succeeded,
@@ -28,11 +29,11 @@ TOKEN = EndpointId.SMARTSTORE_AUTH_TOKEN
 ACCOUNT = EndpointId.SMARTSTORE_SELLER_ACCOUNT
 ORIGIN_READ = EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2
 CHANNEL_READ = EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2
+IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 # M5 PR-D adopts the two product read-backs; everything else the 2.89.0 packet leaves unproven
 # stays NOT_ADOPTED with a named gap (registry.ADOPTION_GAPS).
 STILL_NOT_ADOPTED = {
     "SMARTSTORE_PRODUCT_CREATE_V2",
-    "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     "SMARTSTORE_PRODUCT_SEARCH",
     "SMARTSTORE_CATEGORY_LIST",
     "SMARTSTORE_CATEGORY_READ",
@@ -48,7 +49,7 @@ STILL_NOT_ADOPTED = {
 
 
 def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_read_backs() -> None:
-    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ}
+    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ, IMAGE_UPLOAD}
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
     assert not set(ADOPTED) & NOT_ADOPTED
@@ -112,15 +113,42 @@ def test_em13_7_every_adopted_endpoint_is_no_follow() -> None:
     assert {c.redirect for c in ADOPTED.values()} == {RedirectPolicy.NO_FOLLOW}
 
 
-def test_em5_the_adopted_group_union_is_seller_info_and_product_and_nothing_mutates() -> None:
+def test_em5_the_adopted_group_union_and_the_only_adopted_mutation() -> None:
     union = set().union(*(c.required_groups for c in ADOPTED.values()))
     # The packet's AI-use guide gives the API group 상품 for the product reads; no narrower
     # permission name is invented from it.
     assert union == {"판매자정보", "상품"}
     assert resolve(TOKEN).required_groups == frozenset()
     assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
-    # No mutating SmartStore endpoint is adopted at all, so no code path can mutate the provider.
-    assert not any(c.mutating for c in ADOPTED.values())
+    assert [c.endpoint_id for c in ADOPTED.values() if c.mutating] == [IMAGE_UPLOAD]
+
+
+def test_the_image_upload_contract_is_exactly_the_approved_scope() -> None:
+    contract = resolve(IMAGE_UPLOAD)
+    assert (contract.method, contract.path, contract.content_type) == (
+        Method.POST,
+        "/v1/product-images/upload",
+        "multipart/form-data",
+    )
+    assert contract.requires_bearer and contract.mutating
+    assert contract.required_groups == frozenset({"상품"})
+    assert contract.safe_query_keys == frozenset()
+    assert contract.retained_response_fields == frozenset({"url"})
+    assert contract.predicate_revision == "m5-image-upload-r1"
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "accepted"),
+    [
+        (200, {"images": [{"url": "https://shop-phinf.example/a.jpg"}]}, True),
+        (200, {"images": []}, True),
+        (200, {"images": [{"url": 7}]}, False),
+        (200, {}, False),
+        (201, {"images": [{"url": "https://shop-phinf.example/a.jpg"}]}, False),
+    ],
+)
+def test_image_upload_success_predicate(status: int, body: object, accepted: bool) -> None:
+    assert image_upload_succeeded(status, body) is accepted
 
 
 @pytest.mark.parametrize(
@@ -250,9 +278,13 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-register-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-image-upload-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
-    assert set(MAPPING_FINGERPRINTS) == {"m2-connect-r1", "m5-register-r1"}
+    assert set(MAPPING_FINGERPRINTS) == {
+        "m2-connect-r1",
+        "m5-register-r1",
+        "m5-image-upload-r1",
+    }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     assert RegistryMappingRevision().current_revision() == SMARTSTORE_ENDPOINT_MAPPING_REVISION
 

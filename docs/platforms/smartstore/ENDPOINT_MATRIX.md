@@ -111,7 +111,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_PRODUCT_CREATE_V2` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v1/product-images/upload` | Image upload (`multipart/form-data`) | `OWN_STORE_SELF` | `상품` | Side effect; not frozen |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; no durable upload owner |
 | `SMARTSTORE_CATEGORY_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories` | Category discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -125,13 +125,13 @@ The remaining M5 rows are planning metadata only. Presence does not imply eventu
 
 ### 4.1 M5 PR-D adoption and its recorded gaps (packet 5746489554, release 2.89.0)
 
-PR-D adopts the two product read-backs and nothing else. **No mutating endpoint is adopted**, so
-no code path can mutate the marketplace, and `product_registration.write` stays `UNVERIFIED`.
+PR-D adopted the two product read-backs. Issue #89 decisions `5765557497` and `5765663972`
+subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provider-zero,
+`product_registration.write` stays `UNVERIFIED`, and no application route invokes the upload.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
 | `SMARTSTORE_PRODUCT_CREATE_V2` | the packet proves method, path, group and the request/response product structure, but neither the request media type nor the response envelope |
-| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | media type proven, but not the multipart part name, so no request can be composed without inventing it |
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
@@ -148,7 +148,12 @@ Adopted read-back contract, in the registry and pinned by tests:
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 
-`endpoint_mapping_revision = m5-register-r1`, bound to the registry fingerprint, which now also
+Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; one artifact in one
+`imageFiles` multipart part; HTTP 200 with `images[].url`; no query keys; only `url` is retained.
+ICBM policy is no redirect, connect `5s`, read `30s`, no automatic retry. Any possibly transmitted
+failure is `UPLOAD_UNKNOWN`, distinct from `RegistrationIntent.UNKNOWN`.
+
+`endpoint_mapping_revision = m5-image-upload-r1`, bound to the registry fingerprint, which also
 covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15).
 
 ---

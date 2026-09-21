@@ -430,7 +430,17 @@ def test_an_ambiguous_upload_never_becomes_a_provider_asset_identity(
     assert (outcome.ambiguous, outcome.asset, outcome.ambiguous_reason) == (True, None, reason)
 
 
-def test_the_upload_request_itself_is_refused_while_its_part_name_is_unproven() -> None:
-    with pytest.raises(assets.ImageUploadNotAdoptedError) as refused:
-        assets.upload_request()
-    assert refused.value.code == "SMARTSTORE_IMAGE_UPLOAD_NOT_ADOPTED"
+def test_the_upload_request_names_one_artifact_only() -> None:
+    request = assets.upload_request(
+        access_token="fixture-token",
+        credential_generation=3,
+        session_generation=7,
+        filename="artifact.png",
+        media_type="image/png",
+        content=b"png",
+    )
+    assert (request.filename, request.media_type, request.content) == (
+        "artifact.png",
+        "image/png",
+        b"png",
+    )
