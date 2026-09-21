@@ -1,11 +1,9 @@
-"""Promotion of a provider image-upload outcome to a PreparedAsset (ADR-0014 §3 B2; kickoff §4).
+"""One-artifact SmartStore image upload and promotion to ``PreparedAsset``.
 
-The packet proves that ``POST /v1/product-images/upload`` takes ``multipart/form-data`` and that
-the URL it returns is used directly as the product image URL, but not the multipart part name the
-API expects, so the request cannot be composed without inventing it: the endpoint stays
-NOT_ADOPTED and :func:`upload_request` refuses. What *is* provable — when an upload outcome may
-become a known provider asset identity — is fixed here, so PR-E inherits the rule rather than
-inventing it after the endpoint is adopted:
+The official 2.89.0 contract and Issue #89 amendments 5765557497/5765663972 adopt only
+``POST /v1/product-images/upload`` with one immutable artifact in one ``imageFiles`` part. The
+adapter calls once and never retries. A transport/response ambiguity is represented only as
+``UPLOAD_UNKNOWN`` here; it never enters ``RegistrationIntent.UNKNOWN`` and has no durable owner.
 
 * one reference per exactly one M4 artifact, bound to the READY candidate fingerprint it was
   uploaded under, and to the asset profile the target policy names;
@@ -19,26 +17,19 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from app.core.errors import AppError
 from app.products.image_model import ImageAssetKind
 from app.register.preparation import PreparedAsset
 from app.register.sanitize import safe_provider_reference
-from integrations.marketplaces.smartstore.registry import ADOPTION_GAPS, EndpointId
+from integrations.marketplaces.smartstore.caller import (
+    ImageUploadRequest,
+    ImageUploadResponse,
+    SmartStoreCallError,
+    SmartStoreEndpointCaller,
+)
+from integrations.marketplaces.smartstore.registry import EndpointId
 
 UPLOAD_OUTCOME_VERSION: Final = "smartstore-image-upload-outcome/v1"
 _URL_FIELD: Final = "url"
-
-
-class ImageUploadNotAdoptedError(AppError):
-    """The upload request cannot be composed from the proven contract."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "SMARTSTORE_IMAGE_UPLOAD_NOT_ADOPTED",
-            "SmartStore image upload is not adopted: "
-            + ADOPTION_GAPS[EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD],
-            details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD.value},
-        )
 
 
 @dataclass(frozen=True)
@@ -54,9 +45,59 @@ class UploadOutcome:
         return self.asset is None
 
 
-def upload_request(*_: object, **__: object) -> None:
-    """Compose an image-upload request. Always refuses while the part name is unproven."""
-    raise ImageUploadNotAdoptedError()
+def upload_request(
+    *,
+    access_token: str,
+    credential_generation: int,
+    session_generation: int,
+    filename: str,
+    media_type: str,
+    content: bytes,
+) -> ImageUploadRequest:
+    """Build the typed request for exactly one artifact; validation occurs before transport."""
+    return ImageUploadRequest(
+        access_token=access_token,
+        credential_generation=credential_generation,
+        session_generation=session_generation,
+        filename=filename,
+        media_type=media_type,
+        content=content,
+    )
+
+
+class ImageUploadAdapter:
+    """Single-call adapter. It owns no cache, ledger, retry loop or durable state."""
+
+    def __init__(self, caller: SmartStoreEndpointCaller) -> None:
+        self._caller = caller
+
+    def upload(
+        self,
+        request: ImageUploadRequest,
+        *,
+        asset_kind: ImageAssetKind,
+        sha256: str,
+        derivation_id: str | None,
+        asset_profile: str,
+        candidate_fingerprint: str,
+    ) -> UploadOutcome:
+        try:
+            response = self._caller.call(EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD, request)
+        except SmartStoreCallError as exc:
+            # Any provider response failure or possibly transmitted request is upload ambiguity.
+            # Pre-transmission failures remain ordinary local/transport failures, not UNKNOWN.
+            if exc.remote_outcome.value == "UNKNOWN":
+                return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_UNKNOWN")
+            raise
+        assert isinstance(response, ImageUploadResponse)
+        return promote(
+            response.retained,
+            asset_kind=asset_kind,
+            sha256=sha256,
+            derivation_id=derivation_id,
+            asset_profile=asset_profile,
+            candidate_fingerprint=candidate_fingerprint,
+        )
 
 
 def _references(retained: Mapping[str, Any]) -> list[str]:

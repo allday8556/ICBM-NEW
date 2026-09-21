@@ -1,11 +1,11 @@
 """The SmartStore side of registration execution (M5 PR-E).
 
-PR-D adopted **two product read-backs and nothing else**: CREATE, image upload and product search
-remain NOT_ADOPTED because the 2.89.0 packet does not prove their full contract. PR-E does not
-widen that adoption, so the production seams here are shaped by it:
+CREATE and product search remain NOT_ADOPTED. IMAGE UPLOAD is separately adopted, but is not wired
+to this registration execution module: it has its own one-call adapter and no durable owner.
+The production seams here are shaped by those boundaries:
 
-* :class:`SmartStoreCreateSender` reports unavailable and, if called anyway, raises **before any
-  transport** — there is no code path from this module to a marketplace mutation;
+* :class:`SmartStoreCreateSender` reports unavailable and, if called anyway, raises before any
+  transport;
 * :class:`SmartStoreReadback` is real: it calls the adopted origin read-back through the registry
   caller and returns only the retained, sanitized response (PR-D's profile);
 * :class:`SmartStoreReconcileLookup` reports unavailable, because no product-search contract is

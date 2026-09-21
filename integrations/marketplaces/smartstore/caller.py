@@ -69,6 +69,9 @@ _PATH_VALUE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PRODUCT_READS = frozenset(
     {EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2, EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2}
 )
+_IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
+_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
+_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 # ---------------------------------------------------------------- requests and results
@@ -127,6 +130,22 @@ class ProductReadRequest:
 
 
 @dataclass(frozen=True)
+class ImageUploadRequest:
+    """Upload exactly one immutable artifact in exactly one ``imageFiles`` part.
+
+    The bytes are an execution input only. They are never written by this caller and are excluded
+    from repr/log/evidence. A second artifact requires a distinct request object and call.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    filename: str
+    media_type: str
+    content: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ProductReadback:
     """A read-back response reduced to the endpoint's retained-field allow-list.
 
@@ -136,6 +155,14 @@ class ProductReadback:
 
     endpoint_id: EndpointId
     product_no: str
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class ImageUploadResponse:
+    """Sanitized upload response; only the documented ``images[].url`` leaves survive."""
+
     retained: Mapping[str, object]
     http_status: int
 
@@ -189,7 +216,7 @@ def _endpoint_name(endpoint_id: object) -> str:
 def _generations(request: object) -> tuple[int | None, int | None]:
     if isinstance(request, TokenRequest):
         return request.credentials.credential_generation, None
-    if isinstance(request, AccountRequest | ProductReadRequest):
+    if isinstance(request, AccountRequest | ProductReadRequest | ImageUploadRequest):
         return request.credential_generation, request.session_generation
     return None, None
 
@@ -201,6 +228,7 @@ class _Wire:
     path: str
     headers: dict[str, str]
     form: dict[str, str]
+    files: tuple[tuple[str, tuple[str, bytes, str]], ...] = ()
 
 
 def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
@@ -258,6 +286,26 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
+    if contract.endpoint_id is _IMAGE_UPLOAD:
+        if not isinstance(request, ImageUploadRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        if (
+            not _FILENAME.fullmatch(request.filename)
+            or request.media_type not in _IMAGE_MEDIA_TYPES
+            or not isinstance(request.content, bytes)
+            or not request.content
+        ):
+            raise _Preflight("SMARTSTORE_IMAGE_UPLOAD_ARTIFACT_UNUSABLE")
+        # Do not set Content-Type by hand: httpx supplies the required multipart boundary.
+        return _Wire(
+            contract.path,
+            headers,
+            {},
+            (("imageFiles", (request.filename, request.content, request.media_type)),),
+        )
     raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
 
 
@@ -274,7 +322,7 @@ def _marker(value: object) -> str | None:
 
 def _result(
     contract: EndpointContract, request: object, body: object, status: int
-) -> TokenGrant | SellerAccount | ProductReadback:
+) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
     """The typed result of a response that passed the endpoint's success predicate."""
     fields = cast(dict[str, object], body)
     if contract.endpoint_id in _PRODUCT_READS:
@@ -286,6 +334,9 @@ def _result(
             retained=retain(contract, fields),
             http_status=status,
         )
+    if contract.endpoint_id is _IMAGE_UPLOAD:
+        assert isinstance(request, ImageUploadRequest)
+        return ImageUploadResponse(retained=retain(contract, fields), http_status=status)
     if contract.endpoint_id is EndpointId.SMARTSTORE_AUTH_TOKEN:
         assert isinstance(request, TokenRequest)
         return TokenGrant(
@@ -332,19 +383,26 @@ class SmartStoreEndpointCaller:
 
     @overload
     def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD],
+        request: ImageUploadRequest,
+    ) -> ImageUploadResponse: ...
+
+    @overload
+    def call(
         self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback: ...
+    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse: ...
 
     def call(
         self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback:
+    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
         contract: EndpointContract | None = None
         status: int | None = None
         trace_id: str | None = None
-        result: TokenGrant | SellerAccount | ProductReadback | None = None
+        result: TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse | None = None
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
@@ -454,6 +512,7 @@ class SmartStoreEndpointCaller:
                 BASE_URL + wire.path,
                 headers=wire.headers,
                 data=wire.form or None,
+                files=wire.files or None,
                 extensions={"trace": recorder},
             )
             return client.send(request, follow_redirects=False)

@@ -123,7 +123,7 @@ REQUIRED_CHECKS = {
         "boundary.provider_transport_unloadable",
         "boundary.real_wire_projection_refuses",
         "boundary.create_not_adopted",
-        "boundary.upload_not_adopted",
+        "boundary.upload_adopted_but_unreachable",
         "boundary.search_not_adopted",
         "boundary.product_registration_write_unverified",
         "boundary.no_provider_audit_event",
@@ -236,7 +236,7 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
     assert report["account_scope"]["synthetic_connect_binding"] is True
     adoption = report["endpoint_adoption"]
     assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is False
-    assert adoption["SMARTSTORE_PRODUCT_IMAGE_UPLOAD"] is False
+    assert adoption["SMARTSTORE_PRODUCT_IMAGE_UPLOAD"] is True
     assert adoption["SMARTSTORE_PRODUCT_SEARCH"] is False
     assert adoption["SMARTSTORE_ORIGIN_PRODUCT_READ_V2"] is True
     assert report["boundary"]["marketplace_mutations"] == 0

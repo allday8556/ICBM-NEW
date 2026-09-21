@@ -4,9 +4,9 @@ It drives the accepted M5 acceptance-plan cases through the **real production ow
 dedicated root, and records what it observed. Every case is a check: a failure is a recorded
 problem, never a crash and never a silent pass.
 
-The run is offline and provider-zero. CREATE, image upload and product search are NOT_ADOPTED, so
-the provider seams for those contracts are local fakes (`seams.py`) and the production seams are
-asked — and refuse — in the boundary phase. The guards refuse every HTTP client, browser, AI, OCR
+The run is offline and provider-zero. CREATE and product search are NOT_ADOPTED; image upload is
+ADOPTED but has no application route and its transport module is forbidden in this run. Provider
+seams are local fakes (`seams.py`). The guards refuse every HTTP client, browser, AI, OCR
 and supplier transport for the life of the run, and the report states the measured counters,
 including a marketplace mutation count of zero.
 
@@ -935,7 +935,8 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
     )
     checks.check(
-        "boundary.upload_not_adopted", adoption.get("SMARTSTORE_PRODUCT_IMAGE_UPLOAD") is False
+        "boundary.upload_adopted_but_unreachable",
+        adoption.get("SMARTSTORE_PRODUCT_IMAGE_UPLOAD") is True,
     )
     checks.check("boundary.search_not_adopted", adoption.get("SMARTSTORE_PRODUCT_SEARCH") is False)
     capability = owners.capability.capability(MARKETPLACE)

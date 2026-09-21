@@ -553,7 +553,7 @@ def test_the_production_wiring_supplies_the_identity_and_the_revision(p: Contain
     assert (available.recording_available, available.recording_refusal) == (True, None)
     # The attestation context names whichever mapping revision the registry currently binds; M5
     # PR-D bumped it when it adopted the product read-backs.
-    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-register-r1"
+    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-image-upload-r1"
 
 
 @pytest.mark.parametrize(
