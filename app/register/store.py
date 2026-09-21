@@ -1095,7 +1095,12 @@ class RegistrationUnit:
         identity_generation: int,
     ) -> None:
         """Record which exact authored revision froze this Snapshot, and at which generation of
-        its listing identity (§7, §27). Written once and never changed."""
+        its listing identity (§7, §27). Written once and never changed.
+
+        SQLite guards scope, Draft revision, membership and fingerprint. Generation also affects
+        the hashed listing identity, so this sole production writer recomputes that identity before
+        insert; the repository contract forbids an alternate ORM or raw-SQL production writer.
+        """
         revision = self.session.get(RegistrationPreparationRevision, preparation_revision_id)
         if revision is None:
             raise NotFoundError(

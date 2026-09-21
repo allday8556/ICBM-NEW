@@ -551,6 +551,28 @@ def test_no_register_module_reaches_a_provider() -> None:
     assert register_reach_problems(_code()) == []
 
 
+def test_the_store_is_the_only_production_writer_of_snapshot_preparation_provenance() -> None:
+    orm_writers = []
+    raw_writers = []
+    for path, source in _code():
+        for line_no, line in enumerate(source.splitlines(), 1):
+            stripped = line.strip()
+            if "RegistrationSnapshotPreparation(" in line and not stripped.startswith("class "):
+                orm_writers.append(f"{path}:{line_no}")
+            if re.search(r"INSERT\s+INTO\s+registration_snapshot_preparations", line, re.I):
+                raw_writers.append(f"{path}:{line_no}")
+    assert orm_writers == [
+        next(
+            f"app/register/store.py:{line_no}"
+            for line_no, line in enumerate(
+                (REPO_ROOT / "app/register/store.py").read_text("utf-8").splitlines(), 1
+            )
+            if "RegistrationSnapshotPreparation(" in line
+        )
+    ]
+    assert raw_writers == []
+
+
 def test_the_register_reach_detector_fires() -> None:
     sources = [
         ("app/register/service.py", "import httpx\n"),

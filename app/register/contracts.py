@@ -213,6 +213,9 @@ class AuthoringMetadataView(BaseModel):
     notice_type: str | None = None
     attributes: tuple[AuthoringFieldView, ...] = ()
     notice_fields: tuple[AuthoringFieldView, ...] = ()
+    options_supported: bool = False
+    max_options: int = 1
+    max_option_dimensions: int = 1
 
 
 class AuthoredInputsView(BaseModel):

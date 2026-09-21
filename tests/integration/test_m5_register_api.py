@@ -10,6 +10,7 @@ canary readiness is a derived read that authorizes nothing.
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,11 +24,15 @@ from app.main import create_app
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.contracts import RegisterAction
 from app.register.execution import CREATE_ENDPOINT_GROUP, decode_send_request, enqueue_create
-from app.register.model import IntentState, ListingShape, ScopePauseReason
-from app.register.policy import AssetPolicy
+from app.register.model import (
+    IntentState,
+    ListingShape,
+    RegistrationConflictError,
+    ScopePauseReason,
+)
 from app.register.preparation import UnitRequest
 from app.register.service import RegisterService
-from app.register.store import RegistrationStore, RegistrationUnit
+from app.register.store import RegistrationStore, RegistrationUnit, SnapshotRecord
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from tests.conftest import LOCAL
 from tests.integration.test_m5_register_execution import (
@@ -43,6 +48,7 @@ from tests.register_support import (
     MARKET,
     OPERATOR,
     TAXONOMY,
+    FakeDuplicateLookup,
     Preparation,
     ReadyItem,
     draft,
@@ -51,7 +57,6 @@ from tests.register_support import (
     ready_final,
     ready_item,
     request,
-    target,
 )
 
 pytestmark = pytest.mark.integration
@@ -607,6 +612,67 @@ def _inputs(item: ReadyItem, **overrides: object) -> dict:
     return body
 
 
+def _author(
+    api: TestClient,
+    draft_id: str,
+    items: list[ReadyItem],
+    *,
+    options: dict[str, dict[str, str]] | None = None,
+) -> str:
+    response = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id for item in items],
+            "actor": OPERATOR,
+            "inputs": _inputs(items[0], options=options or {}),
+        },
+        headers=CLIENT,
+    )
+    assert response.status_code == 200, response.text
+    return str(response.json()["preparation_id"])
+
+
+def _legacy_snapshot(
+    container: Container,
+    prep: Preparation,
+    draft_id: str,
+    account: str,
+    items: list[ReadyItem],
+) -> SnapshotRecord:
+    current = container.registrations.draft(draft_id)
+    assert current is not None
+    req = request(
+        container.registrations,
+        draft_id,
+        account,
+        items,
+        unit=UnitRequest(draft_id, current.draft_revision, tuple(item.item_id for item in items)),
+    )
+    _request, final = ready_final(prep, req)
+    return RegistrationSnapshotBuilder(
+        preflight=prep.service, registrations=container.registrations
+    ).freeze(final, created_by=OPERATOR, correlation_id=CID)
+
+
+def _assert_provenance_refused(
+    container: Container, snapshot_id: str, preparation_id: str, *, generation: int = 0
+) -> None:
+    preparation_record = container.registrations.preparation(preparation_id)
+    assert preparation_record is not None
+    with (
+        pytest.raises(RegistrationConflictError) as refused,
+        container.registrations.transaction() as unit,
+    ):
+        unit.record_snapshot_preparation(
+            snapshot_id,
+            preparation_record.current.preparation_revision_id,
+            identity_generation=generation,
+        )
+    assert refused.value.code == "REGISTER_SNAPSHOT_PREPARATION_SCOPE_MISMATCH"
+    assert container.registrations.snapshot_preparation(snapshot_id) is None
+
+
 def test_an_operator_authors_a_preparation_that_the_server_keeps_and_evaluates(
     api: TestClient,
     container: Container,
@@ -806,6 +872,93 @@ def test_an_authored_freeze_never_backfills_a_legacy_snapshot_provenance(
     )
 
 
+def test_provenance_refuses_a_revision_from_another_draft(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    authored_item = ready_item(container, sources, "1234")
+    snapshot_item = ready_item(container, sources, "5678")
+    authored_draft = draft(container.registrations, account, [authored_item])
+    snapshot_draft = draft(container.registrations, account, [snapshot_item])
+    preparation_id = _author(api, authored_draft, [authored_item])
+    snapshot = _legacy_snapshot(container, prep, snapshot_draft, account, [snapshot_item])
+    _assert_provenance_refused(container, snapshot.registration_snapshot_id, preparation_id)
+
+
+def test_provenance_refuses_a_revision_from_another_account(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    first_item = ready_item(container, sources, "1234")
+    first_draft = draft(container.registrations, account, [first_item])
+    snapshot = _legacy_snapshot(container, prep, first_draft, account, [first_item])
+    other_account = establish(container, config, MARKET, "uid-market-a-2")
+    other_item = ready_item(container, sources, "5678")
+    other_draft = draft(container.registrations, other_account, [other_item])
+    preparation_id = _author(api, other_draft, [other_item])
+    _assert_provenance_refused(container, snapshot.registration_snapshot_id, preparation_id)
+
+
+def test_provenance_refuses_the_wrong_exact_item_set(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    items = [ready_item(container, sources, source) for source in ("1234", "5678")]
+    draft_id = draft(container.registrations, account, items, ListingShape.SEPARATE_LISTINGS)
+    preparation_id = _author(api, draft_id, [items[0]])
+    snapshot = _legacy_snapshot(container, prep, draft_id, account, [items[1]])
+    _assert_provenance_refused(container, snapshot.registration_snapshot_id, preparation_id)
+
+
+def test_provenance_refuses_the_wrong_draft_revision(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    first = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [first], ListingShape.SEPARATE_LISTINGS)
+    preparation_id = _author(api, draft_id, [first])
+    second = ready_item(container, sources, "5678")
+    with container.registrations.transaction() as unit:
+        unit.add_draft_item(
+            draft_id,
+            second.item_id,
+            second.pricing_snapshot_id,
+            added_by=OPERATOR,
+            correlation_id=CID,
+        )
+    snapshot = _legacy_snapshot(container, prep, draft_id, account, [first])
+    _assert_provenance_refused(container, snapshot.registration_snapshot_id, preparation_id)
+
+
+def test_provenance_refuses_the_wrong_identity_generation(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    preparation_id = _author(api, draft_id, [item])
+    snapshot = _legacy_snapshot(container, prep, draft_id, account, [item])
+    _assert_provenance_refused(
+        container, snapshot.registration_snapshot_id, preparation_id, generation=1
+    )
+
+
 def test_authored_freeze_is_atomic_across_snapshot_provenance_and_intent(
     api: TestClient,
     container: Container,
@@ -865,15 +1018,6 @@ def test_first_create_copy_comes_from_the_linked_revision_and_is_reused(
     account: str,
     prep: Preparation,
 ) -> None:
-    prep.policies.put(
-        target(
-            account,
-            duplicate_proof_required=False,
-            asset_policy=AssetPolicy(
-                profile="asset-profile-test-1", provider_asset_identity_required=False
-            ),
-        )
-    )
     item = ready_item(container, sources, "1234")
     draft_id = draft(container.registrations, account, [item])
     preparation_id = api.post(
@@ -886,7 +1030,20 @@ def test_first_create_copy_comes_from_the_linked_revision_and_is_reused(
         },
         headers=CLIENT,
     ).json()["preparation_id"]
-    frozen = container.registration_preparations.freeze(preparation_id, actor=OPERATOR)
+    authoring = container.registration_preparations
+    candidate = authoring.evaluate(preparation_id)
+    from tests.register_support import no_match, prepared
+
+    evidence = no_match(candidate)
+    ready = authoring.evaluate(preparation_id, duplicate_evidence=evidence)
+    frozen = authoring.freeze(
+        preparation_id,
+        actor=OPERATOR,
+        duplicate_evidence=evidence,
+        prepared_assets=prepared(ready),
+    )
+    lookup = FakeDuplicateLookup()
+    authoring._duplicate_lookup = lookup
     accepted = api.post(
         f"/api/v1/register/intents/{frozen.intent.intent_id}/create", json={}, headers=CLIENT
     )
@@ -894,6 +1051,8 @@ def test_first_create_copy_comes_from_the_linked_revision_and_is_reused(
     payload = container.jobs.payload(accepted.json()["job_id"])
     request_copy, _assets = decode_send_request(payload)
     assert request_copy.unit.item_ids == (item.item_id,)
+    assert request_copy.duplicate_evidence == evidence
+    assert lookup.calls == [(account, frozen.snapshot.listing_identity)]
     before = dict(payload)
     api.post(
         f"/api/v1/register/preparations/{preparation_id}",
@@ -905,6 +1064,63 @@ def test_first_create_copy_comes_from_the_linked_revision_and_is_reused(
         headers=CLIENT,
     )
     assert container.jobs.payload(accepted.json()["job_id"]) == before
+
+
+@pytest.mark.parametrize(
+    ("lookup_kwargs", "reason"),
+    (
+        ({"available_result": False}, "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"),
+        ({"return_none": True}, "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"),
+        ({"evidence_digest": "f" * 64}, "REGISTER_FIRST_CREATE_INPUTS_STALE"),
+        ({"listing_identity": "wrong-listing"}, "REGISTER_FIRST_CREATE_INPUTS_NOT_READY"),
+    ),
+)
+def test_first_create_refuses_unavailable_missing_stale_or_mismatched_duplicate_evidence(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+    lookup_kwargs: dict[str, Any],
+    reason: str,
+) -> None:
+    from tests.register_support import no_match, prepared
+
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(container.registrations, account, [item])
+    preparation_id = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id],
+            "actor": OPERATOR,
+            "inputs": _inputs(item),
+        },
+        headers=CLIENT,
+    ).json()["preparation_id"]
+    authoring = container.registration_preparations
+    candidate = authoring.evaluate(preparation_id)
+    evidence = no_match(candidate)
+    ready = authoring.evaluate(preparation_id, duplicate_evidence=evidence)
+    frozen = authoring.freeze(
+        preparation_id,
+        actor=OPERATOR,
+        duplicate_evidence=evidence,
+        prepared_assets=prepared(ready),
+    )
+    lookup = FakeDuplicateLookup(**lookup_kwargs)
+    authoring._duplicate_lookup = lookup
+
+    refused = api.post(
+        f"/api/v1/register/intents/{frozen.intent.intent_id}/create", json={}, headers=CLIENT
+    )
+    assert refused.status_code >= 400
+    assert refused.json()["error"]["code"] == reason
+    assert container.jobs.count(job_type_prefix="register.create") == 0
+    if lookup.available_result:
+        assert lookup.calls == [(account, frozen.snapshot.listing_identity)]
+    else:
+        assert lookup.calls == []
 
 
 def test_authoring_metadata_comes_from_current_server_policy(
@@ -927,6 +1143,41 @@ def test_authoring_metadata_comes_from_current_server_policy(
     )
     assert body["detail_composition_revision"] == "detail-test-1"
     assert {field["key"] for field in body["attributes"]} == {"brand", "color"}
+    assert (body["options_supported"], body["max_options"], body["max_option_dimensions"]) == (
+        True,
+        5,
+        1,
+    )
+
+
+def test_multi_item_options_are_authored_as_inputs_and_validated_only_by_preflight(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    items = [ready_item(container, sources, source) for source in ("1234", "5678")]
+    draft_id = draft(container.registrations, account, items)
+    options = {
+        items[0].item_id: {"색상": "검정"},
+        items[1].item_id: {"색상": "흰색"},
+    }
+    created = api.post(
+        "/api/v1/register/preparations",
+        json={
+            "draft_id": draft_id,
+            "item_ids": [item.item_id for item in items],
+            "actor": OPERATOR,
+            "inputs": _inputs(items[0], options=options),
+        },
+        headers=CLIENT,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["inputs"]["options"] == options
+    unit = next(u for u in _get(api, OVERVIEW)["units"] if u["draft_id"] == draft_id)
+    assert "OPTION_VALUE_MISSING" not in unit["preflight"]["reason_codes"]
+    assert "OPTION_DIMENSIONS_INCONSISTENT" not in unit["preflight"]["reason_codes"]
 
 
 def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(

@@ -56,6 +56,7 @@ from app.register.preparation import (
     UnitRequest,
     resolve_unit,
 )
+from app.register.provider import DuplicateLookupSource
 from app.register.sanitize import require_clean
 from app.register.store import (
     IntentRecord,
@@ -71,6 +72,7 @@ logger = logging.getLogger("icbm.register.authoring")
 # The durable shape of one authored revision. A revision of another version is refused rather than
 # guessed at, exactly as the send request's codec refuses one.
 PREPARATION_VERSION = "registration-preparation/v1"
+DUPLICATE_EVIDENCE_UNAVAILABLE = "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"
 
 
 @dataclass(frozen=True)
@@ -225,10 +227,12 @@ class RegistrationPreparationService:
         registrations: RegistrationStore,
         preflight: RegistrationPreflightService,
         builder: RegistrationSnapshotBuilder,
+        duplicate_lookup: DuplicateLookupSource | None = None,
     ) -> None:
         self._registrations = registrations
         self._preflight = preflight
         self._builder = builder
+        self._duplicate_lookup = duplicate_lookup
 
     # ------------------------------------------------------------------ authoring
 
@@ -416,6 +420,12 @@ class RegistrationPreparationService:
         candidate = self._preflight.candidate(
             request, identity_generation=provenance.identity_generation
         )
+        if candidate.resolved.target.duplicate_proof_required:
+            evidence = self._current_duplicate_evidence(candidate)
+            request = preflight_request(preparation, revision, duplicate_evidence=evidence)
+            candidate = self._preflight.candidate(
+                request, identity_generation=provenance.identity_generation
+            )
         prepared_assets = _prepared_assets(
             self._registrations.snapshot_payload(registration_snapshot_id) or {},
             candidate.candidate_fingerprint,
@@ -450,6 +460,31 @@ class RegistrationPreparationService:
         if draft is None:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
         return draft.draft_revision
+
+    def _current_duplicate_evidence(self, candidate: PreflightResult) -> DuplicateEvidence:
+        """Read current evidence through the provider-neutral owner seam, or fail closed.
+
+        The production SmartStore implementation reports unavailable while product search is not
+        adopted, so this method performs no provider call in that state. Preparations never store
+        the outcome; the execution copy only uses this current read to reproduce the Snapshot.
+        """
+        source = self._duplicate_lookup
+        if source is None or not source.available():
+            raise RegistrationConflictError(
+                DUPLICATE_EVIDENCE_UNAVAILABLE,
+                "current duplicate evidence is unavailable for the first CREATE copy",
+            )
+        unit = candidate.resolved
+        evidence = source.evidence(
+            marketplace_account_id=unit.marketplace_account_id,
+            listing_identity=unit.listing_identity,
+        )
+        if evidence is None:
+            raise RegistrationConflictError(
+                DUPLICATE_EVIDENCE_UNAVAILABLE,
+                "the duplicate-evidence owner returned no current evidence",
+            )
+        return evidence
 
     @staticmethod
     def _correlation(correlation_id: str | None) -> str:

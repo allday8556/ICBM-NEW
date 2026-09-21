@@ -276,24 +276,91 @@ def test_an_operator_authors_a_preparation_in_the_screen(
         # The operator authors the unit in the screen, and the server keeps it.
         page.fill("input[name='category_id']", CATEGORY)
         page.fill("input[name='name']", "브라우저가 저장한 상품명")
-        page.fill("input[name='brand']", "브랜드")
-        page.fill("input[name='manufacturer']", "제조사")
-        page.fill("input[name='origin']", "상세페이지 참고")
+        page.fill("input[name='attribute.brand']", "브랜드")
+        page.fill("input[name='notice.manufacturer']", "제조사")
+        reference = page.locator("input[data-detail-reference='notice'][data-field-key='origin']")
+        reference.check()
+        assert (
+            page.locator("input[data-detail-reference='attribute'][data-field-key='brand']").count()
+            == 0
+        )
+        assert page.locator("input[name='notice.origin']").is_disabled()
         page.fill("textarea[name='detail_body']", "상세 본문")
         page.locator("button[data-action='SAVE_PREPARATION']").first.click()
-        page.wait_for_selector(".register-canary", timeout=15_000)
+        page.wait_for_function(
+            "() => document.querySelector('.register-authoring')?.dataset.preparation !== ''"
+        )
         assert writes == [("POST", "/api/v1/register/preparations")]
         # A reload rebuilds the same authored inputs from the durable rows.
         stored = container.registrations.preparations_of_draft(draft_id)
         assert len(stored) == 1 and stored[0].current.revision_no == 1
+        assert stored[0].current.listing["notices"]["origin"] == {
+            "detail_page_reference": True,
+            "provenance": "OPERATOR_CONFIRMED",
+            "value": "",
+        }
         page.reload()
         page.wait_for_selector(".register-canary", timeout=15_000)
         saved = page.locator(f".register-authoring[data-preparation='{stored[0].preparation_id}']")
         assert saved.count() == 1
         assert saved.locator("input[name='name']").input_value() == "브라우저가 저장한 상품명"
+        assert saved.locator(
+            "input[data-detail-reference='notice'][data-field-key='origin']"
+        ).is_checked()
         # The server evaluated those inputs, with no CREATE job anywhere.
         assert page.locator(".register-preflight[data-preflight='CANDIDATE']").count() >= 0
         assert container.jobs.count(job_type_prefix="register.create") == 0
+
+
+def test_the_screen_authors_each_item_of_a_multi_item_option_unit(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    from tests.register_support import draft, ready_item
+
+    items = [ready_item(container, sources, source) for source in ("1234", "5678")]
+    draft_id = draft(container.registrations, account, items)
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        unit = page.locator(f".register-unit[data-draft='{draft_id}']")
+        unit.locator("input[name='category_id']").fill(CATEGORY)
+        unit.locator("input[name='name']").fill("옵션 상품")
+        unit.locator("input[name='attribute.brand']").fill("브랜드")
+        unit.locator("input[name='notice.manufacturer']").fill("제조사")
+        unit.locator("input[data-detail-reference='notice'][data-field-key='origin']").check()
+        unit.locator("textarea[name='detail_body']").fill("상세 본문")
+        unit.locator("input[data-option-dimension]").fill("색상")
+        unit.locator(f"input[data-option-item='{items[0].item_id}']").fill("검정")
+        unit.locator(f"input[data-option-item='{items[1].item_id}']").fill("흰색")
+        unit.locator("button[data-action='SAVE_PREPARATION']").click()
+        page.wait_for_function(
+            "() => document.querySelector('.register-authoring')?.dataset.preparation !== ''"
+        )
+
+        stored = container.registrations.preparations_of_draft(draft_id)
+        assert len(stored) == 1
+        assert stored[0].current.listing["options"] == {
+            items[0].item_id: {"색상": "검정"},
+            items[1].item_id: {"색상": "흰색"},
+        }
+        result = container.registration_preparations.evaluate(stored[0].preparation_id)
+        assert "OPTION_VALUE_MISSING" not in result.codes
+        assert "OPTION_DIMENSIONS_INCONSISTENT" not in result.codes
+        page.reload()
+        saved = page.locator(f".register-authoring[data-preparation='{stored[0].preparation_id}']")
+        saved.locator("input[data-option-dimension]").wait_for(timeout=15_000)
+        assert saved.locator("input[data-option-dimension]").input_value() == "색상"
+        assert (
+            saved.locator(f"input[data-option-item='{items[0].item_id}']").input_value() == "검정"
+        )
+        assert (
+            saved.locator(f"input[data-option-item='{items[1].item_id}']").input_value() == "흰색"
+        )
+        assert writes == [("POST", "/api/v1/register/preparations")]
 
 
 def test_the_page_keeps_no_registration_state_of_its_own(

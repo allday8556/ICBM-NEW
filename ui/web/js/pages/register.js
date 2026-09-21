@@ -215,24 +215,104 @@ function authoringForm(unit, onDone) {
   const categoryInput = field('카테고리', 'category_id', inputs.category?.category_id);
   const categoryControl = categoryInput.querySelector('input');
   const dynamicFields = h('div', { class: 'register-authoring-fields' });
+  const optionFields = h('div', { class: 'register-option-fields' });
+  const fieldControls = new Map();
   let metadata = null;
+
+  function authoredField(rule, kind, current) {
+    const control = field(rule.required ? `${rule.key} (필수)` : rule.key,
+      `${kind}.${rule.key}`, current?.value);
+    const input = control.querySelector('input');
+    let reference = null;
+    if (rule.detail_page_reference_allowed) {
+      reference = h('input', {
+        type: 'checkbox',
+        'data-detail-reference': kind,
+        'data-field-key': rule.key,
+        'aria-label': `${rule.key} 상세페이지 참조`,
+      });
+      reference.checked = current?.detail_page_reference === true;
+      const sync = () => {
+        input.disabled = reference.checked;
+        input.required = rule.required && !reference.checked;
+        if (reference.checked) input.value = '';
+      };
+      reference.addEventListener('change', sync);
+      control.append(h('span', { class: 'mini' }, reference, ' 상세페이지 참조'));
+      sync();
+    } else {
+      input.required = rule.required;
+    }
+    fieldControls.set(`${kind}:${rule.key}`, { input, reference, current });
+    return control;
+  }
+
+  function optionRow(dimension, values) {
+    const dimensionInput = h('input', {
+      value: dimension,
+      placeholder: '예: 색상, 사이즈',
+      'data-option-dimension': 'true',
+    });
+    return h(
+      'div',
+      { class: 'register-option-row' },
+      h('label', { class: 'kv' }, h('span', {}, '옵션명'), dimensionInput),
+      ...unit.items.map((item) => h(
+        'label',
+        { class: 'kv' },
+        h('span', {}, `Item ${item.item_id}`),
+        h('input', {
+          value: values[item.item_id] ?? '',
+          'data-option-item': item.item_id,
+          placeholder: '옵션값',
+        }),
+      )),
+    );
+  }
+
+  function renderOptions(found) {
+    const existing = inputs.options ?? {};
+    const dimensions = [...new Set(
+      Object.values(existing).flatMap((values) => Object.keys(values)),
+    )].sort();
+    optionFields.replaceChildren();
+    if (unit.items.length <= 1 || (!found.options_supported && dimensions.length === 0)) return;
+    const rows = dimensions.length ? dimensions : [''];
+    const valuesFor = (dimension) => Object.fromEntries(
+      unit.items.map((item) => [item.item_id, existing[item.item_id]?.[dimension] ?? '']),
+    );
+    const rowHost = h('div', { class: 'register-option-rows' },
+      ...rows.map((dimension) => optionRow(dimension, valuesFor(dimension))));
+    optionFields.append(
+      h('div', { class: 'supplier-head-row' }, h('b', {}, '옵션 입력'),
+        chip(`${unit.items.length}/${found.max_options} Items`)),
+      rowHost,
+    );
+    if (found.options_supported) {
+      const add = h('button', {
+        type: 'button', class: 'btn', 'data-action': 'ADD_OPTION_DIMENSION',
+      }, '옵션 항목 추가');
+      add.disabled = rowHost.children.length >= found.max_option_dimensions;
+      add.addEventListener('click', () => {
+        rowHost.append(optionRow('', {}));
+        add.disabled = rowHost.children.length >= found.max_option_dimensions;
+      });
+      optionFields.append(add);
+    }
+  }
 
   function renderMetadata(found) {
     metadata = found;
+    fieldControls.clear();
     const controls = [];
     for (const rule of found.attributes) {
-      const control = field(rule.required ? `${rule.key} (필수)` : rule.key, rule.key,
-        inputs.attributes?.[rule.key]?.value);
-      control.querySelector('input').required = rule.required;
-      controls.push(control);
+      controls.push(authoredField(rule, 'attribute', inputs.attributes?.[rule.key]));
     }
     for (const rule of found.notice_fields) {
-      const control = field(rule.required ? `${rule.key} (필수)` : rule.key, rule.key,
-        inputs.notices?.[rule.key]?.value);
-      control.querySelector('input').required = rule.required;
-      controls.push(control);
+      controls.push(authoredField(rule, 'notice', inputs.notices?.[rule.key]));
     }
     dynamicFields.replaceChildren(...controls);
+    renderOptions(found);
   }
 
   async function loadMetadata() {
@@ -257,6 +337,7 @@ function authoringForm(unit, onDone) {
     categoryInput,
     field('상품명', 'name', inputs.name?.value),
     dynamicFields,
+    optionFields,
     field('상세 본문', 'detail_body', inputs.detail_body, 'textarea'),
     h(
       'button',
@@ -281,16 +362,34 @@ function authoringForm(unit, onDone) {
     try {
       const approved = await loadMetadata();
       const values = Object.fromEntries(new FormData(form).entries());
-      const attributes = Object.fromEntries(
-        (approved?.attributes ?? [])
-          .filter((rule) => values[rule.key])
-          .map((rule) => [rule.key, { value: values[rule.key] }]),
-      );
-      const notices = Object.fromEntries(
-        (approved?.notice_fields ?? [])
-          .filter((rule) => values[rule.key])
-          .map((rule) => [rule.key, { value: values[rule.key] }]),
-      );
+      const collectFields = (kind, rules) => Object.fromEntries(rules.flatMap((rule) => {
+        const control = fieldControls.get(`${kind}:${rule.key}`);
+        if (control?.reference?.checked) {
+          return [[rule.key, {
+            detail_page_reference: true,
+            provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
+          }]];
+        }
+        const value = control?.input.value.trim() ?? '';
+        return value ? [[rule.key, {
+          value,
+          provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
+        }]] : [];
+      }));
+      const attributes = collectFields('attribute', approved?.attributes ?? []);
+      const notices = collectFields('notice', approved?.notice_fields ?? []);
+      const options = {};
+      for (const row of optionFields.querySelectorAll('.register-option-row')) {
+        const dimension = row.querySelector('[data-option-dimension]').value.trim();
+        if (!dimension) continue;
+        for (const input of row.querySelectorAll('[data-option-item]')) {
+          const value = input.value.trim();
+          if (!value) continue;
+          const itemId = input.getAttribute('data-option-item');
+          options[itemId] ??= {};
+          options[itemId][dimension] = value;
+        }
+      }
       const body = {
         actor: OPERATOR,
         item_ids: unit.items.map((item) => item.item_id),
@@ -307,7 +406,7 @@ function authoringForm(unit, onDone) {
           tags: inputs.tags ?? [],
           attributes,
           notices,
-          options: inputs.options ?? {},
+          options,
           detail_composition_revision: approved?.detail_composition_revision ?? null,
           detail_body: values.detail_body || null,
           detail_sections: inputs.detail_sections ?? ['BODY'],

@@ -79,6 +79,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreReadback,
     SmartStoreReconcileLookup,
 )
+from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import SupplierCollection
@@ -313,6 +314,7 @@ def build_container(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
+        duplicate_lookup=SmartStoreDuplicateLookup(),
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so

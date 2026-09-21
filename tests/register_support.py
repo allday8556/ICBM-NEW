@@ -7,7 +7,7 @@ capability is a fixed read model.
 """
 
 import contextlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -139,6 +139,38 @@ class FakeCapability:
             error_class=None,
             remote_outcome=None,
             updated_at=self.updated_at,
+        )
+
+
+@dataclass
+class FakeDuplicateLookup:
+    """Provider-neutral deterministic evidence for first-copy tests; it performs no I/O."""
+
+    available_result: bool = True
+    return_none: bool = False
+    evidence_digest: str = "e" * 64
+    marketplace_key: str = MARKET
+    marketplace_account_id: str | None = None
+    listing_identity: str | None = None
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def available(self) -> bool:
+        return self.available_result
+
+    def evidence(
+        self, *, marketplace_account_id: str, listing_identity: str
+    ) -> DuplicateEvidence | None:
+        self.calls.append((marketplace_account_id, listing_identity))
+        if self.return_none:
+            return None
+        return DuplicateEvidence(
+            marketplace_key=self.marketplace_key,
+            marketplace_account_id=self.marketplace_account_id or marketplace_account_id,
+            listing_identity=self.listing_identity or listing_identity,
+            lookup_contract_version="lookup-test-1",
+            evidence_digest=self.evidence_digest,
+            verdict=DuplicateVerdict.NO_MATCH,
+            keys_checked=frozenset({DuplicateKeyKind.SELLER_CODE}),
         )
 
 

@@ -328,6 +328,9 @@ class RegisterService:
             notice_type=None if metadata.notice is None else metadata.notice.notice_type,
             attributes=fields(metadata.attributes),
             notice_fields=fields(() if metadata.notice is None else metadata.notice.fields),
+            options_supported=metadata.options.options_supported,
+            max_options=metadata.options.max_options,
+            max_option_dimensions=metadata.options.max_dimensions,
         )
 
     def evaluate_preparation(self, preparation_id: str) -> ActionResult:
