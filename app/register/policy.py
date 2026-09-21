@@ -137,6 +137,10 @@ class TargetPolicy:
     pricing_context: PricingContextInput
     sanitizer_profile_version: str
     asset_policy: AssetPolicy
+    # Server-owned authoring revisions exposed to the operator form. A deployment without them
+    # cannot author a category or detail by inventing a client-side revision label.
+    category_mapping_revision: str | None = None
+    detail_composition_revision: str | None = None
     templates: Mapping[str, str] = field(default_factory=dict)
     duplicate_proof_required: bool = True
     duplicate_lookup_keys: frozenset[DuplicateKeyKind] = frozenset({DuplicateKeyKind.SELLER_CODE})

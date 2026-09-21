@@ -19,12 +19,16 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.correlation import get_correlation_id, new_correlation_id
-from app.core.errors import NotFoundError
+from app.core.errors import InputValidationError, NotFoundError
+from app.products.image_model import ImageAssetKind
+from app.products.model import ReadinessStatus
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.contracts import AuthoredInputsView, FieldValueView
 from app.register.execution import (
@@ -35,7 +39,8 @@ from app.register.execution import (
     encode_detail,
     encode_field,
 )
-from app.register.model import sanitized_digest
+from app.register.model import RegistrationConflictError, sanitized_digest
+from app.register.payload import build_payload
 from app.register.policy import Provenance
 from app.register.preflight import RegistrationPreflightService
 from app.register.preparation import (
@@ -49,6 +54,7 @@ from app.register.preparation import (
     PreflightResult,
     PreparedAsset,
     UnitRequest,
+    resolve_unit,
 )
 from app.register.sanitize import require_clean
 from app.register.store import (
@@ -83,6 +89,14 @@ class FrozenUnit:
     snapshot: SnapshotRecord
     intent: IntentRecord
     preparation_revision_id: str
+
+
+@dataclass(frozen=True)
+class ExecutionCopy:
+    """The first CREATE job input reconstructed from immutable authored provenance."""
+
+    request: PreflightRequest
+    final: PreflightResult
 
 
 def encode_inputs(inputs: AuthoredInputs) -> PreparationInputs:
@@ -227,15 +241,35 @@ class RegistrationPreparationService:
         actor: str,
         correlation_id: str | None = None,
     ) -> PreparationRecord:
-        encoded = encode_inputs(inputs)
-        with self._registrations.transaction() as unit:
-            return unit.create_preparation(
-                draft_id,
-                item_ids=item_ids,
-                inputs=encoded,
-                created_by=actor,
-                correlation_id=self._correlation(correlation_id),
+        draft = self._registrations.draft(draft_id)
+        if draft is None:
+            raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
+        chosen, problems = resolve_unit(
+            draft.listing_shape, [item.item_id for item in draft.items], item_ids
+        )
+        if problems:
+            raise InputValidationError(
+                "REGISTER_PREPARATION_UNIT_INVALID",
+                "the requested Items do not form one provider-listing unit",
+                details={"reasons": [problem.code for problem in problems]},
             )
+        encoded = encode_inputs(inputs)
+        try:
+            with self._registrations.transaction() as unit:
+                return unit.create_preparation(
+                    draft_id,
+                    item_ids=chosen,
+                    inputs=encoded,
+                    created_by=actor,
+                    correlation_id=self._correlation(correlation_id),
+                )
+        except IntegrityError as exc:
+            if "registration_preparations.draft_id" not in str(exc):
+                raise
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_UNIT_EXISTS",
+                "this Draft unit already has a preparation",
+            ) from exc
 
     def update(
         self,
@@ -314,13 +348,16 @@ class RegistrationPreparationService:
             duplicate_evidence=duplicate_evidence,
         )
         final = self._preflight.final(request, prepared_assets)
-        snapshot = self._builder.freeze(
-            final,
-            created_by=actor,
-            correlation_id=correlation,
-            preparation_revision_id=revision.preparation_revision_id,
-        )
         with self._registrations.transaction() as unit:
+            # Snapshot, provenance, Batch and Intent are one commit. A failure at any point leaves
+            # none of them, so a restart never strands SNAPSHOT_FROZEN authoring work.
+            snapshot = self._builder.freeze(
+                final,
+                created_by=actor,
+                correlation_id=correlation,
+                preparation_revision_id=revision.preparation_revision_id,
+                registrations=unit,
+            )
             existing = unit.intent_of_snapshot(snapshot.registration_snapshot_id)
             if existing is not None:
                 return FrozenUnit(snapshot, existing, revision.preparation_revision_id)
@@ -338,6 +375,74 @@ class RegistrationPreparationService:
             )
         return FrozenUnit(snapshot, intent, revision.preparation_revision_id)
 
+    def execution_copy(self, registration_snapshot_id: str) -> ExecutionCopy:
+        """Build the first job copy from the exact revision that produced this Snapshot.
+
+        Current owner truth is evaluated at the Snapshot's pinned generation, then the resulting
+        fingerprint, listing identity and payload are compared with the immutable Snapshot. A
+        later preparation revision is never consulted.
+        """
+        snapshot = self._registrations.snapshot(registration_snapshot_id)
+        if snapshot is None:
+            raise NotFoundError("REGISTER_SNAPSHOT_NOT_FOUND", "the Snapshot does not exist")
+        provenance = self._registrations.snapshot_preparation(registration_snapshot_id)
+        if provenance is None:
+            raise RegistrationConflictError(
+                "REGISTER_SNAPSHOT_PROVENANCE_MISSING",
+                "the Snapshot has no authored preparation provenance",
+            )
+        preparation = self._registrations.preparation_of_revision(
+            provenance.preparation_revision_id
+        )
+        if preparation is None:
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_REVISION_NOT_FOUND",
+                "the Snapshot's authored revision no longer exists",
+            )
+        revision = next(
+            (
+                revision
+                for revision in preparation.revisions
+                if revision.preparation_revision_id == provenance.preparation_revision_id
+            ),
+            None,
+        )
+        if revision is None:
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_REVISION_NOT_FOUND",
+                "the Snapshot's authored revision no longer exists",
+            )
+        request = preflight_request(preparation, revision)
+        candidate = self._preflight.candidate(
+            request, identity_generation=provenance.identity_generation
+        )
+        prepared_assets = _prepared_assets(
+            self._registrations.snapshot_payload(registration_snapshot_id) or {},
+            candidate.candidate_fingerprint,
+        )
+        final = self._preflight.final(
+            request,
+            prepared_assets,
+            identity_generation=provenance.identity_generation,
+        )
+        if final.status is not ReadinessStatus.READY:
+            raise RegistrationConflictError(
+                "REGISTER_FIRST_CREATE_INPUTS_NOT_READY",
+                "current owner truth cannot reproduce the Snapshot's first CREATE inputs",
+                details={"status": final.status.value, "reasons": list(final.codes)},
+            )
+        outbound = build_payload(final)
+        if (
+            final.resolved.listing_identity != snapshot.listing_identity
+            or final.dependency_fingerprint != snapshot.preflight_fingerprint
+            or outbound.payload_digest != snapshot.payload_hash
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_FIRST_CREATE_INPUTS_STALE",
+                "current approved execution inputs do not match the immutable Snapshot",
+            )
+        return ExecutionCopy(request=request, final=final)
+
     # ------------------------------------------------------------------ helpers
 
     def _draft_revision(self, draft_id: str) -> int:
@@ -349,3 +454,25 @@ class RegistrationPreparationService:
     @staticmethod
     def _correlation(correlation_id: str | None) -> str:
         return correlation_id or get_correlation_id() or new_correlation_id()
+
+
+def _prepared_assets(
+    payload: Mapping[str, Any], candidate_fingerprint: str
+) -> tuple[PreparedAsset, ...]:
+    """Provider asset identities frozen in the Snapshot, rebound to the rechecked candidate."""
+    found: dict[tuple[str, str, str], PreparedAsset] = {}
+    for item in payload.get("items", ()):
+        for asset in item.get("publication_assets", ()):
+            provider_ref = asset.get("provider_asset_ref")
+            if provider_ref is None:
+                continue
+            prepared = PreparedAsset(
+                asset_kind=ImageAssetKind(asset["asset_kind"]),
+                sha256=asset["sha256"],
+                derivation_id=asset.get("derivation_id"),
+                asset_profile=asset["asset_profile"],
+                candidate_fingerprint=candidate_fingerprint,
+                provider_asset_ref=provider_ref,
+            )
+            found[prepared.key] = prepared
+    return tuple(found[key] for key in sorted(found))

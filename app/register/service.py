@@ -14,8 +14,8 @@ offers the read-back only; an `AUTH` pause is never offered an operator resume. 
 ignored every verdict could still not make the server act.
 
 A re-send carries the **frozen** request the durable job already holds
-(`registration-send-request/v1`), never rebuilt inputs: this owner has no authoring surface, and a
-first send is prepared by the owner that evaluated the preflight (PR-C/PR-E).
+(`registration-send-request/v1`), never rebuilt inputs. The first send copy is built once from the
+exact authored revision linked to the Snapshot and current owner truth, then every retry reuses it.
 """
 
 import logging
@@ -49,6 +49,8 @@ from app.register.contracts import (
     AssetView,
     AttemptView,
     AuthoredInputsView,
+    AuthoringFieldView,
+    AuthoringMetadataView,
     CategoryChoiceView,
     CategoryView,
     FieldStateView,
@@ -74,6 +76,9 @@ from app.register.execution import (
     frozen_unit_identity,
     queue_send_request,
     target_ref,
+)
+from app.register.execution import (
+    enqueue_create as enqueue_first_create,
 )
 from app.register.model import (
     OPERATOR_RESUMABLE,
@@ -103,7 +108,6 @@ NOT_SENDABLE = "REGISTER_INTENT_NOT_SENDABLE"
 JOB_QUEUED = "REGISTER_JOB_ALREADY_QUEUED"
 SCOPE_PAUSED = "REGISTER_SCOPE_PAUSED"
 BUDGET_EXHAUSTED = "REGISTER_FAILURE_BUDGET_EXHAUSTED"
-NO_SEND_REQUEST = "REGISTER_SEND_REQUEST_ABSENT"
 NOT_UNKNOWN = "REGISTER_NOT_UNKNOWN"
 NOT_APPLIED = "REGISTER_NOT_APPLIED"
 ALREADY_VERIFIED = "REGISTER_ALREADY_VERIFIED"
@@ -284,6 +288,48 @@ class RegisterService:
         """What is authored now, and the revisions behind it. A reload reads exactly this."""
         return _preparation_view(self._require_authoring().preparation(preparation_id))
 
+    def authoring_metadata(self, draft_id: str, category_id: str) -> AuthoringMetadataView:
+        """Reviewed category fields and authoring revisions from the server's current owners."""
+        store, preflight = self._require_store(), self._require_preflight()
+        draft = store.draft(draft_id)
+        if draft is None:
+            raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "no such registration draft")
+        target = preflight.target_policy(draft.marketplace_key, draft.marketplace_account_id)
+        if target is None:
+            raise AppError("REGISTER_TARGET_POLICY_MISSING", "the account has no target policy")
+        metadata = preflight.category_metadata(target.taxonomy_revision, category_id)
+        if metadata is None or not metadata.reviewed:
+            raise AppError(
+                "REGISTER_CATEGORY_METADATA_MISSING",
+                "the category has no reviewed metadata for the current taxonomy",
+            )
+        if not target.category_mapping_revision or not target.detail_composition_revision:
+            raise AppError(
+                "REGISTER_AUTHORING_POLICY_INCOMPLETE",
+                "the target policy has no approved authoring revisions",
+            )
+
+        def fields(rules: Sequence[Any]) -> tuple[AuthoringFieldView, ...]:
+            return tuple(
+                AuthoringFieldView(
+                    key=rule.key,
+                    required=rule.required,
+                    detail_page_reference_allowed=rule.detail_page_reference_allowed,
+                )
+                for rule in rules
+            )
+
+        return AuthoringMetadataView(
+            category_id=metadata.category_id,
+            mapping_revision=target.category_mapping_revision,
+            taxonomy_revision=target.taxonomy_revision,
+            metadata_revision=metadata.metadata_revision,
+            detail_composition_revision=target.detail_composition_revision,
+            notice_type=None if metadata.notice is None else metadata.notice.notice_type,
+            attributes=fields(metadata.attributes),
+            notice_fields=fields(() if metadata.notice is None else metadata.notice.fields),
+        )
+
     def evaluate_preparation(self, preparation_id: str) -> ActionResult:
         """Ask the preflight owner what these inputs are worth against current truth (§3).
 
@@ -328,9 +374,6 @@ class RegisterService:
         """
         store, jobs = self._require_store(), self._require_jobs()
         intent = self._require_intent(store, intent_id)
-        payload = self._send_request(intent_id)
-        if payload is None:
-            raise AppError(NO_SEND_REQUEST, "no frozen send request exists for this Intent")
         budget = self._budget(intent)
         if not budget.sends_allowed:
             raise AppError(
@@ -338,7 +381,18 @@ class RegisterService:
                 "this execution scope is stopped",
                 details=budget.canonical(),
             )
-        job_id = queue_send_request(jobs, store, intent_id=intent_id, payload=payload)
+        payload = self._send_request(intent_id)
+        if payload is None:
+            copy = self._require_authoring().execution_copy(intent.registration_snapshot_id)
+            job_id = enqueue_first_create(
+                jobs,
+                store,
+                intent_id=intent_id,
+                request=copy.request,
+                frozen=copy.final,
+            )
+        else:
+            job_id = queue_send_request(jobs, store, intent_id=intent_id, payload=payload)
         return ActionResult(
             action=RegisterAction.CREATE_ENQUEUE,
             intent_id=intent_id,
@@ -422,10 +476,15 @@ class RegisterService:
             frozen.append(self._frozen_unit(draft, snapshot, intent))
             if snapshot.draft_revision == draft.draft_revision:
                 covered.add(_unit_items(snapshot))
-        authored = {
-            tuple(sorted(record.current.item_ids)): record
-            for record in store.preparations_of_draft(draft.draft_id)
-        }
+        authored: dict[tuple[str, ...], PreparationRecord] = {}
+        for record in store.preparations_of_draft(draft.draft_id):
+            key = tuple(sorted(record.current.item_ids))
+            if key in authored:
+                raise AppError(
+                    "REGISTER_PREPARATION_UNIT_AMBIGUOUS",
+                    "more than one preparation owns the same provider-listing unit",
+                )
+            authored[key] = record
         drafted = [
             self._drafted_unit(draft, key, authored.get(key))
             for key in sorted(set(authored) | self._prospective_keys(draft))
@@ -594,6 +653,7 @@ class RegisterService:
         frozen: bool = False,
     ) -> tuple[ActionView, ...]:
         """What the server will accept for this unit now, each with its own reason code."""
+        create_reason = self._create_reason(intent, budget, binding, live_job)
         return (
             ActionView(
                 action=RegisterAction.EVALUATE,
@@ -607,8 +667,8 @@ class RegisterService:
             ),
             ActionView(
                 action=RegisterAction.CREATE_ENQUEUE,
-                enabled=self._create_reason(intent, budget, binding, live_job) is None,
-                reason_code=self._create_reason(intent, budget, binding, live_job),
+                enabled=create_reason is None,
+                reason_code=create_reason,
             ),
             ActionView(
                 action=RegisterAction.RECONCILE,
@@ -651,7 +711,10 @@ class RegisterService:
         if not budget.sends_allowed:
             return SCOPE_PAUSED if budget.paused_by is not None else BUDGET_EXHAUSTED
         if self._send_request(intent.intent_id) is None:
-            return NO_SEND_REQUEST
+            try:
+                self._require_authoring().execution_copy(intent.registration_snapshot_id)
+            except AppError as exc:
+                return exc.code
         return None
 
     @staticmethod
@@ -1017,6 +1080,11 @@ class RegisterService:
         if self._execution is None:  # pragma: no cover - the container always wires it
             raise NotFoundError("REGISTER_NOT_WIRED", "the execution owner is not wired")
         return self._execution
+
+    def _require_preflight(self) -> RegistrationPreflightService:
+        if self._preflight is None:  # pragma: no cover - the container always wires it
+            raise NotFoundError("REGISTER_NOT_WIRED", "the preflight owner is not wired")
+        return self._preflight
 
     def _require_authoring(self) -> RegistrationPreparationService:
         if self._authoring is None:  # pragma: no cover - the container always wires it

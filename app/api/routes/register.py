@@ -23,6 +23,7 @@ from app.register.canary import CanaryReadinessView
 from app.register.contracts import (
     ActionResult,
     AuthoredInputsView,
+    AuthoringMetadataView,
     PreparationView,
     RegisterOverview,
     UnitView,
@@ -100,6 +101,13 @@ def create_preparation(
 @router.get("/preparations/{preparation_id}")
 def preparation(container: ContainerDep, preparation_id: str) -> PreparationView:
     return container.register.preparation(preparation_id)
+
+
+@router.get("/drafts/{draft_id}/authoring-metadata/{category_id}")
+def authoring_metadata(
+    container: ContainerDep, draft_id: str, category_id: str
+) -> AuthoringMetadataView:
+    return container.register.authoring_metadata(draft_id, category_id)
 
 
 @router.post("/preparations/{preparation_id}")

@@ -34,7 +34,7 @@ from tests.integration.test_m5_register_execution import (
     prepare,
 )
 from tests.product_support import Collections
-from tests.register_support import MARKET, Preparation, establish, preparation
+from tests.register_support import CATEGORY, MARKET, Preparation, establish, preparation
 
 pytestmark = pytest.mark.integration
 
@@ -274,9 +274,11 @@ def test_an_operator_authors_a_preparation_in_the_screen(
         assert _action(page, "EVALUATE")["disabled"] is True
         assert _action(page, "FREEZE")["disabled"] is True
         # The operator authors the unit in the screen, and the server keeps it.
-        page.fill("input[name='category_id']", "cat-1")
+        page.fill("input[name='category_id']", CATEGORY)
         page.fill("input[name='name']", "브라우저가 저장한 상품명")
         page.fill("input[name='brand']", "브랜드")
+        page.fill("input[name='manufacturer']", "제조사")
+        page.fill("input[name='origin']", "상세페이지 참고")
         page.fill("textarea[name='detail_body']", "상세 본문")
         page.locator("button[data-action='SAVE_PREPARATION']").first.click()
         page.wait_for_selector(".register-canary", timeout=15_000)

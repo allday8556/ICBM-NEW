@@ -212,15 +212,51 @@ function field(label, name, value, type = 'input') {
 function authoringForm(unit, onDone) {
   const authored = unit.authored;
   const inputs = authored?.inputs ?? {};
+  const categoryInput = field('카테고리', 'category_id', inputs.category?.category_id);
+  const categoryControl = categoryInput.querySelector('input');
+  const dynamicFields = h('div', { class: 'register-authoring-fields' });
+  let metadata = null;
+
+  function renderMetadata(found) {
+    metadata = found;
+    const controls = [];
+    for (const rule of found.attributes) {
+      const control = field(rule.required ? `${rule.key} (필수)` : rule.key, rule.key,
+        inputs.attributes?.[rule.key]?.value);
+      control.querySelector('input').required = rule.required;
+      controls.push(control);
+    }
+    for (const rule of found.notice_fields) {
+      const control = field(rule.required ? `${rule.key} (필수)` : rule.key, rule.key,
+        inputs.notices?.[rule.key]?.value);
+      control.querySelector('input').required = rule.required;
+      controls.push(control);
+    }
+    dynamicFields.replaceChildren(...controls);
+  }
+
+  async function loadMetadata() {
+    const categoryId = categoryControl.value.trim();
+    if (!categoryId) {
+      metadata = null;
+      dynamicFields.replaceChildren();
+      return null;
+    }
+    if (metadata?.category_id === categoryId) return metadata;
+    const found = await getJson(
+      `/api/v1/register/drafts/${unit.draft_id}/authoring-metadata/${encodeURIComponent(categoryId)}`,
+    );
+    renderMetadata(found);
+    return found;
+  }
   const form = h(
     'form',
     { class: 'register-authoring', 'data-preparation': authored?.preparation_id ?? '' },
     h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
       authored ? chip(`리비전 ${authored.revision_no}`) : chip('미저장', 'warn')),
-    field('카테고리', 'category_id', inputs.category?.category_id),
+    categoryInput,
     field('상품명', 'name', inputs.name?.value),
-    field('브랜드', 'brand', inputs.attributes?.brand?.value),
-    field('제조사', 'manufacturer', inputs.notices?.manufacturer?.value),
+    dynamicFields,
     field('상세 본문', 'detail_body', inputs.detail_body, 'textarea'),
     h(
       'button',
@@ -233,32 +269,50 @@ function authoringForm(unit, onDone) {
       authored ? '준비 내용 저장' : '준비 내용 만들기',
     ),
   );
+  categoryControl.addEventListener('change', () => {
+    loadMetadata().catch((error) => {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+    });
+  });
+  if (inputs.category?.category_id) loadMetadata().catch(() => {});
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(form).entries());
-    const body = {
-      actor: OPERATOR,
-      item_ids: unit.items.map((item) => item.item_id),
-      inputs: {
-        category: values.category_id
-          ? {
-              category_id: values.category_id,
-              mapping_revision: inputs.category?.mapping_revision ?? 'operator',
-              taxonomy_revision: inputs.category?.taxonomy_revision ?? 'operator',
-              confirmation: 'OPERATOR_CONFIRMED',
-            }
-          : null,
-        name: values.name ? { value: values.name } : null,
-        tags: inputs.tags ?? [],
-        attributes: values.brand ? { brand: { value: values.brand } } : {},
-        notices: values.manufacturer ? { manufacturer: { value: values.manufacturer } } : {},
-        options: inputs.options ?? {},
-        detail_composition_revision: inputs.detail_composition_revision ?? 'operator',
-        detail_body: values.detail_body || null,
-        detail_sections: inputs.detail_sections ?? ['BODY'],
-      },
-    };
     try {
+      const approved = await loadMetadata();
+      const values = Object.fromEntries(new FormData(form).entries());
+      const attributes = Object.fromEntries(
+        (approved?.attributes ?? [])
+          .filter((rule) => values[rule.key])
+          .map((rule) => [rule.key, { value: values[rule.key] }]),
+      );
+      const notices = Object.fromEntries(
+        (approved?.notice_fields ?? [])
+          .filter((rule) => values[rule.key])
+          .map((rule) => [rule.key, { value: values[rule.key] }]),
+      );
+      const body = {
+        actor: OPERATOR,
+        item_ids: unit.items.map((item) => item.item_id),
+        inputs: {
+          category: approved
+            ? {
+                category_id: approved.category_id,
+                mapping_revision: approved.mapping_revision,
+                taxonomy_revision: approved.taxonomy_revision,
+                confirmation: 'OPERATOR_CONFIRMED',
+              }
+            : null,
+          name: values.name ? { value: values.name } : null,
+          tags: inputs.tags ?? [],
+          attributes,
+          notices,
+          options: inputs.options ?? {},
+          detail_composition_revision: approved?.detail_composition_revision ?? null,
+          detail_body: values.detail_body || null,
+          detail_sections: inputs.detail_sections ?? ['BODY'],
+        },
+      };
       if (authored) {
         await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}`, body);
       } else {

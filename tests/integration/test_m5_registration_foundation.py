@@ -1864,6 +1864,46 @@ def test_a_preparation_records_its_authored_inputs_and_keeps_every_revision(
     assert kinds == {"REGISTRATION_PREPARATION_RECORDED", "REGISTRATION_PREPARATION_REVISED"}
 
 
+def test_one_preparation_owns_a_draft_unit_and_its_membership_never_moves(
+    container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
+) -> None:
+    draft_id, item_id, preparation_id = _prepared_draft(container, config, sources, store)
+    with (
+        store.transaction() as unit,
+        pytest.raises(RegistrationConflictError, match="already has a preparation"),
+    ):
+        unit.create_preparation(
+            draft_id,
+            item_ids=[item_id],
+            inputs=_authored(fingerprint="d" * 64),
+            created_by=OPERATOR,
+            correlation_id=CID,
+        )
+    other = _priced(container, config, sources, "5678")
+    with store.transaction() as unit:
+        unit.add_draft_item(
+            draft_id,
+            other.item_id,
+            other.pricing_snapshot_id,
+            added_by=OPERATOR,
+            correlation_id=CID,
+        )
+    with (
+        store.transaction() as unit,
+        pytest.raises(RegistrationConflictError, match="original exact Item membership"),
+    ):
+        unit.revise_preparation(
+            preparation_id,
+            item_ids=[item_id, other.item_id],
+            inputs=_authored(fingerprint="e" * 64),
+            authored_by=OPERATOR,
+            correlation_id=CID,
+        )
+    assert len(store.preparations_of_draft(draft_id)) == 1
+    stored = store.preparation(preparation_id)
+    assert stored is not None and stored.current.item_ids == (item_id,)
+
+
 def test_an_authored_revision_is_never_edited_or_deleted(
     container: Container, config: AppConfig, sources: Collections, store: RegistrationStore
 ) -> None:
@@ -2033,8 +2073,10 @@ def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
             (MARKET, account_id, AT, AT),
         )
         connection.execute(
-            f"INSERT INTO {PREPARATIONS} VALUES ('prep-1', 'draft-1', ?, ?, 'o', ?)",
-            (MARKET, account_id, AT),
+            f"INSERT INTO {PREPARATIONS} (preparation_id, draft_id, marketplace_key,"
+            " marketplace_account_id, unit_membership_fingerprint, created_by, created_at)"
+            " VALUES ('prep-1', 'draft-1', ?, ?, ?, 'o', ?)",
+            (MARKET, account_id, "1" * 64, AT),
         )
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):

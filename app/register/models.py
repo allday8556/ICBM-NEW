@@ -715,7 +715,11 @@ class RegistrationPreparation(Base):
     __tablename__ = "registration_preparations"
     __table_args__ = (
         _account(),
+        UniqueConstraint("draft_id", "unit_membership_fingerprint"),
         CheckConstraint(_present("marketplace_key"), name="marketplace_key_present"),
+        CheckConstraint(
+            _hex64("unit_membership_fingerprint"), name="unit_membership_fingerprint_hex"
+        ),
         CheckConstraint(_present("created_by"), name="created_by_present"),
     )
 
@@ -723,6 +727,9 @@ class RegistrationPreparation(Base):
     draft_id: Mapped[str] = mapped_column(String(36), ForeignKey("registration_drafts.draft_id"))
     marketplace_key: Mapped[str] = mapped_column(String(40))
     marketplace_account_id: Mapped[str] = mapped_column(String(40))
+    # Immutable identity of the exact Item membership within this Draft. It is deliberately not
+    # a provider listing identity: it only gives the authoring owner one row per resolved unit.
+    unit_membership_fingerprint: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 

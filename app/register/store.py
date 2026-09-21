@@ -94,6 +94,7 @@ from app.register.models import (
     RegistrationSnapshot,
     RegistrationSnapshotPreparation,
 )
+from app.register.preparation import listing_identity as expected_listing_identity
 from app.register.sanitize import problems
 
 # ---------------------------------------------------------------- records
@@ -217,6 +218,7 @@ class PreparationRecord:
     draft_id: str
     marketplace_key: str
     marketplace_account_id: str
+    unit_membership_fingerprint: str
     created_by: str
     revisions: tuple[PreparationRevisionRecord, ...]
 
@@ -925,18 +927,33 @@ class RegistrationUnit:
         _require_text(created_by=created_by, correlation_id=correlation_id)
         draft = self._draft_row(draft_id)
         require_bound(self.session, draft.marketplace_key, draft.marketplace_account_id)
+        chosen = self._ordered_preparation_items(draft, item_ids)
+        membership = _unit_membership_fingerprint(chosen)
+        existing = self.session.scalar(
+            select(RegistrationPreparation).where(
+                RegistrationPreparation.draft_id == draft.draft_id,
+                RegistrationPreparation.unit_membership_fingerprint == membership,
+            )
+        )
+        if existing is not None:
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_UNIT_EXISTS",
+                "this Draft unit already has a preparation",
+                details={"preparation_id": existing.preparation_id},
+            )
         row = RegistrationPreparation(
             preparation_id=str(uuid.uuid4()),
             draft_id=draft.draft_id,
             marketplace_key=draft.marketplace_key,
             marketplace_account_id=draft.marketplace_account_id,
+            unit_membership_fingerprint=membership,
             created_by=created_by,
             created_at=self._clock.now(),
         )
         self.session.add(row)
         self.session.flush()
         revision = self._append_revision(
-            row, draft, item_ids, inputs, authored_by=created_by, correlation_id=correlation_id
+            row, draft, chosen, inputs, authored_by=created_by, correlation_id=correlation_id
         )
         self._event(
             AuditEventType.REGISTRATION_PREPARATION_RECORDED,
@@ -968,8 +985,26 @@ class RegistrationUnit:
         _require_text(authored_by=authored_by, correlation_id=correlation_id)
         row = self._preparation_row(preparation_id)
         draft = self._draft_row(row.draft_id)
+        chosen = self._ordered_preparation_items(draft, item_ids)
+        first = self._revision_items(
+            self.session.scalar(
+                select(RegistrationPreparationRevision.preparation_revision_id).where(
+                    RegistrationPreparationRevision.preparation_id == preparation_id,
+                    RegistrationPreparationRevision.revision_no == 1,
+                )
+            )
+            or ""
+        )
+        if (
+            chosen != first
+            or _unit_membership_fingerprint(chosen) != row.unit_membership_fingerprint
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_PREPARATION_UNIT_IMMUTABLE",
+                "a preparation revision must keep its original exact Item membership",
+            )
         revision = self._append_revision(
-            row, draft, item_ids, inputs, authored_by=authored_by, correlation_id=correlation_id
+            row, draft, chosen, inputs, authored_by=authored_by, correlation_id=correlation_id
         )
         self._event(
             AuditEventType.REGISTRATION_PREPARATION_REVISED,
@@ -996,17 +1031,7 @@ class RegistrationUnit:
         authored_by: str,
         correlation_id: str,
     ) -> "PreparationRevisionRecord":
-        chosen = list(dict.fromkeys(item_ids))
-        if not chosen:
-            raise InputValidationError(
-                "REGISTER_PREPARATION_EMPTY", "a preparation names at least one Item"
-            )
-        open_items = {row.item_id for row in self._open_items(draft.draft_id)}
-        if not set(chosen) <= open_items:
-            raise InputValidationError(
-                "REGISTER_PREPARATION_ITEMS",
-                "a preparation names open Items of its own Draft",
-            )
+        chosen = tuple(item_ids)
         revision = RegistrationPreparationRevision(
             preparation_revision_id=str(uuid.uuid4()),
             preparation_id=preparation.preparation_id,
@@ -1034,6 +1059,26 @@ class RegistrationUnit:
         self.session.flush()
         return _revision_record(revision, tuple(chosen))
 
+    def _ordered_preparation_items(
+        self, draft: RegistrationDraft, item_ids: Sequence[str]
+    ) -> tuple[str, ...]:
+        requested = tuple(item_ids)
+        if not requested:
+            raise InputValidationError(
+                "REGISTER_PREPARATION_EMPTY", "a preparation names at least one Item"
+            )
+        if len(set(requested)) != len(requested):
+            raise InputValidationError(
+                "REGISTER_PREPARATION_ITEMS", "a preparation cannot name an Item twice"
+            )
+        open_items = tuple(row.item_id for row in self._open_items(draft.draft_id))
+        if not set(requested) <= set(open_items):
+            raise InputValidationError(
+                "REGISTER_PREPARATION_ITEMS",
+                "a preparation names open Items of its own Draft",
+            )
+        return tuple(item_id for item_id in open_items if item_id in set(requested))
+
     def _next_revision_no(self, preparation_id: str) -> int:
         current = self.session.scalar(
             select(func.max(RegistrationPreparationRevision.revision_no)).where(
@@ -1055,6 +1100,34 @@ class RegistrationUnit:
         if revision is None:
             raise NotFoundError(
                 "REGISTER_PREPARATION_REVISION_NOT_FOUND", "the preparation revision does not exist"
+            )
+        snapshot = self.snapshot(registration_snapshot_id)
+        if snapshot is None:
+            raise NotFoundError("REGISTER_SNAPSHOT_NOT_FOUND", "the Snapshot does not exist")
+        preparation = self._preparation_row(revision.preparation_id)
+        revision_items = self._revision_items(preparation_revision_id)
+        snapshot_items = tuple(item.item_id for item in snapshot.items)
+        expected_identity = expected_listing_identity(
+            snapshot.marketplace_key,
+            snapshot.marketplace_account_id,
+            snapshot.draft_id,
+            (
+                (item.group_id_at_registration, item.composition_signature)
+                for item in snapshot.items
+            ),
+            identity_generation,
+        )
+        if (
+            snapshot.draft_id != preparation.draft_id
+            or snapshot.marketplace_key != preparation.marketplace_key
+            or snapshot.marketplace_account_id != preparation.marketplace_account_id
+            or snapshot.draft_revision != revision.draft_revision
+            or snapshot_items != revision_items
+            or snapshot.listing_identity != expected_identity
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_SNAPSHOT_PREPARATION_SCOPE_MISMATCH",
+                "the Snapshot was not produced by this exact preparation revision and generation",
             )
         self.session.add(
             RegistrationSnapshotPreparation(
@@ -1124,6 +1197,7 @@ class RegistrationUnit:
             draft_id=row.draft_id,
             marketplace_key=row.marketplace_key,
             marketplace_account_id=row.marketplace_account_id,
+            unit_membership_fingerprint=row.unit_membership_fingerprint,
             created_by=row.created_by,
             revisions=tuple(
                 _revision_record(revision, self._revision_items(revision.preparation_revision_id))
@@ -2383,6 +2457,13 @@ class RegistrationUnit:
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def _unit_membership_fingerprint(item_ids: Sequence[str]) -> str:
+    """Stable authoring-unit membership. This is never a marketplace listing identity."""
+    return sanitized_digest(
+        {"version": "registration-preparation-unit/v1", "item_ids": sorted(item_ids)}
+    )
 
 
 def _json(value: Mapping[str, Any] | list[Any]) -> str:

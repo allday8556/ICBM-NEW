@@ -196,6 +196,25 @@ class CategoryChoiceView(BaseModel):
     confirmation: str = "OPERATOR_CONFIRMED"
 
 
+class AuthoringFieldView(BaseModel):
+    key: str
+    required: bool
+    detail_page_reference_allowed: bool = False
+
+
+class AuthoringMetadataView(BaseModel):
+    """Server-owned revisions and reviewed fields for one category authoring form."""
+
+    category_id: str
+    mapping_revision: str
+    taxonomy_revision: str
+    metadata_revision: str
+    detail_composition_revision: str
+    notice_type: str | None = None
+    attributes: tuple[AuthoringFieldView, ...] = ()
+    notice_fields: tuple[AuthoringFieldView, ...] = ()
+
+
 class AuthoredInputsView(BaseModel):
     """What an operator authored for one provider-listing unit (§27).
 

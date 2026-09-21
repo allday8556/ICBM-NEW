@@ -108,9 +108,15 @@ def _create_preparations() -> None:
         sa.Column("draft_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
         sa.Column("marketplace_account_id", sa.String(length=40), nullable=False),
+        sa.Column("unit_membership_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("created_by", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         _check(PREPARATIONS, "marketplace_key <> ''", "marketplace_key_present"),
+        _check(
+            PREPARATIONS,
+            _hex64("unit_membership_fingerprint"),
+            "unit_membership_fingerprint_hex",
+        ),
         _check(PREPARATIONS, "created_by <> ''", "created_by_present"),
         sa.ForeignKeyConstraint(
             ["draft_id"],
@@ -123,6 +129,7 @@ def _create_preparations() -> None:
             name=op.f(f"fk_{PREPARATIONS}_marketplace_key_{ACCOUNTS}"),
         ),
         sa.PrimaryKeyConstraint("preparation_id", name=op.f(f"pk_{PREPARATIONS}")),
+        _unique(PREPARATIONS, "draft_id", "unit_membership_fingerprint"),
     )
 
 
@@ -268,7 +275,51 @@ def _install_triggers() -> None:
         ),
     )
     _immutable(ITEMS, f"an authored {ITEMS} row")
+    # Every later revision may contain only Items of the first revision. The store additionally
+    # requires the complete set before writing, so a preparation cannot migrate to another unit.
+    _trigger(
+        ITEMS,
+        "item_in_first_revision",
+        "INSERT",
+        _raise(
+            f"{ITEMS}: the Item is outside the preparation unit membership",
+            f"EXISTS (SELECT 1 FROM {REVISIONS} current"
+            " WHERE current.preparation_revision_id = NEW.preparation_revision_id"
+            " AND current.revision_no > 1)"
+            f" AND NOT EXISTS (SELECT 1 FROM {ITEMS} base"
+            f" JOIN {REVISIONS} first ON first.preparation_revision_id = base.preparation_revision_id"
+            f" JOIN {REVISIONS} current ON current.preparation_id = first.preparation_id"
+            " WHERE current.preparation_revision_id = NEW.preparation_revision_id"
+            " AND first.revision_no = 1 AND base.item_id = NEW.item_id)",
+        ),
+    )
     # One Snapshot has one provenance, recorded once: the Snapshot itself stays immutable.
+    _trigger(
+        LINKS,
+        "same_scope_and_membership",
+        "INSERT",
+        _raise(
+            f"{LINKS}: the Snapshot and preparation revision have different scope or Items",
+            f"NOT EXISTS (SELECT 1 FROM {SNAPSHOTS} s"
+            f" JOIN {REVISIONS} r ON r.preparation_revision_id = NEW.preparation_revision_id"
+            f" JOIN {PREPARATIONS} p ON p.preparation_id = r.preparation_id"
+            " WHERE s.registration_snapshot_id = NEW.registration_snapshot_id"
+            " AND s.draft_id = p.draft_id AND s.draft_revision = r.draft_revision"
+            " AND s.marketplace_key = p.marketplace_key"
+            " AND s.marketplace_account_id = p.marketplace_account_id"
+            " AND NOT EXISTS (SELECT 1 FROM registration_item_snapshots si"
+            " WHERE si.registration_snapshot_id = s.registration_snapshot_id"
+            f" AND NOT EXISTS (SELECT 1 FROM {ITEMS} pi"
+            " WHERE pi.preparation_revision_id = r.preparation_revision_id"
+            " AND pi.item_id = si.item_id))"
+            f" AND NOT EXISTS (SELECT 1 FROM {ITEMS} pi"
+            " WHERE pi.preparation_revision_id = r.preparation_revision_id"
+            " AND NOT EXISTS (SELECT 1 FROM registration_item_snapshots si"
+            " WHERE si.registration_snapshot_id = s.registration_snapshot_id"
+            " AND si.item_id = pi.item_id)))",
+        ),
+    )
+    # Created after the scope trigger so SQLite evaluates this cheaper revision-local guard first.
     _trigger(
         LINKS,
         "fingerprint_is_its_revision",
