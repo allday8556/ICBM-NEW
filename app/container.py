@@ -68,6 +68,7 @@ from app.register.target_policy import (
     DurableRegistrationPolicy,
     TargetPolicyService,
     TargetPolicyStore,
+    editable_surfaces,
 )
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
@@ -370,6 +371,7 @@ def build_container(
         operate=OperateService(),
         review=ReviewService(),
         execution_mode=execution_mode,
+        editable_surfaces=editable_surfaces(),
     )
     return Container(
         config=config,

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.connect.contracts import MarketplaceConnectionSummary, SupplierConnectionSummary
 from app.core.execution import ExecutionMode
+from app.register.target_policy import EditableSurface
 
 
 class ScreenKey(StrEnum):
@@ -132,7 +133,12 @@ SettingValue = str | int | float | bool | None
 class SettingsView(BaseModel):
     meta: ScreenMeta
     execution_mode: ExecutionMode
+    # Whether the general common/platform settings accept a save. They have no persistence
+    # contract, so this stays false; ``editable_surfaces`` names the surfaces that do.
     editable: bool
+    # The server-owned scope of what Settings can save (ADR-0015 §2): only the registration
+    # target policy, through its own contract. The UI renders this and decides nothing.
+    editable_surfaces: list[EditableSurface]
     marketplace_connections: list[MarketplaceConnectionSummary]
     supplier_connections: list[SupplierConnectionSummary]
     # Saved common/platform policy values keyed by setting id. Empty until a settings
