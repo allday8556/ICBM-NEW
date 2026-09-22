@@ -189,13 +189,21 @@ Collection writes append-oriented/revisioned `ProductFactsRevision` records. Nev
 
 ### 6.5 Marketplace CREATE
 
-Real CREATE uses `RegistrationAttempt` and deterministic reconciliation.
+Real CREATE uses `RegistrationAttempt`.
 
 If a CREATE result is unknown:
 
 - do not blindly retry CREATE
-- reconcile using the deterministic seller product code / marketplace read-back
+- reconcile with positive provider evidence under an adopted contract: a read-back, or a lookup whose key, uniqueness and completeness semantics are proven
 - only retry after proving no marketplace product was created
+
+The deterministic seller product code is ICBM's own correlation identity for a provider-listing unit (ADR-0014 §7). It is not a provider uniqueness guarantee, so it does not by itself make reconciliation deterministic:
+
+- a lookup that returns nothing is not proof that no product was created
+- an operator assertion is never the evidence
+- while no lookup contract with those semantics is adopted, an ambiguous CREATE stays `UNKNOWN` with a `REVIEW_REQUIRED` overlay and its conflict scope stays closed
+
+The current provider-evidence verdict is recorded in `docs/acceptance/M5.md` §9; never soften it in code or documents.
 
 ---
 
@@ -328,8 +336,10 @@ M1 — KM통상 CONNECT only                   ACCEPTED 2026-09-13 (Issue #7, PR
 M2 — SmartStore CONNECT                    ACCEPTED 2026-09-15 (Issue #46, PR #51, docs/acceptance/M2.md)
 M3 — KM통상 one-product COLLECT             ACCEPTED 2026-09-18 (Issue #52, ADR-0010, docs/acceptance/M3.md; bounded by its §2)
 M4 — canonical Product DB                  ACCEPTED 2026-09-19 (Issue #80, ADR-0013, PR #81–#87, docs/acceptance/M4.md; bounded by its §2)
-M5 — SmartStore REGISTER                   CURRENT (Issue #89; PR-A contract ADR-0014 → PR-B → PR-C → PR-D → PR-E → PR-F; each PR separately authorized)
+M5 — SmartStore REGISTER                   CURRENT (Issue #89; PR-A contract ADR-0014 → PR-B → PR-C → PR-D → PR-E → PR-F all merged, plus the #96 IMAGE UPLOAD amendment; each PR was separately authorized)
 ```
+
+Every M5 implementation PR is merged (#90–#96) and main is green. **That is not acceptance.** `docs/acceptance/M5.md` stays `PENDING` and records no acceptance run; product CREATE and the duplicate-lookup search stay `NOT_ADOPTED` after the provider-evidence review closed `INSUFFICIENT` (Issue #89 `5768312853`, `5768347233`); `product_registration.write` stays `UNVERIFIED`; execution stays `DRY_RUN`; a real canary is `BLOCKED`. The owner and application-path gaps that still separate this from a runnable vertical are listed in `ROADMAP.md` §14 and `docs/acceptance/M5.md` §9; none of them may be closed without its own authorization.
 
 The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.
 
@@ -376,7 +386,7 @@ Additional locations:
 | `ROADMAP-ADDITIONS-BY-CLAUDE.md` | Claude review proposal; not binding by itself |
 | `docs/review/` | Claude drafts/proposals awaiting architecture review |
 | `docs/acceptance/` | Durable acceptance evidence |
-| `docs/GLOSSARY.md` | Canonical field and concept names (accepted in ARCHITECT_REVIEW D3; not created yet) |
+| `docs/GLOSSARY.md` | Canonical field and concept names (accepted in ARCHITECT_REVIEW D3); read it before naming an identifier or a state |
 | `ui/prototypes/` | Standalone UI prototypes; only `docs/UI_SOURCE_OF_TRUTH.md` names the current one |
 
 If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing.

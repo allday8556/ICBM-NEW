@@ -703,15 +703,55 @@ Accepted so far:
 
 Next, in order:
 
-1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12; Issue #89). The PRs, in order:
-   - PR-A: contract (`docs/adr/0014-smartstore-register-idempotency-readback.md`);
-   - PR-B: registration foundation and migrations;
-   - PR-C: preflight and the payload Snapshot builder;
-   - PR-D: SmartStore endpoint adoption, typed adapter and read-back normalizer;
-   - PR-E: idempotent execution, reconcile and the durable job;
-   - PR-F: the M5 acceptance harness and the bounded real canary campaign.
+1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12; Issue #89). Each PR was separately authorized in GitHub, and **all of them are merged**. This is implementation history, not acceptance:
 
-   Each PR needs its own authorization in GitHub. No real SmartStore write is authorized until the user authorizes a bounded canary scope.
-2. The rest of the first single-product vertical (M6 → M6.5, §12).
+   | PR | what it landed |
+   | --- | --- |
+   | PR-A #90 | the contract, `docs/adr/0014-smartstore-register-idempotency-readback.md` |
+   | PR-B #91 | the registration foundation and migration 0016 |
+   | PR-C #92 | the derived preflight and the deterministic Snapshot builder |
+   | PR-D #93 | the two SmartStore product read-back adoptions, the typed REGISTER adapter and the read-back normalizer |
+   | PR-E #94 | idempotent execution, reconcile, the durable job and the execution-scope send brake (migration 0017) |
+   | PR-F #95 | the offline acceptance harness, the server-owned registration surface, derived canary readiness and the durable preparation owner (migration 0018) |
+   | #96 | the bounded IMAGE UPLOAD adoption amendment (ADR-0014 §17.1) |
+
+   **PR-F delivered the offline harness only.** The bounded real canary campaign it was once listed beside was not delivered and is not authorized. At the current main the canary is `BLOCKED`: product CREATE and the duplicate-lookup search stay `NOT_ADOPTED` after the provider-evidence review closed `INSUFFICIENT` (Issue #89 `5768312853`, `5768347233`), `product_registration.write` stays `UNVERIFIED`, execution stays `DRY_RUN`, and the measured outbound marketplace mutation count is 0.
+
+   M5 is accepted only by an acceptance run on the exact merged main SHA, recorded in `docs/acceptance/M5.md` and accepted by the architect. That document stays `PENDING`.
+
+2. The owner and application-path gaps below, each separately authorized, before the first vertical can run end to end.
+3. The rest of the first single-product vertical (M6 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
+
+## 14.1 Gaps between the merged code and a runnable vertical
+
+Merged owners are not an operable path. These gaps are recorded facts at the current main, not work in progress; each needs its own authorization, and none of them is started:
+
+| gap | what exists | what is missing |
+| --- | --- | --- |
+| registration category metadata | the `RegistrationMetadataSource` contract | production wiring binds an empty `StaticRegistrationMetadata()`, so no category, attribute or notice metadata reaches the preflight, which answers `CATEGORY_METADATA_MISSING` and no unit can become READY |
+| registration target policy | the `TargetPolicy` contract and its preflight rules | production wiring binds an empty `StaticRegistrationPolicy()`, and Settings can store no policy, so the preflight blocks with `REGISTER_TARGET_POLICY_MISSING` |
+| Draft creation from the product DB | `RegistrationStore.create_draft()` | no API route, service command or screen turns a chosen canonical product into a `RegistrationDraft` |
+| pricing snapshot creation and pinning | the M4 pricing owner and per-context snapshots | no command path computes a price, creates the snapshot and pins it to a Draft from the product DB or the UI |
+| product DB workflow | two read-by-identity product endpoints | no list, search, pagination, detail or registration-target selection; the screen is a count-oriented shell |
+| COLLECT submission | `POST /api/v1/collect/collections` | the COLLECT screen never calls it, so a collection cannot be started from the UI; the DB screen's empty-state link leads to that screen and therefore to no submit path either |
+| Settings persistence | SmartStore credential, account and capability actions are wired | the general policy fields and the save bar reach no write contract, which is why the target policy above cannot be stored |
+| ReviewItem | the `ReviewKind` contract and the screen counters | no table, no producer and no persistence; `open_counts()` returns zero for every kind although M3 already produces `REVIEW_REQUIRED` truth |
+| ComplianceGate | the `PASS / REVIEW_REQUIRED / BLOCKED` contract (`docs/ARCHITECTURE.md` §7) | no production owner decides it; regulated categories may not be claimed as automatically registrable, and the first canary uses a non-regulated product |
+| LIVE authorization | the two-mode execution contract, `DRY_RUN` and `LIVE` | the execution-mode owner still enforces `M0_DRY_RUN_ONLY` and denies LIVE with `M0_LIVE_FORBIDDEN`; the contract that would replace it does not exist |
+
+## 14.2 Preconditions for the first LIVE write
+
+Before any real marketplace write, and independently of endpoint adoption:
+
+- a **bounded LIVE authorization contract** (§14.1) and the user's explicit scope approval;
+- **provider evidence that resolves the CREATE and reconcile blockers** (Issue #89 `5768312853`): an official CREATE idempotency or ambiguous-outcome replay-safety guarantee, a deterministic account-scoped lookup with proven uniqueness and completeness, and read-after-write freshness that makes a zero-result lookup authoritative;
+- a **ComplianceGate owner**, or a canary product outside every regulated category;
+- a proven **backup and restore drill** of the canonical data root;
+- a **complete evidence-retention policy**, end to end, over sanitized provider evidence;
+- a **visual and responsive acceptance gate over populated UI state**. The current UI tests are functional wiring tests driven through Playwright; no visual-regression or responsive acceptance evidence over populated screens exists.
+
+## 14.3 Before any horizontal supplier expansion
+
+The implemented source and pricing schema is **KRW-only** (`docs/ARCHITECTURE.md` §6). A second-currency supplier such as 1688 or Rakuten first needs a currency and FX-snapshot schema extension decided in an ADR. No such extension is authorized, and no migration for it may be written before that decision.

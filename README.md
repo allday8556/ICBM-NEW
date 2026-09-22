@@ -15,12 +15,12 @@ The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOU
 - **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`docs/acceptance/M2.md`](docs/acceptance/M2.md)).
 - **M3** — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls: **ACCEPTED** 2026-09-18, bounded by its §2 capability boundary (Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md), [`docs/acceptance/M3.md`](docs/acceptance/M3.md)).
 - **M4** — canonical Product DB + image pipeline + pricing/readiness foundations: **ACCEPTED** 2026-09-19 on the final offline acceptance run at exact main `57a6676`, bounded by its §2 (Issue #80, [ADR-0013](docs/adr/0013-m4-canonical-product-contract.md), [`docs/acceptance/M4.md`](docs/acceptance/M4.md)).
-- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12, Issue #89). It starts with the PR-A contract ([ADR-0014](docs/adr/0014-smartstore-register-idempotency-readback.md)). No M5 behaviour is implemented yet, and no SmartStore write is authorized.
+- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12, Issue #89). Its contract ([ADR-0014](docs/adr/0014-smartstore-register-idempotency-readback.md)) and every implementation PR are merged, and M5 is **not accepted**: [`docs/acceptance/M5.md`](docs/acceptance/M5.md) stays `PENDING` with no acceptance run, product CREATE and the duplicate-lookup search stay `NOT_ADOPTED`, execution stays `DRY_RUN`, and no SmartStore write is authorized. What still blocks a bounded canary is `docs/acceptance/M5.md` §9.
 
 External calls happen only when the operator starts an action (no call at startup), and only for these accepted flows:
 - **KM통상 CONNECT:** the application authenticates and reads the protected 마이쇼핑 page, through the common, allowlisted supplier transport.
 - **KM통상 one-product COLLECT (M3):** for one operator-supplied product URL at a time, it reads that product page and the page's own product images through the same policed transport, under the collection request controls. It stores them as an immutable `ProductFactsRevision` with its source assets, which can be read back unchanged.
-- **SmartStore CONNECT:** it uses only the two adopted endpoints (token and seller account), through the registry-gated caller.
+- **SmartStore CONNECT:** it uses only the two adopted CONNECT endpoints (token and seller account), through the registry-gated caller. The three M5 endpoints adopted since — the two product read-backs and the bounded image upload — belong to the REGISTER path, which stays `DRY_RUN`; no marketplace mutation has been made.
 
 Collection is one product per operator action. There is no listing, category or bulk collection and no crawl.
 
