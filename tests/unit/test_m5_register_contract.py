@@ -115,10 +115,12 @@ def test_the_adoption_detector_fires() -> None:
 M5_FOUNDATION = "0016_m5_registration_foundation"
 M5_EXECUTION_SCOPE = "0017_m5_registration_execution_scope"
 # ADR-0014 §26 (decision 5749504280) added the execution-scope owner, and §27 (decision
-# 5751540323) the durable preparation owner. Those three are the only M5 migrations; everything
-# else registration-shaped is still forbidden.
-M5_HEAD = "0018_m5_registration_preparation"
-M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_HEAD)
+# 5751540323) the durable preparation owner. Those three are the only M5 migrations.
+M5_PREPARATION = "0018_m5_registration_preparation"
+# Gate 1 G1-A (ADR-0015 §2, authorization 5785935712) adds the durable target-policy owner.
+# Everything else registration-shaped is still forbidden.
+M5_HEAD = "0019_g1_registration_target_policy"
+M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, M5_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
@@ -144,6 +146,10 @@ REGISTRATION_TABLES = frozenset(
         "registration_preparation_revisions",
         "registration_preparation_items",
         "registration_snapshot_preparations",
+        # ADR-0015 §2 (G1-A): the durable target policy, its revisions and its current pointer.
+        "registration_target_policies",
+        "registration_target_policy_revisions",
+        "registration_target_policy_current",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -198,11 +204,14 @@ def test_the_migration_detector_fires() -> None:
         "0016_m5_registration_foundation.py",
         "0017_m5_registration_execution_scope.py",
         "0018_m5_registration_preparation.py",
+        "0019_g1_registration_target_policy.py",
         "0019_m5_registration_more.py",
+        "0020_anything.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
         "0019_m5_registration_more.py",
+        "0020_anything.py",
         "0009_duplicate_override.py",
     ]
 
@@ -305,6 +314,100 @@ def test_the_registration_writer_detector_fires() -> None:
     ]
 
 
+# ADR-0015 §2 (G1-A): the target-policy owner is the only production writer of its three tables,
+# so a revision cannot appear without its server-made identity, fingerprint, pointer and audit
+# record. And production binds only the durable policy source: the static one is a test and
+# offline fixture (G1-10), never what the application reads.
+TARGET_POLICY_OWNERS = frozenset(
+    {"app/register/target_policy.py", "app/register/target_policy_models.py"}
+)
+TARGET_POLICY_CLASSES = frozenset(
+    {
+        "RegistrationTargetPolicy",
+        "RegistrationTargetPolicyRevision",
+        "RegistrationTargetPolicyCurrent",
+    }
+)
+TARGET_POLICY_TABLE_NAMES = re.compile(r"\bregistration_target_polic(y|ies)\w*")
+RUNTIME_ROOTS = ("app/", "integrations/")
+
+
+def target_policy_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    offenders = []
+    for where, source in sources:
+        if where in TARGET_POLICY_OWNERS or "/migrations/" in where:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            named = (
+                node.name
+                if isinstance(node, ast.alias)
+                else node.id
+                if isinstance(node, ast.Name)
+                else node.attr
+                if isinstance(node, ast.Attribute)
+                else None
+            )
+            text = node.value if isinstance(node, ast.Constant) else None
+            if named in TARGET_POLICY_CLASSES or (
+                isinstance(text, str) and TARGET_POLICY_TABLE_NAMES.search(text)
+            ):
+                offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
+    return offenders
+
+
+def static_policy_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Runtime code, other than the module that defines it, naming the static policy source."""
+    return [
+        f"{where}:{node.lineno}"
+        for where, source in sources
+        if where.startswith(RUNTIME_ROOTS) and where != "app/register/policy.py"
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name | ast.alias | ast.Attribute)
+        and "StaticRegistrationPolicy"
+        in (
+            node.name
+            if isinstance(node, ast.alias)
+            else node.id
+            if isinstance(node, ast.Name)
+            else node.attr
+        )
+    ]
+
+
+def test_only_the_target_policy_owner_writes_target_policy_state() -> None:
+    assert target_policy_writer_problems(_code()) == []
+
+
+def test_production_binds_only_the_durable_policy_source() -> None:
+    assert static_policy_problems(_code()) == []
+    from app.register.target_policy import DurableRegistrationPolicy
+
+    container = (REPO_ROOT / "app/container.py").read_text("utf-8")
+    assert f"policies={DurableRegistrationPolicy.__name__}(" in container
+
+
+def test_the_target_policy_detectors_fire() -> None:
+    sources = [
+        (
+            "app/register/service.py",
+            "from app.register.target_policy_models import X\n"
+            "Y = RegistrationTargetPolicyRevision\n",
+        ),
+        ("app/other/raw.py", "SQL = 'DELETE FROM registration_target_policy_current'\n"),
+        ("app/register/target_policy.py", "Z = RegistrationTargetPolicyCurrent\n"),
+        ("app/container.py", "from app.register.policy import StaticRegistrationPolicy\n"),
+        (
+            "scripts/m5accept/owners.py",
+            "from app.register.policy import StaticRegistrationPolicy\n",
+        ),
+    ]
+    assert target_policy_writer_problems(sources) == [
+        "app/register/service.py:2",
+        "app/other/raw.py:1",
+    ]
+    assert static_policy_problems(sources) == ["app/container.py:1"]
+
+
 # ---------------------------------------------------------------- account scope and price pin
 
 # PR #91 review 5255746944: every account-scoped registration table names the canonical
@@ -319,6 +422,8 @@ ACCOUNT_SCOPED_TABLES = frozenset(
         "registration_intents",
         "marketplace_registrations",
         "duplicate_overrides",
+        # ADR-0015 §2: one target policy per marketplace × canonical account.
+        "registration_target_policies",
     }
 )
 ACCOUNT_KEY = (

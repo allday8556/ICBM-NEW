@@ -1228,6 +1228,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "registration_preparation_revisions",
         "registration_preparation_items",
         "registration_snapshot_preparations",
+        # Gate 1 G1-A (ADR-0015 §2, authorization 5785935712): the durable registration target
+        # policy of one marketplace x canonical account, its append-only revisions and its one
+        # current revision. Policy inputs only: no readiness, price or provider truth.
+        "registration_target_policies",
+        "registration_target_policy_revisions",
+        "registration_target_policy_current",
     }
     offenders = [
         path

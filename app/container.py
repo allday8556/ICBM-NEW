@@ -60,10 +60,15 @@ from app.register.execution import (
     RegistrationExecutionService,
     create_job_definition,
 )
-from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
+from app.register.policy import StaticRegistrationMetadata
 from app.register.preflight import RegistrationPreflightService
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
+from app.register.target_policy import (
+    DurableRegistrationPolicy,
+    TargetPolicyService,
+    TargetPolicyStore,
+)
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
 from app.system.diagnostics import DiagnosticsService
@@ -118,6 +123,7 @@ class Container:
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
+    target_policies: TargetPolicyService
     registration_preflight: RegistrationPreflightService
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
@@ -293,9 +299,14 @@ def build_container(
     # ACCOUNT_IDENTITY §2): established only from a committed M2 binding, with no provider call.
     accounts = MarketplaceAccountStore(db, clock, audit)
     registrations = RegistrationStore(db, clock, audit)
+    # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
+    # saved from Settings. It is the production policy source: an account without a current
+    # revision still fails closed with REGISTER_TARGET_POLICY_MISSING.
+    target_policy_store = TargetPolicyStore(db, clock, audit)
+    target_policies = TargetPolicyService(target_policy_store, accounts)
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
-    # either. The metadata and policy sources start empty: every category fails closed until PR-D
-    # adopts the reviewed marketplace metadata, and every account until Settings owns its policy.
+    # either. The category metadata source still starts empty, so every category fails closed
+    # until the reviewed metadata owner of G1-B exists (ADR-0015 §3).
     registration_preflight = RegistrationPreflightService(
         registrations=registrations,
         readiness=product_readiness,
@@ -303,7 +314,7 @@ def build_container(
         images=images,
         capability=marketplace_capability,
         metadata=StaticRegistrationMetadata(),
-        policies=StaticRegistrationPolicy(),
+        policies=DurableRegistrationPolicy(target_policy_store),
     )
     registration_builder = RegistrationSnapshotBuilder(
         preflight=registration_preflight, registrations=registrations
@@ -388,6 +399,7 @@ def build_container(
         product_readiness=product_readiness,
         accounts=accounts,
         registrations=registrations,
+        target_policies=target_policies,
         registration_preflight=registration_preflight,
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,

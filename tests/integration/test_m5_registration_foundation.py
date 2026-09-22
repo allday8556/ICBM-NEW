@@ -449,6 +449,12 @@ PREPARATION_TABLES = (
     "registration_preparation_items",
     "registration_snapshot_preparations",
 )
+# Gate 1 G1-A (migration 0019, ADR-0015 §2): later tables that step down with an earlier owner.
+TARGET_POLICY_TABLES = (
+    "registration_target_policies",
+    "registration_target_policy_revisions",
+    "registration_target_policy_current",
+)
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
     "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"
@@ -2010,8 +2016,10 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
-    # 0017 owns exactly the scope table; the preparation tables 0018 adds step down with it.
-    assert before - _tables(tmp_path / "icbm.db") == {SCOPES} | set(PREPARATION_TABLES)
+    # 0017 owns exactly the scope table; the tables 0018 and 0019 add step down with it.
+    assert before - _tables(tmp_path / "icbm.db") == (
+        {SCOPES} | set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES)
+    )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     account_id = f"mpa-{'1' * 32}"
@@ -2050,7 +2058,10 @@ def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
-    assert before - _tables(tmp_path / "icbm.db") == set(PREPARATION_TABLES)
+    # 0018 owns exactly the preparation tables; the target-policy tables 0019 adds step down too.
+    assert before - _tables(tmp_path / "icbm.db") == (
+        set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES)
+    )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     account_id = f"mpa-{'1' * 32}"
