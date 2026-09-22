@@ -118,7 +118,8 @@ Owns platform conversion and listing creation.
 The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89):
 - M4 keeps every product-side owner. Marketplace-sized binaries stay M4 derived artifacts; M5 owns the upload and the provider asset identity.
 - Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
-- An unresolved `UNKNOWN` CREATE is reconciled before any resend and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
+- An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
+- **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
 
 ### OPERATE
 Owns everything after publication.
@@ -162,7 +163,7 @@ source fingerprint + field fingerprints
 ICBM canonical identity. References each member source product's current source facts revision, and downstream state.
 
 The M4 product contract is `docs/adr/0013-m4-canonical-product-contract.md` (Issue #80):
-- The canonical `Product` **is** the Canonical v3.1 `ProductGroup`: one entity and one identifier, with no second product root. `icbm_product_id` below is that identifier.
+- The canonical `Product` **is** the Canonical v3.1 `ProductGroup`: one entity and one identifier, with no second product root. `icbm_product_id` is the name this document uses for that identifier (`docs/GLOSSARY.md`).
 - Each member source product keeps its own current source revision pointer. That pointer is never an "accepted" or confirmed revision: it may point to a `REVIEW_REQUIRED` revision, and readiness carries that ambiguity.
 - A `PricingSnapshot` is per Item **and** per explicit pricing context (marketplace, account where it matters, fee and policy versions). Readiness is layered: base readiness, per-context pricing readiness, then M5 registration preflight.
 - Sellable Items are `group identifier + composition_signature`.
@@ -171,14 +172,17 @@ The M4 product contract is `docs/adr/0013-m4-canonical-product-contract.md` (Iss
 Always includes:
 
 ```text
-icbm_product_id
 marketplace_key
-account_id
+marketplace_account_id
 marketplace_product_id
 seller_product_code
 published_state
 last_readback_at
 ```
+
+`marketplace_account_id` is the canonical spelling of the account identifier in every registration row; `account_id` is a provider request field of the SmartStore token contract and never an ICBM column (`docs/GLOSSARY.md`). `seller_product_code` holds the listing identity as sent (ADR-0014 §7).
+
+The canonical product is reached **through the registered Items**: each `MarketplaceRegistrationItem` carries its `registration_item_key`, the frozen Item snapshot it registered and the group that Item belonged to. The registration row holds no second `icbm_product_id` copy of that relation.
 
 No downstream module creates a second product truth.
 
@@ -213,6 +217,8 @@ Pricing snapshots must also support:
 - return/exchange costs
 - estimated vs actual settled margin
 
+**Today the implemented schema is KRW-only.** `product_facts_revisions.currency` is constrained to `KRW`, and the pricing owner computes in whole KRW with one rounding rule. That is sufficient for the first vertical (KM통상 → SmartStore, §15). A second-currency supplier — 1688, Rakuten or any other — first needs a currency and FX-snapshot extension of the source and pricing schema, decided in an ADR. **No such extension is authorized now**, and horizontal supplier expansion cannot start before it exists (`ROADMAP.md` §14).
+
 ## 7. Registration safety
 
 ### ComplianceGate
@@ -222,6 +228,8 @@ PASS | REVIEW_REQUIRED | BLOCKED
 ```
 
 BLOCKED cannot be bypassed by automation. Resolution requires changed/verified evidence and an audit trail.
+
+**No production ComplianceGate owner exists yet.** The states above are the contract; no service decides them at this main, and the REGISTER preflight carries no compliance verdict of its own. Until that owner is implemented and accepted, regulated goods — 건강기능식품, KC certification, 식약처 notices, prohibited wording and every other regulated category — must not be claimed as automatically registrable, and **the first bounded canary uses a non-regulated product**.
 
 ### RegistrationAttempt
 
@@ -233,7 +241,11 @@ PREPARED → SENT → CONFIRMED
                  ↘ FAILED
 ```
 
-`UNKNOWN` is reconciled by marketplace read/search using a deterministic seller-side product code before any retry. Never blindly resend CREATE.
+`UNKNOWN` is reconciled before any retry. Never blindly resend CREATE.
+
+What may settle an `UNKNOWN` is fixed by ADR-0014 §10, which stays authoritative: `NOT_APPLIED_PROVEN` or remote absence needs evidence that satisfies the adopted, operation-specific proof contract — a provider read-back under the adopted contract, a provider lookup by the listing identity under an adopted lookup contract, transmission-precluded evidence (no transport handoff), or another explicitly reviewed machine or provider proof. An operator assertion is never the evidence.
+
+The deterministic seller-side product code is **ICBM's own correlation identity** for a provider-listing unit (ADR-0014 §7). It is not a provider uniqueness guarantee, and it does not by itself make a lookup deterministic. **Remote absence via a provider lookup is what the current evidence does not support**: no lookup contract with proven key, uniqueness and completeness semantics is adopted, and **a lookup that returns nothing is not proof of absence** (ADR-0014 §17.2). So a CREATE that may have been transmitted, and whose ambiguity no admissible evidence resolves, stays `UNKNOWN` under its `REVIEW_REQUIRED` workflow overlay, keeps its conflict scope closed, and is never blindly replayed; the current evidence verdict is recorded in `docs/acceptance/M5.md` §9.
 
 ## 8. Jobs and sync
 
@@ -292,6 +304,8 @@ FULFILLMENT
 ```
 
 UI surfaces these items in the relevant existing screen plus dashboard counts. No separate top-level review application is required for v1.
+
+**The ReviewItem owner is not implemented yet.** `ReviewService.open_counts()` returns zero for every kind because no `ReviewItem` table or producer exists. That is now a gap, not a consequence of having no review work: M3 is accepted and COLLECT already produces `REVIEW_REQUIRED` source truth, and M4/M5 readiness carries it further. Until the owner exists, a `REVIEW_REQUIRED` fact is visible only in the screen that derives it, and a dashboard review count of zero proves nothing.
 
 ## 10. Images
 
@@ -359,6 +373,8 @@ DRY_RUN | LIVE
 Default is DRY_RUN. Official marketplace sandbox/test accounts are adapter/environment configuration, not a third global mode.
 
 Protected/destructive actions are audit logged.
+
+**LIVE is refused outright at this main.** The execution-mode owner still enforces the M0 policy (`M0_DRY_RUN_ONLY`): a request for LIVE is denied with `M0_LIVE_FORBIDDEN` and audited. That is the safe state and it is deliberate. Before any bounded real canary, the authorization contract that replaces it — who may enter LIVE, for which marketplace, account, endpoint group and time-bounded scope, on what recorded approval, and how it returns to DRY_RUN — must be decided and accepted. **No such contract exists yet**, so a canary cannot be run even if every endpoint were adopted.
 
 ## 14. Acceptance
 

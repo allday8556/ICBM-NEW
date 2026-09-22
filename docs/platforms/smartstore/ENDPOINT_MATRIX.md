@@ -5,12 +5,12 @@
 | Field | Value |
 | --- | --- |
 | Provider | NAVER SmartStore / Commerce API |
-| Contract status | `M5_PRD_READBACK_ADOPTED_FROZEN_FOR_REVIEW` |
+| Contract status | `M5_READBACK_AND_IMAGE_UPLOAD_ADOPTED_FROZEN_FOR_REVIEW` |
 | M2 integration mode | `OWN_STORE_SELF` |
-| Adopted endpoint count | `4` (2 M2 CONNECT + 2 M5 read-backs) |
-| M5 endpoints | `2 ADOPTED (read-back), 9 NOT_ADOPTED with recorded gaps` |
+| Adopted endpoint count | `5` (2 M2 CONNECT + 2 M5 read-backs + 1 M5 image upload) |
+| M5 endpoints | `3 ADOPTED (2 read-back, 1 image upload), 9 NOT_ADOPTED with recorded gaps` |
 | Runtime verification | `PENDING` |
-| Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554) |
+| Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554; M5 image upload, Issue #89 decisions 5765557497 and 5765663972) |
 | Retrieved at | `2026-09-14` |
 | Verified at | `null` |
 | Review due | `2026-10-14` |
@@ -135,6 +135,14 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
+
+**The CREATE and reconcile evidence review closed `INSUFFICIENT`** (Issue #89 `5768247290` →
+`5768312853` → `5768347233`; ADR-0014 §17.2). Beyond the packet gaps above, the official contract
+proves no CREATE idempotency or ambiguous-outcome replay safety, no `sellerManagementCode`
+uniqueness, and no read-after-write freshness that would make a zero-result lookup an authoritative
+absence — a seller-code search may return similar, partial or exact matches. Both rows therefore
+stay `NOT_ADOPTED` until new official evidence resolves those blockers, and no implementation may
+proceed on the assumption that a deterministic provider lookup exists.
 
 Adopted read-back contract, in the registry and pinned by tests:
 

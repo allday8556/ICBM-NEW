@@ -6,8 +6,10 @@ Status: **ACCEPTED** 2026-09-19. This is PR-A of Issue #89 (kickoff `5740316498`
 - It is amended for the PR #90 GPT review `5255157251` (HOLD): four contract blockers B1–B4 (see "Review amendments").
 - It lands on main with the merge of PR #90.
 - It is extended by the architect decision `5749504280` (PR-E review `5260076445`): §26 and invariants M5-25–M5-27 add the REGISTER execution-scope send brake, the one owner PR-E was missing, together with the migration that owner needs.
+- It is extended by the architect decision `5751540323` (PR-F review `5261280389`): §27 and invariant M5-30 add the durable registration preparation — the operator's authored inputs, append-only, with the provenance of the Snapshot a revision froze — together with the migration that owner needs (`0018`).
+- It is amended by the architect decisions `5765557497` and `5765663972`: §17.1 adopts `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` alone, bounded, with no durable upload owner and no LIVE authority.
 
-Apart from the migration §26 names, it authorizes no schema, migration, runtime code, UI, endpoint adoption, AI call, supplier request or marketplace call. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
+Apart from the two migrations §26 and §27 name, it authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call; the single endpoint adoption it authorizes is the bounded IMAGE UPLOAD of §17.1, which authorizes no real upload. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
 
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #89 body (the M5 umbrella) and the architect kickoff `5740316498`, which authorized PR-A only and listed the twenty decisions this ADR freezes;
@@ -27,7 +29,9 @@ Related:
 
 ## Context
 
-M4 is accepted (`docs/acceptance/M4.md`): the canonical Product (the v3.1 `ProductGroup`), its Items, current source bindings, context-scoped `PricingSnapshot`s, derived image lineage with operator selection and exact-binary QA, and layered readiness exist and are proven offline. SmartStore CONNECT is accepted (M2). The SmartStore product, image, category, attribute, option and notice endpoints are `NOT_ADOPTED` planning metadata (`ENDPOINT_MATRIX.md` §4), and `product_registration.write` is `UNVERIFIED`.
+M4 is accepted (`docs/acceptance/M4.md`): the canonical Product (the v3.1 `ProductGroup`), its Items, current source bindings, context-scoped `PricingSnapshot`s, derived image lineage with operator selection and exact-binary QA, and layered readiness exist and are proven offline. SmartStore CONNECT is accepted (M2). **When this ADR was written** every SmartStore product, image, category, attribute, option and notice endpoint was `NOT_ADOPTED` planning metadata (`ENDPOINT_MATRIX.md` §4), and `product_registration.write` was `UNVERIFIED`.
+
+That starting state has since moved only where an amendment moved it: PR-D adopted the two product read-backs, §17.1 adopted the bounded image upload, and everything else — product CREATE, the duplicate-lookup search, the category, attribute, option and notice reads — remains `NOT_ADOPTED`. `product_registration.write` is still `UNVERIFIED`. The current adoption facts are `ENDPOINT_MATRIX.md` §4 and the adapter registry, never this paragraph.
 
 M5 registers one canonical product to SmartStore and proves, by read-back, that the marketplace recorded exactly what ICBM sent. The dangerous failure is not a failed registration but a **second listing**: a replay, a restart, a retry after an ambiguous result, a changed Snapshot or a partial option set can each create one. This ADR freezes, before any schema, the contract that makes those impossible.
 
@@ -422,6 +426,31 @@ upload: execution remains `DRY_RUN` and provider-zero. There is no automatic ret
 transmitted failure is `UPLOAD_UNKNOWN`, which is not `RegistrationIntent.UNKNOWN`. CREATE and
 SEARCH remain `NOT_ADOPTED`; `product_registration.write` remains `UNVERIFIED`; LIVE, real canary
 and M5 acceptance remain forbidden.
+
+#### 17.2 CREATE and deterministic reconcile: the recorded evidence verdict
+
+The architect's review of the official provider contract for the two remaining M5 endpoints closed
+**`INSUFFICIENT`** (Issue #89 `5768247290` → `5768312853` → `5768347233`), on these blockers:
+
+- no official CREATE idempotency or ambiguous-outcome replay-safety guarantee;
+- a seller-code search may return similar, partial or exact matches;
+- no official uniqueness guarantee for `sellerManagementCode`;
+- no official freshness or read-after-write guarantee that would make a zero-result lookup an
+  authoritative absence.
+
+So the deterministic seller-side listing identity of §7 is exactly what §7 says it is: **ICBM's own
+correlation identity, derived from stable local identity**. It is the key ICBM asks with; it is
+never a provider uniqueness proof and it establishes nothing by itself. This verdict removes one
+path only — **remote absence proven by a provider lookup** — because no lookup contract with the
+needed semantics can be adopted, and an empty lookup result establishes no absence. It revokes
+nothing else in §10: the resolution-evidence table there stays authoritative, including
+transmission-precluded evidence and another explicitly reviewed machine or provider proof. A
+possibly transmitted CREATE whose ambiguity no admissible evidence resolves stays `UNKNOWN` with its
+conflict scope closed, and is never blindly replayed.
+
+`SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED` until
+new official evidence resolves those blockers, and `product_registration.write` stays `UNVERIFIED`
+(§16). This subsection records a verdict. It relaxes no rule of §7, §10 or §16.
 
 ### 18. AI is optional
 
