@@ -726,17 +726,17 @@ Next, in order:
 
 ## 14.1 Gaps between the merged code and a runnable vertical
 
-Merged owners are not an operable path. These gaps are recorded facts at the current main, not work in progress; each needs its own authorization, and none of them is started:
+Merged owners are not an operable path. These gaps are recorded facts at the current main; each needs its own authorization. Rows marked **G1-A** record what that slice closed:
 
 | gap | what exists | what is missing |
 | --- | --- | --- |
 | registration category metadata | the `RegistrationMetadataSource` contract | production wiring binds an empty `StaticRegistrationMetadata()`, so no category, attribute or notice metadata reaches the preflight, which answers `CATEGORY_METADATA_MISSING` and no unit can become READY |
-| registration target policy | the `TargetPolicy` contract and its preflight rules | production wiring binds an empty `StaticRegistrationPolicy()`, and Settings can store no policy, so the preflight blocks with `REGISTER_TARGET_POLICY_MISSING` |
+| registration target policy | **G1-A:** the durable, append-only target-policy owner (migration 0019), its Settings save path and the production `RegistrationPolicySource` over it | nothing for the owner; an account without a saved policy still blocks with `REGISTER_TARGET_POLICY_MISSING` |
 | Draft creation from the product DB | `RegistrationStore.create_draft()` | no API route, service command or screen turns a chosen canonical product into a `RegistrationDraft` |
 | pricing snapshot creation and pinning | the M4 pricing owner and per-context snapshots | no command path computes a price, creates the snapshot and pins it to a Draft from the product DB or the UI |
 | product DB workflow | two read-by-identity product endpoints | no list, search, pagination, detail or registration-target selection; the screen is a count-oriented shell |
 | COLLECT submission | `POST /api/v1/collect/collections` | the COLLECT screen never calls it, so a collection cannot be started from the UI; the DB screen's empty-state link leads to that screen and therefore to no submit path either |
-| Settings persistence | SmartStore credential, account and capability actions are wired | the general policy fields and the save bar reach no write contract, which is why the target policy above cannot be stored |
+| Settings persistence | SmartStore credential, account and capability actions; **G1-A:** the target-policy surface with its own save contract, named by the server as the only editable surface | the general common and platform fields and their save bar still reach no write contract and stay read-only |
 | ReviewItem | the `ReviewKind` contract and the screen counters | no table, no producer and no persistence; `open_counts()` returns zero for every kind although M3 already produces `REVIEW_REQUIRED` truth |
 | ComplianceGate | the `PASS / REVIEW_REQUIRED / BLOCKED` contract (`docs/ARCHITECTURE.md` §7) | no production owner decides it; regulated categories may not be claimed as automatically registrable, and the first canary uses a non-regulated product |
 | LIVE authorization | the two-mode execution contract, `DRY_RUN` and `LIVE` | the execution-mode owner still enforces `M0_DRY_RUN_ONLY` and denies LIVE with `M0_LIVE_FORBIDDEN`; the contract that would replace it does not exist |
