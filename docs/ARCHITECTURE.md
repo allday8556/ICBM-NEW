@@ -118,7 +118,7 @@ Owns platform conversion and listing creation.
 The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89):
 - M4 keeps every product-side owner. Marketplace-sized binaries stay M4 derived artifacts; M5 owns the upload and the provider asset identity.
 - Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
-- An unresolved `UNKNOWN` CREATE is reconciled before any resend — by positive provider evidence under an adopted contract, never by a seller-side code alone (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
+- An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 - **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
 
 ### OPERATE
@@ -243,7 +243,9 @@ PREPARED → SENT → CONFIRMED
 
 `UNKNOWN` is reconciled before any retry. Never blindly resend CREATE.
 
-The deterministic seller-side product code is **ICBM's own correlation identity** for a provider-listing unit (ADR-0014 §7). It is not a provider uniqueness guarantee, and it does not by itself make a lookup deterministic. Only positive provider evidence under an adopted contract — a read-back, or a lookup whose key, uniqueness and completeness semantics are proven — may establish `NOT_APPLIED_PROVEN` or remote absence (ADR-0014 §10). **A lookup that returns nothing is not proof of absence**, and an operator assertion is never the evidence. While no such lookup contract is adopted, an ambiguous CREATE stays `UNKNOWN` under its `REVIEW_REQUIRED` workflow overlay and keeps its conflict scope closed; the current evidence verdict is recorded in `docs/acceptance/M5.md` §9.
+What may settle an `UNKNOWN` is fixed by ADR-0014 §10, which stays authoritative: `NOT_APPLIED_PROVEN` or remote absence needs evidence that satisfies the adopted, operation-specific proof contract — a provider read-back under the adopted contract, a provider lookup by the listing identity under an adopted lookup contract, transmission-precluded evidence (no transport handoff), or another explicitly reviewed machine or provider proof. An operator assertion is never the evidence.
+
+The deterministic seller-side product code is **ICBM's own correlation identity** for a provider-listing unit (ADR-0014 §7). It is not a provider uniqueness guarantee, and it does not by itself make a lookup deterministic. **Remote absence via a provider lookup is what the current evidence does not support**: no lookup contract with proven key, uniqueness and completeness semantics is adopted, and **a lookup that returns nothing is not proof of absence** (ADR-0014 §17.2). So a CREATE that may have been transmitted, and whose ambiguity no admissible evidence resolves, stays `UNKNOWN` under its `REVIEW_REQUIRED` workflow overlay, keeps its conflict scope closed, and is never blindly replayed; the current evidence verdict is recorded in `docs/acceptance/M5.md` §9.
 
 ## 8. Jobs and sync
 

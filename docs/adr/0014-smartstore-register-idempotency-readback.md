@@ -440,10 +440,13 @@ The architect's review of the official provider contract for the two remaining M
 
 So the deterministic seller-side listing identity of §7 is exactly what §7 says it is: **ICBM's own
 correlation identity, derived from stable local identity**. It is the key ICBM asks with; it is
-never a provider uniqueness proof and it establishes nothing by itself. Under §10, only positive
-provider evidence under an adopted contract establishes `NOT_APPLIED_PROVEN` or remote absence; an
-empty lookup result establishes neither; and an unresolved ambiguity stays `UNKNOWN` with its
-conflict scope closed.
+never a provider uniqueness proof and it establishes nothing by itself. This verdict removes one
+path only — **remote absence proven by a provider lookup** — because no lookup contract with the
+needed semantics can be adopted, and an empty lookup result establishes no absence. It revokes
+nothing else in §10: the resolution-evidence table there stays authoritative, including
+transmission-precluded evidence and another explicitly reviewed machine or provider proof. A
+possibly transmitted CREATE whose ambiguity no admissible evidence resolves stays `UNKNOWN` with its
+conflict scope closed, and is never blindly replayed.
 
 `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED` until
 new official evidence resolves those blockers, and `product_registration.write` stays `UNVERIFIED`

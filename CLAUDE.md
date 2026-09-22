@@ -194,14 +194,14 @@ Real CREATE uses `RegistrationAttempt`.
 If a CREATE result is unknown:
 
 - do not blindly retry CREATE
-- reconcile with positive provider evidence under an adopted contract: a read-back, or a lookup whose key, uniqueness and completeness semantics are proven
+- reconcile only with evidence ADR-0014 §10 admits: a provider read-back or a provider lookup under an adopted contract, transmission-precluded evidence, or another explicitly reviewed machine or provider proof
 - only retry after proving no marketplace product was created
 
 The deterministic seller product code is ICBM's own correlation identity for a provider-listing unit (ADR-0014 §7). It is not a provider uniqueness guarantee, so it does not by itself make reconciliation deterministic:
 
 - a lookup that returns nothing is not proof that no product was created
 - an operator assertion is never the evidence
-- while no lookup contract with those semantics is adopted, an ambiguous CREATE stays `UNKNOWN` with a `REVIEW_REQUIRED` overlay and its conflict scope stays closed
+- no lookup contract that could prove remote absence is adopted (ADR-0014 §17.2), so a possibly transmitted CREATE that no admissible evidence resolves stays `UNKNOWN` with a `REVIEW_REQUIRED` overlay and its conflict scope stays closed
 
 The current provider-evidence verdict is recorded in `docs/acceptance/M5.md` §9; never soften it in code or documents.
 

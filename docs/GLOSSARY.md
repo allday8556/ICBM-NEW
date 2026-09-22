@@ -39,9 +39,11 @@ canonical account identifier the implementation spells `marketplace_account_id`.
 | `registration_item_key` | the stable correspondence key of one Item inside a listing, created before CREATE and proven to round-trip. Display labels are never identity. | ADR-0014 §6, invariant M5-06 |
 
 **None of these is a provider uniqueness proof.** A deterministic code is the key ICBM asks with;
-it does not make a lookup deterministic, and a lookup that returns nothing proves no absence. Only
-positive provider evidence under an adopted contract establishes a remote outcome (ADR-0014 §10,
-§17.2).
+it does not make a lookup deterministic, and a lookup that returns nothing proves no remote absence
+(ADR-0014 §17.2). What may settle an ambiguous outcome is fixed by ADR-0014 §10, not by this file:
+a provider read-back or a provider lookup under an adopted contract, transmission-precluded
+evidence, or another explicitly reviewed machine or provider proof — never a seller code alone and
+never an operator's word.
 
 ## 3. Not-knowing: `UNKNOWN`, `REVIEW_REQUIRED`, `FAILED`
 
@@ -49,18 +51,21 @@ These three are confused most often. They are not degrees of the same thing.
 
 | name | axis | meaning |
 | --- | --- | --- |
-| `UNKNOWN` | **remote outcome** (`RemoteOutcome`) | the external mutation may or may not have happened; ICBM has no proof either way. It forbids a blind replay, and an unresolved UNKNOWN CREATE keeps its conflict scope closed. It is resolved only by evidence, never by an operator's word. |
+| `UNKNOWN` | **remote outcome** (`RemoteOutcome`: `APPLIED_PROVEN` \| `NOT_APPLIED_PROVEN` \| `UNKNOWN`) | the external mutation may or may not have happened; ICBM has no proof either way. It forbids a blind replay, and an unresolved UNKNOWN CREATE keeps its conflict scope closed. It is settled only by the evidence ADR-0014 §10 admits, never by an operator's word. A `RegistrationAttempt` and a `RegistrationIntent` both carry this axis; it has no `FAILED` value. |
+| `UNKNOWN` | **Intent state** (`IntentState`) | the Intent's CREATE outcome is not proven; it must be reconciled, never resent. Constrained to `remote_outcome = UNKNOWN`. |
 | `UNKNOWN` | **error class** (`ErrorClass`) | the cause of a failure could not be classified. A cause, never a workflow state and never a replay permission. |
 | `REVIEW_REQUIRED` | **workflow state / review work** | a human must decide. It is the fail-closed landing place for ambiguous source evidence, a stale or conflicting dependency, and an unresolved `UNKNOWN`. `error_class = REVIEW_REQUIRED` is **not** `workflow_state = REVIEW_REQUIRED` (`docs/ARCHITECTURE.md` §8). |
-| `FAILED` | **attempt outcome** | this attempt did not succeed. For a write it is claimed only with `remote_outcome = NOT_APPLIED_PROVEN`: an ambiguous outcome is never silently recorded as `FAILED` (ADR-0014 §10). |
+| `FAILED` | **Intent state** (`IntentState`: `PREPARED` \| `SENT` \| `CONFIRMED` \| `UNKNOWN` \| `FAILED`) | the CREATE is **proven not applied**. The database constrains `state = FAILED` to `remote_outcome = NOT_APPLIED_PROVEN`, so an ambiguous outcome can never be recorded as `FAILED`; a retry is a new attempt of the same Intent (ADR-0014 §8, §10). |
 
-Job states are their own axis again (`QUEUED`, `RUNNING`, `RETRY_SCHEDULED`, `SUCCEEDED`, `DEAD`,
-ADR-0005); a dead job does not classify a remote outcome.
+Two other axes use similar words and decide none of the above: a **job attempt**
+(`SUCCEEDED` \| `FAILED` \| `INTERRUPTED`) and a **job state** (`QUEUED`, `RUNNING`,
+`RETRY_SCHEDULED`, `SUCCEEDED`, `DEAD`), both ADR-0005. A failed job attempt or a dead job never
+classifies a remote outcome and never makes an Intent `FAILED`.
 
 **The Korean UI labels — `재확인필요`, `검토 필요`, `확인 필요` and their siblings — are display text
 for one of the server-owned states above.** They are never a new backend truth, never a fourth
 state, and the UI never computes one: it renders what the owner decided (`docs/ARCHITECTURE.md`
-§3, §5.1).
+§3, `CLAUDE.md` §5.1).
 
 ## 4. Adoption and execution words
 
