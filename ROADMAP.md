@@ -719,7 +719,7 @@ Next, in order:
 
    M5 is accepted only by an acceptance run on the exact merged main SHA, recorded in `docs/acceptance/M5.md` and accepted by the architect. That document stays `PENDING`.
 
-2. The owner and application-path gaps below, each separately authorized, before the first vertical can run end to end.
+2. **Gate 1 — the application path** (Issue #89 kickoff `5784108069`; contract `docs/adr/0015-gate1-registration-target-policy-and-category-metadata.md`). It closes the local owner and path gaps below, provider-zero, one separately authorized slice at a time: G1-A the durable target policy and its Settings write path, G1-B the operator-reviewed category metadata, then G1-C the product DB workflow and G1-E the COLLECT submit, and last G1-D the Draft command path. `ReviewItem` moves to Gate 2; `ComplianceGate` and the bounded LIVE authorization move to later pre-LIVE gates.
 3. The rest of the first single-product vertical (M6 → M6.5, §12).
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
