@@ -1,9 +1,12 @@
 # ADR-0015 — Gate 1: the durable registration target policy, the operator-reviewed category metadata, and the Gate 1 acceptance boundary
 
-Status: **PROPOSED**. This is G1-0 of Gate 1 (Issue #89 architect kickoff `5784108069`, on the
-preparation proposal `5783937360`), on exact main `644af5b51c69e0e338b247fbc3f313f52152d87f`.
-- It freezes the architect decisions D1–D5 of that kickoff as contract, before any schema.
-- It becomes binding only after its exact-head audit, the independent cross-audit and the merge.
+Status: **ACCEPTED** — decided by the architect kickoff `5784108069` (2026-09-22 UTC). This is G1-0
+of Gate 1 (Issue #89, on the preparation proposal `5783937360`), on exact main
+`644af5b51c69e0e338b247fbc3f313f52152d87f`.
+- It records the architect decisions D1–D5 of that kickoff as contract, before any schema. The
+  decisions were made by the kickoff; this document does not re-open them.
+- **Its implementation authority becomes effective only after this exact contract PR is audited,
+  independently cross-audited and merged**, and even then only slice by slice (§5).
 
 **It authorizes no migration, model, service, route, UI, test for new behaviour, provider adapter,
 endpoint adoption or provider call.** Each implementation slice it names (G1-A to G1-D) needs its
@@ -127,10 +130,18 @@ able to materialize the existing `CategoryMetadata` contract. `marketplace_key` 
 the durable source never serves one marketplace's metadata for another, however G1-B shapes the
 read path.
 
-**Revisions.** Append-only and immutable, like §2. Each revision carries:
+**Revisions and the current revision.**
+- Revisions are append-only and immutable, like §2.
+- **For each key the owner holds an explicit current-revision selection** that names exactly one
+  revision. "Current" is that selection, never "the newest reviewed one" and never "the latest
+  row" inferred at read time.
+- Changing the selection and the history is durable and restart-stable. How it is recorded
+  transactionally is a G1-B implementation detail within this rule.
+
+Each revision carries:
 - a provenance and evidence reference — **which reviewed evidence the rules came from**, as a
   sanitized reference, never a retained raw provider payload (ADR-0011);
-- who reviewed it and when it was recorded;
+- whether it is reviewed and, when it is, who reviewed it; and when it was recorded;
 - its `metadata_revision` identity and fingerprint, created by the server;
 - whether the category is a leaf and whether it is registrable;
 - the required attribute rules and the notice type with its field rules, each with its
@@ -147,12 +158,15 @@ permission to guess a provider requirement**.
 - An AI suggestion is never reviewed metadata and never satisfies a rule (ADR-0014 §4, §18).
 
 **Fail-closed use.**
-- **Only a reviewed revision may satisfy the preflight.** Missing metadata answers
-  `CATEGORY_METADATA_MISSING` and unreviewed metadata `CATEGORY_METADATA_UNREVIEWED`, exactly as the
-  preflight already does.
-- The preflight reads the current reviewed revision on every evaluation. A newer revision changes
-  the next evaluation's dependency fingerprint, so an older candidate is stale, and a frozen
-  Snapshot keeps the metadata revision it froze.
+- **The preflight reads the current revision** — the selection above — on every evaluation, and
+  nothing else.
+- **Only a reviewed current revision may satisfy the preflight.** No current revision answers
+  `CATEGORY_METADATA_MISSING`. A current revision with `reviewed = false` answers
+  `CATEGORY_METADATA_UNREVIEWED`, exactly as the preflight already does, and **the preflight never
+  falls back to an older reviewed revision** of the same key.
+- Every evaluation and every Snapshot freezes **the exact metadata revision it evaluated**. A change
+  of the current selection changes the next evaluation's dependency fingerprint, so an older
+  candidate is stale; a frozen Snapshot keeps the revision it froze.
 - The taxonomy revision is the one the account's target policy names (§2); metadata of another
   taxonomy revision never stands in for it.
 
@@ -242,11 +256,11 @@ G1-01  a target policy is scoped by marketplace_key × marketplace_account_id; i
 G1-02  a client never supplies or invents a policy_revision or a metadata_revision
 G1-03  a target policy revision owns only the ADR-0014 §21 inputs; it holds no Product, price, PricingSnapshot, readiness, Snapshot, Intent, Attempt, capability or provider truth
 G1-04  the target policy's pricing context is an M4 PricingContextInput for its own marketplace, with account_id equal to its marketplace_account_id or None; M5 never prices
-G1-05  category metadata is keyed by marketplace_key × taxonomy_revision × category_id; its revisions are append-only and immutable
-G1-06  only a reviewed metadata revision satisfies the preflight; missing or unreviewed metadata fails closed
+G1-05  category metadata is keyed by marketplace_key × taxonomy_revision × category_id; its revisions are append-only and immutable, and each key has an explicit, durable current-revision selection
+G1-06  the preflight reads only the current revision; none is CATEGORY_METADATA_MISSING, an unreviewed one is CATEGORY_METADATA_UNREVIEWED, and it never falls back to an older reviewed revision
 G1-07  operator review accepts reviewed evidence; a rule the evidence does not prove is never promoted, and an AI suggestion is never reviewed metadata
 G1-08  a later adopted provider category source feeds new revisions into the same owner; there is never a second category truth
-G1-09  a frozen Snapshot keeps the exact policy and metadata revisions it froze; a later revision changes only later evaluations
+G1-09  every evaluation and every frozen Snapshot records the exact policy and metadata revisions it evaluated; a later revision or selection changes only later evaluations
 G1-10  StaticRegistrationPolicy and StaticRegistrationMetadata are test and offline fixtures only
 G1-11  Gate 1 adopts no endpoint, makes no provider call and performs zero marketplace mutations; M0_DRY_RUN_ONLY is unchanged
 G1-12  Gate 1 creates no second review queue, claims no compliance PASS, and does not accept M5

@@ -180,7 +180,7 @@ published_state
 last_readback_at
 ```
 
-`marketplace_account_id` is the canonical spelling of the account identifier in every registration row; `account_id` is a provider request field of the SmartStore token contract and never an ICBM column (`docs/GLOSSARY.md`). `seller_product_code` holds the listing identity as sent (ADR-0014 §7).
+`marketplace_account_id` is the canonical spelling of the account identity in every registration row and every new account-scoped owner. `account_id` is not an account identity: in M4 pricing it is the pre-existing pricing-context discriminator (the account, or `None` when account-invariant), and in the SmartStore token contract it is a provider request field (`docs/GLOSSARY.md` §1). `seller_product_code` holds the listing identity as sent (ADR-0014 §7).
 
 The canonical product is reached **through the registered Items**: each `MarketplaceRegistrationItem` carries its `registration_item_key`, the frozen Item snapshot it registered and the group that Item belonged to. The registration row holds no second `icbm_product_id` copy of that relation.
 

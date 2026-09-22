@@ -16,8 +16,13 @@ It is not complete. It holds the names that have already been confused at least 
 
 | name | what it is | owner |
 | --- | --- | --- |
-| `marketplace_account_id` | **the canonical ICBM identifier of one marketplace account.** Every registration, capability and execution-scope row is scoped by it, and it is the spelling to use in contracts, columns and documents. | `docs/adr/0014-…readback.md` §2, `app/connect/account_models.py` |
-| `account_id` | **a provider request field, not an ICBM identifier.** In the SmartStore token contract it is the field an own-store (`type=SELF`) application must not send (`docs/platforms/smartstore/ENDPOINT_MATRIX.md` §Provenance). Never use it as the name of an ICBM column or contract field. | SmartStore AUTH contract |
+| `marketplace_account_id` | **the canonical ICBM identity of one marketplace account.** Every registration, capability, execution-scope and target-policy row is scoped by it, and it is the required spelling for every account-scoped owner and every new account identity or foreign-key field. | `docs/adr/0014-…readback.md` §2, `docs/adr/0015-…metadata.md` §2, `app/connect/account_models.py` |
+| `account_id` (M4 pricing) | **a pricing-context discriminator, not an account-identity owner.** The pre-existing M4 `PricingContextInput.account_id` and its persisted `pricing_snapshots.account_id` say whether a price context varies by account: for a registration target it holds the canonical `marketplace_account_id`, or `None` when the fee and policy are explicitly account-invariant (ADR-0013 §7, ADR-0015 §2). It is a frozen local spelling of the M4 contract and is not renamed. | ADR-0013 §7, `app/products/pricing.py` |
+| `account_id` (SmartStore wire) | **a provider request field.** In the SmartStore token contract it is the field an own-store (`type=SELF`) application must not send (`docs/platforms/smartstore/ENDPOINT_MATRIX.md` §Provenance). It is never an ICBM identity. | SmartStore AUTH contract |
+
+**No new generic `account_id` identity field.** The M4 pricing discriminator is not a precedent: a
+new owner, column or contract field that identifies a marketplace account is named
+`marketplace_account_id`.
 | `accountUid`, `accountId` | provider-side identifiers a SmartStore account is known by upstream. They are recorded as provider facts and mapped to the canonical account; they never replace it. | `docs/platforms/smartstore/ACCOUNT_IDENTITY.md` |
 | `icbm_product_id` | the canonical product identifier — the Canonical v3.1 `ProductGroup` identifier. There is no second product root. | ADR-0013 §1 |
 
