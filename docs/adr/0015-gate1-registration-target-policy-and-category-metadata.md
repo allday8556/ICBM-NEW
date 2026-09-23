@@ -237,6 +237,11 @@ COLLECT UI
 - **It does not promise that only provider-side blockers remain.** `ReviewItem`, `ComplianceGate`,
   bounded LIVE authorization and the CREATE and lookup evidence blockers of ADR-0014 §17.2 stay
   explicitly open for later gates.
+- **Clarification (architect decision `5800619183`).** Gate 1 requires an **authored preparation
+  and a reachable candidate preflight**, not a freezable unit. The target policy's two authoring
+  revisions stay `null` while no owner exists for them (§2), so the Gate 1 candidate reports
+  `AUTHORING_REVISIONS_UNOWNED` and is not `READY`; a Snapshot freeze still requires owner-held
+  revisions and stays refused (ADR-0014 §27). No default or sentinel revision is created to pass it.
 - Its evidence is recorded in GitHub against the exact main SHA it ran on. **Gate 1 evidence is not
   M5 acceptance**, and `docs/acceptance/M5.md` stays `PENDING`.
 
