@@ -21,6 +21,7 @@ from app.api.routes import (
     settings,
     system,
 )
+from app.collect.collection import CollectionGateway, RegisteredCollection, SessionProvider
 from app.config import AppConfig
 from app.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.connect.marketplace.sources import ApplicationIdentitySource
@@ -46,6 +47,9 @@ def create_app(
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
     smartstore_caller: SmartStoreEndpointCaller | None = None,
+    collection_gateway: CollectionGateway | None = None,
+    collection_sessions: SessionProvider | None = None,
+    collections: Sequence[RegisteredCollection] | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -53,6 +57,10 @@ def create_app(
     before any per-directory side effect, and releases it when the application stops. Any
     launcher therefore owns the directory; none can bypass the lock. An injected lease must cover
     ``config.data_dir`` itself.
+
+    The collection transport, its session source and its supplier definitions are handed straight
+    to the container, like the supplier gateway: a test serves the real application over a
+    scripted shop, and a production launcher passes none of them.
     """
     config = config or AppConfig.from_env()
     owns_lease = ownership is None
@@ -70,6 +78,9 @@ def create_app(
             application_identity=application_identity,
             mapping_revision=mapping_revision,
             smartstore_caller=smartstore_caller,
+            collection_gateway=collection_gateway,
+            collection_sessions=collection_sessions,
+            collections=collections,
         )
     except BaseException:
         if owns_lease:

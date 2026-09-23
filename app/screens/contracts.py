@@ -75,9 +75,14 @@ class DashboardView(BaseModel):
 
 
 class CollectView(BaseModel):
+    """``collection_supplier_keys`` are the suppliers with a registered collection definition:
+    the only ones a product may be submitted for (Gate 1 G1-E). Whether one is connected stays
+    CONNECT's truth, in ``suppliers``."""
+
     meta: ScreenMeta
     suppliers: list[SupplierConnectionSummary]
     collection_jobs_total: int
+    collection_supplier_keys: list[str]
 
 
 class ProductDbView(BaseModel):

@@ -150,3 +150,10 @@ class CollectionRunView(BaseModel):
     detail: str | None
     requested_at: datetime
     finished_at: datetime | None
+
+
+class CollectionRunListView(BaseModel):
+    """The newest runs, newest first (Gate 1 G1-E): durable rows only, never a second history."""
+
+    runs: tuple[CollectionRunView, ...]
+    limit: int
