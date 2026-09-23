@@ -209,7 +209,9 @@ class RegistrationPreflightService:
         metadata = (
             None
             if category is None
-            else self._metadata.category(target.taxonomy_revision, category.category_id)
+            else self._metadata.category(
+                draft.marketplace_key, target.taxonomy_revision, category.category_id
+            )
         )
         return ResolvedUnit(
             marketplace_key=draft.marketplace_key,
@@ -251,14 +253,15 @@ class RegistrationPreflightService:
         return tuple(resolve_unit(draft.listing_shape, open_ids, [item])[0] for item in open_ids)
 
     def category_metadata(
-        self, taxonomy_revision: str, category_id: str
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str
     ) -> CategoryMetadata | None:
-        """The reviewed metadata of one category, as the metadata source holds it (§4).
+        """The current metadata of one marketplace's category, as the metadata source holds it
+        (§4, ADR-0015 §3).
 
         A read-through: the operator surface shows which fields a category requires without
         reaching the metadata source itself, and nothing here decides whether they are satisfied.
         """
-        return self._metadata.category(taxonomy_revision, category_id)
+        return self._metadata.category(marketplace_key, taxonomy_revision, category_id)
 
     def target_policy(
         self, marketplace_key: str, marketplace_account_id: str

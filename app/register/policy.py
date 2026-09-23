@@ -9,9 +9,9 @@ Pure and provider-neutral: no database, no provider, no I/O. Nothing here is Sma
   attributes and notice fields it **requires**, whether a field may be "상세페이지 참조", the option
   rule and the templates it needs. Required fields are driven by this versioned metadata only;
   nothing is required, filled or guessed per product.
-- :class:`StaticRegistrationMetadata` is an offline, in-memory metadata source. It holds only what
-  its caller supplies, and the production wiring starts it empty, so every category lookup fails
-  closed until PR-D adopts the reviewed provider metadata.
+- :class:`StaticRegistrationMetadata` is an offline, in-memory metadata source for tests and the
+  offline harness. Production reads the durable operator-reviewed owner of
+  ``app.register.category_metadata`` (ADR-0015 §3, Gate 1 G1-B).
 """
 
 from collections.abc import Iterable, Mapping
@@ -147,9 +147,13 @@ class TargetPolicy:
 
 
 class RegistrationMetadataSource(Protocol):
-    """Reviewed category metadata by taxonomy revision and category (PR-D adopts the provider's)."""
+    """The current category metadata of one ``marketplace × taxonomy revision × category``
+    (ADR-0015 §3). The marketplace is part of the key: a source never serves one marketplace's
+    metadata for another, and another taxonomy revision never stands in."""
 
-    def category(self, taxonomy_revision: str, category_id: str) -> CategoryMetadata | None: ...
+    def category(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str
+    ) -> CategoryMetadata | None: ...
 
 
 class RegistrationPolicySource(Protocol):
@@ -162,15 +166,28 @@ class RegistrationPolicySource(Protocol):
 
 
 class StaticRegistrationMetadata:
-    """An offline metadata source holding exactly the entries its caller supplies."""
+    """An offline metadata source holding exactly the entries its caller supplies, for one named
+    marketplace. A test and offline fixture only: production reads the durable reviewed owner
+    (ADR-0015 §3, G1-10)."""
 
-    def __init__(self, entries: Iterable[CategoryMetadata] = ()) -> None:
-        self._entries = {(e.taxonomy_revision, e.category_id): e for e in entries}
+    def __init__(
+        self, entries: Iterable[CategoryMetadata] = (), *, marketplace_key: str | None = None
+    ) -> None:
+        self._marketplace_key = marketplace_key
+        self._entries: dict[tuple[str, str], CategoryMetadata] = {}
+        for entry in entries:
+            self.put(entry)
 
     def put(self, entry: CategoryMetadata) -> None:
+        if self._marketplace_key is None:
+            raise ValueError("a metadata entry belongs to a named marketplace")
         self._entries[(entry.taxonomy_revision, entry.category_id)] = entry
 
-    def category(self, taxonomy_revision: str, category_id: str) -> CategoryMetadata | None:
+    def category(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str
+    ) -> CategoryMetadata | None:
+        if marketplace_key != self._marketplace_key:
+            return None
         return self._entries.get((taxonomy_revision, category_id))
 
 

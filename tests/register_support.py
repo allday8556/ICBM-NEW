@@ -214,7 +214,7 @@ def preparation(container: Container, account: str, *, served: bool = False) -> 
     report that instead of the truth this preparation froze.
     """
     capability = FakeCapability()
-    entries = StaticRegistrationMetadata((metadata(),))
+    entries = StaticRegistrationMetadata((metadata(),), marketplace_key=MARKET)
     policies = StaticRegistrationPolicy((target(account),))
     service = RegistrationPreflightService(
         registrations=container.registrations,

@@ -438,7 +438,12 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0018_m5_registration_preparation")
-    assert before - _tables(tmp_path / "icbm.db") == set(TABLES)
+    # 0019 owns exactly these three; the category-metadata tables 0020 adds step down with it.
+    assert before - _tables(tmp_path / "icbm.db") == set(TABLES) | {
+        "registration_category_metadata",
+        "registration_category_metadata_revisions",
+        "registration_category_metadata_current",
+    }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     account_id = f"mpa-{'1' * 32}"
@@ -489,7 +494,7 @@ def _served_preflight(container: Container) -> RegistrationPreflightService:
     """
     served = container.registration_preflight
     assert isinstance(served._policies, DurableRegistrationPolicy)
-    served._metadata = StaticRegistrationMetadata((metadata(),))
+    served._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=MARKET)
     served._capability = FakeCapability()
     return served
 

@@ -1234,6 +1234,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "registration_target_policies",
         "registration_target_policy_revisions",
         "registration_target_policy_current",
+        # Gate 1 G1-B (ADR-0015 §3, authorization 5788082735): the durable operator-reviewed
+        # category metadata of one marketplace x taxonomy x category, its append-only revisions
+        # with explicit review provenance, and its one current revision.
+        "registration_category_metadata",
+        "registration_category_metadata_revisions",
+        "registration_category_metadata_current",
     }
     offenders = [
         path

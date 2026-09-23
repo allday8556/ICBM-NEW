@@ -83,8 +83,13 @@ CANONICAL_TABLES = (
     "registration_target_policies",
     "registration_target_policy_revisions",
     "registration_target_policy_current",
+    # Gate 1 G1-B (ADR-0015 §3, authorization 5788082735): the durable operator-reviewed category
+    # metadata, its append-only revisions and its one current revision.
+    "registration_category_metadata",
+    "registration_category_metadata_revisions",
+    "registration_category_metadata_current",
 )
-HEAD = "0019_g1_registration_target_policy"
+HEAD = "0020_g1_registration_category_metadata"
 
 
 def _url(path: Path) -> str:
