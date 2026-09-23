@@ -806,3 +806,166 @@
 .requirement-list li[data-satisfied='false'] {
   color: var(--color-text-strong);
 }
+
+/* ---------- Product DB (Gate 1 G1-C) ---------- */
+/* The prototype's DB layout: a search toolbar, the product list beside one detail panel, and
+   the detail's title/group rhythm. Everything else is the shared panel/table/chip/kv system. */
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.95em;
+  letter-spacing: 0;
+  word-break: break-all;
+}
+
+.db-toolbar {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+}
+
+.db-toolbar input[type='search'] {
+  flex: 1 1 240px;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  background: var(--color-input);
+  color: var(--color-text-body);
+  font-size: var(--fs-lg);
+}
+
+.db-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.db-list {
+  padding: 0;
+}
+
+.db-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+}
+
+.db-list .table th {
+  white-space: nowrap;
+}
+
+.db-list .table tbody tr[data-product] {
+  cursor: pointer;
+}
+
+.db-list .table tbody tr[data-product]:hover {
+  background: var(--color-panel-subtle);
+}
+
+.db-list .table tbody tr[aria-selected='true'] {
+  background: var(--color-info-bg);
+}
+
+.db-member-name + .db-member-name {
+  margin-top: var(--space-2);
+}
+
+.db-member-name .mini,
+.db-items td .mini {
+  display: block;
+}
+
+.db-name {
+  color: var(--color-text-strong);
+  font-weight: var(--fw-semibold);
+}
+
+.db-pager {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.db-detail h3 {
+  display: flex;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-strong);
+  font-size: var(--fs-heading);
+}
+
+.detail-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.detail-group {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+
+.detail-group h4 {
+  display: inline-flex;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+}
+
+.db-items .table {
+  margin-top: var(--space-3);
+}
+
+.db-items .note {
+  margin-top: var(--space-3);
+}
+
+.db-selection {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  font-size: var(--fs-md);
+}
+
+.db-target {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.db-target:empty {
+  display: none;
+}
+
+@media (max-width: 1280px), (orientation: portrait) {
+  .db-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .db-list {
+    overflow-x: auto;
+  }
+  .db-list .table {
+    min-width: 560px;
+  }
+  .db-list-head,
+  .db-pager {
+    padding: var(--space-4);
+  }
+}
