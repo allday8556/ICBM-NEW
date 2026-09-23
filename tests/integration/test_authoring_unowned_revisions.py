@@ -10,7 +10,9 @@ compatibility the decision requires, through the real application on a migrated 
   missing metadata — and still evaluates every other rule, so the unit is never READY;
 - a freeze is refused and writes no Snapshot, Batch, Intent or Attempt, and the Snapshot builder
   refuses an unowned revision even if it is handed a READY result;
-- G1-A still refuses a non-null value, and no stand-in revision is stored anywhere.
+- a preparation carrying any revision other than the policy's own (``null``) is refused whole on
+  create and update (decision 5801915996), G1-A still refuses a non-null value, and no stand-in
+  revision is stored anywhere.
 
 No provider is contacted.
 """
@@ -263,24 +265,64 @@ def test_the_candidate_reports_unowned_revisions_and_evaluates_everything_else(
     assert AUTHORING_REVISIONS_UNOWNED in unit["preflight"]["reason_codes"]
 
 
-def test_a_client_supplied_revision_is_still_unowned(
-    api: TestClient, draft: tuple[str, str]
+def preparation_rows(config: AppConfig) -> tuple[int, int]:
+    with contextlib.closing(raw(config)) as connection:
+        return (
+            connection.execute("SELECT COUNT(*) FROM registration_preparations").fetchone()[0],
+            connection.execute(
+                "SELECT COUNT(*) FROM registration_preparation_revisions"
+            ).fetchone()[0],
+        )
+
+
+@pytest.mark.parametrize(
+    ("mapping", "composition", "body", "refused"),
+    [
+        ("body-only-v1", None, "상세 본문", ["mapping_revision"]),
+        (None, "body-only-v1", "상세 본문", ["detail_composition_revision"]),
+        ("unowned", "default", "상세 본문", ["detail_composition_revision", "mapping_revision"]),
+        # A composition revision sent without a body would not be stored; it is refused anyway.
+        (None, "sentinel", None, ["detail_composition_revision"]),
+    ],
+)
+def test_a_client_supplied_revision_is_refused_and_writes_nothing(
+    config: AppConfig,
+    api: TestClient,
+    draft: tuple[str, str],
+    mapping: str | None,
+    composition: str | None,
+    body: str | None,
+    refused: list[str],
 ) -> None:
-    """A preparation that carries revisions of its own, while the policy holds none, is never
-    owner-held: the unit stays AUTHORING_REVISIONS_UNOWNED and cannot be frozen."""
+    """The revisions are server-owned (5801915996): the client sends back exactly the server's
+    value, None today. Anything else is refused whole — on create and on update."""
     draft_id, item_id = draft
     authored = inputs()
-    authored["category"]["mapping_revision"] = "body-only-v1"
-    authored["detail_composition_revision"] = "body-only-v1"
+    authored["category"]["mapping_revision"] = mapping
+    authored["detail_composition_revision"] = composition
+    authored["detail_body"] = body
     response = api.post(
         PREPARATIONS,
         json={"draft_id": draft_id, "item_ids": [item_id], "actor": OPERATOR, "inputs": authored},
         headers=CLIENT,
     )
-    assert response.status_code == 200, response.text
-    preflight = evaluate(api, response.json()["preparation_id"])
-    assert AUTHORING_REVISIONS_UNOWNED in preflight["reason_codes"]
-    assert preflight["status"] != "READY"
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "REGISTER_AUTHORING_REVISION_NOT_OWNED"
+    assert error["details"]["fields"] == refused
+    assert preparation_rows(config) == (0, 0)
+    # An existing preparation is not revised by it either.
+    saved = author(api, draft_id, item_id)
+    response = api.post(
+        f"{PREPARATIONS}/{saved['preparation_id']}",
+        json={"item_ids": [item_id], "actor": OPERATOR, "inputs": authored},
+        headers=CLIENT,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "REGISTER_AUTHORING_REVISION_NOT_OWNED"
+    assert preparation_rows(config) == (1, 1)
+    reread = api.get(f"{PREPARATIONS}/{saved['preparation_id']}", headers=CLIENT).json()
+    assert reread == saved
 
 
 # ---------------------------------------------------------------- freeze stays fail-closed

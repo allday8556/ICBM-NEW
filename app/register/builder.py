@@ -96,15 +96,17 @@ class RegistrationSnapshotBuilder:
         category, detail = request.category, request.detail
         assert category is not None and detail is not None
         mapping, composition = category.mapping_revision, detail.composition_revision
+        owned_mapping = unit.target.category_mapping_revision
+        owned_composition = unit.target.detail_composition_revision
         if (
-            mapping is None
-            or composition is None
-            or unit.target.category_mapping_revision is None
-            or unit.target.detail_composition_revision is None
+            owned_mapping is None
+            or owned_composition is None
+            or mapping != owned_mapping
+            or composition != owned_composition
         ):
             # Unreachable through a READY preflight, which reports AUTHORING_REVISIONS_UNOWNED:
-            # a revision is owner-held only while the target policy holds one. Refused here too,
-            # before anything is written, and never filled with a stand-in.
+            # a revision is owner-held only when it is exactly the one the target policy holds.
+            # Refused here too, before anything is written, and never filled with a stand-in.
             raise RegistrationConflictError(
                 "REGISTER_AUTHORING_REVISIONS_UNOWNED",
                 "a Snapshot is frozen only with owner-held authoring revisions",
@@ -132,10 +134,10 @@ class RegistrationSnapshotBuilder:
                 listing_identity=unit.listing_identity,
                 preflight_rule_version=fresh.rule_version,
                 preflight_fingerprint=fresh.dependency_fingerprint,
-                category_mapping_revision=mapping,
+                category_mapping_revision=owned_mapping,
                 taxonomy_revision=category.taxonomy_revision,
                 policy_revisions=outbound.policy_revisions,
-                detail_composition_revision=composition,
+                detail_composition_revision=owned_composition,
                 sanitizer_profile_version=unit.target.sanitizer_profile_version,
                 payload=outbound.payload,
                 items=[

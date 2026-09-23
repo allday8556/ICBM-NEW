@@ -993,22 +993,21 @@ def _detail_reasons(request: PreflightRequest) -> list[Reason]:
 
 
 def _authoring_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
-    """Whether both authoring revisions have an owner-held value (decision 5800619183).
+    """Whether both authoring revisions are owner-held (decisions 5800619183, 5801915996).
 
-    The target policy holds ``None`` for a revision whose owner does not exist, and an authored
-    selection or composition carries that ``None`` exactly. A value the preparation carries while
-    the target policy holds ``None`` came from no owner, so it is unowned too: a client-supplied
-    revision never makes a unit READY. Either absence is one statement — no owner stands behind
-    the revision — and it is neither missing category metadata nor a missing policy. Every other
-    rule is still evaluated as it always is."""
+    The revisions are server-owned: the target policy holds them, ``None`` while no owner exists.
+    An authored selection or composition is owner-held only when the target holds a revision and
+    the authored one is **exactly** it. A ``None`` on either side, or any other value — however it
+    was written — is unowned: a client-supplied revision never makes a unit READY. This is neither
+    missing category metadata nor a missing policy, and every other rule is still evaluated."""
     target, category, detail = unit.target, request.category, request.detail
-    unowned = (
-        target.category_mapping_revision is None
-        or target.detail_composition_revision is None
-        or (category is not None and category.mapping_revision is None)
-        or (detail is not None and detail.composition_revision is None)
+    owned = (
+        target.category_mapping_revision is not None
+        and target.detail_composition_revision is not None
+        and (category is None or category.mapping_revision == target.category_mapping_revision)
+        and (detail is None or detail.composition_revision == target.detail_composition_revision)
     )
-    return [Reason(AUTHORING_REVISIONS_UNOWNED, _R, "authoring")] if unowned else []
+    return [] if owned else [Reason(AUTHORING_REVISIONS_UNOWNED, _R, "authoring")]
 
 
 def _publication_reasons(target: TargetPolicy, unit: ResolvedUnit) -> list[Reason]:

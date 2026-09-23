@@ -36,6 +36,7 @@ from app.register.authoring import (
     decode_inputs,
     inputs_from_view,
     preflight_request,
+    submitted_view_revisions,
 )
 from app.register.canary import (
     AdoptionFacts,
@@ -265,6 +266,7 @@ class RegisterService:
             inputs=inputs_from_view(inputs),
             actor=actor,
             correlation_id=correlation_id,
+            revisions=submitted_view_revisions(inputs),
         )
         return _preparation_view(record)
 
@@ -283,6 +285,7 @@ class RegisterService:
             inputs=inputs_from_view(inputs),
             actor=actor,
             correlation_id=correlation_id,
+            revisions=submitted_view_revisions(inputs),
         )
         return _preparation_view(record)
 
