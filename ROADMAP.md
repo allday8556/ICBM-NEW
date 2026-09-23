@@ -726,7 +726,7 @@ Next, in order:
 
 ## 14.1 Gaps between the merged code and a runnable vertical
 
-Merged owners are not an operable path. These gaps are recorded facts at the current main; each needs its own authorization. Rows marked **G1-A** record what that slice closed:
+Merged owners are not an operable path. These gaps are recorded facts at the current main; each needs its own authorization. Rows marked **G1-A**, **G1-B** or **G1-C** record what that slice closed:
 
 | gap | what exists | what is missing |
 | --- | --- | --- |
@@ -734,7 +734,7 @@ Merged owners are not an operable path. These gaps are recorded facts at the cur
 | registration target policy | **G1-A:** the durable, append-only target-policy owner (migration 0019), its Settings save path and the production `RegistrationPolicySource` over it | nothing for the owner; an account without a saved policy still blocks with `REGISTER_TARGET_POLICY_MISSING` |
 | Draft creation from the product DB | `RegistrationStore.create_draft()` | no API route, service command or screen turns a chosen canonical product into a `RegistrationDraft` |
 | pricing snapshot creation and pinning | the M4 pricing owner and per-context snapshots | no command path computes a price, creates the snapshot and pins it to a Draft from the product DB or the UI |
-| product DB workflow | two read-by-identity product endpoints | no list, search, pagination, detail or registration-target selection; the screen is a count-oriented shell |
+| product DB workflow | **G1-C:** the operator's read path over the canonical Product: the list, search and cursor pagination of ACTIVE Products, the detail with each member's source facts read through its current source revision, and the server-revalidated registration-target selection (`/api/v1/products`, the 통합DB screen) | nothing for the read path; the selection is a read-only handoff that creates no Draft, PricingSnapshot or registration row, and turning it into a Draft is the Draft-creation row above |
 | COLLECT submission | `POST /api/v1/collect/collections` | the COLLECT screen never calls it, so a collection cannot be started from the UI; the DB screen's empty-state link leads to that screen and therefore to no submit path either |
 | Settings persistence | SmartStore credential, account and capability actions; **G1-A:** the target-policy surface and **G1-B:** the category-metadata review surface, each with its own save contract and named by the server as editable | the general common and platform fields and their save bar still reach no write contract and stay read-only; the historical `M0 · 미연결` copy of the Settings registry items is deferred to the Gate 1 UI cleanup |
 | ReviewItem | the `ReviewKind` contract and the screen counters | no table, no producer and no persistence; `open_counts()` returns zero for every kind although M3 already produces `REVIEW_REQUIRED` truth |

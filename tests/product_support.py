@@ -16,6 +16,7 @@ from app.collect.facts import (
     Availability,
     FieldFact,
     FieldStatus,
+    ImageReference,
     MoneyValue,
     PricesValue,
     ShippingKind,
@@ -159,8 +160,10 @@ class Collections:
         fields: dict[str, FieldFact] | None = None,
         *,
         source_product_id: str = PRODUCT,
+        extra_images: tuple[ImageReference, ...] = (),
         **overrides: object,
     ) -> tuple[str, StoredRevision]:
+        """``extra_images`` follow the stored representative image, as the page exposed them."""
         with self._db.write() as session:
             run_id = self._runs.open(
                 session,
@@ -173,7 +176,7 @@ class Collections:
         revision = self._revisions.append(
             collected(
                 fields=product() if fields is None else fields,
-                images=self._images,
+                images=(*self._images, *extra_images),
                 source_product_id=source_product_id,
                 collection_run_id=run_id,
                 **overrides,
