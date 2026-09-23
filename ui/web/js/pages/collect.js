@@ -2,6 +2,7 @@
 // state (M1 CONNECT) in the v28/v29 supplier-card shape: login, connection test and resume are
 // live; site analysis and collection rules arrive with COLLECT (M3) and stay inert.
 // The UI never decides a supplier is connected — it shows the server's protected-read verdict.
+// The 수집 view submits one product and follows its durable run (Gate 1 G1-E, below).
 
 import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -11,7 +12,6 @@ import { markInert } from '../core/inert.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
 import { datePill, pageHead } from '../components/page-head.js';
-import { emptyState, unsupportedState } from '../components/states.js';
 
 const ENDPOINT = '/api/v1/screens/collect';
 const CONNECT = '/api/v1/connect/suppliers';
@@ -266,14 +266,338 @@ function supplierCard(supplier, ctx) {
   );
 }
 
-function jobsView(view, ctx) {
-  if (view.meta.state !== 'EMPTY') return unsupportedState(view.meta);
-  return emptyState({
-    title: '아직 수집 작업이 없습니다',
-    copy: '공급처를 연결한 뒤 첫 상품을 수집하세요.',
-    // Collection needs a connected supplier first, so the CTA leads to supplier management.
-    action: { label: '첫 상품 수집하기', onSelect: () => ctx.navigate('collect', { view: 'suppliers' }) },
+// ---------------------------------------------------------------- 수집 (Gate 1 G1-E)
+//
+// One product URL, submitted through POST /api/v1/collect/collections and then only read back.
+// Every state shown is the durable run's own outcome: the page decides no outcome, never submits
+// again on its own, and keeps nothing in browser storage. A reload or a return to this view
+// follows the same durable runs — the run named in the route, and the newest runs the server
+// lists — so leaving the screen neither cancels nor repeats a collection.
+
+const RUNS = '/api/v1/collect/collections';
+const RUN_POLL_MS = 1500;
+// Bounded: about three minutes of reads. After that the operator asks for a recheck; the page
+// never keeps reading on its own and never submits again.
+const RUN_POLL_LIMIT = 120;
+
+const OUTCOME_CHIP = {
+  PENDING: ['진행 중', 'info'],
+  RECORDED: ['기록됨', 'good'],
+  NO_REVISION: ['기록할 식별자 없음', 'warn'],
+  FAILED: ['실패', 'bad'],
+};
+const FACTS_CHIP = {
+  CONFIRMED: ['원천 확정', 'good'],
+  REVIEW_REQUIRED: ['원천 확인 필요', 'warn'],
+};
+const JOB_STATE_LABEL = {
+  QUEUED: '대기 중',
+  RUNNING: '실행 중',
+  RETRY_SCHEDULED: '재시도 예정',
+  SUCCEEDED: '작업 종료',
+  DEAD: '작업 중단',
+};
+// Server codes rendered as copy. The code itself is always shown beside it.
+const COLLECT_COPY = {
+  COLLECT_URL_REFUSED: '이 공급처의 상품 상세 페이지 URL이 아닙니다.',
+  COLLECT_SUPPLIER_UNKNOWN: '수집 정의가 없는 공급처입니다.',
+  COLLECT_SAME_PRODUCT_TOO_SOON: '같은 상품을 너무 최근에 읽어 지금은 요청할 수 없습니다.',
+  COLLECT_RUN_UNKNOWN: '해당 수집 기록을 찾을 수 없습니다.',
+  COLLECT_RUN_NOT_RECORDED: '기록된 수집만 통합DB 상품과 연결됩니다.',
+  COLLECT_RUN_LIMIT_INVALID: '최근 수집 목록 개수가 올바르지 않습니다.',
+};
+const HANDOFF_COPY = {
+  NOT_YET_VISIBLE: '원천 리비전은 기록됐지만 통합DB 상품에는 아직 반영되지 않았습니다.',
+  CURRENT_REVISION_DIFFERS: '통합DB 상품이 이 수집이 아닌 다른 원천 리비전을 현재로 가리키고 있습니다.',
+};
+const SUBMIT_HELP =
+  '상품 상세 URL 하나만 받습니다. 목록·카테고리 수집은 하지 않으며, 요청은 서버가 URL과 같은 상품 재수집 간격을 확인한 뒤 수집 작업 하나로 접수합니다.';
+const RUNS_HELP =
+  '서버에 기록된 최근 수집을 최신순으로 보여줍니다. 진행 중인 수집은 화면을 벗어났다 돌아와도 같은 기록을 다시 읽어 이어서 표시합니다.';
+
+function short(id) {
+  return id ? id.slice(0, 8) : '—';
+}
+
+function chip(label, tone) {
+  return h('span', { class: tone ? `chip ${tone}` : 'chip' }, label);
+}
+
+function outcomeChip(outcome) {
+  const [label, tone] = OUTCOME_CHIP[outcome] ?? [outcome, null];
+  return h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-outcome': outcome }, label);
+}
+
+function factsChip(status) {
+  if (!status) return null;
+  const [label, tone] = FACTS_CHIP[status] ?? [status, null];
+  return h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-facts-status': status }, label);
+}
+
+function codeCopy(code, message) {
+  const copy = COLLECT_COPY[code] ?? ERROR_COPY[code] ?? message ?? code;
+  return code && copy !== code ? `${copy} (${code})` : copy;
+}
+
+// A run's terminal answer as the server recorded it: RECORDED names its revision and facts status,
+// NO_REVISION and FAILED their durable detail, shown exactly as stored.
+function runResult(run) {
+  if (run.outcome === 'RECORDED') {
+    return fragment(h('span', { class: 'mono', 'data-role': 'revision' }, short(run.revision_id)), ' ', factsChip(run.facts_status));
+  }
+  if (run.detail) return h('span', { class: 'mini', 'data-role': 'run-detail-text' }, run.detail);
+  return '—';
+}
+
+function supplierLabel(key, suppliers) {
+  return suppliers.find((s) => s.supplier_key === key)?.display_name ?? key;
+}
+
+function submitCard(view, ctx) {
+  const keys = view.collection_supplier_keys;
+  const select = h(
+    'select',
+    { id: 'collect-supplier', name: 'supplier_key', disabled: !keys.length },
+    ...keys.map((key) => h('option', { value: key }, supplierLabel(key, view.suppliers))),
+  );
+  const url = h('input', {
+    id: 'collect-url',
+    type: 'url',
+    name: 'product_url',
+    required: true,
+    maxlength: '2048',
+    autocomplete: 'off',
+    placeholder: '상품 상세 페이지 URL 하나',
   });
+  const button = h('button', { type: 'submit', class: 'btn blue', 'data-action': 'submit-collection', disabled: !keys.length }, '수집 요청');
+  const connection = h('div', { 'data-role': 'supplier-connection' });
+  const refusal = h('div', { 'data-role': 'submit-refusal' });
+
+  // CONNECT's own verdict for the chosen supplier, shown as it is. It never decides whether the
+  // form may be sent: the server does.
+  const showConnection = () => {
+    const summary = view.suppliers.find((s) => s.supplier_key === select.value);
+    if (!summary) {
+      connection.replaceChildren();
+      return;
+    }
+    const [label, tone] = CAPABILITY_CHIP[summary.capability_status] ?? [summary.capability_status, null];
+    // fragment() skips an absent part; the DOM's own replaceChildren would print "null".
+    connection.replaceChildren(fragment(
+      h('div', { class: 'kv' }, h('span', {}, '공급처 연결'), h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-capability': summary.capability_status }, label)),
+      summary.credentials_stored
+        ? null
+        : h(
+            'div',
+            { class: 'note', 'data-role': 'credentials-missing' },
+            '이 공급처의 로그인 정보가 저장되어 있지 않습니다. ',
+            h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('collect', { view: 'suppliers' }) }, '공급처 관리'),
+          ),
+    ));
+  };
+  select.addEventListener('change', showConnection);
+  showConnection();
+
+  let inFlight = false;
+  const form = h(
+    'form',
+    { class: 'panel collect-submit', 'data-role': 'collect-submit', novalidate: true },
+    h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '상품 수집'), SUBMIT_HELP)),
+    keys.length ? null : h('div', { class: 'note', 'data-role': 'no-collection-supplier' }, '수집 정의가 있는 공급처가 없습니다.'),
+    h('div', { class: 'form-row' }, h('label', { for: 'collect-supplier' }, '공급처'), select),
+    connection,
+    h('div', { class: 'form-row' }, h('label', { for: 'collect-url' }, '상품 URL'), url),
+    refusal,
+    h('div', { class: 'supplier-actions' }, button),
+  );
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    // One submit, one request: a second click or Enter while the first is on the wire does nothing.
+    if (inFlight) return;
+    const productUrl = url.value.trim();
+    if (!productUrl || !select.value) {
+      refusal.replaceChildren(h('div', { class: 'note' }, '공급처와 상품 URL을 입력하세요.'));
+      return;
+    }
+    inFlight = true;
+    button.disabled = true;
+    refusal.replaceChildren();
+    try {
+      const submitted = await sendJson('POST', RUNS, { supplier_key: select.value, product_url: productUrl });
+      url.value = '';
+      toast('수집 요청 접수', `수집 ${short(submitted.collection_run_id)} · 작업 ${short(submitted.job_id)}`);
+      ctx.navigate('collect', { view: 'jobs', run: submitted.collection_run_id });
+    } catch (error) {
+      // A refused request made no run: nothing local is shown as if one existed.
+      const code = error?.error?.code ?? null;
+      refusal.replaceChildren(
+        h('div', { class: 'note', 'data-reason': code ?? '' }, codeCopy(code, error?.error?.message ?? String(error?.message ?? error))),
+      );
+      inFlight = false;
+      button.disabled = false;
+    }
+  });
+  return form;
+}
+
+function jobsView(view, ctx) {
+  const focusId = ctx.params.get('run');
+  const root = h('div', { class: 'collect-jobs', 'data-role': 'collect-jobs' });
+  const focus = h('section', { class: 'panel collect-run', 'data-role': 'run-focus', hidden: !focusId });
+  const listBody = h('tbody', {});
+  const recheck = h('button', { type: 'button', class: 'btn', 'data-action': 'recheck-runs', hidden: true }, '상태 다시 확인');
+  const runsPanel = h(
+    'section',
+    { class: 'panel collect-runs', 'data-role': 'recent-runs' },
+    h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '최근 수집'), RUNS_HELP), recheck),
+    h(
+      'table',
+      { class: 'table' },
+      h('thead', {}, h('tr', {}, ...['요청 시각', '공급처', '상태', '결과', ''].map((label) => h('th', {}, label)))),
+      listBody,
+    ),
+  );
+  let polls = 0;
+  let timer = null;
+
+  function runRow(run) {
+    return h(
+      'tr',
+      { 'data-run': run.collection_run_id, 'data-outcome': run.outcome, 'aria-current': run.collection_run_id === focusId ? 'true' : null },
+      h('td', {}, dotDateTime(run.requested_at)),
+      h('td', {}, supplierLabel(run.supplier_key, view.suppliers)),
+      h('td', {}, outcomeChip(run.outcome)),
+      h('td', {}, runResult(run)),
+      h(
+        'td',
+        {},
+        h('button', { type: 'button', class: 'btn', 'data-action': 'open-run', onclick: () => ctx.navigate('collect', { view: 'jobs', run: run.collection_run_id }) }, '보기'),
+      ),
+    );
+  }
+
+  async function handoffBlock(run) {
+    const holder = h('div', { class: 'collect-handoff', 'data-role': 'handoff' });
+    let handoff;
+    try {
+      handoff = await getJson(`${RUNS}/${encodeURIComponent(run.collection_run_id)}/product`);
+    } catch (error) {
+      const code = error?.error?.code ?? null;
+      holder.append(h('div', { class: 'note', 'data-reason': code ?? '' }, codeCopy(code, error?.error?.message)));
+      return holder;
+    }
+    holder.dataset.state = handoff.state;
+    const open = handoff.product_group_id
+      ? h(
+          'button',
+          { type: 'button', class: 'btn blue', 'data-action': 'open-product', onclick: () => ctx.navigate('db', { product: handoff.product_group_id }) },
+          '통합DB에서 보기',
+        )
+      : null;
+    // Read-only follow-through: a recheck reads again, and nothing here ever collects again.
+    const again = handoff.state === 'NOT_YET_VISIBLE'
+      ? h('button', { type: 'button', class: 'btn', 'data-action': 'recheck-product', onclick: () => refresh() }, '다시 확인')
+      : null;
+    holder.append(fragment(
+      h('div', { class: 'kv' }, h('span', {}, '원천 상품'), h('b', {}, `${handoff.supplier_key} · ${handoff.source_product_id}`)),
+      handoff.product_group_id ? h('div', { class: 'kv' }, h('span', {}, '통합DB 상품'), h('b', { class: 'mono' }, short(handoff.product_group_id))) : null,
+      HANDOFF_COPY[handoff.state] ? h('div', { class: 'note', 'data-reason': handoff.state }, HANDOFF_COPY[handoff.state]) : null,
+      h('div', { class: 'supplier-actions' }, open, again),
+    ));
+    return holder;
+  }
+
+  async function renderFocus() {
+    if (!focusId) return false;
+    let run;
+    try {
+      run = await getJson(`${RUNS}/${encodeURIComponent(focusId)}`);
+    } catch (error) {
+      const code = error?.error?.code ?? null;
+      focus.dataset.state = 'error';
+      focus.replaceChildren(h('div', { class: 'note', 'data-reason': code ?? '' }, codeCopy(code, error?.error?.message)));
+      return false;
+    }
+    let job = null;
+    if (run.outcome === 'PENDING') {
+      try {
+        job = await getJson(`/api/v1/system/jobs/${encodeURIComponent(run.job_id)}`);
+      } catch {
+        job = null;
+      }
+    }
+    const handoff = run.outcome === 'RECORDED' ? await handoffBlock(run) : null;
+    if (!root.isConnected && polls > 0) return false; // the operator left; nothing to render into
+    focus.dataset.run = run.collection_run_id;
+    focus.dataset.outcome = run.outcome;
+    focus.dataset.state = 'ready';
+    focus.replaceChildren(fragment(
+      h('div', { class: 'supplier-head-row' }, h('h3', { class: 'panel-title' }, `수집 ${short(run.collection_run_id)}`), outcomeChip(run.outcome)),
+      kv('수집 ID', run.collection_run_id),
+      kv('작업 ID', run.job_id),
+      kv('상관 ID', run.correlation_id),
+      kv('공급처', supplierLabel(run.supplier_key, view.suppliers)),
+      kv('상품 URL', run.source_url),
+      kv('요청 시각', dotDateTime(run.requested_at)),
+      run.finished_at ? kv('종료 시각', dotDateTime(run.finished_at)) : null,
+      job
+        ? h(
+            'div',
+            { class: 'kv', 'data-role': 'job-state', 'data-job-state': job.state },
+            h('span', {}, '작업 상태'),
+            h('b', {}, `${JOB_STATE_LABEL[job.state] ?? job.state} · 시도 ${job.attempt_count}/${job.max_attempts}`, job.next_attempt_at && job.state === 'RETRY_SCHEDULED' ? ` · 다음 ${dotDateTime(job.next_attempt_at)}` : ''),
+          )
+        : null,
+      run.outcome === 'RECORDED' ? h('div', { class: 'kv' }, h('span', {}, '원천 리비전'), h('b', { class: 'mono', 'data-role': 'revision-id' }, run.revision_id)) : null,
+      run.outcome === 'RECORDED' ? h('div', { class: 'kv' }, h('span', {}, '사실 상태'), factsChip(run.facts_status)) : null,
+      run.outcome === 'NO_REVISION' || run.outcome === 'FAILED'
+        ? h('div', { class: 'kv' }, h('span', {}, run.outcome === 'FAILED' ? '실패 사유' : '사유'), h('b', { 'data-role': 'run-detail' }, run.detail ?? '—'))
+        : null,
+      handoff,
+    ));
+    return run.outcome === 'PENDING';
+  }
+
+  async function renderList() {
+    try {
+      const listed = await getJson(`${RUNS}?limit=10`);
+      listBody.replaceChildren(
+        ...(listed.runs.length
+          ? listed.runs.map(runRow)
+          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, '아직 수집 기록이 없습니다.'))]),
+      );
+      return listed.runs.some((run) => run.outcome === 'PENDING');
+    } catch (error) {
+      listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
+      return false;
+    }
+  }
+
+  // Reads only. While a run is still PENDING the same reads repeat, a bounded number of times and
+  // only while this view is on screen; nothing here ever sends a collection.
+  async function refresh() {
+    window.clearTimeout(timer);
+    const [focusPending, listPending] = await Promise.all([renderFocus(), renderList()]);
+    const pending = focusPending || listPending;
+    if (!root.isConnected && polls > 0) return;
+    if (pending && polls < RUN_POLL_LIMIT) {
+      polls += 1;
+      recheck.hidden = true;
+      timer = window.setTimeout(() => {
+        if (root.isConnected) refresh();
+      }, RUN_POLL_MS);
+    } else {
+      recheck.hidden = !pending;
+    }
+  }
+  recheck.addEventListener('click', () => {
+    polls = 0;
+    refresh();
+  });
+
+  root.append(submitCard(view, ctx), focus, runsPanel);
+  refresh();
+  return root;
 }
 
 function suppliersView(view, ctx) {
