@@ -10,6 +10,12 @@ export function setMarketplaces(marketplaces) {
   for (const marketplace of marketplaces) catalog.set(marketplace.key, marketplace);
 }
 
+// The marketplace's display name as the shell contract gives it, for plain-text places such as a
+// select option; the key itself when the shell names no such marketplace.
+export function marketplaceLabel(key) {
+  return catalog.get(key)?.label ?? key;
+}
+
 export function platformTag(key, { name = false } = {}) {
   const marketplace = catalog.get(key);
   if (!marketplace) return h('span', { class: 'pf' }, key);

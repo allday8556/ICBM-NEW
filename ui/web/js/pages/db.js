@@ -11,19 +11,37 @@
 // that arrives for any Product other than the one selected now — or for an older request — is
 // discarded, never rendered. Nothing is cached across Products: each detail is read fresh.
 //
+// Gate 1 G1-D adds one command: 등록 초안 만들기 sends the chosen Product, its membership
+// revision, the chosen Items, a target the server lists and a listing shape. The server
+// revalidates, prices through M4, pins and creates the Draft — or nothing. The page computes no
+// price and sends no price, policy revision or snapshot.
+//
 // It reuses the v29 panel/table/chip/kv system and the prototype's DB layout (list beside a
 // detail panel). Explanations live behind the help icon, never as permanent subtitles.
 
-import { ApiError, getJson } from '../core/api.js';
+import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
+import { marketplaceLabel } from '../core/platform.js';
+import { toast } from '../core/toast.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
 
 const SCREEN = '/api/v1/screens/db';
 const PRODUCTS = '/api/v1/products';
+const DRAFTS = '/api/v1/register/drafts';
+const DRAFT_TARGETS = '/api/v1/register/draft-targets';
+const DRAFT_HELP =
+  '선택한 품목으로 등록 초안을 만듭니다. 서버가 선택을 다시 검증하고, 계정의 현재 등록 정책으로 M4가 매긴 가격 스냅샷을 품목마다 고정합니다. 하나라도 가격이 정해지지 않으면 초안을 만들지 않습니다.';
+const SHAPE_LABEL = {
+  SINGLE_LISTING_WITH_OPTIONS: '옵션 상품 하나로 등록',
+  SEPARATE_LISTINGS: '품목마다 따로 등록',
+  SELECTED_OFFERS: '선택한 구성만 등록',
+};
+const BASIS_LABEL = { MINIMUM_SALE_PRICE: '최저판매가', TARGET_MARGIN: '목표 마진' };
+const OUTCOME_LABEL = { RECORDED: '새로 기록', UNCHANGED: '기존 스냅샷' };
 const TITLE = '통합DB';
 const HELP = '모든 상품을 하나의 DB에서 관리하고 등록부터 판매까지 빠르게 운영합니다.';
 const LIST_HELP =
@@ -62,6 +80,14 @@ const REASON_COPY = {
   PRODUCTS_CURSOR_INVALID: '목록 위치가 올바르지 않아 처음부터 다시 불러와야 합니다.',
   PRODUCTS_QUERY_INVALID: '검색어는 100자까지 입력할 수 있습니다.',
   PRODUCTS_PAGE_LIMIT_INVALID: '한 페이지의 상품 수가 올바르지 않습니다.',
+  REGISTER_TARGET_ACCOUNT_UNKNOWN: '선택한 판매 계정을 찾을 수 없습니다.',
+  MARKETPLACE_ACCOUNT_NOT_BOUND: '판매 계정 연결이 확인되지 않음',
+  REGISTER_TARGET_POLICY_MISSING: '등록 정책 없음',
+  REGISTER_PRICING_CONTEXT_MISMATCH: '등록 정책의 가격 기준이 이 계정과 맞지 않아 초안을 만들지 않았습니다.',
+  REGISTER_DRAFT_ITEM_NOT_PRICED: 'M4가 가격을 정하지 못한 품목이 있어 초안을 만들지 않았습니다.',
+  REGISTER_DRAFT_SELECTION_MOVED: '가격을 정하는 동안 상품 구성이 바뀌어 초안을 만들지 않았습니다.',
+  REGISTER_DRAFT_PRICE_CONTEXT: '가격 스냅샷이 초안의 대상과 맞지 않아 초안을 만들지 않았습니다.',
+  REQUEST_INVALID: '요청이 올바르지 않습니다.',
 };
 
 function copy(code) {
@@ -213,11 +239,11 @@ export default {
       );
     }
     if (screen.meta.state !== 'READY') return fragment(head, unsupportedState(screen.meta));
-    return fragment(head, workspace(ctx.params.get('product')));
+    return fragment(head, workspace(ctx.params.get('product'), ctx.navigate));
   },
 };
 
-function workspace(initialProduct) {
+function workspace(initialProduct, navigateTo) {
   // Page state only: nothing here is a second copy of product truth, and nothing outlives a reload.
   const state = {
     query: null,
@@ -228,6 +254,7 @@ function workspace(initialProduct) {
     detail: null,
     chosen: new Set(),
     targetSeq: 0,
+    draftSeq: 0,
   };
 
   const search = h('input', {
@@ -327,6 +354,7 @@ function workspace(initialProduct) {
     state.detail = null;
     state.chosen = new Set();
     state.targetSeq += 1;
+    state.draftSeq += 1; // a Draft command still in flight answers for the previous Product only
     const seq = ++state.detailSeq;
     markSelectedRow();
     detailPanel.dataset.product = id;
@@ -363,6 +391,7 @@ function workspace(initialProduct) {
       else state.chosen.delete(item.item_id);
       // A changed choice is a new selection: the previous check no longer describes it.
       state.targetSeq += 1;
+      state.draftSeq += 1;
       renderSelection();
     });
     const binding = item.current_binding;
@@ -387,6 +416,174 @@ function workspace(initialProduct) {
     );
   }
 
+  // ---------------------------------------------------------------- 등록 초안 (Gate 1 G1-D)
+  //
+  // The operator picks a target the server lists and a listing shape; the server revalidates
+  // the selection, prices every Item through M4 and pins it, or creates nothing. The page sends
+  // only those choices — never a price, a policy revision or a snapshot — and shows what the
+  // server answered. One click is one POST; a reload never sends it again.
+  const targetSelect = h('select', { id: 'draft-target', name: 'draft_target', 'data-role': 'draft-target' });
+  const shapeSelect = h('select', { id: 'draft-shape', name: 'listing_shape', 'data-role': 'draft-shape' });
+  const draftButton = h(
+    'button',
+    { type: 'button', class: 'btn blue', 'data-action': 'create-draft', onclick: () => createDraft() },
+    '등록 초안 만들기',
+  );
+  const draftResult = h('div', { class: 'db-draft', 'data-role': 'draft-result' });
+  const draftPanel = h(
+    'div',
+    { class: 'detail-group db-draft-form', 'data-role': 'draft-form' },
+    withHelp(h('h4', {}, '등록 초안'), DRAFT_HELP),
+    h('div', { class: 'form-row' }, h('label', { for: 'draft-target' }, '판매 계정'), targetSelect),
+    h('div', { class: 'form-row' }, h('label', { for: 'draft-shape' }, '리스팅 형태'), shapeSelect),
+    h('div', { class: 'detail-actions' }, draftButton),
+    draftResult,
+  );
+  let targets = [];
+  let drafting = false;
+
+  function renderTargets(listed) {
+    targets = listed.targets;
+    targetSelect.replaceChildren(
+      h('option', { value: '' }, targets.length ? '판매 계정 선택' : '등록할 수 있는 판매 계정이 없습니다'),
+      ...targets.map((target, index) =>
+        h(
+          'option',
+          {
+            value: String(index),
+            disabled: target.unavailable_reason !== null,
+            'data-account': target.marketplace_account_id,
+            'data-reason': target.unavailable_reason ?? '',
+          },
+          `${marketplaceLabel(target.marketplace_key)} · ${short(target.marketplace_account_id)} · ` +
+            (target.unavailable_reason ? copy(target.unavailable_reason) : `정책 ${short(target.policy_revision)}`),
+        ),
+      ),
+    );
+    shapeSelect.replaceChildren(
+      ...listed.listing_shapes.map((shape) => h('option', { value: shape }, SHAPE_LABEL[shape] ?? shape)),
+    );
+    renderDraftButton();
+  }
+
+  function renderDraftButton() {
+    const detail = state.detail;
+    draftButton.disabled =
+      drafting ||
+      !detail ||
+      state.chosen.size === 0 ||
+      detail.selection_unavailable_reason !== null ||
+      targetSelect.value === '';
+  }
+  targetSelect.addEventListener('change', () => {
+    state.draftSeq += 1;
+    draftResult.replaceChildren();
+    renderDraftButton();
+  });
+
+  function pinRow(pin, items) {
+    const item = items.get(pin.item_id);
+    return h(
+      'tr',
+      { 'data-pin-item': pin.item_id, 'data-pricing-snapshot': pin.pricing_snapshot_id },
+      h('td', {}, item ? composition(item) : short(pin.item_id)),
+      h('td', { class: 'mono' }, short(pin.pricing_snapshot_id)),
+      h('td', {}, `${pin.final_sale_price_krw.toLocaleString('ko-KR')}원`),
+      h('td', {}, BASIS_LABEL[pin.price_basis] ?? pin.price_basis),
+      h('td', {}, OUTCOME_LABEL[pin.pricing_outcome] ?? pin.pricing_outcome),
+    );
+  }
+
+  async function createDraft() {
+    const detail = state.detail;
+    const target = targets[Number(targetSelect.value)];
+    if (drafting || !detail || !target || state.chosen.size === 0) return;
+    const product = detail.product;
+    const id = product.product_group_id;
+    const seq = ++state.draftSeq;
+    drafting = true;
+    renderDraftButton();
+    draftResult.replaceChildren();
+    const body = {
+      product_group_id: id,
+      membership_revision_id: product.membership_revision_id,
+      item_ids: product.items.map((item) => item.item_id).filter((itemId) => state.chosen.has(itemId)),
+      marketplace_key: target.marketplace_key,
+      marketplace_account_id: target.marketplace_account_id,
+      listing_shape: shapeSelect.value,
+      actor: 'operator',
+    };
+    try {
+      const created = await sendJson('POST', DRAFTS, body);
+      toast('등록 초안 생성', `초안 ${short(created.draft_id)} · 품목 ${created.items.length}개`);
+      // The Draft exists either way; only the Product it was made from may show it.
+      if (seq !== state.draftSeq || state.productId !== id || created.product_group_id !== id) return;
+      const items = new Map(product.items.map((item) => [item.item_id, item]));
+      draftResult.dataset.state = 'created';
+      draftResult.dataset.draft = created.draft_id;
+      draftResult.replaceChildren(
+        h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 초안 생성됨'), chip(`초안 ${short(created.draft_id)}`, 'good')),
+        kv('초안', created.draft_id),
+        kv('대상', `${marketplaceLabel(created.marketplace_key)} · ${short(created.marketplace_account_id)}`),
+        kv('리스팅 형태', SHAPE_LABEL[created.listing_shape] ?? created.listing_shape),
+        kv('정책 리비전', short(created.policy_revision)),
+        kv('멤버십 리비전', short(created.membership_revision_id)),
+        h(
+          'table',
+          { class: 'table' },
+          h('thead', {}, h('tr', {}, ...['품목', '가격 스냅샷', '판매가', '가격 근거', 'M4'].map((label) => h('th', {}, label)))),
+          h('tbody', {}, ...created.items.map((pin) => pinRow(pin, items))),
+        ),
+        h(
+          'div',
+          { class: 'detail-actions' },
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn blue',
+              'data-action': 'open-draft',
+              onclick: () => navigateTo('register', { draft: created.draft_id }),
+            },
+            '등록관리에서 열기',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (seq !== state.draftSeq || state.productId !== id) return;
+      const code = errorCode(error);
+      const unpriced = code === 'REGISTER_DRAFT_ITEM_NOT_PRICED' ? error.error?.details?.items ?? {} : {};
+      draftResult.dataset.state = 'refused';
+      draftResult.replaceChildren(
+        h('div', { class: 'note', 'data-reason': code ?? '' }, copy(code ?? String(error.message ?? error))),
+        ...Object.entries(unpriced).map(([itemId, reasons]) =>
+          h(
+            'div',
+            { class: 'mini', 'data-unpriced-item': itemId },
+            `${short(itemId)}: ${reasons.map((reason) => reason.code).join(', ')}`,
+          ),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn',
+            'data-action': 'reload-detail',
+            onclick: () => {
+              state.productId = null; // read the same Product again, fresh, with nothing chosen
+              selectProduct(id);
+            },
+          },
+          '상세 다시 불러오기',
+        ),
+      );
+    } finally {
+      // One command at a time: the next one may start once this one has its answer.
+      drafting = false;
+      renderDraftButton();
+    }
+  }
+
   const selectionBar = h('div', { class: 'db-selection', 'data-role': 'selection' });
   const targetResult = h('div', { class: 'db-target', 'data-role': 'target-result' });
   const checkButton = h(
@@ -408,6 +605,11 @@ function workspace(initialProduct) {
     checkButton.disabled = state.chosen.size === 0 || detail.selection_unavailable_reason !== null;
     targetResult.replaceChildren();
     delete targetResult.dataset.state;
+    // A changed choice is a new command: an earlier answer no longer describes it.
+    draftResult.replaceChildren();
+    delete draftResult.dataset.state;
+    delete draftResult.dataset.draft;
+    renderDraftButton();
   }
 
   function renderDetail() {
@@ -450,6 +652,7 @@ function workspace(initialProduct) {
       selectionBar,
       h('div', { class: 'detail-actions' }, checkButton),
       targetResult,
+      draftPanel,
     );
     renderSelection();
   }
@@ -522,6 +725,11 @@ function workspace(initialProduct) {
 
   renderIdleDetail();
   loadList();
+  // The targets are the owners' accounts, bindings and policies: read once for this page.
+  getJson(DRAFT_TARGETS).then(renderTargets, (error) => {
+    targetSelect.replaceChildren(h('option', { value: '' }, copy(errorCode(error) ?? String(error.message ?? error))));
+    renderDraftButton();
+  });
   if (initialProduct) selectProduct(initialProduct);
   return h('div', { class: 'db-workspace' }, toolbar, h('div', { class: 'db-layout' }, listPanel, detailPanel));
 }
