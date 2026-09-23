@@ -25,7 +25,16 @@ from fastapi.testclient import TestClient
 from playwright.sync_api import Browser, Page, Route, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
-from app.collect.facts import FieldFact, QuantityTier, QuantityTiersValue, TextValue
+from app.collect.facts import (
+    FieldFact,
+    FieldStatus,
+    ImageIssue,
+    ImageReference,
+    ImageRole,
+    QuantityTier,
+    QuantityTiersValue,
+    TextValue,
+)
 from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
@@ -146,8 +155,15 @@ class Catalog:
         self.container: Container = client.app.state.container  # type: ignore[attr-defined]
         self.sources = Collections.of(self.container, config)
 
-    def make(self, source_id: str, fields: dict[str, FieldFact]) -> str:
-        run_id, _ = self.sources.collect(fields, source_product_id=source_id)
+    def make(
+        self,
+        source_id: str,
+        fields: dict[str, FieldFact],
+        extra_images: tuple[ImageReference, ...] = (),
+    ) -> str:
+        run_id, _ = self.sources.collect(
+            fields, source_product_id=source_id, extra_images=extra_images
+        )
         result = self.container.materializer.materialize_run(run_id)
         assert result.status is MaterializationStatus.MATERIALIZED, result
         return str(result.product_group_id)
@@ -280,6 +296,45 @@ def test_a_retired_product_is_readable_by_its_identifier_and_nothing_of_it_is_se
             boxes = page.locator(f"{DETAIL} input[type='checkbox']")
             assert boxes.count() == 1 and boxes.first.is_disabled()
             assert page.locator("[data-action='check-registration-target']").is_disabled()
+
+
+# A detail image the collection never finished fetching: unresolved, so the images field stays
+# under review although the representative image was stored and included.
+UNRESOLVED_DETAIL = ImageReference(
+    role=ImageRole.DETAIL,
+    ordinal=0,
+    host="img.shop.example",
+    provenance="#prdDetail img:nth-of-type(1)",
+    status=FieldStatus.REVIEW_REQUIRED,
+    issue=ImageIssue.BUDGET_EXHAUSTED,
+)
+
+
+def test_an_images_field_under_review_is_shown_as_under_review_beside_its_representative(
+    browser: Browser, config: AppConfig
+) -> None:
+    with _served(config) as client:
+        catalog = Catalog(client, config)
+        review = catalog.make("S-IMG", _named("이미지 확인 상품"), (UNRESOLVED_DETAIL,))
+        settled = catalog.make("S-OK", _named("이미지 정상 상품"))
+        # The real current revision: its representative is included, and the field is under review.
+        images = catalog.container.products.detail(review).member_sources[0].images
+        assert images is not None and images.status is FieldStatus.REVIEW_REQUIRED
+        assert images.representative_sha256 is not None
+        assert (images.included, images.references) == (1, 2)
+        with _page(browser, client, [], url=f"{SCREEN}?product={review}") as page:
+            _ready(page, review)
+            shown = page.locator(f"{DETAIL} [data-fact='images']")
+            assert shown.get_attribute("data-status") == "REVIEW_REQUIRED"
+            text = shown.inner_text()
+            assert f"대표 {images.representative_sha256[:8]} · 1/2" in text
+            assert shown.locator(".chip.warn").inner_text() == "확인 필요"
+            # A settled images field shows its representative and no review state.
+            _open(page, settled)
+            shown = page.locator(f"{DETAIL} [data-fact='images']")
+            assert shown.get_attribute("data-status") == "CONFIRMED"
+            assert "대표 " in shown.inner_text()
+            assert shown.locator(".chip").count() == 0
 
 
 def test_a_late_detail_for_another_product_is_never_rendered(

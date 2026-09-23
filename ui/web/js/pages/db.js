@@ -171,16 +171,23 @@ function memberGroup(source) {
           'div',
           { class: 'kv', 'data-fact': 'images', 'data-status': images.status ?? 'NONE' },
           h('span', {}, '이미지'),
-          h(
-            'b',
-            {},
-            images.representative_sha256
-              ? `대표 ${short(images.representative_sha256)} · ${images.included}/${images.references}`
-              : factValue({ key: 'images', status: images.status }),
-          ),
+          h('b', { class: 'db-images' }, ...imagesValue(images)),
         )
       : null,
   );
+}
+
+// The representative reference and counts are shown when they exist, but they never stand in for
+// the field's own status: an images field that is not CONFIRMED always shows that it is not.
+function imagesValue(images) {
+  const shown = [];
+  if (images.representative_sha256) {
+    shown.push(`대표 ${short(images.representative_sha256)} · ${images.included}/${images.references}`);
+  } else if (images.status === 'CONFIRMED') {
+    shown.push(`${images.included}/${images.references}`);
+  }
+  if (images.status !== 'CONFIRMED') shown.push(factValue({ key: 'images', status: images.status }));
+  return shown;
 }
 
 export default {
