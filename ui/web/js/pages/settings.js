@@ -4,9 +4,10 @@
 // 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
 // (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, the SmartStore
 // operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
-// the registration target policy (Gate 1 G1-A, ADR-0015 §2): the one surface the server lists in
-// `editable_surfaces`, saved through its own contract. What the save bar says comes from those
-// server fields, never from this page.
+// the registration target policy (Gate 1 G1-A, ADR-0015 §2) and the operator-reviewed category
+// metadata (Gate 1 G1-B, ADR-0015 §3): the surfaces the server lists in `editable_surfaces`, each
+// saved through its own contract. What the save bar says comes from those server fields, never
+// from this page.
 
 import { getJson } from '../core/api.js';
 import { authLine, statusChip } from '../core/capability.js';
@@ -19,6 +20,7 @@ import { capabilityProjection } from './capability-projection.js';
 import { permissionAttestationPanel } from './permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './smartstore-operator.js';
+import { categoryMetadataPanel } from './category-metadata.js';
 import { targetPolicyPanel } from './target-policy.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
@@ -50,7 +52,10 @@ function liveTruth(key, initial) {
 const TITLE = '설정';
 
 // The display name of each surface the server says it accepts a save for (settings contract).
-const SURFACE_LABEL = { REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)' };
+const SURFACE_LABEL = {
+  REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)',
+  REGISTRATION_CATEGORY_METADATA: '카테고리 메타데이터 (마켓 탭 › 상품 / 카테고리)',
+};
 
 function saveScope(view) {
   if (view.editable) return '변경 사항을 저장할 수 있습니다';
@@ -207,6 +212,7 @@ function renderItem(item, state) {
     return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
   }
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy);
+  if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);
   return null;

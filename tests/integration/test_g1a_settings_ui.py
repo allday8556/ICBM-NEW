@@ -197,11 +197,13 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
     writes: list[tuple[str, str]] = []
     with _served(config) as client, _page(browser, client, COMMON_TAB, ".savebar", writes) as page:
         chip = page.locator(".savebar .chip")
-        assert chip.get_attribute("data-save-scope") == "REGISTRATION_TARGET_POLICY"
+        assert chip.get_attribute("data-save-scope") == (
+            "REGISTRATION_TARGET_POLICY REGISTRATION_CATEGORY_METADATA"
+        )
         text = chip.inner_text()
         assert "M0" not in text
         assert "일반 설정은 저장 계약이 없어 읽기 전용입니다" in text
-        assert "등록 대상 정책" in text
+        assert "등록 대상 정책" in text and "카테고리 메타데이터" in text
         # Every general setting field is read-only, and the general save is inert.
         fields = page.locator("input[data-setting]")
         assert fields.count() > 0

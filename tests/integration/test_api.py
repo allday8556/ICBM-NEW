@@ -71,8 +71,11 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
     body = client.get("/api/v1/screens/settings").json()
     assert body["execution_mode"] == "DRY_RUN"
     assert body["editable"] is False
-    # Gate 1 G1-A (ADR-0015 §2): the one surface with a save contract, named by the server.
-    assert body["editable_surfaces"] == ["REGISTRATION_TARGET_POLICY"]
+    # Gate 1 (ADR-0015 §2, §3): the only surfaces with a save contract, named by the server.
+    assert body["editable_surfaces"] == [
+        "REGISTRATION_TARGET_POLICY",
+        "REGISTRATION_CATEGORY_METADATA",
+    ]
     # The registered supplier appears unconfigured: no credentials, no session, not connected.
     assert [
         (s["supplier_key"], s["state"], s["capability_status"], s["credentials_stored"])

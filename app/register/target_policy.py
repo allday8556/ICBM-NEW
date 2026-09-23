@@ -627,4 +627,7 @@ def _revision_view(record: PolicyRevisionRecord, *, current: bool) -> TargetPoli
 
 def editable_surfaces() -> Sequence[EditableSurface]:
     """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3)."""
-    return (EditableSurface.REGISTRATION_TARGET_POLICY,)
+    return (
+        EditableSurface.REGISTRATION_TARGET_POLICY,
+        EditableSurface.REGISTRATION_CATEGORY_METADATA,
+    )
