@@ -11,9 +11,14 @@ Proven here:
 - a RECORDED run hands off to the Product DB by its revision's source identity: MATERIALIZED,
   CURRENT_REVISION_DIFFERS or NOT_YET_VISIBLE, and any other run has nothing to hand off;
 - none of these reads writes anything, and no G1-D row appears.
+
+The job commits RECORDED before it materializes the Product, so RECORDED with the Product
+NOT_YET_VISIBLE is a legitimate moment. ``settled`` waits for the run's outcome only;
+``settled_and_job_terminal`` also waits for the job, for assertions about the whole job.
 """
 
 import contextlib
+import threading
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -28,8 +33,10 @@ from tests.collect_submit_support import (
     NO_REVISION_ID,
     SUPPLIER_KEY,
     ScriptedShop,
+    gated_materialization,
     product_url,
     served,
+    settled_and_job_terminal,
 )
 from tests.product_support import Collections, raw
 
@@ -75,7 +82,10 @@ def submit(api: TestClient, number: str, supplier: str = SUPPLIER_KEY) -> Any:
 
 
 def settled(api: TestClient, run_id: str, timeout_s: float = 15.0) -> dict[str, Any]:
-    """The run once the worker has given it an outcome."""
+    """The run once the worker has given it an outcome.
+
+    Only the run's own durable outcome: a RECORDED run's job may still be materializing its
+    Product. A test that asserts on the whole job waits with ``settled_and_job_terminal``."""
     deadline = time.monotonic() + timeout_s
     while True:
         run = api.get(f"{RUNS}/{run_id}", headers=CLIENT).json()
@@ -121,7 +131,9 @@ def test_one_submit_is_one_run_and_one_job_followed_to_recorded(
     assert response.status_code == 202, response.text
     submitted = response.json()
     assert set(submitted) == {"collection_run_id", "job_id", "correlation_id"}
-    run = settled(api, submitted["collection_run_id"])
+    # The job's final state and the table counts are what the whole job did, materialization
+    # included: wait for the job, not only for the run's outcome.
+    run = settled_and_job_terminal(api, submitted["collection_run_id"])
     assert run["outcome"] == "RECORDED"
     assert (run["job_id"], run["correlation_id"]) == (
         submitted["job_id"],
@@ -156,7 +168,9 @@ def test_a_refused_submit_creates_no_run_and_no_job(api: TestClient, config: App
     assert everything(config) == before
     # Same-product pacing: the product was just read, so a second request is refused whole.
     first = submit(api, "4242").json()
-    assert settled(api, first["collection_run_id"])["outcome"] == "RECORDED"
+    # The baseline must be one nothing else is still writing to: the job, materialization
+    # included, has ended.
+    assert settled_and_job_terminal(api, first["collection_run_id"])["outcome"] == "RECORDED"
     after_first = everything(config)
     again = submit(api, "4242")
     assert again.status_code == 429
@@ -169,8 +183,9 @@ def test_no_revision_and_failed_are_terminal_and_never_retried(
 ) -> None:
     unresolved = submit(api, NO_REVISION_ID).json()
     failing = submit(api, FAILED_ID).json()
-    no_revision = settled(api, unresolved["collection_run_id"])
-    failed = settled(api, failing["collection_run_id"])
+    # Each job's final state is asserted below: wait for the jobs themselves, not a fixed sleep.
+    no_revision = settled_and_job_terminal(api, unresolved["collection_run_id"])
+    failed = settled_and_job_terminal(api, failing["collection_run_id"])
     assert (no_revision["outcome"], no_revision["revision_id"], no_revision["detail"]) == (
         "NO_REVISION",
         None,
@@ -181,7 +196,6 @@ def test_no_revision_and_failed_are_terminal_and_never_retried(
         None,
         "SUPPLIER_SESSION_EXPIRED",
     )
-    time.sleep(0.5)
     # One attempt each, and each page read once: nothing retried either run.
     assert sorted(collect_jobs(config)) == [("DEAD", 1), ("SUCCEEDED", 1)]
     assert sorted(shop.reads) == [NO_REVISION_ID, FAILED_ID]
@@ -217,7 +231,8 @@ def test_recent_runs_are_bounded_and_totally_ordered(api: TestClient, config: Ap
 def test_a_recorded_run_hands_off_to_the_product_it_materialized(
     api: TestClient, container: Container
 ) -> None:
-    run = settled(api, submit(api, "4242").json()["collection_run_id"])
+    # A materialized Product is asserted, so the job that materializes it must have ended.
+    run = settled_and_job_terminal(api, submit(api, "4242").json()["collection_run_id"])
     handoff = api.get(f"{RUNS}/{run['collection_run_id']}/product", headers=CLIENT).json()
     product = api.get(f"/api/v1/products/by-source/{SUPPLIER_KEY}/4242", headers=CLIENT).json()
     assert handoff == {
@@ -258,6 +273,36 @@ def test_the_handoff_is_truthful_before_and_after_materialization(
     assert earlier["product_group_id"] == later["product_group_id"] is not None
 
 
+def test_a_recorded_run_is_followed_through_its_not_yet_visible_window(
+    config: AppConfig, shop: ScriptedShop
+) -> None:
+    """The post-merge race of `0f0502e3`, made deterministic.
+
+    The job commits RECORDED before it materializes; here the materializer is held open, so the
+    run is RECORDED while its Product is NOT_YET_VISIBLE and its job still RUNNING — a truthful
+    state, not an error. Only a wait for the job, not for the run's outcome, reaches MATERIALIZED.
+    """
+    with gated_materialization() as gate, served(config, shop) as api:
+        try:
+            run_id = submit(api, "4242").json()["collection_run_id"]
+            run = settled(api, run_id)
+            assert run["outcome"] == "RECORDED"
+            waiting = api.get(f"{RUNS}/{run_id}/product", headers=CLIENT).json()
+            assert (waiting["state"], waiting["product_group_id"]) == ("NOT_YET_VISIBLE", None)
+            job = api.get(f"/api/v1/system/jobs/{run['job_id']}", headers=CLIENT).json()
+            assert job["state"] == "RUNNING"
+            # Materialization is let through later, while the test is already waiting for it.
+            threading.Timer(0.5, gate.set).start()
+            assert settled_and_job_terminal(api, run_id)["revision_id"] == run["revision_id"]
+            done = api.get(f"{RUNS}/{run_id}/product", headers=CLIENT).json()
+            assert (done["state"], done["current_source_revision_id"]) == (
+                "MATERIALIZED",
+                run["revision_id"],
+            )
+        finally:
+            gate.set()
+
+
 def test_a_run_without_a_revision_has_nothing_to_hand_off(api: TestClient) -> None:
     for number in (NO_REVISION_ID, FAILED_ID):
         run = settled(api, submit(api, number).json()["collection_run_id"])
@@ -271,7 +316,8 @@ def test_a_run_without_a_revision_has_nothing_to_hand_off(api: TestClient) -> No
 
 
 def test_the_follow_up_reads_write_nothing(api: TestClient, config: AppConfig) -> None:
-    run = settled(api, submit(api, "4242").json()["collection_run_id"])
+    # The baseline is taken once the job, materialization included, has stopped writing.
+    run = settled_and_job_terminal(api, submit(api, "4242").json()["collection_run_id"])
     before = everything(config)
     for _ in range(3):
         api.get(RUNS, headers=CLIENT)
