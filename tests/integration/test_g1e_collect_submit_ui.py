@@ -19,6 +19,7 @@ No supplier, marketplace or AI provider is reached.
 import contextlib
 import json
 import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -37,6 +38,7 @@ from tests.collect_submit_support import (
     NO_REVISION_ID,
     SUPPLIER_KEY,
     ScriptedShop,
+    gated_materialization,
     product_url,
     served,
 )
@@ -145,6 +147,30 @@ def _no_browser_truth(page: Page) -> None:
     assert "://" not in route and "shop.collect.invalid" not in route, route
 
 
+RECHECK_LIMIT = 40
+RECHECK_PAUSE_MS = 250
+
+
+def _await_materialized(page: Page) -> int:
+    """Follow the focused RECORDED run's handoff until its Product is MATERIALIZED, and return how
+    many rechecks that took.
+
+    The job commits RECORDED before it materializes, so NOT_YET_VISIBLE is a truthful moment and
+    one click is no synchronization: each recheck is the screen's own read-only ``다시 확인``,
+    repeated a bounded number of times. It never submits anything.
+    """
+    for attempt in range(RECHECK_LIMIT):
+        handoff = page.locator(f"{FOCUS} [data-role='handoff']")
+        handoff.wait_for()
+        state = handoff.get_attribute("data-state")
+        if state == "MATERIALIZED":
+            return attempt
+        assert state == "NOT_YET_VISIBLE", state
+        page.locator("[data-action='recheck-product']").click()
+        page.wait_for_timeout(RECHECK_PAUSE_MS)
+    raise AssertionError(f"the Product was not visible after {RECHECK_LIMIT} rechecks")
+
+
 def _no_absent_text(page: Page) -> None:
     """An absent part renders as nothing: never as the words ``null`` or ``undefined``."""
     for part in (FORM, FOCUS):
@@ -222,12 +248,9 @@ def test_one_submit_is_one_post_followed_to_recorded_and_into_the_product_db(
             page.locator(f"{FOCUS} [data-facts-status]").get_attribute("data-facts-status")
             == run.facts_status.value
         )
-        # The Product DB handoff, by the revision's own source identity.
-        handoff = page.locator(f"{FOCUS} [data-role='handoff']")
-        handoff.wait_for()
-        if handoff.get_attribute("data-state") != "MATERIALIZED":
-            page.locator("[data-action='recheck-product']").click()
-            page.wait_for_selector(f"{FOCUS} [data-role='handoff'][data-state='MATERIALIZED']")
+        # The Product DB handoff, by the revision's own source identity. The run may be RECORDED
+        # while its Product is still NOT_YET_VISIBLE: follow it with bounded read-only rechecks.
+        _await_materialized(page)
         _no_absent_text(page)
         group = served_container.products.product_of_source(SUPPLIER_KEY, "4242").product_group_id
         page.locator("[data-action='open-product']").click()
@@ -369,3 +392,37 @@ def test_a_recorded_run_not_yet_materialized_is_shown_truthfully_and_rechecked(
                 f"[data-role='product-detail'][data-product='{group.product_group_id}']"
             )
     assert wire.posts() == []
+
+
+def test_a_submitted_run_is_followed_through_its_not_yet_visible_window(
+    browser: Browser, config: AppConfig
+) -> None:
+    """The post-merge race of `0f0502e3`, made deterministic in the screen.
+
+    Materialization is held open after the job commits RECORDED, so the screen truthfully shows
+    NOT_YET_VISIBLE and one recheck cannot be enough; it is let through a second later, while
+    the bounded read-only rechecks are running.
+    """
+    wire = Wire()
+    with gated_materialization() as gate, served(config, ScriptedShop()) as client:
+        try:
+            with _page(browser, client, wire) as page:
+                _submit(page, "4242")
+                run_id = _outcome(page, "RECORDED")
+                page.wait_for_selector(
+                    f"{FOCUS} [data-role='handoff'][data-state='NOT_YET_VISIBLE']"
+                )
+                assert page.locator(f"{FOCUS} [data-action='open-product']").count() == 0
+                threading.Timer(1.0, gate.set).start()
+                assert _await_materialized(page) >= 1, "the first render was NOT_YET_VISIBLE"
+                served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+                group = served_container.products.product_of_source(SUPPLIER_KEY, "4242")
+                page.locator("[data-action='open-product']").click()
+                page.wait_for_selector(
+                    f"[data-role='product-detail'][data-product='{group.product_group_id}']"
+                )
+                assert f"run={run_id}" not in page.url
+        finally:
+            gate.set()
+    # Every recheck was a read: the one POST is the operator's submit.
+    assert len(wire.posts()) == 1
