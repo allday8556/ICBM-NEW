@@ -327,6 +327,22 @@ export const SUBTABS = {
       ],
     },
     {
+      // Gate 1 G1-A (ADR-0015 §2): the one Settings surface with a save contract.
+      key: 'policy',
+      label: '등록 정책',
+      blocks: [
+        {
+          card: {
+            title: '등록 대상 정책',
+            full: true,
+            help:
+              '계정별 등록 대상 정책입니다. · 저장할 때마다 서버가 새 리비전을 만들고 이전 리비전은 그대로 남습니다. · 모든 값은 서버가 검증하며, 잘못된 값이 하나라도 있으면 아무것도 저장되지 않습니다. · 이미 만들어진 등록 스냅샷은 저장 당시의 정책 리비전을 그대로 유지합니다.',
+            items: [{ targetPolicy: 'smartstore' }],
+          },
+        },
+      ],
+    },
+    {
       key: 'shipping',
       label: '배송 관리',
       blocks: [{ cards: [shippingOverrideCard('smartstore'), appliedValuesCard(['기본 배송비', '기본 출고일', '출고지'])] }],

@@ -182,6 +182,18 @@ class MarketplaceAccountStore:
             row = session.get(MarketplaceAccount, marketplace_account_id)
             return None if row is None else _record(row)
 
+    def accounts(self, marketplace_key: str) -> tuple[MarketplaceAccountRecord, ...]:
+        """Every canonical account of one marketplace, oldest first. A read; it decides nothing."""
+        with self._reading() as session:
+            rows = session.scalars(
+                select(MarketplaceAccount)
+                .where(MarketplaceAccount.marketplace_key == marketplace_key)
+                .order_by(
+                    MarketplaceAccount.established_at, MarketplaceAccount.marketplace_account_id
+                )
+            ).all()
+            return tuple(_record(row) for row in rows)
+
     def binding(self, marketplace_key: str, marketplace_account_id: str) -> AccountBinding:
         with self._reading() as session:
             return binding_state(session, marketplace_key, marketplace_account_id)

@@ -72,6 +72,10 @@ class AuditEventType(StrEnum):
     # authored value, which lives in the revision row and never in the audit log.
     REGISTRATION_PREPARATION_RECORDED = "REGISTRATION_PREPARATION_RECORDED"
     REGISTRATION_PREPARATION_REVISED = "REGISTRATION_PREPARATION_REVISED"
+    # Gate 1 G1-A (ADR-0015 §2): a revision of one account's registration target policy, appended
+    # by the server and made current. Scope, identifiers, revision numbers and the content
+    # fingerprint only — never a policy value, which lives in the revision row.
+    REGISTRATION_TARGET_POLICY_REVISED = "REGISTRATION_TARGET_POLICY_REVISED"
 
 
 class AuditOutcome(StrEnum):

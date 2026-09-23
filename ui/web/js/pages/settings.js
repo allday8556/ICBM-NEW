@@ -1,9 +1,12 @@
-// 설정: renders the v29 settings structure from the settings contract. In M0 the contract is
-// read-only (`editable: false`) with no saved values and no connections, so every field shows
-// as unset, every toggle as off, and save/test actions are inert. The live parts are 등록 권한
+// 설정: renders the v29 settings structure from the settings contract. The general common and
+// platform settings have no save contract (`editable: false`), so every such field shows as
+// unset, every toggle as off, and their save/test actions are inert. The live parts are 등록 권한
 // 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
-// (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, and the SmartStore
-// operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read.
+// (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, the SmartStore
+// operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
+// the registration target policy (Gate 1 G1-A, ADR-0015 §2): the one surface the server lists in
+// `editable_surfaces`, saved through its own contract. What the save bar says comes from those
+// server fields, never from this page.
 
 import { getJson } from '../core/api.js';
 import { authLine, statusChip } from '../core/capability.js';
@@ -16,6 +19,7 @@ import { capabilityProjection } from './capability-projection.js';
 import { permissionAttestationPanel } from './permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './smartstore-operator.js';
+import { targetPolicyPanel } from './target-policy.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
@@ -44,6 +48,16 @@ function liveTruth(key, initial) {
   return { projection, actions, attestation, refresh };
 }
 const TITLE = '설정';
+
+// The display name of each surface the server says it accepts a save for (settings contract).
+const SURFACE_LABEL = { REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)' };
+
+function saveScope(view) {
+  if (view.editable) return '변경 사항을 저장할 수 있습니다';
+  const surfaces = (view.editable_surfaces ?? []).map((surface) => SURFACE_LABEL[surface] ?? surface);
+  if (!surfaces.length) return '읽기 전용 — 저장 계약이 연결된 설정이 없습니다';
+  return `일반 설정은 저장 계약이 없어 읽기 전용입니다 · 저장 가능: ${surfaces.join(', ')}`;
+}
 
 let fieldSequence = 0;
 
@@ -192,6 +206,7 @@ function renderItem(item, state) {
   if (item.contractReview) {
     return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
   }
+  if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy);
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);
   return null;
@@ -277,7 +292,7 @@ export default {
       h(
         'div',
         { class: 'savebar' },
-        h('span', { class: 'chip' }, view.editable ? '변경 사항을 저장할 수 있습니다' : 'M0 · 읽기 전용 — 설정 저장 계약이 아직 연결되지 않았습니다'),
+        h('span', { class: 'chip', 'data-save-scope': (view.editable_surfaces ?? []).join(' ') }, saveScope(view)),
         h('div', { class: 'savebar-actions' }, button('취소'), button('설정 저장', 'blue')),
       ),
     );

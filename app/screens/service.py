@@ -8,6 +8,7 @@ from app.core.clock import Clock
 from app.operate.service import OperateService
 from app.products.service import ProductsService
 from app.register.service import RegisterService
+from app.register.target_policy import EditableSurface
 from app.review.service import ReviewKind, ReviewService
 from app.screens.contracts import (
     AnalyticsView,
@@ -55,6 +56,7 @@ class ScreenService:
         operate: OperateService,
         review: ReviewService,
         execution_mode: ExecutionModeService,
+        editable_surfaces: Sequence[EditableSurface] = (),
     ) -> None:
         self._clock = clock
         self._operator_name = operator_name
@@ -66,6 +68,7 @@ class ScreenService:
         self._operate = operate
         self._review = review
         self._execution_mode = execution_mode
+        self._editable_surfaces = tuple(editable_surfaces)
 
     def _meta(self, screen: ScreenKey, empty_reason: EmptyReason | None) -> ScreenMeta:
         return ScreenMeta(
@@ -208,6 +211,7 @@ class ScreenService:
             ),
             execution_mode=self._execution_mode.state().mode,
             editable=False,
+            editable_surfaces=list(self._editable_surfaces),
             marketplace_connections=self._connect.marketplace_connections(),
             supplier_connections=self._connect.supplier_connections(),
             policy_values=policy_values,

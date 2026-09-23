@@ -18,6 +18,7 @@ from app.api.routes import (
     products,
     register,
     screens,
+    settings,
     system,
 )
 from app.config import AppConfig
@@ -126,6 +127,7 @@ def create_app(
     app.include_router(collect.router)
     app.include_router(products.router)
     app.include_router(register.router)
+    app.include_router(settings.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.
     app.add_middleware(ClientHeaderGuard)
