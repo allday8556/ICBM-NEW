@@ -30,6 +30,7 @@ from app.register.model import (
     RegistrationConflictError,
     ScopePauseReason,
 )
+from app.register.policy import StaticRegistrationPolicy
 from app.register.preparation import UnitRequest
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore, RegistrationUnit, SnapshotRecord
@@ -57,6 +58,7 @@ from tests.register_support import (
     ready_final,
     ready_item,
     request,
+    target,
 )
 
 pytestmark = pytest.mark.integration
@@ -900,6 +902,10 @@ def test_provenance_refuses_a_revision_from_another_account(
     first_draft = draft(container.registrations, account, [first_item])
     snapshot = _legacy_snapshot(container, prep, first_draft, account, [first_item])
     other_account = establish(container, config, MARKET, "uid-market-a-2")
+    # The other account's own policy: its authoring revisions are server-owned (5801915996).
+    container.registration_preflight._policies = StaticRegistrationPolicy(
+        (target(account), target(other_account))
+    )
     other_item = ready_item(container, sources, "5678")
     other_draft = draft(container.registrations, other_account, [other_item])
     preparation_id = _author(api, other_draft, [other_item])

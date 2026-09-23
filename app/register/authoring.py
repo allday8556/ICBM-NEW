@@ -73,6 +73,10 @@ logger = logging.getLogger("icbm.register.authoring")
 # guessed at, exactly as the send request's codec refuses one.
 PREPARATION_VERSION = "registration-preparation/v1"
 DUPLICATE_EVIDENCE_UNAVAILABLE = "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"
+# A submitted authoring revision that is not exactly the target policy's own (decision 5801915996).
+AUTHORING_REVISION_NOT_OWNED = "REGISTER_AUTHORING_REVISION_NOT_OWNED"
+MAPPING_REVISION = "mapping_revision"
+COMPOSITION_REVISION = "detail_composition_revision"
 
 
 @dataclass(frozen=True)
@@ -153,9 +157,11 @@ def inputs_from_view(view: AuthoredInputsView) -> AuthoredInputs:
             notices={key: _field(value) for key, value in view.notices.items()},
             options={item: dict(values) for item, values in view.options.items()},
         ),
+        # A body is authored content and is kept whether or not its composition revision has an
+        # owner: an unowned revision stays None, exactly (decision 5800619183).
         detail=(
             None
-            if view.detail_composition_revision is None or view.detail_body is None
+            if view.detail_body is None
             else DetailComposition(
                 composition_revision=view.detail_composition_revision,
                 body=view.detail_body,
@@ -163,6 +169,27 @@ def inputs_from_view(view: AuthoredInputsView) -> AuthoredInputs:
             )
         ),
     )
+
+
+def submitted_revisions(inputs: AuthoredInputs) -> dict[str, str | None]:
+    """The server-owned authoring revisions these inputs would store, by name."""
+    submitted: dict[str, str | None] = {}
+    if inputs.category is not None:
+        submitted[MAPPING_REVISION] = inputs.category.mapping_revision
+    if inputs.detail is not None:
+        submitted[COMPOSITION_REVISION] = inputs.detail.composition_revision
+    return submitted
+
+
+def submitted_view_revisions(view: AuthoredInputsView) -> dict[str, str | None]:
+    """Every authoring revision a client sent, including a composition revision sent without a
+    body, which would not be stored: a client never names a revision the owner does not hold."""
+    submitted: dict[str, str | None] = {}
+    if view.category is not None:
+        submitted[MAPPING_REVISION] = view.category.mapping_revision
+    if view.detail_body is not None or view.detail_composition_revision is not None:
+        submitted[COMPOSITION_REVISION] = view.detail_composition_revision
+    return submitted
 
 
 def _field(view: FieldValueView) -> FieldValue:
@@ -244,10 +271,16 @@ class RegistrationPreparationService:
         inputs: AuthoredInputs,
         actor: str,
         correlation_id: str | None = None,
+        revisions: Mapping[str, str | None] | None = None,
     ) -> PreparationRecord:
+        """``revisions`` are the authoring revisions as the client submitted them, checked beside
+        the ones ``inputs`` would store (see :func:`submitted_view_revisions`)."""
         draft = self._registrations.draft(draft_id)
         if draft is None:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
+        self._require_owned_revisions(
+            draft.marketplace_key, draft.marketplace_account_id, inputs, revisions
+        )
         chosen, problems = resolve_unit(
             draft.listing_shape, [item.item_id for item in draft.items], item_ids
         )
@@ -283,8 +316,13 @@ class RegistrationPreparationService:
         inputs: AuthoredInputs,
         actor: str,
         correlation_id: str | None = None,
+        revisions: Mapping[str, str | None] | None = None,
     ) -> PreparationRecord:
         """Append the next revision. An earlier one, and any Snapshot it froze, stay as they are."""
+        current = self.preparation(preparation_id)
+        self._require_owned_revisions(
+            current.marketplace_key, current.marketplace_account_id, inputs, revisions
+        )
         encoded = encode_inputs(inputs)
         with self._registrations.transaction() as unit:
             return unit.revise_preparation(
@@ -454,6 +492,32 @@ class RegistrationPreparationService:
         return ExecutionCopy(request=request, final=final)
 
     # ------------------------------------------------------------------ helpers
+
+    def _require_owned_revisions(
+        self,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        inputs: AuthoredInputs,
+        submitted: Mapping[str, str | None] | None,
+    ) -> None:
+        """The authoring revisions are server-owned (decision 5801915996): each one a client
+        submits, and each one these inputs would store, must be **exactly** the account's current
+        target-policy value, ``None`` included while no owner exists. Anything else is refused
+        before anything is written, so no sentinel, default or stale revision ever becomes an
+        authored input."""
+        target = self._preflight.target_policy(marketplace_key, marketplace_account_id)
+        owned: dict[str, str | None] = {
+            MAPPING_REVISION: None if target is None else target.category_mapping_revision,
+            COMPOSITION_REVISION: None if target is None else target.detail_composition_revision,
+        }
+        checked = [*submitted_revisions(inputs).items(), *(submitted or {}).items()]
+        mismatched = sorted({name for name, value in checked if value != owned[name]})
+        if mismatched:
+            raise InputValidationError(
+                AUTHORING_REVISION_NOT_OWNED,
+                "authoring revisions are server-owned: send back exactly the server's values",
+                details={"fields": mismatched},
+            )
 
     def _draft_revision(self, draft_id: str) -> int:
         draft = self._registrations.draft(draft_id)
