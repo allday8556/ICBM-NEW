@@ -287,6 +287,10 @@ def policy_sources(account: str) -> tuple[StaticRegistrationPolicy, StaticRegist
         pricing_context=CONTEXT,
         sanitizer_profile_version="m5-acceptance-sanitizer-1",
         asset_policy=AssetPolicy(profile=ASSET_PROFILE),
+        # This offline world stands in for owners of both authoring revisions; the durable G1-A
+        # policy holds them as null, which never reaches READY (decision 5800619183).
+        category_mapping_revision="m5-acceptance-mapping-1",
+        detail_composition_revision="m5-acceptance-detail-1",
         templates={"shipping": "m5-shipping-template", "returns": "m5-returns-template"},
     )
     metadata = CategoryMetadata(

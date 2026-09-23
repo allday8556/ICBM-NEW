@@ -108,6 +108,8 @@ def target(**overrides: Any) -> TargetPolicy:
         "pricing_context": CONTEXT,
         "sanitizer_profile_version": "sanitizer-1",
         "asset_policy": AssetPolicy(profile="asset-profile-1"),
+        "category_mapping_revision": "mapping-1",
+        "detail_composition_revision": "detail-1",
         "templates": {"shipping": "ship-1", "returns": "ret-1"},
     }
     values.update(overrides)

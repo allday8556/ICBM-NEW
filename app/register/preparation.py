@@ -123,6 +123,10 @@ OPTION_VALUES_NOT_DISTINCT: Final = "OPTION_VALUES_NOT_DISTINCT"
 POLICY_TEMPLATE_MISSING: Final = "POLICY_TEMPLATE_MISSING"
 DETAIL_COMPOSITION_MISSING: Final = "DETAIL_COMPOSITION_MISSING"
 DETAIL_BODY_EMPTY: Final = "DETAIL_BODY_EMPTY"
+# No owner exists yet for the category-mapping and detail-composition authoring revisions (G1-A
+# holds both as null; architect decision 5800619183). Authoring and the candidate still run; the
+# unit is never READY, so nothing can be frozen until real owners supply both revisions.
+AUTHORING_REVISIONS_UNOWNED: Final = "AUTHORING_REVISIONS_UNOWNED"
 PUBLICATION_ASSETS_MISSING: Final = "PUBLICATION_ASSETS_MISSING"
 PUBLICATION_ASSET_COUNT_EXCEEDED: Final = "PUBLICATION_ASSET_COUNT_EXCEEDED"
 PUBLICATION_REPRESENTATIVE_MISSING: Final = "PUBLICATION_REPRESENTATIVE_MISSING"
@@ -198,6 +202,7 @@ REASON_CODES: Final = frozenset(
         POLICY_TEMPLATE_MISSING,
         DETAIL_COMPOSITION_MISSING,
         DETAIL_BODY_EMPTY,
+        AUTHORING_REVISIONS_UNOWNED,
         PUBLICATION_ASSETS_MISSING,
         PUBLICATION_ASSET_COUNT_EXCEEDED,
         PUBLICATION_REPRESENTATIVE_MISSING,
@@ -267,8 +272,11 @@ class CategoryConfirmation(StrEnum):
 
 @dataclass(frozen=True)
 class CategorySelection:
+    """``mapping_revision`` is the target's category-mapping revision, exactly as its owner holds
+    it: ``None`` while no owner exists (decision 5800619183). It is never defaulted or invented."""
+
     category_id: str
-    mapping_revision: str
+    mapping_revision: str | None
     taxonomy_revision: str
     confirmation: CategoryConfirmation
 
@@ -277,14 +285,15 @@ class CategorySelection:
 class DetailComposition:
     """``product body → detail composition → marketplace payload`` (Issue #61, ADR-0014 §19).
     The first vertical composes the body only; later guidance adds sections here, never in the
-    payload builder."""
+    payload builder. ``composition_revision`` is ``None`` while its owner does not exist: a body
+    may still be authored, and the unit reports ``AUTHORING_REVISIONS_UNOWNED``."""
 
-    composition_revision: str
+    composition_revision: str | None
     body: str
     sections: tuple[str, ...] = ("BODY",)
 
 
-def compose_body_only(composition_revision: str, body: str) -> DetailComposition:
+def compose_body_only(composition_revision: str | None, body: str) -> DetailComposition:
     return DetailComposition(composition_revision=composition_revision, body=body)
 
 
@@ -983,6 +992,25 @@ def _detail_reasons(request: PreflightRequest) -> list[Reason]:
     return []
 
 
+def _authoring_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
+    """Whether both authoring revisions have an owner-held value (decision 5800619183).
+
+    The target policy holds ``None`` for a revision whose owner does not exist, and an authored
+    selection or composition carries that ``None`` exactly. A value the preparation carries while
+    the target policy holds ``None`` came from no owner, so it is unowned too: a client-supplied
+    revision never makes a unit READY. Either absence is one statement — no owner stands behind
+    the revision — and it is neither missing category metadata nor a missing policy. Every other
+    rule is still evaluated as it always is."""
+    target, category, detail = unit.target, request.category, request.detail
+    unowned = (
+        target.category_mapping_revision is None
+        or target.detail_composition_revision is None
+        or (category is not None and category.mapping_revision is None)
+        or (detail is not None and detail.composition_revision is None)
+    )
+    return [Reason(AUTHORING_REVISIONS_UNOWNED, _R, "authoring")] if unowned else []
+
+
 def _publication_reasons(target: TargetPolicy, unit: ResolvedUnit) -> list[Reason]:
     policy = target.asset_policy
     reasons: list[Reason] = []
@@ -1259,6 +1287,7 @@ def evaluate(
         *_option_reasons(request, unit, metadata),
         *_template_reasons(unit.target, metadata),
         *_detail_reasons(request),
+        *_authoring_reasons(request, unit),
         *_publication_reasons(unit.target, unit),
         *_conflict_reasons(unit),
         *_duplicate_reasons(request, unit),

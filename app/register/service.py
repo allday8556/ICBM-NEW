@@ -307,11 +307,9 @@ class RegisterService:
                 "REGISTER_CATEGORY_METADATA_MISSING",
                 "the category has no reviewed metadata for the current taxonomy",
             )
-        if not target.category_mapping_revision or not target.detail_composition_revision:
-            raise AppError(
-                "REGISTER_AUTHORING_POLICY_INCOMPLETE",
-                "the target policy has no approved authoring revisions",
-            )
+        # The two authoring revisions are handed on exactly as the policy holds them, None
+        # included while no owner exists for them (decision 5800619183). Their absence does not
+        # stop authoring; the candidate preflight reports it as AUTHORING_REVISIONS_UNOWNED.
 
         def fields(rules: Sequence[Any]) -> tuple[AuthoringFieldView, ...]:
             return tuple(

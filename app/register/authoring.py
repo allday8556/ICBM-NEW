@@ -153,9 +153,11 @@ def inputs_from_view(view: AuthoredInputsView) -> AuthoredInputs:
             notices={key: _field(value) for key, value in view.notices.items()},
             options={item: dict(values) for item, values in view.options.items()},
         ),
+        # A body is authored content and is kept whether or not its composition revision has an
+        # owner: an unowned revision stays None, exactly (decision 5800619183).
         detail=(
             None
-            if view.detail_composition_revision is None or view.detail_body is None
+            if view.detail_body is None
             else DetailComposition(
                 composition_revision=view.detail_composition_revision,
                 body=view.detail_body,

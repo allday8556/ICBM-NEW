@@ -9,8 +9,9 @@ What this proves, from the outside in:
 - one policy per marketplace × canonical account, with strict isolation between accounts;
 - the policy survives a restart exactly;
 - the production preflight reads this owner: it leaves `REGISTER_TARGET_POLICY_MISSING` only for a
-  valid current policy, a new revision stales an earlier candidate, and a frozen Snapshot keeps the
-  revision it froze.
+  valid current policy, a new revision stales an earlier candidate, and while the policy's two
+  authoring revisions have no owner nothing is READY and no Snapshot is frozen (decision
+  5800619183).
 
 No provider is reached: a target policy is local configuration.
 """
@@ -29,14 +30,16 @@ from fastapi.testclient import TestClient
 from app.audit.models import AuditEventType
 from app.config import AppConfig
 from app.container import Container
-from app.core.errors import PolicyBlockedError
+from app.core.errors import InputValidationError, PolicyBlockedError
 from app.db.database import create_sqlite_engine
 from app.db.migrate import alembic_config, current_revision, upgrade_to_head
 from app.main import create_app
 from app.products.model import ReadinessStatus
 from app.register.builder import RegistrationSnapshotBuilder
+from app.register.model import RegistrationConflictError
 from app.register.policy import StaticRegistrationMetadata
 from app.register.preflight import RegistrationPreflightService
+from app.register.preparation import AUTHORING_REVISIONS_UNOWNED
 from app.register.target_policy import DurableRegistrationPolicy
 from tests.conftest import LOCAL
 from tests.product_support import Collections, raw
@@ -533,9 +536,12 @@ def test_a_new_policy_revision_stales_an_earlier_candidate(
     )
     req = replace(req, duplicate_evidence=no_match(preflight.candidate(req)))
     candidate = preflight.candidate(req)
-    assert candidate.status is ReadinessStatus.READY, candidate.reasons
+    # Every rule passes except the one no durable policy can satisfy yet: the two authoring
+    # revisions have no owner (decision 5800619183), so nothing here is ever READY.
+    assert candidate.status is ReadinessStatus.REVIEW_REQUIRED
+    assert candidate.codes == (AUTHORING_REVISIONS_UNOWNED,)
     assets = prepared(candidate)
-    assert preflight.final(req, assets).status is ReadinessStatus.READY
+    assert preflight.final(req, assets).codes == (AUTHORING_REVISIONS_UNOWNED,)
 
     changed = inputs(
         templates={"shipping": "shipping-template-2", "returns": "returns-template-test"}
@@ -549,34 +555,40 @@ def test_a_new_policy_revision_stales_an_earlier_candidate(
     assert "PREPARED_ASSET_CANDIDATE_MISMATCH" in {reason.code for reason in stale.reasons}
 
 
-def test_a_frozen_snapshot_keeps_the_policy_revision_it_froze(
+def test_a_durable_policy_without_owned_authoring_revisions_freezes_nothing(
     api: TestClient, container: Container, config: AppConfig, account: str
 ) -> None:
+    """The durable policy holds both authoring revisions as null (decision 5800619183). A request
+    carrying revisions of its own — which no owner issued — is still unowned: the evaluation
+    records the policy revision it read, and no Snapshot is frozen, by any path."""
     preflight = _served_preflight(container)
     first = save(api, account, inputs()).json()["current"]
     item = ready_item(container, Collections.of(container, config))
     req = request(
         container.registrations, draft(container.registrations, account, [item]), account, [item]
     )
+    assert req.category is not None and req.category.mapping_revision == "mapping-test-1"
     req = replace(req, duplicate_evidence=no_match(preflight.candidate(req)))
     final = preflight.final(req, prepared(preflight.candidate(req)))
-    assert final.status is ReadinessStatus.READY, final.reasons
+    assert final.status is ReadinessStatus.REVIEW_REQUIRED
+    assert final.codes == (AUTHORING_REVISIONS_UNOWNED,)
+    assert final.resolved.target.policy_revision == first["policy_revision"]
     builder = RegistrationSnapshotBuilder(
         preflight=preflight, registrations=container.registrations
     )
-    snapshot = builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
-
-    changed = inputs(
-        templates={"shipping": "shipping-template-2", "returns": "returns-template-test"}
-    )
-    assert save(api, account, changed, expected=first["policy_revision"]).status_code == 200
-
+    with pytest.raises(InputValidationError, match="final READY"):
+        builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
+    forged = replace(final, status=ReadinessStatus.READY)
+    with pytest.raises(RegistrationConflictError) as stale:
+        builder.freeze(forged, created_by=OPERATOR, correlation_id=CID)
+    assert stale.value.code == "REGISTER_PREFLIGHT_STALE"
+    with (
+        pytest.raises(RegistrationConflictError) as unowned,
+        container.registrations.transaction() as unit,
+    ):
+        builder._freeze_fresh(
+            unit, forged, created_by=OPERATOR, correlation_id=CID, preparation_revision_id=None
+        )
+    assert unowned.value.code == "REGISTER_AUTHORING_REVISIONS_UNOWNED"
     with contextlib.closing(raw(config)) as connection:
-        frozen = connection.execute(
-            "SELECT json_extract(policy_revisions_json, '$.policy_revision'), payload_hash"
-            " FROM registration_snapshots WHERE registration_snapshot_id = ?",
-            (snapshot.registration_snapshot_id,),
-        ).fetchone()
-    assert frozen == (first["policy_revision"], snapshot.payload_hash)
-    reread = container.registrations.snapshot(snapshot.registration_snapshot_id)
-    assert reread is not None and reread.payload_hash == snapshot.payload_hash
+        assert connection.execute("SELECT COUNT(*) FROM registration_snapshots").fetchone() == (0,)

@@ -95,6 +95,20 @@ class RegistrationSnapshotBuilder:
         request, unit = fresh.request, fresh.resolved
         category, detail = request.category, request.detail
         assert category is not None and detail is not None
+        mapping, composition = category.mapping_revision, detail.composition_revision
+        if (
+            mapping is None
+            or composition is None
+            or unit.target.category_mapping_revision is None
+            or unit.target.detail_composition_revision is None
+        ):
+            # Unreachable through a READY preflight, which reports AUTHORING_REVISIONS_UNOWNED:
+            # a revision is owner-held only while the target policy holds one. Refused here too,
+            # before anything is written, and never filled with a stand-in.
+            raise RegistrationConflictError(
+                "REGISTER_AUTHORING_REVISIONS_UNOWNED",
+                "a Snapshot is frozen only with owner-held authoring revisions",
+            )
         existing = registrations.matching_snapshot(
             unit.draft_id,
             unit.draft_revision,
@@ -118,10 +132,10 @@ class RegistrationSnapshotBuilder:
                 listing_identity=unit.listing_identity,
                 preflight_rule_version=fresh.rule_version,
                 preflight_fingerprint=fresh.dependency_fingerprint,
-                category_mapping_revision=category.mapping_revision,
+                category_mapping_revision=mapping,
                 taxonomy_revision=category.taxonomy_revision,
                 policy_revisions=outbound.policy_revisions,
-                detail_composition_revision=detail.composition_revision,
+                detail_composition_revision=composition,
                 sanitizer_profile_version=unit.target.sanitizer_profile_version,
                 payload=outbound.payload,
                 items=[

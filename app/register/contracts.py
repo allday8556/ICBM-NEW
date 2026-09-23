@@ -191,10 +191,13 @@ class FieldValueView(BaseModel):
 
 
 class CategoryChoiceView(BaseModel):
-    """The category an operator chose, with the revisions it was chosen under (§4)."""
+    """The category an operator chose, with the revisions it was chosen under (§4).
+
+    ``mapping_revision`` is required and nullable: the client sends back exactly what the server
+    gave it, ``None`` included while no mapping owner exists (decision 5800619183)."""
 
     category_id: str
-    mapping_revision: str
+    mapping_revision: str | None
     taxonomy_revision: str
     confirmation: str = "OPERATOR_CONFIRMED"
 
@@ -206,13 +209,16 @@ class AuthoringFieldView(BaseModel):
 
 
 class AuthoringMetadataView(BaseModel):
-    """Server-owned revisions and reviewed fields for one category authoring form."""
+    """Server-owned revisions and reviewed fields for one category authoring form.
+
+    ``mapping_revision`` and ``detail_composition_revision`` are the target policy's own values,
+    ``None`` while no owner exists for them (decision 5800619183): never a default."""
 
     category_id: str
-    mapping_revision: str
+    mapping_revision: str | None
     taxonomy_revision: str
     metadata_revision: str
-    detail_composition_revision: str
+    detail_composition_revision: str | None
     notice_type: str | None = None
     attributes: tuple[AuthoringFieldView, ...] = ()
     notice_fields: tuple[AuthoringFieldView, ...] = ()
