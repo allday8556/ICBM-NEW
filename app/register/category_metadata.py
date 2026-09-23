@@ -292,17 +292,29 @@ def _field_rule(rule: Mapping[str, Any]) -> FieldRule:
     )
 
 
+def effectively_reviewed(reviewed: bool, document: Mapping[str, Any]) -> bool:
+    """Reviewed only if stored as reviewed **and** the content is operator-confirmed.
+
+    Defense in depth behind the database CHECK: whatever wrote the row, an AI suggestion, a missing
+    or unknown provenance is never materialized as reviewed metadata (ADR-0015 §3)."""
+    return (
+        reviewed is True
+        and document.get("content_provenance") == Provenance.OPERATOR_CONFIRMED.value
+    )
+
+
 def category_metadata_of(
     metadata_revision: str, reviewed: bool, document: Mapping[str, Any]
 ) -> CategoryMetadata:
-    """The existing ``CategoryMetadata`` contract, materialized from one stored revision."""
+    """The existing ``CategoryMetadata`` contract, materialized from one stored revision. It is
+    reviewed only if :func:`effectively_reviewed` says so — never on the stored bit alone."""
     notice = document["notice"]
     options = document["options"]
     return CategoryMetadata(
         taxonomy_revision=str(document["taxonomy_revision"]),
         category_id=str(document["category_id"]),
         metadata_revision=metadata_revision,
-        reviewed=reviewed,
+        reviewed=effectively_reviewed(reviewed, document),
         leaf=bool(document["leaf"]),
         registrable=bool(document["registrable"]),
         attributes=tuple(_field_rule(rule) for rule in document["attributes"]),
@@ -582,12 +594,14 @@ def _metadata_record(
 
 
 def _revision_record(row: RegistrationCategoryMetadataRevision) -> MetadataRevisionRecord:
+    content = json.loads(row.content_json)
     return MetadataRevisionRecord(
         metadata_revision=row.metadata_revision_id,
         revision_no=row.revision_no,
-        content=json.loads(row.content_json),
+        content=content,
         content_fingerprint=row.content_fingerprint,
-        reviewed=bool(row.reviewed),
+        # The same fail-closed rule the materialized contract uses, so no view disagrees with it.
+        reviewed=effectively_reviewed(row.reviewed == 1, content),
         reviewed_by=row.reviewed_by,
         reviewed_at=row.reviewed_at,
         recorded_by=row.recorded_by,

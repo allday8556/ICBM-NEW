@@ -18,9 +18,10 @@ No provider is reached: category metadata is operator-recorded local truth.
 """
 
 import contextlib
+import importlib.util
 import sqlite3
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +36,15 @@ from app.db.database import create_sqlite_engine
 from app.db.migrate import alembic_config, current_revision, upgrade_to_head
 from app.main import create_app
 from app.products.model import ReadinessStatus
+from app.register import category_metadata_models as models
 from app.register.builder import RegistrationSnapshotBuilder
 from app.register.category_metadata import (
     CategoryMetadataService,
     DurableRegistrationMetadata,
+    MetadataRevisionRecord,
     RecordRevisionRequest,
+    category_metadata_of,
+    effectively_reviewed,
 )
 from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
 from app.register.preflight import RegistrationPreflightService
@@ -680,3 +685,88 @@ def test_an_exact_revision_resolves_only_within_its_own_key(
     assert source.revision(MARKET, "taxonomy-test-2", CATEGORY, mine) is None
     assert source.revision("market_b", TAXONOMY, CATEGORY, mine) is None
     assert source.revision(MARKET, TAXONOMY, CATEGORY, "no-such-revision") is None
+
+
+# ------------------------------------------------------------------ reviewed = operator-confirmed
+
+
+def test_the_database_refuses_a_reviewed_row_that_is_not_operator_confirmed(
+    api: TestClient, config: AppConfig
+) -> None:
+    reviewed = save(api, body()).json()["current"]["metadata_revision"]
+
+    def copy(row_id: str, content: str, review: str) -> str:
+        return (
+            f"INSERT INTO {REVISIONS} SELECT '{row_id}', metadata_id, 2, {content},"
+            f" content_fingerprint, {review}, recorded_by, correlation_id, recorded_at"
+            f" FROM {REVISIONS} WHERE metadata_revision_id = '{reviewed}'"
+        )
+
+    with contextlib.closing(raw(config)) as connection:
+        for content in (
+            "json_set(content_json, '$.content_provenance', 'AI_SUGGESTION')",
+            "json_set(content_json, '$.content_provenance', 'SOURCE_FACT')",
+            "json_remove(content_json, '$.content_provenance')",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="review_provenance"):
+                connection.execute(copy("r-bad", content, "1, reviewed_by, reviewed_at"))
+        # The same AI-suggested row recorded unreviewed is accepted: the rule is about review.
+        ai = "json_set(content_json, '$.content_provenance', 'AI_SUGGESTION')"
+        connection.execute(copy("r-ai", ai, "0, NULL, NULL"))
+        connection.commit()
+    assert counts(config) == {KEYS: 1, REVISIONS: 2, CURRENT: 1}
+
+
+@dataclass
+class _CorruptStore:
+    """A store that hands back a row whose stored reviewed bit disagrees with its provenance, as a
+    row written around every guard would."""
+
+    record: MetadataRevisionRecord
+
+    def current(self, *_key: str) -> MetadataRevisionRecord:
+        return self.record
+
+    def revision(self, *_key: str) -> MetadataRevisionRecord:
+        return self.record
+
+
+@pytest.mark.parametrize(
+    "provenance", ["AI_SUGGESTION", "SOURCE_FACT", "operator_confirmed", "<absent>"]
+)
+def test_a_reviewed_bit_never_makes_non_operator_content_reviewed(
+    owner: CategoryMetadataService, provenance: str
+) -> None:
+    revision = _record(owner, None)
+    stored = owner._store.revision(MARKET, TAXONOMY, CATEGORY, revision)
+    assert stored is not None and stored.reviewed is True
+    document = {key: value for key, value in stored.content.items() if key != "content_provenance"}
+    if provenance != "<absent>":
+        document["content_provenance"] = provenance
+
+    assert effectively_reviewed(True, document) is False
+    assert category_metadata_of(revision, True, document).reviewed is False
+    corrupt = _CorruptStore(replace(stored, content=document))
+    source = DurableRegistrationMetadata(corrupt)  # type: ignore[arg-type]
+    for materialized in (
+        source.category(MARKET, TAXONOMY, CATEGORY),
+        source.revision(MARKET, TAXONOMY, CATEGORY, revision),
+    ):
+        assert materialized is not None and materialized.reviewed is False
+    # Operator-confirmed content with the stored bit is reviewed; without the bit it is not.
+    assert category_metadata_of(revision, True, stored.content).reviewed is True
+    assert category_metadata_of(revision, False, stored.content).reviewed is False
+
+
+def test_the_model_check_is_the_migration_check() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "app/db/migrations/versions/0020_g1_registration_category_metadata.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0020", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert migration.REVIEW_PROVENANCE == models.REVIEW_PROVENANCE
+    # `IS`: a missing provenance must fail the CHECK instead of passing as NULL.
+    assert "'$.content_provenance') IS 'OPERATOR_CONFIRMED'" in models.REVIEW_PROVENANCE

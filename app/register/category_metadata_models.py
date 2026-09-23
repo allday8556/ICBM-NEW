@@ -23,11 +23,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.types import UTCDateTime
 
+# Identical to migration 0020: reviewer and review time exactly when reviewed, and only
+# operator-confirmed content can be reviewed (ADR-0015 §3: an AI suggestion never is). `IS`, so a
+# missing provenance fails rather than passing as NULL.
 REVIEW_PROVENANCE = (
     "reviewed IN (0, 1)"
     " AND (reviewed = 1) = (reviewed_by IS NOT NULL)"
     " AND (reviewed = 1) = (reviewed_at IS NOT NULL)"
     " AND (reviewed_by IS NULL OR reviewed_by <> '')"
+    " AND (reviewed = 0"
+    " OR json_extract(content_json, '$.content_provenance') IS 'OPERATOR_CONFIRMED')"
 )
 
 

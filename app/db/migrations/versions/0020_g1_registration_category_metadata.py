@@ -26,7 +26,9 @@ account truth, and no second category model.
 - `registration_category_metadata_revisions` holds its revisions: server-created identity (the
   `CategoryMetadata.metadata_revision`), content fingerprint and recording time. `reviewed` is
   explicit, and a reviewed revision carries its reviewer and review time; an unreviewed one carries
-  neither. A revision is never updated or deleted, and its number moves by exactly one.
+  neither. Only operator-confirmed content can be reviewed: a row marking an AI suggestion as
+  reviewed is refused by the database itself. A revision is never updated or deleted, and its
+  number moves by exactly one.
 - `registration_category_metadata_current` names the one current revision of each key. It only
   ever names the newest revision of its own key — never "the newest reviewed one" — and is never
   deleted.
@@ -73,12 +75,17 @@ def _raise(message: str, condition: str) -> str:
     return f"SELECT RAISE(ABORT, '{message}') WHERE {condition};"
 
 
-# A reviewed revision names who reviewed it and when; an unreviewed one names neither.
+# A reviewed revision names who reviewed it and when; an unreviewed one names neither. And only
+# operator-confirmed content can be reviewed: an AI suggestion is never reviewed metadata, however
+# the row was written (ADR-0015 §3). `IS`, not `=`: a missing provenance must fail the check, and
+# a CHECK whose expression is NULL would pass.
 REVIEW_PROVENANCE = (
     "reviewed IN (0, 1)"
     " AND (reviewed = 1) = (reviewed_by IS NOT NULL)"
     " AND (reviewed = 1) = (reviewed_at IS NOT NULL)"
     " AND (reviewed_by IS NULL OR reviewed_by <> '')"
+    " AND (reviewed = 0"
+    " OR json_extract(content_json, '$.content_provenance') IS 'OPERATOR_CONFIRMED')"
 )
 
 
