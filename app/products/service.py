@@ -19,11 +19,13 @@ from app.products.catalog import (
     selection_request,
 )
 from app.products.contracts import (
+    HandoffState,
     ItemSelectionView,
     ProductDetailView,
     ProductPageView,
     ProductRowView,
     RegistrationTargetView,
+    SourceHandoffView,
     TargetItemView,
     product_view,
 )
@@ -66,6 +68,47 @@ class ProductsService:
                 "this source identity is not a confirmed member of any product",
             )
         return self.product(group)
+
+    def source_handoff(
+        self, supplier_key: str, source_product_id: str, revision_id: str
+    ) -> SourceHandoffView:
+        """Where a recorded source revision stands in the Product DB now (Gate 1 G1-E).
+
+        Read-only follow-through after COLLECT: it materializes nothing, invents no Product
+        identity and never asks for another collection. A source no Product holds yet is
+        ``NOT_YET_VISIBLE``; one whose Product has moved to another revision says so.
+        """
+        group = self._store.group_of_source(supplier_key, source_product_id)
+        product = None if group is None else self._store.readback(group)
+        member = (
+            None
+            if product is None
+            else next(
+                (
+                    m
+                    for m in product.members
+                    if (m.supplier_key, m.source_product_id) == (supplier_key, source_product_id)
+                ),
+                None,
+            )
+        )
+        if product is None or member is None:
+            state, product_id, current = HandoffState.NOT_YET_VISIBLE, None, None
+        else:
+            product_id, current = product.product_group_id, member.current_source_revision_id
+            state = (
+                HandoffState.MATERIALIZED
+                if current == revision_id
+                else HandoffState.CURRENT_REVISION_DIFFERS
+            )
+        return SourceHandoffView(
+            supplier_key=supplier_key,
+            source_product_id=source_product_id,
+            revision_id=revision_id,
+            state=state,
+            product_group_id=product_id,
+            current_source_revision_id=current,
+        )
 
     # ------------------------------------------------------------------ product DB (G1-C)
 

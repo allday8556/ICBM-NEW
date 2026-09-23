@@ -383,6 +383,7 @@ def build_container(
         review=ReviewService(),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
+        collection_suppliers=collection.supplier_keys(),
     )
     return Container(
         config=config,

@@ -57,6 +57,7 @@ class ScreenService:
         review: ReviewService,
         execution_mode: ExecutionModeService,
         editable_surfaces: Sequence[EditableSurface] = (),
+        collection_suppliers: Sequence[str] = (),
     ) -> None:
         self._clock = clock
         self._operator_name = operator_name
@@ -69,6 +70,7 @@ class ScreenService:
         self._review = review
         self._execution_mode = execution_mode
         self._editable_surfaces = tuple(editable_surfaces)
+        self._collection_suppliers = tuple(sorted(collection_suppliers))
 
     def _meta(self, screen: ScreenKey, empty_reason: EmptyReason | None) -> ScreenMeta:
         return ScreenMeta(
@@ -127,6 +129,7 @@ class ScreenService:
             ),
             suppliers=self._connect.supplier_connections(),
             collection_jobs_total=jobs,
+            collection_supplier_keys=list(self._collection_suppliers),
         )
 
     def product_db(self) -> ProductDbView:

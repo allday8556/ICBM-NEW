@@ -208,6 +208,20 @@ class CollectionRunStore:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             return _record(row)
 
+    def recent(self, *, limit: int) -> tuple[CollectionRunRecord, ...]:
+        """The newest runs, newest first, exactly as the database holds them (Gate 1 G1-E).
+
+        Ordered by request time and then by identifier, so the order is total and a reload shows
+        the same list. These rows are the only run history: nothing is copied anywhere else.
+        """
+        with self._db.read() as session:
+            rows = session.scalars(
+                select(CollectionRun)
+                .order_by(CollectionRun.requested_at.desc(), CollectionRun.collection_run_id.desc())
+                .limit(limit)
+            ).all()
+            return tuple(_record(row) for row in rows)
+
     def unsettled_job_ids(
         self, terminal_states: Sequence[str], *, limit: int = 500
     ) -> tuple[str, ...]:

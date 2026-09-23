@@ -16,6 +16,7 @@ appears here.
 """
 
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -152,6 +153,29 @@ class ProductDetailView(BaseModel):
     member_sources: tuple[MemberSourceView, ...]
     item_selection: tuple[ItemSelectionView, ...]
     selection_unavailable_reason: str | None
+
+
+class HandoffState(StrEnum):
+    """Where one recorded source revision stands in the Product DB now (Gate 1 G1-E).
+
+    ``MATERIALIZED``: a Product holds the source as a CONFIRMED member whose current revision is
+    exactly this one. ``CURRENT_REVISION_DIFFERS``: a Product holds the source, but its current
+    revision is another one. ``NOT_YET_VISIBLE``: no Product holds the source as a CONFIRMED member
+    yet. None of them is a quality verdict, and none asks for another collection.
+    """
+
+    MATERIALIZED = "MATERIALIZED"
+    CURRENT_REVISION_DIFFERS = "CURRENT_REVISION_DIFFERS"
+    NOT_YET_VISIBLE = "NOT_YET_VISIBLE"
+
+
+class SourceHandoffView(BaseModel):
+    supplier_key: str
+    source_product_id: str
+    revision_id: str
+    state: HandoffState
+    product_group_id: str | None
+    current_source_revision_id: str | None
 
 
 class TargetItemView(BaseModel):

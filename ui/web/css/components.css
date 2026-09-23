@@ -807,6 +807,40 @@
   color: var(--color-text-strong);
 }
 
+/* ---------- COLLECT submit and runs (Gate 1 G1-E) ---------- */
+.collect-jobs {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.form-row select {
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--color-input);
+}
+
+.collect-submit .note,
+.collect-run .note,
+.collect-handoff {
+  margin-top: var(--space-4);
+}
+
+.collect-run .kv b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.collect-runs .table {
+  margin-top: var(--space-4);
+}
+
+.collect-runs tr[aria-current='true'] {
+  background: var(--color-info-bg);
+}
+
 /* ---------- Product DB (Gate 1 G1-C) ---------- */
 /* The prototype's DB layout: a search toolbar, the product list beside one detail panel, and
    the detail's title/group rhythm. Everything else is the shared panel/table/chip/kv system. */

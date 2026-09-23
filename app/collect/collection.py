@@ -61,7 +61,7 @@ from app.collect.sourceassets import (
 from app.collect.urls import UrlPolicy
 from app.core.clock import Clock
 from app.core.correlation import get_correlation_id, new_correlation_id
-from app.core.errors import AppError, InputValidationError, NotFoundError
+from app.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
 from app.db.database import Database
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, TerminalJob
@@ -98,6 +98,9 @@ UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
 # another *real* read of the same product, so the schedule has to be compatible with the interval
 # rather than something the interval has to keep refusing.
 COLLECT_POLICY = RetryPolicy(max_attempts=3, base_delay_s=90.0, factor=2.0, max_delay_s=600.0)
+# How many recent runs the COLLECT screen may ask for at once (Gate 1 G1-E).
+RECENT_RUNS_DEFAULT = 10
+RECENT_RUNS_MAX = 50
 
 # What a supplier's own page role means in the revision's canonical vocabulary. A page's primary
 # image is the product's representative one; everything else the role rules recognise as product
@@ -177,6 +180,22 @@ class SubmittedCollection:
     collection_run_id: str
     job_id: str
     correlation_id: str
+
+
+@dataclass(frozen=True)
+class RecordedSource:
+    """What a RECORDED run appended: the source identity its revision states, and that revision."""
+
+    collection_run_id: str
+    supplier_key: str
+    source_product_id: str
+    revision_id: str
+
+
+class CollectionRunNotRecorded(AppError):
+    """The run has no revision to follow: it is still PENDING, or ended without appending one."""
+
+    error_class = ErrorClass.CONFLICT
 
 
 @dataclass(frozen=True)
@@ -347,6 +366,40 @@ class ProductCollectionService:
 
     def run(self, collection_run_id: str) -> CollectionRunRecord:
         return self._runs.get(collection_run_id)
+
+    def recent_runs(self, limit: int | None = None) -> tuple[CollectionRunRecord, ...]:
+        """The newest runs, newest first: what the COLLECT screen follows after a reload."""
+        size = RECENT_RUNS_DEFAULT if limit is None else limit
+        if isinstance(size, bool) or not 1 <= size <= RECENT_RUNS_MAX:
+            raise InputValidationError(
+                "COLLECT_RUN_LIMIT_INVALID", f"between 1 and {RECENT_RUNS_MAX} runs are listed"
+            )
+        return self._runs.recent(limit=size)
+
+    def recorded_source(self, collection_run_id: str) -> RecordedSource:
+        """The source identity and revision a RECORDED run appended, read from that revision.
+
+        Any other run has none: a PENDING run has not finished, and a NO_REVISION or FAILED run
+        appended nothing, so there is nothing a product could have been materialized from.
+        """
+        record = self._runs.get(collection_run_id)
+        revision = (
+            None
+            if record.outcome is not CollectionOutcome.RECORDED or record.revision_id is None
+            else self._revisions.get(record.revision_id)
+        )
+        if revision is None:
+            raise CollectionRunNotRecorded(
+                "COLLECT_RUN_NOT_RECORDED",
+                "only a RECORDED run names a source revision",
+                details={"outcome": record.outcome.value},
+            )
+        return RecordedSource(
+            collection_run_id=record.collection_run_id,
+            supplier_key=revision.supplier_key,
+            source_product_id=revision.source_product_id,
+            revision_id=revision.revision_id,
+        )
 
     # ------------------------------------------------------------------ execution
 
