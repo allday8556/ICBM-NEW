@@ -60,6 +60,7 @@ from app.register.category_metadata import (
     CategoryMetadataStore,
     DurableRegistrationMetadata,
 )
+from app.register.drafting import DraftCommandService
 from app.register.execution import (
     CREATE_POLICY,
     RegistrationExecutionService,
@@ -135,6 +136,7 @@ class Container:
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
     register: RegisterService
+    drafting: DraftCommandService
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
@@ -328,6 +330,18 @@ def build_container(
         metadata=DurableRegistrationMetadata(category_metadata_store),
         policies=DurableRegistrationPolicy(target_policy_store),
     )
+    # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
+    # owners above — the revalidated selection, the bound account, the current target policy, M4
+    # pricing and the registration store — and replaces none of them.
+    drafting = DraftCommandService(
+        products=products,
+        accounts=accounts,
+        # The same durable policy source the preflight reads: the current revision, every call.
+        policies=DurableRegistrationPolicy(target_policy_store),
+        pricing=pricing,
+        registrations=registrations,
+        marketplaces=[m.key for m in MARKETPLACE_IDENTITIES],
+    )
     registration_builder = RegistrationSnapshotBuilder(
         preflight=registration_preflight, registrations=registrations
     )
@@ -420,6 +434,7 @@ def build_container(
         registration_builder=registration_builder,
         registration_execution=registration_execution,
         register=register_service,
+        drafting=drafting,
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,

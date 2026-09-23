@@ -14,14 +14,21 @@ Nothing here can reach a network: the gateway knows no host and sends nothing.
 
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from fastapi.testclient import TestClient
 
 from app.collect.collection import RegisteredCollection
+from app.collect.facts import (
+    FieldFact,
+    QuantityTier,
+    QuantityTiersValue,
+    ShippingKind,
+    ShippingValue,
+)
 from app.config import AppConfig
 from app.core.errors import AuthError
 from app.main import create_app
@@ -39,10 +46,12 @@ from scripts.m3collect.fake_shop import (
     SUPPLIER_KEY,
     FakeGateway,
     StubSessions,
+    base_fields,
     collection,
     document,
     page,
 )
+from tests.collect_support import absent, confirmed
 from tests.conftest import LOCAL
 
 NO_REVISION_ID = "0"
@@ -60,6 +69,39 @@ def product_url(number: str) -> str:
 def registered() -> RegisteredCollection:
     return RegisteredCollection(
         collection=collection(),
+        extractor_revision=EXTRACTOR_REVISION,
+        extractor_fingerprint=EXTRACTOR_FINGERPRINT,
+    )
+
+
+SELLABLE_TIERS = ((1, 19900), (2, 37900))
+
+
+def _sellable_fields(view: DocumentView) -> Mapping[str, FieldFact]:
+    """The fake shop's own reading, except that the page states no options, two confirmed
+    quantity tiers and a fixed shipping fee: what M4 materializes into two quantity Items it can
+    price (Gate 1 G1-D). M4 does not price a conditional fee, which the ordinary page states."""
+    fields = dict(base_fields())
+    fields["options"] = absent(".options")
+    fields["shipping"] = confirmed(
+        ShippingValue(kind=ShippingKind.FIXED, policy_text="3,000", fee_krw=3000), ".delivery"
+    )
+    fields["quantity_tiers"] = confirmed(
+        QuantityTiersValue(
+            tiers=tuple(
+                QuantityTier(quantity=q, total_price_krw=total, label=f"{q}")
+                for q, total in SELLABLE_TIERS
+            )
+        ),
+        ".tiers",
+    )
+    return fields
+
+
+def sellable_registered() -> RegisteredCollection:
+    """The same fake shop and extraction identity, reading the page as sellable quantity tiers."""
+    return RegisteredCollection(
+        collection=replace(collection(), fields=_sellable_fields),
         extractor_revision=EXTRACTOR_REVISION,
         extractor_fingerprint=EXTRACTOR_FINGERPRINT,
     )
@@ -128,6 +170,9 @@ def gated_materialization() -> Iterator[threading.Event]:
     bound method it was built with. It only delays the materializer the product code already
     calls, in the order it already calls it, so the ``RECORDED`` / ``NOT_YET_VISIBLE`` window
     becomes wide and deterministic instead of a few milliseconds of luck.
+
+    It replaces a class attribute, so it is process-global while it is open: it must never be
+    used by two tests at once, and nothing else may run the materializer while it is held.
     """
     gate = threading.Event()
     original = ProductMaterializer.materialize_run
@@ -147,14 +192,19 @@ def gated_materialization() -> Iterator[threading.Event]:
 
 
 @contextmanager
-def served(config: AppConfig, shop: ScriptedShop) -> Iterator[TestClient]:
+def served(
+    config: AppConfig,
+    shop: ScriptedShop,
+    *,
+    collections: tuple[RegisteredCollection, ...] | None = None,
+) -> Iterator[TestClient]:
     """The real application, collecting from the scripted shop. A held read is released before
     the application stops, so its worker never waits out the hold."""
     app = create_app(
         config,
         collection_gateway=shop,
         collection_sessions=StubSessions(),
-        collections=(registered(),),
+        collections=collections or (registered(),),
     )
     try:
         with TestClient(app, base_url=LOCAL) as client:
@@ -175,6 +225,7 @@ __all__ = [
     "gated_materialization",
     "product_url",
     "registered",
+    "sellable_registered",
     "served",
     "settled_and_job_terminal",
 ]

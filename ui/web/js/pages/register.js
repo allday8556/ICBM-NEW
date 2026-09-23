@@ -646,6 +646,17 @@ export default {
         }),
       );
     }
+    // Opened from the Product DB with the Draft it just created (Gate 1 G1-D): that Draft's
+    // units are marked and brought into view. The route names the Draft only; its units are
+    // read from the server like every other unit.
+    const focusDraft = ctx.params.get('draft');
+    const panels = overview.units.map((unit) => {
+      const panel = unitPanel(unit, reload);
+      if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
+      return panel;
+    });
+    const focused = panels.find((panel) => panel.getAttribute('aria-current') === 'true');
+    if (focused) window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
     return fragment(
       head,
       h(
@@ -656,7 +667,7 @@ export default {
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
       canaryPanel(canary),
-      ...overview.units.map((unit) => unitPanel(unit, reload)),
+      ...panels,
     );
   },
 };

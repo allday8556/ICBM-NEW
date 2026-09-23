@@ -28,6 +28,7 @@ from app.register.contracts import (
     RegisterOverview,
     UnitView,
 )
+from app.register.drafting import CreateDraftRequest, DraftCreatedView, DraftTargetsView
 
 router = APIRouter(prefix="/api/v1/register", tags=["register"])
 
@@ -71,6 +72,20 @@ def _correlation() -> str:
 @router.get("/overview")
 def overview(container: ContainerDep) -> RegisterOverview:
     return container.register.overview()
+
+
+@router.get("/draft-targets")
+def draft_targets(container: ContainerDep) -> DraftTargetsView:
+    """Every canonical account a Draft may target, with its binding and current policy."""
+    return container.drafting.targets()
+
+
+@router.post("/drafts")
+def create_draft(container: ContainerDep, request: CreateDraftRequest) -> DraftCreatedView:
+    """A Draft from the operator's Product DB selection (Gate 1 G1-D). The selection is
+    revalidated, every Item is priced by M4 and pinned, or nothing is created. It creates no
+    preparation, Snapshot, Intent or job."""
+    return container.drafting.create(request, correlation_id=_correlation())
 
 
 @router.get("/canary")

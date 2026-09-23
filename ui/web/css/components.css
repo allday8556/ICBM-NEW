@@ -745,6 +745,11 @@
   margin-top: 10px;
 }
 
+.register-unit[aria-current='true'] {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
 .register-scope {
   margin-top: 10px;
   padding: 10px;
