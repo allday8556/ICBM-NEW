@@ -6,13 +6,20 @@ composition and current binding. Nothing is recomputed — no price, no readines
 fact value is copied: a member's facts are read through its current source revision.
 
 Read-only: this contract creates nothing and changes nothing, and it is not a marketplace payload.
+
+**Product DB read models** (Gate 1 G1-C, ADR-0015 §5). The operator screen's list, detail and
+registration-target selection wrap :class:`ProductView` unchanged and add only what the screen
+needs: each member's source facts read through its exact current source revision and named by
+it, and each Item's server-owned selectability. There is no canonical product name: members that
+state different names each keep their own. No price, readiness, compliance or marketplace verdict
+appears here.
 """
 
 from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.collect.facts import FactsStatus
+from app.collect.facts import FactsStatus, FieldStatus
 from app.products.model import BindingKind, GroupStatus
 from app.products.store import ProductReadback
 
@@ -68,6 +75,104 @@ class ProductView(BaseModel):
     membership_revision_no: int | None
     members: tuple[ProductMemberView, ...]
     items: tuple[ProductItemView, ...]
+
+
+# ---------------------------------------------------------------- product DB read models (G1-C)
+
+
+class SourceFactView(BaseModel):
+    """One source fact of one member, as its current source revision states it.
+
+    ``status`` is ``None`` when the revision holds no such field. ``value`` is set only for a
+    CONFIRMED fact; a fact under review or absent shows no value, and nothing fills it from another
+    member or Product."""
+
+    key: str
+    status: FieldStatus | None
+    value: str | None
+
+
+class SourceImagesView(BaseModel):
+    """The images field of the same revision: how many references it names, how many were
+    included, and the stored-bytes digest of the first included representative, if any. No
+    locator or URL is exposed."""
+
+    status: FieldStatus | None
+    references: int
+    included: int
+    representative_sha256: str | None
+
+
+class MemberSourceView(BaseModel):
+    """One CONFIRMED member and the facts of **its own** current source revision, named by
+    ``source_revision_id`` (``None`` before any revision is current)."""
+
+    member_id: str
+    supplier_key: str
+    source_product_id: str
+    source_revision_id: str | None
+    facts_status: FactsStatus | None
+    facts: tuple[SourceFactView, ...]
+    images: SourceImagesView | None
+
+
+class ItemSelectionView(BaseModel):
+    """Whether this Item may be chosen as a registration target now, and if not, the server's
+    reason code."""
+
+    item_id: str
+    selectable: bool
+    reason: str | None
+
+
+class ProductRowView(BaseModel):
+    """One list row: the canonical Product and each member's current name, member-scoped."""
+
+    product: ProductView
+    member_names: tuple[MemberSourceView, ...]
+
+
+class ProductPageView(BaseModel):
+    """One page of ACTIVE Products. ``next_cursor`` continues this same search and is ``None`` on
+    the last page."""
+
+    products: tuple[ProductRowView, ...]
+    query: str | None
+    limit: int
+    next_cursor: str | None
+    matching_total: int
+
+
+class ProductDetailView(BaseModel):
+    """One Product, retired or not, with every member's source facts and every Item's
+    selectability. ``selection_unavailable_reason`` is the Product-wide reason no Item of it is
+    selectable, if there is one."""
+
+    product: ProductView
+    member_sources: tuple[MemberSourceView, ...]
+    item_selection: tuple[ItemSelectionView, ...]
+    selection_unavailable_reason: str | None
+
+
+class TargetItemView(BaseModel):
+    item_id: str
+    composition_signature: str
+    quantity: int
+    binding_id: str
+    binding_kind: BindingKind
+
+
+class RegistrationTargetView(BaseModel):
+    """A selection the server revalidated against the current Product: one ACTIVE Product, its
+    current membership revision and the chosen Items with the binding each holds now.
+
+    It is a read-only handoff, never durable: nothing is created — no Draft, no PricingSnapshot,
+    no account target and no registration row."""
+
+    product_group_id: str
+    membership_revision_id: str
+    membership_revision_no: int
+    items: tuple[TargetItemView, ...]
 
 
 def product_view(product: ProductReadback) -> ProductView:

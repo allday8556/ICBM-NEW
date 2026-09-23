@@ -27,13 +27,13 @@ of work over its own transaction.
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.collect.facts import FactsStatus, FieldStatus, value_from_json
 from app.collect.models import ProductFactsField, ProductFactsRevision
@@ -70,6 +70,8 @@ from app.products.quantity import OfferTerms
 
 # The revision fields a product-level offer is read from (ruling 5738760913).
 OFFER_FIELDS = ("options", "quantity_tiers")
+# The source fact a product DB search reads, through each member's current source revision only.
+NAME_FIELD = "original_name"
 
 
 @dataclass(frozen=True)
@@ -246,6 +248,27 @@ class ProductReadback:
     membership_revision_no: int | None
     members: tuple[MemberReadback, ...]
     items: tuple[ItemReadback, ...]
+
+
+# ---------------------------------------------------------------- product DB list (G1-C)
+
+
+@dataclass(frozen=True)
+class ProductPageKey:
+    """Where one Product sits in the product DB's one order: newest first by its immutable creation
+    time, then by its canonical identifier, so two Products never tie."""
+
+    created_at: datetime
+    product_group_id: str
+
+
+@dataclass(frozen=True)
+class ProductPage:
+    """One page of ACTIVE Products in that order, whether more follow, and how many match."""
+
+    keys: tuple[ProductPageKey, ...]
+    has_more: bool
+    matching_total: int
 
 
 class ProductFoundationStore:
@@ -951,16 +974,17 @@ class ProductFoundationUnit:
 
     # ------------------------------------------------------------------ quantity offers (PR-Q)
 
-    def offer_fields(self, revision_id: str) -> tuple[dict[str, FieldReading], str | None]:
-        """The ``options`` and ``quantity_tiers`` fields of a revision, and its currency: all a
-        product-level offer is read from. Reading decides nothing."""
+    def source_fields(self, revision_id: str, keys: Iterable[str]) -> dict[str, FieldReading]:
+        """These fields of one revision, read back and validated against the M3 registry again. A
+        read-through of COLLECT's source truth, never a copy: a field the revision does not hold is
+        missing from the result, and reading decides nothing."""
         readings = {}
         for key, status, value_json in self.session.execute(
             select(
                 ProductFactsField.field_key, ProductFactsField.status, ProductFactsField.value_json
             ).where(
                 ProductFactsField.revision_id == revision_id,
-                ProductFactsField.field_key.in_(OFFER_FIELDS),
+                ProductFactsField.field_key.in_(tuple(keys)),
             )
         ).tuples():
             try:
@@ -968,6 +992,12 @@ class ProductFoundationUnit:
             except ValueError:
                 value = None
             readings[key] = FieldReading(FieldStatus(status), value)
+        return readings
+
+    def offer_fields(self, revision_id: str) -> tuple[dict[str, FieldReading], str | None]:
+        """The ``options`` and ``quantity_tiers`` fields of a revision, and its currency: all a
+        product-level offer is read from. Reading decides nothing."""
+        readings = self.source_fields(revision_id, OFFER_FIELDS)
         currency = self.session.scalar(
             select(ProductFactsRevision.currency).where(
                 ProductFactsRevision.revision_id == revision_id
@@ -1092,6 +1122,41 @@ class ProductFoundationUnit:
         session.flush()
         return _binding_record(row)
 
+    # ------------------------------------------------------------------ product DB list (G1-C)
+
+    def active_product_page(
+        self, *, needle: str | None, after: ProductPageKey | None, limit: int
+    ) -> ProductPage:
+        """One page of ACTIVE Products, newest first, strictly after ``after``.
+
+        A retired group is history: it is never listed, and stays addressable by its identifier.
+        With a ``needle`` only Products that match it now are counted and listed
+        (:func:`_matches_now`). The order is total and every key is immutable, so paging an
+        unchanged database neither repeats nor skips a Product.
+        """
+        matching = ProductGroup.status == GroupStatus.ACTIVE.value
+        if needle is not None:
+            matching = and_(matching, _matches_now(needle))
+        total = self.session.scalar(select(func.count()).select_from(ProductGroup).where(matching))
+        query = select(ProductGroup.created_at, ProductGroup.product_group_id).where(matching)
+        if after is not None:
+            query = query.where(
+                or_(
+                    ProductGroup.created_at < after.created_at,
+                    and_(
+                        ProductGroup.created_at == after.created_at,
+                        ProductGroup.product_group_id < after.product_group_id,
+                    ),
+                )
+            )
+        rows = self.session.execute(
+            query.order_by(
+                ProductGroup.created_at.desc(), ProductGroup.product_group_id.desc()
+            ).limit(limit + 1)
+        ).tuples()
+        keys = [ProductPageKey(created_at, group_id) for created_at, group_id in rows]
+        return ProductPage(tuple(keys[:limit]), len(keys) > limit, int(total or 0))
+
     # ------------------------------------------------------------------ canonical read-back
 
     def readback(self, product_group_id: str) -> ProductReadback | None:
@@ -1186,6 +1251,59 @@ class ProductFoundationUnit:
             members=tuple(members),
             items=tuple(items),
         )
+
+
+def _contains(
+    column: InstrumentedAttribute[str] | ColumnElement[str], needle: str
+) -> ColumnElement[bool]:
+    """``needle`` (already ASCII-lowercased by the caller) occurs in ``column``, ASCII case
+    folded as SQLite folds it. ``instr`` takes no wildcard, so the needle is matched literally."""
+    return func.instr(func.lower(column), needle) > 0
+
+
+def _matches_now(needle: str) -> ColumnElement[bool]:
+    """Whether a group matches a product DB search at its current state.
+
+    It matches on its own identifier, or through a CONFIRMED member whose supplier key or source
+    identifier contains the needle, or whose **current** source revision states a CONFIRMED
+    ``original_name`` that contains it. Only the revision the member's newest move names is read:
+    a historical revision never matches, and a name under review or absent proves nothing.
+    """
+    current_revision = (
+        select(CurrentSourceRevisionMove.revision_id)
+        .where(CurrentSourceRevisionMove.source_product_uid == SourceProduct.source_product_uid)
+        .order_by(CurrentSourceRevisionMove.sequence.desc())
+        .limit(1)
+        .correlate(SourceProduct)
+        .scalar_subquery()
+    )
+    named = (
+        select(ProductFactsField.revision_id)
+        .where(
+            ProductFactsField.revision_id == current_revision,
+            ProductFactsField.field_key == NAME_FIELD,
+            ProductFactsField.status == FieldStatus.CONFIRMED.value,
+            _contains(func.json_extract(ProductFactsField.value_json, "$.text"), needle),
+        )
+        .correlate(SourceProduct)
+        .exists()
+    )
+    member = (
+        select(GroupMember.member_id)
+        .join(SourceProduct, SourceProduct.source_product_uid == GroupMember.source_product_uid)
+        .where(
+            GroupMember.product_group_id == ProductGroup.product_group_id,
+            GroupMember.status == MemberStatus.CONFIRMED.value,
+            or_(
+                _contains(SourceProduct.supplier_key, needle),
+                _contains(SourceProduct.source_product_id, needle),
+                named,
+            ),
+        )
+        .correlate(ProductGroup)
+        .exists()
+    )
+    return or_(_contains(ProductGroup.product_group_id, needle), member)
 
 
 def _source_product(

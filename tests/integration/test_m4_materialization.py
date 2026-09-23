@@ -969,8 +969,12 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
     products = {
         path: set(ops) for path, ops in paths.items() if path.startswith("/api/v1/products")
     }
+    # Gate 1 G1-C adds the product DB list, detail and registration-target check: reads too.
     assert products == {
+        "/api/v1/products": {"get"},
         "/api/v1/products/{product_group_id}": {"get"},
+        "/api/v1/products/{product_group_id}/detail": {"get"},
+        "/api/v1/products/{product_group_id}/registration-target": {"get"},
         "/api/v1/products/by-source/{supplier_key}/{source_product_id}": {"get"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
