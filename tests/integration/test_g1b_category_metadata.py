@@ -41,7 +41,7 @@ from app.register.category_metadata import (
     DurableRegistrationMetadata,
     RecordRevisionRequest,
 )
-from app.register.policy import StaticRegistrationPolicy
+from app.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
 from app.register.preflight import RegistrationPreflightService
 from tests.conftest import LOCAL
 from tests.product_support import Collections, raw
@@ -557,3 +557,126 @@ def test_a_frozen_snapshot_keeps_the_metadata_revision_it_froze(
             (snapshot.registration_snapshot_id,),
         ).fetchone()
     assert frozen == (first, first, snapshot.payload_hash)
+
+
+# ------------------------------------------------------------------ a frozen unit, its own revision
+
+
+def _frozen(
+    container: Container, config: AppConfig, account: str, preflight: RegistrationPreflightService
+) -> tuple[Any, Any, Any, str]:
+    """One unit frozen from a final READY evaluation, with the request and assets it froze from."""
+    item = ready_item(container, Collections.of(container, config))
+    store = container.registrations
+    draft_id = draft(store, account, [item])
+    req = request(store, draft_id, account, [item])
+    req = replace(req, duplicate_evidence=no_match(preflight.candidate(req)))
+    assets = prepared(preflight.candidate(req))
+    final = preflight.final(req, assets)
+    assert final.status is ReadinessStatus.READY, final.reasons
+    builder = RegistrationSnapshotBuilder(preflight=preflight, registrations=store)
+    snapshot = builder.freeze(final, created_by=OPERATOR, correlation_id=CID)
+    return snapshot, req, assets, draft_id
+
+
+def _frozen_category(container: Container, draft_id: str, snapshot_id: str) -> Any:
+    units = [u for u in container.register.units(draft_id) if u.unit_ref == snapshot_id]
+    assert len(units) == 1
+    return units[0].category
+
+
+def test_a_frozen_unit_renders_the_exact_revision_it_froze_while_the_preflight_reads_current(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    account: str,
+    owner: CategoryMetadataService,
+) -> None:
+    preflight = _served_preflight(container, account)
+    first = _record(owner, None)
+    snapshot, req, assets, draft_id = _frozen(container, config, account, preflight)
+
+    # A materially different current revision: other notice type and fields, an extra and a newly
+    # required attribute, no options.
+    second = _record(
+        owner,
+        first,
+        name_max_length=90,
+        attributes=[
+            _rule("brand", required=True),
+            _rule("color", required=True),
+            _rule("material", required=True),
+        ],
+        notice={"notice_type": "notice-test-2", "fields": [_rule("manufacturer", required=True)]},
+        options={"options_supported": False, "max_options": 1, "max_dimensions": 1},
+    )
+
+    # The frozen unit shows R1 — its identity and its rules, never R2's rules under R1's name.
+    for category in (
+        _frozen_category(container, draft_id, snapshot.registration_snapshot_id),
+        next(
+            u["category"]
+            for u in api.get(f"/api/v1/register/units/{draft_id}", headers=CLIENT).json()
+            if u["unit_ref"] == snapshot.registration_snapshot_id
+        ),
+    ):
+        view = category if isinstance(category, dict) else category.model_dump()
+        assert view["metadata_revision"] == first
+        assert view["metadata_unavailable_reason"] is None
+        assert view["reviewed"] is True
+        assert view["notice_type"] == "notice-test-1"
+        assert [(f["key"], f["required"]) for f in view["attributes"]] == [
+            ("brand", True),
+            ("color", False),
+        ]
+        assert [f["key"] for f in view["notice_fields"]] == ["manufacturer", "origin"]
+        assert (view["options_supported"], view["max_options"]) == (True, 5)
+
+    # A fresh evaluation reads the current revision, and the frozen candidate is stale under it.
+    fresh = preflight.candidate(req)
+    assert fresh.resolved.metadata is not None
+    assert fresh.resolved.metadata.metadata_revision == second
+    stale = preflight.final(req, assets)
+    assert stale.status is not ReadinessStatus.READY
+    assert "PREPARED_ASSET_CANDIDATE_MISMATCH" in _codes(stale)
+
+
+def test_an_unresolvable_frozen_revision_fails_closed_and_never_shows_the_current_one(
+    container: Container, config: AppConfig, account: str, owner: CategoryMetadataService
+) -> None:
+    preflight = _served_preflight(container, account)
+    durable = preflight._metadata
+    # Freeze under a revision the durable owner never held (the offline fixture's), then put the
+    # durable source back and give the key a current revision of its own.
+    preflight._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=MARKET)
+    snapshot, _req, _assets, draft_id = _frozen(container, config, account, preflight)
+    preflight._metadata = durable
+    _record(owner, None)
+
+    category = _frozen_category(container, draft_id, snapshot.registration_snapshot_id)
+    assert category.metadata_revision == "metadata-test-1"
+    assert category.metadata_unavailable_reason == "REGISTER_FROZEN_METADATA_UNRESOLVED"
+    assert category.reviewed is None and category.notice_type is None
+    assert category.attributes == () and category.notice_fields == ()
+    assert (category.options_supported, category.max_options) == (None, None)
+
+
+def test_an_exact_revision_resolves_only_within_its_own_key(
+    container: Container, owner: CategoryMetadataService
+) -> None:
+    mine = _record(owner, None)
+    other = owner.record(
+        MARKET,
+        TAXONOMY,
+        "category-test-2",
+        RecordRevisionRequest.model_validate(body()),
+        correlation_id=CID,
+    ).current
+    assert other is not None
+    source = DurableRegistrationMetadata(owner._store)
+    found = source.revision(MARKET, TAXONOMY, CATEGORY, mine)
+    assert found is not None and found.metadata_revision == mine
+    assert source.revision(MARKET, TAXONOMY, CATEGORY, other.metadata_revision) is None
+    assert source.revision(MARKET, "taxonomy-test-2", CATEGORY, mine) is None
+    assert source.revision("market_b", TAXONOMY, CATEGORY, mine) is None
+    assert source.revision(MARKET, TAXONOMY, CATEGORY, "no-such-revision") is None

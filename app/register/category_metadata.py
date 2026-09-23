@@ -388,6 +388,20 @@ class CategoryMetadataStore:
             row = _key_row(session, marketplace_key, taxonomy_revision, category_id)
             return None if row is None else _current_record(session, row.metadata_id)
 
+    def revision(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
+    ) -> MetadataRevisionRecord | None:
+        """The exact revision, only if it belongs to this key: a revision of another marketplace,
+        taxonomy or category is never returned in its place."""
+        with self._reading() as session:
+            row = _key_row(session, marketplace_key, taxonomy_revision, category_id)
+            if row is None:
+                return None
+            revision = session.get(RegistrationCategoryMetadataRevision, metadata_revision)
+            if revision is None or revision.metadata_id != row.metadata_id:
+                return None
+            return _revision_record(revision)
+
     # -------------------------------------------------------------- the one write
 
     def append(
@@ -600,6 +614,17 @@ class DurableRegistrationMetadata:
         if current is None:
             return None
         return category_metadata_of(current.metadata_revision, current.reviewed, current.content)
+
+    def revision(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
+    ) -> CategoryMetadata | None:
+        """The exact historical revision a frozen Snapshot names — never the current one."""
+        found = self._store.revision(
+            marketplace_key, taxonomy_revision, category_id, metadata_revision
+        )
+        if found is None:
+            return None
+        return category_metadata_of(found.metadata_revision, found.reviewed, found.content)
 
 
 # ------------------------------------------------------------------ the operator application owner

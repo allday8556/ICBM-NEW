@@ -177,6 +177,9 @@ class CategoryView(BaseModel):
     # Whether this category's listings may carry several Items as options, and how many (§4).
     options_supported: bool | None = None
     max_options: int | None = None
+    # Why the rules above are absent: the exact metadata revision the Snapshot froze could not be
+    # resolved within its own key. The current revision is never shown in its place (G1-09).
+    metadata_unavailable_reason: str | None = None
 
 
 class FieldValueView(BaseModel):

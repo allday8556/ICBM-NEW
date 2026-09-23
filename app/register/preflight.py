@@ -263,6 +263,16 @@ class RegistrationPreflightService:
         """
         return self._metadata.category(marketplace_key, taxonomy_revision, category_id)
 
+    def frozen_category_metadata(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
+    ) -> CategoryMetadata | None:
+        """The exact metadata revision a frozen Snapshot names, within its own key (ADR-0015 §3,
+        G1-09). A read-through for rendering the frozen unit; ``None`` when it cannot be resolved,
+        and never the current revision in its place. Evaluation still reads the current one."""
+        return self._metadata.revision(
+            marketplace_key, taxonomy_revision, category_id, metadata_revision
+        )
+
     def target_policy(
         self, marketplace_key: str, marketplace_account_id: str
     ) -> TargetPolicy | None:

@@ -155,6 +155,13 @@ class RegistrationMetadataSource(Protocol):
         self, marketplace_key: str, taxonomy_revision: str, category_id: str
     ) -> CategoryMetadata | None: ...
 
+    def revision(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
+    ) -> CategoryMetadata | None:
+        """The exact historical revision, only within this key; ``None`` when this key holds no
+        such revision. A frozen Snapshot is rendered with it, never with the current one."""
+        ...
+
 
 class RegistrationPolicySource(Protocol):
     """The current Settings/platform registration policy of one marketplace × canonical account.
@@ -189,6 +196,12 @@ class StaticRegistrationMetadata:
         if marketplace_key != self._marketplace_key:
             return None
         return self._entries.get((taxonomy_revision, category_id))
+
+    def revision(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
+    ) -> CategoryMetadata | None:
+        entry = self.category(marketplace_key, taxonomy_revision, category_id)
+        return entry if entry is not None and entry.metadata_revision == metadata_revision else None
 
 
 class StaticRegistrationPolicy:
