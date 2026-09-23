@@ -117,10 +117,12 @@ M5_EXECUTION_SCOPE = "0017_m5_registration_execution_scope"
 # ADR-0014 §26 (decision 5749504280) added the execution-scope owner, and §27 (decision
 # 5751540323) the durable preparation owner. Those three are the only M5 migrations.
 M5_PREPARATION = "0018_m5_registration_preparation"
-# Gate 1 G1-A (ADR-0015 §2, authorization 5785935712) adds the durable target-policy owner.
-# Everything else registration-shaped is still forbidden.
-M5_HEAD = "0019_g1_registration_target_policy"
-M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, M5_HEAD)
+# Gate 1 G1-A (ADR-0015 §2, authorization 5785935712) adds the durable target-policy owner, and
+# G1-B (ADR-0015 §3, authorization 5788082735) the operator-reviewed category metadata. Everything
+# else registration-shaped is still forbidden.
+G1_TARGET_POLICY = "0019_g1_registration_target_policy"
+M5_HEAD = "0020_g1_registration_category_metadata"
+M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_POLICY, M5_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
@@ -150,6 +152,10 @@ REGISTRATION_TABLES = frozenset(
         "registration_target_policies",
         "registration_target_policy_revisions",
         "registration_target_policy_current",
+        # ADR-0015 §3 (G1-B): the reviewed category metadata, its revisions and current pointer.
+        "registration_category_metadata",
+        "registration_category_metadata_revisions",
+        "registration_category_metadata_current",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -206,12 +212,13 @@ def test_the_migration_detector_fires() -> None:
         "0018_m5_registration_preparation.py",
         "0019_g1_registration_target_policy.py",
         "0019_m5_registration_more.py",
-        "0020_anything.py",
+        "0020_g1_registration_category_metadata.py",
+        "0021_anything.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
         "0019_m5_registration_more.py",
-        "0020_anything.py",
+        "0021_anything.py",
         "0009_duplicate_override.py",
     ]
 
@@ -314,28 +321,47 @@ def test_the_registration_writer_detector_fires() -> None:
     ]
 
 
-# ADR-0015 §2 (G1-A): the target-policy owner is the only production writer of its three tables,
-# so a revision cannot appear without its server-made identity, fingerprint, pointer and audit
-# record. And production binds only the durable policy source: the static one is a test and
-# offline fixture (G1-10), never what the application reads.
-TARGET_POLICY_OWNERS = frozenset(
-    {"app/register/target_policy.py", "app/register/target_policy_models.py"}
+# ADR-0015 §2 and §3 (G1-A, G1-B): each Gate 1 owner is the only production writer of its three
+# tables, so a revision cannot appear without its server-made identity, fingerprint, pointer,
+# review provenance and audit record. And production binds only the durable sources: the static
+# ones are test and offline fixtures (G1-10), never what the application reads.
+@dataclass(frozen=True)
+class OwnedTables:
+    owners: frozenset[str]
+    classes: frozenset[str]
+    names: re.Pattern[str]
+
+
+TARGET_POLICY = OwnedTables(
+    frozenset({"app/register/target_policy.py", "app/register/target_policy_models.py"}),
+    frozenset(
+        {
+            "RegistrationTargetPolicy",
+            "RegistrationTargetPolicyRevision",
+            "RegistrationTargetPolicyCurrent",
+        }
+    ),
+    re.compile(r"\bregistration_target_polic(y|ies)\w*"),
 )
-TARGET_POLICY_CLASSES = frozenset(
-    {
-        "RegistrationTargetPolicy",
-        "RegistrationTargetPolicyRevision",
-        "RegistrationTargetPolicyCurrent",
-    }
+CATEGORY_METADATA = OwnedTables(
+    frozenset({"app/register/category_metadata.py", "app/register/category_metadata_models.py"}),
+    frozenset(
+        {
+            "RegistrationCategoryMetadata",
+            "RegistrationCategoryMetadataRevision",
+            "RegistrationCategoryMetadataCurrent",
+        }
+    ),
+    re.compile(r"\bregistration_category_metadata\w*"),
 )
-TARGET_POLICY_TABLE_NAMES = re.compile(r"\bregistration_target_polic(y|ies)\w*")
+STATIC_SOURCES = frozenset({"StaticRegistrationPolicy", "StaticRegistrationMetadata"})
 RUNTIME_ROOTS = ("app/", "integrations/")
 
 
-def target_policy_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+def owned_writer_problems(sources: Iterable[tuple[str, str]], owned: OwnedTables) -> list[str]:
     offenders = []
     for where, source in sources:
-        if where in TARGET_POLICY_OWNERS or "/migrations/" in where:
+        if where in owned.owners or "/migrations/" in where:
             continue
         for node in ast.walk(ast.parse(source)):
             named = (
@@ -348,64 +374,76 @@ def target_policy_writer_problems(sources: Iterable[tuple[str, str]]) -> list[st
                 else None
             )
             text = node.value if isinstance(node, ast.Constant) else None
-            if named in TARGET_POLICY_CLASSES or (
-                isinstance(text, str) and TARGET_POLICY_TABLE_NAMES.search(text)
-            ):
+            if named in owned.classes or (isinstance(text, str) and owned.names.search(text)):
                 offenders.append(f"{where}:{getattr(node, 'lineno', 0)}")
     return offenders
 
 
-def static_policy_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
-    """Runtime code, other than the module that defines it, naming the static policy source."""
+def static_source_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
+    """Runtime code, other than the module that defines them, naming a static source."""
     return [
         f"{where}:{node.lineno}"
         for where, source in sources
         if where.startswith(RUNTIME_ROOTS) and where != "app/register/policy.py"
         for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Name | ast.alias | ast.Attribute)
-        and "StaticRegistrationPolicy"
-        in (
+        and (
             node.name
             if isinstance(node, ast.alias)
             else node.id
             if isinstance(node, ast.Name)
             else node.attr
         )
+        in STATIC_SOURCES
     ]
 
 
 def test_only_the_target_policy_owner_writes_target_policy_state() -> None:
-    assert target_policy_writer_problems(_code()) == []
+    assert owned_writer_problems(_code(), TARGET_POLICY) == []
 
 
-def test_production_binds_only_the_durable_policy_source() -> None:
-    assert static_policy_problems(_code()) == []
+def test_only_the_category_metadata_owner_writes_category_metadata_state() -> None:
+    assert owned_writer_problems(_code(), CATEGORY_METADATA) == []
+
+
+def test_production_binds_only_the_durable_sources() -> None:
+    assert static_source_problems(_code()) == []
+    from app.register.category_metadata import DurableRegistrationMetadata
     from app.register.target_policy import DurableRegistrationPolicy
 
     container = (REPO_ROOT / "app/container.py").read_text("utf-8")
     assert f"policies={DurableRegistrationPolicy.__name__}(" in container
+    assert f"metadata={DurableRegistrationMetadata.__name__}(" in container
 
 
-def test_the_target_policy_detectors_fire() -> None:
+def test_the_gate1_owner_detectors_fire() -> None:
     sources = [
         (
             "app/register/service.py",
             "from app.register.target_policy_models import X\n"
-            "Y = RegistrationTargetPolicyRevision\n",
+            "Y = RegistrationTargetPolicyRevision\n"
+            "Z = RegistrationCategoryMetadataCurrent\n",
         ),
         ("app/other/raw.py", "SQL = 'DELETE FROM registration_target_policy_current'\n"),
+        ("app/other/meta.py", "SQL = 'UPDATE registration_category_metadata_revisions SET x=1'\n"),
         ("app/register/target_policy.py", "Z = RegistrationTargetPolicyCurrent\n"),
+        ("app/register/category_metadata.py", "Z = RegistrationCategoryMetadataRevision\n"),
         ("app/container.py", "from app.register.policy import StaticRegistrationPolicy\n"),
+        ("app/other/wiring.py", "from app.register.policy import StaticRegistrationMetadata\n"),
         (
             "scripts/m5accept/owners.py",
             "from app.register.policy import StaticRegistrationPolicy\n",
         ),
     ]
-    assert target_policy_writer_problems(sources) == [
+    assert owned_writer_problems(sources, TARGET_POLICY) == [
         "app/register/service.py:2",
         "app/other/raw.py:1",
     ]
-    assert static_policy_problems(sources) == ["app/container.py:1"]
+    assert owned_writer_problems(sources, CATEGORY_METADATA) == [
+        "app/register/service.py:3",
+        "app/other/meta.py:1",
+    ]
+    assert static_source_problems(sources) == ["app/container.py:1", "app/other/wiring.py:1"]
 
 
 # ---------------------------------------------------------------- account scope and price pin

@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.jobs import models as _job_models  # noqa: F401
 from app.products import image_models as _image_models  # noqa: F401
 from app.products import models as _product_models  # noqa: F401
+from app.register import category_metadata_models as _category_metadata_models  # noqa: F401
 from app.register import models as _register_models  # noqa: F401
 from app.register import target_policy_models as _target_policy_models  # noqa: F401
 

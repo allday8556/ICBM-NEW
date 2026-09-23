@@ -55,12 +55,16 @@ from app.products.service import ProductsService
 from app.products.store import ProductFoundationStore
 from app.register.authoring import RegistrationPreparationService
 from app.register.builder import RegistrationSnapshotBuilder
+from app.register.category_metadata import (
+    CategoryMetadataService,
+    CategoryMetadataStore,
+    DurableRegistrationMetadata,
+)
 from app.register.execution import (
     CREATE_POLICY,
     RegistrationExecutionService,
     create_job_definition,
 )
-from app.register.policy import StaticRegistrationMetadata
 from app.register.preflight import RegistrationPreflightService
 from app.register.service import RegisterService
 from app.register.store import RegistrationStore
@@ -125,6 +129,7 @@ class Container:
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
     target_policies: TargetPolicyService
+    category_metadata: CategoryMetadataService
     registration_preflight: RegistrationPreflightService
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
@@ -305,16 +310,22 @@ def build_container(
     # revision still fails closed with REGISTER_TARGET_POLICY_MISSING.
     target_policy_store = TargetPolicyStore(db, clock, audit)
     target_policies = TargetPolicyService(target_policy_store, accounts)
+    # Gate 1 G1-B (ADR-0015 §3): the durable operator-reviewed category metadata of each
+    # marketplace × taxonomy × category. No provider category endpoint is adopted; a category with
+    # no current revision still fails closed with CATEGORY_METADATA_MISSING.
+    category_metadata_store = CategoryMetadataStore(db, clock, audit)
+    category_metadata = CategoryMetadataService(
+        category_metadata_store, frozenset(m.key for m in MARKETPLACE_IDENTITIES)
+    )
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
-    # either. The category metadata source still starts empty, so every category fails closed
-    # until the reviewed metadata owner of G1-B exists (ADR-0015 §3).
+    # either; both sources it reads are the durable owners above.
     registration_preflight = RegistrationPreflightService(
         registrations=registrations,
         readiness=product_readiness,
         pricing=pricing,
         images=images,
         capability=marketplace_capability,
-        metadata=StaticRegistrationMetadata(),
+        metadata=DurableRegistrationMetadata(category_metadata_store),
         policies=DurableRegistrationPolicy(target_policy_store),
     )
     registration_builder = RegistrationSnapshotBuilder(
@@ -402,6 +413,7 @@ def build_container(
         accounts=accounts,
         registrations=registrations,
         target_policies=target_policies,
+        category_metadata=category_metadata,
         registration_preflight=registration_preflight,
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,

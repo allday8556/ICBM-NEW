@@ -363,6 +363,17 @@ export const SUBTABS = {
             },
           ],
         },
+        {
+          // Gate 1 G1-B (ADR-0015 §3): the operator-reviewed category metadata, saved through its
+          // own contract. No provider category endpoint is adopted.
+          card: {
+            title: '카테고리 메타데이터 검토',
+            full: true,
+            help:
+              '카테고리별 필수 속성·상품정보고시·옵션·템플릿 규칙을 검토한 근거로부터 기록합니다. · 저장할 때마다 서버가 새 리비전을 만들고 현재 리비전으로 지정하며, 이전 리비전은 그대로 남습니다. · 근거가 증명하지 않는 규칙은 기록하지 않습니다. · AI 제안은 검토 완료로 기록할 수 없습니다. · 현재 리비전이 미검토이면 등록 사전검사는 이전 검토본으로 대체하지 않고 CATEGORY_METADATA_UNREVIEWED로 멈춥니다.',
+            items: [{ categoryMetadata: 'smartstore' }],
+          },
+        },
       ],
     },
     {

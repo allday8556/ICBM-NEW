@@ -76,6 +76,10 @@ class AuditEventType(StrEnum):
     # by the server and made current. Scope, identifiers, revision numbers and the content
     # fingerprint only — never a policy value, which lives in the revision row.
     REGISTRATION_TARGET_POLICY_REVISED = "REGISTRATION_TARGET_POLICY_REVISED"
+    # Gate 1 G1-B (ADR-0015 §3): a revision of one marketplace × taxonomy × category's reviewed
+    # metadata, appended by the server and made current. Key, identifiers, revision number, content
+    # fingerprint and the review flag only — never a metadata value.
+    REGISTRATION_CATEGORY_METADATA_RECORDED = "REGISTRATION_CATEGORY_METADATA_RECORDED"
 
 
 class AuditOutcome(StrEnum):

@@ -811,7 +811,7 @@ def test_the_production_wiring_fails_closed_and_write_stays_unverified(
         pricing=container.pricing,
         images=container.images,
         capability=container.marketplace_capability,
-        metadata=StaticRegistrationMetadata((metadata(),)),
+        metadata=StaticRegistrationMetadata((metadata(),), marketplace_key=MARKET),
         policies=StaticRegistrationPolicy((target(account),)),
     )
     unavailable = real_capability.candidate(req)

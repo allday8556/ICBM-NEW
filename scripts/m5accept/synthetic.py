@@ -305,7 +305,9 @@ def policy_sources(account: str) -> tuple[StaticRegistrationPolicy, StaticRegist
         options=OptionPolicy(options_supported=True, max_options=5),
         required_templates=frozenset({"shipping", "returns"}),
     )
-    return StaticRegistrationPolicy((target,)), StaticRegistrationMetadata((metadata,))
+    return StaticRegistrationPolicy((target,)), StaticRegistrationMetadata(
+        (metadata,), marketplace_key=MARKETPLACE
+    )
 
 
 def draft(

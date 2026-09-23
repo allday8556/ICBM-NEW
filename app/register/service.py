@@ -123,6 +123,8 @@ PREFLIGHT_OWNER_ABSENT = "REGISTER_PREFLIGHT_NOT_WIRED"
 PREPARATION_ABSENT = "REGISTER_PREPARATION_ABSENT"
 PREFLIGHT_NOT_READY = "REGISTER_PREFLIGHT_NOT_READY"
 ALREADY_FROZEN = "REGISTER_UNIT_ALREADY_FROZEN"
+# The exact metadata revision a Snapshot froze cannot be resolved within its own key (G1-09).
+FROZEN_METADATA_UNRESOLVED = "REGISTER_FROZEN_METADATA_UNRESOLVED"
 READY = "READY"
 
 # What an evaluation was made from: the frozen request a CREATE job carries, or the durable
@@ -297,7 +299,9 @@ class RegisterService:
         target = preflight.target_policy(draft.marketplace_key, draft.marketplace_account_id)
         if target is None:
             raise AppError("REGISTER_TARGET_POLICY_MISSING", "the account has no target policy")
-        metadata = preflight.category_metadata(target.taxonomy_revision, category_id)
+        metadata = preflight.category_metadata(
+            draft.marketplace_key, target.taxonomy_revision, category_id
+        )
         if metadata is None or not metadata.reviewed:
             raise AppError(
                 "REGISTER_CATEGORY_METADATA_MISSING",
@@ -531,7 +535,7 @@ class RegisterService:
                 else PreparationState.SNAPSHOT_FROZEN
             ),
             items=self._frozen_items(snapshot, payload, facts),
-            category=self._category_of(payload),
+            category=self._category_of(snapshot.marketplace_key, payload),
             authored=None if authored is None else _preparation_view(authored),
             preflight=preflight,
             preflight_unavailable_reason=preflight_problem,
@@ -852,9 +856,15 @@ class RegisterService:
             return {}, refused.code
         return {item.item_id: item for item in resolved.items}, None
 
-    def _category_of(self, payload: Mapping[str, Any]) -> CategoryView | None:
-        """The category the Snapshot froze, with the required-field state of its reviewed
-        metadata (§4). What is `provided` is read from the frozen payload, never assumed."""
+    def _category_of(self, marketplace_key: str, payload: Mapping[str, Any]) -> CategoryView | None:
+        """The category the Snapshot froze, with the required-field state of **the exact metadata
+        revision it froze** (§4, ADR-0015 §3, G1-09). What is `provided` is read from the frozen
+        payload, never assumed.
+
+        The current metadata revision is never read here: it may have moved since the freeze, and
+        mixing it into a frozen unit would show one revision's rules under another's identity. A
+        revision that cannot be resolved within its own key leaves the rules empty and says why.
+        Whether the unit is still current is the separately derived preflight's answer."""
         category = payload.get("category")
         if not isinstance(category, Mapping):
             return None
@@ -862,10 +872,13 @@ class RegisterService:
             str(category.get("taxonomy_revision", "")),
             str(category.get("category_id", "")),
         )
+        frozen = str(category.get("metadata_revision", ""))
         metadata = (
             None
-            if self._preflight is None or not (taxonomy and category_id)
-            else self._preflight.category_metadata(taxonomy, category_id)
+            if self._preflight is None or not (taxonomy and category_id and frozen)
+            else self._preflight.frozen_category_metadata(
+                marketplace_key, taxonomy, category_id, frozen
+            )
         )
         attributes = payload.get("attributes")
         notice = payload.get("notice")
@@ -890,6 +903,9 @@ class RegisterService:
             ),
             options_supported=None if metadata is None else metadata.options.options_supported,
             max_options=None if metadata is None else metadata.options.max_options,
+            metadata_unavailable_reason=None
+            if metadata is not None
+            else FROZEN_METADATA_UNRESOLVED,
         )
 
     def _preflight_of(

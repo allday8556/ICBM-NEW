@@ -78,6 +78,8 @@ class EditableSurface(StrEnum):
     """A Settings surface the server accepts a save for. Nothing else in Settings is editable."""
 
     REGISTRATION_TARGET_POLICY = "REGISTRATION_TARGET_POLICY"
+    # Gate 1 G1-B (ADR-0015 §3): the operator-reviewed category metadata.
+    REGISTRATION_CATEGORY_METADATA = "REGISTRATION_CATEGORY_METADATA"
 
 
 # ------------------------------------------------------------------ the application contract
@@ -624,5 +626,8 @@ def _revision_view(record: PolicyRevisionRecord, *, current: bool) -> TargetPoli
 
 
 def editable_surfaces() -> Sequence[EditableSurface]:
-    """The Settings surfaces this application accepts a save for (ADR-0015 §2)."""
-    return (EditableSurface.REGISTRATION_TARGET_POLICY,)
+    """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3)."""
+    return (
+        EditableSurface.REGISTRATION_TARGET_POLICY,
+        EditableSurface.REGISTRATION_CATEGORY_METADATA,
+    )

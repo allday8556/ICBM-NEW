@@ -454,6 +454,10 @@ TARGET_POLICY_TABLES = (
     "registration_target_policies",
     "registration_target_policy_revisions",
     "registration_target_policy_current",
+    # Gate 1 G1-B (migration 0020, ADR-0015 §3).
+    "registration_category_metadata",
+    "registration_category_metadata_revisions",
+    "registration_category_metadata_current",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -92,6 +92,8 @@ const REASON_COPY = {
   REGISTER_PREPARATION_ABSENT: '아직 등록 준비 내용이 저장되지 않았습니다.',
   REGISTER_PREFLIGHT_NOT_READY: 'Preflight가 READY가 아니어서 스냅샷을 고정할 수 없습니다.',
   REGISTER_UNIT_ALREADY_FROZEN: '이미 스냅샷이 고정된 단위입니다.',
+  REGISTER_FROZEN_METADATA_UNRESOLVED:
+    '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
   DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
   ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
   PROOF_NOT_AVAILABLE_IN_PROCESS: '실행 중인 앱에서는 증명할 수 없는 항목입니다.',
@@ -193,6 +195,14 @@ function categoryBlock(category) {
     { class: 'register-category', 'data-category': category.category_id },
     kv('카테고리', category.category_id),
     kv('분류 리비전', category.taxonomy_revision),
+    category.metadata_revision ? kv('메타데이터 리비전 (고정)', category.metadata_revision) : null,
+    category.metadata_unavailable_reason
+      ? h(
+          'div',
+          { class: 'note', 'data-reason': category.metadata_unavailable_reason },
+          REASON_COPY[category.metadata_unavailable_reason] ?? category.metadata_unavailable_reason,
+        )
+      : null,
     category.notice_type ? kv('정보고시', category.notice_type) : null,
     category.options_supported === null
       ? null
