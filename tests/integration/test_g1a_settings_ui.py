@@ -44,8 +44,6 @@ TABLES = (
 
 VALUES = {
     "taxonomy_revision": "taxonomy-ui-1",
-    "category_mapping_revision": "mapping-ui-1",
-    "detail_composition_revision": "detail-ui-1",
     "sanitizer_profile_version": "sanitizer-ui-1",
     "fee_table_version": "fee-ui-1",
     "pricing_policy_version": "pricing-ui-1",
@@ -150,6 +148,13 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
             state, history, _ = _state(page, account)
             assert (state, history) == ("none", "0")
             assert writes == []
+            # The two server-owned references have no owner yet: shown, never authorable.
+            editor = page.locator(_editor(account))
+            for reference in ("category_mapping_revision", "detail_composition_revision"):
+                assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
+                shown = editor.locator(f"[data-policy-reference='{reference}']")
+                assert shown.locator("input, textarea, select").count() == 0
+                assert "입력할 수 없습니다" in shown.inner_text()
             _fill(page, account, VALUES)
             page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
             page.wait_for_selector(
@@ -167,8 +172,11 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
             assert _state(page, account) == saved
             field = page.locator(f"{_editor(account)} [data-policy-field='fee_rate']")
             assert field.input_value() == "0.055"
-        current = served.target_policies.policy(MARKETPLACE, account).current
-        assert current is not None
+        stored = served.target_policies.policy(MARKETPLACE, account)
+        current = stored.current
+        assert current is not None and stored.inputs is not None
+        assert stored.inputs.category_mapping_revision is None
+        assert stored.inputs.detail_composition_revision is None
     # A restart: a new process owns the same data directory and serves the same durable policy.
     with (
         _served(config) as client,

@@ -67,8 +67,14 @@ function whole(text) {
   return /^\d+$/.test(text.trim()) ? Number(text.trim()) : text;
 }
 
-function orNull(text) {
-  return text.trim() === '' ? null : text.trim();
+// A server-owned revision reference with no owner yet: shown, never authorable here.
+function unowned(label, value, name) {
+  return h(
+    'div',
+    { class: 'kv', 'data-policy-reference': name },
+    h('span', {}, label),
+    h('span', { class: 'chip' }, value ?? '없음 · 서버 소유 리비전이 아직 없어 입력할 수 없습니다'),
+  );
 }
 
 function templatesText(templates) {
@@ -102,14 +108,6 @@ function editor(view, onSaved) {
   const on = { editable };
 
   const taxonomy = field('카테고리 체계 리비전', inputs?.taxonomy_revision, { ...on, name: 'taxonomy_revision' });
-  const mapping = field('카테고리 매핑 리비전 (비우면 없음)', inputs?.category_mapping_revision, {
-    ...on,
-    name: 'category_mapping_revision',
-  });
-  const detail = field('상세 구성 리비전 (비우면 없음)', inputs?.detail_composition_revision, {
-    ...on,
-    name: 'detail_composition_revision',
-  });
   const sanitizer = field('정제 프로필 버전', inputs?.sanitizer_profile_version, { ...on, name: 'sanitizer_profile_version' });
   const feeTable = field('수수료표 버전', pricing?.fee_table_version, { ...on, name: 'fee_table_version' });
   const pricingPolicy = field('가격정책 버전', pricing?.pricing_policy_version, { ...on, name: 'pricing_policy_version' });
@@ -181,8 +179,9 @@ function editor(view, onSaved) {
           templates: templatesOf(templates.value),
           duplicate_proof_required: proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
-          category_mapping_revision: orNull(mapping.input.value),
-          detail_composition_revision: orNull(detail.input.value),
+          // Server-owned references with no owner yet: never authored here (ADR-0015 §2).
+          category_mapping_revision: null,
+          detail_composition_revision: null,
         },
       });
       toast(TITLE, '새 정책 리비전을 저장했습니다. 이후 등록 사전검사는 이 리비전으로 다시 평가됩니다.');
@@ -206,8 +205,8 @@ function editor(view, onSaved) {
     ),
     h('div', { class: 'kv' }, h('span', {}, '리비전 이력'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}개`)),
     taxonomy.row,
-    mapping.row,
-    detail.row,
+    unowned('카테고리 매핑 리비전', inputs?.category_mapping_revision, 'category_mapping_revision'),
+    unowned('상세 구성 리비전', inputs?.detail_composition_revision, 'detail_composition_revision'),
     sanitizer.row,
     feeTable.row,
     pricingPolicy.row,

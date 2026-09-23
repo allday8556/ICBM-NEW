@@ -15,6 +15,10 @@ REGISTER preflight reads on every evaluation, and this module is its only owner:
   account's template identities, the sanitizer profile, the asset policy, the duplicate-proof
   policy and the authoring revision references. No Product, price, readiness, Snapshot, capability
   or provider truth, and no category metadata.
+- **The authoring revision references are server-owned.** ``category_mapping_revision`` and
+  ``detail_composition_revision`` name revisions of owners that do not exist yet, so a client can
+  never supply one: a save accepts only an explicit ``null`` for each, and an invented value is
+  refused. They become authorable only when their owner exists and can validate them.
 - **M5 never prices.** The pricing context is an M4 ``PricingContextInput`` for this policy's own
   marketplace, whose ``account_id`` discriminator is this policy's canonical account or ``None``
   (account-invariant); the M4 pricing owner prices under it.
@@ -62,6 +66,12 @@ TARGET_POLICY_UNSAFE_CONTENT: Final = "TARGET_POLICY_UNSAFE_CONTENT"
 TARGET_POLICY_ACCOUNT_UNKNOWN: Final = "TARGET_POLICY_ACCOUNT_UNKNOWN"
 TARGET_POLICY_CURRENT_MOVED: Final = "TARGET_POLICY_CURRENT_MOVED"
 TARGET_POLICY_UNCHANGED: Final = "TARGET_POLICY_UNCHANGED"
+TARGET_POLICY_AUTHORING_REVISION_UNOWNED: Final = "TARGET_POLICY_AUTHORING_REVISION_UNOWNED"
+
+# The server-owned authoring revision references a target policy carries (ADR-0015 §2). No server
+# owner of either revision exists yet, so a client cannot name one: only an explicit null is
+# accepted. When an owner exists, a reference is validated against it here instead.
+UNOWNED_AUTHORING_REVISIONS: Final = ("category_mapping_revision", "detail_composition_revision")
 
 
 class EditableSurface(StrEnum):
@@ -105,7 +115,11 @@ class AssetPolicyView(_Strict):
 
 
 class TargetPolicyInputsView(_Strict):
-    """The supported target-policy surface (ADR-0015 §2). Optional revisions are explicit nulls."""
+    """The supported target-policy surface (ADR-0015 §2).
+
+    ``category_mapping_revision`` and ``detail_composition_revision`` are server-owned references.
+    While no server owner of either exists they must be sent as an explicit ``null``; an invented
+    non-null value is refused (``TARGET_POLICY_AUTHORING_REVISION_UNOWNED``)."""
 
     taxonomy_revision: StrictStr
     pricing_context: PricingContextInputView
@@ -161,10 +175,8 @@ def _invalid(code: str, message: str, field: str) -> InputValidationError:
     return InputValidationError(code, message, details={"field": field})
 
 
-def _label(value: str | None, field: str, *, optional: bool = False) -> str | None:
-    if value is None and optional:
-        return None
-    if value is None or not sanitize.safe_label(value):
+def _label(value: str, field: str) -> str:
+    if not sanitize.safe_label(value):
         raise _invalid(
             TARGET_POLICY_INVALID, "a plain version or identity label is required", field
         )
@@ -202,7 +214,7 @@ def encode_content(
     if len(inputs.templates) > MAX_TEMPLATES:
         raise _invalid(TARGET_POLICY_INVALID, "too many templates", "templates")
     templates = {
-        str(_label(kind, "templates")): str(_label(identity, f"templates.{kind}"))
+        _label(kind, "templates"): _label(identity, f"templates.{kind}")
         for kind, identity in inputs.templates.items()
     }
     keys = [key.value for key in inputs.duplicate_lookup_keys]
@@ -210,6 +222,14 @@ def encode_content(
         raise _invalid(
             TARGET_POLICY_INVALID, "a lookup key is listed twice", "duplicate_lookup_keys"
         )
+    for name in UNOWNED_AUTHORING_REVISIONS:
+        if getattr(inputs, name) is not None:
+            raise _invalid(
+                TARGET_POLICY_AUTHORING_REVISION_UNOWNED,
+                "this is a server-owned authoring revision and no server owner of it exists yet;"
+                " a client cannot name one, so only null is accepted",
+                name,
+            )
     content: dict[str, Any] = {
         "content_version": CONTENT_VERSION,
         "marketplace_key": marketplace_key,
@@ -229,12 +249,9 @@ def encode_content(
         "templates": dict(sorted(templates.items())),
         "duplicate_proof_required": inputs.duplicate_proof_required,
         "duplicate_lookup_keys": sorted(keys),
-        "category_mapping_revision": _label(
-            inputs.category_mapping_revision, "category_mapping_revision", optional=True
-        ),
-        "detail_composition_revision": _label(
-            inputs.detail_composition_revision, "detail_composition_revision", optional=True
-        ),
+        # Always null while no owner exists (checked above): never a client-invented label.
+        "category_mapping_revision": None,
+        "detail_composition_revision": None,
     }
     try:
         sanitize.require_clean(content, "target_policy")

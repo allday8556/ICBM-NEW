@@ -109,8 +109,9 @@ def inputs(**overrides: Any) -> dict[str, Any]:
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],
-        "category_mapping_revision": "mapping-test-1",
-        "detail_composition_revision": "detail-test-1",
+        # Server-owned references with no owner yet: only an explicit null is valid.
+        "category_mapping_revision": None,
+        "detail_composition_revision": None,
     }
     values.update(overrides)
     return values
@@ -339,6 +340,35 @@ def test_an_invalid_save_is_refused_whole_and_writes_nothing(
     assert again.status_code == status
     assert counts(config) == {POLICIES: 1, REVISIONS: 1, CURRENT: 1}
     assert len(policy_events(container)) == 1
+
+
+@pytest.mark.parametrize("reference", ["category_mapping_revision", "detail_composition_revision"])
+def test_an_invented_authoring_revision_reference_is_refused_and_writes_nothing(
+    api: TestClient, container: Container, config: AppConfig, account: str, reference: str
+) -> None:
+    # ADR-0015 §2: server-owned references. No owner of either exists, so a client cannot name
+    # one — however plausible the label — and only an explicit null is accepted.
+    invented = save(api, account, inputs(**{reference: "mapping-test-1"}))
+    assert invented.status_code == 422
+    error = invented.json()["error"]
+    assert error["code"] == "TARGET_POLICY_AUTHORING_REVISION_UNOWNED"
+    assert error["details"] == {"field": reference}
+    assert counts(config) == {POLICIES: 0, REVISIONS: 0, CURRENT: 0}
+    assert policy_events(container) == []
+
+    first = save(api, account, inputs())
+    assert first.status_code == 200
+    assert first.json()["inputs"][reference] is None
+    current = first.json()["current"]["policy_revision"]
+    again = save(api, account, inputs(**{reference: "detail-test-1"}), expected=current)
+    assert again.status_code == 422
+    assert again.json()["error"]["code"] == "TARGET_POLICY_AUTHORING_REVISION_UNOWNED"
+    assert counts(config) == {POLICIES: 1, REVISIONS: 1, CURRENT: 1}
+    assert len(policy_events(container)) == 1
+    # The production preflight's policy carries no invented reference either.
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None
+    assert (target.category_mapping_revision, target.detail_composition_revision) == (None, None)
 
 
 def test_a_save_against_a_moved_or_identical_policy_is_refused(
