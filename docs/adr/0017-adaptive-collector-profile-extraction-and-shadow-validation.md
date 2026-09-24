@@ -19,6 +19,10 @@ cross-audit PASS the architect agreed with, and the drafting authorization on Is
   - a truncated embedded block makes its sample unable to support a `PASS` (§7.2, §7.3);
   - Phase C has an explicit no-cherry-pick rule: only `SHADOW_MISSING_AFTER_RECOVERY` lets a window
     be superseded for the same bundle (§11.2, §11.3).
+- Amended before merge by the architect re-audit `5307562621` on `2592e71e`:
+  - the window ledger is an append-only event stream per run with one derived effective state;
+  - a window final-closes only when every effective state is terminal, so its closeout is never
+    revised (§10.5, §11.1).
 - **Its authority becomes effective only after this exact contract PR is audited, independently
   cross-audited and merged**, and even then only phase by phase (§2).
 
@@ -755,32 +759,54 @@ and the first rule that decides it applies.
     appended a revision.
   - It is **absent for a `NO_REVISION` (identity-unresolved) run**, whose canonical side is
     `UNRESOLVED(reason)`.
-  - A `SHADOW_MISSING` marker (§11.2) likewise carries only the `collection_run_id` and its cause.
+  - A run with no shadow record has no raw record; its `OUTCOME_RECORDED` ledger event (§10.5,
+    §11.2) carries only the `collection_run_id`, the absence of a verdict and its cause.
 - **Committed evidence** drawn from it follows ADR-0010 §6: counts and statuses, keyed
   fingerprints, and no plain digests of business values.
 - **Raw shadow records: a hard bound with no exception.**
-  - A raw shadow record, and a `SHADOW_MISSING` marker, is kept at most **90 days** and at most
-    **5,000 per supplier**, whichever bound is reached first.
+  - A raw shadow record is kept at most **90 days** and at most **5,000 per supplier**,
+    whichever bound is reached first.
   - **There is no hold.** An open or cited window never keeps a raw record past either bound.
   - A missing bound is a refusal, never a code default.
   - Pruning never touches a canonical row.
-- **What a window keeps instead: its evidence ledger.**
-  - When a shadow record or `SHADOW_MISSING` marker of an eligible run is written, the shadow owner
-    also appends that run's **ledger entry** to its window, in the same shadow write unit. The same
-    happens when a resolution is recorded.
-  - A ledger entry holds the `collection_run_id`, the `revision_id` or its absence, the per-field
-    and run verdicts, the §11.1 count-as outcome and its cause, and the resolution reference.
-  - A ledger entry holds **no source values**. It is an immutable summary of outcomes.
-  - Closing a window materializes its verdict, its denominator and its entries as immutable
-    evidence.
+- **What a window keeps instead: its evidence ledger** (re-audit `5307562621`). The ledger is an
+  **append-only event stream per `collection_run_id`**. Nothing in it is ever updated or deleted.
+  One **effective state** per run is derived from that stream.
+  - **Events.** Each event is immutable and sequence-numbered within its run. Each carries the
+    `collection_run_id`, the window, the time and the correlation. An event holds **no source
+    values**. The three kinds:
+
+    | event | appended when | carries |
+    | --- | --- | --- |
+    | `OUTCOME_RECORDED` | once per eligible run, in the same shadow write unit as the run's shadow record, or by the startup reconciliation when the run has none (§11.2) | the `revision_id` or its absence, the per-field and run verdicts, the §11.1 count-as outcome and its cause |
+    | `RESOLUTION_RECORDED` | a human resolution (§10.3) is recorded, and only while the effective state is `UNRESOLVED_MISMATCH` | the resolution, its evidence reference, and the count-as outcome it yields |
+    | `RAW_PRUNED_UNRESOLVED` | the run's raw shadow record is pruned **while its effective state is still `UNRESOLVED_MISMATCH`** — in the same shadow write unit as the prune | the prune time |
+
+  - **The effective state** is a pure fold over the run's events, in sequence order.
+    - It starts from `OUTCOME_RECORDED`.
+    - A `RESOLUTION_RECORDED` replaces an `UNRESOLVED_MISMATCH` with the outcome of its resolution:
+      a success or a failure.
+    - A `RAW_PRUNED_UNRESOLVED` replaces an `UNRESOLVED_MISMATCH` with `INCOMPLETE`, cause
+      `PRUNED_BEFORE_RESOLUTION`.
+  - **Terminal and non-terminal states.** `UNRESOLVED_MISMATCH` is the **only non-terminal**
+    effective state. Every other state is terminal: a success, a failure, and every other
+    `INCOMPLETE` cause. No event is ever appended to a run whose effective state is terminal.
+    - A resolution after `PRUNED_BEFORE_RESOLUTION` is refused; the evidence it needs is gone.
+    - Pruning the raw record of a resolved or otherwise terminal run appends nothing, and changes
+      nothing.
+  - **Counted once.** The denominator counts each eligible `collection_run_id` **exactly once**,
+    through its single effective state, never through its number of events. A run belongs to at
+    most one window, because at most one window per supplier is open at a time (§11.1).
+  - **What verdicts read.** Window and bundle verdicts (§11.3) read **only** effective states. The
+    full event history is retained beside them and is part of the evidence.
 - **Retention of the ledger.** The ledger has a retention class of its own. It is bounded by what it
-  counts: one entry per eligible collection, and eligible collections are operator-submitted real
-  reads under the frozen request budget (ADR-0010 §4). It is kept while its bundle is not
-  `RETIRED`, or while recorded acceptance evidence cites the window.
-- **A raw record pruned before its outcome is settled.** If a raw record is pruned before its
-  mismatch is resolved, the ledger entry stays unresolved and counts `INCOMPLETE`. The evidence
-  needed to resolve a mismatch lives in the raw record, so resolution must happen inside the raw
-  bound.
+  counts: at most three events per eligible collection, and eligible collections are
+  operator-submitted real reads under the frozen request budget (ADR-0010 §4). It is kept while its
+  bundle is not `RETIRED`, or while recorded acceptance evidence cites the window.
+- **A raw record pruned before its outcome is settled.** The evidence needed to resolve a mismatch
+  lives in the raw record, so a resolution must happen inside the raw bound. Otherwise the prune
+  appends `RAW_PRUNED_UNRESOLVED`, and the run's effective state becomes terminal
+  `PRUNED_BEFORE_RESOLUTION`.
 - `ValidationSample` retention is separate (§7.3).
 
 ### 11. Phase C evidence (cross-audit item 1)
@@ -790,8 +816,25 @@ and the first rule that decides it applies.
 - **Declaring a window.** An evidence window is declared **before** its first eligible collection.
   The declaration records the supplier, the bundle (its `comparability_key`), the start and the
   minimum size K.
-- **Closing a window.** A window closes only by a recorded close. It never ends by pruning or by
-  omission.
+- **One open window per supplier.** At most one window per supplier is open at a time.
+- **Window events.** A window has its own append-only events: `DECLARED`, `ENDED`, `CLOSED` and,
+  where §11.2 allows it, `SUPERSEDED`. None is ever updated or deleted.
+  - **`ENDED`** stops eligibility. A run whose first reservation comes after the end is not in the
+    window. A window may end at any time, and ending it records no verdict.
+  - **`CLOSED` is the final closeout.** It may be recorded **only when every run in the window has a
+    terminal effective state**. While any run is still `UNRESOLVED_MISMATCH`, the window can end
+    but cannot close.
+  - **No run stays open forever.** An unresolved mismatch becomes terminal either by its resolution
+    or, at the latest, by `RAW_PRUNED_UNRESOLVED` when its raw record reaches the 90-day or
+    5,000-record bound (§10.5).
+  - **What the closeout records**, immutably:
+    - the window's verdict and its denominator;
+    - each run's effective state;
+    - the sequence number of the last event each state was derived from.
+
+    Every state it records is terminal, so no later event can change it. The closeout is therefore
+    **never revised, versioned or mutated**.
+  - A window never ends or closes by pruning or by omission.
 - **A window belongs to one bundle.** A profile fix is a new EPR and a new `comparability_key`, so
   it opens a new window.
 - **Eligible collection.** A canonical collection run qualifies when all three hold:
@@ -819,8 +862,9 @@ and the first rule that decides it applies.
 | **no shadow record** after a crash between the canonical commit and the shadow record (§11.2) | **`INCOMPLETE`**, cause `SHADOW_MISSING_AFTER_RECOVERY` — the **only non-blocking cause** (§11.3) |
 | **no shadow record** for any other reason, such as a failed shadow write | **`INCOMPLETE`**, cause `SHADOW_MISSING` — **blocking** |
 
-Each `INCOMPLETE` entry carries **exactly one** of these causes, recorded in the window ledger
-(§10.5). No other cause exists, and a new one needs an amendment of this ADR.
+Each `INCOMPLETE` effective state carries **exactly one** of these causes, derived from the run's
+ledger events (§10.5). No other cause exists, and a new one needs an amendment of this ADR.
+`UNRESOLVED_MISMATCH` is the only one that is not terminal.
 
 #### 11.2 A crash between the canonical commit and the shadow record
 
@@ -835,15 +879,20 @@ dies before the shadow's own unit commits.
   - The run is **eligible**. It stays **in the denominator**, and it counts **`INCOMPLETE`**, with
     the cause `SHADOW_MISSING_AFTER_RECOVERY`.
   - It is never excluded, never counted as a success, and never retried away.
-- **Missing records are made visible.** A startup reconciliation of the shadow owner lists every
-  eligible run in an open window that has no shadow record and no ledger entry. For each one it writes a
-  non-canonical `SHADOW_MISSING` marker in the shadow store's own unit, naming the run and the
-  cause. The denominator never depends on that marker existing.
+- **Missing records are made visible.** At startup, the shadow owner's reconciliation lists every
+  eligible run, in a window that is not closed, that has no `OUTCOME_RECORDED` event. For each
+  one it appends that run's `OUTCOME_RECORDED` in its own write unit.
+  - The cause is **`SHADOW_MISSING_AFTER_RECOVERY`** only when the run's canonical job history shows
+    that the §11.2 recovery path settled it: an attempt recovered a revision that was already
+    appended.
+  - Otherwise the cause is `SHADOW_MISSING`.
+  - The denominator never depends on that event existing (§11.1).
 - **The window can never pass.** Any `INCOMPLETE` makes the window `INCOMPLETE`. That window can
   never become `PASS`, because the missing comparison cannot be recreated. It stays recorded, with
   its missing runs listed.
-- **The one supersession this contract allows.** A window whose `INCOMPLETE` entries are **all**
-  `SHADOW_MISSING_AFTER_RECOVERY` may be superseded by a new window for the **same** bundle.
+- **The one supersession this contract allows.** A **closed** window whose `INCOMPLETE` effective
+  states are **all** `SHADOW_MISSING_AFTER_RECOVERY` may be superseded by a new window for the
+  **same** bundle.
   Nothing else in that window may be a failure or a blocking cause.
   - The supersession is recorded before the new window's first eligible collection: the superseded
     window, the reason `SHADOW_MISSING_AFTER_RECOVERY`, the runs it names, and who and when.
@@ -864,19 +913,23 @@ dies before the shadow's own unit commits.
 - **Bundle verdict.** A bundle passes Phase C only when **all** of these hold:
   - at least one of its windows is `PASS`;
   - **none** of its windows is `FAIL`;
-  - **no** window of it holds an entry with a **blocking cause**: `UNRESOLVED_MISMATCH`,
-    `PRUNED_BEFORE_RESOLUTION`, `IMAGE_UNMATCHABLE` or `SHADOW_MISSING`;
+  - **no** run in any of its windows has an **effective state** with a blocking cause:
+    `UNRESOLVED_MISMATCH`, `PRUNED_BEFORE_RESOLUTION`, `IMAGE_UNMATCHABLE` or `SHADOW_MISSING`.
+    The full event history stays in the evidence, and a cause that has since been superseded by a
+    resolution no longer blocks;
   - every window that is `INCOMPLETE` only because of `SHADOW_MISSING_AFTER_RECOVERY` has a
     recorded supersession (§11.2);
   - every other window is `PASS`, or is the one open window still below K.
 - **What clears a blocking cause.**
-  - `UNRESOLVED_MISMATCH` clears only by an evidence-based resolution (§10.3). The entry then
-    counts by that resolution and may make the window `FAIL`.
+  - `UNRESOLVED_MISMATCH` clears only by an appended `RESOLUTION_RECORDED` (§10.3). The run's
+    effective state then counts by that resolution, which may make the window `FAIL`. The earlier
+    event stays in the history.
   - The other three blocking causes can never clear. They are cleared for the bundle only by a
     **new EPR**, which is a new bundle with new windows. The old bundle's evidence stays recorded.
 - **Fixing a bundle.** A `FAIL` disqualifies the bundle, and a fix is a new EPR with new windows.
   Every window of the bundle — `INCOMPLETE` and superseded ones included — is listed in the evidence
-  by `collection_run_id`, with each entry's outcome and cause.
+  by `collection_run_id`, with each run's effective state, its cause and its full event
+  history.
 - **Phase C gates.** Phase C may not start until all of the following are merged and accepted, with
   their negative controls:
   - **§10.4 image matching**, including `UNMATCHABLE` and its `INCOMPLETE` counting;
@@ -884,8 +937,13 @@ dies before the shadow's own unit commits.
     and the shadow record and then proves the run is in the denominator as `INCOMPLETE`;
   - the §10.1 separate-unit boundary, with a test that a failing shadow write leaves the canonical
     revision committed;
-  - the §10.5 retention bounds and window ledger, with a test that pruning a raw record keeps its
-    ledger outcome;
+  - the §10.5 retention bounds and event ledger, with tests of four rules:
+    - pruning an unresolved run appends `RAW_PRUNED_UNRESOLVED`;
+    - pruning a terminal run appends nothing;
+    - a resolution after that prune is refused;
+    - the denominator counts a run with several events once;
+  - the §11.1 window close, with a test that a window holding an `UNRESOLVED_MISMATCH` cannot
+    close;
   - the §10.1 frozen per-run decision, with a test that a switch change between the reservation and
     the shadow step changes neither that run's shadow execution nor its eligibility;
   - the §11.3 bundle verdict, with tests of two cases. (1) A bundle with a later `PASS` window and an
@@ -939,7 +997,7 @@ prototype in place.
 
 | # | Issue #110 `5812200650` item | closed by | Phase C gate |
 | --- | --- | --- | --- |
-| 1 | crash after the canonical commit: missing shadow vs the denominator | §11.2: eligible, in the denominator, `INCOMPLETE` (`SHADOW_MISSING_AFTER_RECOVERY`); the window cannot pass; a startup marker makes it visible | **yes** (§11.3) |
+| 1 | crash after the canonical commit: missing shadow vs the denominator | §11.2: eligible, in the denominator, `INCOMPLETE` (`SHADOW_MISSING_AFTER_RECOVERY`); the window cannot pass; the startup reconciliation appends its `OUTCOME_RECORDED` event | **yes** (§11.3) |
 | 2 | canonical commit before the shadow; the shadow in a separate transaction | §10.1: separate write unit opened after the canonical unit exits; never nested (the `Database.write` poison rule) | with §11.3 |
 | 3 | image comparison with no stable locator | §10.4: in-memory M1/M2 matching; a persisted locator is never used; `UNMATCHABLE` is never a success and counts `INCOMPLETE`; nothing URL-derived is persisted | **yes** (§11.3) |
 | 4 | G6 counts `(hook_point, target)` bindings | §6.4 G6 | — |
@@ -988,13 +1046,15 @@ AC-16  The shadow makes zero supplier requests and writes nothing canonical; its
 AC-17  Shadow image matching is in memory on the exact resolved or written reference; a persisted locator is never used; UNMATCHABLE is never a success
 AC-18  The Phase C denominator is every eligible collection, derived from canonical runs and their frozen per-run shadow decision; a missing shadow record, a crash included, counts INCOMPLETE and is never excluded
 AC-19  A window passes only if every eligible collection succeeds; any FAIL disqualifies the bundle; a bundle's evidence is every window ever declared for it
-AC-20  Raw shadow records are bounded by 90 days and 5000 per supplier with no hold exception; window outcomes survive only as the ledger; ValidationSample retention is separate
+AC-20  Raw shadow records are bounded by 90 days and 5000 per supplier with no hold exception; window outcomes survive only as the event ledger; ValidationSample retention is separate
 AC-21  FieldStatus, EvidenceKind, ReviewKind and FIELD_REGISTRY are unchanged; non-CORE fields are COVERAGE
 AC-22  Phase C may not start before sections 10.4 and 11.2 are implemented with their negative controls; Phase D stays deferred
 AC-23  shadow_enabled_for_run is frozen at a run's first product-read reservation, and both the shadow step and the denominator read only that value
 AC-24  A shadow record is keyed by collection_run_id; revision_id is nullable and absent for a NO_REVISION run
 AC-25  A ValidationRun that includes a SAMPLE_TRUNCATED sample ends INCOMPLETE, never PASS; a digest is never proof material
 AC-26  A blocking INCOMPLETE cause (UNRESOLVED_MISMATCH, PRUNED_BEFORE_RESOLUTION, IMAGE_UNMATCHABLE, SHADOW_MISSING) blocks the bundle until resolved or replaced by a new EPR; only SHADOW_MISSING_AFTER_RECOVERY permits a recorded supersession, and no window is ever abandoned
+AC-27  The window ledger is an append-only event stream per collection_run_id; one effective state per run is derived from it; the denominator counts each run once; RAW_PRUNED_UNRESOLVED is appended only while the effective state is UNRESOLVED_MISMATCH
+AC-28  A window final-closes only when every run's effective state is terminal; a closeout is never revised, versioned or mutated
 ```
 
 ## Consequences
@@ -1013,7 +1073,7 @@ AC-26  A blocking INCOMPLETE cause (UNRESOLVED_MISMATCH, PRUNED_BEFORE_RESOLUTIO
 ## References
 
 - Issue #110; kickoff `5811580104`; items `5812200650`; ADR authorization `5812422770`
-- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101` and re-audit `5307485431`;
+- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101` and re-audits `5307485431`, `5307562621`;
   `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9, ADR-0013 §3, ADR-0016
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2;

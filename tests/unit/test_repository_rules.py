@@ -373,7 +373,7 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert ADAPTIVE_ADR.name in proposal
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 27)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 29)]
     # The truth vocabulary the design must not widen is exactly what the code holds.
     assert {s.value for s in FieldStatus} == {"CONFIRMED", "ABSENT", "REVIEW_REQUIRED"}
     assert {level.value for level in FieldLevel} == {"CORE", "COVERAGE"}
@@ -397,6 +397,9 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
         "only SHADOW_MISSING_AFTER_RECOVERY permits a recorded supersession" in invariants["AC-26"]
     )
     assert "no window is ever abandoned" in invariants["AC-26"]
+    assert "append-only event stream per collection_run_id" in invariants["AC-27"]
+    assert "the denominator counts each run once" in invariants["AC-27"]
+    assert "a closeout is never revised, versioned or mutated" in invariants["AC-28"]
     # ADR-0010 §7's historical level label is aligned with COVERAGE, not left as a second name.
     (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
     levels = _section(_read(collect_adr), r"^7\. Facts: two levels")
