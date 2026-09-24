@@ -72,6 +72,18 @@ for one of the server-owned states above.** They are never a new backend truth, 
 state, and the UI never computes one: it renders what the owner decided (`docs/ARCHITECTURE.md`
 §3, `CLAUDE.md` §5.1).
 
+**Review work** (ADR-0016). A `REVIEW_REQUIRED` condition stays the truth of the owner that derives
+it. The review owner only indexes it:
+
+| name | meaning |
+| --- | --- |
+| `ReviewItem` | a durable **index** of human work over one owner-derived condition; never a source of that owner's truth |
+| condition key | the server-computed digest of kind × producer × canonical scope × subject × owner reason code |
+| review key | the condition key × the exact owner source identity (revision, fingerprint or evidence identity); one row per review key |
+| `OPEN` / `RESOLVED` / `SUPERSEDED` | the ReviewItem lifecycle, decided by reconciliation against current owner truth; `SUPERSEDED` means the same condition moved to a new source identity |
+| `NOT_WIRED` | a review kind with no fully reconciled producer; its count is unknown, never zero |
+| current coverage | a `WIRED` kind whose full reconciliation succeeded in the current process run and has no known indexing failure unrecovered; only then is its count authoritative |
+
 ## 4. Adoption and execution words
 
 | name | meaning |

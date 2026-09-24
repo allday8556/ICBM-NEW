@@ -307,6 +307,13 @@ UI surfaces these items in the relevant existing screen plus dashboard counts. N
 
 **The ReviewItem owner is not implemented yet.** `ReviewService.open_counts()` returns zero for every kind because no `ReviewItem` table or producer exists. That is now a gap, not a consequence of having no review work: M3 is accepted and COLLECT already produces `REVIEW_REQUIRED` source truth, and M4/M5 readiness carries it further. Until the owner exists, a `REVIEW_REQUIRED` fact is visible only in the screen that derives it, and a dashboard review count of zero proves nothing.
 
+The owner's contract is `docs/adr/0016-gate2-human-review-path-and-review-item-owner.md` (Gate 2). A ReviewItem is a durable index of human work over a condition a production owner already derives, never a source of that owner's truth:
+- it is deduplicated by server-computed condition and review keys;
+- a changed owner revision supersedes the old item, and reconciliation alone decides whether an item is open;
+- a human resolution changes no owner fact and leaves the item open while the owner still derives the condition;
+- a kind without a fully reconciled producer is reported as `NOT_WIRED`, never as zero;
+- missed indexing is recovered by a full reconciliation at process startup and periodically while running, never only by the next event for that scope, and a count is authoritative only while that coverage is current.
+
 ## 10. Images
 
 Published images must not depend on supplier hotlinks.

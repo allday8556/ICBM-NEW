@@ -29,6 +29,16 @@ PROTOTYPE_README = REPO_ROOT / "ui" / "prototypes" / "README.md"
 M0_ACCEPTANCE = DOCS / "acceptance" / "M0.md"
 JOB_STATE_ADR = DOCS / "adr" / "0005-durable-job-state-and-attempt-history.md"
 OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
+REVIEW_ADR = DOCS / "adr" / "0016-gate2-human-review-path-and-review-item-owner.md"
+ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
+# The owners whose truth a ReviewItem indexes; none of them may read the review owner (G2-02).
+REVIEWED_OWNERS = (
+    "app/collect/",
+    "app/products/",
+    "app/register/",
+    "app/connect/",
+    "integrations/",
+)
 README_MD = REPO_ROOT / "README.md"
 PROTOTYPE_FILE = re.compile(r"icbm_redesign_test_\w+\.html")
 PRODUCTION_ROOTS = [REPO_ROOT / "app", REPO_ROOT / "integrations"]
@@ -299,6 +309,65 @@ def test_ownership_adr_lists_exactly_the_read_only_commands() -> None:
         if "read-only" in row.split("|")[2] and (match := re.search(r"`icbm ([^`]+)`", row))
     }
     assert listed == set(cli.READ_ONLY_COMMANDS)
+
+
+def test_the_review_item_contract_is_recorded_and_pinned() -> None:
+    """ADR-0016 (Gate 2 G2-0): the ReviewItem owner contract, before any schema."""
+    from app.review.service import ReviewKind
+
+    adr = _read(REVIEW_ADR)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
+    assert "5804605624" in adr
+    for canonical in (ARCHITECTURE_MD, ROADMAP_MD):
+        assert REVIEW_ADR.name in _read(canonical), canonical.name
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(G2-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"G2-{n:02d}" for n in range(1, 20)]
+    # The kinds are closed, and the contract names exactly the ones the code holds.
+    assert invariants["G2-03"].endswith(", ".join(kind.value for kind in ReviewKind))
+    # The decisions the kickoff asked the contract to pick, pinned by their wording.
+    assert "supersedes the old item" in invariants["G2-07"]
+    assert "leaves the item OPEN while the owner still derives" in invariants["G2-10"]
+    assert "never reported as zero" in invariants["G2-14"]
+    assert "COMPLIANCE never implements ComplianceGate" in invariants["G2-13"]
+    # Recovery never waits for an event (review 5805095154): startup and periodic full passes,
+    # coverage that fails closed, and the crash/restart proof every producer slice must carry.
+    assert (
+        "full reconciliation at process startup and a bounded periodic full reconciliation"
+        in invariants["G2-09"]
+    )
+    assert "never only by the next event for that scope" in invariants["G2-09"]
+    assert "authoritative only after a successful full reconciliation" in invariants["G2-14"]
+    assert "no known indexing failure unrecovered" in invariants["G2-14"]
+    assert "exactly once by the startup full reconciliation after a restart" in invariants["G2-19"]
+    assert "periodic full reconciliation in a running process" in invariants["G2-19"]
+    recovery = _section(adr, r"^4\. Lifecycle$")
+    for required in (
+        "**at application process startup**",
+        "**periodically while the process runs**",
+        "restarts with **no new owner write**",
+        "recreates the missing `OPEN` item **exactly once**",
+    ):
+        assert required in recovery, required
+    assert "never a fake `0`" in _section(adr, r"^7\. Counts")
+
+
+def test_no_reviewed_owner_reads_the_review_owner() -> None:
+    """ADR-0016 G2-02: the review owner reads owners, never the reverse."""
+    offenders = []
+    for module, tree in _production_modules().items():
+        if not module.startswith(REVIEWED_OWNERS):
+            continue
+        for node in ast.walk(tree):
+            names = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+                if isinstance(node, ast.ImportFrom)
+                else []
+            )
+            offenders += [f"{module}: {n}" for n in names if n.split(".")[:2] == ["app", "review"]]
+    assert offenders == []
 
 
 def _production_modules() -> dict[str, ast.Module]:
