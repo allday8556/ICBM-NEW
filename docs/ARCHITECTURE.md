@@ -305,7 +305,7 @@ FULFILLMENT
 
 UI surfaces these items in the relevant existing screen plus dashboard counts. No separate top-level review application is required for v1.
 
-**The ReviewItem owner is not implemented yet.** `ReviewService.open_counts()` returns zero for every kind because no `ReviewItem` table or producer exists. That is now a gap, not a consequence of having no review work: M3 is accepted and COLLECT already produces `REVIEW_REQUIRED` source truth, and M4/M5 readiness carries it further. Until the owner exists, a `REVIEW_REQUIRED` fact is visible only in the screen that derives it, and a dashboard review count of zero proves nothing.
+**The ReviewItem owner exists, but no producer is wired to it yet** (G2-A: `app/review/owner.py`, migration 0021). `ReviewService.open_counts()` still returns zero for every kind because no producer indexes any condition. That is now a gap, not a consequence of having no review work: M3 is accepted and COLLECT already produces `REVIEW_REQUIRED` source truth, and M4/M5 readiness carries it further. Until the owner exists, a `REVIEW_REQUIRED` fact is visible only in the screen that derives it, and a dashboard review count of zero proves nothing.
 
 The owner's contract is `docs/adr/0016-gate2-human-review-path-and-review-item-owner.md` (Gate 2). A ReviewItem is a durable index of human work over a condition a production owner already derives, never a source of that owner's truth:
 - it is deduplicated by server-computed condition and review keys;
