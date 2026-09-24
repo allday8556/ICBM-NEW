@@ -447,6 +447,18 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "zero-result search are never proof of remote absence" in invariants["G3-15"]
     # D5-D7: proven prerequisites, not declarations.
     assert "a declaration is not a drill" in invariants["G3-16"]
+    # Review 5821787401: the drill proves the REGISTER chain too, and never manufactures it.
+    for element in (
+        "RegistrationSnapshot",
+        "RegistrationIntent with its idempotency key and state",
+        "execution-scope brake state",
+        "by identity and state",
+        "recorded as absent, never created",
+    ):
+        assert element in invariants["G3-16"], element
+    drill = _section(adr, r"^7\. Backup and restore")
+    for element in ("**the REGISTER chain**", "**idempotency key**", "ADR-0014 §26"):
+        assert element in drill, element
     assert "never discarded" in invariants["G3-17"]
     assert "no server-owned blocker is hidden" in invariants["G3-18"]
     assert "never permission to write" in invariants["G3-19"]

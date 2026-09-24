@@ -1,6 +1,6 @@
 # ADR-0018 — Gate 3: pre-LIVE safety and the bounded LIVE authorization contract
 
-Status: **ACCEPTED** — decided by the architect kickoff `5821078540` (2026-09-25 UTC). This is G3-0
+Status: **ACCEPTED** — decided by the architect kickoff `5821078540` (2026-09-24 19:47 UTC; 2026-09-25 KST). This is G3-0
 of Gate 3 (Issue #89), on exact main `267d6a9eb20788819a8863f59a9c8f8e47700870` (post-merge CI
 `36045605845`, 6/6), after the Gate 2 acceptance (`5818393660`, cross-audit `5818648647`).
 - It records the kickoff's seven decisions (D1–D7) as contract, before any schema or runtime. The
@@ -28,7 +28,7 @@ Decision owner: Architect (ChatGPT). Sources:
 
 Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every
 remote branch immediately before writing.
-Date: 2026-09-25
+Date: 2026-09-24 UTC (2026-09-25 KST)
 Related:
 - ADR-0014 (SmartStore REGISTER): its CREATE, `UNKNOWN`, reconcile, read-back, sanitizer and
   execution-scope rules stay the only authority for what they govern. This ADR adds a layer in
@@ -197,12 +197,30 @@ Before any first LIVE write, a **backup and restore drill** is performed and rec
 - a backup is taken from the canonical data root, consistent with SQLite WAL (a copy of the live
   database file alone is not a backup);
 - it is restored into a **separate fresh root** — never over the active data root;
-- the restored root proves: the schema is at the expected Alembic head, the database is readable
-  and passes its integrity check, and the canonical identities the canary needs survive — the
-  source revision, the Product and Item, the Draft, the preparation revision, the target-policy and
-  category-metadata revisions, and the canonical account;
-- the drill's sanitized evidence (identities, counts, digests, versions, times) is recorded; no
-  credential, secret or raw payload enters it.
+- the restored root proves that the schema is at the expected Alembic head and that the database is
+  readable and passes its integrity check;
+- it proves that **the complete canary-critical chain that exists at drill time** survives, each
+  element compared by identity **and** state with the source root, so a restore that loses or
+  changes one fails:
+  - the product side: the source revision, the Product and Item, the canonical account, and the
+    target-policy and category-metadata revisions;
+  - the preparation side: the Draft and the preparation revision;
+  - **the REGISTER chain** (review `5821787401`):
+    - the canary unit's immutable `RegistrationSnapshot` — its listing identity, payload hash,
+      preflight fingerprint and item snapshots;
+    - its `RegistrationIntent` — the intent identity, the **idempotency key**, and its current
+      `state`, remote outcome and verification state;
+    - every `RegistrationAttempt` of that Intent, as history;
+    - the REGISTER **execution-scope brake** state (ADR-0014 §26) for that marketplace × account ×
+      endpoint group — its state, pause cause and resume generation, or its proven absence, which
+      is an `ACTIVE` scope;
+    - when they exist: an unresolved conflict scope, a duplicate override, and a registration and
+      its verification;
+- **an element that does not exist yet at the drill point is recorded as absent, never created for
+  the drill**: before a freeze there is no Snapshot, before an Intent there is no Attempt. The drill
+  writes nothing to the active root and fabricates nothing in either root;
+- the drill's sanitized evidence (identities, states, counts, digests, versions, times, and every
+  element recorded as absent) is recorded; no credential, secret or raw payload enters it.
 
 A document saying that backups exist is not a drill. **A canary without a recorded drill on the
 current schema head stays `BLOCKED`.**
@@ -329,7 +347,7 @@ G3-12  Gate 3 implements no ComplianceGate and puts no compliance logic in a gra
 G3-13  the first canary uses only a product proven outside every regulated category by its reviewed category metadata; that proof is eligibility, never a COMPLIANCE PASS, and without it the canary stays BLOCKED
 G3-14  CREATE and SEARCH stay NOT_ADOPTED and the provider-evidence verdict stays INSUFFICIENT; no grant, brake, backup, retention, visual acceptance or approval overrides it
 G3-15  an ICBM seller-side code and a zero-result search are never proof of remote absence
-G3-16  a canary needs a recorded backup and restore drill into a separate fresh root on the current schema head; a declaration is not a drill
+G3-16  a canary needs a recorded backup and restore drill into a separate fresh root on the current schema head that proves, by identity and state, the complete canary-critical chain existing at drill time, including the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state; an element not yet existing is recorded as absent, never created; a declaration is not a drill
 G3-17  canary evidence is sanitized before hash or persist, durable REGISTER rows are never deleted, no canary evidence is deleted before M5 acceptance, and evidence tied to an unresolved condition is never discarded
 G3-18  a canary needs a recorded populated visual and responsive acceptance at the accepted viewport set in which no server-owned blocker is hidden
 G3-19  canary readiness is derived and read-only, stays BLOCKED until every requirement holds, and is never permission to write
