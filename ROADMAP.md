@@ -756,3 +756,5 @@ Before any real marketplace write, and independently of endpoint adoption:
 ## 14.3 Before any horizontal supplier expansion
 
 The implemented source and pricing schema is **KRW-only** (`docs/ARCHITECTURE.md` §6). A second-currency supplier such as 1688 or Rakuten first needs a currency and FX-snapshot schema extension decided in an ADR. No such extension is authorized, and no migration for it may be written before that decision.
+
+A second supplier is meant to be onboarded through the Adaptive Collector (Issue #110, `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md`): a validated profile instead of a new supplier-specific parser. That contract authorizes no implementation by itself; its Phase B prototype, production slices and KM통상 shadow Phase C each need their own authorization, and its second-supplier Phase D stays deferred until the first vertical closes (`CLAUDE.md` §12).

@@ -122,6 +122,12 @@ An unresolved identity never advances the pointer: such a run records no revisio
 
   Each move is audited (`AuditEvent`).
 
+> **Amendment note (ADR-0017 §5.3, §5.4, §7.4).** Read "the same `extractor_revision`" below as
+> "equal `comparability_key`". For every revision without profile provenance the key is
+> `("CODE", extractor_revision)`, so every existing revision compares exactly as before. An
+> `ExtractionProfileRevision` becoming `ACTIVE` moves no pointer; only a later recorded eligible
+> revision does, and that move is `EXTRACTOR_CHANGED`.
+
 **Source drift vs extractor change (ADR-0010 §6).** Fingerprints are drift evidence only between revisions with the **same `extractor_revision`**.
 - **Same extractor.** When the pointer moves, the old and new current revisions are compared. The difference is classified by the source-drift rules (`docs/ARCHITECTURE.md` §11). Every derived result whose dependency fingerprint includes the old revision becomes `STALE` (§8). User-locked values are kept, with a `SOURCE_DRIFT` mark, and are not overwritten (v3.1 §7.3, §7.7).
 - **Different extractor.**

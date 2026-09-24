@@ -85,6 +85,28 @@ it. The review owner only indexes it:
 | current coverage | a `WIRED` kind whose full reconciliation succeeded in the current process run and has no known indexing failure unrecovered; only then is its count authoritative |
 | `CURRENT` / `NOT_CURRENT` (a review count) | whether a kind's open count is authoritative: `CURRENT` only when **every** producer that can emit the kind is wired and its coverage current, and the owner has not moved since the watermark's pass; `NOT_CURRENT` when all are wired and one is not current. Only `CURRENT` carries a count (G2-C) |
 
+## 3a. Collection profiles and extraction identity
+
+Three different things are called a "profile". They are never one another (ADR-0017 §4):
+
+| name | what it is | owner |
+| --- | --- | --- |
+| `SupplierProfile` | the **CONNECT** profile of a supplier: key, display name, base URL, auth flag, egress hosts, request policy. Not an extraction profile | ADR-0007 |
+| `CollectionProfile` | the **COLLECT access envelope**: product path form, policy paths, explicit image hosts, safe query keys, frozen limits, transport. Repository-reviewed, never widened at run time, never profile data | ADR-0010 §3, §9 |
+| `ExtractionProfileRevision` (EPR) | an immutable, content-addressed revision of one supplier's **interpretation** — identity rule, vocabularies, image-role rules, hook bindings — pinning a closed set of PTRs by digest; validated and activated as one bundle | ADR-0017 §3 |
+| `PageTemplateRevision` (PTR) | an immutable, content-addressed revision of **one page shape** of a supplier: its signature and per-field locator rules; never activated alone | ADR-0017 §3 |
+
+| name | what it is | owner |
+| --- | --- | --- |
+| `CORE` / `COVERAGE` | the two field levels of `FIELD_REGISTRY` (`FieldLevel`). Every non-CORE field is a `COVERAGE` field. ADR-0010 §7's historical label "Source coverage" / "source-coverage" means `COVERAGE`; no new contract uses it | ADR-0010 §7, ADR-0017 §4 |
+| `comparability_key` | the tagged semantic tuple that decides drift comparability: `("CODE", extractor_revision)` for a revision without profile provenance, derived on read and never stored or backfilled; `("ADAPTIVE", extractor_revision, profile_schema_version, extraction_profile_digest)` otherwise | ADR-0017 §5.3; ADR-0013 §3 as amended |
+| `extraction_semantics_id` | the stored, collision-resistant digest of an Adaptive revision's semantic tuple; an integrity and indexing aid, never the comparability decision by itself | ADR-0017 §5.2 |
+| `HOOK_REVISION` / `HOOK_FINGERPRINT` | a supplier hook manifest's semantic revision (bound by the EPR) and implementation fingerprint (provenance and validation freshness only, never semantic identity) | ADR-0017 §6.2 |
+| promotion key | `(hook_point, target)` of a hook binding; the G6 counting unit, and when two or more suppliers share it, an architect promotion decision is required | ADR-0017 §6.3, §6.4 |
+| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation, cut by an independent capture owner and never by the profile it validates; keeps product controls and admissible embedded data as parsed literals, excludes non-authoritative regions; never a whole authenticated page. A sample with a digest-only (truncated) block is `SAMPLE_TRUNCATED` and never supports a `PASS` | ADR-0017 §7.3, V8 |
+| `shadow_enabled_for_run` | a run's shadow decision, frozen at its first product-read reservation; the shadow step and the Phase C denominator both read only it | ADR-0017 §10.1 |
+| `VALIDATED` (a profile) | derived, never stored: a `PASS` validation run exists for the exact freshness tuple, implementation fingerprints included | ADR-0017 §7.1 |
+
 ## 4. Adoption and execution words
 
 | name | meaning |

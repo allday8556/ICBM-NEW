@@ -169,6 +169,11 @@ If the page exposes more images than the budget allows, the count is recorded an
 
 ### 6. ProductFactsRevision contract
 
+> **Amendment note (ADR-0017 §5).** A revision produced by profile-interpreted (Adaptive) extraction
+> additionally carries its profile provenance, and drift comparability between revisions is decided by
+> `comparability_key`, which for every revision without profile provenance is
+> `("CODE", extractor_revision)`, the rule below. No existing revision is backfilled or rewritten.
+
 `ProductFactsRevision` is **append-only source truth**.
 
 - **Every successful collection creates a new immutable revision, even when the page is unchanged.**
@@ -221,6 +226,11 @@ revision 3 ─ source_product_id X ─ fingerprint F
 **Committed evidence** never carries plain digests of business values, such as a SHA-256 of a wholesale price, which would be trivially reversible. Repository evidence uses counts, presence and statuses, plus keyed per-campaign fingerprints (the M2 HMAC precedent). The raw values stay in the local database.
 
 ### 7. Facts: two levels (addendum D)
+
+> **Amendment note (ADR-0017 §4).** "Source coverage" in the table below and "source-coverage" in
+> the prose are the historical label of the enum level `COVERAGE` (`FieldLevel.COVERAGE`), and are
+> read as `COVERAGE`. The level, its fields, its `ABSENT` rule and its acceptance semantics are
+> unchanged.
 
 `ROADMAP.md` §5 and `docs/ARCHITECTURE.md` §5 define the COLLECT source-truth contract. M3 keeps all of it in the schema and the parser/evidence model, and splits only what **acceptance** requires.
 
@@ -401,6 +411,13 @@ mixed / insufficient evidence      → REVIEW_REQUIRED
   - private account data.
 
 ### 12. Extraction identity (addendum C; PR #55 review `5204359614` §2)
+
+> **Amendment note (ADR-0017 §5.2, §5.6).** For a code extractor this section is unchanged. For
+> profile-interpreted extraction, the semantic identity is the tuple of the engine's
+> `extractor_revision`, the profile schema version and the `ExtractionProfileRevision` digest; hook
+> semantics enter it through `HOOK_REVISION`, and no implementation fingerprint enters it. Such a
+> revision is reproducible from the repository at the fingerprints it records plus the immutable
+> profile rows it names.
 
 A manual string with no guard is insufficient. The **supplier collection definition** owns its extraction identity, and every revision persists both parts of it.
 

@@ -30,6 +30,8 @@ M0_ACCEPTANCE = DOCS / "acceptance" / "M0.md"
 JOB_STATE_ADR = DOCS / "adr" / "0005-durable-job-state-and-attempt-history.md"
 OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
 REVIEW_ADR = DOCS / "adr" / "0016-gate2-human-review-path-and-review-item-owner.md"
+ADAPTIVE_ADR = DOCS / "adr" / "0017-adaptive-collector-profile-extraction-and-shadow-validation.md"
+ADAPTIVE_PROPOSAL = DOCS / "review" / "ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md"
 ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
 # The owners whose truth a ReviewItem indexes; none of them may read the review owner (G2-02).
 REVIEWED_OWNERS = (
@@ -350,6 +352,62 @@ def test_the_review_item_contract_is_recorded_and_pinned() -> None:
     ):
         assert required in recovery, required
     assert "never a fake `0`" in _section(adr, r"^7\. Counts")
+
+
+def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
+    """ADR-0017 (Issue #110): the Adaptive Collector contract, before any implementation."""
+    from app.collect.facts import EvidenceKind, FieldLevel, FieldStatus
+
+    adr = _read(ADAPTIVE_ADR)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
+    for source in ("5302952567", "5812200650", "5812422770"):
+        assert source in adr, source
+    for canonical in (ARCHITECTURE_MD, ROADMAP_MD, DOCS / "GLOSSARY.md"):
+        assert ADAPTIVE_ADR.name in _read(canonical) or "ADR-0017" in _read(canonical), canonical
+    # The amended contracts point at their amendment; nothing amends them silently.
+    for amended in ("0010-supplier-generic-collect", "0013-m4-canonical-product-contract"):
+        (path,) = (DOCS / "adr").glob(f"{amended}*.md")
+        assert "Amendment note (ADR-0017" in _read(path), path.name
+    proposal = _read(ADAPTIVE_PROPOSAL)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", proposal, re.M)
+    assert ADAPTIVE_ADR.name in proposal
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 29)]
+    # The truth vocabulary the design must not widen is exactly what the code holds.
+    assert {s.value for s in FieldStatus} == {"CONFIRMED", "ABSENT", "REVIEW_REQUIRED"}
+    assert {level.value for level in FieldLevel} == {"CORE", "COVERAGE"}
+    assert len(EvidenceKind) == 8
+    assert "non-CORE fields are COVERAGE" in invariants["AC-21"]
+    # The rulings the audits fixed, pinned by their wording.
+    assert "No existing ProductFactsRevision is backfilled" in invariants["AC-06"]
+    assert "never by itself EXTRACTOR_CHANGED" in invariants["AC-07"]
+    assert "(hook_point, target) bindings" in invariants["AC-10"]
+    assert "never by the EPR or PTR it validates" in invariants["AC-11"]
+    assert "IMAGES_FIELD" in invariants["AC-12"]
+    assert "writes only a lifecycle transition" in invariants["AC-13"]
+    assert "never nested" in invariants["AC-16"]
+    assert "UNMATCHABLE is never a success" in invariants["AC-17"]
+    assert "a crash included, counts INCOMPLETE and is never excluded" in invariants["AC-18"]
+    assert "with no hold exception" in invariants["AC-20"]
+    assert "frozen at a run's first product-read reservation" in invariants["AC-23"]
+    assert "revision_id is nullable and absent for a NO_REVISION run" in invariants["AC-24"]
+    assert "SAMPLE_TRUNCATED sample ends INCOMPLETE, never PASS" in invariants["AC-25"]
+    assert (
+        "only SHADOW_MISSING_AFTER_RECOVERY permits a recorded supersession" in invariants["AC-26"]
+    )
+    assert "no window is ever abandoned" in invariants["AC-26"]
+    assert "append-only event stream per collection_run_id" in invariants["AC-27"]
+    assert "the denominator counts each run once" in invariants["AC-27"]
+    assert "a closeout is never revised, versioned or mutated" in invariants["AC-28"]
+    # ADR-0010 §7's historical level label is aligned with COVERAGE, not left as a second name.
+    (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
+    levels = _section(_read(collect_adr), r"^7\. Facts: two levels")
+    assert "Amendment note (ADR-0017 §4)" in levels and "`COVERAGE`" in levels
+    # The six cross-audit items of Issue #110 5812200650 are each closed by a named section.
+    closed = _section(adr, r"^14\. The cross-audit items, closed$")
+    assert len(re.findall(r"^\| [1-6] \|", closed, re.M)) == 6
+    assert closed.count("**yes**") == 2
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:

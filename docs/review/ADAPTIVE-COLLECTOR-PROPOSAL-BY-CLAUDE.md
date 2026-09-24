@@ -1,6 +1,10 @@
 # Adaptive Collector — design proposal (Issue #110, Phase A)
 
-Status: **PROPOSAL — revision 4, awaiting architect re-audit**
+Status: **ACCEPTED** — architect PASS `5302952567` on PR #111 exact head `1dbb1335` (revision 4), with
+the Claude AI cross-audit PASS, as the input to [ADR-0017](../adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md).
+The binding contract is ADR-0017, which also closes the six cross-audit items of Issue #110
+`5812200650`; where this proposal and ADR-0017 differ, ADR-0017 is right. The body below is kept
+as the reviewed revision 4 and is not edited further.
 Author: Claude Code
 Issue: #110; architect kickoff `5811580104` (DESIGN only)
 Audit: PR #111 review `5302725919` on `eaa85aa` — direction accepted, four required fixes, rulings Q1–Q6;
