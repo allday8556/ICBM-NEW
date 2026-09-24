@@ -237,6 +237,7 @@ def test_a_fast_path_failure_never_touches_collect_and_is_recorded(config: AppCo
     with served(config, UnclearShop()) as api:
         container: Container = api.app.state.container  # type: ignore[attr-defined]
         assert coverage_of(api, "fakeshop", "4242")["current"] is True
+        hold_the_running_recovery(container)
         fail_next_reconcile(container)
         run = collect_unclear(api, "4242")
         # COLLECT's own work is untouched: the run is RECORDED and its job SUCCEEDED.
@@ -262,6 +263,13 @@ def fail_next_reconcile(container: Container) -> None:
     store.reconcile = crashing  # type: ignore[method-assign]
 
 
+def hold_the_running_recovery(container: Container) -> None:
+    """This process runs no further full pass. The fast path asks for one at once (G2-C), and
+    it would recover the lost item in this process; a test of what only a restart or a later
+    periodic pass may recover holds it here."""
+    container.review_reconciler.full_passes = lambda: ()  # type: ignore[method-assign]
+
+
 # ---------------------------------------------------------------- G2-19 recovery proofs
 
 
@@ -270,6 +278,7 @@ def test_a_restart_recreates_a_lost_item_exactly_once(config: AppConfig) -> None
     startup full pass recreates the missing OPEN item exactly once."""
     with served(config, UnclearShop()) as api:
         container: Container = api.app.state.container  # type: ignore[attr-defined]
+        hold_the_running_recovery(container)
         fail_next_reconcile(container)
         run = collect_unclear(api, "4242")
         assert run["outcome"] == "RECORDED"
@@ -674,4 +683,4 @@ def test_the_database_refuses_a_backward_watermark(container: Container, config:
 
 def test_the_review_store_is_owned_by_the_container(container: Container) -> None:
     assert isinstance(container.review_items, ReviewItemStore)
-    assert container.review_items.producers == (COLLECT_PRODUCER,)
+    assert COLLECT_PRODUCER in container.review_items.producers

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.connect.contracts import MarketplaceConnectionSummary, SupplierConnectionSummary
 from app.core.execution import ExecutionMode
 from app.register.target_policy import EditableSurface
+from app.review.model import CountState, ReviewKind
 
 
 class ScreenKey(StrEnum):
@@ -55,15 +56,39 @@ class ScreenMeta(BaseModel):
     milestone: str
 
 
+class ReviewEmitterView(BaseModel):
+    """One producer that can emit a review kind: whether it is wired and current, and why not."""
+
+    producer: str
+    wired: bool
+    current: bool
+    reason: str | None
+
+
+class ReviewKindCountView(BaseModel):
+    """One review kind's open count, and whether it is authoritative (ADR-0016 §7, G2-C).
+
+    ``open`` is set only when ``state`` is ``CURRENT``. ``NOT_WIRED`` and ``NOT_CURRENT`` never
+    carry a count, so neither can read as zero; ``open_known`` is the durable OPEN rows known now,
+    a lower bound. The UI renders these states and decides none of them.
+    """
+
+    kind: ReviewKind
+    state: CountState
+    open: int | None
+    open_known: int
+    emitters: list[ReviewEmitterView]
+
+
 class ReviewCounts(BaseModel):
     """Open ReviewItem counts per kind (ARCHITECTURE.md §9: surfaced as dashboard counts)."""
 
-    collect_evidence: int
-    stock: int
-    source_change: int
-    compliance: int
-    registration_error: int
-    fulfillment: int
+    collect_evidence: ReviewKindCountView
+    stock: ReviewKindCountView
+    source_change: ReviewKindCountView
+    compliance: ReviewKindCountView
+    registration_error: ReviewKindCountView
+    fulfillment: ReviewKindCountView
 
 
 class DashboardView(BaseModel):
@@ -109,8 +134,11 @@ class InquiryView(BaseModel):
 
 
 class SoldoutView(BaseModel):
+    """``NO_STOCK_REVIEW_ITEMS`` is an EMPTY verdict only on an authoritative STOCK zero: every
+    producer that can emit STOCK wired and current, and none open (ADR-0016 §7)."""
+
     meta: ScreenMeta
-    stock_review_items_total: int
+    stock_review: ReviewKindCountView
 
 
 class InsightView(BaseModel):

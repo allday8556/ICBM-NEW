@@ -161,6 +161,29 @@ class ProductReadinessService:
             ),
         )
 
+    def base_items(self) -> tuple[tuple[str, str], ...]:
+        """Every Item base readiness evaluates as a product: ``(product_group_id, item_id)`` of
+        each ACTIVE canonical Product's Items."""
+        return self._store.active_items()
+
+    def base_truth_token(self) -> str:
+        """A token of **all** the owner truth base readiness reads, for every Item at once (Gate 2
+        G2-C, review 5807902325 B3). It writes nothing.
+
+        - Foundation and image rows are named by a state that never returns to an earlier value
+          (``ProductFoundationUnit.readiness_truth``, ``ProductImageService.readiness_truth``).
+        - Source facts need no entry of their own: a revision is immutable, and which revision is
+          current is an append-only foundation move.
+
+        So two equal tokens prove that no base readiness could have changed in between."""
+        with self._store.reading() as unit:
+            state = {
+                "rule_version": BASE_READINESS_RULE_VERSION,
+                "foundation": unit.readiness_truth(),
+                "images": self._images.readiness_truth(unit),
+            }
+        return digest(state)
+
     def pricing_readiness(self, item_id: str, context: PricingContextInput) -> Readiness:
         evaluation = self._pricing.evaluate(item_id, context)
         reasons = list(evaluation.reasons)

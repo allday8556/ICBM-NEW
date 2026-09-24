@@ -94,7 +94,7 @@ CANONICAL_TABLES = (
     # Gate 2 G2-B (ADR-0016 §4, §7): the review producers' coverage watermark.
     "review_coverage",
 )
-HEAD = "0022_g2_review_coverage"
+HEAD = "0023_g2_review_coverage_fence"
 
 
 def _url(path: Path) -> str:

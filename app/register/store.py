@@ -44,7 +44,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.audit.models import AuditEventType, AuditOutcome
+from app.audit.models import AuditEvent, AuditEventType, AuditOutcome
 from app.audit.service import AuditEntry, AuditLog
 from app.connect.accounts import require_bound
 from app.connect.marketplace.capability import RemoteOutcome
@@ -384,6 +384,33 @@ class ScopeRecord:
         }
 
 
+# The audit events of every change to the rows the review reads come from (``review_truth``).
+_REVIEW_AUDITED = (
+    AuditEventType.REGISTRATION_INTENT_RECORDED,
+    AuditEventType.REGISTRATION_ATTEMPT_RECORDED,
+    AuditEventType.REGISTRATION_OUTCOME_RESOLVED,
+    AuditEventType.REGISTRATION_VERIFICATION_RECORDED,
+    AuditEventType.REGISTRATION_EXECUTION_SCOPE_PAUSED,
+    AuditEventType.REGISTRATION_EXECUTION_SCOPE_RESUMED,
+)
+
+
+@dataclass(frozen=True)
+class IntentReviewRecord:
+    """An Intent in a state this owner says only a human can move on (Gate 2 G2-C): its outcome
+    is ``UNKNOWN`` (ADR-0014 §10), or its read-back comparison is a ``MISMATCH`` (§11). It carries
+    the Draft its Snapshot froze and the identities those states were recorded against."""
+
+    intent_id: str
+    marketplace_key: str
+    marketplace_account_id: str
+    draft_id: str
+    state: IntentState
+    verification_state: VerificationState
+    latest_attempt_id: str | None
+    verification_evidence_digest: str | None
+
+
 # ---------------------------------------------------------------- the store
 
 
@@ -512,6 +539,28 @@ class RegistrationStore:
     def paused_scopes(self, *, limit: int = 50) -> tuple[ScopeRecord, ...]:
         with self.reading() as unit:
             return unit.paused_scopes(limit=limit)
+
+    # ------------------------------------------------------------------ review reads (G2-C)
+
+    def review_accounts(self) -> tuple[tuple[str, str], ...]:
+        with self.reading() as unit:
+            return unit.review_accounts()
+
+    def review_intents(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[IntentReviewRecord, ...]:
+        with self.reading() as unit:
+            return unit.review_intents(account)
+
+    def review_paused_scopes(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[ScopeRecord, ...]:
+        with self.reading() as unit:
+            return unit.review_paused_scopes(account)
+
+    def review_truth(self) -> dict[str, object]:
+        with self.reading() as unit:
+            return unit.review_truth()
 
 
 class RegistrationUnit:
@@ -747,6 +796,140 @@ class RegistrationUnit:
             .limit(limit)
         ).all()
         return tuple(_scope_record(row) for row in rows)
+
+    # ------------------------------------------------------------------ review reads (G2-C)
+
+    def review_accounts(self) -> tuple[tuple[str, str], ...]:
+        """Every canonical account that holds an Intent or an execution scope row, in order."""
+        intents = self.session.execute(
+            select(RegistrationIntent.marketplace_key, RegistrationIntent.marketplace_account_id)
+        ).all()
+        scopes = self.session.execute(
+            select(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+            )
+        ).all()
+        return tuple(sorted({(key, account) for key, account in (*intents, *scopes)}))
+
+    def review_intents(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[IntentReviewRecord, ...]:
+        """Every Intent, of one account or of all, whose outcome is ``UNKNOWN`` or whose
+        read-back is a ``MISMATCH``: no limit, since a full review pass must see them all."""
+        query = (
+            select(RegistrationIntent, RegistrationSnapshot.draft_id)
+            .join(
+                RegistrationSnapshot,
+                RegistrationSnapshot.registration_snapshot_id
+                == RegistrationIntent.registration_snapshot_id,
+            )
+            .where(
+                (RegistrationIntent.state == IntentState.UNKNOWN.value)
+                | (RegistrationIntent.verification_state == VerificationState.MISMATCH.value)
+            )
+            .order_by(RegistrationIntent.intent_id)
+        )
+        if account is not None:
+            query = query.where(
+                RegistrationIntent.marketplace_key == account[0],
+                RegistrationIntent.marketplace_account_id == account[1],
+            )
+        found = []
+        for row, draft_id in self.session.execute(query).all():
+            latest = self._latest_attempt(row.intent_id)
+            found.append(
+                IntentReviewRecord(
+                    intent_id=row.intent_id,
+                    marketplace_key=row.marketplace_key,
+                    marketplace_account_id=row.marketplace_account_id,
+                    draft_id=draft_id,
+                    state=IntentState(row.state),
+                    verification_state=VerificationState(row.verification_state),
+                    latest_attempt_id=None if latest is None else latest.attempt_id,
+                    verification_evidence_digest=row.verification_evidence_digest,
+                )
+            )
+        return tuple(found)
+
+    def review_paused_scopes(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[ScopeRecord, ...]:
+        """Every PAUSED execution scope, of one account or of all: no limit."""
+        query = (
+            select(RegistrationExecutionScope)
+            .where(RegistrationExecutionScope.state == ExecutionScopeState.PAUSED.value)
+            .order_by(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+                RegistrationExecutionScope.endpoint_group,
+            )
+        )
+        if account is not None:
+            query = query.where(
+                RegistrationExecutionScope.marketplace_key == account[0],
+                RegistrationExecutionScope.marketplace_account_id == account[1],
+            )
+        return tuple(_scope_record(row) for row in self.session.scalars(query))
+
+    def review_truth(self) -> dict[str, object]:
+        """Every row the review conditions above are read from, as a state that never returns to
+        an earlier value (Gate 2 G2-C, review 5807902325 B3):
+
+        - each Intent's state, outcome, verification and the evidence digest it was verified on,
+          with its attempt count, which only grows: an Intent reaches ``UNKNOWN`` again only
+          through a new attempt;
+        - each scope row's state and cause with its resume generation, which only grows: a scope
+          is paused again only after a resume moved the generation;
+        - how many audit events this owner has written for those rows. Every change to them is
+          audited in its own unit of work, and the log is append-only, so the count only grows.
+          It is what makes a cause replaced and then restored under a frozen clock
+          (``pause_scope``) a different state."""
+        audited = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.event_type.in_([e.value for e in _REVIEW_AUDITED]))
+            )
+            or 0
+        )
+        attempts: dict[str, int] = {
+            intent_id: int(count)
+            for intent_id, count in self.session.execute(
+                select(RegistrationAttempt.intent_id, func.count()).group_by(
+                    RegistrationAttempt.intent_id
+                )
+            ).all()
+        }
+        intents = self.session.execute(
+            select(
+                RegistrationIntent.intent_id,
+                RegistrationIntent.registration_snapshot_id,
+                RegistrationIntent.state,
+                RegistrationIntent.remote_outcome,
+                RegistrationIntent.verification_state,
+                RegistrationIntent.verification_evidence_digest,
+            ).order_by(RegistrationIntent.intent_id)
+        ).all()
+        scopes = self.session.execute(
+            select(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+                RegistrationExecutionScope.endpoint_group,
+                RegistrationExecutionScope.state,
+                RegistrationExecutionScope.pause_reason,
+                RegistrationExecutionScope.resume_generation,
+            ).order_by(
+                RegistrationExecutionScope.marketplace_key,
+                RegistrationExecutionScope.marketplace_account_id,
+                RegistrationExecutionScope.endpoint_group,
+            )
+        ).all()
+        return {
+            "audited": audited,
+            "intents": [[*row, int(attempts.get(row[0], 0))] for row in intents],
+            "scopes": [list(row) for row in scopes],
+        }
 
     # ------------------------------------------------------------------ snapshots (§6, §7)
 

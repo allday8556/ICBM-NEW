@@ -243,6 +243,17 @@ class ReviewItemStore:
         matching = [row for row in rows if wanted is None or _within(row.scope, wanted)]
         return tuple(matching[: max(0, limit)])
 
+    def open_counts(self) -> dict[ReviewKind, int]:
+        """How many OPEN items each kind holds now, from the durable rows in one read. A kind
+        with none is absent; whether a count is authoritative is not decided here (G2-C)."""
+        with self._db.read() as session:
+            rows = session.execute(
+                select(ReviewItem.kind, func.count())
+                .where(ReviewItem.state == ReviewState.OPEN.value)
+                .group_by(ReviewItem.kind)
+            ).all()
+        return {ReviewKind(kind): int(count) for kind, count in rows}
+
     def history(self, review_item_id: str) -> tuple[ReviewEventRecord, ...]:
         with self._db.read() as session:
             if session.get(ReviewItem, review_item_id) is None:

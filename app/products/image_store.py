@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.collect.assets import ImageDecoder
@@ -245,6 +245,27 @@ class ImageUnit:
     def __init__(self, session: Session, clock: Clock) -> None:
         self.session = session
         self._clock = clock
+
+    def readiness_truth(self) -> dict[str, int]:
+        """The row count of every image table base readiness can read (Gate 2 G2-C). Each one is
+        append-only (migration 0014), so a count only grows: any image write that could change a
+        readiness changes this state, and nothing brings it back."""
+        return {
+            model.__tablename__: int(
+                self.session.scalar(select(func.count()).select_from(model)) or 0
+            )
+            for model in (
+                DerivedImageArtifact,
+                DerivedImageDerivation,
+                DerivedImageDerivationInput,
+                DerivedImageDerivationRoot,
+                ImageSelectionRevision,
+                ImageSelectionSourceDecision,
+                ImageSelectionOutput,
+                CurrentImageSelectionMove,
+                ImageQaResult,
+            )
+        }
 
     # ------------------------------------------------------------------ source references
 

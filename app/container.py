@@ -77,9 +77,12 @@ from app.register.target_policy import (
     editable_surfaces,
 )
 from app.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
+from app.review.counts import ReviewCounts
 from app.review.coverage import ReviewCoverageStore
 from app.review.owner import ReviewItemStore
+from app.review.products_producer import ProductsReviewProducer
 from app.review.reconciler import ReviewReconciler
+from app.review.register_producer import RegisterReviewProducer
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
 from app.system.diagnostics import DiagnosticsService
@@ -273,23 +276,13 @@ def build_container(
     # materialized after a run is RECORDED, or by an explicit call; never by a startup sweep.
     product_store = ProductFoundationStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
-    # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with the COLLECT / M3 producer
-    # (G2-B). Each process run has its own identity: coverage is current only after a complete
-    # full pass in this run (§7). The owner reads COLLECT; COLLECT never reads it.
-    review_items = ReviewItemStore(db, clock, audit, producers=[CollectReviewProducer(revisions)])
-    review_reconciler = ReviewReconciler(
-        review_items,
-        ReviewCoverageStore(db, clock, audit),
-        clock,
-        process_run_id=str(uuid.uuid4()),
-        interval_s=config.review_reconcile_interval_s,
-        max_age_s=config.review_coverage_max_age_s,
-    )
     runs = CollectionRunStore(db, clock)
 
     def after_recorded(collection_run_id: str) -> None:
         """What follows a durably RECORDED run: the Product, then the review fast path. The review
-        step never raises into the run; a failure there is a recorded known failure (§4)."""
+        step never raises into the run; a failure there is a recorded known failure (§4). The
+        fast path also asks for a full pass, which covers what the materialization moved in M4
+        (G2-C); until it completes, M4's coverage is not current."""
         try:
             materializer.materialize_run(collection_run_id)
         finally:
@@ -405,6 +398,28 @@ def build_container(
         clock=clock,
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
+    # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with its producers: COLLECT / M3
+    # (G2-B), M4 base readiness and REGISTER (G2-C). Each process run has its own identity:
+    # coverage is current only after a complete full pass in this run (§7). The review owner
+    # reads these owners; none of them reads it.
+    review_items = ReviewItemStore(
+        db,
+        clock,
+        audit,
+        producers=[
+            CollectReviewProducer(revisions),
+            ProductsReviewProducer(product_readiness),
+            RegisterReviewProducer(registrations),
+        ],
+    )
+    review_reconciler = ReviewReconciler(
+        review_items,
+        ReviewCoverageStore(db, clock, audit),
+        clock,
+        process_run_id=str(uuid.uuid4()),
+        interval_s=config.review_reconcile_interval_s,
+        max_age_s=config.review_coverage_max_age_s,
+    )
     # M5 PR-F (ADR-0014 §22, §24): the Registration Management read model and its operator
     # actions. It owns no truth of its own — it reads the owners above and hands each action to
     # the owner of that action — and its canary readiness is derived and read-only.
@@ -428,7 +443,7 @@ def build_container(
         products=products,
         register=register_service,
         operate=OperateService(),
-        review=ReviewService(),
+        review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
         collection_suppliers=collection.supplier_keys(),

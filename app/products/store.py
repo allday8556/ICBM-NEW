@@ -57,6 +57,7 @@ from app.products.model import (
 )
 from app.products.models import (
     CurrentSourceRevisionMove,
+    GroupChangeEvent,
     GroupMember,
     GroupMembershipRevision,
     ListingComposition,
@@ -436,6 +437,11 @@ class ProductFoundationStore:
         history."""
         with self.reading() as unit:
             return unit.readback(product_group_id)
+
+    def active_items(self) -> tuple[tuple[str, str], ...]:
+        """Every Item of an ACTIVE canonical Product, as ``(product_group_id, item_id)``."""
+        with self.reading() as unit:
+            return unit.active_items()
 
     def group_of_source(self, supplier_key: str, source_product_id: str) -> str | None:
         """The group in which this source identity is CONFIRMED now, if any."""
@@ -1251,6 +1257,66 @@ class ProductFoundationUnit:
             members=tuple(members),
             items=tuple(items),
         )
+
+    # ------------------------------------------------------------------ review reads (G2-C)
+
+    def active_items(self) -> tuple[tuple[str, str], ...]:
+        """Every Item of an ACTIVE canonical Product, as ``(product_group_id, item_id)``, in one
+        deterministic order. A retired group is history, not a product (ADR-0013 §4)."""
+        rows = self.session.execute(
+            select(ProductItem.product_group_id, ProductItem.item_id)
+            .join(ProductGroup, ProductGroup.product_group_id == ProductItem.product_group_id)
+            .where(ProductGroup.status == GroupStatus.ACTIVE.value)
+            .order_by(ProductItem.product_group_id, ProductItem.item_id)
+        ).all()
+        return tuple((group, item) for group, item in rows)
+
+    def readiness_truth(self) -> dict[str, object]:
+        """Every foundation row base readiness can read, as a state that never returns to an
+        earlier value (Gate 2 G2-C, review 5807902325 B3).
+
+        - The append-only tables are named by their row counts: a count only grows.
+        - The three mutable columns are named row by row: a group only retires, a member only
+          moves along ``MEMBER_TRANSITIONS`` (REJECTED is final), and a binding only closes.
+
+        So any foundation write that could change a readiness changes this state, and no sequence
+        of writes brings it back."""
+        counts = {
+            model.__tablename__: int(
+                self.session.scalar(select(func.count()).select_from(model)) or 0
+            )
+            for model in (
+                SourceProduct,
+                CurrentSourceRevisionMove,
+                ProductGroup,
+                GroupMember,
+                GroupMembershipRevision,
+                GroupChangeEvent,
+                ListingComposition,
+                ProductItem,
+                QuantityOffer,
+                SourceBinding,
+            )
+        }
+        groups = self.session.execute(
+            select(ProductGroup.product_group_id, ProductGroup.status).order_by(
+                ProductGroup.product_group_id
+            )
+        ).all()
+        members = self.session.execute(
+            select(GroupMember.member_id, GroupMember.status).order_by(GroupMember.member_id)
+        ).all()
+        closed = self.session.scalars(
+            select(SourceBinding.binding_id)
+            .where(SourceBinding.valid_to.is_not(None))
+            .order_by(SourceBinding.binding_id)
+        ).all()
+        return {
+            "counts": counts,
+            "groups": [list(row) for row in groups],
+            "members": [list(row) for row in members],
+            "closed_bindings": list(closed),
+        }
 
 
 def _contains(

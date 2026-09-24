@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.api.deps import ContainerDep
 from app.core.correlation import get_correlation_id, new_correlation_id
+from app.review.collect_producer import COLLECT_PRODUCER
 from app.review.contracts import (
     ResolutionView,
     ResolveRequest,
@@ -64,7 +65,9 @@ def items(
     source_product_id: str,
     state: ReviewState | None = None,
 ) -> ReviewItemListView:
-    """The ReviewItems of one COLLECT source identity, with every producer's coverage verdict."""
+    """The ReviewItems of one COLLECT source identity, with the coverage verdict of the one
+    producer whose items carry that scope (COLLECT). Another producer's coverage says nothing
+    about whether this list is current."""
     scope = canonical_scope({"supplier_key": supplier_key, "source_product_id": source_product_id})
     store = container.review_items
     found = store.items(scope=scope, state=state)
@@ -75,6 +78,7 @@ def items(
                 producer=c.producer, current=c.current, reason=c.reason, watermark_at=c.watermark_at
             )
             for c in container.review_reconciler.coverage()
+            if c.producer == COLLECT_PRODUCER
         ),
     )
 

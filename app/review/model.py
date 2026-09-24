@@ -39,6 +39,14 @@ class ReviewKind(StrEnum):
     FULFILLMENT = "FULFILLMENT"
 
 
+class CountState(StrEnum):
+    """Whether a kind's open count is authoritative (§7, G2-C; ``app.review.counts``)."""
+
+    CURRENT = "CURRENT"
+    NOT_CURRENT = "NOT_CURRENT"
+    NOT_WIRED = "NOT_WIRED"
+
+
 class ReviewState(StrEnum):
     """§4: decided by reconciliation against current owner truth, and only by it."""
 

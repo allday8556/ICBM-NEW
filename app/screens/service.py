@@ -9,7 +9,7 @@ from app.operate.service import OperateService
 from app.products.service import ProductsService
 from app.register.service import RegisterService
 from app.register.target_policy import EditableSurface
-from app.review.service import ReviewKind, ReviewService
+from app.review.service import KindCount, ReviewKind, ReviewService
 from app.screens.contracts import (
     AnalyticsView,
     CollectView,
@@ -23,6 +23,8 @@ from app.screens.contracts import (
     ProductDbView,
     RegisterView,
     ReviewCounts,
+    ReviewEmitterView,
+    ReviewKindCountView,
     ScreenKey,
     ScreenMeta,
     ScreenState,
@@ -34,6 +36,21 @@ from app.system.execution_mode import ExecutionModeService
 from integrations.marketplaces.identity import MarketplaceIdentity
 
 ANALYTICS_PERIOD_DAYS = 7
+
+
+def _count_view(count: KindCount) -> ReviewKindCountView:
+    return ReviewKindCountView(
+        kind=count.kind,
+        state=count.state,
+        open=count.open,
+        open_known=count.open_known,
+        emitters=[
+            ReviewEmitterView(
+                producer=e.producer, wired=e.wired, current=e.current, reason=e.reason
+            )
+            for e in count.emitters
+        ],
+    )
 
 
 class ScreenService:
@@ -105,19 +122,26 @@ class ScreenService:
         marketplaces = self._connect.connected_marketplace_count()
         products = self._products.product_count()
         review = self._review.open_counts()
-        empty = suppliers == 0 and marketplaces == 0 and products == 0 and not any(review.values())
+        # ADR-0016 §7: the empty verdict rests on review counts only when every kind is an
+        # authoritative zero. A NOT_WIRED or NOT_CURRENT kind proves nothing, so it is never empty.
+        empty = (
+            suppliers == 0
+            and marketplaces == 0
+            and products == 0
+            and all(count.authoritative_zero for count in review.values())
+        )
         return DashboardView(
             meta=self._meta(ScreenKey.DASHBOARD, EmptyReason.NO_CONNECTIONS if empty else None),
             suppliers_connected=suppliers,
             marketplaces_connected=marketplaces,
             products_total=products,
             review_counts=ReviewCounts(
-                collect_evidence=review[ReviewKind.COLLECT_EVIDENCE],
-                stock=review[ReviewKind.STOCK],
-                source_change=review[ReviewKind.SOURCE_CHANGE],
-                compliance=review[ReviewKind.COMPLIANCE],
-                registration_error=review[ReviewKind.REGISTRATION_ERROR],
-                fulfillment=review[ReviewKind.FULFILLMENT],
+                collect_evidence=_count_view(review[ReviewKind.COLLECT_EVIDENCE]),
+                stock=_count_view(review[ReviewKind.STOCK]),
+                source_change=_count_view(review[ReviewKind.SOURCE_CHANGE]),
+                compliance=_count_view(review[ReviewKind.COMPLIANCE]),
+                registration_error=_count_view(review[ReviewKind.REGISTRATION_ERROR]),
+                fulfillment=_count_view(review[ReviewKind.FULFILLMENT]),
             ),
         )
 
@@ -170,12 +194,14 @@ class ScreenService:
         )
 
     def soldout(self) -> SoldoutView:
-        items = self._review.open_counts()[ReviewKind.STOCK]
+        stock = self._review.open_counts()[ReviewKind.STOCK]
+        # Only an authoritative STOCK zero is "no stock review items" (ADR-0016 §7, G2-C).
         return SoldoutView(
             meta=self._meta(
-                ScreenKey.SOLDOUT, EmptyReason.NO_STOCK_REVIEW_ITEMS if items == 0 else None
+                ScreenKey.SOLDOUT,
+                EmptyReason.NO_STOCK_REVIEW_ITEMS if stock.authoritative_zero else None,
             ),
-            stock_review_items_total=items,
+            stock_review=_count_view(stock),
         )
 
     def insight(self) -> InsightView:
