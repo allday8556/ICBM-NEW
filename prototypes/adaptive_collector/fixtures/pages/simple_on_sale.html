@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- Synthetic fixture: an invented supplier "synthetic". No real page, account or product. -->
+<html>
+<head>
+<meta name="product-id" content="SYN-1001">
+<script type="application/ld+json">{"@type": "Product", "sku": "SYN-1001", "name": "합성 테스트 상품 A", "offers": {"price": "12000", "priceCurrency": "KRW"}}</script>
+<script>var productData = {"sku": "SYN-1001", "stock": "IN_STOCK", "sessionToken": "sessvalue-not-a-real-token", "memberGrade": "VIP"};</script>
+<script>trackPage("SYN-1001"); var viewer = currentViewer();</script>
+<style>.hidden { display: none; }</style>
+</head>
+<body>
+<header class="gnb"><nav><a href="/">홈</a></nav></header>
+<div class="member-info">홍길동 님 · 적립금 1,200P</div>
+<div class="product-detail" id="prd">
+  <h1 class="product-title">합성 테스트 상품 A</h1>
+  <table class="info">
+    <tr><th>판매가</th><td>12,000원</td></tr>
+    <tr><th>소비자가</th><td>15,000원</td></tr>
+    <tr><th>배송비</th><td>3,000원</td></tr>
+    <tr><th>브랜드</th><td>합성브랜드</td></tr>
+    <tr><th>원산지</th><td>국내산</td></tr>
+  </table>
+  <div class="options"></div>
+  <div class="gallery">
+    <img class="main" src="/img/syn-1001-main.jpg?sig=abc123">
+    <img class="thumb" src="/img/syn-1001-thumb.jpg">
+  </div>
+  <div class="actions">
+    <button class="btn-buy">구매하기</button>
+    <button class="btn-cart">장바구니</button>
+  </div>
+  <form class="order" action="/order/add?token=zzz">
+    <input type="hidden" name="csrf_token" value="csrf-not-a-real-value">
+    <input type="number" name="qty" min="1" max="99" step="1" value="3">
+  </form>
+  <div class="detail-body">
+    <p>상세 설명 본문입니다.</p>
+    <img src="/img/syn-1001-detail-1.jpg">
+    <img src="/img/syn-1001-detail-2.jpg">
+  </div>
+  <table class="notice">
+    <tr><th>제조사</th><td>합성제조</td></tr>
+    <tr><th>원산지</th><td>국내산</td></tr>
+  </table>
+</div>
+<div class="review-list">
+  <p>김** 님: 품절될까 봐 두 개 샀어요</p>
+  <table><tr><th>판매가</th><td>9,000원</td></tr></table>
+</div>
+<div class="recommend-box"><button class="btn-buy">다른 상품 구매</button></div>
+<footer>(주)합성</footer>
+</body>
+</html>

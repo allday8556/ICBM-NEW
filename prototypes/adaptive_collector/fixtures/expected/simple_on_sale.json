@@ -1,0 +1,23 @@
+{
+  "template": "simple",
+  "identity": "SYN-1001",
+  "fields": {
+    "original_name": {"status": "CONFIRMED", "value": {"text": "합성 테스트 상품 A"}},
+    "prices": {"status": "CONFIRMED", "value": {"prices": [{"label": "판매가", "amount_krw": 12000}, {"label": "소비자가", "amount_krw": 15000}]}},
+    "options": {"status": "CONFIRMED", "value": {"axes": [], "configurations": []}},
+    "stock": {"status": "CONFIRMED", "value": {"availability": "ON_SALE"}},
+    "shipping": {"status": "CONFIRMED", "value": {"kind": "FIXED", "policy_text": "3,000원", "fee_krw": 3000, "free_over_krw": null}},
+    "minimum_sale_price": {"status": "ABSENT", "value": null},
+    "quantity_tiers": {"status": "ABSENT", "value": null},
+    "brand": {"status": "CONFIRMED", "value": {"text": "합성브랜드"}},
+    "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성제조"}},
+    "origin": {"status": "CONFIRMED", "value": {"text": "국내산"}},
+    "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조사", "text": "합성제조"}, {"label": "원산지", "text": "국내산"}]}},
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "상세 설명 본문입니다."}}
+  },
+  "images": [
+    ["REPRESENTATIVE", 0, "/img/syn-1001-main.jpg"],
+    ["DETAIL", 0, "/img/syn-1001-detail-1.jpg"],
+    ["DETAIL", 1, "/img/syn-1001-detail-2.jpg"]
+  ]
+}
