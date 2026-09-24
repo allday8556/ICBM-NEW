@@ -6,6 +6,9 @@ of Gate 3 (Issue #89), on exact main `267d6a9eb20788819a8863f59a9c8f8e47700870` 
 - It records the kickoff's seven decisions (D1–D7) as contract, before any schema or runtime. The
   decisions were made by the kickoff. Where the kickoff asked the contract to define a rule, the
   rule is defined here and is open to the exact-head audit.
+- Amended before merge by the reviews `5821787401` (the restore drill proves the REGISTER chain)
+  and `5822405880` (the canary has two mutation stages, ASSET and CREATE, each with its own
+  grant binding, restore proof and send-time readiness — §3.1, §7, §10).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§12).
 
@@ -64,7 +67,8 @@ before M5 acceptance.
 This ADR is the contract for the **pre-LIVE safety stack**: the bounded LIVE grant (§3), the
 protected-write brake (§4), canary eligibility without a ComplianceGate (§5), the provider-evidence
 blocker (§6), and three proven prerequisites — backup and restore (§7), evidence retention (§8) and
-populated visual/responsive acceptance (§9). §10 composes them into canary readiness.
+populated visual/responsive acceptance (§9). §10 composes them into a readiness for **each
+mutation stage**, enforced at send time.
 
 It governs **marketplace mutations only**: a request that can create, change or remove state at a
 marketplace (for SmartStore today: product CREATE and a product image upload; later any UPDATE,
@@ -91,36 +95,69 @@ A **LIVE grant** is the only authority for a marketplace mutation. It is a durab
 server-owned record, created only by an explicit protected operator action that names every field
 below. The server validates it and stores it; the UI only displays it.
 
-**What a grant binds, and every field is exact:**
+#### 3.1 The two mutation stages of one canary
 
-| field | rule |
-| --- | --- |
-| `marketplace_key` | one marketplace |
-| `marketplace_account_id` | one canonical account (GLOSSARY §1), bound at grant time |
-| operation / endpoint group | the exact operations and adopted endpoint groups it permits (e.g. `CREATE` + the image upload that unit needs); never "any" |
-| provider-listing unit / Intent scope | the exact `RegistrationIntent` (and its Snapshot's listing identity) where the operation has one |
-| mutation budget | a finite maximum number of mutation attempts, at least 1; each attempt is counted when it is started, and never refunded, whatever its outcome — an `UNKNOWN` included |
-| approval | the approving user's identity, the GitHub authorization reference the approval answers, and the audit correlation identity |
-| window | a finite `not_before` and `expires_at`; no open-ended grant exists, and the maximum window length is a server-owned bound the implementing slice fixes and pins |
-| state | `ACTIVE` until it becomes `EXPIRED`, `REVOKED` or `EXHAUSTED`; each of those is terminal |
+A canary makes its marketplace mutations in the order ADR-0014 §5 fixes, and never in another:
 
-**Rules:**
-- **Deny by default.** No active grant that matches the mutation exactly — marketplace, account,
-  operation, endpoint group, unit/Intent, within its window, with budget left — means the mutation
-  is refused **before any transmission**, and the refusal is audited.
-- **No wildcard and no widening.** A grant never matches another account, marketplace, operation,
-  endpoint group or unit. A reload, restart, retry, job re-run or new batch can neither widen a grant
+```text
+candidate preflight READY
+→ ASSET stage:  upload the exact selected, QA-passed artifacts (image upload)
+→ final preflight READY
+→ freeze the RegistrationSnapshot and open its PREPARED RegistrationIntent
+→ CREATE stage: send that Intent (product CREATE)
+```
+
+The **ASSET** stage happens before any Snapshot or Intent exists; the **CREATE** stage happens only
+after the freeze. Each stage is its own mutation identity with its own grant (§3.2), its own restore
+proof (§7) and its own send-time readiness (§10). **A grant, proof or readiness of one stage never
+covers, widens into or automatically authorizes the other.** A unit that needs no provider asset has
+no ASSET stage; the CREATE stage is then the first mutation, and nothing of it is relaxed.
+
+#### 3.2 What a grant binds, and every field is exact
+
+**Every grant names one stage and one exact unit of that stage. No unit-less grant and no
+wildcard exists.**
+
+| field | ASSET grant | CREATE grant |
+| --- | --- | --- |
+| `marketplace_key`, `marketplace_account_id` | one marketplace and one canonical account (GLOSSARY §1), bound at grant time | the same |
+| operation / endpoint group | the adopted image-upload endpoint group only | the product CREATE endpoint group only |
+| exact unit | the exact **preparation revision**, the exact **candidate fingerprint** of its `READY` candidate preflight, the exact **selected artifact set** (each artifact's kind, SHA-256 and derivation identity) and the requested **marketplace asset profile** | the exact **`RegistrationSnapshot`** and its listing identity, and the exact **`RegistrationIntent`** with its **idempotency key** |
+| mutation budget | a finite maximum number of mutation attempts, at least 1; each attempt is counted when it is started, and never refunded, whatever its outcome — an `UPLOAD_UNKNOWN` included | the same — an Intent `UNKNOWN` included |
+| approval | the approving user's identity, the GitHub authorization reference the approval answers, and the audit correlation identity | the same, recorded separately for this stage |
+| window | a finite `not_before` and `expires_at`; no open-ended grant exists, and the maximum window length is a server-owned bound the implementing slice fixes and pins | the same |
+| state | `ACTIVE` until it becomes `EXPIRED`, `REVOKED` or `EXHAUSTED`; each of those is terminal | the same |
+
+An ASSET grant stops matching as soon as its bound preparation revision, candidate fingerprint,
+artifact set or asset profile no longer is the current one; a CREATE grant stops matching when its
+Snapshot is superseded or its Intent leaves `PREPARED` other than through its own attempt.
+
+#### 3.3 Rules
+
+- **Deny by default.** No active grant of the mutation's stage that matches it exactly —
+  marketplace, account, endpoint group and the stage's exact unit (§3.2), within its window, with
+  budget left — means the mutation is refused **before any transmission**, and the refusal is
+  audited.
+- **No wildcard and no widening.** A grant never matches another account, marketplace, stage,
+  endpoint group or unit. An ASSET grant never authorizes a CREATE, and a CREATE grant never an
+  upload. A reload, restart, retry, job re-run or new batch can neither widen a grant
   nor recreate an expired, revoked or exhausted one. A new scope needs a new grant.
 - **Terminal states are terminal.** `EXPIRED`, `REVOKED` and `EXHAUSTED` never return to `ACTIVE`.
   Revocation is an explicit audited action and takes effect for every mutation not yet started.
 - **A grant decides nothing else.** It never changes endpoint-adoption state, CONNECT capability or
   write-scope truth, registration readiness or preflight, ComplianceGate state, provider truth,
   `product_registration.write` status or ReviewItem state.
-- **A grant never authorizes a blind CREATE replay.** An `UNKNOWN` outcome stays governed by
-  ADR-0014 §10: it is reconciled only with admissible evidence, it keeps its conflict scope closed,
-  and no grant, budget or approval turns it into `FAILED` or `NOT_APPLIED_PROVEN`.
+- **A grant never authorizes a blind replay** — of a CREATE or of an upload. An Intent `UNKNOWN`
+  stays governed by ADR-0014 §10: it is reconciled only with admissible evidence, it keeps its
+  conflict scope closed, and no grant, budget or approval turns it into `FAILED` or
+  `NOT_APPLIED_PROVEN`. An `UPLOAD_UNKNOWN` (ADR-0014 §17.1, distinct from the Intent `UNKNOWN`)
+  is never retried automatically, is never treated as a known provider asset identity, and is
+  never re-uploaded blindly; its evidence is kept while it is unresolved (§8).
 - **UI text and checkboxes are never authority.** Only the server-owned grant is. A confirmation
   typed in the UI is an input to the protected action that creates the grant, never the grant.
+  **Raw confirmation prose an operator enters is never persisted, hashed or logged**: the durable
+  grant keeps only the approved safe identities, the approver's identity and the authorization
+  reference.
 - **Every grant transition is audited** in the same unit of work: created, activated, consumed
   (per attempt), expired, revoked, exhausted — with actor, time and correlation identity.
 
@@ -154,12 +191,15 @@ same unit of work that starts the attempt:
 
 1. the execution mode is `LIVE` (§2);
 2. the protected-write brake is `RELEASED` (§4.1);
-3. an `ACTIVE` grant matches exactly, with budget left (§3);
-4. the endpoint group is adopted, and the capability and write scope allow it (unchanged owners);
-5. the REGISTER execution-scope send brake for that scope is `ACTIVE` (ADR-0014 §26 — **unchanged
+3. an `ACTIVE` grant **of the mutation's stage** matches its exact unit, with budget left (§3);
+4. the stage's mutation readiness is `READY` — `ASSET_MUTATION_READY` before an upload,
+   `CREATE_MUTATION_READY` before a CREATE (§10) — which enforces §5, §7, §8 and §9 for that stage;
+5. the endpoint group is adopted, and the capability and write scope allow it (unchanged owners);
+6. the REGISTER execution-scope send brake for that scope is `ACTIVE` (ADR-0014 §26 — **unchanged
    and not weakened**; the two brakes are independent, and releasing either releases nothing of the
    other);
-6. the complete send-time gate of ADR-0014 §3 passes, with no unresolved conflict (§10).
+7. the stage's own send-time gate passes — the candidate preflight for an upload, the final
+   preflight and the ADR-0014 §3 send-time gate for a CREATE — with no unresolved conflict.
 
 Any failing layer refuses the mutation before transmission. No layer re-decides another's truth.
 
@@ -193,37 +233,61 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 
-Before any first LIVE write, a **backup and restore drill** is performed and recorded:
+A restore proof is **stage-bound and freshness-bound**. The mutation it gates needs its own proof,
+taken for that exact target and state; one stage's proof never gates the other.
+
+**Every drill:**
 - a backup is taken from the canonical data root, consistent with SQLite WAL (a copy of the live
   database file alone is not a backup);
 - it is restored into a **separate fresh root** — never over the active data root;
 - the restored root proves that the schema is at the expected Alembic head and that the database is
   readable and passes its integrity check;
-- it proves that **the complete canary-critical chain that exists at drill time** survives, each
-  element compared by identity **and** state with the source root, so a restore that loses or
-  changes one fails:
-  - the product side: the source revision, the Product and Item, the canonical account, and the
-    target-policy and category-metadata revisions;
-  - the preparation side: the Draft and the preparation revision;
-  - **the REGISTER chain** (review `5821787401`):
-    - the canary unit's immutable `RegistrationSnapshot` — its listing identity, payload hash,
-      preflight fingerprint and item snapshots;
-    - its `RegistrationIntent` — the intent identity, the **idempotency key**, and its current
-      `state`, remote outcome and verification state;
-    - every `RegistrationAttempt` of that Intent, as history;
-    - the REGISTER **execution-scope brake** state (ADR-0014 §26) for that marketplace × account ×
-      endpoint group — its state, pause cause and resume generation, or its proven absence, which
-      is an `ACTIVE` scope;
-    - when they exist: an unresolved conflict scope, a duplicate override, and a registration and
-      its verification;
-- **an element that does not exist yet at the drill point is recorded as absent, never created for
-  the drill**: before a freeze there is no Snapshot, before an Intent there is no Attempt. The drill
-  writes nothing to the active root and fabricates nothing in either root;
-- the drill's sanitized evidence (identities, states, counts, digests, versions, times, and every
-  element recorded as absent) is recorded; no credential, secret or raw payload enters it.
+- every element below is compared with the source root **by identity and state**, so a restore that
+  loses or changes one fails;
+- **only state that legitimately cannot yet exist at that stage may be absent**, and it is recorded
+  as absent, **never created for the drill**; the drill writes nothing to the active root and
+  fabricates nothing in either root;
+- its sanitized evidence (identities, states, counts, digests, versions, times, every element
+  recorded as absent, and the **target state digest** below) is recorded; no credential, secret or
+  raw payload enters it.
 
-A document saying that backups exist is not a drill. **A canary without a recorded drill on the
-current schema head stays `BLOCKED`.**
+**The ASSET restore proof** — before an upload — proves the exact pre-upload chain:
+- the product side: the source revision, the Product and Item, the canonical account, and the
+  target-policy and category-metadata revisions;
+- the preparation side: the Draft and the exact preparation revision, and the candidate preflight
+  fingerprint the ASSET grant binds;
+- the exact selected artifact set (kind, SHA-256, derivation identity) with its QA, and the asset
+  profile;
+- the REGISTER **execution-scope brake** state (ADR-0014 §26) for the upload endpoint group — its
+  state, pause cause and resume generation, or its proven absence, which is an `ACTIVE` scope;
+- recorded as absent, because they cannot exist yet: the `RegistrationSnapshot`, the
+  `RegistrationIntent`, its Attempts and any registration.
+
+**The CREATE restore proof** — after the freeze and before a CREATE, taken **after** the freeze —
+proves the exact post-freeze chain:
+- the product and preparation sides as above, and the prepared provider asset identities the
+  Snapshot froze;
+- **the REGISTER chain** (review `5821787401`):
+  - the canary unit's immutable `RegistrationSnapshot` — its listing identity, payload hash,
+    preflight fingerprint and item snapshots;
+  - its `RegistrationIntent` in `PREPARED` — the intent identity, the **idempotency key**, and its
+    state, remote outcome and verification state;
+  - the REGISTER **execution-scope brake** state for the CREATE endpoint group;
+  - when they exist: an unresolved conflict scope and a duplicate override;
+- **the Snapshot and the Intent may never be recorded as absent** in a CREATE restore proof: a
+  proof without them does not gate a CREATE. Only what cannot yet exist before the CREATE — its
+  Attempts and the registration — may be recorded as absent. **A pre-freeze proof is never accepted
+  as a CREATE restore proof.**
+
+**Freshness.** Each proof records a **target state digest** over exactly what it proved for its
+stage: the preparation revision, candidate fingerprint, artifact set, asset profile and scope state
+for ASSET; the Snapshot, the Intent's identity and state, the idempotency key and the scope state
+for CREATE. A proof gates a mutation **only while that digest equals the current state**: if the
+bound candidate, preparation, artifact set, Snapshot, Intent state or relevant scope state changes,
+the proof is **stale** and gates nothing until a new drill proves the new state.
+
+A document saying that backups exist is not a drill. **A stage without its own current restore
+proof stays `BLOCKED`.**
 
 ### 8. Evidence retention: end to end, fail closed (D6)
 
@@ -237,7 +301,8 @@ follows. It relaxes nothing of ADR-0014 §15, ADR-0011 or the Gate 2 evidence ru
     sanitized read-back comparison evidence, the reconcile evidence of an `UNKNOWN`, and the
     sanitized provider asset identity of an image upload — each recording its sanitizer and
     safe-query-key profile version (ADR-0014 §15).
-  - The grant and brake history (§3, §4) and the audit trail.
+  - The grant and brake history (§3, §4) and the audit trail — never the raw confirmation prose
+    an operator typed (§3.3).
 - **Sanitation before hash or persist** stays the rule (ADR-0014 §15): no credential, token,
   cookie, session material, raw private payload or unsafe or signed URL is ever hashed or stored.
   A value the sanitizer cannot classify is not persisted, and the dependent verification becomes
@@ -246,8 +311,10 @@ follows. It relaxes nothing of ADR-0014 §15, ADR-0011 or the Gate 2 evidence ru
   - **No automatic deletion** of canary-scope REGISTER evidence is authorized before M5 acceptance
     is decided. A later deletion policy needs its own decision.
   - **Evidence tied to an unresolved condition is never discarded**, silently or by any policy,
-    while that condition is unresolved. That covers an `UNKNOWN` Intent, a read-back `MISMATCH`,
-    an open review item that references it, and an open conflict scope.
+    while that condition is unresolved. That covers an `UNKNOWN` Intent, an **`UPLOAD_UNKNOWN`**
+    (ADR-0014 §17.1), a read-back `MISMATCH`, an open review item that references it, and an
+    open conflict scope. An `UPLOAD_UNKNOWN` is never recorded as a known provider asset
+    identity, and its evidence is what any later reconcile or reuse must rest on.
   - Any later deletion is itself audited, and it removes only sanitized raw artifacts, never
     durable rows.
 - **Fail closed.** If the retention path cannot store the evidence a mutation requires, the mutation
@@ -255,7 +322,9 @@ follows. It relaxes nothing of ADR-0014 §15, ADR-0011 or the Gate 2 evidence ru
 
 ### 9. Populated visual and responsive acceptance (D7)
 
-The first canary may not be authorized from functional Playwright wiring tests alone. Before it:
+The first canary may not be authorized from functional Playwright wiring tests alone. Before its
+**first** mutation — the ASSET stage when the unit needs one — and again for the CREATE stage when
+the accepted code SHA changed in between:
 - the **populated first-vertical state** is exercised through the relevant screens: 수집관리 (a
   recorded collection), 통합DB (the Product and Item, image and review state), 등록관리 (target,
   Draft, preparation, candidate preflight, REGISTER review items, execution-scope and
@@ -272,24 +341,30 @@ The first canary may not be authorized from functional Playwright wiring tests a
 
 This is UI acceptance only. It authorizes no provider mutation.
 
-### 10. Canary readiness
+### 10. Mutation-stage readiness
 
-The derived, read-only canary readiness (`docs/acceptance/M5.md` §6) stays `BLOCKED` until **every**
-requirement holds, each proven from its own durable evidence, never asserted:
+Each stage has its own derived, read-only readiness, and **it is a mandatory layer of the send-time
+safety stack (§4.3)**: a mutation of a stage cannot start unless that stage's readiness is `READY`
+at send time. Each requirement is proven from its own durable evidence, never asserted.
 
-| requirement | owner / evidence |
-| --- | --- |
-| `CREATE_ADOPTED`, `RECONCILE_PATH_ADOPTED` (and `IMAGE_UPLOAD_ADOPTED` when needed) | endpoint adoption — **not met** (§6) |
-| `LIVE_GRANT_ACTIVE` | an `ACTIVE` grant matching the canary unit exactly (§3) |
-| `PROTECTED_WRITE_BRAKE_RELEASED` | the brake (§4) |
-| `CANARY_NON_REGULATED` | the canary eligibility evidence (§5) |
-| `BACKUP_RESTORE_PROVEN` | the recorded drill on the current schema head (§7) |
-| `EVIDENCE_RETENTION_READY` | the retention path of §8 |
-| `VISUAL_ACCEPTANCE_RECORDED` | the recorded populated acceptance at the accepted SHA (§9) |
-| the existing requirements | account binding, auth, write scope, a prepared Intent, no unresolved conflict, the execution-scope brake, one unit only (M5.md §6, unchanged) |
+| requirement | `ASSET_MUTATION_READY` (before an upload) | `CREATE_MUTATION_READY` (before a CREATE) |
+| --- | --- | --- |
+| endpoint adoption (§6) | `IMAGE_UPLOAD_ADOPTED` | `CREATE_ADOPTED` and `RECONCILE_PATH_ADOPTED` — **not met** |
+| grant (§3) | an `ACTIVE` ASSET grant matching the exact preparation revision, candidate fingerprint, artifact set and asset profile | an `ACTIVE` CREATE grant matching the exact Snapshot, Intent and idempotency key |
+| protected-write brake (§4) | `RELEASED` | `RELEASED` |
+| canary eligibility (§5) | `CANARY_NON_REGULATED` | `CANARY_NON_REGULATED` |
+| restore proof (§7) | a current ASSET restore proof for that exact target | a current CREATE restore proof for that exact target, taken after the freeze |
+| evidence retention (§8) | `EVIDENCE_RETENTION_READY` | `EVIDENCE_RETENTION_READY` |
+| visual acceptance (§9) | `VISUAL_ACCEPTANCE_RECORDED` at the accepted SHA | `VISUAL_ACCEPTANCE_RECORDED` at the accepted SHA |
+| the stage's own gate | candidate preflight `READY`; no unresolved `UPLOAD_UNKNOWN` for that artifact | final preflight `READY`; a `PREPARED` Intent; no unresolved conflict or `UNKNOWN` |
+| the existing requirements | account binding, auth, write scope, the execution-scope brake, one unit only | the same (M5.md §6) |
 
-Readiness is derived, read-only and authorizes nothing: even `READY` is not permission. A real
-write stays a separate, explicitly user-authorized, single-product canary (ADR-0014 §24).
+- **The ASSET stage never depends on a `PREPARED` Intent**, which cannot exist before its upload; and
+  no requirement is circular.
+- The overall canary readiness (`docs/acceptance/M5.md` §6) only **summarizes** the two stages. It is
+  derived, read-only and authorizes nothing: even `READY` is not permission. A real write stays a
+  separate, explicitly user-authorized, single-product canary (ADR-0014 §24), and while CREATE and
+  SEARCH are `NOT_ADOPTED` the CREATE stage — and so the canary — stays `BLOCKED`.
 
 ### 11. Unchanged
 
@@ -322,7 +397,8 @@ expected areas, none authorized by this ADR:
   the brake, the drill record or the eligibility record — each slice decides them within this
   boundary and its own review;
 - the maximum grant window length and the exact budget values, beyond "finite" and "at least 1";
-- the backup mechanism and file format, beyond WAL-consistency and restore into a separate root;
+- the backup mechanism and file format, beyond WAL-consistency and restore into a separate root,
+  and the encoding of the target state digest (§7);
 - a deletion policy after M5 acceptance (§8);
 - the final viewport set beyond the two established sizes (§9);
 - the ComplianceGate contract, CREATE/SEARCH adoption, and anything M6 or M6.5.
@@ -333,12 +409,12 @@ expected areas, none authorized by this ADR:
 
 ```text
 G3-01  M0_DRY_RUN_ONLY / M0_LIVE_FORBIDDEN stays the only execution policy until a slice replaces it under this contract; nothing in G3-0 permits a LIVE write
-G3-02  a marketplace mutation needs an ACTIVE LIVE grant that matches marketplace, account, operation, endpoint group and unit exactly, within its window, with budget left; otherwise it is refused before any transmission
+G3-02  a marketplace mutation needs an ACTIVE LIVE grant of its stage that matches marketplace, account, endpoint group and the stage's exact unit, within its window, with budget left; otherwise it is refused before any transmission
 G3-03  a grant is durable, audited and server-owned; UI text and checkboxes are never authority
 G3-04  a grant binds a finite not_before/expires_at window and a finite mutation budget of at least 1; an attempt consumes budget when started and is never refunded, an UNKNOWN included
 G3-05  EXPIRED, REVOKED and EXHAUSTED are terminal; no reload, restart, retry or brake release widens a grant or recreates one
 G3-06  a grant never changes endpoint adoption, capability or write scope, readiness, ComplianceGate state, provider truth, product_registration.write or ReviewItem state
-G3-07  a grant never authorizes a blind CREATE replay; an UNKNOWN stays governed by ADR-0014 §10 and keeps its conflict scope closed
+G3-07  a grant never authorizes a blind CREATE or upload replay; an UNKNOWN stays governed by ADR-0014 §10 and keeps its conflict scope closed
 G3-08  the protected-write brake is server-owned, durable and fail-closed: absent or unreadable means ENGAGED, and a restart never releases it
 G3-09  an engaged brake stops every mutation not yet started; it never deletes or rewrites history and never rewrites an UNKNOWN
 G3-10  releasing the brake needs a new explicit audited authorization and never resurrects an expired, revoked or exhausted grant
@@ -347,20 +423,23 @@ G3-12  Gate 3 implements no ComplianceGate and puts no compliance logic in a gra
 G3-13  the first canary uses only a product proven outside every regulated category by its reviewed category metadata; that proof is eligibility, never a COMPLIANCE PASS, and without it the canary stays BLOCKED
 G3-14  CREATE and SEARCH stay NOT_ADOPTED and the provider-evidence verdict stays INSUFFICIENT; no grant, brake, backup, retention, visual acceptance or approval overrides it
 G3-15  an ICBM seller-side code and a zero-result search are never proof of remote absence
-G3-16  a canary needs a recorded backup and restore drill into a separate fresh root on the current schema head that proves, by identity and state, the complete canary-critical chain existing at drill time, including the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state; an element not yet existing is recorded as absent, never created; a declaration is not a drill
+G3-16  each mutation stage needs its own current restore proof into a separate fresh root on the current schema head, bound to a target state digest and stale once that state changes; a CREATE restore proof is taken after the freeze and proves, by identity and state, the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state, which it may never record as absent; a pre-freeze proof never gates a CREATE; only state that cannot yet exist is recorded as absent, never created; a declaration is not a drill
 G3-17  canary evidence is sanitized before hash or persist, durable REGISTER rows are never deleted, no canary evidence is deleted before M5 acceptance, and evidence tied to an unresolved condition is never discarded
 G3-18  a canary needs a recorded populated visual and responsive acceptance at the accepted viewport set in which no server-owned blocker is hidden
-G3-19  canary readiness is derived and read-only, stays BLOCKED until every requirement holds, and is never permission to write
+G3-19  ASSET_MUTATION_READY before an upload and CREATE_MUTATION_READY before a CREATE are mandatory send-time layers requiring the stage's grant, brake, eligibility, restore proof, retention and visual acceptance; the ASSET stage never depends on a PREPARED Intent; readiness is derived, read-only and never permission to write
 G3-20  M5 stays PENDING, product_registration.write stays UNVERIFIED, the canary stays BLOCKED and M6/M6.5 stay unstarted until their own decisions
+G3-21  every grant names one stage and one exact unit: an ASSET grant binds the preparation revision, candidate fingerprint, selected artifact set and asset profile, a CREATE grant the Snapshot, Intent and idempotency key; no unit-less or wildcard grant exists, and one stage never widens into the other
+G3-22  an UPLOAD_UNKNOWN is never retried automatically, never treated as a known provider asset identity and never re-uploaded blindly, and its evidence is kept while it is unresolved
+G3-23  raw confirmation prose an operator enters is never persisted, hashed or logged; a grant stores only safe identities, the approver and the authorization reference
 ```
 
 ## Consequences
 
 - The LIVE-authorization gap (`ROADMAP.md` §14.1) and the §14.2 preconditions now have a contract,
   but **no implementation**. The execution-mode owner still refuses LIVE.
-- The M5 canary readiness gains named requirements (§10). Every one of them is missing at this main,
-  and CREATE/SEARCH adoption stays missing independently, so the canary is `BLOCKED` for several
-  independent reasons at once.
+- The M5 canary gains two mutation stages, each with its own grant, restore proof and send-time
+  readiness (§3.1, §7, §10). None of them is implemented at this main, and CREATE/SEARCH adoption
+  stays missing independently, so the canary is `BLOCKED` for several independent reasons at once.
 - A later slice that implements a grant or the brake adds a migration under its own authorization.
 
 ## References

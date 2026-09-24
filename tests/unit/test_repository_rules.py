@@ -428,13 +428,14 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0018" in _read(canonical), canonical.name
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 21)]
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 24)]
     # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
     assert "refused before any transmission" in invariants["G3-02"]
+    assert "grant of its stage" in invariants["G3-02"]
     assert "UI text and checkboxes are never authority" in invariants["G3-03"]
     assert "never refunded, an UNKNOWN included" in invariants["G3-04"]
     assert "EXPIRED, REVOKED and EXHAUSTED are terminal" in invariants["G3-05"]
-    assert "never authorizes a blind CREATE replay" in invariants["G3-07"]
+    assert "never authorizes a blind CREATE or upload replay" in invariants["G3-07"]
     # D4: the brake is fail closed, survives restart, and never rewrites an UNKNOWN.
     assert "absent or unreadable means ENGAGED" in invariants["G3-08"]
     assert "never rewrites an UNKNOWN" in invariants["G3-09"]
@@ -457,11 +458,52 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     ):
         assert element in invariants["G3-16"], element
     drill = _section(adr, r"^7\. Backup and restore")
-    for element in ("**the REGISTER chain**", "**idempotency key**", "ADR-0014 §26"):
+    for element in (
+        "**the REGISTER chain**",
+        "**idempotency key**",
+        "ADR-0014 §26",
+        "**The ASSET restore proof**",
+        "**The CREATE restore proof**",
+        "**A pre-freeze proof is never accepted",
+        "the proof is **stale**",
+    ):
         assert element in drill, element
     assert "never discarded" in invariants["G3-17"]
     assert "no server-owned blocker is hidden" in invariants["G3-18"]
     assert "never permission to write" in invariants["G3-19"]
+    # Review 5822405880: two mutation stages, each exactly bound, proven and gated at send time.
+    for element in (
+        "ASSET_MUTATION_READY before an upload",
+        "CREATE_MUTATION_READY before a CREATE",
+        "mandatory send-time layers",
+        "eligibility, restore proof, retention and visual acceptance",
+        "never depends on a PREPARED Intent",
+    ):
+        assert element in invariants["G3-19"], element
+    for element in (
+        "preparation revision, candidate fingerprint, selected artifact set and asset profile",
+        "the Snapshot, Intent and idempotency key",
+        "no unit-less or wildcard grant exists",
+        "one stage never widens into the other",
+    ):
+        assert element in invariants["G3-21"], element
+    assert "never re-uploaded blindly" in invariants["G3-22"]
+    assert "evidence is kept while it is unresolved" in invariants["G3-22"]
+    assert "never persisted, hashed or logged" in invariants["G3-23"]
+    for element in (
+        "bound to a target state digest and stale once that state changes",
+        "taken after the freeze",
+        "which it may never record as absent",
+        "a pre-freeze proof never gates a CREATE",
+    ):
+        assert element in invariants["G3-16"], element
+    stages = _section(adr, r"^10\. Mutation-stage readiness")
+    assert "**it is a mandatory layer of the send-time" in stages
+    assert "**The ASSET stage never depends on a `PREPARED` Intent**" in stages
+    safety = _section(adr, r"^4\.3 The whole safety stack")
+    assert "the stage's mutation readiness is `READY`" in safety
+    assert "`ASSET_MUTATION_READY` before an upload" in safety
+    assert "`CREATE_MUTATION_READY` before a CREATE" in safety
     # G3-0 changes no runtime: the M0 policy still refuses LIVE, and M5 is still PENDING.
     assert M0_POLICY == "M0_DRY_RUN_ONLY"
     assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
