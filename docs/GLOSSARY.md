@@ -83,6 +83,7 @@ it. The review owner only indexes it:
 | `OPEN` / `RESOLVED` / `SUPERSEDED` | the ReviewItem lifecycle, decided by reconciliation against current owner truth; `SUPERSEDED` means the same condition moved to a new source identity |
 | `NOT_WIRED` | a review kind with no fully reconciled producer; its count is unknown, never zero |
 | current coverage | a `WIRED` kind whose full reconciliation succeeded in the current process run and has no known indexing failure unrecovered; only then is its count authoritative |
+| `CURRENT` / `NOT_CURRENT` (a review count) | whether a kind's open count is authoritative: `CURRENT` only when **every** producer that can emit the kind is wired and its coverage current, and the owner has not moved since the watermark's pass; `NOT_CURRENT` when all are wired and one is not current. Only `CURRENT` carries a count (G2-C) |
 
 ## 4. Adoption and execution words
 
