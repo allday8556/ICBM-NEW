@@ -91,8 +91,10 @@ CANONICAL_TABLES = (
     # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner and its append-only history.
     "review_items",
     "review_item_events",
+    # Gate 2 G2-B (ADR-0016 §4, §7): the review producers' coverage watermark.
+    "review_coverage",
 )
-HEAD = "0021_g2_review_items"
+HEAD = "0022_g2_review_coverage"
 
 
 def _url(path: Path) -> str:

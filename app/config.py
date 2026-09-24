@@ -103,6 +103,8 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "browser_channel": ("ICBM_BROWSER_CHANNEL", str),
     "smartstore_a0_max_age_days": ("ICBM_SMARTSTORE_A0_MAX_AGE_DAYS", int),
     "smartstore_renewal_margin_s": ("ICBM_SMARTSTORE_RENEWAL_MARGIN_S", int),
+    "review_reconcile_interval_s": ("ICBM_REVIEW_RECONCILE_INTERVAL_S", float),
+    "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
 }
 
 
@@ -135,6 +137,11 @@ class AppConfig:
     # policy that must come from configuration, never from a code default. While it is unset,
     # SmartStore CONNECT refuses before any provider call.
     smartstore_renewal_margin_s: int | None = None
+    # Gate 2 G2-B (ADR-0016 §4, §7): how often every review producer runs a full reconciliation
+    # while the process runs, and how old its last complete pass may be before its coverage stops
+    # being current. The bound is always longer than the interval and never unbounded.
+    review_reconcile_interval_s: float = 300.0
+    review_coverage_max_age_s: float = 900.0
 
     def __post_init__(self) -> None:
         if not is_loopback_host(self.host):
@@ -159,6 +166,11 @@ class AppConfig:
             raise ConfigError("job_backoff_max_s must be >= job_backoff_base_s")
         if self.job_poll_interval_s <= 0 or self.job_lease_s <= 0:
             raise ConfigError("job poll interval and lease must be > 0")
+        if not 0 < self.review_reconcile_interval_s < self.review_coverage_max_age_s < float("inf"):
+            raise ConfigError(
+                "review coverage needs 0 < review_reconcile_interval_s < "
+                "review_coverage_max_age_s, both finite (ADR-0016 §4, §7)"
+            )
         if not valid_max_age_days(self.smartstore_a0_max_age_days):
             raise ConfigError(
                 f"smartstore_a0_max_age_days must be 1..{A0_MAX_AGE_DAYS}: an override may only "

@@ -63,13 +63,25 @@ class FakeProducer:
         self._name = name
         self.current: list[ReviewCondition] = []
         self.calls = 0
+        # A well-behaved producer derives only inside the scope it is asked for.
+        self.filtering = True
 
     @property
     def name(self) -> str:
         return self._name
 
+    def scopes(self) -> Sequence[Mapping[str, str]]:
+        return list(
+            {json.dumps(dict(c.scope), sort_keys=True): c.scope for c in self.current}.values()
+        )
+
+    def truth_token(self) -> str:
+        return json.dumps(sorted(c.review_key for c in self.current))
+
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         self.calls += 1
+        if not self.filtering:
+            return list(self.current)
         return [c for c in self.current if all(c.scope.get(k) == v for k, v in scope.items())]
 
 
@@ -158,7 +170,11 @@ def snapshot(config: AppConfig) -> dict[str, int]:
 def reconcile(
     owner: ReviewItemStore, derived: Sequence[ReviewCondition], scope: Mapping[str, str] | None
 ) -> object:
-    return owner.reconcile(PRODUCER, derived, scope=scope, correlation_id="cid-reconcile")
+    """The owner now derives ``derived``; the store reconciles by deriving it itself."""
+    source = owner.producer(PRODUCER)
+    assert isinstance(source, FakeProducer)
+    source.current = list(derived)
+    return owner.reconcile(PRODUCER, scope=scope, correlation_id="cid-reconcile")
 
 
 def resolve(
@@ -186,12 +202,13 @@ def resolve(
 # ---------------------------------------------------------------- production wiring (G2-A)
 
 
-def test_production_wires_the_owner_with_no_producer_and_leaves_counts_alone(
+def test_production_wires_only_the_collect_producer_and_leaves_counts_alone(
     app: Container,
 ) -> None:
-    assert app.review_items.producers == ()
+    # G2-B wires the COLLECT / M3 producer and nothing else (ADR-0016 §6).
+    assert app.review_items.producers == ("collect.facts",)
     assert app.review_items.items() == ()
-    # G2-A changes no count: the placeholder stays until G2-C (ADR-0016 §7).
+    # No count changes before G2-C: the placeholder stays (ADR-0016 §7).
     assert ReviewService().open_counts() == dict.fromkeys(ReviewKind, 0)
 
 
@@ -256,7 +273,9 @@ def test_repeats_and_a_restart_never_multiply_open_items(
     config: AppConfig, clock: FakeClock
 ) -> None:
     with running(config, clock) as first_run:
-        owner = ReviewItemStore(first_run.db, first_run.clock, first_run.audit)
+        owner = ReviewItemStore(
+            first_run.db, first_run.clock, first_run.audit, producers=[FakeProducer()]
+        )
         first = reconcile(owner, [condition()], scope_of())
         again = reconcile(owner, [condition()], scope_of())
         full = reconcile(owner, [condition()], None)
@@ -264,8 +283,10 @@ def test_repeats_and_a_restart_never_multiply_open_items(
     assert first.opened == (item.review_item_id,)  # type: ignore[attr-defined]
     assert again.unchanged == full.unchanged == (item.review_item_id,)  # type: ignore[attr-defined]
     with running(config, clock) as restarted:
-        after = ReviewItemStore(restarted.db, restarted.clock, restarted.audit)
-        after.reconcile(PRODUCER, [condition()], scope=None, correlation_id="cid-restart")
+        after = ReviewItemStore(
+            restarted.db, restarted.clock, restarted.audit, producers=[FakeProducer()]
+        )
+        reconcile(after, [condition()], None)
         assert after.items() == (item,)
         assert [e.event for e in after.history(item.review_item_id)] == [ReviewEvent.OPENED]
     assert [r["event_type"] for r in review_audit(config)] == ["REVIEW_ITEM_OPENED"]
@@ -331,22 +352,26 @@ def test_a_reappearing_review_key_reopens_its_own_row(owner: ReviewItemStore) ->
 
 
 def test_a_scoped_reconciliation_touches_only_its_scope(
-    config: AppConfig, owner: ReviewItemStore
+    config: AppConfig, owner: ReviewItemStore, producer: FakeProducer
 ) -> None:
     reconcile(owner, [condition("p-1"), condition("p-2")], None)
-    reconcile(owner, [], scope_of("p-1"))
+    producer.current = [condition("p-2")]
+    owner.reconcile(PRODUCER, scope=scope_of("p-1"), correlation_id="cid-scope")
     states = {i.scope["source_product_id"]: i.state for i in owner.items()}
     assert states == {"p-1": ReviewState.RESOLVED, "p-2": ReviewState.OPEN}
     assert [i.scope["source_product_id"] for i in owner.items(scope=scope_of("p-2"))] == ["p-2"]
     before = snapshot(config)
+    # A producer that answers outside the scope it was asked for is refused, not trusted.
+    producer.filtering = False
     with pytest.raises(InputValidationError):
-        reconcile(owner, [condition("p-2")], scope_of("p-1"))  # outside the reconciled scope
+        reconcile(owner, [condition("p-2")], scope_of("p-1"))
+    producer.filtering = True
     with pytest.raises(InputValidationError):
-        owner.reconcile(
-            PRODUCER, [condition(producer="test.other")], scope=None, correlation_id="c"
-        )
+        reconcile(owner, [condition(producer="test.other")], None)
     with pytest.raises(InputValidationError, match="two source identities"):
         reconcile(owner, [condition(source="rev-1"), condition(source="rev-2")], scope_of())
+    with pytest.raises(ReviewConflictError, match="no producer"):
+        owner.reconcile("test.unwired", scope=None, correlation_id="c")
     assert snapshot(config) == before
 
 
@@ -372,7 +397,8 @@ def test_a_resolution_while_the_owner_still_derives_leaves_the_item_open(
         "재수집을 요청했습니다",
     )
     assert len(owner.items(state=ReviewState.OPEN)) == 1
-    assert producer.calls == 1
+    # One derivation to open the item, and one inside the resolution's own locked unit.
+    assert producer.calls == 2
 
 
 def test_a_resolution_after_the_owner_changed_closes_it_as_the_human(
@@ -628,7 +654,8 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0020_g1_registration_category_metadata")
-    assert before - _tables(tmp_path / "icbm.db") == set(REVIEW_TABLES)
+    # 0021 owns these two; the coverage table 0022 adds steps down with it.
+    assert before - _tables(tmp_path / "icbm.db") == {*REVIEW_TABLES, "review_coverage"}
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     item = condition()

@@ -460,7 +460,7 @@ TARGET_POLICY_TABLES = (
     "registration_category_metadata_current",
 )
 # Gate 2 G2-A (migration 0021, ADR-0016): the ReviewItem owner, after the registration tables.
-REVIEW_TABLES = ("review_items", "review_item_events")
+REVIEW_TABLES = ("review_items", "review_item_events", "review_coverage")
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
     "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"

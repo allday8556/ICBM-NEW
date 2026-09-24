@@ -310,6 +310,33 @@ const HANDOFF_COPY = {
   NOT_YET_VISIBLE: '원천 리비전은 기록됐지만 통합DB 상품에는 아직 반영되지 않았습니다.',
   CURRENT_REVISION_DIFFERS: '통합DB 상품이 이 수집이 아닌 다른 원천 리비전을 현재로 가리키고 있습니다.',
 };
+// Gate 2 G2-B (ADR-0016): the ReviewItems of the run's source product, as the server holds them.
+// The page renders server states and the server's coverage verdict; it counts nothing and decides
+// nothing. A resolution names the scope and generation it was shown, and the server decides whether
+// the item closes: it stays open while the source still states the condition.
+const REVIEW = '/api/v1/review/items';
+const OPERATOR = 'operator';
+const REVIEW_KIND = { COLLECT_EVIDENCE: '원천 증거', STOCK: '재고' };
+const REVIEW_STATE = {
+  OPEN: ['검토 필요', 'warn'],
+  RESOLVED: ['해결됨', 'good'],
+  SUPERSEDED: ['새 리비전으로 대체', 'info'],
+};
+const REVIEW_OUTCOME = {
+  RESOLVED: '원천이 더 이상 확인 필요 상태가 아니어서 항목이 해결되었습니다.',
+  CONDITION_PERSISTS: '원천이 아직 확인 필요 상태라 항목은 열린 채로 남습니다. 해결 기록은 남았습니다.',
+  SUPERSEDED: '원천이 새 리비전으로 바뀌어 새 검토 항목이 열렸습니다.',
+};
+const DISPOSITION_LABEL = {
+  OWNER_ACTION_TAKEN: '원천에서 조치함',
+  FOLLOW_UP_REQUIRED: '후속 조치 필요',
+  NO_ACTION_TAKEN: '조치하지 않음',
+};
+const COVERAGE_COPY = {
+  REVIEW_COVERAGE_NO_PASS_THIS_RUN: '검토 목록의 전체 대조가 아직 끝나지 않았습니다.',
+  REVIEW_COVERAGE_STALE: '검토 목록의 마지막 전체 대조가 오래되었습니다.',
+  REVIEW_INDEX_FAILURE_UNRECOVERED: '검토 목록 색인에 실패한 뒤 아직 복구되지 않았습니다.',
+};
 const SUBMIT_HELP =
   '상품 상세 URL 하나만 받습니다. 목록·카테고리 수집은 하지 않으며, 요청은 서버가 URL과 같은 상품 재수집 간격을 확인한 뒤 수집 작업 하나로 접수합니다.';
 const RUNS_HELP =
@@ -459,6 +486,8 @@ function jobsView(view, ctx) {
   );
   let polls = 0;
   let timer = null;
+  // The newest review render owns the block: a slower, older response never replaces it.
+  let reviewSeq = 0;
 
   function runRow(run) {
     return h(
@@ -504,6 +533,102 @@ function jobsView(view, ctx) {
       HANDOFF_COPY[handoff.state] ? h('div', { class: 'note', 'data-reason': handoff.state }, HANDOFF_COPY[handoff.state]) : null,
       h('div', { class: 'supplier-actions' }, open, again),
     ));
+    holder.source = { supplier_key: handoff.supplier_key, source_product_id: handoff.source_product_id };
+    return holder;
+  }
+
+  function reviewRow(item, onResolved) {
+    const [label, tone] = REVIEW_STATE[item.state] ?? [item.state, null];
+    const row = h(
+      'div',
+      { class: 'collect-review-item', 'data-review-item': item.review_item_id, 'data-state': item.state, 'data-generation': String(item.generation) },
+      h(
+        'div',
+        { class: 'supplier-head-row' },
+        h('b', {}, REVIEW_KIND[item.kind] ?? item.kind),
+        h('span', { class: 'mono', 'data-role': 'review-subject' }, item.subject),
+        h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-review-state': item.state }, label),
+      ),
+      h('div', { class: 'mini', 'data-reason': item.reason_code }, item.reason_code),
+    );
+    if (item.state !== 'OPEN') return row;
+    const disposition = h(
+      'select',
+      { name: 'disposition', 'data-role': 'review-disposition' },
+      ...Object.entries(DISPOSITION_LABEL).map(([value, text]) => h('option', { value }, text)),
+    );
+    const note = h('input', { type: 'text', name: 'note', maxlength: '500', placeholder: '메모 (선택)', 'data-role': 'review-note' });
+    const button = h('button', { type: 'submit', class: 'btn', 'data-action': 'resolve-review' }, '해결 기록');
+    const answer = h('div', { 'data-role': 'review-answer' });
+    let inFlight = false;
+    const form = h('form', { class: 'supplier-actions', novalidate: true }, disposition, note, button);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      // One resolution per click: a second click while the first is on the wire does nothing.
+      if (inFlight) return;
+      inFlight = true;
+      button.disabled = true;
+      answer.replaceChildren();
+      try {
+        const resolved = await sendJson('POST', `${REVIEW}/${encodeURIComponent(item.review_item_id)}/resolve`, {
+          expected_scope: item.scope,
+          expected_generation: item.generation,
+          disposition: disposition.value,
+          note: note.value.trim() || null,
+          actor: OPERATOR,
+        });
+        // The server's answer is shown on the redrawn block, which reads the item back.
+        onResolved(resolved.outcome);
+      } catch (error) {
+        const code = error?.error?.code ?? null;
+        answer.replaceChildren(h('div', { class: 'note', 'data-reason': code ?? '' }, codeCopy(code, error?.error?.message)));
+        inFlight = false;
+        button.disabled = false;
+      }
+    });
+    row.append(form, answer);
+    return row;
+  }
+
+  async function reviewBlock(source, lastOutcome = null) {
+    const seq = ++reviewSeq;
+    const holder = h('div', { class: 'collect-review', 'data-role': 'review-items' });
+    let listed;
+    try {
+      const query = new URLSearchParams({ supplier_key: source.supplier_key, source_product_id: source.source_product_id });
+      listed = await getJson(`${REVIEW}?${query}`);
+    } catch (error) {
+      const code = error?.error?.code ?? null;
+      holder.append(h('div', { class: 'note', 'data-reason': code ?? '' }, codeCopy(code, error?.error?.message)));
+      return holder;
+    }
+    if (seq !== reviewSeq) return null; // a newer render owns the block now
+    const stale = listed.coverage.filter((c) => !c.current);
+    holder.dataset.coverage = stale.length ? 'NOT_CURRENT' : 'CURRENT';
+    const open = listed.items.filter((item) => item.state === 'OPEN');
+    const rest = listed.items.filter((item) => item.state !== 'OPEN');
+    const redraw = async (outcome) => {
+      const next = await reviewBlock(source, outcome);
+      if (next && holder.isConnected) holder.replaceWith(next);
+    };
+    holder.append(fragment(
+      h('div', { class: 'supplier-head-row' }, h('b', {}, '검토 항목')),
+      lastOutcome
+        ? h('div', { class: 'note', 'data-role': 'review-outcome', 'data-outcome': lastOutcome }, REVIEW_OUTCOME[lastOutcome] ?? lastOutcome)
+        : null,
+      ...stale.map((c) => h('div', { class: 'note', 'data-coverage': c.producer, 'data-reason': c.reason ?? '' }, COVERAGE_COPY[c.reason] ?? c.reason)),
+      open.length || rest.length
+        ? null
+        : h(
+            'div',
+            { class: 'note', 'data-role': 'review-empty' },
+            stale.length
+              ? '검토 목록이 최신이 아니어서, 비어 있어도 검토할 것이 없다는 뜻은 아닙니다.'
+              : '이 원천 상품에 기록된 검토 항목이 없습니다.',
+          ),
+      ...open.map((item) => reviewRow(item, redraw)),
+      ...rest.map((item) => reviewRow(item, redraw)),
+    ));
     return holder;
   }
 
@@ -527,6 +652,7 @@ function jobsView(view, ctx) {
       }
     }
     const handoff = run.outcome === 'RECORDED' ? await handoffBlock(run) : null;
+    const review = handoff?.source ? await reviewBlock(handoff.source) : null;
     if (!root.isConnected && polls > 0) return false; // the operator left; nothing to render into
     focus.dataset.run = run.collection_run_id;
     focus.dataset.outcome = run.outcome;
@@ -554,6 +680,7 @@ function jobsView(view, ctx) {
         ? h('div', { class: 'kv' }, h('span', {}, run.outcome === 'FAILED' ? '실패 사유' : '사유'), h('b', { 'data-role': 'run-detail' }, run.detail ?? '—'))
         : null,
       handoff,
+      review,
     ));
     return run.outcome === 'PENDING';
   }

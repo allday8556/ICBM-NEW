@@ -1,6 +1,7 @@
 """Explicit composition root: every service is built here and nowhere else."""
 
 import os
+import uuid
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -75,7 +76,10 @@ from app.register.target_policy import (
     TargetPolicyStore,
     editable_surfaces,
 )
+from app.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
+from app.review.coverage import ReviewCoverageStore
 from app.review.owner import ReviewItemStore
+from app.review.reconciler import ReviewReconciler
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
 from app.system.diagnostics import DiagnosticsService
@@ -142,6 +146,7 @@ class Container:
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
     review_items: ReviewItemStore
+    review_reconciler: ReviewReconciler
     ownership: DataDirLease
 
 
@@ -268,13 +273,40 @@ def build_container(
     # materialized after a run is RECORDED, or by an explicit call; never by a startup sweep.
     product_store = ProductFoundationStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
+    # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with the COLLECT / M3 producer
+    # (G2-B). Each process run has its own identity: coverage is current only after a complete
+    # full pass in this run (§7). The owner reads COLLECT; COLLECT never reads it.
+    review_items = ReviewItemStore(db, clock, audit, producers=[CollectReviewProducer(revisions)])
+    review_reconciler = ReviewReconciler(
+        review_items,
+        ReviewCoverageStore(db, clock, audit),
+        clock,
+        process_run_id=str(uuid.uuid4()),
+        interval_s=config.review_reconcile_interval_s,
+        max_age_s=config.review_coverage_max_age_s,
+    )
+    runs = CollectionRunStore(db, clock)
+
+    def after_recorded(collection_run_id: str) -> None:
+        """What follows a durably RECORDED run: the Product, then the review fast path. The review
+        step never raises into the run; a failure there is a recorded known failure (§4)."""
+        try:
+            materializer.materialize_run(collection_run_id)
+        finally:
+            run = runs.get(collection_run_id)
+            if run is not None and run.source_product_id is not None:
+                review_reconciler.index_scope(
+                    COLLECT_PRODUCER,
+                    {"supplier_key": run.supplier_key, "source_product_id": run.source_product_id},
+                )
+
     # One operator-submitted product at a time, as a durable collect.* job. The transport is
     # deferred: composing the application opens no connection, and under CI it cannot.
     collection = ProductCollectionService(
         db=db,
         clock=clock,
         jobs=jobs,
-        runs=CollectionRunStore(db, clock),
+        runs=runs,
         revisions=revisions,
         recorder=source_asset_recorder,
         sessions=collection_sessions or connect,
@@ -282,7 +314,7 @@ def build_container(
         collections=(
             tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
         ),
-        after_recorded=materializer.materialize_run,
+        after_recorded=after_recorded,
     )
     registry.register(collection.job_definition())
 
@@ -440,9 +472,8 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
-        # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner. No producer is wired yet, so it
-        # holds nothing in production until a producer slice (G2-B, G2-C) is authorized.
-        review_items=ReviewItemStore(db, clock, audit),
+        review_items=review_items,
+        review_reconciler=review_reconciler,
         ownership=ownership,
     )
 

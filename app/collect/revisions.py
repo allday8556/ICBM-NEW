@@ -39,6 +39,8 @@ from app.collect.facts import (
     value_from_json,
 )
 from app.collect.models import (
+    CollectionOutcome,
+    CollectionRun,
     ProductFactsEvidence,
     ProductFactsField,
     ProductFactsImageRef,
@@ -241,6 +243,69 @@ class ProductFactsRevisionStore:
                 .where(
                     ProductFactsRevision.supplier_key == supplier_key,
                     ProductFactsRevision.source_product_id == source_product_id,
+                )
+                .order_by(ProductFactsRevision.sequence.desc())
+                .limit(1)
+            ).first()
+            return None if row is None else self._load(session, row)
+
+    def recorded_sources(self) -> tuple[tuple[str, str], ...]:
+        """Every ``(supplier_key, source_product_id)`` with a revision a RECORDED run names, in
+        order. A read for the review owner's full pass (ADR-0016 §4); it copies no fact."""
+        with self._db.read() as session:
+            rows = session.execute(
+                select(ProductFactsRevision.supplier_key, ProductFactsRevision.source_product_id)
+                .join(CollectionRun, CollectionRun.revision_id == ProductFactsRevision.revision_id)
+                .where(CollectionRun.outcome == CollectionOutcome.RECORDED.value)
+                .distinct()
+                .order_by(ProductFactsRevision.supplier_key, ProductFactsRevision.source_product_id)
+            ).all()
+            return tuple((row[0], row[1]) for row in rows)
+
+    def current_recorded_identities(self) -> tuple[tuple[str, str, str], ...]:
+        """Every source identity with its current revision id, in order, in one read: the newest
+        revision, by sequence, that a RECORDED run names. What the review owner's full pass
+        fences on (review 5807902325 B3); it copies no fact."""
+        with self._db.read() as session:
+            newest = (
+                select(
+                    ProductFactsRevision.supplier_key.label("supplier_key"),
+                    ProductFactsRevision.source_product_id.label("source_product_id"),
+                    func.max(ProductFactsRevision.sequence).label("sequence"),
+                )
+                .join(CollectionRun, CollectionRun.revision_id == ProductFactsRevision.revision_id)
+                .where(CollectionRun.outcome == CollectionOutcome.RECORDED.value)
+                .group_by(ProductFactsRevision.supplier_key, ProductFactsRevision.source_product_id)
+                .subquery()
+            )
+            rows = session.execute(
+                select(
+                    ProductFactsRevision.supplier_key,
+                    ProductFactsRevision.source_product_id,
+                    ProductFactsRevision.revision_id,
+                )
+                .join(
+                    newest,
+                    (ProductFactsRevision.supplier_key == newest.c.supplier_key)
+                    & (ProductFactsRevision.source_product_id == newest.c.source_product_id)
+                    & (ProductFactsRevision.sequence == newest.c.sequence),
+                )
+                .order_by(ProductFactsRevision.supplier_key, ProductFactsRevision.source_product_id)
+            ).all()
+            return tuple((row[0], row[1], row[2]) for row in rows)
+
+    def current_recorded(self, supplier_key: str, source_product_id: str) -> StoredRevision | None:
+        """The source identity's current revision: the newest, by sequence, that a RECORDED run
+        names — the same rule the M4 materializer follows. A revision whose run has not settled
+        RECORDED is not current yet."""
+        with self._db.read() as session:
+            row = session.scalars(
+                select(ProductFactsRevision)
+                .join(CollectionRun, CollectionRun.revision_id == ProductFactsRevision.revision_id)
+                .where(
+                    ProductFactsRevision.supplier_key == supplier_key,
+                    ProductFactsRevision.source_product_id == source_product_id,
+                    CollectionRun.outcome == CollectionOutcome.RECORDED.value,
                 )
                 .order_by(ProductFactsRevision.sequence.desc())
                 .limit(1)

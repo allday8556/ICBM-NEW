@@ -88,6 +88,10 @@ class AuditEventType(StrEnum):
     REVIEW_ITEM_SUPERSEDED = "REVIEW_ITEM_SUPERSEDED"
     REVIEW_ITEM_RESOLVED = "REVIEW_ITEM_RESOLVED"
     REVIEW_ITEM_RESOLUTION_RECORDED = "REVIEW_ITEM_RESOLUTION_RECORDED"
+    # Gate 2 G2-B (ADR-0016 §4, §7): a producer's known indexing failure, and its recovery by a
+    # later complete full pass. Producer name and our own failure code only.
+    REVIEW_COVERAGE_FAILURE_RECORDED = "REVIEW_COVERAGE_FAILURE_RECORDED"
+    REVIEW_COVERAGE_RECOVERED = "REVIEW_COVERAGE_RECOVERED"
 
 
 class AuditOutcome(StrEnum):

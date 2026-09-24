@@ -125,8 +125,8 @@ M5_HEAD = "0020_g1_registration_category_metadata"
 M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_POLICY, M5_HEAD)
 # Gate 2 G2-A (ADR-0016) adds the ReviewItem owner after the M5 head. It is not registration
 # state, so the registration guards below still apply to it unchanged. Nothing else follows.
-SCHEMA_HEAD = "0021_g2_review_items"
-AFTER_M5 = (SCHEMA_HEAD,)
+SCHEMA_HEAD = "0022_g2_review_coverage"
+AFTER_M5 = ("0021_g2_review_items", SCHEMA_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
@@ -219,6 +219,7 @@ def test_the_migration_detector_fires() -> None:
         "0019_m5_registration_more.py",
         "0020_g1_registration_category_metadata.py",
         "0021_g2_review_items.py",
+        "0022_g2_review_coverage.py",
         "0021_anything.py",
         "0022_anything.py",
         "0021_g2_registration_more.py",

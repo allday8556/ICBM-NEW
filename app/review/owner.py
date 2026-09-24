@@ -1,9 +1,15 @@
 """The durable ReviewItem owner (Gate 2 G2-A, ADR-0016 §2–§5, §8, §9).
 
 It is the only production writer of ``review_items`` and ``review_item_events``. It owns the
-review lifecycle and nothing else. It reads no owner truth itself: a producer derives conditions
-from its owner and hands them in, and no owner ever reads this module (G2-02). G2-A wires no
-producer, so production holds none.
+review lifecycle and nothing else. It reads no owner truth itself: a registered producer derives
+conditions from its owner, and no owner ever reads this module (G2-02).
+
+**Derive and apply are one locked unit** (reviews ``5806206452``, ``5806614407``). Both a
+reconciliation and a human resolution take the application write coordinator first, then let the
+producer derive, then apply, and only then commit — so no owner write of this process can land
+between what was derived and what is applied. A producer's derivation is read-only; one that tries
+to write is refused by the coordinator (``DATABASE_WRITE_REENTRANT``), never left to hang, and the
+whole unit rolls back.
 
 **Reconciliation alone decides the state** (§4). Given the conditions a producer derives now
 within a scope, one unit of work:
@@ -75,14 +81,26 @@ _AUDIT_TYPE: Final = {
 
 
 class ReviewProducer(Protocol):
-    """One owner derivation that opens review work (§6). G2-A implements none."""
+    """One owner derivation that opens review work (§6)."""
 
     @property
     def name(self) -> str: ...
 
+    def scopes(self) -> Sequence[Mapping[str, str]]:
+        """Every canonical scope the owner holds truth for now: what a full pass visits. It
+        writes nothing."""
+        ...
+
+    def truth_token(self) -> str:
+        """A deterministic token of all the owner truth the producer derives from, including each
+        scope's current source identity. Equal at a full pass's start and at its watermark, it
+        proves the owner did not move during the pass (review 5807902325 B3). It writes nothing."""
+        ...
+
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         """Every condition the owner derives **now** among items whose scope includes ``scope``,
-        read from the owner's own truth. It writes nothing."""
+        read from the owner's own truth. It writes nothing: it runs under the write
+        coordinator, and a write attempt is refused as ``DATABASE_WRITE_REENTRANT``."""
         ...
 
 
@@ -169,8 +187,26 @@ class ReviewItemStore:
 
     @property
     def producers(self) -> tuple[str, ...]:
-        """The producers wired to this owner. Production wires none in G2-A."""
+        """The producers wired to this owner."""
         return tuple(sorted(self._producers))
+
+    def producer(self, name: str) -> ReviewProducer:
+        found = self._producers.get(name)
+        if found is None:
+            raise ReviewConflictError(
+                REVIEW_PRODUCER_NOT_WIRED,
+                "no producer of that name is wired to the review owner",
+                details={"producer": name},
+            )
+        return found
+
+    def scopes(self, producer: str) -> tuple[dict[str, str], ...]:
+        """Every distinct scope the producer's items hold, whatever their state."""
+        with self._db.read() as session:
+            raw = session.scalars(
+                select(ReviewItem.scope_json).where(ReviewItem.producer == producer).distinct()
+            ).all()
+        return tuple(json.loads(value) for value in sorted(raw))
 
     # -------------------------------------------------------------- reads
 
@@ -225,19 +261,22 @@ class ReviewItemStore:
     def reconcile(
         self,
         producer: str,
-        derived: Iterable[ReviewCondition],
         *,
         scope: Mapping[str, str] | None,
         correlation_id: str,
     ) -> ReconcileResult:
         """Make the producer's items within ``scope`` match what its owner derives now.
 
-        ``scope=None`` is a full pass over every item of the producer. Idempotent: the same
-        derivation again changes nothing, whatever reload, restart or retry came in between.
+        The producer derives **inside** the write unit that applies it, so what is applied is
+        what the owner holds at commit (reviews 5806206452, 5806614407). ``scope=None`` covers
+        every item of the producer in one unit. Idempotent: the same owner truth again changes
+        nothing, whatever reload, restart or retry came in between.
         """
         wanted = None if scope is None else canonical_scope(scope)
-        conditions = _validated(producer, wanted, derived)
         with self._db.write() as session:
+            source = self.producer(producer)
+            derived = source.derive({} if wanted is None else wanted)
+            conditions = _validated(producer, wanted, derived)
             return self._apply(session, producer, wanted, conditions, correlation_id, None)
 
     # -------------------------------------------------------------- human resolution (§5)
