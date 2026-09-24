@@ -428,7 +428,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0018" in _read(canonical), canonical.name
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 24)]
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 28)]
     # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
     assert "refused before any transmission" in invariants["G3-02"]
     assert "grant of its stage" in invariants["G3-02"]
@@ -440,7 +440,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "absent or unreadable means ENGAGED" in invariants["G3-08"]
     assert "never rewrites an UNKNOWN" in invariants["G3-09"]
     assert "never resurrects" in invariants["G3-10"]
-    assert "execution-scope brake is unchanged and not weakened" in invariants["G3-11"]
+    assert "brake stays CREATE-only, unchanged and not weakened" in invariants["G3-11"]
     # D2 and D3: no ComplianceGate, eligibility is never a PASS, and the evidence blocker holds.
     assert "implements no ComplianceGate" in invariants["G3-12"]
     assert "never a COMPLIANCE PASS" in invariants["G3-13"]
@@ -461,7 +461,8 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     for element in (
         "**the REGISTER chain**",
         "**idempotency key**",
-        "ADR-0014 §26",
+        "the REGISTER **execution-scope brake** state (ADR-0014 §26) for the CREATE endpoint group",
+        "**no ADR-0014 §26 scope row is part of\n  an ASSET proof**",
         "**The ASSET restore proof**",
         "**The CREATE restore proof**",
         "**A pre-freeze proof is never accepted",
@@ -490,6 +491,31 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "never re-uploaded blindly" in invariants["G3-22"]
     assert "evidence is kept while it is unresolved" in invariants["G3-22"]
     assert "never persisted, hashed or logged" in invariants["G3-23"]
+    # Review 5823321537: a durable ASSET upload-attempt owner is a prerequisite of any upload.
+    for key, element in (
+        ("G3-24", "recorded the attempt as started in the same atomic unit that consumes"),
+        (
+            "G3-24",
+            "terminalized exactly once as APPLIED_PROVEN, NOT_APPLIED_PROVEN or UPLOAD_UNKNOWN",
+        ),
+        ("G3-25", "not terminal after a crash or restart is UPLOAD_UNKNOWN"),
+        ("G3-25", "never proof that no unresolved upload exists"),
+        ("G3-25", "only APPLIED_PROVEN yields a known provider asset identity"),
+        ("G3-26", "ASSET_MUTATION_READY requires that durable owner"),
+        ("G3-26", "no started or UPLOAD_UNKNOWN attempt for the exact artifact"),
+        ("G3-26", "never depends on an ADR-0014 §26 scope row"),
+        ("G3-27", "needs a new CREATE grant and a fresh restore proof"),
+        ("G3-16", "never an ADR-0014 §26 row"),
+    ):
+        assert element in invariants[key], (key, element)
+    owner = _section(adr, r"^3\.4 The durable ASSET upload-attempt owner")
+    for element in (
+        "**Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` at this main.**",
+        "If that commit fails, **nothing is transmitted**.",
+        "**No record is not proof.**",
+        "A restart never erases this fence.",
+    ):
+        assert element in owner, element
     for element in (
         "bound to a target state digest and stale once that state changes",
         "taken after the freeze",
@@ -500,8 +526,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     stages = _section(adr, r"^10\. Mutation-stage readiness")
     assert "**it is a mandatory layer of the send-time" in stages
     assert "**The ASSET stage never depends on a `PREPARED` Intent**" in stages
+    assert "**`ASSET_MUTATION_READY` is `BLOCKED` at this main**" in stages
+    assert "proven from that owner and never from row absence" in stages
     safety = _section(adr, r"^4\.3 The whole safety stack")
     assert "the stage's mutation readiness is `READY`" in safety
+    assert "**for the CREATE stage only**" in safety
+    assert "**The ASSET stage has no §26\n   scope owner" in safety
     assert "`ASSET_MUTATION_READY` before an upload" in safety
     assert "`CREATE_MUTATION_READY` before a CREATE" in safety
     # G3-0 changes no runtime: the M0 policy still refuses LIVE, and M5 is still PENDING.

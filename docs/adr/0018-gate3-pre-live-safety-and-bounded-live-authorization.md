@@ -8,7 +8,9 @@ of Gate 3 (Issue #89), on exact main `267d6a9eb20788819a8863f59a9c8f8e47700870` 
   rule is defined here and is open to the exact-head audit.
 - Amended before merge by the reviews `5821787401` (the restore drill proves the REGISTER chain)
   and `5822405880` (the canary has two mutation stages, ASSET and CREATE, each with its own
-  grant binding, restore proof and send-time readiness — §3.1, §7, §10).
+  grant binding, restore proof and send-time readiness — §3.1, §7, §10), and `5823321537` (a durable
+  ASSET upload-attempt owner is a prerequisite of any upload; the ADR-0014 §26 scope brake stays
+  CREATE-only — §3.4, §4.3, §7, §10).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§12).
 
@@ -152,7 +154,12 @@ Snapshot is superseded or its Intent leaves `PREPARED` other than through its ow
   conflict scope closed, and no grant, budget or approval turns it into `FAILED` or
   `NOT_APPLIED_PROVEN`. An `UPLOAD_UNKNOWN` (ADR-0014 §17.1, distinct from the Intent `UNKNOWN`)
   is never retried automatically, is never treated as a known provider asset identity, and is
-  never re-uploaded blindly; its evidence is kept while it is unresolved (§8).
+  never re-uploaded blindly; its evidence is kept while it is unresolved (§8), in the durable
+  ASSET upload-attempt owner (§3.4).
+- **A grant and a restore proof authorize only the state they were issued for.** After a CREATE
+  attempt proven `NOT_APPLIED_PROVEN`, any retry ADR-0014 permits for the same durable Intent and
+  idempotency key needs a **new CREATE grant and a fresh restore proof and readiness**; an
+  `UNKNOWN` still forbids any resend.
 - **UI text and checkboxes are never authority.** Only the server-owned grant is. A confirmation
   typed in the UI is an input to the protected action that creates the grant, never the grant.
   **Raw confirmation prose an operator enters is never persisted, hashed or logged**: the durable
@@ -160,6 +167,41 @@ Snapshot is superseded or its Intent leaves `PREPARED` other than through its ow
   reference.
 - **Every grant transition is audited** in the same unit of work: created, activated, consumed
   (per attempt), expired, revoked, exhausted — with actor, time and correlation identity.
+
+#### 3.4 The durable ASSET upload-attempt owner — a prerequisite of any upload
+
+ADR-0014 §17.1 describes the **current, provider-zero `DRY_RUN` state**: the bounded image upload is
+adopted with **no durable upload owner, cache or ledger**, and a possibly transmitted failure is
+`UPLOAD_UNKNOWN`. A `PreparedAsset` is only an input to the final preflight, and a
+`RegistrationAttempt` belongs to an Intent that does not exist before the freeze. So today **nothing
+durably records that an upload may already have been transmitted**, and every fence of the ASSET
+stage — no blind re-upload, no unresolved `UPLOAD_UNKNOWN`, retained upload evidence — would rest on
+the absence of a record. **Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` at this main.**
+
+A later, separately authorized slice (§12) must create **one server-owned, durable ASSET
+upload-attempt owner** before `ASSET_MUTATION_READY` can ever be `READY`; if it needs ADR-0014 to be
+amended, it amends it then. This ADR freezes its semantics now; its tables and columns are that
+slice's:
+- **Identity.** One durable attempt identity is bound to the exact ASSET grant, the marketplace and
+  canonical account, the exact preparation revision, the candidate fingerprint, the exact artifact
+  key (kind, SHA-256, derivation identity), the asset profile, the upload endpoint group, and an
+  attempt number and correlation identity.
+- **Start before transmission, atomically with the budget.** Before any provider transmission, the
+  attempt is durably recorded as **started in the same atomic unit of work that consumes the ASSET
+  grant's budget**. If that commit fails, **nothing is transmitted**.
+- **Terminal exactly once.** After the provider call, the attempt is terminalized once, as
+  `APPLIED_PROVEN`, `NOT_APPLIED_PROVEN` or **`UPLOAD_UNKNOWN`**, with its sanitized evidence (§8).
+- **Crash and restart fail closed.** A started attempt that is not terminal after a crash or
+  restart is treated as unresolved — `UPLOAD_UNKNOWN` — unless admissible evidence proves that
+  transmission was precluded. A restart never erases this fence.
+- **Only `APPLIED_PROVEN` yields a known provider asset.** It is the only attempt state from which a
+  known `PreparedAsset.provider_asset_ref` may come; nothing else — an `UPLOAD_UNKNOWN`, a started
+  attempt, an operator entry — may supply one.
+- **No record is not proof.** Missing, unreadable or stale upload-attempt truth is never proof that
+  no unresolved upload exists; it keeps the ASSET stage `BLOCKED`.
+- **Replay fence.** A started or `UPLOAD_UNKNOWN` attempt for the exact artifact, candidate and
+  profile blocks any new upload of it until separately admissible reconciliation or reuse evidence
+  resolves it (ADR-0014 §5).
 
 ### 4. The protected-write brake — the kill switch (D4)
 
@@ -193,13 +235,18 @@ same unit of work that starts the attempt:
 2. the protected-write brake is `RELEASED` (§4.1);
 3. an `ACTIVE` grant **of the mutation's stage** matches its exact unit, with budget left (§3);
 4. the stage's mutation readiness is `READY` — `ASSET_MUTATION_READY` before an upload,
-   `CREATE_MUTATION_READY` before a CREATE (§10) — which enforces §5, §7, §8 and §9 for that stage;
+   `CREATE_MUTATION_READY` before a CREATE (§10) — which enforces §5, §7, §8 and §9 for that stage,
+   and for the ASSET stage the durable upload-attempt owner (§3.4);
 5. the endpoint group is adopted, and the capability and write scope allow it (unchanged owners);
-6. the REGISTER execution-scope send brake for that scope is `ACTIVE` (ADR-0014 §26 — **unchanged
-   and not weakened**; the two brakes are independent, and releasing either releases nothing of the
-   other);
-7. the stage's own send-time gate passes — the candidate preflight for an upload, the final
-   preflight and the ADR-0014 §3 send-time gate for a CREATE — with no unresolved conflict.
+6. **for the CREATE stage only**, the REGISTER execution-scope send brake for that scope is
+   `ACTIVE` (ADR-0014 §26 — **CREATE-only, unchanged and not weakened**; the two brakes are
+   independent, and releasing either releases nothing of the other). **The ASSET stage has no §26
+   scope owner and does not pretend one exists**: it is bounded by the global brake, its exact
+   grant and finite budget, the durable upload-attempt owner (§3.4) and `ASSET_MUTATION_READY`; an
+   ASSET failure-budget brake, if one is wanted, needs its own authorization;
+7. for an upload, the attempt is durably started together with its budget consumption (§3.4)
+   and the candidate preflight passes; for a CREATE, the final preflight and the ADR-0014 §3
+   send-time gate pass — in each case with no unresolved conflict.
 
 Any failing layer refuses the mutation before transmission. No layer re-decides another's truth.
 
@@ -258,8 +305,10 @@ taken for that exact target and state; one stage's proof never gates the other.
   fingerprint the ASSET grant binds;
 - the exact selected artifact set (kind, SHA-256, derivation identity) with its QA, and the asset
   profile;
-- the REGISTER **execution-scope brake** state (ADR-0014 §26) for the upload endpoint group — its
-  state, pause cause and resume generation, or its proven absence, which is an `ACTIVE` scope;
+- **the durable upload-attempt and replay state** for that exact target (§3.4): every attempt
+  for the exact artifact, candidate and profile, with its state — or the owner's own readable
+  record that none exists, never the mere absence of rows; **no ADR-0014 §26 scope row is part of
+  an ASSET proof**;
 - recorded as absent, because they cannot exist yet: the `RegistrationSnapshot`, the
   `RegistrationIntent`, its Attempts and any registration.
 
@@ -272,7 +321,7 @@ proves the exact post-freeze chain:
     preflight fingerprint and item snapshots;
   - its `RegistrationIntent` in `PREPARED` — the intent identity, the **idempotency key**, and its
     state, remote outcome and verification state;
-  - the REGISTER **execution-scope brake** state for the CREATE endpoint group;
+  - the REGISTER **execution-scope brake** state (ADR-0014 §26) for the CREATE endpoint group;
   - when they exist: an unresolved conflict scope and a duplicate override;
 - **the Snapshot and the Intent may never be recorded as absent** in a CREATE restore proof: a
   proof without them does not gate a CREATE. Only what cannot yet exist before the CREATE — its
@@ -280,10 +329,11 @@ proves the exact post-freeze chain:
   as a CREATE restore proof.**
 
 **Freshness.** Each proof records a **target state digest** over exactly what it proved for its
-stage: the preparation revision, candidate fingerprint, artifact set, asset profile and scope state
-for ASSET; the Snapshot, the Intent's identity and state, the idempotency key and the scope state
-for CREATE. A proof gates a mutation **only while that digest equals the current state**: if the
-bound candidate, preparation, artifact set, Snapshot, Intent state or relevant scope state changes,
+stage: the preparation revision, candidate fingerprint, artifact set, asset profile and the
+upload-attempt state for ASSET; the Snapshot, the Intent's identity and state, the idempotency key
+and the scope state for CREATE. A proof gates a mutation **only while that digest equals the
+current state**: if the bound candidate, preparation, artifact set, upload-attempt state,
+Snapshot, Intent state or CREATE scope state changes,
 the proof is **stale** and gates nothing until a new drill proves the new state.
 
 A document saying that backups exist is not a drill. **A stage without its own current restore
@@ -356,11 +406,15 @@ at send time. Each requirement is proven from its own durable evidence, never as
 | restore proof (§7) | a current ASSET restore proof for that exact target | a current CREATE restore proof for that exact target, taken after the freeze |
 | evidence retention (§8) | `EVIDENCE_RETENTION_READY` | `EVIDENCE_RETENTION_READY` |
 | visual acceptance (§9) | `VISUAL_ACCEPTANCE_RECORDED` at the accepted SHA | `VISUAL_ACCEPTANCE_RECORDED` at the accepted SHA |
-| the stage's own gate | candidate preflight `READY`; no unresolved `UPLOAD_UNKNOWN` for that artifact | final preflight `READY`; a `PREPARED` Intent; no unresolved conflict or `UNKNOWN` |
-| the existing requirements | account binding, auth, write scope, the execution-scope brake, one unit only | the same (M5.md §6) |
+| durable attempt owner (§3.4) | the ASSET upload-attempt owner present, readable, current and able to persist the required sanitized evidence; **no started or `UPLOAD_UNKNOWN` attempt** for the exact artifact, candidate and profile, proven from that owner and never from row absence | — (CREATE attempts are ADR-0014's `RegistrationAttempt`) |
+| the stage's own gate | candidate preflight `READY` | final preflight `READY`; a `PREPARED` Intent; no unresolved conflict or `UNKNOWN` |
+| the existing requirements | account binding, auth, write scope, one unit only — **no ADR-0014 §26 scope row** | the same, and the ADR-0014 §26 execution-scope brake `ACTIVE` (M5.md §6) |
 
 - **The ASSET stage never depends on a `PREPARED` Intent**, which cannot exist before its upload; and
   no requirement is circular.
+- **`ASSET_MUTATION_READY` is `BLOCKED` at this main**, because the durable upload-attempt owner of
+  §3.4 does not exist; it stays `BLOCKED` whenever that owner is absent, unreadable, stale or
+  unable to persist the required evidence.
 - The overall canary readiness (`docs/acceptance/M5.md` §6) only **summarizes** the two stages. It is
   derived, read-only and authorizes nothing: even `READY` is not permission. A real write stays a
   separate, explicitly user-authorized, single-product canary (ADR-0014 §24), and while CREATE and
@@ -385,7 +439,7 @@ expected areas, none authorized by this ADR:
 
 | area | content |
 | --- | --- |
-| 1 | the bounded grant and the protected-write brake as durable owners, integrated deny-by-default into execution; still provider-zero |
+| 1 | the bounded grant, the protected-write brake and the durable ASSET upload-attempt owner (§3.4) as durable owners, integrated deny-by-default into execution; still provider-zero |
 | 2 | the backup/restore drill and the evidence-retention proof |
 | 3 | the populated visual/responsive acceptance |
 | 4 | a provider-evidence re-review, and any endpoint adoption **only if** new official evidence resolves §6 |
@@ -394,7 +448,7 @@ expected areas, none authorized by this ADR:
 ### 13. What this ADR does not decide
 
 - table names, columns, enum spellings, route paths, payload shapes and screen layout for the grant,
-  the brake, the drill record or the eligibility record — each slice decides them within this
+  the brake, the ASSET upload-attempt owner, the drill record or the eligibility record — each slice decides them within this
   boundary and its own review;
 - the maximum grant window length and the exact budget values, beyond "finite" and "at least 1";
 - the backup mechanism and file format, beyond WAL-consistency and restore into a separate root,
@@ -418,12 +472,12 @@ G3-07  a grant never authorizes a blind CREATE or upload replay; an UNKNOWN stay
 G3-08  the protected-write brake is server-owned, durable and fail-closed: absent or unreadable means ENGAGED, and a restart never releases it
 G3-09  an engaged brake stops every mutation not yet started; it never deletes or rewrites history and never rewrites an UNKNOWN
 G3-10  releasing the brake needs a new explicit audited authorization and never resurrects an expired, revoked or exhausted grant
-G3-11  every layer of the safety stack must allow a mutation at send time; the ADR-0014 §26 execution-scope brake is unchanged and not weakened
+G3-11  every layer of the safety stack must allow a mutation at send time; the ADR-0014 §26 execution-scope brake stays CREATE-only, unchanged and not weakened, and gates the CREATE stage only
 G3-12  Gate 3 implements no ComplianceGate and puts no compliance logic in a grant
 G3-13  the first canary uses only a product proven outside every regulated category by its reviewed category metadata; that proof is eligibility, never a COMPLIANCE PASS, and without it the canary stays BLOCKED
 G3-14  CREATE and SEARCH stay NOT_ADOPTED and the provider-evidence verdict stays INSUFFICIENT; no grant, brake, backup, retention, visual acceptance or approval overrides it
 G3-15  an ICBM seller-side code and a zero-result search are never proof of remote absence
-G3-16  each mutation stage needs its own current restore proof into a separate fresh root on the current schema head, bound to a target state digest and stale once that state changes; a CREATE restore proof is taken after the freeze and proves, by identity and state, the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state, which it may never record as absent; a pre-freeze proof never gates a CREATE; only state that cannot yet exist is recorded as absent, never created; a declaration is not a drill
+G3-16  each mutation stage needs its own current restore proof into a separate fresh root on the current schema head, bound to a target state digest and stale once that state changes; a CREATE restore proof is taken after the freeze and proves, by identity and state, the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state, which it may never record as absent; a pre-freeze proof never gates a CREATE; an ASSET restore proof proves the durable upload-attempt state and never an ADR-0014 §26 row; only state that cannot yet exist is recorded as absent, never created; a declaration is not a drill
 G3-17  canary evidence is sanitized before hash or persist, durable REGISTER rows are never deleted, no canary evidence is deleted before M5 acceptance, and evidence tied to an unresolved condition is never discarded
 G3-18  a canary needs a recorded populated visual and responsive acceptance at the accepted viewport set in which no server-owned blocker is hidden
 G3-19  ASSET_MUTATION_READY before an upload and CREATE_MUTATION_READY before a CREATE are mandatory send-time layers requiring the stage's grant, brake, eligibility, restore proof, retention and visual acceptance; the ASSET stage never depends on a PREPARED Intent; readiness is derived, read-only and never permission to write
@@ -431,6 +485,10 @@ G3-20  M5 stays PENDING, product_registration.write stays UNVERIFIED, the canary
 G3-21  every grant names one stage and one exact unit: an ASSET grant binds the preparation revision, candidate fingerprint, selected artifact set and asset profile, a CREATE grant the Snapshot, Intent and idempotency key; no unit-less or wildcard grant exists, and one stage never widens into the other
 G3-22  an UPLOAD_UNKNOWN is never retried automatically, never treated as a known provider asset identity and never re-uploaded blindly, and its evidence is kept while it is unresolved
 G3-23  raw confirmation prose an operator enters is never persisted, hashed or logged; a grant stores only safe identities, the approver and the authorization reference
+G3-24  no upload is transmitted unless a durable ASSET upload-attempt owner has recorded the attempt as started in the same atomic unit that consumes the ASSET grant budget; each attempt is terminalized exactly once as APPLIED_PROVEN, NOT_APPLIED_PROVEN or UPLOAD_UNKNOWN
+G3-25  a started attempt not terminal after a crash or restart is UPLOAD_UNKNOWN unless admissible evidence proves transmission was precluded; missing or unreadable attempt truth is never proof that no unresolved upload exists; only APPLIED_PROVEN yields a known provider asset identity
+G3-26  ASSET_MUTATION_READY requires that durable owner and no started or UPLOAD_UNKNOWN attempt for the exact artifact, candidate and profile, and is BLOCKED while the owner does not exist; the ASSET stage never depends on an ADR-0014 §26 scope row
+G3-27  a CREATE grant and restore proof authorize only the state they were issued for; after a NOT_APPLIED_PROVEN attempt any permitted retry needs a new CREATE grant and a fresh restore proof and readiness, and an UNKNOWN still forbids any resend
 ```
 
 ## Consequences
