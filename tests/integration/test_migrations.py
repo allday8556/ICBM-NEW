@@ -88,8 +88,11 @@ CANONICAL_TABLES = (
     "registration_category_metadata",
     "registration_category_metadata_revisions",
     "registration_category_metadata_current",
+    # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner and its append-only history.
+    "review_items",
+    "review_item_events",
 )
-HEAD = "0020_g1_registration_category_metadata"
+HEAD = "0021_g2_review_items"
 
 
 def _url(path: Path) -> str:

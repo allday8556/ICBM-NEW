@@ -75,6 +75,7 @@ from app.register.target_policy import (
     TargetPolicyStore,
     editable_surfaces,
 )
+from app.review.owner import ReviewItemStore
 from app.review.service import ReviewService
 from app.screens.service import ScreenService
 from app.system.diagnostics import DiagnosticsService
@@ -140,6 +141,7 @@ class Container:
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
+    review_items: ReviewItemStore
     ownership: DataDirLease
 
 
@@ -438,6 +440,9 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
+        # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner. No producer is wired yet, so it
+        # holds nothing in production until a producer slice (G2-B, G2-C) is authorized.
+        review_items=ReviewItemStore(db, clock, audit),
         ownership=ownership,
     )
 
