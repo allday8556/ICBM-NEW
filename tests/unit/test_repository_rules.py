@@ -322,7 +322,7 @@ def test_the_review_item_contract_is_recorded_and_pinned() -> None:
         assert REVIEW_ADR.name in _read(canonical), canonical.name
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(G2-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"G2-{n:02d}" for n in range(1, 19)]
+    assert list(invariants) == [f"G2-{n:02d}" for n in range(1, 20)]
     # The kinds are closed, and the contract names exactly the ones the code holds.
     assert invariants["G2-03"].endswith(", ".join(kind.value for kind in ReviewKind))
     # The decisions the kickoff asked the contract to pick, pinned by their wording.
@@ -330,6 +330,26 @@ def test_the_review_item_contract_is_recorded_and_pinned() -> None:
     assert "leaves the item OPEN while the owner still derives" in invariants["G2-10"]
     assert "never reported as zero" in invariants["G2-14"]
     assert "COMPLIANCE never implements ComplianceGate" in invariants["G2-13"]
+    # Recovery never waits for an event (review 5805095154): startup and periodic full passes,
+    # coverage that fails closed, and the crash/restart proof every producer slice must carry.
+    assert (
+        "full reconciliation at process startup and a bounded periodic full reconciliation"
+        in invariants["G2-09"]
+    )
+    assert "never only by the next event for that scope" in invariants["G2-09"]
+    assert "authoritative only after a successful full reconciliation" in invariants["G2-14"]
+    assert "no known indexing failure unrecovered" in invariants["G2-14"]
+    assert "exactly once by the startup full reconciliation after a restart" in invariants["G2-19"]
+    assert "periodic full reconciliation in a running process" in invariants["G2-19"]
+    recovery = _section(adr, r"^4\. Lifecycle$")
+    for required in (
+        "**at application process startup**",
+        "**periodically while the process runs**",
+        "restarts with **no new owner write**",
+        "recreates the missing `OPEN` item **exactly once**",
+    ):
+        assert required in recovery, required
+    assert "never a fake `0`" in _section(adr, r"^7\. Counts")
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:

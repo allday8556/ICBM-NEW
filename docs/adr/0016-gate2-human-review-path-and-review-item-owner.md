@@ -6,6 +6,9 @@ acceptance `5804516180`.
 - It records the eight contract decisions of that kickoff as contract, before any schema. The
   decisions were made by the kickoff. Where the kickoff asked the contract to pick one deterministic
   rule (§4, §5), the rule is picked here and is open to the exact-head audit.
+- Amended before merge by the review `5805095154` (B1). Recovery no longer depends on an event: every
+  producer runs a full reconciliation at startup and periodically, and a count is authoritative
+  only while that coverage is current (§4, §7, G2-09, G2-14, G2-19).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§11).
 
@@ -156,17 +159,45 @@ from the owner's current truth, the set of conditions in a scope. It then applie
 source identity and evidence references unchanged. A new item opens for the new identity. Nothing
 is rewritten or merged.
 
-**When reconciliation runs.** It is idempotent and scoped, and it runs:
+**When reconciliation runs.** Every run is idempotent. Two kinds of run exist.
+
+**Fast paths**, scoped to what just happened:
 - after the owner's own unit of work that changed the scope commits;
 - on an explicit re-evaluation;
 - as a full pass when a producer is first wired (§7);
 - inside every human resolution (§5).
 
-Two further rules apply:
-- A failure to index **never** rolls back, delays or changes the owner's write. Missed indexing is
-  recovered by the next reconciliation of that scope, which is durable and repeatable.
-- Reload, restart and repeated evaluation never multiply `OPEN` items. The two key rules of §3 make
-  that a storage invariant, not a convention.
+The fast paths keep items current quickly. **They are not the recovery guarantee.** Each depends on
+an event, and a scope that is never written or evaluated again would never get one (review
+`5805095154`).
+
+**The safety net: full reconciliation, independent of every event.** Every implemented producer
+runs a **full reconciliation** over all current owner truth of its kind at two points:
+- **at application process startup**, before its counts may be treated as current coverage (§7);
+- **periodically while the process runs**, at a finite, server-owned interval. The pass is bounded
+  and does not depend on owner writes, explicit re-evaluation or human resolution. The cadence and
+  the scheduler mechanism are chosen by the producer slice. "Periodic" means a guaranteed recovery
+  interval, never best effort and never event-only.
+
+Three further rules apply:
+- **Indexing never touches the owner.** A failure to index never rolls back, delays or changes the
+  owner's write.
+- **Missed work is recovered by the safety net.** A missed or failed indexing step is recovered by
+  the startup and periodic full reconciliation, not merely by the next event for that scope. A
+  known indexing failure is recorded durably, and it keeps coverage non-authoritative until a later
+  full reconciliation has recovered it (§7).
+- **No duplicates.** Reload, restart, repeated evaluation and every full pass never multiply `OPEN`
+  items. The two key rules of §3 make that a storage invariant, not a convention.
+
+**The recovery proofs the producer slices must carry.** Each producer slice (G2-B, G2-C) must prove
+two cases, among its own tests:
+- **Restart recovery:** the owner commit succeeds → the index step crashes or fails → the process
+  restarts with **no new owner write** → startup full reconciliation recreates the missing `OPEN`
+  item **exactly once**.
+- **Running-process recovery:** the owner commit succeeds → the index step fails → the process keeps
+  running with **no new owner write** and no re-evaluation → the next periodic full reconciliation
+  recreates the missing `OPEN` item **exactly once**. Until then, the kind's count is not
+  presented as authoritative.
 
 ### 5. A human resolution never overrides the owner
 
@@ -247,12 +278,25 @@ ADR-0014 §9, §10 and M5-23 stay exactly as they are.
 Until then the kind is `NOT_WIRED`. A producer that indexes only new writes would undercount
 conditions that already existed, and that undercount must never read as coverage.
 
+**`WIRED` is a capability; coverage must also be current.** A `WIRED` kind's count is
+**authoritative** only when both of these hold:
+- a successful full reconciliation (§4) has been durably recorded **for the current process run**,
+  as its coverage watermark. The startup pass sets it, and each periodic pass renews it;
+- no known indexing failure of that kind is still unrecovered, meaning none is recorded after the
+  last successful full reconciliation.
+
+While either is false — before the startup pass completes, after it fails, or while a known
+indexing failure awaits the next full pass — the count is **not current**. The server must not
+present it as an authoritative zero or an empty result. How the server says so is decided by the
+slice that implements counts, but it is never a fake `0`.
+
 **Counts come from durable rows.** `open_counts()` derives each `WIRED` kind's count from durable
 `OPEN` ReviewItems, and never returns a hard-coded zero.
 - For a `NOT_WIRED` kind, the server says `NOT_WIRED` explicitly. It never says `0`.
+- A `WIRED` kind whose coverage is not current is also never reported as an authoritative `0`.
 - The screens render that difference.
 - A dashboard "empty" or a `NO_STOCK_REVIEW_ITEMS` verdict may rest on review counts only when the
-  kind is `WIRED` and its count is zero.
+  kind is `WIRED`, its coverage is current, and its count is zero.
 
 **Where review work is shown.** The relevant existing screens show their own ReviewItems, and the
 dashboard aggregates the counts. **No new top-level review application is added in v1**
@@ -333,8 +377,8 @@ each as its own PR with its own exact-head audit:
 | slice | content |
 | --- | --- |
 | G2-A | the durable ReviewItem owner and its migration: identity and deduplication (§3), the audited lifecycle (§4) and resolution (§5); no producer |
-| G2-B | the COLLECT / M3 producer and its review path on the relevant existing screens |
-| G2-C | indexing of the current M4 and REGISTER conditions; `open_counts()` from durable rows, and the dashboard and 품절 counts with `NOT_WIRED` semantics (§7) |
+| G2-B | the COLLECT / M3 producer, with its startup and periodic full reconciliation and both recovery proofs (§4), and its review path on the relevant existing screens |
+| G2-C | indexing of the current M4 and REGISTER conditions, each producer with the same startup and periodic full reconciliation and recovery proofs (§4); `open_counts()` from durable rows, and the dashboard and 품절 counts with `NOT_WIRED` and current-coverage semantics (§7) |
 | closeout | exact-main Gate 2 closeout from a fresh session |
 
 ### 12. What this ADR does not decide
@@ -342,6 +386,11 @@ each as its own PR with its own exact-head audit:
 - table names, columns, enum spellings (including the disposition set), route paths, payload shapes
   or screen layout: each slice decides them within this boundary and its own review;
 - the kind mapping of each M4 and REGISTER condition, which is reviewed with G2-C (§6);
+- the recovery cadence, the scheduler mechanism and the spelling of a not-current count (§4, §7),
+  which each producer and counts slice decides within those rules;
+- how the COLLECT producer chooses its source identity, given that every new collection makes a new
+  `ProductFactsRevision` (revision churn). This is a G2-B design point, and it does not block this
+  contract.
 - the ComplianceGate, LIVE authorization and M6 contracts;
 - anything about CREATE, SEARCH, reconcile or image upload, which stay exactly as ADR-0014 states
   them.
@@ -357,16 +406,17 @@ G2-05  the condition key and the review key are server-computed digests; one row
 G2-06  reload, restart, a retried job and repeated producer evaluation never multiply OPEN items
 G2-07  a changed owner revision or fingerprint supersedes the old item and opens a new one; nothing is rewritten or merged
 G2-08  reconciliation alone decides OPEN, RESOLVED and SUPERSEDED from current owner truth; a reappearing review key reopens its own row
-G2-09  a failure to index never rolls back, delays or changes an owner write; the next reconciliation of that scope recovers it
+G2-09  a failure to index never rolls back, delays or changes an owner write; missed work is recovered by a full reconciliation at process startup and a bounded periodic full reconciliation while running, never only by the next event for that scope
 G2-10  a human resolution records actor, time, disposition, note and evidence reference, changes no owner fact, and leaves the item OPEN while the owner still derives the condition
 G2-11  no note, disposition or operator assertion is ever provider evidence, NOT_APPLIED_PROVEN, remote-absence proof, a source-fact confirmation or a compliance verdict
 G2-12  producers index only conditions production owners already derive, each in exactly one kind, without copying owner logic or inventing reasons
 G2-13  COMPLIANCE and FULFILLMENT have no Gate 2 producer and stay NOT_WIRED; COMPLIANCE never implements ComplianceGate
-G2-14  a kind is WIRED only after its producer's first full reconciliation is durably recorded; a NOT_WIRED kind is never reported as zero
+G2-14  a kind is WIRED only after its producer's first full reconciliation is durably recorded; a NOT_WIRED kind is never reported as zero, and a WIRED count is authoritative only after a successful full reconciliation in the current process run with no known indexing failure unrecovered
 G2-15  a ReviewItem of one scope never renders or resolves as another's; a stale, mismatched or repeated resolution writes nothing
 G2-16  every transition is audited with actor and correlation identity; a row's identity references are immutable and its transitions append-only
 G2-17  a ReviewItem stores references, reason codes, digests and sanitized bounded text only; no raw payload, credential, external URL or verdict copied from an owner
 G2-18  Gate 2 adds no ComplianceGate, LIVE authorization, provider call, endpoint adoption, M6 behaviour or expansion; M5 stays PENDING
+G2-19  every producer slice proves that an OPEN item lost to an index failure after a successful owner commit, with no new owner write, is recreated exactly once by the startup full reconciliation after a restart, and by the periodic full reconciliation in a running process
 ```
 
 ## Consequences

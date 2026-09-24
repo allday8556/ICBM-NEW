@@ -82,6 +82,7 @@ it. The review owner only indexes it:
 | review key | the condition key × the exact owner source identity (revision, fingerprint or evidence identity); one row per review key |
 | `OPEN` / `RESOLVED` / `SUPERSEDED` | the ReviewItem lifecycle, decided by reconciliation against current owner truth; `SUPERSEDED` means the same condition moved to a new source identity |
 | `NOT_WIRED` | a review kind with no fully reconciled producer; its count is unknown, never zero |
+| current coverage | a `WIRED` kind whose full reconciliation succeeded in the current process run and has no known indexing failure unrecovered; only then is its count authoritative |
 
 ## 4. Adoption and execution words
 

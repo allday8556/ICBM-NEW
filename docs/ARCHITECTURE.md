@@ -311,7 +311,8 @@ The owner's contract is `docs/adr/0016-gate2-human-review-path-and-review-item-o
 - it is deduplicated by server-computed condition and review keys;
 - a changed owner revision supersedes the old item, and reconciliation alone decides whether an item is open;
 - a human resolution changes no owner fact and leaves the item open while the owner still derives the condition;
-- a kind without a fully reconciled producer is reported as `NOT_WIRED`, never as zero.
+- a kind without a fully reconciled producer is reported as `NOT_WIRED`, never as zero;
+- missed indexing is recovered by a full reconciliation at process startup and periodically while running, never only by the next event for that scope, and a count is authoritative only while that coverage is current.
 
 ## 10. Images
 
