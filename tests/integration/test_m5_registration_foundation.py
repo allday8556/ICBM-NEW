@@ -459,6 +459,8 @@ TARGET_POLICY_TABLES = (
     "registration_category_metadata_revisions",
     "registration_category_metadata_current",
 )
+# Gate 2 G2-A (migration 0021, ADR-0016): the ReviewItem owner, after the registration tables.
+REVIEW_TABLES = ("review_items", "review_item_events")
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
     "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"
@@ -2020,9 +2022,9 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
-    # 0017 owns exactly the scope table; the tables 0018 and 0019 add step down with it.
+    # 0017 owns exactly the scope table; the tables later migrations add step down with it.
     assert before - _tables(tmp_path / "icbm.db") == (
-        {SCOPES} | set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES)
+        {SCOPES} | set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES) | set(REVIEW_TABLES)
     )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
@@ -2062,9 +2064,9 @@ def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
-    # 0018 owns exactly the preparation tables; the target-policy tables 0019 adds step down too.
+    # 0018 owns exactly the preparation tables; the tables later migrations add step down too.
     assert before - _tables(tmp_path / "icbm.db") == (
-        set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES)
+        set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES) | set(REVIEW_TABLES)
     )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

@@ -415,7 +415,11 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0019_g1_registration_target_policy")
-    assert before - _tables(tmp_path / "icbm.db") == set(TABLES)
+    # 0020 owns exactly these three; the ReviewItem tables 0021 adds step down with it.
+    assert before - _tables(tmp_path / "icbm.db") == set(TABLES) | {
+        "review_items",
+        "review_item_events",
+    }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:

@@ -80,6 +80,14 @@ class AuditEventType(StrEnum):
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.
     REGISTRATION_CATEGORY_METADATA_RECORDED = "REGISTRATION_CATEGORY_METADATA_RECORDED"
+    # Gate 2 G2-A (ADR-0016 §9): one transition of a ReviewItem, or one human resolution of it.
+    # Item identifiers, states, generation, review key, basis, successor and disposition only —
+    # never a note, which lives in the event row, and never an owner value.
+    REVIEW_ITEM_OPENED = "REVIEW_ITEM_OPENED"
+    REVIEW_ITEM_REOPENED = "REVIEW_ITEM_REOPENED"
+    REVIEW_ITEM_SUPERSEDED = "REVIEW_ITEM_SUPERSEDED"
+    REVIEW_ITEM_RESOLVED = "REVIEW_ITEM_RESOLVED"
+    REVIEW_ITEM_RESOLUTION_RECORDED = "REVIEW_ITEM_RESOLUTION_RECORDED"
 
 
 class AuditOutcome(StrEnum):

@@ -123,6 +123,10 @@ M5_PREPARATION = "0018_m5_registration_preparation"
 G1_TARGET_POLICY = "0019_g1_registration_target_policy"
 M5_HEAD = "0020_g1_registration_category_metadata"
 M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_POLICY, M5_HEAD)
+# Gate 2 G2-A (ADR-0016) adds the ReviewItem owner after the M5 head. It is not registration
+# state, so the registration guards below still apply to it unchanged. Nothing else follows.
+SCHEMA_HEAD = "0021_g2_review_items"
+AFTER_M5 = (SCHEMA_HEAD,)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
@@ -170,10 +174,11 @@ def migration_problems(names: Iterable[str]) -> list[str]:
     migration: the PR-B foundation, or the PR-E execution-scope owner (§25, §26)."""
     head = int(M5_HEAD.split("_", 1)[0])
     authorized = {f"{name}.py" for name in M5_MIGRATIONS}
+    after = {f"{name}.py" for name in AFTER_M5}
     return [
         name
         for name in names
-        if int(name.split("_", 1)[0]) > head
+        if (int(name.split("_", 1)[0]) > head and name not in after)
         or (REGISTRATION_STATE.search(name) and name not in authorized)
     ]
 
@@ -200,8 +205,8 @@ def test_the_m5_migrations_are_exactly_the_two_authorized_ones() -> None:
 
     names = sorted(p.name for p in MIGRATIONS.glob("0*.py"))
     assert migration_problems(names) == []
-    assert {f"{name}.py" for name in M5_MIGRATIONS} <= set(names)
-    assert head_revision() == M5_HEAD
+    assert {f"{name}.py" for name in (*M5_MIGRATIONS, *AFTER_M5)} <= set(names)
+    assert head_revision() == SCHEMA_HEAD
 
 
 def test_the_migration_detector_fires() -> None:
@@ -213,12 +218,17 @@ def test_the_migration_detector_fires() -> None:
         "0019_g1_registration_target_policy.py",
         "0019_m5_registration_more.py",
         "0020_g1_registration_category_metadata.py",
+        "0021_g2_review_items.py",
         "0021_anything.py",
+        "0022_anything.py",
+        "0021_g2_registration_more.py",
         "0009_duplicate_override.py",
     ]
     assert migration_problems(names) == [
         "0019_m5_registration_more.py",
         "0021_anything.py",
+        "0022_anything.py",
+        "0021_g2_registration_more.py",
         "0009_duplicate_override.py",
     ]
 
