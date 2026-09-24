@@ -2,20 +2,25 @@
 
 from dataclasses import replace
 
+import pytest
+
 from prototypes.adaptive_collector.capture import capture_sample
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.hooks import HookManifest
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
 from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
+    Negatives,
     expected,
     hook_manifest,
+    negative_pages,
     page,
     sample,
     scope_for,
 )
 from prototypes.adaptive_collector.validation import (
     REQUIRED_MUTATIONS,
+    NegativeClass,
     ValidationRun,
     Verdict,
     freshness_tuple,
@@ -24,7 +29,7 @@ from prototypes.adaptive_collector.validation import (
 )
 
 
-def _run(bundle: Bundle, negatives: dict[str, str], **kwargs: object) -> ValidationRun:
+def _run(bundle: Bundle, negatives: Negatives, **kwargs: object) -> ValidationRun:
     return validate(bundle, [sample(n) for n in SAMPLE_PAGES], negatives=negatives, **kwargs)  # type: ignore[arg-type]
 
 
@@ -32,13 +37,13 @@ def _resolved(run: ValidationRun) -> frozenset[str]:
     return frozenset(run.check("V3a").details)
 
 
-def test_every_negative_control_fails_closed(bundle: Bundle, negatives: dict[str, str]) -> None:
+def test_every_negative_control_fails_closed(bundle: Bundle, negatives: Negatives) -> None:
     run = _run(bundle, negatives)
     assert run.check("V4").outcome is Verdict.PASS, run.check("V4").details
 
 
 def test_an_open_v3a_finding_blocks_pass_until_the_operator_resolves_it(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     first = _run(bundle, negatives)
     assert first.verdict is Verdict.INCOMPLETE
@@ -48,7 +53,7 @@ def test_an_open_v3a_finding_blocks_pass_until_the_operator_resolves_it(
 
 
 def test_validated_is_derived_from_a_pass_for_the_exact_freshness_tuple(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     samples = [sample(n) for n in SAMPLE_PAGES]
     first = validate(bundle, samples, negatives=negatives)
@@ -62,7 +67,7 @@ def test_validated_is_derived_from_a_pass_for_the_exact_freshness_tuple(
 
 
 def test_a_wrong_profile_fails_v3_against_operator_expectations(
-    store: ProfileStore, negatives: dict[str, str]
+    store: ProfileStore, negatives: Negatives
 ) -> None:
     wrong = profiles.ptr("simple", optioned=False)
     wrong["fields"]["brand"]["primary"]["vocabulary"] = "origin_labels"  # reads the wrong row
@@ -74,7 +79,7 @@ def test_a_wrong_profile_fails_v3_against_operator_expectations(
 
 
 def test_a_bundle_that_matches_a_login_page_fails_v4(
-    store: ProfileStore, negatives: dict[str, str]
+    store: ProfileStore, negatives: Negatives
 ) -> None:
     loose = profiles.ptr("loose", optioned=False)
     loose["signature"] = {"required": ["h1"], "forbidden": []}
@@ -84,7 +89,7 @@ def test_a_bundle_that_matches_a_login_page_fails_v4(
 
 
 def test_one_sample_per_template_and_two_in_total_are_required(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     run = validate(bundle, [sample("simple_on_sale")], negatives=negatives)
     details = run.check("V3").details
@@ -99,9 +104,7 @@ def test_g7_fails_a_bound_hook_no_sample_exercises(store: ProfileStore) -> None:
     # shipping hook is never called and its path is proven by no sample.
     html = page("simple_sold_out").replace("<tr><th>배송비</th><td>무료</td></tr>", "")
     unshipped = capture_sample(html, scope_for(html), expected("simple_sold_out"))
-    run = validate(
-        bundle, [unshipped], negatives={"login": page("login")}, manifest=hook_manifest()
-    )
+    run = validate(bundle, [unshipped], negatives=negative_pages(), manifest=hook_manifest())
     assert run.check("V7").outcome is Verdict.FAIL
     assert any(
         "G7" in detail and "value_parse:shipping" in detail for detail in run.check("V7").details
@@ -109,7 +112,7 @@ def test_g7_fails_a_bound_hook_no_sample_exercises(store: ProfileStore) -> None:
 
 
 def test_g6_over_the_cap_blocks_validated_until_an_architecture_review(
-    store: ProfileStore, negatives: dict[str, str]
+    store: ProfileStore, negatives: Negatives
 ) -> None:
     simple = store.put(profiles.ptr("simple", optioned=False))
     optioned = store.put(profiles.ptr("optioned", optioned=True))
@@ -132,7 +135,7 @@ def test_g6_over_the_cap_blocks_validated_until_an_architecture_review(
 
 
 def test_all_five_required_mutations_run_on_the_synthetic_samples(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     details = _run(bundle, negatives).check("V4").details
     for name in REQUIRED_MUTATIONS:
@@ -142,7 +145,7 @@ def test_all_five_required_mutations_run_on_the_synthetic_samples(
 
 
 def test_a_mutation_that_cannot_be_constructed_is_never_a_silent_pass(
-    store: ProfileStore, negatives: dict[str, str]
+    store: ProfileStore, negatives: Negatives
 ) -> None:
     # Prices read by a TEXT rule: the duplicate-price-row mutation cannot be constructed.
     simple = profiles.ptr("simple", optioned=False)
@@ -156,7 +159,7 @@ def test_a_mutation_that_cannot_be_constructed_is_never_a_silent_pass(
 
 
 def test_an_embedded_first_identity_source_still_gets_its_conflict_mutation(
-    store: ProfileStore, negatives: dict[str, str]
+    store: ProfileStore, negatives: Negatives
 ) -> None:
     simple = store.put(profiles.ptr("simple", optioned=False))
     optioned = store.put(profiles.ptr("optioned", optioned=True))
@@ -165,3 +168,28 @@ def test_an_embedded_first_identity_source_still_gets_its_conflict_mutation(
     bundle = store.bundle(store.put(epr))
     v4 = _run(bundle, negatives).check("V4")
     assert v4.outcome is Verdict.PASS, v4.details
+
+
+def test_both_negative_page_classes_are_required(bundle: Bundle, negatives: Negatives) -> None:
+    resolved = _resolved(_run(bundle, negatives))
+    assert _run(bundle, negatives, resolved_findings=resolved).verdict is Verdict.PASS
+    for missing in NegativeClass:
+        partial = {k: v for k, v in negatives.items() if k is not missing}
+        run = _run(bundle, partial, resolved_findings=resolved)
+        assert run.check("V4").outcome is Verdict.INCOMPLETE, missing
+        assert f"NEGATIVE_CONTROL_MISSING:{missing.value}" in run.check("V4").details
+        assert run.verdict is not Verdict.PASS
+    none = _run(bundle, {}, resolved_findings=resolved)
+    assert {d for d in none.check("V4").details if d.startswith("NEGATIVE")} == {
+        "NEGATIVE_CONTROL_MISSING:LOGIN",
+        "NEGATIVE_CONTROL_MISSING:NON_PRODUCT",
+    }
+
+
+def test_negative_controls_are_typed_not_free_strings(bundle: Bundle) -> None:
+    with pytest.raises(ValueError, match="NegativeClass"):
+        validate(
+            bundle,
+            [sample(n) for n in SAMPLE_PAGES],
+            negatives={"login": page("login")},  # type: ignore[dict-item]
+        )

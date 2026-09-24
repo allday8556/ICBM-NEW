@@ -6,7 +6,7 @@ from prototypes.adaptive_collector.dom import from_snapshot
 from prototypes.adaptive_collector.engine import ImageCoverage, extract
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
-from prototypes.adaptive_collector.testsupport import SAMPLE_PAGES, sample
+from prototypes.adaptive_collector.testsupport import SAMPLE_PAGES, Negatives, sample
 from prototypes.adaptive_collector.validation import Verdict, _v2, validate
 
 
@@ -57,7 +57,7 @@ def test_a_missing_representative_is_never_a_complete_image_set(bundle: Bundle) 
 
 
 def test_validation_passes_image_coverage_on_the_synthetic_bundle(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     run = validate(bundle, [sample(n) for n in SAMPLE_PAGES], negatives=negatives)
     assert run.check("V2").outcome is Verdict.PASS

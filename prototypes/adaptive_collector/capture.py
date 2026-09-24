@@ -31,7 +31,20 @@ _SECRET_VALUE = re.compile(r"(eyJ[A-Za-z0-9_-]{10,}|[A-Fa-f0-9]{32,}|(?i:bearer\
 _MEMBER_KEY = re.compile(
     r"(?i)(member|customer|user(name|_?id)?$|email|phone|mobile|address|point|grade)"
 )
+# Private attribute names: member and account material in any kept attribute, not only in inputs.
+_PRIVATE_NAME = re.compile(r"(?i)(account|mypage|login|nickname|contact|birth)")
 _URL_ATTRS = frozenset({"src", "href", "action", "data-src"})
+# The final safety scan's own value patterns (independent of the sanitizer's stripping rules).
+_SCAN_VALUE = re.compile(
+    r"(?i)("
+    r"eyJ[A-Za-z0-9_-]{10,}"  # a JWT-like token
+    r"|\b[A-Fa-f0-9]{32,}\b"  # a long hex secret
+    r"|bearer\s+\S+"  # an authorization header value
+    r"|\b(?:token|session|sid|sessid|auth|apikey|api_key|csrf|signature|sig)=\S+"  # key=value
+    r"|[\w.+-]+@[\w-]+\.[\w.-]+"  # an e-mail address
+    r"|\b01[016789][-. ]?\d{3,4}[-. ]?\d{4}\b"  # a mobile number
+    r")"
+)
 # An input keeps its structure and state; its ``value`` survives only for a server-authored control
 # (hidden, submit, button) whose name and value are not secret or member material.
 _INPUT_SERVER_VALUE_TYPES = frozenset({"hidden", "submit", "button"})
@@ -315,6 +328,9 @@ def _attrs(capture: _Capture, node: dict[str, Any]) -> dict[str, str]:
         if _SECRET_NAME.search(name) or _SECRET_VALUE.search(value):
             capture.removed(f"SECRET_ATTR:{name}", node)
             continue
+        if _MEMBER_KEY.search(name) or _PRIVATE_NAME.search(name):
+            capture.removed(f"MEMBER_ATTR:{name}", node)
+            continue
         if name in _URL_ATTRS:
             parts = urlsplit(value)
             clean = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
@@ -384,6 +400,10 @@ def capture_sample(
         "excluded": capture.excluded,
         "removals": capture.removals,
     }
+    if residual := final_scan(snapshot):
+        # The final gate: anything the sanitizer missed refuses the sample. Nothing is saved,
+        # and the refusal names only the kind and where, never the value.
+        raise CaptureRefused(f"residual secret or private material: {residual}")
     body = {
         "snapshot": snapshot,
         "expected": dict(expected),
@@ -397,6 +417,58 @@ def capture_sample(
         truncated=capture.truncated,
         digest=hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest(),
     )
+
+
+def final_scan(snapshot: Mapping[str, Any]) -> list[str]:
+    """An independent last pass over the sanitized structured snapshot (ADR-0017 §7.3).
+
+    Profile-independent, and not a re-run of the stripping rules: it looks at every attribute name
+    and value, every text, and every embedded key and value, for credential, token, session,
+    authorization, CSRF, member, account and contact material, and for URL query material. It
+    returns findings as ``kind@boundary`` only.
+    """
+    findings: list[str] = []
+
+    def data(value: Any, where: str) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if _SECRET_NAME.search(key) or _MEMBER_KEY.search(key) or _PRIVATE_NAME.search(key):
+                    findings.append(f"EMBEDDED_KEY@{where}")
+                data(item, where)
+        elif isinstance(value, list):
+            for item in value:
+                data(item, where)
+        elif isinstance(value, str):
+            if _SCAN_VALUE.search(value):
+                findings.append(f"EMBEDDED_VALUE@{where}")
+            if _EMBEDDED_URL.match(value) and ("?" in value or "#" in value):
+                findings.append(f"EMBEDDED_URL_QUERY@{where}")
+
+    def walk(node: Mapping[str, Any]) -> None:
+        where = boundary(node)
+        for name, value in node.get("attrs", {}).items():
+            if (
+                _SECRET_NAME.search(name)
+                or _MEMBER_KEY.search(name)
+                or _PRIVATE_NAME.search(name)
+                or name.lower().startswith("on")
+            ):
+                findings.append(f"ATTR_NAME:{name}@{where}")
+            if _SCAN_VALUE.search(value):
+                findings.append(f"ATTR_VALUE:{name}@{where}")
+            if name in _URL_ATTRS and ("?" in value or "#" in value):
+                findings.append(f"URL_QUERY:{name}@{where}")
+        if "data" in node:
+            data(node["data"], where)
+        for child in node.get("children", []):
+            if isinstance(child, str):
+                if _SCAN_VALUE.search(child):
+                    findings.append(f"TEXT@{where}")
+            else:
+                walk(child)
+
+    walk(snapshot)
+    return findings
 
 
 def secret_findings(text: str) -> list[str]:

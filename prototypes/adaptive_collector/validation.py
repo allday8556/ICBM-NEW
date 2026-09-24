@@ -75,6 +75,13 @@ class SampleRefused(ValueError):
     pass
 
 
+class NegativeClass(StrEnum):
+    """The negative-page classes V4 requires (ADR-0017 §7.2). Closed; both must be present."""
+
+    LOGIN = "LOGIN"
+    NON_PRODUCT = "NON_PRODUCT"
+
+
 @dataclass(frozen=True)
 class Check:
     name: str
@@ -333,7 +340,7 @@ def validate(
     bundle: Bundle,
     samples: Sequence[ValidationSample],
     *,
-    negatives: Mapping[str, str],
+    negatives: Mapping[NegativeClass, str],
     manifest: HookManifest | None = None,
     all_eprs: Sequence[ExtractionProfileRevision] = (),
     architecture_review_recorded: bool = False,
@@ -395,10 +402,16 @@ def validate(
     v4: list[str] = []
     v4_incomplete: list[str] = []
     exercised: Counter[str] = Counter()
-    for name, html in negatives.items():
+    if unknown := [key for key in negatives if not isinstance(key, NegativeClass)]:
+        raise ValueError(f"negative controls are typed NegativeClass members, not {unknown!r}")
+    for required in NegativeClass:
+        if not negatives.get(required, "").strip():
+            # A missing negative class is unproven: V4 is never PASS without both.
+            v4_incomplete.append(f"NEGATIVE_CONTROL_MISSING:{required.value}")
+    for negative_class, html in negatives.items():
         negative, _ = match_template(bundle, parse_html(html))
         if negative is TemplateVerdict.MATCHED:
-            v4.append(f"negative page {name} matched a template")
+            v4.append(f"negative page {negative_class.value} matched a template")
     for sample, root, base in extractions:
         _, matched = match_template(bundle, root)
         if matched is None:

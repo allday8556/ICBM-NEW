@@ -9,8 +9,9 @@ from prototypes.adaptive_collector.capture import ValidationSample
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
 from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
+    Negatives,
     NetworkRefused,
-    page,
+    negative_pages,
     sample,
     synthetic_bundle,
 )
@@ -44,5 +45,5 @@ def samples() -> list[ValidationSample]:
 
 
 @pytest.fixture
-def negatives() -> dict[str, str]:
-    return {"login": page("login"), "not_product": page("not_product")}
+def negatives() -> Negatives:
+    return negative_pages()

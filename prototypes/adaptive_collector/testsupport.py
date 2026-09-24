@@ -17,6 +17,9 @@ from prototypes.adaptive_collector.capture import (
 from prototypes.adaptive_collector.fixtures import profiles, synthetic_hooks
 from prototypes.adaptive_collector.hooks import HookManifest, fingerprint_files
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
+from prototypes.adaptive_collector.validation import NegativeClass
+
+Negatives = dict[NegativeClass, str]
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SAMPLE_PAGES = ("simple_on_sale", "simple_sold_out", "optioned")
@@ -50,6 +53,10 @@ def scope_for(html: str, boundary: str = PRODUCT_BOUNDARY) -> OperatorScope:
 def sample(name: str) -> ValidationSample:
     html = page(name)
     return capture_sample(html, scope_for(html), expected(name))
+
+
+def negative_pages() -> Negatives:
+    return {NegativeClass.LOGIN: page("login"), NegativeClass.NON_PRODUCT: page("not_product")}
 
 
 def synthetic_bundle(store: ProfileStore) -> Bundle:

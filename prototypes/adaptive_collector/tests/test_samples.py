@@ -19,6 +19,7 @@ from prototypes.adaptive_collector.engine import extract
 from prototypes.adaptive_collector.profile import Bundle
 from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
+    Negatives,
     expected,
     page,
     sample,
@@ -187,7 +188,7 @@ def test_v3a_flags_statements_the_bundle_neither_reads_nor_disposes(bundle: Bund
 
 
 def test_a_truncated_sample_makes_the_run_incomplete_and_is_never_inspected(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     big = json.dumps({"sku": "SYN-1001", "blob": "가" * BLOCK_MAX_BYTES})
     html = page("simple_on_sale").replace(
@@ -205,7 +206,7 @@ def test_a_truncated_sample_makes_the_run_incomplete_and_is_never_inspected(
 
 
 def test_a_sample_whose_provenance_names_a_profile_is_refused(
-    bundle: Bundle, negatives: dict[str, str]
+    bundle: Bundle, negatives: Negatives
 ) -> None:
     good = sample("simple_on_sale")
     provenance = good.provenance
@@ -215,3 +216,51 @@ def test_a_sample_whose_provenance_names_a_profile_is_refused(
     )
     with pytest.raises(SampleRefused):
         validate(bundle, [forged, sample("simple_sold_out")], negatives=negatives)
+
+
+# ---------------------------------------------------------------- the final safety scan
+
+
+def _inject(extra: str) -> str:
+    return page("simple_on_sale").replace(
+        '<h1 class="product-title">', f'{extra}<h1 class="product-title">'
+    )
+
+
+@pytest.mark.parametrize(
+    "residual",
+    [
+        # Each is material the sanitizer's stripping rules do not name; only the final scan sees it.
+        '<span class="seller-note" data-note="buyer@example.com">판매자</span>',
+        '<div class="note" data-ref="sid=0a1b2c3d4e">참고</div>',
+        '<p class="cs">문의 010-1234-5678</p>',
+        '<p class="debug">eyJhbGciOiJIUzI1NiJ9.payload</p>',
+        '<script>var sellerData = {"note": "문의 buyer@example.com"};</script>',
+    ],
+    ids=["email-attr", "sid-attr", "phone-text", "jwt-text", "email-embedded"],
+)
+def test_residual_secret_or_private_material_refuses_the_capture(residual: str) -> None:
+    html = _inject(residual)
+    with pytest.raises(CaptureRefused, match="residual secret or private material") as refused:
+        capture_sample(html, scope_for(html), expected("simple_on_sale"))
+    # The refusal names the kind and where, never the value.
+    for value in ("buyer@example.com", "0a1b2c3d4e", "1234-5678", "eyJhbGci"):
+        assert value not in str(refused.value)
+
+
+def test_member_and_account_attribute_names_are_stripped_not_persisted() -> None:
+    html = _inject(
+        '<div class="meta" data-member-id="m123" data-account-no="a9" data-email="x">i</div>'
+    )
+    captured = capture_sample(html, scope_for(html), expected("simple_on_sale"))
+    for gone in ("data-member-id", "data-account-no", "data-email", "m123"):
+        assert gone not in captured.snapshot_json, gone
+    removals = {what for what, _ in captured.provenance["removals"]}
+    assert {"MEMBER_ATTR:data-member-id", "MEMBER_ATTR:data-account-no"} <= removals
+
+
+def test_the_final_scan_passes_every_saved_fixture_sample() -> None:
+    from prototypes.adaptive_collector.capture import final_scan
+
+    for name in SAMPLE_PAGES:
+        assert final_scan(sample(name).snapshot) == [], name

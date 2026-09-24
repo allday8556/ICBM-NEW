@@ -1,10 +1,10 @@
 # Adaptive Collector — Phase B prototype (disposable)
 
-Status: **PROTOTYPE, revision 2. It lives only on a draft PR: it is never merged and never
+Status: **PROTOTYPE, revision 3. It lives only on a draft PR: it is never merged and never
 promoted.**
 Author: Claude Code
 Issue: #110. Phase B kickoff `5820294346`, under ADR-0017 §13. Revised for architect audit
-`5309150430`.
+`5309150430` and re-audit `5309411958`.
 Base: main `c509c6236aeaddd76f7553071bcc1ee0799eeb19`
 
 This directory proves the core ADR-0017 behaviours on **synthetic fixtures only**. It is not
@@ -34,9 +34,9 @@ explicitly (see [Run it](#run-it)). `ruff` covers the directory as part of `ruff
 | 3 | deterministic CORE/COVERAGE extraction, conflicts, ABSENT | §8.2, §4 | `test_fields.py` (13) |
 | 4 | V2 image-region and image-role coverage, without bytes | §7.2 V2 | `test_images.py` (7) |
 | 5 | closed hooks; `(hook_point, target)` counting | §6 | `test_hooks.py` (10); G6 and G7 also in `test_validation.py` |
-| 6 | ValidationSample replay: product boundary, embedded literals, non-authoritative exclusion, `SAMPLE_TRUNCATED → INCOMPLETE` | §7.3, V3a, V8 | `test_samples.py` (18) |
+| 6 | ValidationSample replay: product boundary, embedded literals, non-authoritative exclusion, final safety scan, `SAMPLE_TRUNCATED → INCOMPLETE` | §7.3, V3a, V8 | `test_samples.py` (25) |
 | 7 | determinism | §7.2 V5 | `test_determinism.py` (4) |
-| 8 | V4 synthetic negative controls, with mutation coverage | §7.2 V4 | `test_validation.py` (11) |
+| 8 | V4 synthetic negative controls, with mutation and negative-class coverage | §7.2 V4 | `test_validation.py` (13) |
 
 What each suite covers:
 
@@ -97,6 +97,18 @@ What each suite covers:
       URL).
     - `on*` event-handler attributes are stripped.
     - Non-literal scripts are stripped.
+    - Member and account attribute names (`data-member-id`, `data-account-no`, `data-email`, …)
+      are stripped from every kept attribute, not only from inputs.
+  - **Final safety scan (`final_scan`), before a sample is saved:**
+    - It is an independent, profile-independent pass over the sanitized snapshot: every attribute
+      name and value, every text, every embedded key and value.
+    - Any residual credential, token, session, authorization, CSRF, member, account or contact
+      material, or URL query material, **refuses the capture**. Nothing is saved.
+    - The refusal names the kind and the boundary, never the value.
+    - It is proven on material the sanitizer's own rules do not name: an e-mail in a `data-note`,
+      `sid=` in an attribute, a mobile number and a JWT in text, and an e-mail inside embedded
+      data.
+    - Every saved fixture sample passes it.
   - **Samples, V3a and V8:**
     - Samples are immutable and content-addressed.
     - V3a flags the unread `productData` block.
@@ -108,6 +120,9 @@ What each suite covers:
   - Fresh stores and fresh captures give the same digests.
   - A validation run is deterministic.
 - **8 `test_validation.py`.**
+  - **Negative-class coverage:** negative controls are typed (`NegativeClass.LOGIN`,
+    `NegativeClass.NON_PRODUCT`), and a free-string key is refused. Missing either class records
+    `NEGATIVE_CONTROL_MISSING:<class>`, and V4, and so the run, is never `PASS`.
   - **Mutation coverage:** all five mutations run and fail closed: remove a required anchor,
     duplicate a price row, inject hidden sold-out text, add a conflicting identity, remove the
     image region. A mutation that cannot be constructed is recorded as `MUTATION_NOT_EXERCISED`,
@@ -124,7 +139,8 @@ What each suite covers:
 - The operator expectations (`fixtures/expected/*.json`) carry identity, the twelve supplied fields
   and the images, and **no template key**. They agree with the engine.
 - The first `validate()` over the synthetic bundle ends **`INCOMPLETE`**, by design. Every other
-  check passes, and V4 reports all five mutations exercised. V3a flags a `productData` literal
+  check passes. V4 reports both negative classes present and all five mutations exercised, three
+  times each. V3a flags a `productData` literal
   assignment (`sku`, `stock`) that no rule reads. Once the operator records that finding as
   resolved, the run ends **`PASS`**, and `VALIDATED` holds only for that run's exact freshness
   tuple.

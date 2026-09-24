@@ -5,6 +5,7 @@ from prototypes.adaptive_collector.engine import extract
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore, canonical
 from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
+    Negatives,
     page,
     sample,
     synthetic_bundle,
@@ -40,7 +41,7 @@ def test_the_raw_page_and_its_sample_differ_only_where_the_capture_stripped(bund
     assert raw.normalized()["fields"] == replayed.normalized()["fields"]
 
 
-def test_a_validation_run_is_deterministic(bundle: Bundle, negatives: dict[str, str]) -> None:
+def test_a_validation_run_is_deterministic(bundle: Bundle, negatives: Negatives) -> None:
     samples = [sample(n) for n in SAMPLE_PAGES]
     assert run_digest(validate(bundle, samples, negatives=negatives)) == run_digest(
         validate(bundle, samples, negatives=negatives)
