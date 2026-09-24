@@ -98,12 +98,13 @@ Three different things are called a "profile". They are never one another (ADR-0
 
 | name | what it is | owner |
 | --- | --- | --- |
-| `CORE` / `COVERAGE` | the two field levels of `FIELD_REGISTRY` (`FieldLevel`). Every non-CORE field is a `COVERAGE` field | ADR-0010 §7, ADR-0017 §4 |
+| `CORE` / `COVERAGE` | the two field levels of `FIELD_REGISTRY` (`FieldLevel`). Every non-CORE field is a `COVERAGE` field. ADR-0010 §7's historical label "Source coverage" / "source-coverage" means `COVERAGE`; no new contract uses it | ADR-0010 §7, ADR-0017 §4 |
 | `comparability_key` | the tagged semantic tuple that decides drift comparability: `("CODE", extractor_revision)` for a revision without profile provenance, derived on read and never stored or backfilled; `("ADAPTIVE", extractor_revision, profile_schema_version, extraction_profile_digest)` otherwise | ADR-0017 §5.3; ADR-0013 §3 as amended |
 | `extraction_semantics_id` | the stored, collision-resistant digest of an Adaptive revision's semantic tuple; an integrity and indexing aid, never the comparability decision by itself | ADR-0017 §5.2 |
 | `HOOK_REVISION` / `HOOK_FINGERPRINT` | a supplier hook manifest's semantic revision (bound by the EPR) and implementation fingerprint (provenance and validation freshness only, never semantic identity) | ADR-0017 §6.2 |
 | promotion key | `(hook_point, target)` of a hook binding; the G6 counting unit, and when two or more suppliers share it, an architect promotion decision is required | ADR-0017 §6.3, §6.4 |
-| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation, cut by an independent capture owner and never by the profile it validates; never a whole authenticated page | ADR-0017 §7.3 |
+| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation, cut by an independent capture owner and never by the profile it validates; keeps product controls and admissible embedded data as parsed literals, excludes non-authoritative regions; never a whole authenticated page | ADR-0017 §7.3 |
+| `shadow_enabled_for_run` | a run's shadow decision, frozen at its first product-read reservation; the shadow step and the Phase C denominator both read only it | ADR-0017 §10.1 |
 | `VALIDATED` (a profile) | derived, never stored: a `PASS` validation run exists for the exact freshness tuple, implementation fingerprints included | ADR-0017 §7.1 |
 
 ## 4. Adoption and execution words

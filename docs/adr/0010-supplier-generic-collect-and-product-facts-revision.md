@@ -227,6 +227,11 @@ revision 3 ─ source_product_id X ─ fingerprint F
 
 ### 7. Facts: two levels (addendum D)
 
+> **Amendment note (ADR-0017 §4).** "Source coverage" in the table below and "source-coverage" in
+> the prose are the historical label of the enum level `COVERAGE` (`FieldLevel.COVERAGE`), and are
+> read as `COVERAGE`. The level, its fields, its `ABSENT` rule and its acceptance semantics are
+> unchanged.
+
 `ROADMAP.md` §5 and `docs/ARCHITECTURE.md` §5 define the COLLECT source-truth contract. M3 keeps all of it in the schema and the parser/evidence model, and splits only what **acceptance** requires.
 
 | Level | Facts |

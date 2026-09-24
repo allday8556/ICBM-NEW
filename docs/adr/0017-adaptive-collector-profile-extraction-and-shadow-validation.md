@@ -8,6 +8,13 @@ cross-audit PASS the architect agreed with, and the drafting authorization on Is
   Issue #110 (`5812200650`) (§14).
 - Where the Proposal left a value for "the ADR" to fix — the shadow retention bounds and the Phase C
   evidence window — this ADR fixes it, and that value is open to the exact-head audit.
+- Amended before merge by the architect audit `5307128101` on `43cbb0fd`:
+  - the ADR-0010 §7 level name is aligned with `COVERAGE` (§4);
+  - a `ValidationSample` keeps admissible embedded data and excludes non-authoritative regions
+    (§7.3);
+  - the shadow decision is frozen per run at the product-read reservation (§10.1, §11.1);
+  - raw shadow retention has no hold exception, and windows keep their own evidence ledger (§10.5);
+  - a `NO_REVISION` shadow record has no `revision_id` (§10.5).
 - **Its authority becomes effective only after this exact contract PR is audited, independently
   cross-audited and merged**, and even then only phase by phase (§2).
 
@@ -30,10 +37,16 @@ Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main
 PR immediately before writing.
 Date: 2026-09-24
 Related:
-- **Amends** ADR-0010 §6 and §12 (provenance and extraction identity for profile-interpreted
-  extraction, §5) and ADR-0013 §3 (drift comparability keys on `comparability_key`, §5.4). Both
-  amendments give **identical answers for every revision that exists today**, and both ADRs carry a
-  pointer to this one. No other sentence, invariant or ruling of any ADR changes.
+- **Amends** three ADR sections:
+  - ADR-0010 §6 and §12: provenance and extraction identity for profile-interpreted extraction
+    (§5);
+  - ADR-0010 §7: its historical level label "Source coverage" / "source-coverage" is read as the
+    enum level `COVERAGE` (§4);
+  - ADR-0013 §3: drift comparability keys on `comparability_key` (§5.4).
+
+  These amendments give **identical answers for every revision that exists today**. Both ADRs carry
+  a pointer to this one at each amended section. No other sentence, invariant or ruling of any ADR
+  changes.
 - ADR-0016: unchanged. `ReviewKind` stays closed, and a shadow mismatch is never a `ReviewItem`
   (§10.4).
 
@@ -161,7 +174,12 @@ These names are fixed (Q1, and cross-audit item 6). `docs/GLOSSARY.md` records t
 - The CONNECT **`SupplierProfile`** (ADR-0007) and the COLLECT access envelope
   **`CollectionProfile`** (ADR-0010) are distinct from each other, and from the EPR and PTR.
 - The two field levels are **`CORE`** and **`COVERAGE`** (`FieldLevel`, `app/collect/facts.py`).
-  Every non-CORE field is a `COVERAGE` field. No other word names that level in a contract.
+  Every non-CORE field is a `COVERAGE` field.
+- **ADR-0010 §7 is amended.** It calls the second level "Source coverage" in its table and
+  "source-coverage" in its prose. Those words are the historical label of the enum level
+  `COVERAGE`, and they are read as `COVERAGE` wherever they appear. ADR-0010 §7 carries an
+  amendment note saying so, and no new contract uses them. The level itself is unchanged: its
+  fields, its `ABSENT` rule and its acceptance semantics are exactly as ADR-0010 §7 states them.
 
 ### 5. Extraction identity and comparability (amends ADR-0010 §6, §12 and ADR-0013 §3)
 
@@ -409,7 +427,8 @@ promotion_group = (hook_point, target, format_class)    reported beside it; neve
   - JSON-LD offers.
 
   Any statement they find that the bundle neither reads nor explicitly disposes of must be
-  resolved by the operator before `PASS`.
+  resolved by the operator before `PASS`. V3a scans the admissible embedded data too. It never
+  scans an excluded non-authoritative region, because that region is not in the sample.
 - **V4 negative controls.** A login page, a non-product page, and a mutation suite derived
   deterministically from each sample must fail closed exactly as §8 says. The mutations include:
   - removing a required anchor;
@@ -443,16 +462,56 @@ does.** The snapshot is cut at capture time by two things.
    | sold-out and restock controls and markers | authorization, session and cookie material in any attribute or value |
    | option selectors (`select`/`option`, radio and button groups) with labels, order, selected/disabled state and non-secret values | member and account fields: names, IDs, grades, points, addresses, contacts |
    | quantity-input structure and bounds (`min`, `max`, `step`), never a user-entered value | cart and account submission payloads, and every user-entered or private value |
-   | the forms that carry the above, reduced to structure; an `action` kept only as a sanitized path under ADR-0010 §9 | scripts other than JSON-LD; account, member and navigation regions; secret-bearing URL material |
+   | the forms that carry the above, reduced to structure; an `action` kept only as a sanitized path under ADR-0010 §9 | account, member and navigation regions; secret-bearing URL material |
+   | **admissible embedded data** (below), as a parsed data tree, never as script text | executable code: every script that is not admissible embedded data, and every part of one that is not a literal |
 
    - A `form`, `input`, `select` or `button` is never removed merely for being a control.
+   - **Admissible embedded data.** `EvidenceKind.EMBEDDED_JSON` and `JSON_LD` stay canonical, and
+     `embedded_decode` / `SCRIPT_ASSIGNMENT` (§6) must stay provable under V3 and G7. The
+     capture sanitizer therefore keeps a bounded, sanitized, product-scoped representation of
+     embedded data. It uses only its own generic rules, never a profile's:
+     - **What qualifies:** a JSON-LD block; a `<script>` whose type declares JSON data; or a
+       top-level assignment of one **pure literal** (object, array, string, number, boolean or null)
+       to a name. The sanitizer's own strict literal parser decides this. A block with a function,
+       call, operator, template, reference or any other non-literal is not admissible and is
+       stripped whole.
+     - **How it is stored:** as its parsed data tree, with the assignment target's name where there
+       is one. It is never stored as script text, and it never becomes executable again.
+     - **What is stripped from inside it:** every key or value that is a credential, token, session,
+       authorization or CSRF value, a member or account field, a cart or account payload, or
+       secret-bearing URL material. Keys are matched by generic name rules and values by the same
+       secret scan the rest of the sample passes. Each removal is recorded.
+     - **Bounds:** at most 64 KiB per block and 256 KiB of embedded data per sample, after
+       stripping. A larger block is kept by digest only and is recorded as truncated, never
+       silently cut.
+     - **Scope:** a block qualifies only inside the recorded product scope (point 2). Page-wide
+       analytics, advertising, consent and tracking configuration is outside it by the
+       non-authoritative rule below.
    - When a kept control has a secret-bearing attribute, the control is kept, that attribute is
      removed, and the removal is recorded.
 2. **An operator-approved product scope.** The operator chooses it on the captured page, and it is
    recorded with the sample (who, when, the boundary) **before** any candidate profile evaluates
    the sample.
-   - The default scope is the whole document body after the sanitizer's exclusions.
-   - The operator may exclude further regions for privacy only, and each exclusion is recorded.
+   - The default scope is the document body after the sanitizer's exclusions **and after its
+     non-authoritative exclusions**.
+   - **Non-authoritative regions are not product scope.** These regions are never source authority
+     (ADR-0010 §10: review badges and description text do not decide stock):
+     - customer reviews and ratings;
+     - Q&A;
+     - recommendations and related or recently viewed products;
+     - other user-generated content;
+     - advertising.
+
+     They also carry other people's personal data. The capture sanitizer identifies them by its
+     own generic rules and the operator confirms each one. They are excluded from the sample and
+     recorded as excluded (their boundary and class, never their content). So they never become
+     V3 or V3a source evidence merely because the scope started from the body.
+   - The operator may exclude further regions, for privacy or as another non-authoritative region,
+     and each exclusion is recorded with its reason. The operator may never exclude a region
+     **because a candidate profile disagrees with it**. No profile has been evaluated at the time
+     the scope is recorded.
+   - A region is re-included only by a new capture with a new recorded scope, never by editing a
+     sample.
 
 **What a profile may do with a sample.**
 - No EPR or PTR, candidate or validated, may define, narrow or filter a snapshot. A bundle only
@@ -567,6 +626,17 @@ eligible `ProductFactsRevision`. An activation records none.
     the canonical side is `UNRESOLVED(reason)`.
   - It does not run on an attempt that recovered an already-appended revision, because that
     attempt read no document (§11.2).
+- **The per-run decision is frozen at the reservation.**
+  - When a run first reserves its product read (`CollectionRunStore.reserve_product_read`), the same
+    canonical write unit records `shadow_enabled_for_run`. That is the identity of the shadow-switch
+    history entry in effect at that moment, or an explicit *disabled*.
+  - A retry of the same run keeps the value its first reservation froze. It is never re-evaluated.
+  - **Both** the shadow step of that run and the Phase C denominator (§11.1) read that one frozen
+    value. Neither consults the switch's current setting.
+  - A switch change after the reservation affects **later reservations only**.
+  - This is the one canonical-run field this contract requires. It is an additive, nullable field
+    on the run record, written only by the run store, and added by its authorized production slice
+    with no backfill. A run without it is never shadow-eligible.
 - **Ordering.** The canonical revision's write unit **has committed before the shadow starts**.
 - **The shadow's own write.**
   - The engine evaluation is pure and holds no write unit.
@@ -589,7 +659,7 @@ eligible `ProductFactsRevision`. An activation records none.
 | S4 | no canonical write | the shadow package may not import the revision store, source-asset recorder, run store, review owner or pointer owner (repository rule), and it opens no canonical write unit |
 | S5 | no body persistence | `body` stays in memory (ADR-0010 §3) |
 | S6 | no AI | §9 |
-| S7 | off by default | enabled per supplier by explicit configuration whose changes form an append-only, timestamped history (§11 needs it); disabled means zero engine calls |
+| S7 | off by default, **frozen per run** | enabled per supplier by explicit configuration whose changes form an append-only history. Each run's decision is **frozen once, at its first product-read reservation** (§10.1); disabled means zero engine calls |
 
 #### 10.3 What is compared
 
@@ -662,18 +732,41 @@ and the first rule that decides it applies.
 
 #### 10.5 The shadow store and its retention
 
-- **Ownership.** The shadow store is a separate, non-canonical owner. It is keyed by
-  `collection_run_id` and references `revision_id` one way. Nothing canonical references it or
-  joins it.
+- **Ownership.** The shadow store is a separate, non-canonical owner. Nothing canonical
+  references it or joins it.
+- **Keys.** A shadow record's required key is **`collection_run_id`**, with at most one record per
+  run.
+  - `revision_id` is a **nullable**, one-way reference. It is present when the canonical side
+    appended a revision.
+  - It is **absent for a `NO_REVISION` (identity-unresolved) run**, whose canonical side is
+    `UNRESOLVED(reason)`.
+  - A `SHADOW_MISSING` marker (§11.2) likewise carries only the `collection_run_id` and its cause.
 - **Committed evidence** drawn from it follows ADR-0010 §6: counts and statuses, keyed
   fingerprints, and no plain digests of business values.
-- **Retention, fixed here.** A shadow record is kept at most **90 days** and at most **5,000
-  records per supplier**, whichever bound is reached first.
+- **Raw shadow records: a hard bound with no exception.**
+  - A raw shadow record, and a `SHADOW_MISSING` marker, is kept at most **90 days** and at most
+    **5,000 per supplier**, whichever bound is reached first.
+  - **There is no hold.** An open or cited window never keeps a raw record past either bound.
   - A missing bound is a refusal, never a code default.
   - Pruning never touches a canonical row.
-  - Pruning never removes a record that belongs to an open evidence window, or to a window cited
-    by recorded evidence (§11).
-  - `ValidationSample` retention is separate (§7.3).
+- **What a window keeps instead: its evidence ledger.**
+  - When a shadow record or `SHADOW_MISSING` marker of an eligible run is written, the shadow owner
+    also appends that run's **ledger entry** to its window, in the same shadow write unit. The same
+    happens when a resolution is recorded.
+  - A ledger entry holds the `collection_run_id`, the `revision_id` or its absence, the per-field
+    and run verdicts, the §11.1 count-as outcome and its cause, and the resolution reference.
+  - A ledger entry holds **no source values**. It is an immutable summary of outcomes.
+  - Closing a window materializes its verdict, its denominator and its entries as immutable
+    evidence.
+- **Retention of the ledger.** The ledger has a retention class of its own. It is bounded by what it
+  counts: one entry per eligible collection, and eligible collections are operator-submitted real
+  reads under the frozen request budget (ADR-0010 §4). It is kept while its bundle is not
+  `RETIRED`, or while recorded acceptance evidence cites the window.
+- **A raw record pruned before its outcome is settled.** If a raw record is pruned before its
+  mismatch is resolved, the ledger entry stays unresolved and counts `INCOMPLETE`. The evidence
+  needed to resolve a mismatch lives in the raw record, so resolution must happen inside the raw
+  bound.
+- `ValidationSample` retention is separate (§7.3).
 
 ### 11. Phase C evidence (cross-audit item 1)
 
@@ -688,10 +781,12 @@ and the first rule that decides it applies.
   it opens a new window.
 - **Eligible collection.** A canonical collection run qualifies when all three hold:
   - its terminal outcome is `RECORDED` or `NO_REVISION`, so a product document was read;
-  - the supplier's shadow switch was enabled when the run reserved its product read (S7 history);
-  - the reservation falls inside the window.
+  - its frozen `shadow_enabled_for_run` (§10.1) names an enabled switch entry;
+  - its first product-read reservation falls inside the window.
 - **Denominator.** Every eligible collection is counted. The denominator is derived from the
-  canonical run records and the switch history, **never from the shadow store**.
+  canonical run records and their frozen per-run shadow decision, **never from the shadow store**
+  and never from the switch's current setting. The shadow step ran for exactly the runs the
+  denominator counts, because both read the same frozen value.
 
 **What each eligible collection counts as.**
 
@@ -721,7 +816,7 @@ dies before the shadow's own unit commits.
     the cause `SHADOW_MISSING_AFTER_RECOVERY`.
   - It is never excluded, never counted as a success, and never retried away.
 - **Missing records are made visible.** A startup reconciliation of the shadow owner lists every
-  eligible run in an open window that has no shadow record. For each one it writes a
+  eligible run in an open window that has no shadow record and no ledger entry. For each one it writes a
   non-canonical `SHADOW_MISSING` marker in the shadow store's own unit, naming the run and the
   cause. The denominator never depends on that marker existing.
 - **The window can never pass.** Any `INCOMPLETE` makes the window `INCOMPLETE`. That window can
@@ -749,7 +844,10 @@ dies before the shadow's own unit commits.
     and the shadow record and then proves the run is in the denominator as `INCOMPLETE`;
   - the §10.1 separate-unit boundary, with a test that a failing shadow write leaves the canonical
     revision committed;
-  - the §10.5 retention bounds.
+  - the §10.5 retention bounds and window ledger, with a test that pruning a raw record keeps its
+    ledger outcome;
+  - the §10.1 frozen per-run decision, with a test that a switch change between the reservation and
+    the shadow step changes neither that run's shadow execution nor its eligibility.
 
 **Honest limit.** The accepted KM통상 product states no options and no tiers (`docs/acceptance/M3.md`
 §2.1). Positive options and tiers are therefore proven only on synthetic fixtures.
@@ -803,7 +901,7 @@ prototype in place.
 | 3 | image comparison with no stable locator | §10.4: in-memory M1/M2 matching; a persisted locator is never used; `UNMATCHABLE` is never a success and counts `INCOMPLETE`; nothing URL-derived is persisted | **yes** (§11.3) |
 | 4 | G6 counts `(hook_point, target)` bindings | §6.4 G6 | — |
 | 5 | V2 covers CORE `IMAGES_FIELD` | §7.2 V2 (image-role rules plus an image region in every PTR, plus expected image references per sample) | — |
-| 6 | non-CORE terminology is `COVERAGE` | §4 | — |
+| 6 | non-CORE terminology is `COVERAGE` | §4, including the explicit amendment of ADR-0010 §7's historical "Source coverage" label | — |
 
 ### 15. What this ADR does not decide
 
@@ -838,18 +936,20 @@ AC-07  No implementation fingerprint of the engine or of any hook enters the sem
 AC-08  extraction_semantics_id is a collision-resistant stored digest, never the comparability decision by itself; a mismatch with its recomputation makes the row non-comparable and is never repaired in place
 AC-09  Hook points are closed; a hook emits no status and no evidence; the EPR binds HOOK_REVISION only
 AC-10  promotion_key = (hook_point, target); G6 caps an EPR at two distinct (hook_point, target) bindings before an architecture review
-AC-11  A ValidationSample is cut by the independent capture owner and an operator-approved scope, never by the EPR or PTR it validates; it keeps sanitized product controls and strips private and secret material
+AC-11  A ValidationSample is cut by the independent capture owner and an operator-approved scope, never by the EPR or PTR it validates; it keeps sanitized product controls and admissible embedded data as parsed literals, strips executable code, private and secret material, and excludes non-authoritative regions
 AC-12  V2 covers CORE IMAGES_FIELD through image-role rules, an image region in every PTR and expected image references per sample
 AC-13  An ACTIVE switch writes only a lifecycle transition; the current source revision moves only through a later recorded eligible revision
 AC-14  Template matching requires exactly one template; no closest match; ambiguity fails closed
 AC-15  Production collection and the shadow make zero AI, OCR and vision calls; AI never authors or verifies expected facts
 AC-16  The shadow makes zero supplier requests and writes nothing canonical; its record is written in its own write unit only after the canonical unit has committed, never nested
 AC-17  Shadow image matching is in memory on the exact resolved or written reference; a persisted locator is never used; UNMATCHABLE is never a success
-AC-18  The Phase C denominator is every eligible collection, derived from canonical runs and the switch history; a missing shadow record, a crash included, counts INCOMPLETE and is never excluded
+AC-18  The Phase C denominator is every eligible collection, derived from canonical runs and their frozen per-run shadow decision; a missing shadow record, a crash included, counts INCOMPLETE and is never excluded
 AC-19  A window passes only if every eligible collection succeeds; any FAIL disqualifies the bundle
-AC-20  Shadow records are bounded by 90 days and 5000 per supplier; ValidationSample retention is separate
+AC-20  Raw shadow records are bounded by 90 days and 5000 per supplier with no hold exception; window outcomes survive only as the ledger; ValidationSample retention is separate
 AC-21  FieldStatus, EvidenceKind, ReviewKind and FIELD_REGISTRY are unchanged; non-CORE fields are COVERAGE
 AC-22  Phase C may not start before sections 10.4 and 11.2 are implemented with their negative controls; Phase D stays deferred
+AC-23  shadow_enabled_for_run is frozen at a run's first product-read reservation, and both the shadow step and the denominator read only that value
+AC-24  A shadow record is keyed by collection_run_id; revision_id is nullable and absent for a NO_REVISION run
 ```
 
 ## Consequences
@@ -868,7 +968,7 @@ AC-22  Phase C may not start before sections 10.4 and 11.2 are implemented with 
 ## References
 
 - Issue #110; kickoff `5811580104`; items `5812200650`; ADR authorization `5812422770`
-- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`;
+- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101`;
   `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9, ADR-0013 §3, ADR-0016
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2;

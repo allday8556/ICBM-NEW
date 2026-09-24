@@ -373,7 +373,7 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert ADAPTIVE_ADR.name in proposal
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 23)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 25)]
     # The truth vocabulary the design must not widen is exactly what the code holds.
     assert {s.value for s in FieldStatus} == {"CONFIRMED", "ABSENT", "REVIEW_REQUIRED"}
     assert {level.value for level in FieldLevel} == {"CORE", "COVERAGE"}
@@ -389,6 +389,13 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert "never nested" in invariants["AC-16"]
     assert "UNMATCHABLE is never a success" in invariants["AC-17"]
     assert "a crash included, counts INCOMPLETE and is never excluded" in invariants["AC-18"]
+    assert "with no hold exception" in invariants["AC-20"]
+    assert "frozen at a run's first product-read reservation" in invariants["AC-23"]
+    assert "revision_id is nullable and absent for a NO_REVISION run" in invariants["AC-24"]
+    # ADR-0010 §7's historical level label is aligned with COVERAGE, not left as a second name.
+    (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
+    levels = _section(_read(collect_adr), r"^7\. Facts: two levels")
+    assert "Amendment note (ADR-0017 §4)" in levels and "`COVERAGE`" in levels
     # The six cross-audit items of Issue #110 5812200650 are each closed by a named section.
     closed = _section(adr, r"^14\. The cross-audit items, closed$")
     assert len(re.findall(r"^\| [1-6] \|", closed, re.M)) == 6
