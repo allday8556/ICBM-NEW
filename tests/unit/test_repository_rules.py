@@ -1040,6 +1040,7 @@ ADAPTIVE_STDLIB = frozenset(
         "math",
         "re",
         "struct",
+        "types",
         "typing",
         "urllib.parse",
     }
