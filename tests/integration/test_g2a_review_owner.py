@@ -17,12 +17,15 @@ No provider is contacted and no owner is read: the test producer holds its condi
 import contextlib
 import json
 import sqlite3
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
 from alembic import command
 
+from app.audit.models import AuditEventType, AuditOutcome
+from app.audit.service import AuditEntry
 from app.config import AppConfig
 from app.container import Container, build_container
 from app.core.errors import AppError, InputValidationError
@@ -461,6 +464,68 @@ def test_a_stale_mismatched_or_unwired_resolution_writes_nothing(
     assert moved.value.code == "REVIEW_ITEM_MOVED"
     assert snapshot(config) == after_close
     assert before[ITEMS] == after_close[ITEMS]
+
+
+def test_an_owner_write_cannot_slip_between_derive_and_apply(
+    config: AppConfig, app: Container, owner: ReviewItemStore, producer: FakeProducer
+) -> None:
+    """Review 5806206452: the owner is re-derived and the resolution applied in one locked unit.
+
+    The owner has cleared the condition when the human resolves. While the producer derives, the
+    owner's own command tries to put the condition back through the same write coordinator every
+    owner write uses. It must wait: the resolution commits against the truth it derived, and the
+    owner write lands after it — never between derive and apply."""
+    producer.current = [condition()]
+    reconcile(owner, producer.current, scope_of())
+    (item,) = owner.items()
+    producer.current = []
+    owner_committed = threading.Event()
+
+    def owner_write() -> None:
+        with app.db.write() as session:
+            producer.current = [condition()]
+            app.audit.append(
+                AuditEntry(
+                    event_type=AuditEventType.PROTECTED_ACTION,
+                    action="OWNER_WRITE",
+                    actor="owner:test",
+                    outcome=AuditOutcome.RECORDED,
+                ),
+                session=session,
+            )
+        owner_committed.set()
+
+    writer = threading.Thread(target=owner_write)
+    derive = producer.derive
+    passed_during_derive: list[bool] = []
+
+    def derive_while_the_owner_writes(scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
+        derived = derive(scope)
+        writer.start()
+        writer.join(timeout=0.5)  # every chance for the owner write to slip in now
+        passed_during_derive.append(owner_committed.is_set())
+        return derived
+
+    producer.derive = derive_while_the_owner_writes  # type: ignore[method-assign]
+    result = resolve(owner, item.review_item_id)
+    writer.join(timeout=10)
+    assert passed_during_derive == [False]
+    assert owner_committed.is_set()
+    assert result.outcome is ResolutionOutcome.RESOLVED  # type: ignore[attr-defined]
+    with contextlib.closing(raw(config)) as connection:
+        order = [
+            r[0]
+            for r in connection.execute(
+                "SELECT action FROM audit_events"
+                " WHERE action IN ('REVIEW_ITEM_RESOLVED', 'OWNER_WRITE') ORDER BY seq"
+            )
+        ]
+    assert order == ["REVIEW_ITEM_RESOLVED", "OWNER_WRITE"]
+    # The owner's later truth is not lost: the next reconciliation reopens the same item.
+    producer.derive = derive  # type: ignore[method-assign]
+    reconcile(owner, producer.current, scope_of())
+    reopened = owner.item(item.review_item_id)
+    assert (reopened.state, reopened.generation) == (ReviewState.OPEN, 2)
 
 
 def test_a_resolution_changes_no_owner_table(

@@ -254,31 +254,37 @@ class ReviewItemStore:
         actor: str,
         correlation_id: str,
     ) -> ResolutionResult:
-        """Record one human resolution of one item generation, reconciled against its owner."""
+        """Record one human resolution of one item generation, reconciled against its owner.
+
+        Everything decisive happens inside **one** write unit (review ``5806206452``): the
+        application write coordinator is held from before the owner is re-derived until the
+        item, its events and their audit commit. The stale, generation and replay checks read
+        that same session, and no owner write of this process can pass the coordinator while
+        the producer derives, so the resolution is never reconciled against owner truth that
+        has already moved. The producer's derivation is read-only; it must not write.
+        """
         if not isinstance(disposition, ReviewDisposition):
             raise InputValidationError(REVIEW_REFERENCE_INVALID, "disposition is server-owned")
         human = _Human(
             review_item_id, disposition, sanitized_note(note), evidence_reference(evidence), actor
         )
         shown = canonical_scope(expected_scope)
-        current = self.item(review_item_id)
-        replay = self._check_resolvable(current, shown, expected_generation, human)
-        if replay is not None:
-            return replay
-        producer = self._producers.get(current.producer)
-        if producer is None:
-            raise ReviewConflictError(
-                REVIEW_PRODUCER_NOT_WIRED,
-                "the item's producer is not wired, so its owner cannot be re-derived",
-                details={"producer": current.producer},
-            )
-        derived = _validated(current.producer, current.scope, producer.derive(current.scope))
         with self._db.write() as session:
             row = session.get(ReviewItem, review_item_id)
-            assert row is not None
-            again = self._check_resolvable(_item_record(row), shown, expected_generation, human)
-            if again is not None:
-                return again
+            if row is None:
+                raise NotFoundError(REVIEW_ITEM_NOT_FOUND, "no such review item")
+            current = _item_record(row)
+            replay = _check_resolvable(session, current, shown, expected_generation, human)
+            if replay is not None:
+                return replay
+            producer = self._producers.get(current.producer)
+            if producer is None:
+                raise ReviewConflictError(
+                    REVIEW_PRODUCER_NOT_WIRED,
+                    "the item's producer is not wired, so its owner cannot be re-derived",
+                    details={"producer": current.producer},
+                )
+            derived = _validated(current.producer, current.scope, producer.derive(current.scope))
             self._apply(session, current.producer, current.scope, derived, correlation_id, human)
             session.refresh(row)
             after = _item_record(row)
@@ -307,64 +313,6 @@ class ReviewItemStore:
                     human=human,
                 )
             return ResolutionResult(after, outcome, replayed=False, successor_item_id=successor)
-
-    def _check_resolvable(
-        self,
-        item: ReviewItemRecord,
-        shown: Mapping[str, str],
-        expected_generation: int,
-        human: _Human,
-    ) -> ResolutionResult | None:
-        """Refuse a mismatched, stale or conflicting resolution; return a replay unchanged."""
-        if dict(item.scope) != dict(shown):
-            raise ReviewConflictError(
-                REVIEW_ITEM_SCOPE_MISMATCH, "the item belongs to another scope than the one shown"
-            )
-        recorded = self._recorded_resolution(item.review_item_id, expected_generation)
-        if recorded is not None:
-            if (recorded.disposition, recorded.note, recorded.evidence_reference) != (
-                human.disposition,
-                human.note,
-                human.evidence_reference,
-            ):
-                raise ReviewConflictError(
-                    REVIEW_RESOLUTION_ALREADY_RECORDED,
-                    "this item generation already has a different resolution",
-                    details={"generation": expected_generation},
-                )
-            return ResolutionResult(
-                item,
-                _outcome_of(recorded),
-                replayed=True,
-                successor_item_id=self._successor_of(item.review_item_id)
-                if recorded.basis is ReviewBasis.OWNER_SOURCE_MOVED
-                else None,
-            )
-        if item.generation != expected_generation or item.state is not ReviewState.OPEN:
-            raise ReviewConflictError(
-                REVIEW_ITEM_MOVED,
-                "the item moved since it was shown; reload it before resolving",
-                details={"state": item.state.value, "generation": item.generation},
-            )
-        return None
-
-    def _recorded_resolution(
-        self, review_item_id: str, generation: int
-    ) -> ReviewEventRecord | None:
-        with self._db.read() as session:
-            row = session.scalars(
-                select(ReviewItemEvent).where(
-                    ReviewItemEvent.review_item_id == review_item_id,
-                    ReviewItemEvent.generation == generation,
-                    ReviewItemEvent.disposition.is_not(None),
-                )
-            ).one_or_none()
-            return None if row is None else _event_record(row)
-
-    def _successor_of(self, review_item_id: str) -> str | None:
-        with self._db.read() as session:
-            row = session.get(ReviewItem, review_item_id)
-            return None if row is None else _successor(session, row)
 
     # -------------------------------------------------------------- the one lifecycle engine
 
@@ -591,6 +539,57 @@ def _validated(
             )
         conditions[condition.condition_key] = condition
     return conditions
+
+
+def _check_resolvable(
+    session: Session,
+    item: ReviewItemRecord,
+    shown: Mapping[str, str],
+    expected_generation: int,
+    human: _Human,
+) -> ResolutionResult | None:
+    """Refuse a mismatched, stale or conflicting resolution; return a replay unchanged. It reads
+    only the caller's locked session, so the check and the write decide on the same state."""
+    if dict(item.scope) != dict(shown):
+        raise ReviewConflictError(
+            REVIEW_ITEM_SCOPE_MISMATCH, "the item belongs to another scope than the one shown"
+        )
+    row = session.scalars(
+        select(ReviewItemEvent).where(
+            ReviewItemEvent.review_item_id == item.review_item_id,
+            ReviewItemEvent.generation == expected_generation,
+            ReviewItemEvent.disposition.is_not(None),
+        )
+    ).one_or_none()
+    if row is not None:
+        recorded = _event_record(row)
+        if (recorded.disposition, recorded.note, recorded.evidence_reference) != (
+            human.disposition,
+            human.note,
+            human.evidence_reference,
+        ):
+            raise ReviewConflictError(
+                REVIEW_RESOLUTION_ALREADY_RECORDED,
+                "this item generation already has a different resolution",
+                details={"generation": expected_generation},
+            )
+        item_row = session.get(ReviewItem, item.review_item_id)
+        assert item_row is not None
+        return ResolutionResult(
+            item,
+            _outcome_of(recorded),
+            replayed=True,
+            successor_item_id=_successor(session, item_row)
+            if recorded.basis is ReviewBasis.OWNER_SOURCE_MOVED
+            else None,
+        )
+    if item.generation != expected_generation or item.state is not ReviewState.OPEN:
+        raise ReviewConflictError(
+            REVIEW_ITEM_MOVED,
+            "the item moved since it was shown; reload it before resolving",
+            details={"state": item.state.value, "generation": item.generation},
+        )
+    return None
 
 
 def _within(scope: Mapping[str, str], wanted: Mapping[str, str]) -> bool:
