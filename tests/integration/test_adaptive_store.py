@@ -6,9 +6,11 @@ What this proves (ADR-0017 §3, §7; Issue #110 5822923514), with the invented s
   writes nothing, and the database refuses any UPDATE or DELETE of every P2 table;
 - every read recomputes the digest, and a row changed out of band fails closed
   (``ADAPTIVE_TAMPERED``) for profiles, bundles, samples and runs alike;
-- lineage stays inside one kind and one supplier; the lifecycle is an append-only log of the
-  ``DRAFT``, ``SHADOW`` and ``RETIRED`` designations whose shape and order the database enforces;
-  ``SHADOW`` is designated only while ``VALIDATED`` for the running engine, and grants no run;
+- lineage stays inside one kind and one supplier; the lifecycle is an append-only log whose shape
+  and order the database enforces, and P2 never enters ``SHADOW`` (review 5311392575 B1);
+- an EPR enters ``DRAFT`` with its lint findings recorded, immutable and re-checked on read (B2);
+- a sample belongs to one supplier, a run replays only its own EPR's supplier's samples, and every
+  read recomputes a run's ordered sample set from its linked rows (B3);
 - ``VALIDATED`` is never stored: it is derived from a ``PASS`` run for the exact freshness tuple,
   of an EPR that is not retired;
 - a sample is kept locally, re-checked on save and load, retained while a run references it and
@@ -34,6 +36,13 @@ import pytest
 from alembic import command
 
 from app.collect.adaptive.capture import ValidationSample, sample_digest
+from app.collect.adaptive.lint import (
+    COVERAGE_FIELD_WITHOUT_RULE,
+    LINT_REVISION,
+    UNMAPPED_CORE_FIELD,
+    draft_lint,
+    lint_digest,
+)
 from app.collect.adaptive.profiles import profile_document
 from app.collect.adaptive.validation import (
     ValidationRun,
@@ -43,6 +52,7 @@ from app.collect.adaptive.validation import (
 )
 from app.collect.adaptive_store.gate import build_supplier_gate, registered_suppliers
 from app.collect.adaptive_store.store import (
+    _FOLLOWS,
     ADAPTIVE_LIFECYCLE_REFUSED,
     ADAPTIVE_LINEAGE_INVALID,
     ADAPTIVE_PROFILE_INVALID,
@@ -66,11 +76,16 @@ from tests.adaptive_support import (
     Negatives,
     documents,
     epr,
+    hook_manifest,
+    hooked_bundle,
     negative_pages,
     sample,
     samples,
     synmart_bundle,
     template,
+)
+from tests.adaptive_support import (
+    SAMPLES as SAMPLES_NAMES,
 )
 from tests.support import FakeClock
 
@@ -82,11 +97,12 @@ BEFORE_0024 = "0023_g2_review_coverage_fence"
 AT_0024 = "0024_adaptive_profile_validation"
 REVISIONS = "adaptive_profile_revisions"
 PINS = "adaptive_profile_pins"
+LINT = "adaptive_profile_lint"
 TRANSITIONS = "adaptive_profile_transitions"
 SAMPLES = "adaptive_validation_samples"
 RUNS = "adaptive_validation_runs"
 RUN_SAMPLES = "adaptive_validation_run_samples"
-TABLES = (REVISIONS, PINS, TRANSITIONS, SAMPLES, RUNS, RUN_SAMPLES)
+TABLES = (REVISIONS, PINS, LINT, TRANSITIONS, SAMPLES, RUNS, RUN_SAMPLES)
 
 
 class NetworkRefused(AssertionError):
@@ -523,117 +539,26 @@ def test_the_database_refuses_a_retired_epr_reopened_and_a_template_lifecycle(
                 )
 
 
-# ---------------------------------------------------------------- the SHADOW designation
+# ---------------------------------------------------------------- no SHADOW entry in P2
 
 
-def _states(stores: Stores, digest: str) -> list[tuple[str | None, str]]:
-    return [(t.from_state, t.to_state) for t in stores.profiles.lifecycle(digest)]
-
-
-def test_shadow_is_designated_only_while_validated_for_the_running_engine(
-    stores: Stores, negatives: Negatives
-) -> None:
-    digest = _save_synmart(stores)
-    current = freshness_tuple(synmart_bundle(), samples(), None)
-    with pytest.raises(InputValidationError) as error:  # a DRAFT with no PASS run
-        stores.validation.designate_shadow(
-            digest, current, actor=AUTHOR, reason="READY", correlation_id=CORRELATION
-        )
-    _refused(error, ADAPTIVE_LIFECYCLE_REFUSED)
-
+def test_p2_never_enters_shadow_even_from_a_pass_run(stores: Stores, negatives: Negatives) -> None:
+    # ADR-0017 §7.1: SHADOW is VALIDATED plus the per-supplier shadow switch, which P2 does not
+    # own (review 5311392575 B1). A PASS run leaves the EPR a DRAFT, and neither store offers a
+    # way in.
     digest, run = _validated_profile(stores, negatives)
-    # A tuple that names another EPR, or an engine that is not the running one, never designates,
-    # even when a PASS run for exactly that tuple were on record.
-    other = ("0" * 64, *current[1:])
-    for index in (1, 2, 3, 6):
-        stale = tuple(f"{p}-old" if i == index else p for i, p in enumerate(current))
-        for freshness in (other, stale, current[:6]):
-            with pytest.raises(InputValidationError) as error:
-                stores.validation.designate_shadow(
-                    digest, freshness, actor=AUTHOR, reason="READY", correlation_id=CORRELATION
-                )
-            _refused(error, ADAPTIVE_LIFECYCLE_REFUSED)
+    assert stores.validation.is_validated(digest, run.freshness)
     assert stores.profiles.state(digest) == "DRAFT"
-
-    stores.validation.designate_shadow(
-        digest, current, actor="operator:local", reason="READY", correlation_id="corr-shadow"
-    )
-    assert stores.profiles.state(digest) == "SHADOW"
-    assert _states(stores, digest) == [(None, "DRAFT"), ("DRAFT", "SHADOW")]
-    designated = stores.profiles.lifecycle(digest)[-1]
-    assert (designated.actor, designated.reason, designated.correlation_id) == (
-        "operator:local",
-        "READY",
-        "corr-shadow",
-    )
-    # The designation is not VALIDATED: that stays derived, and lapses with the freshness.
-    assert stores.validation.is_validated(digest, current)
-    lapsed = (*current[:5], "f" * 64, current[6])
-    assert not stores.validation.is_validated(digest, lapsed)
-    assert stores.profiles.state(digest) == "SHADOW"
-    assert run.freshness == current
-
-
-def test_a_shadow_designation_is_withdrawn_redesignated_and_retired_in_order(
-    stores: Stores, negatives: Negatives
-) -> None:
-    digest, run = _validated_profile(stores, negatives)
-    current = run.freshness
-    stores.validation.designate_shadow(
-        digest, current, actor=AUTHOR, reason="READY", correlation_id=CORRELATION
-    )
-    with pytest.raises(InputValidationError) as error:  # already designated
-        stores.validation.designate_shadow(
-            digest, current, actor=AUTHOR, reason="AGAIN", correlation_id=CORRELATION
-        )
+    assert [t.to_state for t in stores.profiles.lifecycle(digest)] == ["DRAFT"]
+    for owner in (stores.profiles, stores.validation):
+        public = {name for name in dir(owner) if not name.startswith("_")}
+        assert not {name for name in public if "shadow" in name.lower()}, public
+    assert {"RETIRED": frozenset({"DRAFT", "SHADOW"})} == _FOLLOWS
+    # Even the owner's own transition refuses it, and nothing is appended.
+    with pytest.raises(InputValidationError) as error:
+        stores.profiles._transition(digest, "SHADOW", AUTHOR, "READY", CORRELATION)
     _refused(error, ADAPTIVE_LIFECYCLE_REFUSED)
-    # A designated EPR is still revalidated, for example against another sample set.
-    fewer = samples()[:2]
-    again = validate(synmart_bundle(), fewer, negatives=negatives)
-    stores.validation.record_run(
-        stores.profiles.load_bundle(digest),
-        again,
-        fewer,
-        recorded_by=AUTHOR,
-        correlation_id=CORRELATION,
-    )
-    assert len(stores.validation.runs(digest)) == 3
-    stores.profiles.withdraw_shadow(
-        digest, actor=AUTHOR, reason="PAUSED", correlation_id=CORRELATION
-    )
-    with pytest.raises(InputValidationError) as error:  # nothing to withdraw
-        stores.profiles.withdraw_shadow(
-            digest, actor=AUTHOR, reason="PAUSED", correlation_id=CORRELATION
-        )
-    _refused(error, ADAPTIVE_LIFECYCLE_REFUSED)
-    stores.validation.designate_shadow(
-        digest, current, actor=AUTHOR, reason="RESUMED", correlation_id=CORRELATION
-    )
-    stores.profiles.retire(digest, actor=AUTHOR, reason="SUPERSEDED", correlation_id=CORRELATION)
-    assert _states(stores, digest) == [
-        (None, "DRAFT"),
-        ("DRAFT", "SHADOW"),
-        ("SHADOW", "DRAFT"),
-        ("DRAFT", "SHADOW"),
-        ("SHADOW", "RETIRED"),
-    ]
-    assert [t.seq for t in stores.profiles.lifecycle(digest)] == [1, 2, 3, 4, 5]
-    assert not stores.validation.is_validated(digest, current)
-    for move in (
-        lambda: stores.validation.designate_shadow(
-            digest, current, actor=AUTHOR, reason="NO", correlation_id=CORRELATION
-        ),
-        lambda: stores.profiles.withdraw_shadow(
-            digest, actor=AUTHOR, reason="NO", correlation_id=CORRELATION
-        ),
-        lambda: stores.profiles.retire(
-            digest, actor=AUTHOR, reason="NO", correlation_id=CORRELATION
-        ),
-    ):
-        with pytest.raises(InputValidationError) as error:
-            move()
-        _refused(error, ADAPTIVE_LIFECYCLE_REFUSED)
-    assert len(stores.profiles.lifecycle(digest)) == 5
+    assert len(stores.profiles.lifecycle(digest)) == 1
 
 
 # ---------------------------------------------------------------- append-only
@@ -907,11 +832,228 @@ def test_a_retired_epr_is_never_validated_again(stores: Stores, negatives: Negat
 def test_the_database_refuses_a_run_of_a_template(stores: Stores, negatives: Negatives) -> None:
     _validated_profile(stores, negatives)
     ptr = stores.profiles.revisions(SUPPLIER, "PAGE_TEMPLATE")[0].digest
+    with _raw(stores.path) as raw, pytest.raises(sqlite3.IntegrityError, match="validates an EPR"):
+        raw.execute(
+            f"INSERT INTO {RUNS} SELECT 'r-x', ?, verdict, profile_schema_version,"
+            " extractor_revision, extractor_fingerprint, hook_fingerprint, sample_set_digest,"
+            " capture_revision, checks_json, sample_count, ?, recorded_by, correlation_id,"
+            f" recorded_at FROM {RUNS} LIMIT 1",
+            (ptr, "e" * 64),
+        )
+
+
+# ---------------------------------------------------------------- DRAFT lint (B2)
+
+
+def _save_linted(stores: Stores) -> str:
+    """An EPR whose template leaves one CORE and two COVERAGE fields unruled: a valid DRAFT."""
+    sparse = template("sparse", choice=False)
+    for field in ("prices", "brand", "origin"):
+        del sparse["fields"][field]
+    (pinned,) = documents(sparse)
+    stores.profiles.save_template(sparse, created_by=AUTHOR, correlation_id=CORRELATION)
+    return stores.profiles.save_draft(epr([pinned]), created_by=AUTHOR, correlation_id=CORRELATION)
+
+
+def test_an_epr_enters_draft_with_its_lint_recorded(stores: Stores, clock: FakeClock) -> None:
+    clean = _save_synmart(stores)
+    assert stores.profiles.lint(clean).findings == ()
+    digest = _save_linted(stores)
+    recorded = stores.profiles.lint(digest)
+    assert recorded.lint_revision == LINT_REVISION
+    assert recorded.recorded_at == clock.now()
+    assert recorded.findings == (
+        f"{COVERAGE_FIELD_WITHOUT_RULE}:sparse:brand",
+        f"{COVERAGE_FIELD_WITHOUT_RULE}:sparse:origin",
+        f"{UNMAPPED_CORE_FIELD}:sparse:prices",
+    )
+    assert recorded.findings == draft_lint(stores.profiles.load_bundle(digest))
+    # Lint is a record, not a verdict: the DRAFT is saved and loads.
+    assert stores.profiles.state(digest) == "DRAFT"
     with _raw(stores.path) as raw:
-        row = raw.execute(f"SELECT * FROM {RUNS} LIMIT 1").fetchone()
-        values = ("r-x", ptr, *row[2:10], "[]", "e" * 64, *row[12:])
-        with pytest.raises(sqlite3.IntegrityError, match="validates an EPR"):
-            raw.execute(f"INSERT INTO {RUNS} VALUES ({', '.join('?' * len(values))})", values)
+        assert raw.execute(f"SELECT COUNT(*) FROM {LINT}").fetchone()[0] == 2
+        (stored,) = raw.execute(
+            f"SELECT lint_digest FROM {LINT} WHERE epr_digest = ?", (digest,)
+        ).fetchone()
+    assert stored == lint_digest(LINT_REVISION, recorded.findings)
+
+
+def test_a_repeated_draft_save_keeps_the_first_lint(stores: Stores, clock: FakeClock) -> None:
+    digest = _save_linted(stores)
+    first = stores.profiles.lint(digest)
+    before = _counts(stores.path)
+    clock.advance(60)
+    sparse_pin = stores.profiles.revisions(SUPPLIER, "PAGE_TEMPLATE")[0].digest
+    assert (
+        stores.profiles.save_draft(
+            epr([sparse_pin]), created_by="operator:other", correlation_id="corr-other"
+        )
+        == digest
+    )
+    assert _counts(stores.path) == before
+    assert stores.profiles.lint(digest) == first
+
+
+def _set_lint(path: Path, digest: str, revision: str, findings: list[str], stored: str) -> None:
+    with _raw(path) as raw:
+        raw.execute(f"DROP TRIGGER IF EXISTS trg_{LINT}_no_update")
+        raw.execute(
+            f"UPDATE {LINT} SET lint_revision = ?, findings_json = ?, lint_digest = ?"
+            " WHERE epr_digest = ?",
+            (revision, json.dumps(findings), stored, digest),
+        )
+        raw.commit()
+
+
+def test_recorded_lint_changed_out_of_band_fails_closed(stores: Stores) -> None:
+    digest = _save_linted(stores)
+    findings = list(stores.profiles.lint(digest).findings)
+    dropped = findings[1:]
+    for revision, changed, stored in (
+        # a finding removed, its digest recomputed: disagrees with the running rule set
+        (LINT_REVISION, dropped, lint_digest(LINT_REVISION, tuple(dropped))),
+        # the findings kept, the digest wrong
+        (LINT_REVISION, findings, "0" * 64),
+        # reordered: never the canonical sorted form
+        (LINT_REVISION, findings[::-1], lint_digest(LINT_REVISION, tuple(findings[::-1]))),
+    ):
+        _set_lint(stores.path, digest, revision, changed, stored)
+        with pytest.raises(AdaptiveTampered):
+            stores.profiles.lint(digest)
+
+
+def test_lint_recorded_under_another_rule_set_is_read_as_recorded(stores: Stores) -> None:
+    # A later rule set never reinterprets an earlier record: it is checked against its own digest.
+    digest = _save_linted(stores)
+    older = ["UNMAPPED_CORE_FIELD:sparse:prices"]
+    _set_lint(
+        stores.path, digest, "adaptive-lint-0", older, lint_digest("adaptive-lint-0", tuple(older))
+    )
+    assert stores.profiles.lint(digest).findings == tuple(older)
+    assert stores.profiles.lint(digest).lint_revision == "adaptive-lint-0"
+
+
+def test_a_draft_without_its_lint_fails_closed(stores: Stores) -> None:
+    digest = _save_linted(stores)
+    with _raw(stores.path) as raw:
+        raw.execute(f"DROP TRIGGER trg_{LINT}_no_delete")
+        raw.execute(f"DELETE FROM {LINT} WHERE epr_digest = ?", (digest,))
+        raw.commit()
+    with pytest.raises(AdaptiveTampered):
+        stores.profiles.lint(digest)
+
+
+def test_the_database_records_lint_only_for_an_epr(stores: Stores) -> None:
+    _save_synmart(stores)
+    ptr = stores.profiles.revisions(SUPPLIER, "PAGE_TEMPLATE")[0].digest
+    with _raw(stores.path) as raw, pytest.raises(sqlite3.IntegrityError, match="only an EPR"):
+        raw.execute(
+            f"INSERT INTO {LINT} VALUES (?, ?, '[]', ?, '2026-09-13 00:00:00.000000')",
+            (ptr, LINT_REVISION, lint_digest(LINT_REVISION, ())),
+        )
+
+
+# ---------------------------------------------------------------- evidence binding (B3)
+
+
+def _save_hooked(stores: Stores) -> str:
+    bundle = hooked_bundle()
+    for _, ptr in bundle.templates:
+        stores.profiles.save_template(
+            profile_document(ptr), created_by=AUTHOR, correlation_id=CORRELATION
+        )
+    return stores.profiles.save_draft(
+        profile_document(bundle.epr), created_by=AUTHOR, correlation_id=CORRELATION
+    )
+
+
+def test_a_sample_belongs_to_one_supplier(stores: Stores) -> None:
+    (first, *_) = _save_samples(stores)
+    assert stores.validation.sample_supplier(first.digest) == SUPPLIER
+    with pytest.raises(InputValidationError) as error:
+        stores.validation.save_sample(
+            first, supplier_key=HOOKED_SUPPLIER, stored_by=AUTHOR, correlation_id=CORRELATION
+        )
+    _refused(error, ADAPTIVE_SAMPLE_REFUSED)
+    assert stores.validation.sample_supplier(first.digest) == SUPPLIER
+    assert _count(stores.path, SAMPLES) == len(SAMPLES_NAMES)
+
+
+def test_a_run_replays_only_its_own_suppliers_samples(stores: Stores) -> None:
+    hooked = _save_hooked(stores)
+    captured = _save_samples(stores)  # synmart's
+    bundle = stores.profiles.load_bundle(hooked)
+    current = freshness_tuple(bundle, captured, hook_manifest())
+    run = ValidationRun(Verdict.FAIL, (), current)
+    with pytest.raises(InputValidationError) as error:
+        stores.validation.record_run(
+            bundle, run, captured, recorded_by=AUTHOR, correlation_id=CORRELATION
+        )
+    _refused(error, ADAPTIVE_RUN_REFUSED)
+    assert _count(stores.path, RUNS) == 0
+
+
+def test_the_database_links_only_samples_of_the_runs_supplier_inside_its_count(
+    stores: Stores, negatives: Negatives
+) -> None:
+    digest, _ = _validated_profile(stores, negatives)
+    foreign = _redigested(sample("on_sale"), expected_json=json.dumps({"x": 1}))
+    stores.validation.save_sample(
+        foreign, supplier_key=HOOKED_SUPPLIER, stored_by=AUTHOR, correlation_id=CORRELATION
+    )
+    (run_id,) = {s.run_id for s in stores.validation.runs(digest) if s.run.verdict is Verdict.PASS}
+    first = samples()[0].digest
+    with _raw(stores.path) as raw:
+        for position, linked in ((3, first), (7, first), (0, foreign.digest)):
+            with pytest.raises(sqlite3.IntegrityError):
+                raw.execute(
+                    f"INSERT INTO {RUN_SAMPLES} VALUES (?, ?, ?)", (run_id, position, linked)
+                )
+
+
+def _pass_run_id(stores: Stores, digest: str) -> str:
+    (run_id,) = {s.run_id for s in stores.validation.runs(digest) if s.run.verdict is Verdict.PASS}
+    return run_id
+
+
+def _links_out_of_band(path: Path, *statements: tuple[str, tuple[object, ...]]) -> None:
+    with _raw(path) as raw:
+        for trigger in ("no_update", "no_delete", "within_the_run"):
+            raw.execute(f"DROP TRIGGER trg_{RUN_SAMPLES}_{trigger}")
+        for statement, args in statements:
+            raw.execute(statement, args)
+        raw.commit()
+
+
+@pytest.mark.parametrize("change", ["extra", "missing", "reordered", "replaced"])
+def test_a_runs_links_changed_out_of_band_fail_closed_and_never_validate(
+    stores: Stores, negatives: Negatives, change: str
+) -> None:
+    digest, run = _validated_profile(stores, negatives)
+    run_id = _pass_run_id(stores, digest)
+    first = samples()[0].digest
+    other = _redigested(sample("on_sale"), expected_json=json.dumps({"y": 2}))
+    stores.validation.save_sample(
+        other, supplier_key=SUPPLIER, stored_by=AUTHOR, correlation_id=CORRELATION
+    )
+    where = "WHERE run_id = ? AND position = ?"
+    statements = {
+        "extra": [(f"INSERT INTO {RUN_SAMPLES} VALUES (?, 3, ?)", (run_id, first))],
+        "missing": [(f"DELETE FROM {RUN_SAMPLES} {where}", (run_id, 2))],
+        "reordered": [
+            (f"UPDATE {RUN_SAMPLES} SET position = 9 {where}", (run_id, 0)),
+            (f"UPDATE {RUN_SAMPLES} SET position = 0 {where}", (run_id, 1)),
+            (f"UPDATE {RUN_SAMPLES} SET position = 1 {where}", (run_id, 9)),
+        ],
+        "replaced": [
+            (f"UPDATE {RUN_SAMPLES} SET sample_digest = ? {where}", (other.digest, run_id, 2))
+        ],
+    }[change]
+    _links_out_of_band(stores.path, *statements)
+    with pytest.raises(AdaptiveTampered):
+        stores.validation.runs(digest)
+    with pytest.raises(AdaptiveTampered):
+        stores.validation.is_validated(digest, run.freshness)
 
 
 # ---------------------------------------------------------------- restart, audit, migration

@@ -465,6 +465,7 @@ REVIEW_TABLES = ("review_items", "review_item_events", "review_coverage")
 ADAPTIVE_TABLES = (
     "adaptive_profile_revisions",
     "adaptive_profile_pins",
+    "adaptive_profile_lint",
     "adaptive_profile_transitions",
     "adaptive_validation_samples",
     "adaptive_validation_runs",

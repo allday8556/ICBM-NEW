@@ -5,7 +5,7 @@ Revises: 0023_g2_review_coverage_fence
 Create Date: 2026-09-25
 
 Issue #110, production slice P2 (authorization `5822024807`, activated by `5822923514`), under
-ADR-0017 §3, §5 and §7. It adds six tables and touches no existing table, row, trigger or index.
+ADR-0017 §3, §5 and §7. It adds seven tables and touches no existing table, row, trigger or index.
 
 **What it holds.**
 - ``adaptive_profile_revisions``: immutable, content-addressed ``ExtractionProfileRevision`` and
@@ -13,24 +13,30 @@ ADR-0017 §3, §5 and §7. It adds six tables and touches no existing table, row
   digest is the primary key; the application recomputes it on every load and refuses a mismatch.
 - ``adaptive_profile_pins``: the templates an EPR pins, in order, each one the database checks
   against the EPR's own document.
-- ``adaptive_profile_transitions``: the append-only lifecycle log of an EPR's designations:
-  ``DRAFT``, ``SHADOW`` and ``RETIRED`` (authorization ``5822024807``). ``VALIDATED`` is never
-  stored: it is derived from a ``PASS`` validation run for the exact freshness tuple. ``SHADOW``
-  is only a designation (ADR-0017 §7.1): it grants no shadow run, since eligibility also needs
-  ``VALIDATED`` at run time and the per-supplier shadow switch, which a later slice owns.
-  ``ACTIVE`` does not exist here: ADR-0017 §7.4 does not authorize it.
+- ``adaptive_profile_lint``: the lint findings recorded when an EPR entered ``DRAFT``
+  (ADR-0017 §7.1), with the lint rule-set revision that produced them and their digest. One
+  immutable row per EPR; lint is never a verdict and never a mutable flag.
+- ``adaptive_profile_transitions``: the append-only lifecycle log of an EPR's designations. Its
+  vocabulary is ``DRAFT``, ``SHADOW`` and ``RETIRED`` (authorization ``5822024807``), but P2
+  never enters ``SHADOW``: ADR-0017 §7.1 requires ``VALIDATED`` plus the per-supplier shadow
+  switch, which a later slice owns (review ``5311392575`` B1). ``VALIDATED`` is never stored: it
+  is derived from a ``PASS`` validation run for the exact freshness tuple. ``ACTIVE`` does not
+  exist here: ADR-0017 §7.4 does not authorize it.
 - ``adaptive_validation_samples``: operator-captured ``ValidationSample`` material, kept only in
   this local database. A sample is retained while any validation run references it; the database
   refuses to delete a referenced one.
 - ``adaptive_validation_runs`` and ``adaptive_validation_run_samples``: every validation run with
-  its verdict, checks, exact freshness tuple and run digest, and the ordered samples it replayed.
+  its verdict, checks, exact freshness tuple, run digest and sample count, and the ordered samples
+  it replayed. The database admits a linked sample only at a position below the run's count and
+  only of the run's own supplier; the application recomputes the ordered sample-set digest from
+  the links on every read.
 
 **What the database enforces.** Revisions, pins, transitions and runs are never updated or deleted.
 A transition follows the one before it, with no gap, and only in the lifecycle's own shape. A pin
 names a template of the same supplier, at the position the EPR's document names it. Samples are
-never updated, and are deletable only while unreferenced.
+never updated, and are deletable only while unreferenced. A sample belongs to one supplier.
 
-**Downgrade fails closed.** It refuses while any of the six tables holds a row: profile and
+**Downgrade fails closed.** It refuses while any of the seven tables holds a row: profile and
 validation history is never silently dropped.
 """
 
@@ -46,11 +52,12 @@ depends_on: str | Sequence[str] | None = None
 
 REVISIONS = "adaptive_profile_revisions"
 PINS = "adaptive_profile_pins"
+LINT = "adaptive_profile_lint"
 TRANSITIONS = "adaptive_profile_transitions"
 SAMPLES = "adaptive_validation_samples"
 RUNS = "adaptive_validation_runs"
 RUN_SAMPLES = "adaptive_validation_run_samples"
-CREATED = (RUN_SAMPLES, RUNS, SAMPLES, TRANSITIONS, PINS, REVISIONS)
+CREATED = (RUN_SAMPLES, RUNS, SAMPLES, TRANSITIONS, LINT, PINS, REVISIONS)
 
 KINDS = ("EXTRACTION_PROFILE", "PAGE_TEMPLATE")
 ORIGINS = ("OPERATOR", "AI_PROPOSAL", "IMPORT")
@@ -170,6 +177,26 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        LINT,
+        sa.Column("epr_digest", sa.String(length=64), nullable=False),
+        sa.Column("lint_revision", sa.String(length=64), nullable=False),
+        sa.Column("findings_json", sa.Text(), nullable=False),
+        sa.Column("lint_digest", sa.String(length=64), nullable=False),
+        sa.Column("recorded_at", sa.DateTime(), nullable=False),
+        _check(LINT, _present("lint_revision"), "revision_present"),
+        _check(
+            LINT,
+            "json_valid(findings_json) AND json_type(findings_json) = 'array'",
+            "findings_array",
+        ),
+        _check(LINT, _hex64("lint_digest"), "digest_hex"),
+        sa.ForeignKeyConstraint(
+            ["epr_digest"], [f"{REVISIONS}.digest"], name=op.f(f"fk_{LINT}_epr_digest_{REVISIONS}")
+        ),
+        sa.PrimaryKeyConstraint("epr_digest", name=op.f(f"pk_{LINT}")),
+    )
+
+    op.create_table(
         TRANSITIONS,
         sa.Column("transition_id", sa.String(length=36), nullable=False),
         sa.Column("epr_digest", sa.String(length=64), nullable=False),
@@ -233,6 +260,7 @@ def upgrade() -> None:
         sa.Column("sample_set_digest", sa.String(length=64), nullable=False),
         sa.Column("capture_revision", sa.String(length=64), nullable=False),
         sa.Column("checks_json", sa.Text(), nullable=False),
+        sa.Column("sample_count", sa.Integer(), nullable=False),
         sa.Column("run_digest", sa.String(length=64), nullable=False),
         sa.Column("recorded_by", sa.String(length=64), nullable=False),
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
@@ -249,6 +277,7 @@ def upgrade() -> None:
         _check(
             RUNS, "json_valid(checks_json) AND json_type(checks_json) = 'array'", "checks_array"
         ),
+        _check(RUNS, "sample_count >= 0", "sample_count_valid"),
         _check(RUNS, _hex64("run_digest"), "run_digest_hex"),
         _check(RUNS, _present("recorded_by"), "author_present"),
         _check(RUNS, _present("correlation_id"), "correlation_present"),
@@ -311,6 +340,17 @@ def _install_triggers() -> None:
             " = NEW.ptr_digest)",
         ),
     )
+    _immutable(LINT)
+    _trigger(
+        LINT,
+        "of_an_epr",
+        "INSERT",
+        _raise(
+            f"{LINT}: only an EPR records DRAFT lint",
+            f"NOT EXISTS (SELECT 1 FROM {REVISIONS} r WHERE r.digest = NEW.epr_digest"
+            " AND r.kind = 'EXTRACTION_PROFILE')",
+        ),
+    )
     _immutable(TRANSITIONS)
     _trigger(
         TRANSITIONS,
@@ -352,6 +392,18 @@ def _install_triggers() -> None:
         ),
     )
     _immutable(RUN_SAMPLES)
+    _trigger(
+        RUN_SAMPLES,
+        "within_the_run",
+        "INSERT",
+        _raise(
+            f"{RUN_SAMPLES}: a linked sample is of the supplier of the run, inside its sample count",
+            f"NOT EXISTS (SELECT 1 FROM {RUNS} run, {REVISIONS} e, {SAMPLES} s"
+            " WHERE run.run_id = NEW.run_id AND NEW.position < run.sample_count"
+            " AND e.digest = run.epr_digest AND s.sample_digest = NEW.sample_digest"
+            " AND s.supplier_key = e.supplier_key)",
+        ),
+    )
 
 
 def downgrade() -> None:

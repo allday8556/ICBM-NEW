@@ -14,8 +14,9 @@ EXTRACTOR_INPUTS = (
     "app/collect/adaptive/document.py",
     "app/collect/adaptive/engine.py",
     "app/collect/adaptive/hooks.py",
+    "app/collect/adaptive/lint.py",
     "app/collect/adaptive/locator.py",
     "app/collect/adaptive/profiles.py",
     "app/collect/adaptive/validation.py",
 )
-EXTRACTOR_FINGERPRINT = "5bf0e628398bef22f88b043c3b8fbd245465bf21c7d9a99ffd0b0091f501c97a"
+EXTRACTOR_FINGERPRINT = "3345acb0ad90b5cce1bdb89b34e57d150b90c7a546309cc6d13d643a0f2fab64"

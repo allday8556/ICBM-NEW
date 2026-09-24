@@ -97,6 +97,7 @@ CANONICAL_TABLES = (
     # validation persistence owner.
     "adaptive_profile_revisions",
     "adaptive_profile_pins",
+    "adaptive_profile_lint",
     "adaptive_profile_transitions",
     "adaptive_validation_samples",
     "adaptive_validation_runs",

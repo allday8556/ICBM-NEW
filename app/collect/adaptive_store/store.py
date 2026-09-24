@@ -1,24 +1,25 @@
 """The Adaptive profile and validation persistence owner (ADR-0017 §3, §7; P2).
 
-Two stores, one owner of the six migration-0024 tables:
+Two stores, one owner of the seven migration-0024 tables:
 
 ``AdaptiveProfileStore``
     Saves immutable, content-addressed ``PageTemplateRevision`` and ``ExtractionProfileRevision``
     documents with their lineage, only for a registered supplier. Saving an EPR records its pins
-    and opens its lifecycle at ``DRAFT``; ``withdraw_shadow`` and ``retire`` are its further
-    designations, and ``AdaptiveValidationStore.designate_shadow`` the one that needs a PASS. Every
-    read recomputes the digest from the stored document and refuses a mismatch, and a bundle is
-    loaded only through ``resolve_bundle``, which recomputes every pinned digest again.
+    and its DRAFT lint findings and opens its lifecycle at ``DRAFT``; ``retire`` is the one further
+    transition P2 performs. Every read recomputes the digest from the stored document and refuses
+    a mismatch, and a bundle is loaded only through ``resolve_bundle``, which recomputes every
+    pinned digest again.
 
 ``AdaptiveValidationStore``
     Saves operator-captured ``ValidationSample`` material in this local database only, re-checking
     its digest and its final safety scan; records validation runs with their exact freshness tuple
     and run digest; and derives ``VALIDATED`` — never stored — from a ``PASS`` run for the exact
-    current freshness. A sample is retained while any run references it.
+    current freshness. A sample belongs to one supplier and is retained while any run references
+    it; every read of a run recomputes its ordered sample set from the linked sample rows.
 
-``SHADOW`` is only a designation (ADR-0017 §7.1). It grants nothing by itself: a shadow run also
-needs ``VALIDATED`` at run time and the per-supplier shadow switch, which a later slice owns. A
-designated EPR whose ``VALIDATED`` lapses keeps its designation and is not eligible.
+``SHADOW`` is lifecycle vocabulary only in P2. Nothing here enters it: ADR-0017 §7.1 requires
+``VALIDATED`` plus the per-supplier shadow switch, and the switch, with the frozen per-run shadow
+decision of §10.1, belongs to a later slice (review ``5311392575`` B1).
 
 Nothing here reads a supplier, writes a ``ProductFactsRevision``, activates a profile or runs a
 shadow. It writes no audit event: its own append-only tables are the record, and an audit event
@@ -37,15 +38,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.collect.adaptive.canonical import NonFiniteValue, canonical_json, parse_json
-from app.collect.adaptive.capture import (
-    CAPTURE_REVISION,
-    ValidationSample,
-    final_scan,
-    sample_digest,
-)
-from app.collect.adaptive.extraction_identity import EXTRACTOR_FINGERPRINT, EXTRACTOR_REVISION
+from app.collect.adaptive.capture import ValidationSample, final_scan, sample_digest
+from app.collect.adaptive.lint import LINT_REVISION, draft_lint, lint_digest
 from app.collect.adaptive.profiles import (
-    SCHEMA_VERSION,
     Bundle,
     BundleRefused,
     ExtractionProfileRevision,
@@ -65,6 +60,7 @@ from app.collect.adaptive.validation import (
 from app.collect.adaptive_store.gate import SupplierGate
 from app.collect.adaptive_store.models import (
     NOTE_MAX_CHARS,
+    AdaptiveProfileLint,
     AdaptiveProfilePin,
     AdaptiveProfileRevision,
     AdaptiveProfileTransition,
@@ -90,12 +86,9 @@ ADAPTIVE_TAMPERED = "ADAPTIVE_TAMPERED"
 Kind = Literal["EXTRACTION_PROFILE", "PAGE_TEMPLATE"]
 Origin = Literal["OPERATOR", "AI_PROPOSAL", "IMPORT"]
 State = Literal["DRAFT", "SHADOW", "RETIRED"]
-# Each designation, and the states it may follow (ADR-0017 §7.1). RETIRED is final.
-_FOLLOWS: dict[State, frozenset[State]] = {
-    "SHADOW": frozenset({"DRAFT"}),
-    "DRAFT": frozenset({"SHADOW"}),
-    "RETIRED": frozenset({"DRAFT", "SHADOW"}),
-}
+# The transitions P2 performs, and the states each may follow. RETIRED is final. There is no
+# entry into SHADOW here (module docstring).
+_FOLLOWS: dict[State, frozenset[State]] = {"RETIRED": frozenset({"DRAFT", "SHADOW"})}
 
 
 class AdaptiveTampered(AppError):
@@ -115,6 +108,15 @@ class ProfileRecord:
     created_by: str
     correlation_id: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class LintRecord:
+    """The lint findings recorded when an EPR entered DRAFT, and the rule set that produced them."""
+
+    lint_revision: str
+    findings: tuple[str, ...]
+    recorded_at: datetime
 
 
 @dataclass(frozen=True)
@@ -238,8 +240,9 @@ class AdaptiveProfileStore:
         parent_digest: str | None = None,
         change_note: str | None = None,
     ) -> str:
-        """Save an EPR as ``DRAFT``. Every template it pins must already be stored, verify, and
-        resolve with it into a bundle; otherwise nothing is written."""
+        """Save an EPR as ``DRAFT``, with its lint findings recorded (ADR-0017 §7.1). Every
+        template it pins must already be stored, verify, and resolve with it into a bundle;
+        otherwise nothing is written. Lint never refuses a DRAFT."""
         epr = _parse(document, ExtractionProfileRevision)
         assert isinstance(epr, ExtractionProfileRevision)
         self._gate(epr.supplier_key)
@@ -253,7 +256,7 @@ class AdaptiveProfileStore:
                 ) from None
             templates[pinned] = profile_document(template)
         try:
-            resolve_bundle(profile_document(epr), templates)
+            bundle = resolve_bundle(profile_document(epr), templates)
         except BundleRefused as refused:
             raise _invalid(ADAPTIVE_PROFILE_INVALID, str(refused)) from None
         return self._save(
@@ -264,6 +267,7 @@ class AdaptiveProfileStore:
             parent_digest,
             change_note,
             pins=epr.templates,
+            lint=draft_lint(bundle),
         )
 
     def _gate(self, supplier_key: str) -> None:
@@ -285,6 +289,7 @@ class AdaptiveProfileStore:
         change_note: str | None,
         *,
         pins: Sequence[str],
+        lint: tuple[str, ...] = (),
     ) -> str:
         self._gate(profile.supplier_key)
         if change_note is not None and not 1 <= len(change_note) <= NOTE_MAX_CHARS:
@@ -326,6 +331,15 @@ class AdaptiveProfileStore:
                     session.add(
                         AdaptiveProfilePin(epr_digest=digest, position=position, ptr_digest=pinned)
                     )
+                session.add(
+                    AdaptiveProfileLint(
+                        epr_digest=digest,
+                        lint_revision=LINT_REVISION,
+                        findings_json=canonical_json(list(lint)),
+                        lint_digest=lint_digest(LINT_REVISION, lint),
+                        recorded_at=now,
+                    )
+                )
                 session.flush()
                 self._append(session, digest, 1, None, "DRAFT", "SAVED", created_by, correlation_id)
         return digest
@@ -361,18 +375,6 @@ class AdaptiveProfileStore:
         never VALIDATED again."""
         self._transition(epr_digest, "RETIRED", actor, reason, correlation_id)
 
-    def withdraw_shadow(
-        self, epr_digest: str, *, actor: str, reason: str, correlation_id: str
-    ) -> None:
-        """``SHADOW → DRAFT``: the designation is withdrawn; nothing else changes."""
-        self._transition(epr_digest, "DRAFT", actor, reason, correlation_id)
-
-    def _designate_shadow(
-        self, epr_digest: str, *, actor: str, reason: str, correlation_id: str
-    ) -> None:
-        # Only AdaptiveValidationStore.designate_shadow calls this, after it derived VALIDATED.
-        self._transition(epr_digest, "SHADOW", actor, reason, correlation_id)
-
     def _transition(
         self, epr_digest: str, to_state: State, actor: str, reason: str, correlation_id: str
     ) -> None:
@@ -387,7 +389,7 @@ class AdaptiveProfileStore:
             if last is None:
                 raise AdaptiveTampered(ADAPTIVE_TAMPERED, "an EPR without a lifecycle")
             from_state: State = last.to_state  # type: ignore[assignment]
-            if from_state not in _FOLLOWS[to_state]:
+            if from_state not in _FOLLOWS.get(to_state, frozenset()):
                 raise _invalid(
                     ADAPTIVE_LIFECYCLE_REFUSED,
                     f"an EPR in {from_state} is never moved to {to_state}",
@@ -469,6 +471,30 @@ class AdaptiveProfileStore:
         if not history:
             raise AdaptiveTampered(ADAPTIVE_TAMPERED, "an EPR without a lifecycle")
         return history[-1].to_state
+
+    def lint(self, epr_digest: str) -> LintRecord:
+        """The lint recorded when this EPR entered DRAFT, verified against its digest and, under
+        the running rule set, recomputed from the stored bundle (tamper fails closed)."""
+        bundle = self.load_bundle(epr_digest)
+        with self._db.read() as session:
+            row = session.get(AdaptiveProfileLint, epr_digest)
+            if row is None:
+                raise AdaptiveTampered(ADAPTIVE_TAMPERED, "a DRAFT EPR without its recorded lint")
+            session.expunge(row)
+        try:
+            loaded = json.loads(row.findings_json)
+        except ValueError:
+            raise AdaptiveTampered(ADAPTIVE_TAMPERED, "stored lint no longer parses") from None
+        findings = tuple(loaded) if isinstance(loaded, list) else ()
+        if (
+            not isinstance(loaded, list)
+            or not all(isinstance(item, str) for item in findings)
+            or findings != tuple(sorted(set(findings)))
+            or lint_digest(row.lint_revision, findings) != row.lint_digest
+            or (row.lint_revision == LINT_REVISION and findings != draft_lint(bundle))
+        ):
+            raise AdaptiveTampered(ADAPTIVE_TAMPERED, "stored lint does not recompute")
+        return LintRecord(row.lint_revision, findings, row.recorded_at)
 
     def load_bundle(self, epr_digest: str) -> Bundle:
         """The offline bundle of a stored EPR, every digest recomputed (tamper fails closed)."""
@@ -560,7 +586,14 @@ class AdaptiveValidationStore:
         if "profile" in canonical_json(provenance).lower():
             raise _invalid(ADAPTIVE_SAMPLE_REFUSED, "a sample's provenance never names a profile")
         with self._db.write() as session:
-            if session.get(AdaptiveValidationSample, sample.digest) is None:
+            existing = session.get(AdaptiveValidationSample, sample.digest)
+            if existing is not None and existing.supplier_key != supplier_key:
+                raise _invalid(
+                    ADAPTIVE_SAMPLE_REFUSED,
+                    "a sample belongs to one supplier and is never reused for another",
+                    supplier_key=supplier_key,
+                )
+            if existing is None:
                 session.add(
                     AdaptiveValidationSample(
                         sample_digest=sample.digest,
@@ -578,6 +611,13 @@ class AdaptiveValidationStore:
         return sample.digest
 
     def sample(self, digest: str) -> ValidationSample:
+        return self._stored_sample(digest)[0]
+
+    def sample_supplier(self, digest: str) -> str:
+        """The one supplier a stored sample belongs to."""
+        return self._stored_sample(digest)[1]
+
+    def _stored_sample(self, digest: str) -> tuple[ValidationSample, str]:
         with self._db.read() as session:
             row = session.get(AdaptiveValidationSample, digest)
             if row is None:
@@ -585,11 +625,12 @@ class AdaptiveValidationStore:
             stored = ValidationSample(
                 row.structure_json, row.expected_json, row.provenance_json, row.truncated, digest
             )
+            supplier_key = row.supplier_key
         if sample_digest(
             stored.structure, stored.expected, stored.provenance, stored.truncated
         ) != digest or final_scan(stored.structure):
             raise AdaptiveTampered(ADAPTIVE_TAMPERED, "a stored sample does not recompute")
-        return stored
+        return stored, supplier_key
 
     def prune_unreferenced_samples(self) -> int:
         """Retention: a sample is kept while any run references it, and only then (ADR-0017
@@ -626,8 +667,10 @@ class AdaptiveValidationStore:
         if len(run.freshness) != 7 or run.freshness[5] != sample_set_digest(samples):
             raise _invalid(ADAPTIVE_RUN_REFUSED, "the run's freshness names other samples")
         for sample in samples:
-            if self.sample(sample.digest).digest != sample.digest:
-                raise _invalid(ADAPTIVE_RUN_REFUSED, "every replayed sample is stored first")
+            if self.sample_supplier(sample.digest) != stored.epr.supplier_key:
+                raise _invalid(
+                    ADAPTIVE_RUN_REFUSED, "a run replays only samples of its own EPR's supplier"
+                )
         run_id = str(uuid.uuid4())
         _, schema, extractor, fingerprint, hook, sample_set, capture = run.freshness
         with self._db.write() as session:
@@ -652,6 +695,7 @@ class AdaptiveValidationStore:
                     sample_set_digest=sample_set,
                     capture_revision=capture,
                     checks_json=_checks_json(run),
+                    sample_count=len(samples),
                     run_digest=run.digest(),
                     recorded_by=recorded_by,
                     correlation_id=correlation_id,
@@ -668,24 +712,50 @@ class AdaptiveValidationStore:
         return run_id
 
     def runs(self, epr_digest: str) -> tuple[StoredRun, ...]:
+        """Every run of this EPR. Each is rebuilt from its row and its run digest, and its ordered
+        sample set is recomputed from the linked sample rows: a missing, extra or reordered link,
+        or a linked sample of another supplier, fails closed."""
         with self._db.read() as session:
+            owner = session.get(AdaptiveProfileRevision, epr_digest)
             rows = session.scalars(
                 select(AdaptiveValidationRun)
                 .where(AdaptiveValidationRun.epr_digest == epr_digest)
                 .order_by(AdaptiveValidationRun.recorded_at, AdaptiveValidationRun.run_id)
             ).all()
-            stored: list[StoredRun] = []
+            linked: list[tuple[AdaptiveValidationRun, list[tuple[int, str]]]] = []
             for row in rows:
-                digests = tuple(
-                    session.scalars(
-                        select(AdaptiveValidationRunSample.sample_digest)
-                        .where(AdaptiveValidationRunSample.run_id == row.run_id)
-                        .order_by(AdaptiveValidationRunSample.position)
+                session.expunge(row)
+                found = session.execute(
+                    select(
+                        AdaptiveValidationRunSample.position,
+                        AdaptiveValidationRunSample.sample_digest,
                     )
+                    .where(AdaptiveValidationRunSample.run_id == row.run_id)
+                    .order_by(AdaptiveValidationRunSample.position)
+                ).all()
+                linked.append((row, [(position, digest) for position, digest in found]))
+        stored: list[StoredRun] = []
+        for row, links in linked:
+            run = _run_from(row)
+            digests = tuple(digest for _, digest in links)
+            try:
+                replayed = [self._stored_sample(digest) for digest in digests]
+            except NotFoundError:
+                raise AdaptiveTampered(
+                    ADAPTIVE_TAMPERED, "a stored run links a sample that is not stored"
+                ) from None
+            if (
+                owner is None
+                or [position for position, _ in links] != list(range(row.sample_count))
+                or sample_set_digest([sample for sample, _ in replayed]) != row.sample_set_digest
+                or any(supplier != owner.supplier_key for _, supplier in replayed)
+            ):
+                raise AdaptiveTampered(
+                    ADAPTIVE_TAMPERED,
+                    "a stored run's linked samples do not recompute to its sample set",
+                    details={"run_id": row.run_id},
                 )
-                stored.append(
-                    StoredRun(row.run_id, _run_from(row), digests, row.recorded_by, row.recorded_at)
-                )
+            stored.append(StoredRun(row.run_id, run, digests, row.recorded_by, row.recorded_at))
         return tuple(stored)
 
     def is_validated(self, epr_digest: str, current_freshness: Iterable[str]) -> bool:
@@ -695,33 +765,4 @@ class AdaptiveValidationStore:
             return False
         return is_validated(
             (stored.run for stored in self.runs(epr_digest)), tuple(current_freshness)
-        )
-
-    def designate_shadow(
-        self,
-        epr_digest: str,
-        current_freshness: Sequence[str],
-        *,
-        actor: str,
-        reason: str,
-        correlation_id: str,
-    ) -> None:
-        """``DRAFT → SHADOW``, only while the EPR is VALIDATED for a freshness tuple that names it
-        and this running engine. The designation alone permits no shadow run (module docstring)."""
-        current = tuple(current_freshness)
-        running = (SCHEMA_VERSION, EXTRACTOR_REVISION, EXTRACTOR_FINGERPRINT)
-        if (
-            len(current) != 7
-            or current[0] != epr_digest
-            or current[1:4] != running
-            or current[6] != CAPTURE_REVISION
-        ):
-            raise _invalid(
-                ADAPTIVE_LIFECYCLE_REFUSED,
-                "a SHADOW designation names this EPR and the running engine's freshness",
-            )
-        if not self.is_validated(epr_digest, current):
-            raise _invalid(ADAPTIVE_LIFECYCLE_REFUSED, "only a VALIDATED EPR is designated SHADOW")
-        self._profiles._designate_shadow(
-            epr_digest, actor=actor, reason=reason, correlation_id=correlation_id
         )

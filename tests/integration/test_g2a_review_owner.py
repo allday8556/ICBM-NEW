@@ -663,6 +663,7 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "review_coverage",
         "adaptive_profile_revisions",
         "adaptive_profile_pins",
+        "adaptive_profile_lint",
         "adaptive_profile_transitions",
         "adaptive_validation_samples",
         "adaptive_validation_runs",

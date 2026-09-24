@@ -1513,10 +1513,11 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # known indexing failure. Whether coverage is current is derived, never stored.
         "review_coverage",
         # Adaptive Collector P2 (ADR-0017 §3, §7, Issue #110 5822923514): immutable EPR/PTR
-        # revisions with their pins, the append-only EPR lifecycle, local-only validation samples
-        # and validation runs. No VALIDATED or ACTIVE table: VALIDATED is derived, never stored.
+        # revisions with their pins and DRAFT lint, the append-only EPR lifecycle, local-only
+        # samples and validation runs. No VALIDATED or ACTIVE table: VALIDATED is derived.
         "adaptive_profile_revisions",
         "adaptive_profile_pins",
+        "adaptive_profile_lint",
         "adaptive_profile_transitions",
         "adaptive_validation_samples",
         "adaptive_validation_runs",

@@ -96,6 +96,26 @@ class AdaptiveProfilePin(Base):
     )
 
 
+class AdaptiveProfileLint(Base):
+    __tablename__ = "adaptive_profile_lint"
+    __table_args__ = (
+        CheckConstraint("lint_revision <> ''", name="revision_present"),
+        CheckConstraint(
+            "json_valid(findings_json) AND json_type(findings_json) = 'array'",
+            name="findings_array",
+        ),
+        CheckConstraint(_hex64("lint_digest"), name="digest_hex"),
+    )
+
+    epr_digest: Mapped[str] = mapped_column(
+        String(64), ForeignKey("adaptive_profile_revisions.digest"), primary_key=True
+    )
+    lint_revision: Mapped[str] = mapped_column(String(64))
+    findings_json: Mapped[str] = mapped_column(Text)
+    lint_digest: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
 class AdaptiveProfileTransition(Base):
     __tablename__ = "adaptive_profile_transitions"
     __table_args__ = (
@@ -165,6 +185,7 @@ class AdaptiveValidationRun(Base):
         CheckConstraint(
             "json_valid(checks_json) AND json_type(checks_json) = 'array'", name="checks_array"
         ),
+        CheckConstraint("sample_count >= 0", name="sample_count_valid"),
         CheckConstraint(_hex64("run_digest"), name="run_digest_hex"),
         CheckConstraint("recorded_by <> ''", name="author_present"),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
@@ -182,6 +203,7 @@ class AdaptiveValidationRun(Base):
     sample_set_digest: Mapped[str] = mapped_column(String(64))
     capture_revision: Mapped[str] = mapped_column(String(64))
     checks_json: Mapped[str] = mapped_column(Text)
+    sample_count: Mapped[int] = mapped_column(Integer)
     run_digest: Mapped[str] = mapped_column(String(64))
     recorded_by: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
