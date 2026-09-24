@@ -21,7 +21,7 @@ from prototypes.adaptive_collector.profile import (
     ProfileStore,
     semantic_tuple,
 )
-from prototypes.adaptive_collector.tests.conftest import hook_manifest, hooked_bundle, page
+from prototypes.adaptive_collector.testsupport import hook_manifest, hooked_bundle, page
 
 
 def _binding(point: str, target: str, fmt: str, name: str = "h") -> dict[str, str]:

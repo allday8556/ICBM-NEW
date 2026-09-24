@@ -16,10 +16,26 @@ VOID_ELEMENTS = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"}
 )
 _NO_TEXT = frozenset({"script", "style"})
-_HIDDEN_CLASSES = frozenset({"hidden", "displaynone", "sr-only"})
+_HIDDEN_CLASSES = frozenset({"hidden", "displaynone", "sr-only", "invisible"})
 _JSON_TYPES = frozenset({"application/ld+json", "application/json"})
 # One top-level assignment of one value: ``var name = <json>;``. The value must parse as JSON.
 _ASSIGNMENT = re.compile(r"^\s*(?:var|let|const)?\s*([A-Za-z_$][\w$.]*)\s*=\s*(.+?);?\s*$", re.S)
+
+
+def _hides(style: str) -> bool:
+    declarations: dict[str, str] = {}
+    for part in style.split(";"):
+        name, _, value = part.partition(":")
+        declarations[name.strip().lower()] = value.strip().lower().replace("!important", "").strip()
+    try:
+        transparent = float(declarations.get("opacity", "1") or "1") == 0.0
+    except ValueError:
+        transparent = False
+    return (
+        declarations.get("display") == "none"
+        or declarations.get("visibility") in {"hidden", "collapse"}
+        or transparent
+    )
 
 
 @dataclass
@@ -43,10 +59,29 @@ class Node:
 
     @property
     def hidden(self) -> bool:
+        """Not presented to the reader: ``hidden``, ``aria-hidden``, ``display:none``,
+        ``visibility:hidden``, ``opacity:0`` or a hiding class, on it or on any ancestor."""
         node: Node | None = self
         while node is not None:
-            style = node.attrs.get("style", "").replace(" ", "").lower()
-            if "hidden" in node.attrs or "display:none" in style or node.classes & _HIDDEN_CLASSES:
+            if (
+                "hidden" in node.attrs
+                or node.attrs.get("aria-hidden", "").strip().lower() == "true"
+                or _hides(node.attrs.get("style", ""))
+                or node.classes & _HIDDEN_CLASSES
+            ):
+                return True
+            node = node.parent
+        return False
+
+    @property
+    def disabled(self) -> bool:
+        """Not operable: ``disabled`` or ``aria-disabled="true"``, on it or on a disabled
+        ancestor fieldset."""
+        node: Node | None = self
+        while node is not None:
+            if "disabled" in node.attrs and (node is self or node.tag == "fieldset"):
+                return True
+            if node.attrs.get("aria-disabled", "").strip().lower() == "true":
                 return True
             node = node.parent
         return False

@@ -42,6 +42,7 @@ from prototypes.adaptive_collector.profile import (
     SCHEMA_VERSION,
     AttributeRule,
     Bundle,
+    EmbeddedRule,
     ExtractionProfileRevision,
     LabelRowRule,
     PageTemplateRevision,
@@ -50,6 +51,14 @@ from prototypes.adaptive_collector.profile import (
 )
 
 EVIDENCE_MAX_BYTES = 4096
+# The five mutation classes ADR-0017 §7.2 V4 names; each must run at least once.
+REQUIRED_MUTATIONS = (
+    "remove_required_anchor",
+    "duplicate_price_row",
+    "inject_hidden_sold_out",
+    "add_conflicting_identity",
+    "remove_image_region",
+)
 GENERIC_PRICE_LABELS = frozenset(
     {"판매가", "가격", "소비자가", "정가", "공급가", "할인가", "price"}
 )
@@ -147,8 +156,6 @@ def _agreement(extraction: Extraction, expected: Mapping[str, Any]) -> list[str]
     problems: list[str] = []
     if extraction.verdict is not TemplateVerdict.MATCHED:
         return [f"template {extraction.verdict.value}"]
-    if extraction.template_key != expected["template"]:
-        problems.append(f"template {extraction.template_key} != {expected['template']}")
     if extraction.identity != expected["identity"]:
         problems.append(f"identity {extraction.identity} != {expected['identity']}")
     for key in sorted(SUPPLIED_FIELDS):
@@ -255,18 +262,28 @@ def _mutations(
         return _clone(root)
 
     def conflicting_identity(root: Node) -> Node | None:
-        source = epr.identity.sources[0]
-        if isinstance(source, AttributeRule | TextRule):
-            nodes = select(root, source.selector)
-            if nodes and nodes[0].parent is not None:
-                twin = from_snapshot(to_snapshot(nodes[0]))
-                twin.parent = nodes[0].parent
-                if isinstance(source, AttributeRule):
-                    twin.attrs[source.attribute] = "CONFLICT-0000"
-                else:
-                    twin.children = ["CONFLICT-0000"]
-                nodes[0].parent.children.append(twin)
-                return _clone(root)
+        """A second, different identity statement for the first source that can carry one."""
+        for source in epr.identity.sources:
+            if isinstance(source, AttributeRule | TextRule):
+                nodes = select(root, source.selector)
+                if nodes and nodes[0].parent is not None:
+                    twin = from_snapshot(to_snapshot(nodes[0]))
+                    twin.parent = nodes[0].parent
+                    if isinstance(source, AttributeRule):
+                        twin.attrs[source.attribute] = "CONFLICT-0000"
+                    else:
+                        twin.children = ["CONFLICT-0000"]
+                    nodes[0].parent.children.append(twin)
+                    return _clone(root)
+            elif isinstance(source, EmbeddedRule):
+                for node in root.iter():
+                    if node.tag == "script" and isinstance(node.data, dict) and node.parent:
+                        target: Any = node.data
+                        for step in source.path[:-1]:
+                            target = target.get(step) if isinstance(target, dict) else None
+                        if isinstance(target, dict) and source.path[-1] in target:
+                            target[source.path[-1]] = "CONFLICT-0000"
+                            return _clone(root)
         return None
 
     def remove_image_region(root: Node) -> Node | None:
@@ -376,6 +393,8 @@ def validate(
 
     # V4: negative pages and the deterministic mutation suite fail closed.
     v4: list[str] = []
+    v4_incomplete: list[str] = []
+    exercised: Counter[str] = Counter()
     for name, html in negatives.items():
         negative, _ = match_template(bundle, parse_html(html))
         if negative is TemplateVerdict.MATCHED:
@@ -388,9 +407,17 @@ def validate(
             mutated = mutate(_clone(root))
             if mutated is None:
                 continue
+            exercised[name] += 1
             if not holds(base, extract(bundle, mutated, manifest)):
                 v4.append(f"{sample.digest[:12]}: {name} did not fail closed")
-    checks.append(Check("V4", Verdict.FAIL if v4 else Verdict.PASS, tuple(v4)))
+    # Coverage: every required mutation class must run at least once across the samples. A class
+    # that could not be constructed is unproven, never silently passed.
+    for name in REQUIRED_MUTATIONS:
+        if not exercised[name]:
+            v4_incomplete.append(f"MUTATION_NOT_EXERCISED:{name}")
+    coverage = tuple(f"EXERCISED:{name}x{exercised[name]}" for name in REQUIRED_MUTATIONS)
+    v4_outcome = Verdict.FAIL if v4 else Verdict.INCOMPLETE if v4_incomplete else Verdict.PASS
+    checks.append(Check("V4", v4_outcome, (*v4, *v4_incomplete, *coverage)))
     checks.append(Check("V5", Verdict.FAIL if v5 else Verdict.PASS, tuple(v5)))
     checks.append(Check("V6", Verdict.FAIL if v6 else Verdict.PASS, tuple(v6)))
 

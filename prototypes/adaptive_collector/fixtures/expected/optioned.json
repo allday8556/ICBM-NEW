@@ -1,5 +1,4 @@
 {
-  "template": "optioned",
   "identity": "SYN-2001",
   "fields": {
     "original_name": {"status": "CONFIRMED", "value": {"text": "합성 옵션 상품"}},

@@ -6,7 +6,7 @@ from prototypes.adaptive_collector.capture import capture_sample
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.hooks import HookManifest
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
-from prototypes.adaptive_collector.tests.conftest import (
+from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
     expected,
     hook_manifest,
@@ -15,6 +15,7 @@ from prototypes.adaptive_collector.tests.conftest import (
     scope_for,
 )
 from prototypes.adaptive_collector.validation import (
+    REQUIRED_MUTATIONS,
     ValidationRun,
     Verdict,
     freshness_tuple,
@@ -128,3 +129,39 @@ def test_g6_over_the_cap_blocks_validated_until_an_architecture_review(
     assert run.check("V7").outcome is Verdict.INCOMPLETE
     reviewed = _run(bundle, negatives, manifest=manifest, architecture_review_recorded=True)
     assert reviewed.check("V7").outcome is Verdict.PASS
+
+
+def test_all_five_required_mutations_run_on_the_synthetic_samples(
+    bundle: Bundle, negatives: dict[str, str]
+) -> None:
+    details = _run(bundle, negatives).check("V4").details
+    for name in REQUIRED_MUTATIONS:
+        counts = [d for d in details if d.startswith(f"EXERCISED:{name}x")]
+        assert counts and not counts[0].endswith("x0"), name
+    assert not any(d.startswith("MUTATION_NOT_EXERCISED") for d in details)
+
+
+def test_a_mutation_that_cannot_be_constructed_is_never_a_silent_pass(
+    store: ProfileStore, negatives: dict[str, str]
+) -> None:
+    # Prices read by a TEXT rule: the duplicate-price-row mutation cannot be constructed.
+    simple = profiles.ptr("simple", optioned=False)
+    optioned = profiles.ptr("optioned", optioned=True)
+    for template in (simple, optioned):
+        template["fields"]["prices"] = {"primary": {"kind": "TEXT", "selector": "table.info td"}}
+    bundle = store.bundle(store.put(profiles.epr([store.put(simple), store.put(optioned)])))
+    v4 = _run(bundle, negatives).check("V4")
+    assert v4.outcome is not Verdict.PASS
+    assert "MUTATION_NOT_EXERCISED:duplicate_price_row" in v4.details
+
+
+def test_an_embedded_first_identity_source_still_gets_its_conflict_mutation(
+    store: ProfileStore, negatives: dict[str, str]
+) -> None:
+    simple = store.put(profiles.ptr("simple", optioned=False))
+    optioned = store.put(profiles.ptr("optioned", optioned=True))
+    epr = profiles.epr([simple, optioned])
+    epr["identity"]["sources"] = list(reversed(epr["identity"]["sources"]))  # JSON-LD first
+    bundle = store.bundle(store.put(epr))
+    v4 = _run(bundle, negatives).check("V4")
+    assert v4.outcome is Verdict.PASS, v4.details

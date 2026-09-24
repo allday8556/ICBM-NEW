@@ -3,7 +3,7 @@
 from prototypes.adaptive_collector.dom import from_snapshot, parse_html
 from prototypes.adaptive_collector.engine import extract
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore, canonical
-from prototypes.adaptive_collector.tests.conftest import (
+from prototypes.adaptive_collector.testsupport import (
     SAMPLE_PAGES,
     page,
     sample,

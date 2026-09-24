@@ -2,16 +2,17 @@
 <!-- Synthetic fixture: an invented supplier "synthetic". No real page, account or product. -->
 <html>
 <head>
-<meta name="product-id" content="SYN-1001">
-<script type="application/ld+json">{"@type": "Product", "sku": "SYN-1001", "name": "합성 테스트 상품 A", "offers": {"price": "12000", "priceCurrency": "KRW"}}</script>
-<script>var productData = {"sku": "SYN-1001", "stock": "IN_STOCK", "sessionToken": "sessvalue-not-a-real-token", "memberGrade": "VIP"};</script>
-<script>trackPage("SYN-1001"); var viewer = currentViewer();</script>
+<script>trackPage("SYN-1001");</script>
 <style>.hidden { display: none; }</style>
 </head>
 <body>
 <header class="gnb"><nav><a href="/">홈</a></nav></header>
-<div class="member-info">홍길동 님 · 적립금 1,200P</div>
 <div class="product-detail" id="prd">
+  <meta name="product-id" content="SYN-1001">
+  <script type="application/ld+json">{"@type": "Product", "sku": "SYN-1001", "name": "합성 테스트 상품 A", "offers": {"price": "12000", "priceCurrency": "KRW"}}</script>
+  <script>var productData = {"sku": "SYN-1001", "stock": "IN_STOCK", "image": "https://cdn.example/syn-1001.jpg?token=abc123", "sessionToken": "sessvalue-not-a-real-token", "memberGrade": "VIP"};</script>
+  <script>var viewer = currentViewer();</script>
+  <div class="member-info">홍길동 님 · 적립금 1,200P</div>
   <h1 class="product-title">합성 테스트 상품 A</h1>
   <table class="info">
     <tr><th>판매가</th><td>12,000원</td></tr>
@@ -26,10 +27,11 @@
     <img class="thumb" src="/img/syn-1001-thumb.jpg">
   </div>
   <div class="actions">
-    <button class="btn-buy">구매하기</button>
+    <button class="btn-buy" onclick="buyNow('SYN-1001')">구매하기</button>
     <button class="btn-cart">장바구니</button>
   </div>
   <form class="order" action="/order/add?token=zzz">
+    <input type="hidden" name="product_no" value="SYN-1001">
     <input type="hidden" name="csrf_token" value="csrf-not-a-real-value">
     <input type="number" name="qty" min="1" max="99" step="1" value="3">
   </form>
@@ -42,12 +44,13 @@
     <tr><th>제조사</th><td>합성제조</td></tr>
     <tr><th>원산지</th><td>국내산</td></tr>
   </table>
+  <div class="review-list">
+    <p>김** 님: 품절될까 봐 두 개 샀어요</p>
+    <table><tr><th>판매가</th><td>9,000원</td></tr></table>
+  </div>
+  <div class="recommend-box"><button class="btn-buy">다른 상품 구매</button></div>
 </div>
-<div class="review-list">
-  <p>김** 님: 품절될까 봐 두 개 샀어요</p>
-  <table><tr><th>판매가</th><td>9,000원</td></tr></table>
-</div>
-<div class="recommend-box"><button class="btn-buy">다른 상품 구매</button></div>
+<div class="review-list"><p>페이지 하단 리뷰: 품절 임박</p></div>
 <footer>(주)합성</footer>
 </body>
 </html>

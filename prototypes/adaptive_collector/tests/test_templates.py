@@ -4,7 +4,7 @@ from prototypes.adaptive_collector.dom import from_snapshot, parse_html
 from prototypes.adaptive_collector.engine import TemplateVerdict, extract, match_template
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
-from prototypes.adaptive_collector.tests.conftest import SAMPLE_PAGES, page, sample
+from prototypes.adaptive_collector.testsupport import SAMPLE_PAGES, TEMPLATE_OF, page, sample
 
 
 def test_every_sample_matches_exactly_its_template(bundle: Bundle) -> None:
@@ -12,7 +12,9 @@ def test_every_sample_matches_exactly_its_template(bundle: Bundle) -> None:
         captured = sample(name)
         verdict, template = match_template(bundle, from_snapshot(captured.snapshot))
         assert verdict is TemplateVerdict.MATCHED
-        assert template is not None and template.template_key == captured.expected["template"]
+        assert template is not None and template.template_key == TEMPLATE_OF[name]
+        # The operator expectation carries no profile-owned template identity.
+        assert "template" not in captured.expected
 
 
 def test_a_login_page_and_a_listing_page_match_no_template(bundle: Bundle) -> None:

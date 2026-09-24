@@ -1,5 +1,4 @@
 {
-  "template": "simple",
   "identity": "SYN-1001",
   "fields": {
     "original_name": {"status": "CONFIRMED", "value": {"text": "합성 테스트 상품 A"}},

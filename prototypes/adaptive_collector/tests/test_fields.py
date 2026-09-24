@@ -7,7 +7,7 @@ from prototypes.adaptive_collector.dom import from_snapshot, parse_html
 from prototypes.adaptive_collector.engine import extract, value_json
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
-from prototypes.adaptive_collector.tests.conftest import SAMPLE_PAGES, page, sample
+from prototypes.adaptive_collector.testsupport import SAMPLE_PAGES, page, sample
 
 
 def _extract(bundle: Bundle, name: str) -> Any:
@@ -112,3 +112,56 @@ def test_the_page_proving_no_option_control_has_zero_axes_confirmed(bundle: Bund
     got = _extract(bundle, "simple_on_sale")
     assert got.fields["options"].status is FieldStatus.CONFIRMED
     assert value_json(got.fields["options"]) == {"axes": [], "configurations": []}
+
+
+# ---------------------------------------------------------------- control-state precision
+
+
+def _stock_of(bundle: Bundle, actions: str) -> tuple[FieldStatus, Any]:
+    html = page("simple_on_sale")
+    start = html.index('<div class="actions">')
+    end = html.index("</div>", start) + len("</div>")
+    got = extract(bundle, parse_html(html[:start] + actions + html[end:]))
+    return got.fields["stock"].status, value_json(got.fields["stock"])
+
+
+def test_a_non_visible_purchase_control_is_never_stock_authority(bundle: Bundle) -> None:
+    sold = '<span class="soldout-badge">품절</span>'
+    for hidden_buy in (
+        '<button class="btn-buy" style="visibility: hidden">구매하기</button>',
+        '<button class="btn-buy" style="opacity:0">구매하기</button>',
+        '<button class="btn-buy" aria-hidden="true">구매하기</button>',
+        '<button class="btn-buy" hidden>구매하기</button>',
+    ):
+        # A hidden buy control does not make the product ON_SALE; the visible sold-out does.
+        status, value = _stock_of(bundle, f'<div class="actions">{hidden_buy}{sold}</div>')
+        assert (status, value) == (FieldStatus.CONFIRMED, {"availability": "SOLD_OUT"}), hidden_buy
+        # Without the visible sold-out statement, nothing decides: REVIEW_REQUIRED.
+        status, _ = _stock_of(bundle, f'<div class="actions">{hidden_buy}</div>')
+        assert status is FieldStatus.REVIEW_REQUIRED, hidden_buy
+
+
+def test_a_non_operable_purchase_control_is_never_active(bundle: Bundle) -> None:
+    for disabled_buy in (
+        '<button class="btn-buy" disabled>구매하기</button>',
+        '<button class="btn-buy" aria-disabled="true">구매하기</button>',
+        '<fieldset disabled><button class="btn-buy">구매하기</button></fieldset>',
+    ):
+        status, _ = _stock_of(bundle, f'<div class="actions">{disabled_buy}</div>')
+        assert status is FieldStatus.REVIEW_REQUIRED, disabled_buy
+
+
+def test_hidden_sold_out_text_is_not_a_statement(bundle: Bundle) -> None:
+    for hidden_sold in (
+        '<span aria-hidden="true">품절</span>',
+        '<span style="visibility:hidden">품절</span>',
+        '<span style="opacity: 0;">품절</span>',
+    ):
+        status, value = _stock_of(
+            bundle,
+            f'<div class="actions"><button class="btn-buy">구매하기</button>{hidden_sold}</div>',
+        )
+        assert value == {"availability": "ON_SALE"}, hidden_sold
+        disabled = '<button class="btn-buy" disabled>구매하기</button>'
+        status, _ = _stock_of(bundle, f'<div class="actions">{disabled}{hidden_sold}</div>')
+        assert status is FieldStatus.REVIEW_REQUIRED, hidden_sold

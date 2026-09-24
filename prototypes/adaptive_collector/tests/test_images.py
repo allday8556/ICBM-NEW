@@ -6,7 +6,7 @@ from prototypes.adaptive_collector.dom import from_snapshot
 from prototypes.adaptive_collector.engine import ImageCoverage, extract
 from prototypes.adaptive_collector.fixtures import profiles
 from prototypes.adaptive_collector.profile import Bundle, ProfileStore
-from prototypes.adaptive_collector.tests.conftest import SAMPLE_PAGES, sample
+from prototypes.adaptive_collector.testsupport import SAMPLE_PAGES, sample
 from prototypes.adaptive_collector.validation import Verdict, _v2, validate
 
 

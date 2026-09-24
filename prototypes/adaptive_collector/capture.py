@@ -32,9 +32,10 @@ _MEMBER_KEY = re.compile(
     r"(?i)(member|customer|user(name|_?id)?$|email|phone|mobile|address|point|grade)"
 )
 _URL_ATTRS = frozenset({"src", "href", "action", "data-src"})
-_KEPT_INPUT_ATTRS = frozenset(
-    {"type", "name", "min", "max", "step", "class", "id", "disabled", "hidden", "style"}
-)
+# An input keeps its structure and state; its ``value`` survives only for a server-authored control
+# (hidden, submit, button) whose name and value are not secret or member material.
+_INPUT_SERVER_VALUE_TYPES = frozenset({"hidden", "submit", "button"})
+_EMBEDDED_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:)?//|^/", re.I)
 _NON_AUTHORITATIVE = ("review", "qna", "recommend", "related", "recent", "ugc", "advert", "banner")
 _NON_AUTHORITATIVE_EXACT = frozenset({"ad", "ads"})
 _PRIVATE = ("member", "account", "mypage", "login", "userinfo", "user-info")
@@ -63,8 +64,15 @@ class OperatorExclusion:
 
 @dataclass(frozen=True)
 class OperatorScope:
+    """The operator's scope decision, recorded before any profile runs (ADR-0017 §7.3).
+
+    ``product_boundary`` is the element id or class token of the one product region the operator
+    approves. It must resolve to exactly one element; only that subtree is captured.
+    """
+
     decided_by: str
     decided_at: str
+    product_boundary: str
     confirmed_regions: tuple[str, ...]
     exclusions: tuple[OperatorExclusion, ...] = ()
 
@@ -164,8 +172,36 @@ def _region_class(node: Mapping[str, Any]) -> RegionClass | None:
     return None
 
 
-def detect_regions(html: str) -> list[tuple[str, RegionClass]]:
-    """What the generic rules would exclude, for the operator to confirm before capture."""
+def _carries(node: Mapping[str, Any], token: str) -> bool:
+    return token.lower() in set(_tokens(node))
+
+
+def find_boundary(root: dict[str, Any], token: str) -> dict[str, Any]:
+    """The one element the operator's boundary names; missing or ambiguous refuses the sample."""
+    found: list[dict[str, Any]] = []
+
+    def walk(node: dict[str, Any]) -> None:
+        for child in node["children"]:
+            if isinstance(child, dict):
+                if _carries(child, token):
+                    found.append(child)
+                walk(child)
+
+    if not token.strip():
+        raise CaptureRefused("the operator has recorded no product boundary")
+    walk(root)
+    if len(found) != 1:
+        raise CaptureRefused(
+            f"the product boundary {token!r} resolves to {len(found)} elements, not exactly one"
+        )
+    if _region_class(found[0]) is not None:
+        raise CaptureRefused("the product boundary is itself a non-product region")
+    return found[0]
+
+
+def detect_regions(html: str, product_boundary: str) -> list[tuple[str, RegionClass]]:
+    """What the generic rules would exclude inside the product boundary, for the operator to
+    confirm before capture."""
     found: list[tuple[str, RegionClass]] = []
 
     def walk(node: dict[str, Any]) -> None:
@@ -177,7 +213,7 @@ def detect_regions(html: str) -> list[tuple[str, RegionClass]]:
                 else:
                     walk(child)
 
-    walk(_parse(html))
+    walk(find_boundary(_parse(html), product_boundary))
     return found
 
 
@@ -210,6 +246,11 @@ def _strip_data(capture: _Capture, data: Any, where: Mapping[str, Any]) -> Any:
     if isinstance(data, str) and _SECRET_VALUE.search(data):
         capture.removed("EMBEDDED_SECRET_VALUE", where)
         return None
+    if isinstance(data, str) and _EMBEDDED_URL.match(data) and ("?" in data or "#" in data):
+        # Every query key is secret-bearing by default (ADR-0010 §9), inside embedded data too.
+        parts = urlsplit(data)
+        capture.removed("EMBEDDED_URL_QUERY", where)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
     return data
 
 
@@ -250,11 +291,26 @@ def _script(capture: _Capture, node: dict[str, Any]) -> dict[str, Any] | None:
     return kept
 
 
+def _input_value_kept(node: Mapping[str, Any]) -> bool:
+    attrs = node["attrs"]
+    field_name = attrs.get("name", "")
+    return (
+        attrs.get("type", "text").lower() in _INPUT_SERVER_VALUE_TYPES
+        and not _SECRET_NAME.search(field_name)
+        and not _MEMBER_KEY.search(field_name)
+        and not _SECRET_VALUE.search(attrs.get("value", ""))
+    )
+
+
 def _attrs(capture: _Capture, node: dict[str, Any]) -> dict[str, str]:
     kept: dict[str, str] = {}
     for name, value in node["attrs"].items():
-        if node["tag"] == "input" and name not in _KEPT_INPUT_ATTRS:
-            capture.removed(f"INPUT_ATTR:{name}", node)
+        if name.lower().startswith("on"):
+            capture.removed(f"EVENT_HANDLER:{name}", node)
+            continue
+        if node["tag"] == "input" and name == "value" and not _input_value_kept(node):
+            # A user-entered, credential, security or member value; the control itself stays.
+            capture.removed("INPUT_VALUE", node)
             continue
         if _SECRET_NAME.search(name) or _SECRET_VALUE.search(value):
             capture.removed(f"SECRET_ATTR:{name}", node)
@@ -280,9 +336,6 @@ def _sanitize(capture: _Capture, node: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if tag == "script":
         return _script(capture, node)
-    if tag == "input" and node["attrs"].get("type", "").lower() in {"hidden", "password"}:
-        capture.removed("INPUT_SECURITY_OR_HIDDEN", node)
-        return None
     region = _region_class(node)
     if region is not None:
         capture.excluded.append([boundary(node), region.value])
@@ -303,26 +356,28 @@ def _sanitize(capture: _Capture, node: dict[str, Any]) -> dict[str, Any] | None:
 def capture_sample(
     html: str, scope: OperatorScope, expected: Mapping[str, Any]
 ) -> ValidationSample:
-    """Cut one sample. It takes no profile: the scope is decided before any profile runs."""
-    detected = [b for b, region in detect_regions(html) if region is not RegionClass.NAVIGATION]
+    """Cut one sample. It takes no profile: the scope is decided before any profile runs, and only
+    the operator's one product boundary is captured."""
+    detected = [
+        b
+        for b, region in detect_regions(html, scope.product_boundary)
+        if region is not RegionClass.NAVIGATION
+    ]
     if unconfirmed := [b for b in detected if b not in scope.confirmed_regions]:
         raise CaptureRefused(f"the operator has not confirmed excluded regions: {unconfirmed}")
     capture = _Capture(scope)
-    root = _parse(html)
-    snapshot = {
-        "tag": "#document",
-        "attrs": {},
-        "children": [
-            kept
-            for child in root["children"]
-            if isinstance(child, dict) and (kept := _sanitize(capture, child)) is not None
-        ],
-    }
+    region = find_boundary(_parse(html), scope.product_boundary)
+    kept_region = _sanitize(capture, region)
+    if kept_region is None:
+        raise CaptureRefused("the product boundary was excluded by the operator's own scope")
+    snapshot = {"tag": "#document", "attrs": {}, "children": [kept_region]}
     provenance = {
         "capture_revision": CAPTURE_REVISION,
         "scope": {
             "decided_by": scope.decided_by,
             "decided_at": scope.decided_at,
+            "product_boundary": scope.product_boundary,
+            "boundary_element": boundary(region),
             "confirmed_regions": list(scope.confirmed_regions),
             "exclusions": [[e.token, e.reason.value] for e in scope.exclusions],
         },

@@ -444,13 +444,13 @@ def _stock(run: _Run) -> FieldFact:
             if not node.hidden and any(word in own for word in vocabulary.sold_out_words):
                 sold.append(node)
     run.mark(purchase + sold)
-    active = [node for node in purchase if "disabled" not in node.attrs]
+    active = [node for node in purchase if not node.disabled]
     evidence = [
         Evidence(
             kind=EvidenceKind.CONTROL_STATE,
             locator=f"{where}:control:{node.tag}.{'.'.join(sorted(node.classes))}"[:_OBSERVED_MAX],
             status=FieldStatus.CONFIRMED,
-            observed="disabled" if "disabled" in node.attrs else "active",
+            observed="disabled" if node.disabled else "active",
         )
         for node in purchase
     ]

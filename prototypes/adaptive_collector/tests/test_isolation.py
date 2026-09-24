@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from prototypes.adaptive_collector.tests.conftest import NetworkRefused
+from prototypes.adaptive_collector.testsupport import NetworkRefused
 
 REPO = Path(__file__).resolve().parents[3]
 PROTOTYPE = REPO / "prototypes" / "adaptive_collector"
