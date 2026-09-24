@@ -87,6 +87,11 @@ Owns source evidence and source facts. Collection is supplier-generic (`docs/adr
 - suppliers contribute pure collection definitions and parsers;
 - COLLECT persists ProductFactsRevision source truth from M3, while the canonical Product arrives in M4.
 
+The Adaptive Collector contract is `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` (Issue #110). **Nothing of it is implemented, and it authorizes no implementation by itself**:
+- it is a second implementation of the same parser seam: a generic engine interprets an immutable, digested `ExtractionProfileRevision` bundle, and the gateway, budget, image fetch, revision store and job owners stay as above;
+- the access envelope (`CollectionProfile`) is never profile data and is never widened at run time;
+- a shadow comparison reads the same one fetch, writes nothing canonical and makes zero AI/OCR calls; the canonical extractor stays the only revision writer until a separate cutover ADR.
+
 - discover/open/extract
 - raw evidence
 - ProductFactsRevision creation
@@ -135,7 +140,7 @@ Owns everything after publication.
 
 ### ProductFactsRevision
 Append-oriented source truth. Every successful recollection creates a new immutable revision, even when the source is unchanged; facts are never mutated in place. ADR-0010 defines:
-- provenance: revision ID, extractor revision and fingerprint, collection run/correlation, `facts_status`;
+- provenance: revision ID, extractor revision and fingerprint, collection run/correlation, `facts_status`; a profile-interpreted revision also carries its profile provenance (ADR-0017 §5), and no existing revision is backfilled;
 - the product-scoped evidence model;
 - fingerprint rules.
 
@@ -339,7 +344,7 @@ Derived marketplace variants (the transformed binary, its lineage and its QA) be
 
 ## 11. Source drift
 
-Recollection compares facts fingerprints.
+Recollection compares facts fingerprints, only between revisions with equal `comparability_key` (ADR-0013 §3 as amended by ADR-0017 §5.3; for every revision without profile provenance that is the same `extractor_revision`).
 
 ```text
 price changed    → new pricing proposal

@@ -169,6 +169,11 @@ If the page exposes more images than the budget allows, the count is recorded an
 
 ### 6. ProductFactsRevision contract
 
+> **Amendment note (ADR-0017 §5).** A revision produced by profile-interpreted (Adaptive) extraction
+> additionally carries its profile provenance, and drift comparability between revisions is decided by
+> `comparability_key`, which for every revision without profile provenance is
+> `("CODE", extractor_revision)`, the rule below. No existing revision is backfilled or rewritten.
+
 `ProductFactsRevision` is **append-only source truth**.
 
 - **Every successful collection creates a new immutable revision, even when the page is unchanged.**
@@ -401,6 +406,13 @@ mixed / insufficient evidence      → REVIEW_REQUIRED
   - private account data.
 
 ### 12. Extraction identity (addendum C; PR #55 review `5204359614` §2)
+
+> **Amendment note (ADR-0017 §5.2, §5.6).** For a code extractor this section is unchanged. For
+> profile-interpreted extraction, the semantic identity is the tuple of the engine's
+> `extractor_revision`, the profile schema version and the `ExtractionProfileRevision` digest; hook
+> semantics enter it through `HOOK_REVISION`, and no implementation fingerprint enters it. Such a
+> revision is reproducible from the repository at the fingerprints it records plus the immutable
+> profile rows it names.
 
 A manual string with no guard is insufficient. The **supplier collection definition** owns its extraction identity, and every revision persists both parts of it.
 
