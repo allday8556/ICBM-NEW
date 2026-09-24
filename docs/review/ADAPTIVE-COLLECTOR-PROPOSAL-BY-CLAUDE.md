@@ -1,10 +1,11 @@
 # Adaptive Collector — design proposal (Issue #110, Phase A)
 
-Status: **PROPOSAL — revision 3, awaiting architect re-audit**
+Status: **PROPOSAL — revision 4, awaiting architect re-audit**
 Author: Claude Code
 Issue: #110; architect kickoff `5811580104` (DESIGN only)
 Audit: PR #111 review `5302725919` on `eaa85aa` — direction accepted, four required fixes, rulings Q1–Q6;
-re-audit `5302852218` on `63dd1d73` — those fixes applied, three further corrections and one precision fix
+re-audit `5302852218` on `63dd1d73` — those fixes applied, three further corrections and one precision fix;
+re-audit `5302910552` on `a4ace6f9` — those applied, two remaining corrections
 Base: main `02dd2a35819bdee0d4209b2c0fa1ba9f10156f2a`
 Place at: `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 
@@ -34,6 +35,13 @@ ADR must carry, not as a decision in force.
 | 2. source-value drift compared stored `extraction_semantics_id` | §7, §4.1, §13.1 | every drift-comparability statement now names `comparability_key` (§4.2.1), the one owner of the amended ADR-0013 §3 rule |
 | 3. `ValidationSample` scope defined by the bundle under validation | §9.2, §9.1 | the snapshot is cut by an **independent capture owner** — a versioned sanitizer plus an operator-approved product scope recorded at capture — never by an EPR/PTR; plus a conflict scan over the whole snapshot |
 | precision: SHA-256 is not injective | §4.2, §4.2.1 | comparability compares a **tagged semantic tuple**; SHA-256 over a domain-separated, length-prefixed encoding is only its storage form and is described as collision-resistant, never collision-free |
+
+### Revision 4 — what changed after re-audit `5302910552`
+
+| re-audit item | where | change |
+| --- | --- | --- |
+| 1. the capture sanitizer blanket-removed forms and inputs | §9.2, §9.1 V3a | the sanitizer **keeps** sanitized product-scoped control structure and state (purchase and cart buttons, sold-out controls, option selectors, non-secret attributes and state) and strips only credentials, auth/session material, member/account fields, cart/account submission payloads and user-entered or private values; V3a scans the kept controls |
+| 2. an ACTIVE switch was described as a pointer move | §9 D7, §4.2 | an ACTIVE switch writes **only** the profile lifecycle transition; the current source revision pointer moves only when a later canonical collection records a new eligible revision under a different `comparability_key`, and that move is the `EXTRACTOR_CHANGED` one; no new revision, no pointer move |
 
 ---
 
@@ -242,7 +250,9 @@ domain-separated, length-prefixed encoding. It is collision-resistant, not colli
 nothing in this design relies on it being injective. Comparability compares tuples (§4.2.1).
 
 - **Profile changes never masquerade as source drift.** Any semantic profile edit is a new EPR
-  digest, so a new tuple, so the ADR-0013 pointer move is `EXTRACTOR_CHANGED` and no drift is
+  digest, so a new tuple. A profile edit or activation moves no pointer by itself (§9); when a
+  later canonical collection records a revision under the new tuple and that revision becomes
+  current, that pointer move (ADR-0013 §3) is recorded as `EXTRACTOR_CHANGED` and no drift is
   inferred. No new move reason is needed.
 - **Engine semantic change.** The engine's golden guard (§4.4) forces `extractor_revision` to
   advance; every profile's tuple changes with it, and every VALIDATED status lapses (D7).
@@ -585,7 +595,7 @@ promotion_group = (hook_point, target, format_class)       # reported beside it,
 | `DRAFT` | a strict schema parse passes; digest computed; lint findings recorded (an unmapped CORE field is allowed in a DRAFT). Costs no network. | offline evaluation against samples only |
 | `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact freshness tuple `(extraction_profile_digest, profile_schema_version, engine extractor_revision, engine extractor_fingerprint, hook_fingerprint, sample-set digest, capture revision)`. A change to any of them lapses it with no stored flag to forget. The freshness tuple deliberately includes implementation fingerprints; the semantic tuple (§4.2) deliberately does not, so an implementation-only change forces revalidation without being `EXTRACTOR_CHANGED`. | shadow |
 | `SHADOW` | a designation: VALIDATED + the per-supplier shadow switch | shadow comparison (D3) |
-| `ACTIVE` | **not authorized in this track.** Requires a cutover ADR, Phase C evidence and the user's approval; at most one ACTIVE bundle per supplier; each switch is an append-only transition and an `EXTRACTOR_CHANGED` pointer move | canonical revisions (later) |
+| `ACTIVE` | **not authorized in this track.** Requires a cutover ADR, Phase C evidence and the user's approval; at most one ACTIVE bundle per supplier; each switch writes **only** an append-only profile lifecycle transition (§9.3) | canonical revisions (later) |
 | `RETIRED` | explicit transition; never deleted | reading history |
 
 ### 9.1 Validation checks (all deterministic, zero network)
@@ -598,9 +608,10 @@ promotion_group = (hook_point, target, format_class)       # reported beside it,
   expected facts on every must-match dimension of D4. At least one sample per template, at least
   two in total. **Expected facts are authored or verified by the operator from the source — never
   by AI and never by the profile under validation**, or validation would be circular.
-- **V3a conflict scan** — generic, profile-independent detectors (price-like label rows, purchase
-  and sold-out controls, identity declarations, JSON-LD offers) run over the **whole** captured
-  snapshot. Any statement they find that the bundle's locators neither read nor explicitly
+- **V3a conflict scan** — generic, profile-independent detectors (price-like label rows, purchase,
+  cart and sold-out controls, option selectors and their option states, identity declarations,
+  JSON-LD offers) run over the **whole** captured snapshot, including every product control the
+  capture sanitizer kept (§9.2). Any statement they find that the bundle's locators neither read nor explicitly
   dispose of is a finding the operator must resolve before PASS, so evidence outside the
   bundle's attention cannot pass silently.
 - **V4 negative controls** — a login page, a non-product page, and a mutation suite generated
@@ -621,8 +632,20 @@ shadow observation, so it has its own rule.
 - **Who decides what it contains: an independent capture owner, never the bundle under
   validation** (re-audit `5302852218` item 3). The snapshot is cut at capture time by:
   - a **versioned capture sanitizer** (`capture_revision`) with its own parser and its own generic,
-    profile-independent exclusion rules (scripts other than JSON-LD, forms and inputs, account,
-    member, cart and navigation regions, every forbidden category below); and
+    profile-independent rules, which **keep product evidence and strip private material**
+    (re-audit `5302910552` item 1):
+
+    | kept, sanitized (product-scoped source evidence, ADR-0010 §8 `CONTROL_STATE` among it) | stripped |
+    | --- | --- |
+    | purchase, buy and cart buttons and their enabled/disabled/hidden state | credentials, passwords, tokens, CSRF and other hidden security fields |
+    | sold-out and restock controls and markers | authorization, session and cookie material in any attribute or value |
+    | option selectors (`select`/`option`, radio and button groups) with their labels, order, selected/disabled state and non-secret value attributes | member and account fields (names, IDs, grades, points, addresses, contacts) |
+    | quantity inputs' structure and bounds (`min`, `max`, `step`), not a user-entered value | cart and account submission payloads, and every user-entered or private value |
+    | forms that carry the above, reduced to their structure; the `action` kept only as a sanitized path under the ADR-0010 §9 URL rules | scripts other than JSON-LD; account, member and navigation regions; every forbidden category below |
+
+    Stripping is by what a value **is**, never by element type: a `form`, `input`, `select` or
+    `button` is not removed for being a control. A kept control whose attribute is secret-bearing
+    keeps the control with that attribute removed, and the removal is recorded; and
   - an **operator-approved product scope**, chosen on the captured page by the operator and recorded
     with the sample (who, when, the scope boundary) **before** any candidate profile evaluates it.
     The default scope is the whole document body after the sanitizer's exclusions; the operator may
@@ -632,7 +655,7 @@ shadow observation, so it has its own rule.
   bundle only **reads** from it. The sample's provenance names the `capture_revision` and the
   scope decision, never a profile, and a `ValidationRun` refuses a sample whose provenance names
   one. A too-narrow operator scope is visible in the recorded boundary, and the V3a conflict scan
-  runs over everything the scope kept.
+  runs over everything the scope kept, product controls included.
 - **What it never is or holds.** Never whole authenticated HTML; never cookies, headers, session or
   authorization material; never account, member or page-wide data; never secret-bearing URL
   material (ADR-0010 §8, §9). A snapshot that fails the sanitizer or the secret scan is not saved.
@@ -645,6 +668,26 @@ shadow observation, so it has its own rule.
   pruned by the shadow age/count bound (§5.4), and a shadow bound never reaches it.
 - **Local only.** Kept in the data root, never committed. Repository fixtures for Phase B are
   synthetic (§12), never a captured sample.
+
+### 9.3 An ACTIVE switch is not a pointer move (re-audit `5302910552` item 2)
+
+ADR-0013 §3 advances a `SourceProduct`'s current source revision only to a newly recorded,
+eligible `ProductFactsRevision`. Activation records none, so it moves no pointer.
+
+- **What an ACTIVE switch writes:** one append-only profile lifecycle transition (who, when, from,
+  to, the EPR, the reason, the correlation). Nothing else — no `ProductFactsRevision`, no pointer
+  row, no derived-result invalidation, no ReviewItem.
+- **When the pointer moves:** only when a **later** canonical collection records a new eligible
+  revision under the newly active bundle, and that revision becomes current by the unchanged
+  ADR-0013 §3 advance rule. Because its `comparability_key` differs from the previous current
+  revision's, **that** pointer move is recorded as `EXTRACTOR_CHANGED`, with the usual
+  invalidation of dependent derived results.
+- **No new revision, no pointer move.** A product that is not collected again after the switch
+  keeps its current source revision, with its original provenance, indefinitely. Its current
+  revision is never re-labelled, re-evaluated or backfilled because a different bundle is now
+  ACTIVE.
+- The same holds for leaving ACTIVE (a switch to another bundle or back to a code extractor): a
+  transition only, and pointer moves only through later recorded revisions.
 
 ---
 
@@ -783,7 +826,7 @@ authorizes no second-supplier read.
 
 ## References
 
-- Issue #110 and kickoff `5811580104`; PR #111 architect review `5302725919` and re-audit `5302852218`
+- Issue #110 and kickoff `5811580104`; PR #111 architect review `5302725919` and re-audits `5302852218`, `5302910552`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9 §13 §14, ADR-0013 §3, ADR-0016 §2 §6
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2
 - `integrations/suppliers/collection.py`, `integrations/suppliers/extraction.py`,
