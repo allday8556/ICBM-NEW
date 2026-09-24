@@ -15,6 +15,10 @@ cross-audit PASS the architect agreed with, and the drafting authorization on Is
   - the shadow decision is frozen per run at the product-read reservation (§10.1, §11.1);
   - raw shadow retention has no hold exception, and windows keep their own evidence ledger (§10.5);
   - a `NO_REVISION` shadow record has no `revision_id` (§10.5).
+- Amended before merge by the architect re-audit `5307485431` on `fe335cd7`:
+  - a truncated embedded block makes its sample unable to support a `PASS` (§7.2, §7.3);
+  - Phase C has an explicit no-cherry-pick rule: only `SHADOW_MISSING_AFTER_RECOVERY` lets a window
+    be superseded for the same bundle (§11.2, §11.3).
 - **Its authority becomes effective only after this exact contract PR is audited, independently
   cross-audited and merged**, and even then only phase by phase (§2).
 
@@ -375,7 +379,7 @@ promotion_group = (hook_point, target, format_class)    reported beside it; neve
 | state | how it is entered | may be used for |
 | --- | --- | --- |
 | `DRAFT` | a strict schema parse passes, the digest is computed and lint findings are recorded. An unmapped CORE field is allowed in a DRAFT. Costs no network | offline evaluation against samples |
-| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact freshness tuple (below) | shadow |
+| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact freshness tuple (below). A `ValidationRun` ends `PASS`, `FAIL` or `INCOMPLETE`; only `PASS` counts | shadow |
 | `SHADOW` | a designation: VALIDATED plus the per-supplier shadow switch | shadow comparison (§10) |
 | `ACTIVE` | **not authorized by this ADR** — see §7.4 | canonical revisions, after the cutover ADR |
 | `RETIRED` | an explicit transition; the revision is never deleted | reading history |
@@ -442,6 +446,12 @@ promotion_group = (hook_point, target, format_class)    reported beside it; neve
   - Observed fragments stay within 4 KiB.
   - Nothing appears that ADR-0010 §8 forbids.
 - **V7 hook guards.** G5–G7.
+- **V8 complete samples only.** A `ValidationRun` that includes a sample marked
+  `SAMPLE_TRUNCATED` (§7.3) ends **`INCOMPLETE`**, never `PASS`.
+  - Nothing may treat the omitted bytes as inspected: no locator, no hook exercise (G7), no expected
+    fact, no `ABSENT` decision and no V3a result.
+  - The truncated block's digest is kept for diagnostics only.
+  - Validating that path requires a different, bounded capture.
 
 #### 7.3 `ValidationSample`: independent capture and its own retention
 
@@ -482,8 +492,13 @@ does.** The snapshot is cut at capture time by two things.
        secret-bearing URL material. Keys are matched by generic name rules and values by the same
        secret scan the rest of the sample passes. Each removal is recorded.
      - **Bounds:** at most 64 KiB per block and 256 KiB of embedded data per sample, after
-       stripping. A larger block is kept by digest only and is recorded as truncated, never
-       silently cut.
+       stripping.
+       - A larger admissible block inside the product scope is kept **by digest only**, for
+         diagnostics.
+       - The whole sample is then marked **`SAMPLE_TRUNCATED`**, and it can never support a
+         `PASS` (V8).
+       - A digest is never proof material: it cannot show what facts or conflicts the omitted tree
+         held. A block is never silently cut.
      - **Scope:** a block qualifies only inside the recorded product scope (point 2). Page-wide
        analytics, advertising, consent and tracking configuration is outside it by the
        non-authoritative rule below.
@@ -796,11 +811,16 @@ and the first rule that decides it applies.
 | a mismatch resolved `ADAPTIVE_CORRECT` | success for the Adaptive side (the canonical defect is filed separately) |
 | resolved `SOURCE_AMBIGUOUS` | success only if the Adaptive side failed closed on every ambiguous field |
 | resolved `CURRENT_CORRECT` or `BOTH_WRONG` | failure |
-| an unresolved mismatch | `INCOMPLETE` |
+| an unresolved mismatch | `INCOMPLETE`, cause `UNRESOLVED_MISMATCH` — **blocking** (§11.3) until it is resolved |
+| a mismatch whose raw record was pruned before resolution (§10.5) | `INCOMPLETE`, cause `PRUNED_BEFORE_RESOLUTION` — **blocking**; it can no longer be resolved |
 | `TEMPLATE_UNMATCHED` / `TEMPLATE_AMBIGUOUS` | failure, unless resolved `SOURCE_AMBIGUOUS` |
-| `IMAGE_UNMATCHABLE` | `INCOMPLETE` — never a success (§10.4) |
+| `IMAGE_UNMATCHABLE` | `INCOMPLETE`, cause `IMAGE_UNMATCHABLE` — **blocking**; it is never a success and never resolvable (§10.4) |
 | `SHADOW_FAILED` | failure |
-| **no shadow record**, for any reason, a crash included | **`INCOMPLETE`** |
+| **no shadow record** after a crash between the canonical commit and the shadow record (§11.2) | **`INCOMPLETE`**, cause `SHADOW_MISSING_AFTER_RECOVERY` — the **only non-blocking cause** (§11.3) |
+| **no shadow record** for any other reason, such as a failed shadow write | **`INCOMPLETE`**, cause `SHADOW_MISSING` — **blocking** |
+
+Each `INCOMPLETE` entry carries **exactly one** of these causes, recorded in the window ledger
+(§10.5). No other cause exists, and a new one needs an amendment of this ADR.
 
 #### 11.2 A crash between the canonical commit and the shadow record
 
@@ -822,6 +842,14 @@ dies before the shadow's own unit commits.
 - **The window can never pass.** Any `INCOMPLETE` makes the window `INCOMPLETE`. That window can
   never become `PASS`, because the missing comparison cannot be recreated. It stays recorded, with
   its missing runs listed.
+- **The one supersession this contract allows.** A window whose `INCOMPLETE` entries are **all**
+  `SHADOW_MISSING_AFTER_RECOVERY` may be superseded by a new window for the **same** bundle.
+  Nothing else in that window may be a failure or a blocking cause.
+  - The supersession is recorded before the new window's first eligible collection: the superseded
+    window, the reason `SHADOW_MISSING_AFTER_RECOVERY`, the runs it names, and who and when.
+  - The superseded window stays in the final evidence, verdict and all. It is **never deleted,
+    closed away or abandoned**.
+  - This is the only exception (§11.3).
 
 #### 11.3 The Phase C verdict and its gates
 
@@ -830,13 +858,25 @@ dies before the shadow's own unit commits.
     K = 3 eligible collections, at least one of them after a process restart (the fresh-session
     condition, `CLAUDE.md` §9).
   - `FAIL` when any collection counts as a failure.
-  - `INCOMPLETE` otherwise.
-- **Bundle verdict.** A bundle passes Phase C only when both hold:
+  - `INCOMPLETE` otherwise: some entry counts `INCOMPLETE`, or the window is still below K.
+- **No cherry-picking** (re-audit `5307485431`). A bundle's evidence is **every** window ever
+  declared for it. A later `PASS` window never hides an earlier window.
+- **Bundle verdict.** A bundle passes Phase C only when **all** of these hold:
   - at least one of its windows is `PASS`;
-  - **none of its windows is `FAIL`.**
-
-  A `FAIL` disqualifies the bundle. A fix is a new EPR with new windows. Every window of the bundle,
-  `INCOMPLETE` ones included, is listed in the evidence by `collection_run_id`.
+  - **none** of its windows is `FAIL`;
+  - **no** window of it holds an entry with a **blocking cause**: `UNRESOLVED_MISMATCH`,
+    `PRUNED_BEFORE_RESOLUTION`, `IMAGE_UNMATCHABLE` or `SHADOW_MISSING`;
+  - every window that is `INCOMPLETE` only because of `SHADOW_MISSING_AFTER_RECOVERY` has a
+    recorded supersession (§11.2);
+  - every other window is `PASS`, or is the one open window still below K.
+- **What clears a blocking cause.**
+  - `UNRESOLVED_MISMATCH` clears only by an evidence-based resolution (§10.3). The entry then
+    counts by that resolution and may make the window `FAIL`.
+  - The other three blocking causes can never clear. They are cleared for the bundle only by a
+    **new EPR**, which is a new bundle with new windows. The old bundle's evidence stays recorded.
+- **Fixing a bundle.** A `FAIL` disqualifies the bundle, and a fix is a new EPR with new windows.
+  Every window of the bundle — `INCOMPLETE` and superseded ones included — is listed in the evidence
+  by `collection_run_id`, with each entry's outcome and cause.
 - **Phase C gates.** Phase C may not start until all of the following are merged and accepted, with
   their negative controls:
   - **§10.4 image matching**, including `UNMATCHABLE` and its `INCOMPLETE` counting;
@@ -847,7 +887,10 @@ dies before the shadow's own unit commits.
   - the §10.5 retention bounds and window ledger, with a test that pruning a raw record keeps its
     ledger outcome;
   - the §10.1 frozen per-run decision, with a test that a switch change between the reservation and
-    the shadow step changes neither that run's shadow execution nor its eligibility.
+    the shadow step changes neither that run's shadow execution nor its eligibility;
+  - the §11.3 bundle verdict, with tests of two cases. (1) A bundle with a later `PASS` window and an
+    earlier window holding a blocking cause does **not** pass. (2) A window superseded only for
+    `SHADOW_MISSING_AFTER_RECOVERY` stays in the evidence.
 
 **Honest limit.** The accepted KM통상 product states no options and no tiers (`docs/acceptance/M3.md`
 §2.1). Positive options and tiers are therefore proven only on synthetic fixtures.
@@ -944,12 +987,14 @@ AC-15  Production collection and the shadow make zero AI, OCR and vision calls; 
 AC-16  The shadow makes zero supplier requests and writes nothing canonical; its record is written in its own write unit only after the canonical unit has committed, never nested
 AC-17  Shadow image matching is in memory on the exact resolved or written reference; a persisted locator is never used; UNMATCHABLE is never a success
 AC-18  The Phase C denominator is every eligible collection, derived from canonical runs and their frozen per-run shadow decision; a missing shadow record, a crash included, counts INCOMPLETE and is never excluded
-AC-19  A window passes only if every eligible collection succeeds; any FAIL disqualifies the bundle
+AC-19  A window passes only if every eligible collection succeeds; any FAIL disqualifies the bundle; a bundle's evidence is every window ever declared for it
 AC-20  Raw shadow records are bounded by 90 days and 5000 per supplier with no hold exception; window outcomes survive only as the ledger; ValidationSample retention is separate
 AC-21  FieldStatus, EvidenceKind, ReviewKind and FIELD_REGISTRY are unchanged; non-CORE fields are COVERAGE
 AC-22  Phase C may not start before sections 10.4 and 11.2 are implemented with their negative controls; Phase D stays deferred
 AC-23  shadow_enabled_for_run is frozen at a run's first product-read reservation, and both the shadow step and the denominator read only that value
 AC-24  A shadow record is keyed by collection_run_id; revision_id is nullable and absent for a NO_REVISION run
+AC-25  A ValidationRun that includes a SAMPLE_TRUNCATED sample ends INCOMPLETE, never PASS; a digest is never proof material
+AC-26  A blocking INCOMPLETE cause (UNRESOLVED_MISMATCH, PRUNED_BEFORE_RESOLUTION, IMAGE_UNMATCHABLE, SHADOW_MISSING) blocks the bundle until resolved or replaced by a new EPR; only SHADOW_MISSING_AFTER_RECOVERY permits a recorded supersession, and no window is ever abandoned
 ```
 
 ## Consequences
@@ -968,7 +1013,7 @@ AC-24  A shadow record is keyed by collection_run_id; revision_id is nullable an
 ## References
 
 - Issue #110; kickoff `5811580104`; items `5812200650`; ADR authorization `5812422770`
-- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101`;
+- PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101` and re-audit `5307485431`;
   `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9, ADR-0013 §3, ADR-0016
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2;
