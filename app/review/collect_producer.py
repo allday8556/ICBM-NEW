@@ -27,6 +27,8 @@ collection is a new revision, so an unchanged condition moves to a new identity 
 old item (§4); the old item keeps its revision and its resolution history.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from typing import Final
 
@@ -72,6 +74,15 @@ class CollectReviewProducer:
             {"supplier_key": supplier, "source_product_id": product}
             for supplier, product in self._revisions.recorded_sources()
         )
+
+    def truth_token(self) -> str:
+        """A digest of every RECORDED source identity **and its current revision id**: the whole
+        owner truth this producer derives from. Revisions only ever advance, so an equal token
+        at a pass's start and at its end proves nothing moved in between."""
+        identities = self._revisions.current_recorded_identities()
+        return hashlib.sha256(
+            json.dumps([list(identity) for identity in identities]).encode("utf-8")
+        ).hexdigest()
 
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         conditions: list[ReviewCondition] = []

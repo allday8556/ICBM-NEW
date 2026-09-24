@@ -389,6 +389,78 @@ def test_a_failure_during_a_pass_is_not_cleared_by_that_pass_even_at_the_same_in
     assert (cover.current, cover.reason) == (True, None)
 
 
+@pytest.mark.parametrize("move", ["a new source scope", "a new revision of a reconciled scope"])
+def test_an_owner_that_moves_during_a_pass_is_never_published_as_current(
+    container: Container, config: AppConfig, move: str
+) -> None:
+    """Review 5807902325 B3. After the pass has snapshotted and reconciled its scopes, COLLECT
+    commits new truth, and that write's own fast path has not run yet. The pass must not publish
+    its watermark: the new condition is not indexed, so coverage must not read as current — not even
+    on the strength of an earlier, older watermark. A later, stable pass covers it and recovers."""
+    sources = Collections.of(container, config)
+    sources.collect(product(stock=review("#stock")), source_product_id="821")
+    reconciler = container.review_reconciler
+    assert reconciler.full_pass(COLLECT_PRODUCER).complete
+    assert reconciler.coverage()[0].current is True  # an earlier stable watermark exists
+    moved_to = "822" if move == "a new source scope" else "821"
+    store = container.review_items
+    original = store.reconcile
+    committed: list[str] = []
+
+    def owner_moves_after_the_scope(producer: str, **kwargs: Any) -> Any:
+        result = original(producer, **kwargs)
+        if not committed:
+            # The owner's own write, after this scope was reconciled. Its fast path is withheld.
+            _, revision = sources.collect(
+                product(shipping=unknown_shipping()), source_product_id=moved_to
+            )
+            committed.append(revision.revision_id)
+        return result
+
+    store.reconcile = owner_moves_after_the_scope  # type: ignore[method-assign]
+    result = reconciler.full_pass(COLLECT_PRODUCER)
+    store.reconcile = original  # type: ignore[method-assign]
+    assert committed and not result.complete
+    assert "REVIEW_OWNER_MOVED_DURING_PASS" in result.failed
+
+    def shipping_items() -> list[Any]:
+        return [
+            i
+            for i in container.review_items.items(scope=scope(moved_to))
+            if i.subject == "field:shipping" and i.state is ReviewState.OPEN
+        ]
+
+    # The new owner truth is not indexed yet, and nothing presents that as covered.
+    assert shipping_items() == []
+    cover = reconciler.coverage()[0]
+    assert (cover.current, cover.reason) == (False, REVIEW_INDEX_FAILURE_UNRECOVERED)
+    # A later, stable pass covers it, publishes the watermark and recovers the coverage.
+    assert reconciler.full_pass(COLLECT_PRODUCER).complete
+    assert [i.source_identity for i in shipping_items()] == committed
+    cover = reconciler.coverage()[0]
+    assert (cover.current, cover.reason) == (True, None)
+
+
+def test_the_owner_token_names_every_scope_and_its_current_revision(
+    container: Container, config: AppConfig
+) -> None:
+    sources = Collections.of(container, config)
+    producer = container.review_items.producer(COLLECT_PRODUCER)
+    empty = producer.truth_token()
+    _, first = sources.collect(product(), source_product_id="831")
+    one = producer.truth_token()
+    sources.collect(product(), source_product_id="832")
+    two = producer.truth_token()
+    _, newer = sources.collect(product(), source_product_id="831")
+    moved = producer.truth_token()
+    assert len({empty, one, two, moved}) == 4
+    assert container.revisions.current_recorded_identities() == (
+        ("kmretail", "831", newer.revision_id),
+        ("kmretail", "832", container.revisions.current_recorded("kmretail", "832").revision_id),  # type: ignore[union-attr]
+    )
+    assert first.revision_id != newer.revision_id
+
+
 def test_shutdown_waits_for_an_in_flight_periodic_pass(data_dir: Path) -> None:
     """Review 5807477351 B1. A periodic pass is held inside its locked unit when shutdown starts.
     Shutdown must not finish — the owner lease stays held, so no other process can take the data

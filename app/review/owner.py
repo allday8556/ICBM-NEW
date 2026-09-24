@@ -91,6 +91,12 @@ class ReviewProducer(Protocol):
         writes nothing."""
         ...
 
+    def truth_token(self) -> str:
+        """A deterministic token of all the owner truth the producer derives from, including each
+        scope's current source identity. Equal at a full pass's start and at its watermark, it
+        proves the owner did not move during the pass (review 5807902325 B3). It writes nothing."""
+        ...
+
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         """Every condition the owner derives **now** among items whose scope includes ``scope``,
         read from the owner's own truth. It writes nothing: it runs under the write

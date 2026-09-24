@@ -14,8 +14,10 @@ Both are independent of owner writes, re-evaluation and resolution.
 A full pass visits every scope the owner holds and every scope the producer's items hold, in one
 deterministic order. Each scope is its own short locked unit (derive and apply together, as the
 owner requires), so a pass makes monotonic forward progress, and a crash loses at most the scope
-in flight. The watermark is renewed **only when the pass reached its end with no failure**. A
-failed scope is recorded as a known failure, and the watermark stays where it was.
+in flight. The watermark is renewed **only when the pass reached its end with no failure and the
+owner did not move during it**: the owner's truth token is taken as the pass begins and compared
+again inside the watermark's own write unit. A failed scope, or an owner that moved, is recorded as
+a known failure, and the watermark stays where it was until a later, stable pass.
 """
 
 import asyncio
@@ -28,7 +30,11 @@ from dataclasses import dataclass
 from app.core.clock import Clock
 from app.core.correlation import new_correlation_id
 from app.core.errors import AppError
-from app.review.coverage import CoverageView, ReviewCoverageStore
+from app.review.coverage import (
+    REVIEW_OWNER_MOVED_DURING_PASS,
+    CoverageView,
+    ReviewCoverageStore,
+)
 from app.review.model import canonical_scope
 from app.review.owner import ReviewItemStore
 
@@ -104,6 +110,11 @@ class ReviewReconciler:
             # Which failures already existed when this pass began (review 5807477351 B2): only
             # those can be recovered by it, whatever the clock says.
             failures_before = self._coverage.failures_recorded(producer)
+            # The owner fence (review 5807902325 B3): the owner's truth, including each scope's
+            # current source identity, as the pass begins. It is compared again inside the
+            # watermark's own write unit.
+            source = self._store.producer(producer)
+            token_before = source.truth_token()
             scopes = self._scopes(producer)
         except Exception as exc:
             self._record_failure(producer, _code(exc), correlation_id)
@@ -124,13 +135,16 @@ class ReviewReconciler:
             self._record_failure(producer, failed[0], correlation_id)
         else:
             try:
-                self._coverage.record_pass(
+                published = self._coverage.record_pass(
                     producer,
                     process_run_id=self._process_run_id,
                     started_at=started_at,
                     failures_before=failures_before,
+                    owner_unchanged=lambda: source.truth_token() == token_before,
                     correlation_id=correlation_id,
                 )
+                if not published:
+                    failed.append(REVIEW_OWNER_MOVED_DURING_PASS)
             except Exception as exc:
                 failed.append(_code(exc))
                 logger.warning("review.watermark_failed", extra={"producer": producer})

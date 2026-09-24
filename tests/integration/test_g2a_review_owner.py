@@ -75,6 +75,9 @@ class FakeProducer:
             {json.dumps(dict(c.scope), sort_keys=True): c.scope for c in self.current}.values()
         )
 
+    def truth_token(self) -> str:
+        return json.dumps(sorted(c.review_key for c in self.current))
+
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         self.calls += 1
         if not self.filtering:
