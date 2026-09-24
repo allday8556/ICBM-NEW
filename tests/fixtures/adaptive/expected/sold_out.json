@@ -1,0 +1,21 @@
+{
+  "source_product_id": "SM-5002",
+  "fields": {
+    "original_name": {"status": "CONFIRMED", "value": {"text": "합성마트 배즙 15포"}},
+    "prices": {"status": "CONFIRMED", "value": {"prices": [{"label": "판매가", "amount_krw": 11000}]}},
+    "options": {"status": "CONFIRMED", "value": {"axes": [], "configurations": []}},
+    "stock": {"status": "CONFIRMED", "value": {"availability": "SOLD_OUT"}},
+    "shipping": {"status": "CONFIRMED", "value": {"kind": "FREE", "policy_text": "무료", "fee_krw": null, "free_over_krw": null}},
+    "minimum_sale_price": {"status": "CONFIRMED", "value": {"label": "최저판매가", "amount_krw": 10500}},
+    "quantity_tiers": {"status": "ABSENT", "value": null},
+    "brand": {"status": "ABSENT", "value": null},
+    "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성식품공사"}},
+    "origin": {"status": "ABSENT", "value": null},
+    "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조원", "text": "합성식품공사"}]}},
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "재입고 예정입니다."}}
+  },
+  "images": [
+    ["REPRESENTATIVE", 0, "/goods/sm-5002/cover.jpg"],
+    ["DETAIL", 0, "/goods/sm-5002/detail-a.jpg"]
+  ]
+}

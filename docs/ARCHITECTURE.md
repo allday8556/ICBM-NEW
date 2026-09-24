@@ -87,7 +87,7 @@ Owns source evidence and source facts. Collection is supplier-generic (`docs/adr
 - suppliers contribute pure collection definitions and parsers;
 - COLLECT persists ProductFactsRevision source truth from M3, while the canonical Product arrives in M4.
 
-The Adaptive Collector contract is `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` (Issue #110). **Nothing of it is implemented, and it authorizes no implementation by itself**:
+The Adaptive Collector contract is `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` (Issue #110). It authorizes no implementation by itself. **Only its offline core exists (production slice P1, `app/collect/adaptive/`), and nothing in the runtime calls it**: no profile or validation persistence, no COLLECT wiring, no shadow and no `ProductFactsRevision` write, each of which needs its own authorized slice:
 - it is a second implementation of the same parser seam: a generic engine interprets an immutable, digested `ExtractionProfileRevision` bundle, and the gateway, budget, image fetch, revision store and job owners stay as above;
 - the access envelope (`CollectionProfile`) is never profile data and is never widened at run time;
 - a shadow comparison reads the same one fetch, writes nothing canonical and makes zero AI/OCR calls; the canonical extractor stays the only revision writer until a separate cutover ADR.

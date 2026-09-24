@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Synthetic fixture for the Adaptive core: an invented supplier "synmart". No real page, account,
+     person or product. -->
+<html>
+<head><script>analytics.track("goods");</script></head>
+<body>
+<header class="top-bar"><nav><a href="/">홈</a></nav></header>
+<section class="goods-view" id="goods">
+  <meta name="goods-code" content="SM-5001">
+  <script type="application/ld+json">{"@type": "Product", "sku": "SM-5001", "name": "합성마트 사과즙 30포", "offers": {"price": "19800", "priceCurrency": "KRW"}}</script>
+  <script>window.goodsInfo = {"sku": "SM-5001", "stock": "AVAILABLE", "thumb": "https://img.synmart.example/sm-5001.jpg?expires=99&sig=abc", "sessionKey": "not-a-real-session", "memberLevel": "GOLD"};</script>
+  <script>var viewer = resolveViewer();</script>
+  <div class="member-box">합성회원 님 · 포인트 3,000</div>
+  <h2 class="goods-name">합성마트 사과즙 30포</h2>
+  <table class="spec">
+    <tr><th>판매가</th><td>19,800원</td></tr>
+    <tr><th>정가</th><td>24,000원</td></tr>
+    <tr><th>배송비</th><td>2,500원</td></tr>
+    <tr><th>브랜드</th><td>합성농장</td></tr>
+    <tr><th>원산지</th><td>국산</td></tr>
+  </table>
+  <div class="choice"></div>
+  <div class="photos">
+    <img class="cover" src="/goods/sm-5001/cover.jpg?w=800">
+    <img class="alt" src="/goods/sm-5001/alt.jpg">
+  </div>
+  <div class="buttons">
+    <a class="btn-order" href="/order?goods=SM-5001" onclick="order()">바로구매</a>
+    <button class="btn-basket">장바구니</button>
+  </div>
+  <form class="order-form" action="/basket/add?xsrf=q">
+    <input type="hidden" name="goods_no" value="SM-5001">
+    <input type="hidden" name="xsrf_token" value="xsrf-not-a-real-value">
+    <input type="number" name="ea" min="1" max="30" value="2">
+  </form>
+  <div class="description">
+    <p>아침에 한 포씩 드세요.</p>
+    <img src="/goods/sm-5001/detail-a.jpg">
+    <img src="/goods/sm-5001/detail-b.jpg">
+  </div>
+  <table class="legal">
+    <tr><th>제조원</th><td>합성식품공사</td></tr>
+    <tr><th>원산지</th><td>국산</td></tr>
+  </table>
+  <div class="review-area"><p>박** 님: 품절 전에 쟁여요</p><table><tr><th>판매가</th><td>15,000원</td></tr></table></div>
+  <div class="related-goods"><button class="btn-order">연관상품 구매</button></div>
+</section>
+<div class="review-area"><p>하단 리뷰</p></div>
+<footer>합성마트</footer>
+</body>
+</html>

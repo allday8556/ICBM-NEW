@@ -1005,6 +1005,78 @@ def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> No
             assert not forbidden, f"{path}: {name}"
 
 
+# ADR-0017 P1 (Issue #110 5821999699): no dynamic-import or code-evaluation escape in the source
+# truth path, so an import rule can never be walked around at run time.
+DYNAMIC_ESCAPES = frozenset({"__import__", "exec", "eval", "compile", "__builtins__"})
+
+
+def test_source_truth_path_has_no_dynamic_import_escape() -> None:
+    modules = {p: t for p, t in _production_modules().items() if p.startswith(SOURCE_TRUTH_ROOTS)}
+    assert "app/collect/adaptive/engine.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert name.split(".")[0] != "importlib", f"{path}: {name}"
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in DYNAMIC_ESCAPES:
+                pytest.fail(f"{path}: {node.id}")
+            if isinstance(node, ast.Attribute) and node.attr in {"__import__", "import_module"}:
+                pytest.fail(f"{path}: .{node.attr}")
+
+
+# ADR-0017 P1: the Adaptive core is pure and offline. It may import only these stdlib modules,
+# pydantic, the COLLECT value models and itself — no network, browser, DB, gateway, session,
+# CONNECT, provider, AI or OCR code — and nothing in production wires it in yet.
+ADAPTIVE_ROOT = "app/collect/adaptive/"
+ADAPTIVE_STDLIB = frozenset(
+    {
+        "collections",
+        "collections.abc",
+        "dataclasses",
+        "enum",
+        "functools",
+        "hashlib",
+        "html.parser",
+        "json",
+        "math",
+        "re",
+        "struct",
+        "types",
+        "typing",
+        "urllib.parse",
+    }
+)
+ADAPTIVE_MAY_IMPORT = frozenset({"pydantic", "app.collect.facts"})
+
+
+def test_the_adaptive_core_imports_only_pure_modules() -> None:
+    modules = {p: t for p, t in _production_modules().items() if p.startswith(ADAPTIVE_ROOT)}
+    assert f"{ADAPTIVE_ROOT}validation.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            allowed = (
+                name in ADAPTIVE_STDLIB
+                or name in ADAPTIVE_MAY_IMPORT
+                or name.startswith("app.collect.adaptive")
+            )
+            assert allowed, f"{path}: {name}"
+
+
+def test_the_disposable_phase_b_prototype_never_reached_the_repository() -> None:
+    # ADR-0017 §13: the prototype was evidence only; production code is written fresh.
+    assert not (REPO_ROOT / "prototypes").exists()
+
+
+def test_nothing_in_production_wires_the_adaptive_core_yet() -> None:
+    roots = [*PRODUCTION_ROOTS, REPO_ROOT / "scripts"]
+    for root in roots:
+        for file in root.rglob("*.py"):
+            relative = file.relative_to(REPO_ROOT).as_posix()
+            if relative.startswith(ADAPTIVE_ROOT):
+                continue
+            for name in _imported_modules(ast.parse(file.read_text("utf-8"))):
+                assert not name.startswith("app.collect.adaptive"), f"{relative}: {name}"
+
+
 # Issue #52 ruling 5711123764 §1: the REAL acceptance harness orchestrates and never collects.
 CAMPAIGN_MAY_NOT_IMPORT = (
     "integrations.suppliers.kmretail.collect",
