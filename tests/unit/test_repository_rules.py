@@ -8,6 +8,7 @@ revision-history and review documents legitimately keep older prototype names.
 import argparse
 import ast
 import hashlib
+import inspect
 import re
 from pathlib import Path
 
@@ -32,6 +33,9 @@ OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
 REVIEW_ADR = DOCS / "adr" / "0016-gate2-human-review-path-and-review-item-owner.md"
 ADAPTIVE_ADR = DOCS / "adr" / "0017-adaptive-collector-profile-extraction-and-shadow-validation.md"
 ADAPTIVE_PROPOSAL = DOCS / "review" / "ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md"
+LIVE_ADR = DOCS / "adr" / "0018-gate3-pre-live-safety-and-bounded-live-authorization.md"
+M5_ACCEPTANCE = DOCS / "acceptance" / "M5.md"
+GLOSSARY_MD = DOCS / "GLOSSARY.md"
 ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
 # The owners whose truth a ReviewItem indexes; none of them may read the review owner (G2-02).
 REVIEWED_OWNERS = (
@@ -408,6 +412,49 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     closed = _section(adr, r"^14\. The cross-audit items, closed$")
     assert len(re.findall(r"^\| [1-6] \|", closed, re.M)) == 6
     assert closed.count("**yes**") == 2
+
+
+def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
+    """ADR-0018 (Gate 3 G3-0): the pre-LIVE safety contract, before any schema or runtime."""
+    from app.system.execution_mode import M0_POLICY, ExecutionModeService
+
+    adr = _read(LIVE_ADR)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
+    assert "5821078540" in adr
+    # The roadmap names the contract file and its kickoff; the other canonical docs cite it.
+    roadmap = _read(ROADMAP_MD)
+    assert f"contract `docs/adr/{LIVE_ADR.name}`" in roadmap and "5821078540" in roadmap
+    for canonical in (ARCHITECTURE_MD, M5_ACCEPTANCE, GLOSSARY_MD):
+        assert "ADR-0018" in _read(canonical), canonical.name
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 21)]
+    # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
+    assert "refused before any transmission" in invariants["G3-02"]
+    assert "UI text and checkboxes are never authority" in invariants["G3-03"]
+    assert "never refunded, an UNKNOWN included" in invariants["G3-04"]
+    assert "EXPIRED, REVOKED and EXHAUSTED are terminal" in invariants["G3-05"]
+    assert "never authorizes a blind CREATE replay" in invariants["G3-07"]
+    # D4: the brake is fail closed, survives restart, and never rewrites an UNKNOWN.
+    assert "absent or unreadable means ENGAGED" in invariants["G3-08"]
+    assert "never rewrites an UNKNOWN" in invariants["G3-09"]
+    assert "never resurrects" in invariants["G3-10"]
+    assert "execution-scope brake is unchanged and not weakened" in invariants["G3-11"]
+    # D2 and D3: no ComplianceGate, eligibility is never a PASS, and the evidence blocker holds.
+    assert "implements no ComplianceGate" in invariants["G3-12"]
+    assert "never a COMPLIANCE PASS" in invariants["G3-13"]
+    assert "CREATE and SEARCH stay NOT_ADOPTED" in invariants["G3-14"]
+    assert "zero-result search are never proof of remote absence" in invariants["G3-15"]
+    # D5-D7: proven prerequisites, not declarations.
+    assert "a declaration is not a drill" in invariants["G3-16"]
+    assert "never discarded" in invariants["G3-17"]
+    assert "no server-owned blocker is hidden" in invariants["G3-18"]
+    assert "never permission to write" in invariants["G3-19"]
+    # G3-0 changes no runtime: the M0 policy still refuses LIVE, and M5 is still PENDING.
+    assert M0_POLICY == "M0_DRY_RUN_ONLY"
+    assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
+    assert "Status: **PENDING**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
+    assert "authorizes nothing to run" in adr.split("\n---", 1)[0]
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:

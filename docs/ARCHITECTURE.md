@@ -234,7 +234,7 @@ PASS | REVIEW_REQUIRED | BLOCKED
 
 BLOCKED cannot be bypassed by automation. Resolution requires changed/verified evidence and an audit trail.
 
-**No production ComplianceGate owner exists yet.** The states above are the contract; no service decides them at this main, and the REGISTER preflight carries no compliance verdict of its own. Until that owner is implemented and accepted, regulated goods — 건강기능식품, KC certification, 식약처 notices, prohibited wording and every other regulated category — must not be claimed as automatically registrable, and **the first bounded canary uses a non-regulated product**.
+**No production ComplianceGate owner exists yet.** The states above are the contract; no service decides them at this main, and the REGISTER preflight carries no compliance verdict of its own. Until that owner is implemented and accepted, regulated goods — 건강기능식품, KC certification, 식약처 notices, prohibited wording and every other regulated category — must not be claimed as automatically registrable, and **the first bounded canary uses a non-regulated product**: one whose reviewed category metadata proves it outside every regulated category — an eligibility restriction recorded for the canary, never a `COMPLIANCE PASS` (ADR-0018 §5). Gate 3 implements no ComplianceGate.
 
 ### RegistrationAttempt
 
@@ -386,7 +386,7 @@ Default is DRY_RUN. Official marketplace sandbox/test accounts are adapter/envir
 
 Protected/destructive actions are audit logged.
 
-**LIVE is refused outright at this main.** The execution-mode owner still enforces the M0 policy (`M0_DRY_RUN_ONLY`): a request for LIVE is denied with `M0_LIVE_FORBIDDEN` and audited. That is the safe state and it is deliberate. Before any bounded real canary, the authorization contract that replaces it — who may enter LIVE, for which marketplace, account, endpoint group and time-bounded scope, on what recorded approval, and how it returns to DRY_RUN — must be decided and accepted. **No such contract exists yet**, so a canary cannot be run even if every endpoint were adopted.
+**LIVE is refused outright at this main.** The execution-mode owner still enforces the M0 policy (`M0_DRY_RUN_ONLY`): a request for LIVE is denied with `M0_LIVE_FORBIDDEN` and audited. That is the safe state and it is deliberate. Before any bounded real canary, the authorization contract that replaces it — who may enter LIVE, for which marketplace, account, endpoint group and time-bounded scope, on what recorded approval, and how it returns to DRY_RUN — must be decided and accepted. **That contract is ADR-0018 (Gate 3, G3-0), and it is not implemented**: a bounded, audited, server-owned LIVE grant is the only authority for a marketplace mutation, a durable fail-closed protected-write brake stops every new mutation, and a mutation starts only when every layer of that safety stack allows it — beside, never instead of, the ADR-0014 §26 execution-scope brake. Until an implementation slice replaces `M0_DRY_RUN_ONLY` under it, LIVE stays refused. Even then, a canary stays `BLOCKED` while CREATE and SEARCH are `NOT_ADOPTED` (ADR-0018 §6).
 
 ## 14. Acceptance
 
