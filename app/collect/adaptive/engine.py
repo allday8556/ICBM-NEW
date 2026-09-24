@@ -366,70 +366,91 @@ class _Pass:
         return self._review(f"{where}:missing")
 
     def field(self, key: str) -> FieldFact:
+        """One deterministic decision over every declared location (ADR-0017 §8.2).
+
+        The primary and every alternative are evaluated, and every hit of every location takes
+        part: cardinality is counted in hits, any two hits that disagree make the field
+        ``REVIEW_REQUIRED``, and no location is ever chosen over another. Using alternatives
+        alone is signalled.
+        """
         where = f"{self.template.template_key}/{key}"
         rule = self.template.fields.get(key)
         if rule is None:
             # A missing rule is a V2 lint finding, never an ABSENT fact.
             self.signals.append(f"NO_RULE:{key}")
             return self._review(f"{where}:no-rule")
-        primary = self.locate(rule.primary, where)
-        alternatives = [
-            self.locate(location, f"{where}/alternative-{index}")
-            for index, location in enumerate(rule.alternatives)
+        results = [
+            self.locate(rule.primary, where),
+            *(
+                self.locate(location, f"{where}/alternative-{index}")
+                for index, location in enumerate(rule.alternatives)
+            ),
         ]
-        if key in _ROW_FIELDS:
-            return self._rows(key, primary) if primary else self._unstated(key, rule, where)
-        if key == "quantity_tiers":
-            if primary:
-                self.signals.append("M3_BOUNDARY:quantity_tiers")
-                return self._all_review(primary)
+        hitting = [hits for hits in results if hits]
+        if not hitting:
             return self._unstated(key, rule, where)
-        chosen = primary or next((hits for hits in alternatives if hits), [])
-        if not chosen:
-            return self._unstated(key, rule, where)
-        if not primary:
+        every = [hit for hits in hitting for hit in hits]
+        if not results[0]:
             self.signals.append(f"ALTERNATIVE_USED:{key}")
-        if rule.cardinality == "ONE" and len({hit.text for hit in chosen}) > 1:
+        if key == "quantity_tiers":
+            # The inherited M3 boundary: positive tier values are not accepted (M3.md §2.3).
+            self.signals.append("M3_BOUNDARY:quantity_tiers")
+            return self._all_review(every)
+        if rule.cardinality == "ONE" and any(len(hits) > 1 for hits in hitting):
             self.signals.append(f"CARDINALITY:{key}")
-            return self._all_review(chosen)
-        first = chosen[0]
-        corroborating = [hits[0] for hits in alternatives if hits] if primary else []
-        if any(" ".join(o.text.split()) != " ".join(first.text.split()) for o in corroborating):
-            # Two locators that disagree: the engine never picks one.
+            return self._all_review(every)
+        if key in _ROW_FIELDS:
+            return self._rows(key, hitting, every)
+        if len({" ".join(hit.text.split()) for hit in every}) > 1:
+            # Locations, or hits of one location, that disagree: the engine never picks one.
             self.signals.append(f"CONFLICT:{key}")
-            return self._all_review([first, *corroborating])
-        value, status = self._value(key, first)
+            return self._all_review(every)
+        value, status = self._value(key, every[0])
         if status is not FieldStatus.CONFIRMED:
             self.signals.append(f"UNREADABLE:{key}")
-            return FieldFact(status, value, (first.evidence(FieldStatus.REVIEW_REQUIRED),))
+            return FieldFact(
+                status, value, tuple(hit.evidence(FieldStatus.REVIEW_REQUIRED) for hit in every)
+            )
         return FieldFact(
             FieldStatus.CONFIRMED,
             value,
-            tuple(hit.evidence(FieldStatus.CONFIRMED) for hit in (first, *corroborating)),
+            tuple(hit.evidence(FieldStatus.CONFIRMED) for hit in every),
         )
 
-    def _rows(self, key: str, hits: Sequence[_Hit]) -> FieldFact:
+    def _row_value(self, key: str, hits: Sequence[_Hit]) -> FactValue | None:
+        """One location's rows as a value, or ``None`` when they are ambiguous or unreadable."""
         labels = [hit.label for hit in hits]
-        if len(labels) != len(set(labels)):
-            # One label stated twice is ambiguous, never merged.
+        if None in labels or len(labels) != len(set(labels)):
+            # A row without a label, or one label stated twice, is ambiguous, never merged.
             self.signals.append(f"CONFLICT:{key}")
-            return self._all_review(hits)
-        value: FactValue
+            return None
         if key == "prices":
             prices: list[SourcePrice] = []
             for hit in hits:
                 amount = _won(hit.text)
                 if amount is None or hit.label is None:
                     self.signals.append(f"UNREADABLE:{key}")
-                    return self._all_review([hit])
+                    return None
                 prices.append(SourcePrice(label=hit.label, amount_krw=amount))
-            value = PricesValue(prices=tuple(prices))
-        else:
-            value = NoticeValue(
-                items=tuple(NoticeItem(label=hit.label or "", text=hit.text) for hit in hits)
-            )
+            return PricesValue(prices=tuple(prices))
+        return NoticeValue(
+            items=tuple(NoticeItem(label=hit.label or "", text=hit.text) for hit in hits)
+        )
+
+    def _rows(
+        self, key: str, hitting: Sequence[Sequence[_Hit]], every: Sequence[_Hit]
+    ) -> FieldFact:
+        values = [self._row_value(key, hits) for hits in hitting]
+        if any(value is None for value in values):
+            return self._all_review(every)
+        stated = {canonical_json(value.model_dump(mode="json")) for value in values if value}
+        if len(stated) > 1:
+            self.signals.append(f"CONFLICT:{key}")
+            return self._all_review(every)
         return FieldFact(
-            FieldStatus.CONFIRMED, value, tuple(hit.evidence(FieldStatus.CONFIRMED) for hit in hits)
+            FieldStatus.CONFIRMED,
+            values[0],
+            tuple(hit.evidence(FieldStatus.CONFIRMED) for hit in every),
         )
 
     def stock(self) -> FieldFact:

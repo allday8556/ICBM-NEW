@@ -14,9 +14,18 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from types import MappingProxyType
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+    model_validator,
+)
 
 from app.collect.adaptive.canonical import canonical_json, digest, length_prefixed, parse_json
 from app.collect.adaptive.locator import compile_locator
@@ -44,20 +53,38 @@ class HookPoint(StrEnum):
     EMBEDDED_DECODE = "embedded_decode"
 
 
-HOOK_TARGETS: Mapping[HookPoint, frozenset[str]] = {
-    HookPoint.IDENTITY_DECODE: frozenset({"identity"}),
-    HookPoint.VALUE_PARSE: frozenset(SUPPLIED_FIELDS),
-    HookPoint.OPTION_DECODE: frozenset({"options"}),
-    HookPoint.EMBEDDED_DECODE: frozenset({"embedded"}),
-}
-FORMAT_CLASSES: Mapping[HookPoint, frozenset[str]] = {
-    HookPoint.IDENTITY_DECODE: frozenset({"PATH_CODE", "ENCODED_TOKEN", "COMPOSITE_CODE"}),
-    HookPoint.VALUE_PARSE: frozenset(
-        {"MONEY_TEXT", "QUANTITY_TEXT", "CONDITIONAL_POLICY_TEXT", "LABELLED_TEXT"}
-    ),
-    HookPoint.OPTION_DECODE: frozenset({"SELECT_CONTROL", "BUTTON_GROUP", "SCRIPT_MATRIX"}),
-    HookPoint.EMBEDDED_DECODE: frozenset({"KEY_VALUE_BLOCK", "SCRIPT_ASSIGNMENT"}),
-}
+HOOK_TARGETS: Mapping[HookPoint, frozenset[str]] = MappingProxyType(
+    {
+        HookPoint.IDENTITY_DECODE: frozenset({"identity"}),
+        HookPoint.VALUE_PARSE: frozenset(SUPPLIED_FIELDS),
+        HookPoint.OPTION_DECODE: frozenset({"options"}),
+        HookPoint.EMBEDDED_DECODE: frozenset({"embedded"}),
+    }
+)
+FORMAT_CLASSES: Mapping[HookPoint, frozenset[str]] = MappingProxyType(
+    {
+        HookPoint.IDENTITY_DECODE: frozenset({"PATH_CODE", "ENCODED_TOKEN", "COMPOSITE_CODE"}),
+        HookPoint.VALUE_PARSE: frozenset(
+            {"MONEY_TEXT", "QUANTITY_TEXT", "CONDITIONAL_POLICY_TEXT", "LABELLED_TEXT"}
+        ),
+        HookPoint.OPTION_DECODE: frozenset({"SELECT_CONTROL", "BUTTON_GROUP", "SCRIPT_MATRIX"}),
+        HookPoint.EMBEDDED_DECODE: frozenset({"KEY_VALUE_BLOCK", "SCRIPT_ASSIGNMENT"}),
+    }
+)
+
+
+def _read_only(value: Mapping[Any, Any]) -> Mapping[Any, Any]:
+    return MappingProxyType(dict(value))
+
+
+def _plain(value: Mapping[Any, Any]) -> dict[Any, Any]:
+    return dict(value)
+
+
+# A revision-owned mapping is read-only after validation: ``frozen=True`` alone stops only
+# attribute assignment, not ``revision.fields[key] = ...``, which would let an in-memory revision
+# drift from its recorded digest. Every value inside is itself frozen or a tuple.
+ReadOnly = (AfterValidator(_read_only), PlainSerializer(_plain))
 
 
 class _Frozen(BaseModel):
@@ -172,7 +199,7 @@ class PageTemplateRevision(_Frozen):
     supplier_key: Key
     template_key: Key
     signature: Signature
-    fields: dict[str, FieldRule]
+    fields: Annotated[Mapping[str, FieldRule], *ReadOnly]
     stock_scope: LocatorText
     options_container: LocatorText
     image_regions: tuple[ImageRegion, ...] = Field(max_length=6)
@@ -223,7 +250,7 @@ class ExtractionProfileRevision(_Frozen):
     kind: Literal["EXTRACTION_PROFILE"]
     supplier_key: Key
     identity: IdentityRule
-    vocabularies: dict[Key, tuple[Label, ...]]
+    vocabularies: Annotated[Mapping[Key, tuple[Label, ...]], *ReadOnly]
     purchase_controls: tuple[LocatorText, ...] = Field(min_length=1, max_length=6)
     sold_out_words: tuple[Label, ...] = Field(min_length=1, max_length=12)
     image_roles: tuple[ImageRoleRule, ...] = Field(min_length=1, max_length=6)

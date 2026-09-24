@@ -191,3 +191,26 @@ def test_v1_fails_when_a_hook_does_not_bind(negatives: Negatives) -> None:
 
 def test_a_validation_run_is_deterministic(negatives: Negatives) -> None:
     assert _run(negatives).digest() == _run(negatives).digest()
+
+
+def test_a_truncated_sample_never_satisfies_the_image_expectation(negatives: Negatives) -> None:
+    big = json.dumps({"sku": "SM-5001", "blob": "가" * BLOCK_MAX_BYTES})
+    html = page("on_sale").replace(
+        '<h2 class="goods-name">', f'<script>var huge = {big};</script><h2 class="goods-name">'
+    )
+    truncated = capture_sample(html, scope_for(html), expected("on_sale"))
+    assert truncated.truncated
+    alone = validate(synmart_bundle(), [truncated], negatives=negatives).check("V2")
+    assert alone.outcome is Verdict.INCOMPLETE
+    assert "no complete sample states the expected images" in alone.details
+    # A complete sample without the expectation still fails, whatever a truncated one states.
+    lacking = sample("sold_out")
+    stripped = ValidationSample(
+        lacking.structure_json,
+        json.dumps({**lacking.expected, "images": []}),
+        lacking.provenance_json,
+        False,
+        "e" * 64,
+    )
+    mixed = validate(synmart_bundle(), [stripped, truncated], negatives=negatives).check("V2")
+    assert mixed.outcome is Verdict.FAIL

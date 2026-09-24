@@ -121,3 +121,43 @@ def test_one_binding_per_hook_point_and_target() -> None:
     }
     with pytest.raises(ValidationError):
         synmart_bundle(hooks=[{**twice, "hook_name": "a"}, {**twice, "hook_name": "b"}])
+
+
+# ---------------------------------------------------------------- deep immutability
+
+
+def test_revision_owned_mappings_are_read_only_after_resolution() -> None:
+    bundle = synmart_bundle()
+    template_model = bundle.templates[0][1]
+    before = profile_digest(template_model), profile_digest(bundle.epr)
+    attempts: list[Callable[[], object]] = [
+        lambda: template_model.fields.__setitem__("brand", template_model.fields["origin"]),  # type: ignore[attr-defined]
+        lambda: template_model.fields.__delitem__("brand"),  # type: ignore[attr-defined]
+        lambda: bundle.epr.vocabularies.__setitem__("price_labels", ("가짜",)),  # type: ignore[attr-defined]
+        lambda: bundle.epr.vocabularies.__delitem__("price_labels"),  # type: ignore[attr-defined]
+    ]
+    for attempt in attempts:
+        with pytest.raises((TypeError, AttributeError)):
+            attempt()
+    with pytest.raises(TypeError):
+        template_model.fields["brand"] = template_model.fields["origin"]  # type: ignore[index]
+    assert (profile_digest(template_model), profile_digest(bundle.epr)) == before
+
+
+def test_nested_values_are_immutable_too() -> None:
+    bundle = synmart_bundle()
+    rule = bundle.templates[0][1].fields["prices"]
+    with pytest.raises(ValidationError):
+        rule.cardinality = "ONE"
+    assert isinstance(bundle.epr.vocabularies["price_labels"], tuple)
+    assert isinstance(bundle.templates, tuple) and isinstance(bundle.epr.templates, tuple)
+    with pytest.raises(AttributeError):
+        bundle.epr_digest = "0" * 64  # type: ignore[misc]
+
+
+def test_read_only_mappings_still_serialize_to_the_same_digest() -> None:
+    document = template("plain", choice=False)
+    model = PageTemplateRevision.model_validate_json(json.dumps(document))
+    assert json.loads(profile_document(model))["fields"].keys() == document["fields"].keys()
+    again = PageTemplateRevision.model_validate_json(profile_document(model))
+    assert profile_digest(again) == profile_digest(model)

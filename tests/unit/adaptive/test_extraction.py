@@ -235,3 +235,104 @@ def test_identity_needs_every_source_to_agree() -> None:
     missing = page("on_sale").replace('<meta name="goods-code" content="SM-5001">', "")
     got = _html(missing)
     assert got.source_product_id is None and got.identity_reason == "IDENTITY_MISSING"
+
+
+# ---------------------------------------------------------------- every declared location decides
+
+MISSING = {"kind": "TEXT", "locator": "h3.absent"}
+HEADING = {"kind": "TEXT", "locator": "section.goods-view h2.goods-name"}
+LD_NAME = {"kind": "EMBEDDED", "source": "JSON_LD", "json_ld_type": "Product", "path": ["name"]}
+LD_SKU = {"kind": "EMBEDDED", "source": "JSON_LD", "json_ld_type": "Product", "path": ["sku"]}
+
+
+def _name_rule(primary: dict[str, Any], alternatives: list[dict[str, Any]]) -> Extraction:
+    document = template("plain", choice=False)
+    document["fields"]["original_name"] = {"primary": primary, "alternatives": alternatives}
+    return extract(bundle_of([document]), read_html(page("on_sale")))
+
+
+def test_primary_missing_and_two_disagreeing_alternatives_is_review() -> None:
+    got = _name_rule(MISSING, [LD_NAME, LD_SKU])
+    assert got.fields["original_name"].status is FieldStatus.REVIEW_REQUIRED
+    assert {"ALTERNATIVE_USED:original_name", "CONFLICT:original_name"} <= set(got.signals)
+
+
+def test_primary_missing_and_agreeing_alternatives_is_confirmed_and_signalled() -> None:
+    got = _name_rule(MISSING, [LD_NAME, HEADING])
+    assert fact_value(got.fields["original_name"]) == {"text": "합성마트 사과즙 30포"}
+    assert "ALTERNATIVE_USED:original_name" in got.signals
+    assert len(got.fields["original_name"].evidence) == 2
+
+
+def test_cardinality_one_counts_hits_not_distinct_texts() -> None:
+    heading = '<h2 class="goods-name">합성마트 사과즙 30포</h2>'
+    got = _html(page("on_sale").replace(heading, heading + heading))
+    assert got.fields["original_name"].status is FieldStatus.REVIEW_REQUIRED
+    assert "CARDINALITY:original_name" in got.signals
+
+
+def _price_alternative(extra_table: str) -> Extraction:
+    document = template("plain", choice=False)
+    document["fields"]["prices"]["alternatives"] = [
+        {
+            "kind": "LABELLED_ROW",
+            "container": "section.goods-view table.summary",
+            "vocabulary": "price_labels",
+        }
+    ]
+    html = page("on_sale").replace(
+        '<div class="choice"></div>', f'{extra_table}<div class="choice"></div>'
+    )
+    return extract(bundle_of([document]), read_html(html))
+
+
+def test_a_row_field_alternative_that_disagrees_is_review() -> None:
+    got = _price_alternative(
+        '<table class="summary"><tr><th>판매가</th><td>18,000원</td></tr></table>'
+    )
+    assert got.fields["prices"].status is FieldStatus.REVIEW_REQUIRED
+    assert "CONFLICT:prices" in got.signals
+
+
+def test_a_row_field_alternative_that_agrees_is_confirmed() -> None:
+    got = _price_alternative(
+        '<table class="summary"><tr><th>판매가</th><td>19,800원</td></tr>'
+        "<tr><th>정가</th><td>24,000원</td></tr></table>"
+    )
+    assert got.fields["prices"].status is FieldStatus.CONFIRMED
+
+
+def test_a_row_field_is_read_from_an_alternative_when_the_primary_is_missing() -> None:
+    document = template("plain", choice=False)
+    document["fields"]["prices"] = {
+        "primary": {
+            "kind": "LABELLED_ROW",
+            "container": "table.gone",
+            "vocabulary": "price_labels",
+        },
+        "alternatives": [
+            {"kind": "LABELLED_ROW", "container": "table.spec", "vocabulary": "price_labels"}
+        ],
+        "cardinality": "MANY",
+    }
+    got = extract(bundle_of([document]), read_html(page("on_sale")))
+    assert got.fields["prices"].status is FieldStatus.CONFIRMED
+    assert "ALTERNATIVE_USED:prices" in got.signals
+
+
+def test_a_quantity_tier_alternative_hit_is_review_never_absent() -> None:
+    document = template("plain", choice=False)
+    document["fields"]["quantity_tiers"]["alternatives"] = [
+        {
+            "kind": "LABELLED_ROW",
+            "container": "section.goods-view table.promo",
+            "vocabulary": "tier_labels",
+        }
+    ]
+    promo = '<table class="promo"><tr><th>수량별 할인</th><td>3포 55,000원</td></tr></table>'
+    html = page("on_sale").replace(
+        '<div class="choice"></div>', promo + '<div class="choice"></div>'
+    )
+    got = extract(bundle_of([document]), read_html(html))
+    assert got.fields["quantity_tiers"].status is FieldStatus.REVIEW_REQUIRED
+    assert {"ALTERNATIVE_USED:quantity_tiers", "M3_BOUNDARY:quantity_tiers"} <= set(got.signals)

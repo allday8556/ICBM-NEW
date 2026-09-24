@@ -171,10 +171,15 @@ def _coverage(bundle: Bundle, samples: Sequence[ValidationSample]) -> Check:
                 problems.append(f"{template.template_key}: no image region {rule.region!r}")
         if unruled := sorted(coverage - set(template.fields)):
             lint.append(f"LINT {template.template_key}: COVERAGE without a rule {unruled}")
-    for sample in samples:
+    # Only complete samples are proof material: a SAMPLE_TRUNCATED sample's expectations never
+    # satisfy the image requirement (V8).
+    complete = [sample for sample in samples if not sample.truncated]
+    for sample in complete:
         if not any(image[0] == "REPRESENTATIVE" for image in sample.expected.get("images", [])):
             problems.append(f"sample {sample.digest[:12]} expects no representative image")
-    return Check("V2", Verdict.FAIL if problems else Verdict.PASS, (*problems, *lint))
+    unproven = [] if complete else ["no complete sample states the expected images"]
+    outcome = Verdict.FAIL if problems else Verdict.INCOMPLETE if unproven else Verdict.PASS
+    return Check("V2", outcome, (*problems, *unproven, *lint))
 
 
 # ---------------------------------------------------------------- V3 and V3a
