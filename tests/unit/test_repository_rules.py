@@ -428,7 +428,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0018" in _read(canonical), canonical.name
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 28)]
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 30)]
     # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
     assert "refused before any transmission" in invariants["G3-02"]
     assert "grant of its stage" in invariants["G3-02"]
@@ -462,11 +462,17 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         "**the REGISTER chain**",
         "**idempotency key**",
         "the REGISTER **execution-scope brake** state (ADR-0014 §26) for the CREATE endpoint group",
-        "**no ADR-0014 §26 scope row is part of\n  an ASSET proof**",
+        "**no ADR-0014 §26\n  scope row is part of an ASSET proof**",
         "**The ASSET restore proof**",
         "**The CREATE restore proof**",
         "**A pre-freeze proof is never accepted",
         "the proof is **stale**",
+        "**the durable upload-attempt and replay state over the whole replay-conflict scope**",
+        "**whatever\n  grant, preparation revision, candidate fingerprint or local profile it was "
+        "started under**",
+        "a proof that\n  inspects only the current candidate's or profile's attempts "
+        "proves nothing",
+        "upload-attempt state of the whole replay-conflict scope for ASSET",
     ):
         assert element in drill, element
     assert "never discarded" in invariants["G3-17"]
@@ -502,7 +508,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         ("G3-25", "never proof that no unresolved upload exists"),
         ("G3-25", "only APPLIED_PROVEN yields a known provider asset identity"),
         ("G3-26", "ASSET_MUTATION_READY requires that durable owner"),
-        ("G3-26", "no started or UPLOAD_UNKNOWN attempt for the exact artifact"),
+        ("G3-26", "no started or unresolved UPLOAD_UNKNOWN attempt in the replay-conflict scope"),
         ("G3-26", "never depends on an ADR-0014 §26 scope row"),
         ("G3-27", "needs a new CREATE grant and a fresh restore proof"),
         ("G3-16", "never an ADR-0014 §26 row"),
@@ -516,6 +522,57 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         "A restart never erases this fence.",
     ):
         assert element in owner, element
+    # Review 5823765435: the replay fence is keyed by the provider mutation, never by provenance.
+    for key, element in (
+        ("G3-28", "attempt provenance and the ASSET replay-conflict key are separate"),
+        (
+            "G3-28",
+            "marketplace, canonical account, upload endpoint and contract identity, "
+            "exact outbound artifact identity",
+        ),
+        (
+            "G3-28",
+            "the grant, preparation revision, candidate fingerprint, Draft revision, listing, "
+            "category, policy state and a local profile label never enter or narrow it",
+        ),
+        ("G3-28", "an undeterminable key keeps the ASSET stage BLOCKED"),
+        (
+            "G3-29",
+            "across a new grant, preparation revision, candidate fingerprint, local profile "
+            "change, restart or batch",
+        ),
+        ("G3-29", "inspect the whole scope, never only the current candidate's attempts"),
+        ("G3-29", "only NOT_APPLIED_PROVEN clears it for a retry"),
+        ("G3-29", "never re-uploaded merely because the candidate changed"),
+        ("G3-16", "upload-attempt state over the whole replay-conflict scope"),
+    ):
+        assert element in invariants[key], (key, element)
+    fence = owner.split("- **Replay-conflict key.**", 1)[1]
+    key_fields, fence_rule = fence.split("- **Replay fence, over the whole", 1)
+    # The key names exactly the provider mutation's own fields, and no local provenance.
+    key_list = re.findall(r"^  - (.*)$", key_fields.split("\n\n", 1)[0], re.M)
+    assert [field.split(" —", 1)[0].rstrip(";") for field in key_list] == [
+        "the marketplace",
+        "the canonical account",
+        "the upload endpoint and contract identity",
+        "the exact outbound artifact identity",
+    ]
+    assert "it never decides which attempts block another**" in owner
+    assert "any local profile label never enter it and never narrow it" in key_fields
+    assert "A replay-conflict key that cannot be determined keeps the\n  ASSET stage" in key_fields
+    for element in (
+        "attempt **anywhere in a replay-conflict key's scope** blocks every new upload",
+        "**across a new grant, a new preparation revision, a new candidate fingerprint, a local "
+        "profile\n  change, a restart, a job re-run or a new batch**",
+        "Changing local provenance never erases an unresolved\n  remote-mutation ambiguity.",
+        "A `NOT_APPLIED_PROVEN` attempt may clear that ambiguity for a retry",
+        "fresh ASSET\n    restore proof",
+        "**never re-uploaded merely because the candidate, preparation or\n    grant changed**",
+    ):
+        assert element in fence_rule, element
+    assert "the exact artifact, candidate and profile" not in adr
+    grant = _section(adr, r"^3\.2 What a grant binds")
+    assert "**A grant's exact unit is authorization provenance, never a replay boundary.**" in grant
     for element in (
         "bound to a target state digest and stale once that state changes",
         "taken after the freeze",
@@ -528,6 +585,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "**The ASSET stage never depends on a `PREPARED` Intent**" in stages
     assert "**`ASSET_MUTATION_READY` is `BLOCKED` at this main**" in stages
     assert "proven from that owner and never from row absence" in stages
+    assert "**no started or unresolved `UPLOAD_UNKNOWN` attempt in the replay-conflict scope**" in (
+        stages
+    )
+    assert "whatever grant, preparation revision, candidate fingerprint or local profile" in stages
+    assert "**The ASSET readiness queries the whole replay-conflict scope**" in stages
+    assert "a readiness that does is not\n  `ASSET_MUTATION_READY`" in stages
     safety = _section(adr, r"^4\.3 The whole safety stack")
     assert "the stage's mutation readiness is `READY`" in safety
     assert "**for the CREATE stage only**" in safety
