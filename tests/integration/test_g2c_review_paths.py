@@ -47,7 +47,7 @@ from app.review.preflight_producer import (
 )
 from app.review.products_producer import PRODUCTS_PRODUCER, REVIEW_CONDITION_UNMAPPED
 from app.review.register_producer import REGISTER_PRODUCER
-from app.review.scopes import PRODUCER_SCOPE_KEYS
+from app.review.scopes import SCOPE_SHAPES
 from tests.collect_submit_support import served
 from tests.conftest import make_config
 from tests.gate1_support import (
@@ -449,7 +449,9 @@ def test_each_owner_scope_reads_its_own_items_with_its_own_coverage(
         REVIEW, params={"supplier_key": "kmretail", "product_group_id": "g"}, headers=CLIENT
     )
     assert (mixed.status_code, mixed.json()["error"]["code"]) == (422, "REVIEW_SCOPE_UNSUPPORTED")
-    assert set(PRODUCER_SCOPE_KEYS) == set(app_container.review_items.producers)
+    # Every wired producer is reachable from some owner screen's shape.
+    reachable = {name for named in SCOPE_SHAPES.values() for name in named}
+    assert reachable == set(app_container.review_items.producers)
 
 
 def test_a_stale_scope_or_generation_is_refused_and_a_derived_condition_stays_open(
@@ -499,3 +501,74 @@ def test_a_stale_scope_or_generation_is_refused_and_a_derived_condition_stays_op
         r.code
         for r in app_container.registration_preparations.evaluate(made["preparation_id"]).reasons
     }
+
+
+# An incomplete or mixed shape (review 5811564367 B1-R1). Containment would let each one reach
+# across its scope: another account, another source product, another Product's Item.
+INCOMPLETE = {
+    "supplier_key alone": {"supplier_key": "kmretail"},
+    "source_product_id alone": {"source_product_id": "1234"},
+    "marketplace_key alone": {"marketplace_key": MARKET},
+    "marketplace_account_id alone": {"marketplace_account_id": "account-1"},
+    "item_id alone": {"item_id": "item-1"},
+    "draft_id alone": {"draft_id": "draft-1"},
+    "intent_id alone": {"intent_id": "intent-1"},
+    "preparation_id alone": {"preparation_id": "prep-1"},
+    "draft without its account": {"marketplace_key": MARKET, "draft_id": "draft-1"},
+    "intent without its Draft": {
+        "marketplace_key": MARKET,
+        "marketplace_account_id": "account-1",
+        "intent_id": "intent-1",
+    },
+    "preparation without its Draft": {
+        "marketplace_key": MARKET,
+        "marketplace_account_id": "account-1",
+        "preparation_id": "prep-1",
+    },
+    "intent and preparation at once": {
+        "marketplace_key": MARKET,
+        "marketplace_account_id": "account-1",
+        "draft_id": "draft-1",
+        "intent_id": "intent-1",
+        "preparation_id": "prep-1",
+    },
+    "mixed owners": {"supplier_key": "kmretail", "product_group_id": "g-1"},
+}
+
+
+@pytest.mark.parametrize("shape", sorted(INCOMPLETE))
+def test_an_incomplete_or_mixed_scope_is_refused_never_answered(
+    api: TestClient, app_container: Container, config: AppConfig, shape: str
+) -> None:
+    prepared(api, app_container, config)
+    passes(app_container)  # items exist that a containment match would reach
+    refused = api.get(REVIEW, params=INCOMPLETE[shape], headers=CLIENT)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "REVIEW_SCOPE_UNSUPPORTED"
+
+
+def test_every_owner_screen_shape_still_answers(
+    api: TestClient, app_container: Container, config: AppConfig
+) -> None:
+    made = prepared(api, app_container, config)
+    passes(app_container)
+    account = {"marketplace_key": MARKET, "marketplace_account_id": made["account"]}
+    shapes = {
+        "product": ({"product_group_id": made["product_group_id"]}, {PRODUCTS_PRODUCER}),
+        "item": (
+            {"product_group_id": made["product_group_id"], "item_id": made["item_id"]},
+            {PRODUCTS_PRODUCER},
+        ),
+        "account": (account, {PREFLIGHT_PRODUCER}),
+        "draft": (account | {"draft_id": made["draft_id"]}, {PREFLIGHT_PRODUCER}),
+        "preparation": (
+            account | {"draft_id": made["draft_id"], "preparation_id": made["preparation_id"]},
+            {PREFLIGHT_PRODUCER},
+        ),
+        "intent": (account | {"draft_id": made["draft_id"], "intent_id": "none-yet"}, set()),
+        "source": ({"supplier_key": "kmretail", "source_product_id": "1234"}, set()),
+    }
+    for name, (params, producers) in shapes.items():
+        answered = api.get(REVIEW, params=params, headers=CLIENT)
+        assert answered.status_code == 200, (name, answered.text)
+        assert {i["producer"] for i in answered.json()["items"]} == producers, name
