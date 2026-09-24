@@ -19,7 +19,9 @@ finite freshness bound. It is never stored.
 **What the database enforces.**
 - A watermark is complete or absent, and it never moves backwards.
 - The count of completed passes never falls.
-- A failure is a time and a code together.
+- A failure is a time and a code together, and the count of recorded failures never falls. A
+  pass clears a failure only if that count has not moved since the pass began, never by comparing
+  times.
 - A row is never deleted.
 
 **Downgrade fails closed.** It refuses while the table holds a row.
@@ -62,6 +64,7 @@ def upgrade() -> None:
         sa.Column("full_passes", sa.Integer(), nullable=False),
         sa.Column("failure_at", sa.DateTime(), nullable=True),
         sa.Column("failure_code", sa.String(length=64), nullable=True),
+        sa.Column("failures_recorded", sa.Integer(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         _check("producer <> ''", "producer_present"),
         _check(
@@ -72,6 +75,10 @@ def upgrade() -> None:
         _check("pass_started_at IS NULL OR pass_started_at <= watermark_at", "pass_ordered"),
         _check("full_passes >= 0", "full_passes_counted"),
         _check("(failure_at IS NULL) = (failure_code IS NULL)", "failure_complete"),
+        _check(
+            "failures_recorded >= 0 AND (failures_recorded > 0 OR failure_at IS NULL)",
+            "failures_counted",
+        ),
         sa.PrimaryKeyConstraint("producer", name=op.f(f"pk_{COVERAGE}")),
     )
     _trigger(
@@ -87,6 +94,14 @@ def upgrade() -> None:
         "passes_forward",
         "UPDATE",
         _raise(f"{COVERAGE}: completed passes never fall", "NEW.full_passes < OLD.full_passes"),
+    )
+    _trigger(
+        "failures_forward",
+        "UPDATE",
+        _raise(
+            f"{COVERAGE}: recorded failures never fall",
+            "NEW.failures_recorded < OLD.failures_recorded",
+        ),
     )
     _trigger("no_delete", "DELETE", _raise(f"a {COVERAGE} row is never deleted", "1"))
 

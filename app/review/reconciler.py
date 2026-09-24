@@ -21,6 +21,7 @@ failed scope is recorded as a known failure, and the watermark stays where it wa
 import asyncio
 import json
 import logging
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -41,10 +42,12 @@ class FullPass:
     producer: str
     scopes: int
     failed: tuple[str, ...]
+    # Stopped by shutdown before its end: incomplete, so it renews no watermark, and not a failure.
+    stopped: bool = False
 
     @property
     def complete(self) -> bool:
-        return not self.failed
+        return not self.failed and not self.stopped
 
 
 def _code(exc: BaseException) -> str:
@@ -68,8 +71,11 @@ class ReviewReconciler:
         self._process_run_id = process_run_id
         self._interval_s = interval_s
         self._max_age_s = max_age_s
-        self._task: asyncio.Task[None] | None = None
-        self._stopping: asyncio.Event | None = None
+        # Shutdown (review 5807477351 B1): the periodic loop runs on a thread this reconciler owns
+        # and joins. A pass checks the halt between scopes, and stop() returns only once that
+        # thread has ended, so no pass can still write after the owner lease is released.
+        self._halt = threading.Event()
+        self._thread: threading.Thread | None = None
 
     @property
     def process_run_id(self) -> str:
@@ -95,12 +101,17 @@ class ReviewReconciler:
         correlation_id = new_correlation_id()
         started_at = self._clock.now()
         try:
+            # Which failures already existed when this pass began (review 5807477351 B2): only
+            # those can be recovered by it, whatever the clock says.
+            failures_before = self._coverage.failures_recorded(producer)
             scopes = self._scopes(producer)
         except Exception as exc:
             self._record_failure(producer, _code(exc), correlation_id)
             return FullPass(producer, 0, (_code(exc),))
         failed: list[str] = []
         for scope in scopes:
+            if self._halt.is_set():
+                return FullPass(producer, len(scopes), tuple(failed), stopped=True)
             try:
                 self._store.reconcile(producer, scope=scope, correlation_id=correlation_id)
             except Exception as exc:
@@ -117,6 +128,7 @@ class ReviewReconciler:
                     producer,
                     process_run_id=self._process_run_id,
                     started_at=started_at,
+                    failures_before=failures_before,
                     correlation_id=correlation_id,
                 )
             except Exception as exc:
@@ -125,7 +137,12 @@ class ReviewReconciler:
         return FullPass(producer, len(scopes), tuple(failed))
 
     def full_passes(self) -> tuple[FullPass, ...]:
-        return tuple(self.full_pass(producer) for producer in self._store.producers)
+        passes: list[FullPass] = []
+        for producer in self._store.producers:
+            if self._halt.is_set():
+                break
+            passes.append(self.full_pass(producer))
+        return tuple(passes)
 
     def coverage(self) -> tuple[CoverageView, ...]:
         return tuple(
@@ -158,28 +175,32 @@ class ReviewReconciler:
     # -------------------------------------------------------------- lifecycle
 
     async def start(self) -> None:
-        """The startup pass, awaited before the application serves, then the periodic loop."""
+        """The startup pass, awaited before the application serves, then the periodic loop on a
+        thread this reconciler owns."""
+        self._halt.clear()
         await asyncio.to_thread(self.full_passes)
-        self._stopping = asyncio.Event()
-        self._task = asyncio.create_task(self._run(), name="icbm-review-reconciler")
+        self._thread = threading.Thread(
+            target=self._periodic, name="icbm-review-reconciler", daemon=True
+        )
+        self._thread.start()
 
-    async def _run(self) -> None:
-        assert self._stopping is not None
-        while not self._stopping.is_set():
+    def _periodic(self) -> None:
+        while not self._halt.wait(self._interval_s):
             try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=self._interval_s)
-            except TimeoutError:
-                try:
-                    await asyncio.to_thread(self.full_passes)
-                except Exception:
-                    logger.exception("review.periodic_pass_error")
+                self.full_passes()
+            except Exception:
+                logger.exception("review.periodic_pass_error")
 
     async def stop(self) -> None:
-        if self._stopping is not None:
-            self._stopping.set()
-        if self._task is not None:
-            try:
-                await asyncio.wait_for(self._task, timeout=30.0)
-            except TimeoutError:
-                self._task.cancel()
-            self._task = None
+        """Halt the loop and wait until its thread has **actually** ended.
+
+        A pass in flight stops at its next scope boundary; the scope it is in finishes as the one
+        short locked unit it is. There is no timeout after which this returns while that thread
+        could still write: the caller disposes the database and releases the owner lease only
+        after this returns (ADR-0006).
+        """
+        self._halt.set()
+        thread = self._thread
+        if thread is not None:
+            await asyncio.to_thread(thread.join)
+            self._thread = None

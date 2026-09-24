@@ -7,7 +7,9 @@ only when all three of these hold:
 2. that watermark is younger than a finite freshness bound, so a stalled periodic scheduler
    eventually makes coverage stale instead of leaving an old zero standing;
 3. no known indexing failure is unrecovered. Only a full pass that *started after* the failure
-   clears it.
+   clears it. "After" is proven by a monotonic failure counter read when the pass begins, never by
+   comparing timestamps: under a frozen or coarse clock a failure recorded during a pass can carry
+   the pass's own start time (review ``5807477351`` B2).
 
 "Current" is derived on every read from the durable row, the process run and the clock. It is
 never stored.
@@ -48,18 +50,34 @@ class ReviewCoverageStore:
         self._clock = clock
         self._audit = audit
 
+    def failures_recorded(self, producer: str) -> int:
+        """How many known failures this producer has ever recorded. A pass reads it first."""
+        with self._db.read() as session:
+            row = session.get(ReviewCoverage, producer)
+            return 0 if row is None else row.failures_recorded
+
     def record_pass(
-        self, producer: str, *, process_run_id: str, started_at: datetime, correlation_id: str
+        self,
+        producer: str,
+        *,
+        process_run_id: str,
+        started_at: datetime,
+        failures_before: int,
+        correlation_id: str,
     ) -> None:
         """A full pass that started at ``started_at`` has completed: renew the watermark, and clear
-        a known failure that happened before the pass began."""
+        the known failure only if no failure was recorded since the pass began — that is, only if
+        the counter still reads ``failures_before``. A failure recorded during the pass, even at
+        the same instant, stays unrecovered for a later pass."""
         now = self._clock.now()
         with self._db.write() as session:
             row = session.get(ReviewCoverage, producer)
             if row is None:
-                row = ReviewCoverage(producer=producer, full_passes=0, updated_at=now)
+                row = ReviewCoverage(
+                    producer=producer, full_passes=0, failures_recorded=0, updated_at=now
+                )
                 session.add(row)
-            recovered = row.failure_at is not None and row.failure_at <= started_at
+            recovered = row.failure_at is not None and row.failures_recorded == failures_before
             recovered_code = row.failure_code
             row.process_run_id = process_run_id
             row.pass_started_at = started_at
@@ -90,10 +108,13 @@ class ReviewCoverageStore:
         with self._db.write() as session:
             row = session.get(ReviewCoverage, producer)
             if row is None:
-                row = ReviewCoverage(producer=producer, full_passes=0, updated_at=now)
+                row = ReviewCoverage(
+                    producer=producer, full_passes=0, failures_recorded=0, updated_at=now
+                )
                 session.add(row)
             row.failure_at = now
             row.failure_code = code[:64]
+            row.failures_recorded += 1
             row.updated_at = now
             session.flush()
             self._audit.append(

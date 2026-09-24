@@ -112,7 +112,8 @@ class ReviewCoverage(Base):
     ``watermark_at`` is when the producer's last **complete** full pass ended, and
     ``process_run_id`` is the application process run that completed it; a pass that did not reach
     its end never touches either. ``failure_at`` is the newest known indexing failure still
-    unrecovered: only a full pass that *started after* it clears it. Whether coverage is current is
+    unrecovered: only a full pass that *started after* it clears it, which ``failures_recorded``
+    proves. Whether coverage is current is
     derived from these, the process run and the freshness bound — it is never stored.
     """
 
@@ -129,6 +130,10 @@ class ReviewCoverage(Base):
         ),
         CheckConstraint("full_passes >= 0", name="full_passes_counted"),
         CheckConstraint("(failure_at IS NULL) = (failure_code IS NULL)", name="failure_complete"),
+        CheckConstraint(
+            "failures_recorded >= 0 AND (failures_recorded > 0 OR failure_at IS NULL)",
+            name="failures_counted",
+        ),
     )
 
     producer: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -138,6 +143,9 @@ class ReviewCoverage(Base):
     full_passes: Mapped[int] = mapped_column(Integer)
     failure_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     failure_code: Mapped[str | None] = mapped_column(String(64))
+    # Every known failure ever recorded, counted: a pass may clear only a failure that this count
+    # already included when the pass began (review 5807477351 B2), never by comparing times.
+    failures_recorded: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 

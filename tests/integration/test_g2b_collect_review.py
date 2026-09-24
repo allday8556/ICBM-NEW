@@ -30,9 +30,10 @@ from fastapi.testclient import TestClient
 from app.collect.facts import FieldStatus, ImageIssue, ImageReference, ImageRole
 from app.config import AppConfig
 from app.container import Container, build_container
-from app.core.ownership import acquire_data_dir
+from app.core.ownership import DataDirInUseError, acquire_data_dir
 from app.core.secrets import MemorySecretStore
 from app.db.database import DatabaseWriteReentryError
+from app.main import create_app
 from app.review.collect_producer import COLLECT_PRODUCER, conditions_of
 from app.review.coverage import (
     REVIEW_COVERAGE_NO_PASS_THIS_RUN,
@@ -43,15 +44,16 @@ from app.review.model import ReviewCondition, ReviewKind, ReviewState
 from app.review.owner import ReviewItemStore
 from integrations.suppliers.collection import CollectionProfile, DocumentView, ReadKind
 from integrations.suppliers.transport.collection import RequestBudget
-from scripts.m3collect.fake_shop import document, page
+from scripts.m3collect.fake_shop import StubSessions, document, page
 from tests.collect_submit_support import (
     CLIENT,
     ScriptedShop,
     product_url,
+    registered,
     served,
     settled_and_job_terminal,
 )
-from tests.conftest import make_config
+from tests.conftest import LOCAL, make_config
 from tests.product_support import Collections, product, raw, review, unknown_shipping
 from tests.support import FakeClock
 
@@ -356,6 +358,83 @@ def test_the_watermark_moves_only_after_a_complete_pass(
     cover = reconciler.coverage()[0]
     assert (cover.current, cover.full_passes) == (True, 1)
     assert len(open_items(config)) == 2
+
+
+def test_a_failure_during_a_pass_is_not_cleared_by_that_pass_even_at_the_same_instant(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    """Review 5807477351 B2. The clock is frozen: a failure recorded while a pass runs carries the
+    pass's own start time. That pass completes, yet it must not clear the failure nor publish
+    current coverage; only a later pass, one that began after the failure, recovers it."""
+    Collections.of(container, config).collect(
+        product(stock=review("#stock")), source_product_id="811"
+    )
+    reconciler = container.review_reconciler
+    store = container.review_items
+    original = store.reconcile
+
+    def with_a_concurrent_failure(producer: str, **kwargs: Any) -> Any:
+        # A fast-path failure lands while this pass runs, at the very same clock value.
+        reconciler._record_failure(producer, "REVIEW_INDEX_FAILED", "cid-fast-path")
+        return original(producer, **kwargs)
+
+    store.reconcile = with_a_concurrent_failure  # type: ignore[method-assign]
+    assert reconciler.full_pass(COLLECT_PRODUCER).complete
+    cover = reconciler.coverage()[0]
+    assert (cover.current, cover.reason) == (False, REVIEW_INDEX_FAILURE_UNRECOVERED)
+    store.reconcile = original  # type: ignore[method-assign]
+    # The clock is still frozen: a later pass recovers it because it began after the failure.
+    assert reconciler.full_pass(COLLECT_PRODUCER).complete
+    cover = reconciler.coverage()[0]
+    assert (cover.current, cover.reason) == (True, None)
+
+
+def test_shutdown_waits_for_an_in_flight_periodic_pass(data_dir: Path) -> None:
+    """Review 5807477351 B1. A periodic pass is held inside its locked unit when shutdown starts.
+    Shutdown must not finish — the owner lease stays held, so no other process can take the data
+    root — until that pass has actually ended; then it completes cleanly."""
+    config = make_config(data_dir, review_reconcile_interval_s=0.2, review_coverage_max_age_s=30.0)
+    app = create_app(
+        config,
+        collection_gateway=UnclearShop(),
+        collection_sessions=StubSessions(),
+        collections=(registered(),),
+    )
+    client = TestClient(app, base_url=LOCAL)
+    client.__enter__()
+    gate, entered = threading.Event(), threading.Event()
+    shutdown: threading.Thread | None = None
+    try:
+        collect_unclear(client, "4242")  # a scope for the periodic pass to visit
+        container: Container = app.state.container
+        producer = container.review_items.producer(COLLECT_PRODUCER)
+        derive = producer.derive
+
+        def held_in_the_periodic_thread(scope_: Mapping[str, str]) -> Sequence[ReviewCondition]:
+            if threading.current_thread().name == "icbm-review-reconciler":
+                entered.set()
+                gate.wait(30)
+            return derive(scope_)
+
+        producer.derive = held_in_the_periodic_thread  # type: ignore[method-assign]
+        assert entered.wait(10), "no periodic pass started"
+        shutdown = threading.Thread(target=client.__exit__, args=(None, None, None))
+        shutdown.start()
+        shutdown.join(1.0)
+        assert shutdown.is_alive(), "shutdown returned while a pass could still write"
+        with pytest.raises(DataDirInUseError):
+            acquire_data_dir(config.data_dir, app_version="intruder").release()
+        gate.set()
+        shutdown.join(30)
+        assert not shutdown.is_alive()
+    finally:
+        gate.set()
+        if shutdown is None:
+            client.__exit__(None, None, None)
+        elif shutdown.is_alive():
+            shutdown.join(30)
+    # Only now is the data root free, and nothing is left writing to it.
+    acquire_data_dir(config.data_dir, app_version="next").release()
 
 
 def test_coverage_is_bounded_by_freshness_and_by_the_process_run(
