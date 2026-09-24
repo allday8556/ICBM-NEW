@@ -132,6 +132,11 @@ def _identifier(value: object, what: str) -> str:
     return value
 
 
+def is_identifier(value: object) -> bool:
+    """Whether a value is a bounded owner identifier a ReviewItem may carry (§9)."""
+    return isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
+
+
 def canonical_scope(scope: Mapping[str, str]) -> dict[str, str]:
     """The scope, validated and in canonical key order. It is never empty."""
     if not scope:

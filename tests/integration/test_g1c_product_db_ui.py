@@ -291,7 +291,8 @@ def test_a_retired_product_is_readable_by_its_identifier_and_nothing_of_it_is_se
             _ready(page, made["b"])
             assert page.locator(_row(page, made["b"])).count() == 0
             assert "보관됨" in page.locator(f"{DETAIL} .detail-title").inner_text()
-            note = page.locator(f"{DETAIL} .note[data-reason]")
+            # The review block has notes of its own (G2-C); this is the selection's.
+            note = page.locator(f"{DETAIL} .db-items .note[data-reason]")
             assert note.get_attribute("data-reason") == "PRODUCTS_PRODUCT_RETIRED"
             boxes = page.locator(f"{DETAIL} input[type='checkbox']")
             assert boxes.count() == 1 and boxes.first.is_disabled()
@@ -401,6 +402,7 @@ def test_a_target_check_is_a_read_and_a_reload_keeps_nothing_chosen(
         catalog = Catalog(client, config)
         made = catalog.standard()
         before = _counts(config)
+        audited_before = _owner_audit(config)
         with _page(browser, client, writes) as page:
             _open(page, made["tiered"])
             for box in page.locator(f"{DETAIL} input[type='checkbox']:not([disabled])").all():
@@ -436,7 +438,12 @@ def test_a_target_check_is_a_read_and_a_reload_keeps_nothing_chosen(
             )
             assert page.locator(f"{DETAIL} input:checked").count() == 0
         after = _counts(config)
+        audited_after = _owner_audit(config)
     assert writes == []
+    # Gate 2 G2-C: the review owner indexes the Product the test itself changed, in its own
+    # background pass. That is the review owner's bookkeeping, never the screen's: the page sent no
+    # write, and no owner other than the review owner audited anything.
+    assert audited_after == audited_before
     assert {t: after[t] for t in NEVER_CREATED} == dict.fromkeys(NEVER_CREATED, 0)
     # Only the membership the test itself made moved: the screen wrote nothing.
     changed = {t for t in after if after[t] != before[t]}
@@ -451,4 +458,19 @@ def test_a_target_check_is_a_read_and_a_reload_keeps_nothing_chosen(
         "group_members",
         "group_membership_revisions",
         "group_change_events",
+        "review_items",
+        "review_item_events",
+        "review_coverage",
+        "audit_events",
     }, changed
+
+
+def _owner_audit(config: AppConfig) -> int:
+    """Audit events of every owner but the review owner."""
+    with contextlib.closing(raw(config)) as connection:
+        return int(
+            connection.execute(
+                "SELECT COUNT(*) FROM audit_events"
+                " WHERE event_type NOT LIKE 'REVIEW\\_%' ESCAPE '\\'"
+            ).fetchone()[0]
+        )

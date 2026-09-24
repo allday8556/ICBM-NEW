@@ -17,9 +17,10 @@ are unchanged, and a resolution of one of these items changes no REGISTER fact (
 An Intent's scope is ``marketplace_key``, ``marketplace_account_id``, the ``draft_id`` its
 Snapshot froze, and ``intent_id``; an execution scope's is its account (§8).
 
-Not indexed, by design: preflight and preparation reasons. They are derived verdicts of the
-preparation screen, re-derived on every read, and not errors of a registration (ADR-0014 M5-03);
-an ``APPLIED_PROVEN`` Intent awaiting its read-back is pending work, not a recorded failure.
+Preflight and preparation reasons are the REGISTER preparation producer's
+(``app.review.preflight_producer``), anchored on the durable preparation revision; this producer
+reads execution state only. An ``APPLIED_PROVEN`` Intent awaiting its read-back is pending work,
+not a recorded failure.
 """
 
 import hashlib

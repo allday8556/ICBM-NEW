@@ -202,12 +202,14 @@ def resolve(
 
 
 def test_production_wires_exactly_the_gate2_producers(app: Container) -> None:
-    # G2-B wires COLLECT / M3, G2-C M4 base readiness and REGISTER, and nothing else
+    # G2-B wires COLLECT / M3, G2-C M4 base readiness and REGISTER (execution and preparations),
+    # and nothing else
     # (ADR-0016 §6). Their counts are G2-C's (tests/integration/test_g2c_review_counts.py).
     assert app.review_items.producers == (
         "collect.facts",
         "products.readiness",
         "register.execution",
+        "register.preflight",
     )
     assert app.review_items.items() == ()
 

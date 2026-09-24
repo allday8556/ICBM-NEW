@@ -25,6 +25,7 @@ from app.review.collect_producer import COLLECT_PRODUCER
 from app.review.coverage import CoverageView
 from app.review.model import CountState, ReviewKind
 from app.review.owner import ReviewItemStore
+from app.review.preflight_producer import PREFLIGHT_PRODUCER
 from app.review.products_producer import PRODUCTS_PRODUCER
 from app.review.reconciler import ReviewReconciler
 from app.review.register_producer import REGISTER_PRODUCER
@@ -40,8 +41,10 @@ FULFILLMENT_PRODUCER: Final = "operate.fulfillment"
 # Every producer that can emit each kind. The table is reviewed with G2-C (ADR-0016 §6, §12).
 EMITTERS: Final[Mapping[ReviewKind, tuple[str, ...]]] = {
     # A ProductFactsRevision's REVIEW_REQUIRED truth (G2-B) and M4's evidence reasons; and a
-    # collection run that ended with no revision (ADR-0010 §6), which ADR-0016 §8 gives no
-    # ReviewItem scope yet.
+    # collection run that ended NO_REVISION. ADR-0010 leaves such a run to architecture review, and
+    # no ADR yet defines a run-scoped ReviewItem identity or how its terminal condition would ever
+    # clear (architect decision on PR #109, review 5810256789). No item is created for it and no
+    # scope key is invented; it stays NOT_WIRED so COLLECT_EVIDENCE is never an authoritative zero.
     ReviewKind.COLLECT_EVIDENCE: (
         COLLECT_PRODUCER,
         PRODUCTS_PRODUCER,
@@ -53,7 +56,9 @@ EMITTERS: Final[Mapping[ReviewKind, tuple[str, ...]]] = {
     ReviewKind.SOURCE_CHANGE: (PRODUCTS_PRODUCER, SOURCE_DRIFT_PRODUCER),
     # No Gate 2 producer: ComplianceGate is a later pre-LIVE gate (G2-13).
     ReviewKind.COMPLIANCE: (COMPLIANCE_PRODUCER,),
-    ReviewKind.REGISTRATION_ERROR: (REGISTER_PRODUCER,),
+    # Execution states (UNKNOWN, MISMATCH, PAUSED) and each current preparation's candidate
+    # preflight: an authoritative zero needs both current (review 5810256789 B2).
+    ReviewKind.REGISTRATION_ERROR: (REGISTER_PRODUCER, PREFLIGHT_PRODUCER),
     # No Gate 2 producer: M6 (G2-13).
     ReviewKind.FULFILLMENT: (FULFILLMENT_PRODUCER,),
 }

@@ -80,6 +80,7 @@ from app.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
 from app.review.counts import ReviewCounts
 from app.review.coverage import ReviewCoverageStore
 from app.review.owner import ReviewItemStore
+from app.review.preflight_producer import PreflightReviewProducer
 from app.review.products_producer import ProductsReviewProducer
 from app.review.reconciler import ReviewReconciler
 from app.review.register_producer import RegisterReviewProducer
@@ -399,7 +400,8 @@ def build_container(
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
     # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with its producers: COLLECT / M3
-    # (G2-B), M4 base readiness and REGISTER (G2-C). Each process run has its own identity:
+    # (G2-B), M4 base readiness, REGISTER execution and REGISTER preparations (G2-C). Each
+    # process run has its own identity:
     # coverage is current only after a complete full pass in this run (§7). The review owner
     # reads these owners; none of them reads it.
     review_items = ReviewItemStore(
@@ -410,6 +412,13 @@ def build_container(
             CollectReviewProducer(revisions),
             ProductsReviewProducer(product_readiness),
             RegisterReviewProducer(registrations),
+            PreflightReviewProducer(
+                registrations=registrations,
+                preparations=registration_preparations,
+                preflight=registration_preflight,
+                readiness=product_readiness,
+                audit=audit,
+            ),
         ],
     )
     review_reconciler = ReviewReconciler(

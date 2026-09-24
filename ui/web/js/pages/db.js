@@ -28,6 +28,8 @@ import { marketplaceLabel } from '../core/platform.js';
 import { toast } from '../core/toast.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
+import { reviewItemsBlock } from '../components/review-items.js';
+import { KIND_LABEL } from '../components/review-counts.js';
 
 const SCREEN = '/api/v1/screens/db';
 const PRODUCTS = '/api/v1/products';
@@ -612,9 +614,26 @@ function workspace(initialProduct, navigateTo) {
     renderDraftButton();
   }
 
+  // Gate 2 G2-C (ADR-0016 §7): this Product's ReviewItems from M4 base readiness, with that
+  // producer's coverage. The block reads the server's rows; the owner re-derives any resolution.
+  const productReview = reviewItemsBlock({
+    kindLabel: KIND_LABEL,
+    emptyCopy: '이 상품에 기록된 검토 항목이 없습니다.',
+    errorCopy: (code, message) => copy(code ?? message),
+    scopeLabel: (item) => (item.scope.item_id ? `품목 ${short(item.scope.item_id)}` : null),
+  });
+
+  async function loadProductReview(id, slot) {
+    const block = await productReview({ product_group_id: id });
+    // Product context isolation: an answer for another Product, or a detail since redrawn, is dropped.
+    if (!block || state.productId !== id || !slot.isConnected) return;
+    slot.replaceChildren(block);
+  }
+
   function renderDetail() {
     const detail = state.detail;
     const product = detail.product;
+    const reviewSlot = h('div', { class: 'detail-group', 'data-role': 'product-review', 'data-product': product.product_group_id });
     const selection = new Map(detail.item_selection.map((entry) => [entry.item_id, entry]));
     detailPanel.dataset.product = product.product_group_id;
     detailPanel.dataset.state = 'ready';
@@ -649,12 +668,14 @@ function workspace(initialProduct, navigateTo) {
           h('tbody', {}, ...product.items.map((item) => itemRow(item, selection.get(item.item_id)))),
         ),
       ),
+      reviewSlot,
       selectionBar,
       h('div', { class: 'detail-actions' }, checkButton),
       targetResult,
       draftPanel,
     );
     renderSelection();
+    loadProductReview(product.product_group_id, reviewSlot);
   }
 
   async function checkTarget() {

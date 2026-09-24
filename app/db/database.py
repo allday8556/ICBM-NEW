@@ -70,6 +70,8 @@ class Database:
         # The thread holding the write unit, if any. Only that thread can ever read its own ident
         # here, so the check needs no lock of its own.
         self._writer: int | None = None
+        # Set when a nested write is refused inside the open unit: that unit then rolls back.
+        self._nested_refused = False
 
     @contextmanager
     def read(self) -> Iterator[Session]:
@@ -79,6 +81,10 @@ class Database:
     @contextmanager
     def write(self) -> Iterator[Session]:
         if self._writer == threading.get_ident():
+            # The enclosing unit is poisoned as well: it rolls back even if a caller swallows
+            # this refusal as an ordinary AppError and carries on (Gate 2 G2-C, review
+            # 5810256789 — the CONNECT capability read inside a preflight derivation does).
+            self._nested_refused = True
             raise DatabaseWriteReentryError(
                 DATABASE_WRITE_REENTRANT,
                 "a write unit is already open on this thread; a nested write is refused, never "
@@ -86,11 +92,18 @@ class Database:
             )
         with self._write_lock:
             self._writer = threading.get_ident()
+            self._nested_refused = False
             try:
                 with self._sessions.begin() as session:
                     yield session
+                    if self._nested_refused:
+                        raise DatabaseWriteReentryError(
+                            DATABASE_WRITE_REENTRANT,
+                            "a nested write was refused inside this unit; the unit rolls back",
+                        )
             finally:
                 self._writer = None
+                self._nested_refused = False
 
     def ping(self) -> None:
         with self.engine.connect() as connection:

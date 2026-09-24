@@ -411,6 +411,38 @@ class IntentReviewRecord:
     verification_evidence_digest: str | None
 
 
+def visible_snapshots(
+    snapshots: Iterable[SnapshotRecord], intents: Mapping[str, IntentRecord]
+) -> list[tuple[SnapshotRecord, IntentRecord | None]]:
+    """The frozen provider-listing units of one Draft, newest first as given (ADR-0014 §2).
+
+    A Snapshot an Intent names is always its own unit. Only a **superseded** freeze — a later
+    Snapshot for the same listing identity that no Intent names — steps aside, because it is a
+    re-freeze of the same unit rather than another listing. ``intents`` maps a Snapshot id to the
+    Intent that names it."""
+    visible: list[tuple[SnapshotRecord, IntentRecord | None]] = []
+    seen: set[str] = set()
+    for snapshot in snapshots:
+        intent = intents.get(snapshot.registration_snapshot_id)
+        if intent is None and snapshot.listing_identity in seen:
+            continue
+        seen.add(snapshot.listing_identity)
+        visible.append((snapshot, intent))
+    return visible
+
+
+def covered_units(
+    draft_revision: int, visible: Iterable[tuple[SnapshotRecord, IntentRecord | None]]
+) -> set[tuple[str, ...]]:
+    """The Item sets the Draft's **current** revision has frozen: a preparation of one of them no
+    longer needs showing as work still to author."""
+    return {
+        tuple(sorted(item.item_id for item in snapshot.items))
+        for snapshot, _intent in visible
+        if snapshot.draft_revision == draft_revision
+    }
+
+
 # ---------------------------------------------------------------- the store
 
 
@@ -561,6 +593,10 @@ class RegistrationStore:
     def review_truth(self) -> dict[str, object]:
         with self.reading() as unit:
             return unit.review_truth()
+
+    def current_preparations(self) -> tuple[PreparationRecord, ...]:
+        with self.reading() as unit:
+            return unit.current_preparations()
 
 
 class RegistrationUnit:
@@ -930,6 +966,35 @@ class RegistrationUnit:
             "intents": [[*row, int(attempts.get(row[0], 0))] for row in intents],
             "scopes": [list(row) for row in scopes],
         }
+
+    def current_preparations(self) -> tuple[PreparationRecord, ...]:
+        """Every durable preparation that is still work to author, in one deterministic order:
+        each preparation of every Draft whose Item set that Draft's **current** revision has not
+        frozen. It is the same rule by which Registration Management shows a preparation as a
+        drafted unit (``visible_snapshots``, ``covered_units``); nothing is limited, since a full
+        review pass must see them all."""
+        found: list[PreparationRecord] = []
+        draft_ids = self.session.scalars(
+            select(RegistrationDraft.draft_id).order_by(RegistrationDraft.draft_id)
+        ).all()
+        for draft_id in draft_ids:
+            draft = self.draft(draft_id)
+            if draft is None:  # pragma: no cover - the id was just read
+                continue
+            snapshots = self.snapshots_of_draft(draft_id)
+            intents = {
+                snapshot.registration_snapshot_id: intent
+                for snapshot in snapshots
+                if (intent := self.intent_of_snapshot(snapshot.registration_snapshot_id))
+                is not None
+            }
+            covered = covered_units(draft.draft_revision, visible_snapshots(snapshots, intents))
+            found.extend(
+                record
+                for record in self.preparations_of_draft(draft_id)
+                if tuple(sorted(record.current.item_ids)) not in covered
+            )
+        return tuple(found)
 
     # ------------------------------------------------------------------ snapshots (§6, §7)
 

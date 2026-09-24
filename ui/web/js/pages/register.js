@@ -17,6 +17,8 @@ import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState } from '../components/states.js';
+import { reviewItemsBlock } from '../components/review-items.js';
+import { KIND_LABEL } from '../components/review-counts.js';
 
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
@@ -585,6 +587,34 @@ function unitPanel(unit, onDone) {
   );
 }
 
+// Gate 2 G2-C (ADR-0016 §7): one account's REGISTER ReviewItems — execution states and each
+// current preparation's candidate preflight — with both producers' coverage. The server derives
+// every item; a resolution is re-derived by its owner and never changes a REGISTER fact.
+function reviewScopeLabel(item) {
+  const scope = item.scope;
+  if (scope.intent_id) return `요청 ${scope.intent_id.slice(0, 8)} · 초안 ${scope.draft_id.slice(0, 8)}`;
+  if (scope.preparation_id) return `준비 ${scope.preparation_id.slice(0, 8)} · 초안 ${scope.draft_id.slice(0, 8)}`;
+  return '계정 범위';
+}
+
+function reviewPanel(marketplaceKey, accountId) {
+  const block = reviewItemsBlock({
+    kindLabel: KIND_LABEL,
+    emptyCopy: '이 판매 계정에 기록된 등록 검토 항목이 없습니다.',
+    errorCopy: (code, message) => REASON_COPY[code] ?? message ?? code,
+    scopeLabel: reviewScopeLabel,
+  });
+  const panel = h(
+    'section',
+    { class: 'panel register-review', 'data-role': 'register-review', 'data-account': accountId },
+    h('h2', { class: 'panel-title' }, `검토 항목 · ${accountId}`),
+  );
+  block({ marketplace_key: marketplaceKey, marketplace_account_id: accountId }).then((found) => {
+    if (found) panel.append(found);
+  });
+  return panel;
+}
+
 function canaryPanel(canary) {
   const blocked = canary.verdict === 'BLOCKED';
   return h(
@@ -655,6 +685,10 @@ export default {
       if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
       return panel;
     });
+    const accounts = new Map(
+      overview.units.map((unit) => [`${unit.marketplace_key}|${unit.marketplace_account_id}`, unit]),
+    );
+    const reviews = [...accounts.values()].map((unit) => reviewPanel(unit.marketplace_key, unit.marketplace_account_id));
     const focused = panels.find((panel) => panel.getAttribute('aria-current') === 'true');
     if (focused) window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
     return fragment(
@@ -667,6 +701,7 @@ export default {
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
       canaryPanel(canary),
+      ...reviews,
       ...panels,
     );
   },
