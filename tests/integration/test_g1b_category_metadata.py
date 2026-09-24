@@ -419,6 +419,7 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     assert before - _tables(tmp_path / "icbm.db") == set(TABLES) | {
         "review_items",
         "review_item_events",
+        "review_coverage",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

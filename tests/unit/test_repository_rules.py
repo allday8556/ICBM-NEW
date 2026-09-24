@@ -1314,6 +1314,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # readiness, verdict or provider content.
         "review_items",
         "review_item_events",
+        # Gate 2 G2-B (ADR-0016 §4, §7): each review producer's coverage watermark and its
+        # known indexing failure. Whether coverage is current is derived, never stored.
+        "review_coverage",
     }
     offenders = [
         path

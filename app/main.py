@@ -17,6 +17,7 @@ from app.api.routes import (
     diagnostics,
     products,
     register,
+    review,
     screens,
     settings,
     system,
@@ -109,11 +110,15 @@ def create_app(
             # Likewise a persisted marketplace auth READY is never trusted (M2 PR-B, §17 #17).
             services.marketplace_capability.normalize_on_startup()
             await services.worker.start()
+            # Gate 2 (ADR-0016 §4): every review producer's startup full reconciliation, before
+            # the application serves, then its bounded periodic pass.
+            await services.review_reconciler.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})
         try:
             yield
         finally:
+            await services.review_reconciler.stop()
             await services.worker.stop()
             services.db.dispose()
             logger.info("app.stopped")
@@ -139,6 +144,7 @@ def create_app(
     app.include_router(products.router)
     app.include_router(register.router)
     app.include_router(settings.router)
+    app.include_router(review.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.
     app.add_middleware(ClientHeaderGuard)

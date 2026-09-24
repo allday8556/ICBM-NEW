@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, event, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.errors import AppError, ErrorClass
+
 
 def sqlite_database_dir(database_url: str) -> Path:
     """Directory holding a file-backed SQLite database: the data directory whose ownership a
@@ -38,12 +40,26 @@ def create_sqlite_engine(database_url: str) -> Engine:
     return engine
 
 
+DATABASE_WRITE_REENTRANT = "DATABASE_WRITE_REENTRANT"
+
+
+class DatabaseWriteReentryError(AppError):
+    """A write unit was opened on a thread that already holds one.
+
+    The write coordinator is not re-entrant. A nested write would wait for itself forever, so it
+    is refused at once and the enclosing unit rolls back: fail closed, never a hang (Gate 2 G2-B
+    carry-forward from the G2-A cross-audit)."""
+
+    error_class = ErrorClass.FATAL
+
+
 class Database:
     """The single unit-of-work boundary for application DB access.
 
     Reads use independent sessions (WAL allows concurrent readers). Writes are serialised by a
     process-scoped lock so request threads and the job-worker thread never contend inside
-    SQLite. Keep write blocks short and never perform external I/O while holding one.
+    SQLite. Keep write blocks short and never perform external I/O while holding one. A write
+    opened inside another on the same thread is refused with :class:`DatabaseWriteReentryError`.
     """
 
     def __init__(self, database_url: str) -> None:
@@ -51,6 +67,9 @@ class Database:
         self.engine = create_sqlite_engine(database_url)
         self._sessions = sessionmaker(self.engine, expire_on_commit=False)
         self._write_lock = threading.Lock()
+        # The thread holding the write unit, if any. Only that thread can ever read its own ident
+        # here, so the check needs no lock of its own.
+        self._writer: int | None = None
 
     @contextmanager
     def read(self) -> Iterator[Session]:
@@ -59,8 +78,19 @@ class Database:
 
     @contextmanager
     def write(self) -> Iterator[Session]:
-        with self._write_lock, self._sessions.begin() as session:
-            yield session
+        if self._writer == threading.get_ident():
+            raise DatabaseWriteReentryError(
+                DATABASE_WRITE_REENTRANT,
+                "a write unit is already open on this thread; a nested write is refused, never "
+                "waited for",
+            )
+        with self._write_lock:
+            self._writer = threading.get_ident()
+            try:
+                with self._sessions.begin() as session:
+                    yield session
+            finally:
+                self._writer = None
 
     def ping(self) -> None:
         with self.engine.connect() as connection:

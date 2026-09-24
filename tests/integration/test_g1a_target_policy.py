@@ -448,6 +448,7 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "registration_category_metadata_current",
         "review_items",
         "review_item_events",
+        "review_coverage",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
