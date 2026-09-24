@@ -1,13 +1,29 @@
 # Adaptive Collector — design proposal (Issue #110, Phase A)
 
-Status: **PROPOSAL — awaiting architect audit**
+Status: **PROPOSAL — revision 2, awaiting architect re-audit**
 Author: Claude Code
 Issue: #110; architect kickoff `5811580104` (DESIGN only)
+Audit: PR #111 review `5302725919` on `eaa85aa` — direction accepted, four required fixes, rulings Q1–Q6
 Base: main `02dd2a35819bdee0d4209b2c0fa1ba9f10156f2a`
 Place at: `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 
-This document is not binding. It changes nothing in ADR-0010, ADR-0013, ADR-0016, `docs/ARCHITECTURE.md`
-or the code. A decision here becomes binding only when an accepted ADR records it (`CLAUDE.md` §1.1).
+This document is not binding. It changes nothing in ADR-0010, ADR-0013, ADR-0016, `docs/ARCHITECTURE.md`,
+`docs/GLOSSARY.md` or the code. A decision here becomes binding only when an accepted ADR records it
+(`CLAUDE.md` §1.1). Where this revision records an architect ruling, it records it as the input the
+ADR must carry, not as a decision in force.
+
+### Revision 2 — what changed after review `5302725919`
+
+| review item | where | change |
+| --- | --- | --- |
+| Q1 names | throughout, §13 | `ExtractionProfileRevision` (EPR) and `PageTemplateRevision` (PTR); draft GLOSSARY entries (§13.1) land with the ADR |
+| D2 fix | §4.2.1 | **no backfill or update of any existing `ProductFactsRevision`**; legacy comparability is a read-time derivation from `extractor_revision` |
+| D3 fix | §5.5 | Phase C denominator = every eligible canonical collection with the shadow enabled; a missing shadow outcome is `INCOMPLETE`, a failed one `FAIL`, never omitted |
+| D6 fix | §8.3, §8.4 | G5 triggers on a machine-derived promotion key `(hook_point, target)`, grouped by a closed engine-owned `format_class`, not on "same purpose" |
+| D7 fix / Q2 | §9.2, §5.4 | `ValidationSample` retention separated from shadow retention |
+| Q3, Q4 | §7.1, §4.2 | recorded as accepted for the cutover ADR / the identity ADR |
+| Q5 | §12 | Phase B only as an isolated, disposable, fixture-only prototype outside production packages; not started |
+| Q6 | §11, §12 | Phase D stays deferred |
 
 ---
 
@@ -25,6 +41,8 @@ It authorizes **nothing**. In particular, while this proposal is under review:
 | a new `EvidenceKind` or `FieldStatus` value, or an extraction-identity implementation | kickoff; ADR required |
 | a real second-supplier read or campaign | `CLAUDE.md` §12 first-vertical restriction |
 | a migration | no ADR exists yet |
+| a Phase B prototype | Q5 allows only an isolated, disposable, fixture-only one, and only after its own go-ahead (§12) |
+| any backfill or update of an existing `ProductFactsRevision` | review `5302725919` D2; §4.2.1 |
 
 The fixture/synthetic research that informed this proposal read only repository code and documents
 at the base commit. No supplier, marketplace, AI or OCR call was made.
@@ -66,7 +84,8 @@ Every fact below is at the base commit.
   `REVIEW_REQUIRED` with no value.
 - **Name collision.** `SupplierProfile` already exists and is the CONNECT profile
   (`integrations/suppliers/base.py:49`, ADR-0007); `CollectionProfile` is the ADR-0010 access
-  envelope. See Q1 (§13).
+  envelope. Q1 therefore names the new concepts `ExtractionProfileRevision` and
+  `PageTemplateRevision` (§13).
 
 ---
 
@@ -101,8 +120,8 @@ operator URL → durable collect.product job → policed gateway (1 product read
 | --- | --- | --- | --- |
 | **Access envelope** | CONNECT `SupplierDefinition` (ADR-0007) and `CollectionProfile`: product path form, policy paths, explicit hosts, safe query keys, limits, `RequestPolicy` | repository, reviewed | **never** (ADR-0010 §9: the allowlist is never widened at run time) |
 | **Generic engine** | locator interpreter, generic extractors, normalizers, template matcher | repository code with its own extraction-identity manifest | no |
-| **`SupplierProfileRevision`** | supplier-wide interpretation (D1) | canonical DB, immutable rows | a new revision only |
-| **`PageTemplateProfile` revision** | one page shape: signature and per-field locators (D1) | canonical DB, immutable rows | a new revision only |
+| **`ExtractionProfileRevision`** | supplier-wide interpretation (D1) | canonical DB, immutable rows | a new revision only |
+| **`PageTemplateRevision`** | one page shape: signature and per-field locators (D1) | canonical DB, immutable rows | a new revision only |
 | **Site adapter hooks** | allowlisted pure functions (D6) | repository code in the supplier package, inside its manifest | no |
 
 **What "profile-only onboarding" means.** A new supplier needs its access envelope and CONNECT
@@ -117,11 +136,11 @@ decision for an ADR, and this proposal does not ask for it (default: no new Evid
 
 ---
 
-## 3. D1 — `SupplierProfileRevision` vs `PageTemplateProfile`: ownership and immutable revisions
+## 3. D1 — `ExtractionProfileRevision` vs `PageTemplateRevision`: ownership and immutable revisions
 
 ### 3.1 Ownership
 
-| owns | `SupplierProfileRevision` (SPR) | `PageTemplateProfile` revision (PTR) |
+| owns | `ExtractionProfileRevision` (EPR) | `PageTemplateRevision` (PTR) |
 | --- | --- | --- |
 | scope | one supplier, all its product pages | one page shape of that supplier |
 | identity rule | **yes** — which source statements declare the product identity and how they must agree (the ADR-0010 §5 "exact rule"); never a name or content hash | no |
@@ -132,11 +151,11 @@ decision for an ADR, and this proposal does not ask for it (default: no new Evid
 | field rules | no | per field: a primary locator rule, optional declared alternatives, expected cardinality |
 | hook bindings | hook point → hook name + the supplier hook manifest fingerprint (D6) | no |
 
-**Activation and validation happen on the SPR only.** Because the SPR pins its templates by digest,
-the SPR digest covers the whole bundle. Rejected alternative: independently activated templates.
+**Activation and validation happen on the EPR only.** Because the EPR pins its templates by digest,
+the EPR digest covers the whole bundle. Rejected alternative: independently activated templates.
 Mixing template revisions freely would run combinations no validation ever saw.
 
-A PTR is content-addressed and may be pinned by several SPRs of the same supplier. A PTR is never
+A PTR is content-addressed and may be pinned by several EPRs of the same supplier. A PTR is never
 shared across suppliers: the thing that repeats across suppliers is a generic extractor or a hook
 promotion (D6), not a copied template.
 
@@ -183,11 +202,11 @@ refused at DRAFT save. A profile never contains:
 | --- | --- | --- |
 | `extractor_revision` | **the engine's** semantic revision, e.g. `adaptive-engine-1`; keeps the ADR-0010 meaning "semantic identity of code" | unchanged (`kmretail-1`) |
 | `extractor_fingerprint` | the engine manifest fingerprint (ADR-0010 §12 mechanism, a generic package) | unchanged |
-| `supplier_profile_revision_id` | the SPR used | `NULL` |
-| `supplier_profile_digest` | its digest; covers every pinned PTR and every hook-manifest fingerprint bound | `NULL` |
-| `profile_schema_version` | the profile schema the SPR was parsed under | `NULL` |
+| `extraction_profile_revision_id` | the EPR used | `NULL` |
+| `extraction_profile_digest` | its digest; covers every pinned PTR and every hook-manifest fingerprint bound | `NULL` |
+| `profile_schema_version` | the profile schema the EPR was parsed under | `NULL` |
 | `page_template_revision_id` | the PTR this document matched (provenance; see §4.3) | `NULL` |
-| `extraction_semantics_id` | **the one identity drift comparability keys on** (§4.2) | derived, non-null |
+| `extraction_semantics_id` | **the one identity drift comparability keys on** (§4.2); persisted only on new rows written after the ADR and its schema are authorized | **not stored on any existing row**; derived on read from `extractor_revision` (§4.2) |
 
 Exact column names and schema are the ADR's decision; the table fixes the semantics.
 
@@ -197,21 +216,52 @@ Exact column names and schema are the ADR's decision; the table fixes the semant
 extraction_semantics_id = SHA-256( "icbm-extraction-semantics/v1" 0x00
                                    extractor_revision 0x00
                                    profile_schema_version-or-empty 0x00
-                                   supplier_profile_digest-or-empty )
+                                   extraction_profile_digest-or-empty )
 ```
 
-- **Profile changes never masquerade as source drift.** Any profile edit is a new SPR digest, so a
+- **Profile changes never masquerade as source drift.** Any profile edit is a new EPR digest, so a
   new `extraction_semantics_id`, so the ADR-0013 pointer move is `EXTRACTOR_CHANGED` and no drift is
   inferred. No new move reason is needed.
 - **Engine semantic change.** The engine's golden guard (§4.4) forces `extractor_revision` to
   advance; every profile's semantics id changes with it, and every VALIDATED status lapses (D7).
-- **Implementation fingerprint is excluded**, matching the ADR-0010 split: a refactor that keeps
-  every golden output keeps comparability. (Q4 asks the architect to confirm.)
-- **Code extractors are unchanged in behaviour.** For KM the id is a pure function of
-  `extractor_revision`, so it is equal exactly when `extractor_revision` is equal. Existing rows can
-  be backfilled deterministically; no historical value is rewritten.
+- **Implementation fingerprint is excluded** (Q4, accepted in review `5302725919`), matching the
+  ADR-0010 split: a refactor that keeps every golden output keeps comparability. Because the
+  fingerprint is excluded, a *semantic* code change must be **mechanically forced** to advance
+  `extractor_revision`; §4.4 guards 2 and 4 are that force, for the engine and for hooks.
 
-**Required amendment:** ADR-0013 §3 compares on `extraction_semantics_id` instead of
+### 4.2.1 Legacy rows: a read-time compatibility rule, never a backfill (review `5302725919` D2)
+
+**No existing `ProductFactsRevision` row is backfilled, updated or rewritten** — not to add a
+column value, not to "normalize" provenance. Revisions are append-only source truth (ADR-0010 §6),
+and a migration that touched them would be exactly the historical mutation that rule forbids.
+
+Comparability is instead decided by one pure function over what a row already carries:
+
+```text
+comparability_key(row) =
+    row.extraction_semantics_id                          when the row carries one (new Adaptive rows)
+    legacy_semantics_id(row.extractor_revision)          otherwise (every row that exists today)
+
+legacy_semantics_id(r) = SHA-256( "icbm-extraction-semantics/v1" 0x00 r 0x00 "" 0x00 "" )
+```
+
+- **Deterministic and read-only.** It is computed on read by the comparison owner (the ADR-0013
+  pointer-move logic). Nothing is stored for a legacy row.
+- **Identical answers for every existing row.** For a row without profile provenance the key is a
+  pure, injective function of `extractor_revision`, so two legacy rows compare exactly when
+  ADR-0013 §3 compares them today.
+- **No collision between the two populations.** A new Adaptive row always carries a non-empty
+  profile digest and schema version, so its key can never equal a legacy key.
+- **New columns are nullable.** Schema that adds the §4.1 provenance adds nullable columns and
+  never a default that the database would materialize into old rows. A code-extractor row written
+  after the ADR may leave them `NULL`; the rule above then gives the same answer it gives today.
+- **Integrity check, not repair.** Where a new row stores `extraction_semantics_id`, a read-time
+  check recomputes it from the row's own provenance; a mismatch makes that row non-comparable
+  (fail closed) and is reported. The row is never corrected in place.
+- **Only after authorization.** New Adaptive revisions persist the §4.1 provenance only after the
+  ADR and its schema are authorized. Nothing in Phase B stores any of it.
+
+**Required amendment:** ADR-0013 §3 compares on `comparability_key` instead of on
 `extractor_revision`. For every row that exists today the two rules give identical answers.
 
 ### 4.3 The matched template is provenance, not semantics
@@ -228,10 +278,13 @@ immutable profile rows the revision names.** The guards:
 
 1. **Engine pin** — the existing manifest mechanism over the engine package.
 2. **Engine goldens** — synthetic fixtures with expected outputs per engine `extractor_revision`,
-   so an engine semantic change without a revision advance fails.
+   so an engine semantic change without a revision advance fails the build. This is what makes the
+   Q4 exclusion safe: the fingerprint is not in the identity, but a semantic change cannot land
+   without advancing the revision that is.
 3. **Digest recomputation** on every load (§3.3).
-4. **Hook manifest check** — the fingerprint an SPR binds must equal the running supplier manifest,
-   or the bundle is refused.
+4. **Hook manifest check** — the fingerprint an EPR binds must equal the running supplier manifest,
+   or the bundle is refused. Any hook edit therefore forces a new EPR, a new digest and a new
+   `extraction_semantics_id`; a hook can never change meaning under an unchanged identity.
 5. **Clean-tree campaigns** — unchanged (ADR-0010 §12 guard 3).
 
 ---
@@ -259,7 +312,7 @@ shadow record can reference the `revision_id` one way.
 | S4 | **no canonical write** | the shadow package may not import the revision store, source-asset recorder, run store, review owner or pointer owner (repository rule) |
 | S5 | **no body persistence** | the shadow store keeps comparison records only; `body` stays in memory (ADR-0010 §3) |
 | S6 | **no AI** | the engine, profile runtime and shadow packages sit under the source-truth import rule |
-| S7 | **off by default** | enabled per supplier by explicit configuration; disabled means zero engine calls |
+| S7 | **off by default** | enabled per supplier by explicit configuration whose changes are an append-only, timestamped history (§5.5 needs it); disabled means zero engine calls |
 
 ### 5.3 Images in the shadow
 
@@ -282,8 +335,46 @@ fields (local only, like the facts tables themselves), the identity of the bundl
 and the observations of D4. Committed evidence drawn from it follows ADR-0010 §6: counts and
 statuses, keyed fingerprints, no plain digests of business values.
 
-Phase B has **no** shadow store: its harness writes a report over fixtures only (§12).
-Retention of shadow records is Q2.
+**Shadow retention is its own rule, not the sample rule** (Q2 as modified in review
+`5302725919`). Shadow records are non-canonical engineering evidence, so they are bounded by an
+explicit **age bound and count bound** (for example: at most N records per supplier and none older
+than D days, whichever is reached first). The ADR fixes both values **before Phase C**; Phase C
+cannot start with either left open, and there is no code default (the ADR-0010 §4 no-default rule).
+Pruning a shadow record never touches canonical rows, and it never prunes a record that an open
+Phase C evidence window still counts (§5.5). `ValidationSample` retention is separate (§9.2).
+
+Phase B has **no** shadow store: its harness writes a report over synthetic fixtures only (§12).
+
+### 5.5 Phase C evidence: the denominator is every eligible collection (review `5302725919` D3)
+
+A shadow result that is missing must never shrink the evidence into a success.
+
+- **Eligible collection.** A canonical collection attempt that read a product document (so either a
+  revision was appended or the identity was unresolved, §5.1) for a supplier whose shadow switch
+  was enabled at the time of the read, inside the declared Phase C evidence window.
+- **Denominator.** Every eligible collection, derived from the canonical run records and the
+  switch history (S7) — **not** from the shadow store. The shadow store cannot define its own
+  denominator, because a lost write would then disappear from both sides.
+- **Outcome per eligible collection.**
+
+  | shadow outcome | counts as |
+  | --- | --- |
+  | a verdict of `MATCH` | success |
+  | `MISMATCH` / `IDENTITY_MISMATCH` resolved `ADAPTIVE_CORRECT` (§6.2) | success for the Adaptive side; the canonical defect is filed separately |
+  | resolved `SOURCE_AMBIGUOUS` | success only if the Adaptive side failed closed (`REVIEW_REQUIRED`) on every ambiguous field; an Adaptive `CONFIRMED` there is a failure |
+  | resolved `CURRENT_CORRECT` or `BOTH_WRONG` | failure |
+  | `MISMATCH` / `IDENTITY_MISMATCH` not yet resolved | `INCOMPLETE` |
+  | `TEMPLATE_UNMATCHED` / `TEMPLATE_AMBIGUOUS` | failure (the validated bundle did not cover a real page) unless resolved as `SOURCE_AMBIGUOUS` |
+  | `SHADOW_FAILED` | **failure** |
+  | **no shadow record at all** | **`INCOMPLETE`** |
+
+- **Evidence verdict.** Phase C evidence is `PASS` only when **every** eligible collection counts as
+  a success. Any `INCOMPLETE` makes the evidence `INCOMPLETE`, and any failure makes it `FAIL`.
+  An eligible collection is never omitted, excluded as "noise" or retried away; the evidence record
+  lists the denominator and each collection's outcome by `collection_run_id`.
+- **A window belongs to one bundle.** A profile fix is a new EPR and a new
+  `extraction_semantics_id` (§4.2), so it opens a new evidence window with a new denominator;
+  successes under the previous bundle do not carry over.
 
 ---
 
@@ -337,7 +428,7 @@ Three questions, three owners. This proposal adds the first two and changes noth
 
 | question | owner | when | inputs | output |
 | --- | --- | --- | --- | --- |
-| **Is this profile trustworthy enough to become VALIDATED?** | **profile validation** (proposed `app/collect/profiles/`) | on demand, offline, zero network | one SPR bundle, the engine identity, an approved sample set, the negative-control suite | an immutable `ValidationRun` bound to exact digests (D7) |
+| **Is this profile trustworthy enough to become VALIDATED?** | **profile validation** (proposed `app/collect/profiles/`) | on demand, offline, zero network | one EPR bundle, the engine identity, an approved sample set, the negative-control suite | an immutable `ValidationRun` bound to exact digests (D7) |
 | **Does the page still fit the validated template?** | **structural drift** = template conformance, inside the engine | every extraction, shadow or (later) canonical | the document and the bundle | a conformance record; affected fields fail closed |
 | **Did the source's values change?** | **source-value drift**, `docs/ARCHITECTURE.md` §11 and ADR-0013 §3 | a current source revision pointer move | two revisions with the same `extraction_semantics_id` | unchanged |
 
@@ -347,10 +438,14 @@ Three questions, three owners. This proposal adds the first two and changes noth
   present. There is no score and no closest match.
 - Exactly one template must match. None → `TEMPLATE_UNMATCHED`; more than one →
   `TEMPLATE_AMBIGUOUS`. Neither guesses.
-- In the shadow this is a verdict. What the canonical path does on an unmatched template belongs to
-  the cutover ADR (Q3). Recommendation: when the SPR identity rule still resolves, append a revision
-  whose fields are all `REVIEW_REQUIRED` with a structural reason, because keeping the pointer on the
-  last good revision would present an unreadable page as current and unchanged.
+- In the shadow this is a verdict only. The canonical behaviour is recorded here as the input the
+  **future cutover ADR** must carry (Q3, accepted in review `5302725919`), and nothing implements it
+  before that ADR:
+  - stable source identity still resolves, but no unique template matches → **append a new current
+    revision** whose affected facts fail closed as `REVIEW_REQUIRED` with a structural reason;
+    keeping the pointer on the last good revision would present an unreadable page as current and
+    unchanged;
+  - identity unresolved or contradictory → **no revision** (ADR-0010 §11, unchanged).
 
 ### 7.2 Inside a matched template
 
@@ -396,7 +491,7 @@ the `EvidenceKind` of the input the hook read and names the hook in provenance. 
 
 `integrations/suppliers/<key>/hooks/`, pure, under `test_supplier_packages_hold_site_knowledge_only`,
 importing nothing but the value models. The supplier's extraction-identity manifest must cover
-`hooks/` as it covers `collect/` today, and the SPR binds each hook with that manifest fingerprint
+`hooks/` as it covers `collect/` today, and the EPR binds each hook with that manifest fingerprint
 (D2 §4.4 guard 4).
 
 ### 8.3 Anti-growth guards
@@ -407,9 +502,35 @@ importing nothing but the value models. The supplier's extraction-identity manif
 | G2 | no unknown profile key | strict schema at DRAFT save |
 | G3 | closed hook points | an enum owned by the engine; an unknown binding refuses the bundle |
 | G4 | measurable adapter use | hook invocations per supplier × hook point in every conformance and shadow record; the validation report counts bindings; profile-only = zero bindings |
-| G5 | promotion review | when a second supplier binds the same hook point for the same purpose, validation records `HOOK_PROMOTION_REVIEW_REQUIRED`; ACTIVE (later) requires a recorded architect decision on promoting it into a generic extractor |
+| G5 | promotion review | keyed on the machine-defined **promotion key** of §8.4, never on a prose notion of "same purpose": when bindings of two or more suppliers share a promotion key, validation computes `HOOK_PROMOTION_REVIEW_REQUIRED` for every one of them; ACTIVE (later) is refused until an architect decision record names that key |
 | G6 | per-supplier cap | more than two bound hook points blocks VALIDATED until an architecture review is recorded: the supplier is not fitting the generic model, and that is a design finding, not a hook to add |
 | G7 | proven paths only | no VALIDATED unless every bound hook is exercised by an approved sample or fixture |
+
+### 8.4 The promotion key (review `5302725919` D6)
+
+Every hook binding in an EPR carries three machine-readable parts, and the engine refuses a
+binding that lacks any of them:
+
+| part | domain | where it comes from |
+| --- | --- | --- |
+| `hook_point` | the closed enum of §8.1 | the binding |
+| `target` | `identity` for `identity_decode`; a `FIELD_REGISTRY` key for `value_parse`; `options` for `option_decode`; `embedded` for `embedded_decode` | the binding, checked against the hook point (a `value_parse` binding for an unknown field key is refused) |
+| `format_class` | a **closed, engine-owned enum per hook point** — proposed v1: `identity_decode`: `PATH_CODE`, `ENCODED_TOKEN`, `COMPOSITE_CODE`; `value_parse`: `MONEY_TEXT`, `QUANTITY_TEXT`, `CONDITIONAL_POLICY_TEXT`, `LABELLED_TEXT`; `option_decode`: `SELECT_CONTROL`, `BUTTON_GROUP`, `SCRIPT_MATRIX`; `embedded_decode`: `KEY_VALUE_BLOCK`, `SCRIPT_ASSIGNMENT` | declared on the binding; a value outside the enum is refused; a new class is an engine change with its own review |
+
+```text
+promotion_key = (hook_point, target)                      # the trigger: derived, cannot be mis-declared
+promotion_group = (hook_point, target, format_class)       # reported beside it, for the promotion decision
+```
+
+- **The trigger uses only derived parts.** `hook_point` and `target` follow from what the binding
+  does, so a supplier cannot avoid G5 by declaring a different `format_class`. The class groups
+  the evidence the architect reviews; it never suppresses the flag.
+- **Computed over all suppliers.** At every validation run, over the bindings of every
+  non-`RETIRED` EPR of every supplier. The result is a count per `promotion_key` and the list of
+  suppliers sharing it. It is derived on each run, and no operator action clears it.
+- **What resolves it.** Only an architect decision recorded against the `promotion_key`: promote
+  into a generic extractor or profile rule (then the hooks are retired through new EPRs), or keep
+  site-specific with a reason. G4 metrics are reported per `promotion_key`.
 
 ---
 
@@ -418,7 +539,7 @@ importing nothing but the value models. The supplier's extraction-identity manif
 | state | how it is entered | may be used for |
 | --- | --- | --- |
 | `DRAFT` | a strict schema parse passes; digest computed; lint findings recorded (an unmapped CORE field is allowed in a DRAFT). Costs no network. | offline evaluation against samples only |
-| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact `(supplier_profile_digest, engine extractor_revision, profile_schema_version, sample-set digest, hook-manifest fingerprints)`. A change to any of them lapses it with no stored flag to forget. | shadow |
+| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact `(extraction_profile_digest, engine extractor_revision, profile_schema_version, sample-set digest, hook-manifest fingerprints)`. A change to any of them lapses it with no stored flag to forget. | shadow |
 | `SHADOW` | a designation: VALIDATED + the per-supplier shadow switch | shadow comparison (D3) |
 | `ACTIVE` | **not authorized in this track.** Requires a cutover ADR, Phase C evidence and the user's approval; at most one ACTIVE bundle per supplier; each switch is an append-only transition and an `EXTRACTOR_CHANGED` pointer move | canonical revisions (later) |
 | `RETIRED` | explicit transition; never deleted | reading history |
@@ -440,7 +561,25 @@ importing nothing but the value models. The supplier's extraction-identity manif
   4 KiB; nothing forbidden by ADR-0010 §8.
 - **V7 hook guards** — G5–G7.
 
-Where the approved samples themselves are stored is Q2.
+### 9.2 `ValidationSample` — its own retention, separate from shadow records (Q2, review `5302725919`)
+
+A `ValidationSample` is what V3 and V4 replay. It is **proof material for a profile**, not a
+shadow observation, so it has its own rule.
+
+- **What it is.** A sanitized, product-scoped **structured** snapshot: the engine's parsed element
+  tree restricted to the product-scope regions the bundle declares, with the text, attributes and
+  image references those regions hold, plus the operator-verified expected facts.
+- **What it never is or holds.** Never whole authenticated HTML; never cookies, headers, session or
+  authorization material; never account, member or page-wide data; never secret-bearing URL
+  material (ADR-0010 §8, §9). A snapshot that fails the sanitizer or the secret scan is not saved.
+- **Immutable and content-addressed.** Its digest is over its canonical serialization, and the
+  sample-set digest of a `ValidationRun` is over the ordered sample digests. It is never edited;
+  a corrected expectation is a new sample.
+- **Retained while referenced.** A sample is kept as long as any `ValidationRun` or recorded profile
+  proof references it, and it becomes eligible for removal only when nothing does. It is never
+  pruned by the shadow age/count bound (§5.4), and a shadow bound never reaches it.
+- **Local only.** Kept in the data root, never committed. Repository fixtures for Phase B are
+  synthetic (§12), never a captured sample.
 
 ---
 
@@ -458,7 +597,7 @@ Where the approved samples themselves are stored is Q2.
 - **What AI never does:** author or verify expected sample facts, save a profile without an
   operator action, transition a state, trigger a read, or appear in any production path. A DRAFT
   from AI carries `origin = AI_PROPOSAL` with the AI profile and prompt revision.
-- **Egress.** A sample shown to AI is the sanitized, product-scoped sample (Q2), never cookies,
+- **Egress.** A sample shown to AI is the sanitized, product-scoped `ValidationSample` (§9.2), never cookies,
   member data or page-wide private HTML. Sending it to a cloud provider is data egress under
   ADR-0012 and needs the user's approval; the default is the local capability or none.
 
@@ -467,7 +606,7 @@ Where the approved samples themselves are stored is Q2.
 ## 11. D9 — Second-supplier profile-only proof criteria (deferred)
 
 Nothing here runs until the first-vertical restriction is lifted or an architect-approved canonical
-amendment authorizes a bounded proof.
+amendment authorizes a bounded proof (Q6, accepted in review `5302725919`: Phase D stays deferred).
 
 **Preconditions.**
 - a KRW supplier (`ROADMAP.md` §14.3: a second currency needs its own ADR first);
@@ -506,12 +645,25 @@ Each step needs its own authorization in GitHub.
 | --- | --- | --- | --- |
 | **A** (this) | this proposal | none | 0 |
 | **ADR** | records D1, D2, D5, D6, D7 and the ADR-0010 §6/§12 and ADR-0013 §3 amendments | contract only, no implementation in the same PR | 0 |
-| **B** prototype | generic engine, strict profile parser/validator, template matcher, the D4 comparison model and an offline harness over synthetic fixtures (KM-shaped synthetic pages included); a report file, no store | **no migration, no canonical wiring**, isolated package | 0 |
+| **B** prototype (Q5) | an **isolated, disposable, fixture-only** prototype of the engine, strict profile parser/validator, template matcher, D4 comparison model and an offline harness over synthetic fixtures (KM-shaped synthetic pages included); a report file, no store. **Not started**: it needs its own go-ahead after this proposal passes | none: outside every production and runtime package; no `app/collect` or supplier-integration wiring; no DB, schema or migration; nothing at runtime imports it; no canonical acceptance claim | 0 |
+| **ADR → production** | production-intended engine, profile and shadow code | only after the ADR is merged | 0 |
 | **C** KM shadow | profile and shadow store migrations, the D3 hook in `collect`, a KM profile, the switch; shadow runs only on ordinary operator collections | per the ADR | only ordinary operator collections, with the user's go-ahead; no read exists for the shadow's sake |
 | **D** second supplier | D9 | cutover ADR | only under D9 preconditions |
 
-**Phase C exit evidence** (proposed): over K KM collections every verdict is `MATCH` or its mismatch
-is resolved with evidence; S1 and S2 differential proofs; zero AI; ledger equality. Honest limit:
+**Phase B isolation (Q5, conditional yes in review `5302725919`).** Before the ADR, Phase B may exist
+only as a disposable prototype. Proposed shape: a top-level `prototypes/adaptive_collector/`
+directory on its own draft PR, kept as review evidence and **not merged to main**; its fixtures are
+synthetic; it imports nothing from `app/` or `integrations/` that acts (at most the pure
+`app.collect.facts` value models, read-only), and nothing imports it. Its outputs claim nothing for
+any acceptance. Production-intended implementation is written fresh after the ADR, never by
+promoting the prototype in place. If the architect prefers the prototype on main, a repository
+rule must forbid every import of it from `app/`, `integrations/` and `scripts/`.
+
+**Phase C exit evidence** (proposed): the §5.5 rule — the denominator is every eligible KM
+collection with the shadow enabled, and the evidence is `PASS` only if each one counts as a
+success; any missing shadow outcome is `INCOMPLETE`, any `SHADOW_FAILED` a `FAIL`. Plus S1 and S2
+differential proofs, zero AI, ledger equality, and the shadow retention bounds fixed by the ADR
+(§5.4). Honest limit:
 the accepted KM product states no options and no tiers (`docs/acceptance/M3.md` §2.1), so positive
 options and tiers are proven only on synthetic fixtures, and the engine inherits the M3 boundary.
 
@@ -523,28 +675,48 @@ reachable gateway; identical input gives identical output.
 
 ---
 
-## 13. Questions for the architect
+## 13. Architect rulings (review `5302725919`) and what they require
 
-| # | question | recommendation |
+| # | question | ruling | carried by |
+| --- | --- | --- | --- |
+| Q1 | names | **ACCEPT**: `ExtractionProfileRevision` (EPR) and `PageTemplateRevision` (PTR); CONNECT `SupplierProfile` and COLLECT `CollectionProfile` stay distinct; add glossary entries | this revision (throughout); §13.1 entries land with the ADR |
+| Q2 | sample and shadow retention | **MODIFY**: two rules, not one. `ValidationSample` = sanitized, product-scoped structured snapshot, immutable, content-addressed, retained while referenced. Shadow records = non-canonical, explicit age + count bounds fixed by the ADR before Phase C. Phase B stays synthetic/fixture-only | §9.2, §5.4 |
+| Q3 | unmatched template on the canonical path | **ACCEPT** for the future cutover ADR; not implemented before it | §7.1 |
+| Q4 | implementation fingerprint in `extraction_semantics_id` | **ACCEPT**: excluded; semantic code changes mechanically forced to advance `extractor_revision` | §4.2, §4.4 |
+| Q5 | Phase B before the ADR | **CONDITIONAL YES**: isolated, disposable, fixture-only, outside production/runtime packages, no wiring, no DB/schema/migration, no runtime import, no acceptance claim; production-intended code waits for the ADR | §12 |
+| Q6 | Phase D | **ACCEPT**: deferred under `CLAUDE.md` §12 until the first vertical closes or a canonical amendment authorizes it | §11, §12 |
+
+No question remains open in this proposal. The retention **values** of Q2 and the Phase C
+evidence window size are for the ADR.
+
+### 13.1 Draft `docs/GLOSSARY.md` entries (land with the ADR, not before)
+
+GLOSSARY points every name at the contract that owns it, and that contract does not exist yet, so
+these entries are drafted here and added by the ADR PR:
+
+| name | what it is | owner |
 | --- | --- | --- |
-| Q1 | **Names.** `SupplierProfile` is already the CONNECT profile and `CollectionProfile` the access envelope; `SupplierProfileRevision` would read as a revision of the CONNECT profile. | Name them `ExtractionProfileRevision` and `PageTemplateRevision`, and add all four to `docs/GLOSSARY.md`. This proposal keeps the Issue's working names until you rule. |
-| Q2 | **Sample and shadow retention.** Validation replays need the sample documents; storing whole authenticated pages is forbidden (ADR-0010 §8). | Store only a sanitized, product-scoped sample snapshot, locally, never committed, with a bounded retention; the same bound for shadow records. Needs your ruling on the sanitizer's scope rule. |
-| Q3 | **Unmatched template on the canonical path** (cutover ADR, not now). | A revision with every field `REVIEW_REQUIRED` and a structural reason when identity still resolves; no revision when it does not (ADR-0010 §11 unchanged). |
-| Q4 | **Implementation fingerprint in `extraction_semantics_id`.** | Exclude it (ADR-0010's semantic/implementation split). |
-| Q5 | **Is Phase B allowed before the ADR?** It changes no contract, wires nothing and adds no migration. | Allow Phase B after this proposal is accepted; require the ADR merged before Phase C. |
-| Q6 | **Phase D sequencing** with respect to `CLAUDE.md` §12. | Keep it deferred until the first vertical closes; revisit only through a canonical amendment. |
+| `SupplierProfile` | the **CONNECT** profile of a supplier: key, display name, base URL, auth flag, egress hosts, request policy. Not an extraction profile | ADR-0007 |
+| `CollectionProfile` | the **COLLECT access envelope**: product path form, policy paths, explicit image hosts, safe query keys, frozen limits, transport. Repository-reviewed, never widened at run time | ADR-0010 §3, §9 |
+| `ExtractionProfileRevision` (EPR) | an immutable, content-addressed revision of one supplier's **interpretation** — identity rule, vocabularies, image-role rules, hook bindings — pinning a closed set of PTRs by digest. Validated and activated as one bundle | the Adaptive Collector ADR |
+| `PageTemplateRevision` (PTR) | an immutable, content-addressed revision of **one page shape** of a supplier: its signature and per-field locator rules. Never activated alone | the Adaptive Collector ADR |
+| `extraction_semantics_id` / `comparability_key` | the semantic extraction identity drift comparability keys on; for a row without profile provenance it is derived on read from `extractor_revision`, never stored or backfilled | the Adaptive Collector ADR; ADR-0013 §3 as amended |
+| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation; never a whole authenticated page | the Adaptive Collector ADR |
+| promotion key | `(hook_point, target)` of a hook binding; shared by two or more suppliers, it requires an architect promotion decision | the Adaptive Collector ADR |
 
 ---
 
 ## 14. What this proposal explicitly does not do
 
-It changes no code, schema, ADR or canonical document; adds no `EvidenceKind`, `FieldStatus`,
+It changes no code, schema, ADR or canonical document (the GLOSSARY entries of §13.1 are drafts);
+backfills or updates no existing `ProductFactsRevision`; adds no `EvidenceKind`, `FieldStatus`,
 `ReviewKind` or field; widens no host, path, budget or transport; makes no supplier, marketplace, AI
-or OCR call; does not touch or migrate the KM통상 extractor; and authorizes no second-supplier read.
+or OCR call; does not touch or migrate the KM통상 extractor; starts no Phase B prototype; and
+authorizes no second-supplier read.
 
 ## References
 
-- Issue #110 and kickoff `5811580104`
+- Issue #110 and kickoff `5811580104`; PR #111 architect review `5302725919`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9 §13 §14, ADR-0013 §3, ADR-0016 §2 §6
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2
 - `integrations/suppliers/collection.py`, `integrations/suppliers/extraction.py`,
