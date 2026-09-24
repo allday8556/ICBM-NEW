@@ -39,6 +39,14 @@ class ReviewKind(StrEnum):
     FULFILLMENT = "FULFILLMENT"
 
 
+class CountState(StrEnum):
+    """Whether a kind's open count is authoritative (§7, G2-C; ``app.review.counts``)."""
+
+    CURRENT = "CURRENT"
+    NOT_CURRENT = "NOT_CURRENT"
+    NOT_WIRED = "NOT_WIRED"
+
+
 class ReviewState(StrEnum):
     """§4: decided by reconciliation against current owner truth, and only by it."""
 
@@ -122,6 +130,11 @@ def _identifier(value: object, what: str) -> str:
             details={"field": what},
         )
     return value
+
+
+def is_identifier(value: object) -> bool:
+    """Whether a value is a bounded owner identifier a ReviewItem may carry (§9)."""
+    return isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
 
 
 def canonical_scope(scope: Mapping[str, str]) -> dict[str, str]:

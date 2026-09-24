@@ -32,6 +32,7 @@ from app.core.correlation import new_correlation_id
 from app.core.errors import AppError
 from app.review.coverage import (
     REVIEW_OWNER_MOVED_DURING_PASS,
+    REVIEW_OWNER_MOVED_SINCE_PASS,
     CoverageView,
     ReviewCoverageStore,
 )
@@ -41,6 +42,8 @@ from app.review.owner import ReviewItemStore
 logger = logging.getLogger("icbm.review.reconciler")
 
 REVIEW_INDEX_FAILED = "REVIEW_INDEX_FAILED"
+# How many times a full pass the owner moved under is retried at once (G2-C).
+CHURN_RETRIES = 2
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,9 @@ class ReviewReconciler:
         # and joins. A pass checks the halt between scopes, and stop() returns only once that
         # thread has ended, so no pass can still write after the owner lease is released.
         self._halt = threading.Event()
+        # A request for a prompt full pass (G2-C): the fast path, and a reader that finds the owner
+        # moved since the watermark, ask for one instead of waiting out the periodic interval.
+        self._wake = threading.Event()
         self._thread: threading.Thread | None = None
 
     @property
@@ -99,6 +105,14 @@ class ReviewReconciler:
             logger.warning("review.index_failed", extra={"producer": producer, "code": _code(exc)})
             self._record_failure(producer, _code(exc), correlation_id)
             return False
+        finally:
+            # The owner moved, so its watermark no longer covers it (coverage condition 5): a full
+            # pass is what makes it current again, and it is asked for now.
+            self.request_pass()
+
+    def request_pass(self) -> None:
+        """Ask the periodic loop for a full pass now. It never runs one in the caller's thread."""
+        self._wake.set()
 
     # -------------------------------------------------------------- the safety net
 
@@ -140,7 +154,8 @@ class ReviewReconciler:
                     process_run_id=self._process_run_id,
                     started_at=started_at,
                     failures_before=failures_before,
-                    owner_unchanged=lambda: source.truth_token() == token_before,
+                    token_before=token_before,
+                    owner_token=source.truth_token,
                     correlation_id=correlation_id,
                 )
                 if not published:
@@ -151,20 +166,36 @@ class ReviewReconciler:
         return FullPass(producer, len(scopes), tuple(failed))
 
     def full_passes(self) -> tuple[FullPass, ...]:
+        """One full pass of every wired producer. A pass the owner moved under is retried at
+        once, at most ``CHURN_RETRIES`` times: under whole-owner churn every attempt still indexes
+        its scopes in their own units (progress), and none publishes a watermark it cannot fence
+        (safety). What remains is left to the next requested or periodic pass."""
         passes: list[FullPass] = []
         for producer in self._store.producers:
-            if self._halt.is_set():
-                break
-            passes.append(self.full_pass(producer))
+            for _ in range(1 + CHURN_RETRIES):
+                if self._halt.is_set():
+                    return tuple(passes)
+                result = self.full_pass(producer)
+                passes.append(result)
+                if REVIEW_OWNER_MOVED_DURING_PASS not in result.failed:
+                    break
         return tuple(passes)
 
     def coverage(self) -> tuple[CoverageView, ...]:
-        return tuple(
+        """Every wired producer's coverage now, each checked against its owner's truth now. An
+        owner found moved since its watermark asks for a full pass; it is still not current."""
+        views = tuple(
             self._coverage.coverage(
-                producer, process_run_id=self._process_run_id, max_age_s=self._max_age_s
+                producer,
+                process_run_id=self._process_run_id,
+                max_age_s=self._max_age_s,
+                owner_token=self._store.producer(producer).truth_token,
             )
             for producer in self._store.producers
         )
+        if any(view.reason == REVIEW_OWNER_MOVED_SINCE_PASS for view in views):
+            self.request_pass()
+        return views
 
     def _scopes(self, producer: str) -> Sequence[Mapping[str, str]]:
         """What the owner holds and what the producer's items hold, once each, in order. A scope
@@ -192,6 +223,7 @@ class ReviewReconciler:
         """The startup pass, awaited before the application serves, then the periodic loop on a
         thread this reconciler owns."""
         self._halt.clear()
+        self._wake.clear()
         await asyncio.to_thread(self.full_passes)
         self._thread = threading.Thread(
             target=self._periodic, name="icbm-review-reconciler", daemon=True
@@ -199,7 +231,12 @@ class ReviewReconciler:
         self._thread.start()
 
     def _periodic(self) -> None:
-        while not self._halt.wait(self._interval_s):
+        """A full pass every ``interval_s``, or sooner when one is requested."""
+        while True:
+            self._wake.wait(self._interval_s)
+            if self._halt.is_set():
+                return
+            self._wake.clear()
             try:
                 self.full_passes()
             except Exception:
@@ -214,6 +251,7 @@ class ReviewReconciler:
         after this returns (ADR-0006).
         """
         self._halt.set()
+        self._wake.set()
         thread = self._thread
         if thread is not None:
             await asyncio.to_thread(thread.join)

@@ -16,17 +16,20 @@ pytestmark = pytest.mark.integration
 
 CLIENT = {"X-ICBM-Client": "pytest"}
 SCREENS = {
-    "dashboard": "NO_CONNECTIONS",
     "collect": "NO_COLLECTION_JOBS",
     "db": "NO_PRODUCTS",
     "register": "NO_REGISTRATION_CANDIDATES",
     "orders": "NO_ORDERS",
     "inquiry": "NO_INQUIRIES",
-    "soldout": "NO_STOCK_REVIEW_ITEMS",
     "ai-insight": "NO_INTERNAL_HISTORY",
     "analytics": "NO_OPERATING_DATA",
     "settings": "NO_SETTINGS_SAVED",
 }
+# Gate 2 G2-C (ADR-0016 §7): a dashboard or 품절 "empty" may rest on review counts only when every
+# kind they count is WIRED, current and zero. Kinds whose producer does not exist yet are
+# NOT_WIRED, so on a fresh database both are READY and say so; neither ever shows a fake 0.
+REVIEW_COUNTED = ("dashboard", "soldout")
+NOT_WIRED_KINDS = ("collect_evidence", "stock", "source_change", "compliance", "fulfillment")
 
 
 def _wait_for(predicate, timeout_s: float = 10.0):  # type: ignore[no-untyped-def]
@@ -65,6 +68,32 @@ def test_every_screen_contract_reports_empty(client: TestClient, screen: str, re
     meta = response.json()["meta"]
     assert meta == meta | {"screen": screen, "state": "EMPTY", "empty_reason": reason}
     assert meta["milestone"] == "M5"
+
+
+def test_the_review_counted_screens_are_never_empty_on_a_count_that_is_not_authoritative(
+    client: TestClient,
+) -> None:
+    for screen in REVIEW_COUNTED:
+        meta = client.get(f"/api/v1/screens/{screen}").json()["meta"]
+        assert (meta["state"], meta["empty_reason"]) == ("READY", None)
+    counts = client.get("/api/v1/screens/dashboard").json()["review_counts"]
+    for kind in NOT_WIRED_KINDS:
+        assert (counts[kind]["state"], counts[kind]["open"], counts[kind]["open_known"]) == (
+            "NOT_WIRED",
+            None,
+            0,
+        )
+    # REGISTRATION_ERROR's one producer is wired and its startup pass completed: an honest zero.
+    assert (counts["registration_error"]["state"], counts["registration_error"]["open"]) == (
+        "CURRENT",
+        0,
+    )
+    stock = client.get("/api/v1/screens/soldout").json()["stock_review"]
+    assert (stock["state"], stock["open"]) == ("NOT_WIRED", None)
+    assert [(e["producer"], e["wired"]) for e in stock["emitters"]] == [
+        ("collect.facts", True),
+        ("operate.stock", False),
+    ]
 
 
 def test_settings_contract_has_no_connections_and_is_read_only(client: TestClient) -> None:

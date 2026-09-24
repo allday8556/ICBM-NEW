@@ -10,7 +10,9 @@ evidence to ``--out``. It demonstrates, rather than asserts:
 * one correlation_id traced through the log file, the Job row and AuditEvent rows;
 * a protected action (LIVE request) denied with a persisted AuditEvent the database refuses to
   update or delete;
-* all ten screen contracts reporting EMPTY (and, with ``--visual``, rendering in a browser);
+* all ten screen contracts at their zero-data verdict: eight EMPTY, and the dashboard and 품절
+  READY on review counts that are not authoritative (Gate 2 G2-C) — and, with ``--visual``,
+  rendering in a browser;
 * full restarts: queued work survives a stop and completes afterwards, and a second restart comes
   back ready with unchanged state;
 * zero external connection attempts in every server run (process-wide egress guard).
@@ -51,6 +53,8 @@ SCREENS = [
     "analytics",
     "settings",
 ]
+# The screens whose empty verdict rests on review counts (ADR-0016 §7, Gate 2 G2-C).
+REVIEW_COUNTED = frozenset({"dashboard", "soldout"})
 CLIENT = {"X-ICBM-Client": "m0-acceptance"}
 MAX_ATTEMPTS = 4
 EXPECTED_DELAYS_S = [1.0, 2.0, 4.0]
@@ -304,15 +308,29 @@ def step_contracts(ev: Evidence, server: Server, label: str) -> None:
     for screen in SCREENS:
         meta = server.http.get(f"/api/v1/screens/{screen}").json()["meta"]
         screens[screen] = {"state": meta["state"], "empty_reason": meta["empty_reason"]}
+    # Gate 2 G2-C (ADR-0016 §7): the dashboard and 품절 may be EMPTY only on authoritative review
+    # zeros. Kinds whose producer does not exist yet are NOT_WIRED, so on a fresh database both
+    # are READY, and none of those kinds carries a count: never a fake 0.
+    counted = server.http.get("/api/v1/screens/dashboard").json()["review_counts"]
+    stock = server.http.get("/api/v1/screens/soldout").json()["stock_review"]
+    honest = all(
+        view["open"] is None for view in counted.values() if view["state"] != "CURRENT"
+    ) and (stock["state"], stock["open"]) == ("NOT_WIRED", None)
     index = server.http.get("/")
     csp = index.headers.get("content-security-policy", "")
     ev.check(
-        f"{label}: all ten screen contracts EMPTY; UI shell served with self-only CSP",
+        f"{label}: every screen contract at its zero-data verdict (eight EMPTY; dashboard and"
+        " 품절 READY on non-authoritative review counts); UI shell served with self-only CSP",
         len(screens) == 10
-        and all(s["state"] == "EMPTY" for s in screens.values())
+        and all(
+            s["state"] == ("READY" if name in REVIEW_COUNTED else "EMPTY")
+            for name, s in screens.items()
+        )
+        and honest
         and index.status_code == 200
         and "default-src 'self'" in csp,
         screens=screens,
+        review_counts={kind: [view["state"], view["open"]] for kind, view in counted.items()},
         marketplace_identities=[m["key"] for m in shell["marketplaces"]],
         execution_mode=shell["execution_mode"],
     )

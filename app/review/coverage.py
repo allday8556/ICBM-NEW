@@ -1,7 +1,7 @@
 """The review producers' coverage watermark (Gate 2 G2-B, ADR-0016 §4, §7).
 
 A count is authoritative only while its producer's coverage is **current**. Coverage is current
-only when all four of these hold:
+only when all five of these hold:
 
 1. a full pass completed in **this** process run, recorded as the watermark;
 2. that watermark is younger than a finite freshness bound, so a stalled periodic scheduler
@@ -11,7 +11,11 @@ only when all four of these hold:
 4. no known indexing failure is unrecovered. Only a full pass that *started after* the failure
    clears it. "After" is proven by a monotonic failure counter read when the pass begins, never by
    comparing timestamps: under a frozen or coarse clock a failure recorded during a pass can carry
-   the pass's own start time (review ``5807477351`` B2).
+   the pass's own start time (review ``5807477351`` B2);
+5. the owner still holds the truth that pass was fenced on: its truth token **now** equals the
+   token stored with the watermark (G2-C, migration 0023). An owner that moved since the pass, by
+   a fast-path write or by whole-owner churn, is covered again only by a later stable pass, so
+   repeated owner movement can never keep an old watermark authoritative.
 
 "Current" is derived on every read from the durable row, the process run and the clock. It is
 never stored.
@@ -35,6 +39,9 @@ REVIEW_COVERAGE_STALE: Final = "REVIEW_COVERAGE_STALE"
 REVIEW_INDEX_FAILURE_UNRECOVERED: Final = "REVIEW_INDEX_FAILURE_UNRECOVERED"
 # The owner's truth moved while a full pass ran: the pass cannot prove it covered it.
 REVIEW_OWNER_MOVED_DURING_PASS: Final = "REVIEW_OWNER_MOVED_DURING_PASS"
+# The owner's truth moved after the watermark's pass (G2-C): the watermark no longer covers it.
+REVIEW_OWNER_MOVED_SINCE_PASS: Final = "REVIEW_OWNER_MOVED_SINCE_PASS"
+REVIEW_OWNER_TRUTH_UNREADABLE: Final = "REVIEW_OWNER_TRUTH_UNREADABLE"
 SYSTEM_ACTOR: Final = "system:review"
 
 
@@ -70,7 +77,8 @@ class ReviewCoverageStore:
         process_run_id: str,
         started_at: datetime,
         failures_before: int,
-        owner_unchanged: Callable[[], bool],
+        token_before: str,
+        owner_token: Callable[[], str],
         correlation_id: str,
     ) -> bool:
         """A full pass that started at ``started_at`` has reconciled every scope it snapshotted.
@@ -86,7 +94,7 @@ class ReviewCoverageStore:
         now = self._clock.now()
         with self._db.write() as session:
             row = self._row(session, producer, now)
-            if not owner_unchanged():
+            if owner_token() != token_before:
                 self._fail(session, row, producer, REVIEW_OWNER_MOVED_DURING_PASS, correlation_id)
                 return False
             recovered = row.failure_at is not None and row.failures_recorded == failures_before
@@ -94,6 +102,8 @@ class ReviewCoverageStore:
             row.process_run_id = process_run_id
             row.pass_started_at = started_at
             row.watermark_at = now
+            # What the pass was fenced on: coverage compares the owner with it on every read.
+            row.truth_digest = token_before
             row.full_passes += 1
             if recovered:
                 row.failure_at = None
@@ -153,7 +163,16 @@ class ReviewCoverageStore:
             session=session,
         )
 
-    def coverage(self, producer: str, *, process_run_id: str, max_age_s: float) -> CoverageView:
+    def coverage(
+        self,
+        producer: str,
+        *,
+        process_run_id: str,
+        max_age_s: float,
+        owner_token: Callable[[], str],
+    ) -> CoverageView:
+        """The producer's coverage now. ``owner_token`` reads the owner's truth token **now**: a
+        watermark fenced on another token no longer covers the owner (G2-C)."""
         with self._db.read() as session:
             row = session.get(ReviewCoverage, producer)
             if row is None:
@@ -167,6 +186,8 @@ class ReviewCoverageStore:
                 reason = REVIEW_COVERAGE_NO_PASS_THIS_RUN
             elif self._clock.now() - row.watermark_at > timedelta(seconds=max_age_s):
                 reason = REVIEW_COVERAGE_STALE
+            else:
+                reason = _owner_reason(row.truth_digest, owner_token)
             return CoverageView(
                 producer=producer,
                 current=reason is None,
@@ -175,3 +196,15 @@ class ReviewCoverageStore:
                 full_passes=row.full_passes,
                 failure_code=row.failure_code,
             )
+
+
+def _owner_reason(fenced: str | None, owner_token: Callable[[], str]) -> str | None:
+    """Whether the owner still holds the truth the watermark was fenced on. A token that cannot
+    be read proves nothing, so it is never current either."""
+    if fenced is None:
+        return REVIEW_OWNER_MOVED_SINCE_PASS
+    try:
+        now = owner_token()
+    except Exception:
+        return REVIEW_OWNER_TRUTH_UNREADABLE
+    return None if now == fenced else REVIEW_OWNER_MOVED_SINCE_PASS

@@ -123,10 +123,11 @@ M5_PREPARATION = "0018_m5_registration_preparation"
 G1_TARGET_POLICY = "0019_g1_registration_target_policy"
 M5_HEAD = "0020_g1_registration_category_metadata"
 M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_POLICY, M5_HEAD)
-# Gate 2 G2-A (ADR-0016) adds the ReviewItem owner after the M5 head. It is not registration
-# state, so the registration guards below still apply to it unchanged. Nothing else follows.
-SCHEMA_HEAD = "0022_g2_review_coverage"
-AFTER_M5 = ("0021_g2_review_items", SCHEMA_HEAD)
+# Gate 2 (ADR-0016) adds the ReviewItem owner after the M5 head: G2-A its items, G2-B its
+# coverage watermark, G2-C the owner truth token of that watermark. None is registration
+# state, so the registration guards below still apply to them unchanged. Nothing else follows.
+SCHEMA_HEAD = "0023_g2_review_coverage_fence"
+AFTER_M5 = ("0021_g2_review_items", "0022_g2_review_coverage", SCHEMA_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",
@@ -220,6 +221,7 @@ def test_the_migration_detector_fires() -> None:
         "0020_g1_registration_category_metadata.py",
         "0021_g2_review_items.py",
         "0022_g2_review_coverage.py",
+        "0023_g2_review_coverage_fence.py",
         "0021_anything.py",
         "0022_anything.py",
         "0021_g2_registration_more.py",

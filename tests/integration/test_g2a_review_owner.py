@@ -44,7 +44,6 @@ from app.review.model import (
     ReviewState,
 )
 from app.review.owner import SYSTEM_ACTOR, ReviewItemStore
-from app.review.service import ReviewService
 from tests.product_support import raw
 from tests.support import FakeClock
 
@@ -202,14 +201,17 @@ def resolve(
 # ---------------------------------------------------------------- production wiring (G2-A)
 
 
-def test_production_wires_only_the_collect_producer_and_leaves_counts_alone(
-    app: Container,
-) -> None:
-    # G2-B wires the COLLECT / M3 producer and nothing else (ADR-0016 §6).
-    assert app.review_items.producers == ("collect.facts",)
+def test_production_wires_exactly_the_gate2_producers(app: Container) -> None:
+    # G2-B wires COLLECT / M3, G2-C M4 base readiness and REGISTER (execution and preparations),
+    # and nothing else
+    # (ADR-0016 §6). Their counts are G2-C's (tests/integration/test_g2c_review_counts.py).
+    assert app.review_items.producers == (
+        "collect.facts",
+        "products.readiness",
+        "register.execution",
+        "register.preflight",
+    )
     assert app.review_items.items() == ()
-    # No count changes before G2-C: the placeholder stays (ADR-0016 §7).
-    assert ReviewService().open_counts() == dict.fromkeys(ReviewKind, 0)
 
 
 # ---------------------------------------------------------------- identity (§2, §3, §9)

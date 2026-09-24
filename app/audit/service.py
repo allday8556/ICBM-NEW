@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.audit.models import AuditEvent, AuditEventType, AuditOutcome
@@ -115,6 +115,23 @@ class AuditLog:
             },
         )
         return record
+
+    def owner_writes(self) -> int:
+        """How many events every owner except the review owner has appended (Gate 2 G2-C).
+
+        Every owner change the REGISTER preflight can read is audited in its own unit of work, and
+        this log is append-only, so the count only grows: a review producer uses it as a fence
+        that no sequence of owner writes can bring back to an earlier value. The review owner's
+        own events are left out, so its reconciliation never moves the fence it is checked by."""
+        with self._db.read() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AuditEvent)
+                    .where(AuditEvent.event_type.not_like("REVIEW\\_%", escape="\\"))
+                )
+                or 0
+            )
 
     def list_events(
         self, *, correlation_id: str | None = None, limit: int = 100

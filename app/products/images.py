@@ -601,6 +601,11 @@ class ProductImageService:
 
     # ------------------------------------------------------------------ readiness input
 
+    def readiness_truth(self, unit: ProductFoundationUnit) -> dict[str, object]:
+        """What :meth:`image_state` can read, as a state that never returns to an earlier value:
+        every image table's row count, and the QA rule it evaluates under (Gate 2 G2-C)."""
+        return {"qa_rule_version": self.qa_rule_version, **self._images(unit).readiness_truth()}
+
     def image_state(
         self, unit: ProductFoundationUnit, item_id: str, current_revision_id: str | None
     ) -> ImageState:

@@ -113,8 +113,9 @@ class ReviewCoverage(Base):
     ``process_run_id`` is the application process run that completed it; a pass that did not reach
     its end never touches either. ``failure_at`` is the newest known indexing failure still
     unrecovered: only a full pass that *started after* it clears it, which ``failures_recorded``
-    proves. Whether coverage is current is
-    derived from these, the process run and the freshness bound — it is never stored.
+    proves. ``truth_digest`` is the owner truth the watermark's pass was fenced on (G2-C). Whether
+    coverage is current is derived from these, the owner's truth now, the process run and the
+    freshness bound — it is never stored.
     """
 
     __tablename__ = "review_coverage"
@@ -147,6 +148,9 @@ class ReviewCoverage(Base):
     # already included when the pass began (review 5807477351 B2), never by comparing times.
     failures_recorded: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # The owner truth token the watermark's pass was fenced on (G2-C, migration 0023). Coverage
+    # compares it with the owner's token now, so an owner that moved since is never current.
+    truth_digest: Mapped[str | None] = mapped_column(String(64))
 
 
 class ReviewItemEvent(Base):

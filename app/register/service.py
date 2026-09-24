@@ -99,6 +99,8 @@ from app.register.store import (
     ScopeRecord,
     SnapshotProvenance,
     SnapshotRecord,
+    covered_units,
+    visible_snapshots,
 )
 
 logger = logging.getLogger("icbm.register.service")
@@ -473,17 +475,10 @@ class RegisterService:
         listing identity, no `registration_item_key` and no Intent, and none is invented for it.
         """
         store = self._require_store()
-        frozen: list[UnitView] = []
-        seen: set[str] = set()
-        covered: set[tuple[str, ...]] = set()
-        for snapshot in store.snapshots_of_draft(draft.draft_id):
-            intent = intents.get(snapshot.registration_snapshot_id)
-            if intent is None and snapshot.listing_identity in seen:
-                continue
-            seen.add(snapshot.listing_identity)
-            frozen.append(self._frozen_unit(draft, snapshot, intent))
-            if snapshot.draft_revision == draft.draft_revision:
-                covered.add(_unit_items(snapshot))
+        # One rule, shared with the review producer of preparations (``current_preparations``).
+        visible = visible_snapshots(store.snapshots_of_draft(draft.draft_id), intents)
+        frozen = [self._frozen_unit(draft, snapshot, intent) for snapshot, intent in visible]
+        covered = covered_units(draft.draft_revision, visible)
         authored: dict[tuple[str, ...], PreparationRecord] = {}
         for record in store.preparations_of_draft(draft.draft_id):
             key = tuple(sorted(record.current.item_ids))

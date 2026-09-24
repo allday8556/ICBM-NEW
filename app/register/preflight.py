@@ -20,11 +20,12 @@ evidence and prepared provider assets are inputs a later adapter supplies.
 """
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.connect.accounts import AccountBinding, binding_state
 from app.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.core.errors import AppError, NotFoundError, PolicyBlockedError
+from app.db.database import DatabaseWriteReentryError
 from app.products.images import ProductImageService
 from app.products.pricing_service import ProductPricingService
 from app.products.readiness import ProductReadinessService, Readiness
@@ -278,6 +279,18 @@ class RegistrationPreflightService:
     ) -> TargetPolicy | None:
         """The account's current Settings/platform registration policy (§21). A read-through."""
         return self._policies.target(marketplace_key, marketplace_account_id)
+
+    def capability_reading(self, marketplace_key: str) -> dict[str, Any]:
+        """What this owner reads of CONNECT capability for one marketplace, through the same port
+        the candidate reads, as JSON-safe state (Gate 2 G2-C: the review producer's fence). A
+        capability that cannot be read is named by its code, as the candidate treats it."""
+        try:
+            view = self._capability.capability(marketplace_key)
+        except DatabaseWriteReentryError:
+            raise
+        except AppError as refused:
+            return {"unavailable": refused.code}
+        return view.model_dump(mode="json")
 
     def _account(self, marketplace_key: str, binding: AccountBinding) -> AccountState:
         try:
