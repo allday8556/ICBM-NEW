@@ -656,8 +656,18 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     upgrade_to_head(url)
     before = _tables(tmp_path / "icbm.db")
     command.downgrade(alembic_config(url), "0020_g1_registration_category_metadata")
-    # 0021 owns these two; the coverage table 0022 adds steps down with it.
-    assert before - _tables(tmp_path / "icbm.db") == {*REVIEW_TABLES, "review_coverage"}
+    # 0021 owns these two; the coverage table 0022 adds and the Adaptive tables 0024 adds step
+    # down with it.
+    assert before - _tables(tmp_path / "icbm.db") == {
+        *REVIEW_TABLES,
+        "review_coverage",
+        "adaptive_profile_revisions",
+        "adaptive_profile_pins",
+        "adaptive_profile_transitions",
+        "adaptive_validation_samples",
+        "adaptive_validation_runs",
+        "adaptive_validation_run_samples",
+    }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
     item = condition()
