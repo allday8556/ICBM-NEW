@@ -1,9 +1,10 @@
 # Adaptive Collector — design proposal (Issue #110, Phase A)
 
-Status: **PROPOSAL — revision 2, awaiting architect re-audit**
+Status: **PROPOSAL — revision 3, awaiting architect re-audit**
 Author: Claude Code
 Issue: #110; architect kickoff `5811580104` (DESIGN only)
-Audit: PR #111 review `5302725919` on `eaa85aa` — direction accepted, four required fixes, rulings Q1–Q6
+Audit: PR #111 review `5302725919` on `eaa85aa` — direction accepted, four required fixes, rulings Q1–Q6;
+re-audit `5302852218` on `63dd1d73` — those fixes applied, three further corrections and one precision fix
 Base: main `02dd2a35819bdee0d4209b2c0fa1ba9f10156f2a`
 Place at: `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 
@@ -24,6 +25,15 @@ ADR must carry, not as a decision in force.
 | Q3, Q4 | §7.1, §4.2 | recorded as accepted for the cutover ADR / the identity ADR |
 | Q5 | §12 | Phase B only as an isolated, disposable, fixture-only prototype outside production packages; not started |
 | Q6 | §11, §12 | Phase D stays deferred |
+
+### Revision 3 — what changed after re-audit `5302852218`
+
+| re-audit item | where | change |
+| --- | --- | --- |
+| 1. hook implementation fingerprint leaked into semantic identity | §3.1, §4.1, §4.2, §4.4, §8.2, §9 | hooks get a **semantic `HOOK_REVISION`** in their own manifest; the EPR binds only that revision, never the hook fingerprint; the fingerprint is runtime provenance and a `ValidationRun` freshness input only; hook goldens force the revision to advance |
+| 2. source-value drift compared stored `extraction_semantics_id` | §7, §4.1, §13.1 | every drift-comparability statement now names `comparability_key` (§4.2.1), the one owner of the amended ADR-0013 §3 rule |
+| 3. `ValidationSample` scope defined by the bundle under validation | §9.2, §9.1 | the snapshot is cut by an **independent capture owner** — a versioned sanitizer plus an operator-approved product scope recorded at capture — never by an EPR/PTR; plus a conflict scan over the whole snapshot |
+| precision: SHA-256 is not injective | §4.2, §4.2.1 | comparability compares a **tagged semantic tuple**; SHA-256 over a domain-separated, length-prefixed encoding is only its storage form and is described as collision-resistant, never collision-free |
 
 ---
 
@@ -122,7 +132,7 @@ operator URL → durable collect.product job → policed gateway (1 product read
 | **Generic engine** | locator interpreter, generic extractors, normalizers, template matcher | repository code with its own extraction-identity manifest | no |
 | **`ExtractionProfileRevision`** | supplier-wide interpretation (D1) | canonical DB, immutable rows | a new revision only |
 | **`PageTemplateRevision`** | one page shape: signature and per-field locators (D1) | canonical DB, immutable rows | a new revision only |
-| **Site adapter hooks** | allowlisted pure functions (D6) | repository code in the supplier package, inside its manifest | no |
+| **Site adapter hooks** | allowlisted pure functions (D6) | repository code in the supplier package, under its own hook manifest (§8.2) | no |
 
 **What "profile-only onboarding" means.** A new supplier needs its access envelope and CONNECT
 definition — reviewed declarations that ADR-0007 and ADR-0010 require anyway — plus profile data.
@@ -149,7 +159,7 @@ decision for an ADR, and this proposal does not ask for it (default: no new Evid
 | template set | **a closed set of PTR digests it pins**; no precedence order (matching is exclusive, D5) | no |
 | signature | no | required anchors, forbidden anchors (D5) |
 | field rules | no | per field: a primary locator rule, optional declared alternatives, expected cardinality |
-| hook bindings | hook point → hook name + the supplier hook manifest fingerprint (D6) | no |
+| hook bindings | hook point, target, format class → hook name + the supplier's **semantic** `HOOK_REVISION` (D6, §8.2); never the hook implementation fingerprint | no |
 
 **Activation and validation happen on the EPR only.** Because the EPR pins its templates by digest,
 the EPR digest covers the whole bundle. Rejected alternative: independently activated templates.
@@ -201,33 +211,49 @@ refused at DRAFT save. A profile never contains:
 | field | meaning | for a code extractor (KM today) |
 | --- | --- | --- |
 | `extractor_revision` | **the engine's** semantic revision, e.g. `adaptive-engine-1`; keeps the ADR-0010 meaning "semantic identity of code" | unchanged (`kmretail-1`) |
-| `extractor_fingerprint` | the engine manifest fingerprint (ADR-0010 §12 mechanism, a generic package) | unchanged |
+| `extractor_fingerprint` | the engine manifest fingerprint (ADR-0010 §12 mechanism, a generic package) — implementation provenance | unchanged |
 | `extraction_profile_revision_id` | the EPR used | `NULL` |
-| `extraction_profile_digest` | its digest; covers every pinned PTR and every hook-manifest fingerprint bound | `NULL` |
+| `extraction_profile_digest` | its digest; covers every pinned PTR and every bound hook's **semantic** `HOOK_REVISION` — no implementation fingerprint | `NULL` |
+| `hook_fingerprint` | the supplier hook manifest's implementation fingerprint at extraction time (`NULL` when no hook is bound) — implementation provenance, **outside every semantic identity** | `NULL` |
 | `profile_schema_version` | the profile schema the EPR was parsed under | `NULL` |
 | `page_template_revision_id` | the PTR this document matched (provenance; see §4.3) | `NULL` |
-| `extraction_semantics_id` | **the one identity drift comparability keys on** (§4.2); persisted only on new rows written after the ADR and its schema are authorized | **not stored on any existing row**; derived on read from `extractor_revision` (§4.2) |
+| `extraction_semantics_id` | the stored form of a new Adaptive row's semantic tuple (§4.2); persisted only on new rows written after the ADR and its schema are authorized. Drift comparability is decided by `comparability_key` (§4.2.1), never by this column alone | **not stored on any existing row**; its `comparability_key` is derived on read from `extractor_revision` (§4.2.1) |
 
 Exact column names and schema are the ADR's decision; the table fixes the semantics.
 
-### 4.2 `extraction_semantics_id`
+### 4.2 The semantic tuple and `extraction_semantics_id`
+
+The semantic identity of an Adaptive extraction is a **tagged tuple** of semantic parts only:
 
 ```text
-extraction_semantics_id = SHA-256( "icbm-extraction-semantics/v1" 0x00
-                                   extractor_revision 0x00
-                                   profile_schema_version-or-empty 0x00
-                                   extraction_profile_digest-or-empty )
+adaptive_semantics = ("ADAPTIVE",
+                      extractor_revision,           # engine semantic revision
+                      profile_schema_version,
+                      extraction_profile_digest)    # covers PTR digests and hook HOOK_REVISIONs,
+                                                    # no implementation fingerprint of any kind
+
+extraction_semantics_id = SHA-256( "icbm-extraction-semantics/v1" ‖ LP(tag) ‖ LP(extractor_revision)
+                                   ‖ LP(profile_schema_version) ‖ LP(extraction_profile_digest) )
+                          # LP(x) = 4-byte big-endian UTF-8 length of x, then x
 ```
 
-- **Profile changes never masquerade as source drift.** Any profile edit is a new EPR digest, so a
-  new `extraction_semantics_id`, so the ADR-0013 pointer move is `EXTRACTOR_CHANGED` and no drift is
+`extraction_semantics_id` is only the **stored form** of the tuple: SHA-256 over a
+domain-separated, length-prefixed encoding. It is collision-resistant, not collision-free, and
+nothing in this design relies on it being injective. Comparability compares tuples (§4.2.1).
+
+- **Profile changes never masquerade as source drift.** Any semantic profile edit is a new EPR
+  digest, so a new tuple, so the ADR-0013 pointer move is `EXTRACTOR_CHANGED` and no drift is
   inferred. No new move reason is needed.
 - **Engine semantic change.** The engine's golden guard (§4.4) forces `extractor_revision` to
-  advance; every profile's semantics id changes with it, and every VALIDATED status lapses (D7).
-- **Implementation fingerprint is excluded** (Q4, accepted in review `5302725919`), matching the
-  ADR-0010 split: a refactor that keeps every golden output keeps comparability. Because the
-  fingerprint is excluded, a *semantic* code change must be **mechanically forced** to advance
-  `extractor_revision`; §4.4 guards 2 and 4 are that force, for the engine and for hooks.
+  advance; every profile's tuple changes with it, and every VALIDATED status lapses (D7).
+- **No implementation fingerprint in the tuple** (Q4, accepted in review `5302725919`, and re-audit
+  `5302852218` item 1): neither `extractor_fingerprint` nor any hook implementation fingerprint
+  enters the tuple, directly or through the EPR digest. An implementation-only change — of the
+  engine or of a hook — keeps comparability; it may lapse VALIDATED and force revalidation (§9),
+  but it is **never by itself `EXTRACTOR_CHANGED`**.
+- **Semantic changes are mechanically forced.** Because no fingerprint is in the tuple, a behaviour
+  change must advance a semantic revision that is: the engine goldens force `extractor_revision`,
+  and the hook goldens force `HOOK_REVISION`, which forces a new EPR (§4.4 guards 2 and 4).
 
 ### 4.2.1 Legacy rows: a read-time compatibility rule, never a backfill (review `5302725919` D2)
 
@@ -235,29 +261,33 @@ extraction_semantics_id = SHA-256( "icbm-extraction-semantics/v1" 0x00
 column value, not to "normalize" provenance. Revisions are append-only source truth (ADR-0010 §6),
 and a migration that touched them would be exactly the historical mutation that rule forbids.
 
-Comparability is instead decided by one pure function over what a row already carries:
+Comparability is instead decided by one pure function over what a row already carries, and it
+returns a **tagged tuple**, not a hash:
 
 ```text
 comparability_key(row) =
-    row.extraction_semantics_id                          when the row carries one (new Adaptive rows)
-    legacy_semantics_id(row.extractor_revision)          otherwise (every row that exists today)
-
-legacy_semantics_id(r) = SHA-256( "icbm-extraction-semantics/v1" 0x00 r 0x00 "" 0x00 "" )
+    ("ADAPTIVE", row.extractor_revision, row.profile_schema_version, row.extraction_profile_digest)
+                                            when the row carries profile provenance (new Adaptive rows)
+    ("CODE", row.extractor_revision)        otherwise (every row that exists today)
 ```
+
+Two revisions are drift-comparable exactly when their `comparability_key` tuples are equal.
 
 - **Deterministic and read-only.** It is computed on read by the comparison owner (the ADR-0013
   pointer-move logic). Nothing is stored for a legacy row.
-- **Identical answers for every existing row.** For a row without profile provenance the key is a
-  pure, injective function of `extractor_revision`, so two legacy rows compare exactly when
-  ADR-0013 §3 compares them today.
-- **No collision between the two populations.** A new Adaptive row always carries a non-empty
-  profile digest and schema version, so its key can never equal a legacy key.
+- **Identical answers for every existing row.** For a row without profile provenance the key is
+  `("CODE", extractor_revision)`, so two legacy rows are equal exactly when their
+  `extractor_revision` strings are equal — the ADR-0013 §3 rule today. No hash is involved.
+- **The two populations are separated by the tag.** A `"CODE"` tuple and an `"ADAPTIVE"` tuple are
+  never equal because their tags and arities differ; this is a structural property of the
+  comparison, not a claim about hash collisions.
 - **New columns are nullable.** Schema that adds the §4.1 provenance adds nullable columns and
   never a default that the database would materialize into old rows. A code-extractor row written
   after the ADR may leave them `NULL`; the rule above then gives the same answer it gives today.
 - **Integrity check, not repair.** Where a new row stores `extraction_semantics_id`, a read-time
-  check recomputes it from the row's own provenance; a mismatch makes that row non-comparable
-  (fail closed) and is reported. The row is never corrected in place.
+  check recomputes it from the row's own semantic tuple; a mismatch makes that row non-comparable
+  (fail closed) and is reported. The row is never corrected in place. The stored id is an integrity
+  and indexing aid; equality of stored ids alone never decides comparability.
 - **Only after authorization.** New Adaptive revisions persist the §4.1 provenance only after the
   ADR and its schema are authorized. Nothing in Phase B stores any of it.
 
@@ -273,18 +303,23 @@ still evaluated. The template switch itself is recorded as a structural observat
 ### 4.4 Guards that replace "reproducible from the repository"
 
 ADR-0010 §12 promises reproduction from the repository. With data-backed interpretation the
-promise becomes: **reproducible from the repository at the engine fingerprint plus the stored
-immutable profile rows the revision names.** The guards:
+promise becomes: **reproducible from the repository at the engine and hook fingerprints the
+revision records, plus the stored immutable profile rows it names.** The fingerprints serve
+reproduction and validation freshness; they are not semantic identity (§4.2). The guards:
 
-1. **Engine pin** — the existing manifest mechanism over the engine package.
+1. **Engine and hook pins** — the existing manifest mechanism over the engine package, and a
+   separate hook manifest per supplier (§8.2).
 2. **Engine goldens** — synthetic fixtures with expected outputs per engine `extractor_revision`,
    so an engine semantic change without a revision advance fails the build. This is what makes the
    Q4 exclusion safe: the fingerprint is not in the identity, but a semantic change cannot land
    without advancing the revision that is.
 3. **Digest recomputation** on every load (§3.3).
-4. **Hook manifest check** — the fingerprint an EPR binds must equal the running supplier manifest,
-   or the bundle is refused. Any hook edit therefore forces a new EPR, a new digest and a new
-   `extraction_semantics_id`; a hook can never change meaning under an unchanged identity.
+4. **Hook goldens and the hook revision check.** Every bound hook has synthetic golden cases with
+   expected outputs recorded under its supplier's `HOOK_REVISION`; a behaviour change without a
+   revision advance fails the build, as the engine goldens do. At load, the `HOOK_REVISION` an EPR
+   binds must equal the running hook manifest's, or the bundle is refused. A semantic hook change
+   therefore forces a new EPR and a new tuple, while an implementation-only hook change (same
+   goldens, same `HOOK_REVISION`, new fingerprint) keeps the tuple and only lapses VALIDATED (§9).
 5. **Clean-tree campaigns** — unchanged (ADR-0010 §12 guard 3).
 
 ---
@@ -373,7 +408,7 @@ A shadow result that is missing must never shrink the evidence into a success.
   An eligible collection is never omitted, excluded as "noise" or retried away; the evidence record
   lists the denominator and each collection's outcome by `collection_run_id`.
 - **A window belongs to one bundle.** A profile fix is a new EPR and a new
-  `extraction_semantics_id` (§4.2), so it opens a new evidence window with a new denominator;
+  semantic tuple and `comparability_key` (§4.2, §4.2.1), so it opens a new evidence window with a new denominator;
   successes under the previous bundle do not carry over.
 
 ---
@@ -430,7 +465,7 @@ Three questions, three owners. This proposal adds the first two and changes noth
 | --- | --- | --- | --- | --- |
 | **Is this profile trustworthy enough to become VALIDATED?** | **profile validation** (proposed `app/collect/profiles/`) | on demand, offline, zero network | one EPR bundle, the engine identity, an approved sample set, the negative-control suite | an immutable `ValidationRun` bound to exact digests (D7) |
 | **Does the page still fit the validated template?** | **structural drift** = template conformance, inside the engine | every extraction, shadow or (later) canonical | the document and the bundle | a conformance record; affected fields fail closed |
-| **Did the source's values change?** | **source-value drift**, `docs/ARCHITECTURE.md` §11 and ADR-0013 §3 | a current source revision pointer move | two revisions with the same `extraction_semantics_id` | unchanged |
+| **Did the source's values change?** | **source-value drift**, `docs/ARCHITECTURE.md` §11 and ADR-0013 §3 | a current source revision pointer move | two revisions with equal `comparability_key` (§4.2.1), the same owner the amended ADR-0013 §3 rule uses | unchanged, except that the comparability condition is `comparability_key` |
 
 ### 7.1 Template matching fails closed
 
@@ -490,9 +525,18 @@ the `EvidenceKind` of the input the hook read and names the hook in provenance. 
 ### 8.2 Where hooks live
 
 `integrations/suppliers/<key>/hooks/`, pure, under `test_supplier_packages_hold_site_knowledge_only`,
-importing nothing but the value models. The supplier's extraction-identity manifest must cover
-`hooks/` as it covers `collect/` today, and the EPR binds each hook with that manifest fingerprint
-(D2 §4.4 guard 4).
+importing nothing but the value models.
+
+- **Their own manifest.** `integrations/suppliers/<key>/hook_identity.py` holds exactly three
+  constants on the ADR-0010 §12 pattern: `HOOK_REVISION` (semantic), `HOOK_INPUTS` (every module of
+  `hooks/`, never the manifest) and `HOOK_FINGERPRINT` (implementation), with the same acyclic,
+  recomputed pin. It is separate from the `collect/` manifest, so a code extractor's identity
+  (`kmretail-1`) is untouched.
+- **What binds where.** The EPR binds `HOOK_REVISION` only, so it enters the EPR digest and the
+  semantic tuple. `HOOK_FINGERPRINT` is recorded on each Adaptive revision as `hook_fingerprint`
+  (§4.1) and in each `ValidationRun`; it never enters a digest that feeds the tuple.
+- **Forcing.** Hook goldens (§4.4 guard 4) make a behaviour change without a `HOOK_REVISION` advance
+  a failing build.
 
 ### 8.3 Anti-growth guards
 
@@ -539,7 +583,7 @@ promotion_group = (hook_point, target, format_class)       # reported beside it,
 | state | how it is entered | may be used for |
 | --- | --- | --- |
 | `DRAFT` | a strict schema parse passes; digest computed; lint findings recorded (an unmapped CORE field is allowed in a DRAFT). Costs no network. | offline evaluation against samples only |
-| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact `(extraction_profile_digest, engine extractor_revision, profile_schema_version, sample-set digest, hook-manifest fingerprints)`. A change to any of them lapses it with no stored flag to forget. | shadow |
+| `VALIDATED` | **derived**: a `PASS` `ValidationRun` exists for this exact freshness tuple `(extraction_profile_digest, profile_schema_version, engine extractor_revision, engine extractor_fingerprint, hook_fingerprint, sample-set digest, capture revision)`. A change to any of them lapses it with no stored flag to forget. The freshness tuple deliberately includes implementation fingerprints; the semantic tuple (§4.2) deliberately does not, so an implementation-only change forces revalidation without being `EXTRACTOR_CHANGED`. | shadow |
 | `SHADOW` | a designation: VALIDATED + the per-supplier shadow switch | shadow comparison (D3) |
 | `ACTIVE` | **not authorized in this track.** Requires a cutover ADR, Phase C evidence and the user's approval; at most one ACTIVE bundle per supplier; each switch is an append-only transition and an `EXTRACTOR_CHANGED` pointer move | canonical revisions (later) |
 | `RETIRED` | explicit transition; never deleted | reading history |
@@ -547,12 +591,18 @@ promotion_group = (hook_point, target, format_class)       # reported beside it,
 ### 9.1 Validation checks (all deterministic, zero network)
 
 - **V1 referential** — every pinned PTR exists and recomputes to its digest; every hook binding
-  resolves; manifests are current.
+  resolves to a running hook manifest whose `HOOK_REVISION` equals the bound one; manifests are
+  current.
 - **V2 coverage** — every CORE field has a rule in every template.
 - **V3 sample agreement** — for each approved sample, the engine output equals the sample's
   expected facts on every must-match dimension of D4. At least one sample per template, at least
   two in total. **Expected facts are authored or verified by the operator from the source — never
   by AI and never by the profile under validation**, or validation would be circular.
+- **V3a conflict scan** — generic, profile-independent detectors (price-like label rows, purchase
+  and sold-out controls, identity declarations, JSON-LD offers) run over the **whole** captured
+  snapshot. Any statement they find that the bundle's locators neither read nor explicitly
+  dispose of is a finding the operator must resolve before PASS, so evidence outside the
+  bundle's attention cannot pass silently.
 - **V4 negative controls** — a login page, a non-product page, and a mutation suite generated
   deterministically from each sample (remove a required anchor, duplicate a price row, inject
   hidden sold-out text, add a second conflicting identity) must fail closed exactly as D5 says.
@@ -566,12 +616,27 @@ promotion_group = (hook_point, target, format_class)       # reported beside it,
 A `ValidationSample` is what V3 and V4 replay. It is **proof material for a profile**, not a
 shadow observation, so it has its own rule.
 
-- **What it is.** A sanitized, product-scoped **structured** snapshot: the engine's parsed element
-  tree restricted to the product-scope regions the bundle declares, with the text, attributes and
-  image references those regions hold, plus the operator-verified expected facts.
+- **What it is.** A sanitized, product-scoped **structured** snapshot — an element tree with its
+  text, attributes and image references — plus the operator-verified expected facts.
+- **Who decides what it contains: an independent capture owner, never the bundle under
+  validation** (re-audit `5302852218` item 3). The snapshot is cut at capture time by:
+  - a **versioned capture sanitizer** (`capture_revision`) with its own parser and its own generic,
+    profile-independent exclusion rules (scripts other than JSON-LD, forms and inputs, account,
+    member, cart and navigation regions, every forbidden category below); and
+  - an **operator-approved product scope**, chosen on the captured page by the operator and recorded
+    with the sample (who, when, the scope boundary) **before** any candidate profile evaluates it.
+    The default scope is the whole document body after the sanitizer's exclusions; the operator may
+    only exclude further regions for privacy, with each exclusion recorded.
+
+  No EPR or PTR, candidate or validated, may define, narrow or filter the snapshot. A candidate
+  bundle only **reads** from it. The sample's provenance names the `capture_revision` and the
+  scope decision, never a profile, and a `ValidationRun` refuses a sample whose provenance names
+  one. A too-narrow operator scope is visible in the recorded boundary, and the V3a conflict scan
+  runs over everything the scope kept.
 - **What it never is or holds.** Never whole authenticated HTML; never cookies, headers, session or
   authorization material; never account, member or page-wide data; never secret-bearing URL
   material (ADR-0010 §8, §9). A snapshot that fails the sanitizer or the secret scan is not saved.
+  These exclusions belong to the capture owner and are unchanged by the scope rule above.
 - **Immutable and content-addressed.** Its digest is over its canonical serialization, and the
   sample-set digest of a `ValidationRun` is over the ordered sample digests. It is never edited;
   a corrected expectation is a new sample.
@@ -682,7 +747,7 @@ reachable gateway; identical input gives identical output.
 | Q1 | names | **ACCEPT**: `ExtractionProfileRevision` (EPR) and `PageTemplateRevision` (PTR); CONNECT `SupplierProfile` and COLLECT `CollectionProfile` stay distinct; add glossary entries | this revision (throughout); §13.1 entries land with the ADR |
 | Q2 | sample and shadow retention | **MODIFY**: two rules, not one. `ValidationSample` = sanitized, product-scoped structured snapshot, immutable, content-addressed, retained while referenced. Shadow records = non-canonical, explicit age + count bounds fixed by the ADR before Phase C. Phase B stays synthetic/fixture-only | §9.2, §5.4 |
 | Q3 | unmatched template on the canonical path | **ACCEPT** for the future cutover ADR; not implemented before it | §7.1 |
-| Q4 | implementation fingerprint in `extraction_semantics_id` | **ACCEPT**: excluded; semantic code changes mechanically forced to advance `extractor_revision` | §4.2, §4.4 |
+| Q4 | implementation fingerprint in `extraction_semantics_id` | **ACCEPT**: excluded; semantic code changes mechanically forced to advance `extractor_revision` — and, per re-audit `5302852218`, no hook implementation fingerprint either, directly or through the EPR digest; hooks are forced through `HOOK_REVISION` | §4.2, §4.4, §8.2 |
 | Q5 | Phase B before the ADR | **CONDITIONAL YES**: isolated, disposable, fixture-only, outside production/runtime packages, no wiring, no DB/schema/migration, no runtime import, no acceptance claim; production-intended code waits for the ADR | §12 |
 | Q6 | Phase D | **ACCEPT**: deferred under `CLAUDE.md` §12 until the first vertical closes or a canonical amendment authorizes it | §11, §12 |
 
@@ -700,8 +765,10 @@ these entries are drafted here and added by the ADR PR:
 | `CollectionProfile` | the **COLLECT access envelope**: product path form, policy paths, explicit image hosts, safe query keys, frozen limits, transport. Repository-reviewed, never widened at run time | ADR-0010 §3, §9 |
 | `ExtractionProfileRevision` (EPR) | an immutable, content-addressed revision of one supplier's **interpretation** — identity rule, vocabularies, image-role rules, hook bindings — pinning a closed set of PTRs by digest. Validated and activated as one bundle | the Adaptive Collector ADR |
 | `PageTemplateRevision` (PTR) | an immutable, content-addressed revision of **one page shape** of a supplier: its signature and per-field locator rules. Never activated alone | the Adaptive Collector ADR |
-| `extraction_semantics_id` / `comparability_key` | the semantic extraction identity drift comparability keys on; for a row without profile provenance it is derived on read from `extractor_revision`, never stored or backfilled | the Adaptive Collector ADR; ADR-0013 §3 as amended |
-| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation; never a whole authenticated page | the Adaptive Collector ADR |
+| `comparability_key` | the tagged semantic tuple that decides drift comparability (ADR-0013 §3 as amended): `("CODE", extractor_revision)` for a row without profile provenance, derived on read and never stored or backfilled; `("ADAPTIVE", …)` for an Adaptive row | the Adaptive Collector ADR; ADR-0013 §3 as amended |
+| `extraction_semantics_id` | the stored, collision-resistant digest of an Adaptive row's semantic tuple; an integrity and indexing aid, never the comparability decision by itself | the Adaptive Collector ADR |
+| `HOOK_REVISION` / `HOOK_FINGERPRINT` | a supplier hook manifest's semantic revision (enters the EPR) and implementation fingerprint (provenance and validation freshness only) | the Adaptive Collector ADR |
+| `ValidationSample` | an operator-verified, sanitized, product-scoped structured snapshot replayed by profile validation, cut by the independent capture owner and never by the profile it validates; never a whole authenticated page | the Adaptive Collector ADR |
 | promotion key | `(hook_point, target)` of a hook binding; shared by two or more suppliers, it requires an architect promotion decision | the Adaptive Collector ADR |
 
 ---
@@ -716,7 +783,7 @@ authorizes no second-supplier read.
 
 ## References
 
-- Issue #110 and kickoff `5811580104`; PR #111 architect review `5302725919`
+- Issue #110 and kickoff `5811580104`; PR #111 architect review `5302725919` and re-audit `5302852218`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9 §13 §14, ADR-0013 §3, ADR-0016 §2 §6
 - `docs/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `docs/acceptance/M3.md` §2
 - `integrations/suppliers/collection.py`, `integrations/suppliers/extraction.py`,
