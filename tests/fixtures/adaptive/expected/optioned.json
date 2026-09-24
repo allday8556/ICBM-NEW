@@ -1,0 +1,20 @@
+{
+  "source_product_id": "SM-6001",
+  "fields": {
+    "original_name": {"status": "CONFIRMED", "value": {"text": "합성마트 선물세트"}},
+    "prices": {"status": "CONFIRMED", "value": {"prices": [{"label": "판매가", "amount_krw": 35000}]}},
+    "options": {"status": "REVIEW_REQUIRED", "value": null},
+    "stock": {"status": "CONFIRMED", "value": {"availability": "ON_SALE"}},
+    "shipping": {"status": "REVIEW_REQUIRED", "value": {"kind": "UNKNOWN", "policy_text": "3만원 이상 무료 / 미만 3,000원", "fee_krw": null, "free_over_krw": null}},
+    "minimum_sale_price": {"status": "ABSENT", "value": null},
+    "quantity_tiers": {"status": "REVIEW_REQUIRED", "value": null},
+    "brand": {"status": "ABSENT", "value": null},
+    "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성선물"}},
+    "origin": {"status": "ABSENT", "value": null},
+    "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조원", "text": "합성선물"}]}},
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "명절 선물용 세트입니다."}}
+  },
+  "images": [
+    ["REPRESENTATIVE", 0, "/goods/sm-6001/cover.jpg"]
+  ]
+}

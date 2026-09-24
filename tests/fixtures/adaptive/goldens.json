@@ -1,0 +1,12 @@
+{
+  "extractor_revision": "adaptive-engine-1",
+  "note": "Engine goldens (ADR-0017 §5.6 guard 2): the extraction digest of each synthetic page under this engine revision. A behaviour change fails this pin until EXTRACTOR_REVISION advances and new goldens are recorded for it.",
+  "extractions": {
+    "on_sale": "d3dc4d23476a5afe3276f1d644dabc920035a031ad9b36f36cccb9d61f4ef6d8",
+    "sold_out": "99fc1b1fb39d4c924288478420c85f0e38b378d285255186ef05b94a32bb95ae",
+    "optioned": "53f98e8f233719535b1a699eb7a8d5e9f97508092d394237e1955d0c2d3a4c4e",
+    "login": "fb757ad0bff93710fbb1eec41c32bcc5afec524ca61a39abaa894890cab0830f",
+    "listing": "fb757ad0bff93710fbb1eec41c32bcc5afec524ca61a39abaa894890cab0830f",
+    "hooked": "416be554f85346548bc7161305e3568234d4fdfd185cf9af704010f0ef3b85cc"
+  }
+}

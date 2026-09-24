@@ -1,0 +1,22 @@
+{
+  "source_product_id": "SM-5001",
+  "fields": {
+    "original_name": {"status": "CONFIRMED", "value": {"text": "합성마트 사과즙 30포"}},
+    "prices": {"status": "CONFIRMED", "value": {"prices": [{"label": "판매가", "amount_krw": 19800}, {"label": "정가", "amount_krw": 24000}]}},
+    "options": {"status": "CONFIRMED", "value": {"axes": [], "configurations": []}},
+    "stock": {"status": "CONFIRMED", "value": {"availability": "ON_SALE"}},
+    "shipping": {"status": "CONFIRMED", "value": {"kind": "FIXED", "policy_text": "2,500원", "fee_krw": 2500, "free_over_krw": null}},
+    "minimum_sale_price": {"status": "ABSENT", "value": null},
+    "quantity_tiers": {"status": "ABSENT", "value": null},
+    "brand": {"status": "CONFIRMED", "value": {"text": "합성농장"}},
+    "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성식품공사"}},
+    "origin": {"status": "CONFIRMED", "value": {"text": "국산"}},
+    "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조원", "text": "합성식품공사"}, {"label": "원산지", "text": "국산"}]}},
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "아침에 한 포씩 드세요."}}
+  },
+  "images": [
+    ["REPRESENTATIVE", 0, "/goods/sm-5001/cover.jpg"],
+    ["DETAIL", 0, "/goods/sm-5001/detail-a.jpg"],
+    ["DETAIL", 1, "/goods/sm-5001/detail-b.jpg"]
+  ]
+}
