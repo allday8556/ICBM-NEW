@@ -70,6 +70,7 @@ class HarnessAuthority:
         intent: Any,
         attempt_no: int,
         endpoint_adopted: bool,
+        scope: Any,
         actor: str,
         correlation_id: str,
     ) -> None:

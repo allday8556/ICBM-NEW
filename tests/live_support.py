@@ -35,6 +35,7 @@ class AdmittingAuthority:
         intent: Any,
         attempt_no: int,
         endpoint_adopted: bool,
+        scope: Any,
         actor: str,
         correlation_id: str,
     ) -> None:
@@ -64,8 +65,12 @@ class PermittedMode:
 class ProvenProofs:
     """Every §5/§7/§8/§9 prerequisite proven, unless a test names one as missing."""
 
-    def __init__(self, *, missing: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self, *, missing: frozenset[str] = frozenset(), accept: set[str] | None = None
+    ) -> None:
         self.missing = missing
+        # When given, a restore proof exists only for exactly these recorded targets (§7).
+        self.accept = accept
         self.restore_targets: list[str] = []
 
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
@@ -73,6 +78,8 @@ class ProvenProofs:
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:
         self.restore_targets.append(target_digest)
+        if self.accept is not None:
+            return target_digest in self.accept
         return "restore" not in self.missing
 
     def evidence_retention_ready(self) -> bool:

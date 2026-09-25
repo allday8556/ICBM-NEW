@@ -446,3 +446,72 @@ def test_an_asset_grant_binds_only_the_current_preparation_revision(
         )
     assert refused.value.code == "LIVE_GRANT_PREPARATION_NOT_CURRENT"
     assert count(container.config, "live_grants") == 0
+
+
+def test_a_section_26_scope_change_stales_the_create_restore_target(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Review 5827905179 control 3: a pause and a resume leave the scope ACTIVE again, with a new
+    # generation — the CREATE proof taken before it must not gate the CREATE.
+    from app.register.execution import CREATE_ENDPOINT_GROUP
+    from app.register.model import OPERATOR_RESUMABLE
+
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    create_grant(container, ready.intent_id)
+    intent = store.intent(ready.intent_id)
+    assert intent is not None
+
+    def target() -> str:
+        proofs = ProvenProofs()
+        stack = SafetyStack(
+            store=LiveAuthorityStore(container.db, container.clock, container.audit),
+            mode=PermittedMode(),
+            proofs=proofs,
+            clock=container.clock,
+        )
+        stack.create_readiness(
+            intent,
+            attempt_no=1,
+            endpoint_adopted=True,
+            scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
+        )
+        return proofs.restore_targets[-1]
+
+    before = target()
+    _pause(store, account, CREATE_ENDPOINT_GROUP)
+    with store.transaction() as unit:
+        unit.resume_scope(
+            MARKET,
+            account,
+            CREATE_ENDPOINT_GROUP,
+            actor="operator",
+            reason="OPERATOR_REVIEWED",
+            correlation_id=CID,
+            allowed_reasons=OPERATOR_RESUMABLE,
+        )
+    after = target()
+    assert after != before
+    stale = SafetyStack(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        mode=PermittedMode(),
+        proofs=ProvenProofs(accept={before}),
+        clock=container.clock,
+    )
+    run = execution(container, prep, authority=stale)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    assert refused.value.code == live_model.RESTORE_PROOF_ABSENT
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    fresh = SafetyStack(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        mode=PermittedMode(),
+        proofs=ProvenProofs(accept={after}),
+        clock=container.clock,
+    )
+    result = execution(container, prep, authority=fresh).service.run(context(ready))
+    assert result.intent_state is IntentState.CONFIRMED

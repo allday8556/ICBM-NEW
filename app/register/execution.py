@@ -145,6 +145,7 @@ class CreateAuthority(Protocol):
         intent: IntentRecord,
         attempt_no: int,
         endpoint_adopted: bool,
+        scope: ScopeRecord,
         actor: str,
         correlation_id: str,
     ) -> Any: ...
@@ -664,6 +665,12 @@ class RegistrationExecutionService:
                     intent=intent,
                     attempt_no=attempt.attempt_no,
                     endpoint_adopted=self._sender.available(),
+                    # §7: the §26 brake as its owner reads it in this unit is part of the target.
+                    scope=unit.execution_scope(
+                        intent.marketplace_key,
+                        intent.marketplace_account_id,
+                        self._policy.endpoint_group,
+                    ),
                     actor=self._actor,
                     correlation_id=correlation_id,
                 )

@@ -68,7 +68,7 @@ from app.live.store import (
     UploadAttemptRecord,
     UploadProvenance,
 )
-from app.register.store import IntentRecord
+from app.register.store import IntentRecord, ScopeRecord
 
 # A second selection of the same outbound bytes in one unit: one upload may serve it only through
 # a reuse/rebind path, which is not adopted. The liveness limit is reported, never hidden.
@@ -198,13 +198,16 @@ class SafetyStack:
         intent: IntentRecord,
         attempt_no: int,
         endpoint_adopted: bool,
+        scope: ScopeRecord,
         actor: str,
         correlation_id: str,
     ) -> GrantRecord:
         """Admit one CREATE attempt inside the unit that opens it, and spend its grant.
 
         The grant must name this exact Snapshot, Intent, idempotency key **and attempt number**:
-        after a ``NOT_APPLIED_PROVEN`` attempt the next attempt needs a new grant (G3-27).
+        after a ``NOT_APPLIED_PROVEN`` attempt the next attempt needs a new grant (G3-27). ``scope``
+        is ADR-0014 §26's execution-scope brake as its owner reads it in this same unit: its state
+        and generation are part of the restore target a CREATE proof must match (§7).
         """
         unit = self._store.unit(session)
         grant = self._create_grant(unit, intent, attempt_no)
@@ -212,7 +215,7 @@ class SafetyStack:
             unit,
             MutationStage.CREATE,
             unit_ref=f"registration_intent:{intent.intent_id}",
-            target_digest=_create_digest(intent, attempt_no),
+            target_digest=_create_digest(intent, attempt_no, scope),
             endpoint_adopted=endpoint_adopted,
         )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
@@ -221,7 +224,12 @@ class SafetyStack:
         return unit.consume(grant.grant_id, actor=actor, correlation_id=correlation_id)
 
     def create_readiness(
-        self, intent: IntentRecord, *, attempt_no: int, endpoint_adopted: bool
+        self,
+        intent: IntentRecord,
+        *,
+        attempt_no: int,
+        endpoint_adopted: bool,
+        scope: ScopeRecord,
     ) -> StageReadiness:
         with self._store.reading() as unit:
             grant = self._create_grant(unit, intent, attempt_no)
@@ -229,7 +237,7 @@ class SafetyStack:
                 unit,
                 MutationStage.CREATE,
                 unit_ref=f"registration_intent:{intent.intent_id}",
-                target_digest=_create_digest(intent, attempt_no),
+                target_digest=_create_digest(intent, attempt_no, scope),
                 endpoint_adopted=endpoint_adopted,
             )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
@@ -377,19 +385,16 @@ class SafetyStack:
             and grant.marketplace_account_id == target.key.marketplace_account_id
             and grant.preparation_revision_id == target.candidate.preparation_revision_id
         )
+        try:
+            target_digest = _asset_digest(unit, target, grant)
+        except SQLAlchemyError:
+            # No readable attempt truth, no restore target: never inferred from row absence.
+            target_digest = ""
         layers = self._common(
             unit,
             MutationStage.ASSET,
             unit_ref=f"preparation_revision:{target.candidate.preparation_revision_id}",
-            target_digest=_digest(
-                {
-                    "preparation_revision_id": target.candidate.preparation_revision_id,
-                    "candidate_fingerprint": target.candidate.fingerprint,
-                    "artifact_set_digest": None if grant is None else _artifacts_digest(grant),
-                    "asset_profile": None if grant is None else grant.asset_profile,
-                    "replay_key": target.key.digest,
-                }
-            ),
+            target_digest=target_digest,
             endpoint_adopted=target.endpoint_adopted,
         )
         layers.insert(2, _layer(Layer.GRANT, matching, GRANT_MISSING))
@@ -544,15 +549,61 @@ def _unresolved_elsewhere(unit: LiveUnit, key: ReplayKey, grant: GrantRecord | N
     return False
 
 
-def _create_digest(intent: IntentRecord, attempt_no: int) -> str:
-    """The CREATE target state a restore proof must match: stale once any of it moves (§7)."""
+def _create_digest(intent: IntentRecord, attempt_no: int, scope: ScopeRecord) -> str:
+    """The CREATE restore target (§7): the Snapshot, the Intent with its state and idempotency
+    key, the attempt it would open, and ADR-0014 §26's execution-scope brake with its state and
+    generation. A proof is stale once any of it moves — a pause and a later resume included."""
     return _digest(
         {
             "registration_snapshot_id": intent.registration_snapshot_id,
             "intent_id": intent.intent_id,
             "idempotency_key": intent.idempotency_key,
             "state": intent.state.value,
+            "remote_outcome": (
+                None if intent.remote_outcome is None else intent.remote_outcome.value
+            ),
             "attempt_no": attempt_no,
+            "scope": {
+                "marketplace_key": scope.marketplace_key,
+                "marketplace_account_id": scope.marketplace_account_id,
+                "endpoint_group": scope.endpoint_group,
+                "state": scope.state.value,
+                "pause_reason": None if scope.pause_reason is None else scope.pause_reason.value,
+                "paused_at": scope.paused_at,
+                "resume_generation": scope.resume_generation,
+                "resumed_at": scope.resumed_at,
+            },
+        }
+    )
+
+
+def _asset_digest(unit: LiveUnit, target: "AssetTarget", grant: GrantRecord | None) -> str:
+    """The ASSET restore target (§7): the preparation revision, candidate, artifact set and
+    profile, and **for every selected artifact** its replay key with the durable attempt history
+    of its whole replay-conflict scope — whatever grant, candidate or profile each attempt was
+    started under. A readable owner with no attempt records an explicit empty history; an
+    unreadable owner raises, and no target exists at all."""
+    artifacts = () if grant is None else grant.artifacts
+    endpoint = target.key.endpoint
+    scopes: dict[str, Any] = {}
+    for artifact in artifacts or (target.artifact,):
+        key = replace(target.key, content_sha256=artifact.sha256)
+        scopes[key.digest] = {
+            "content_sha256": key.content_sha256,
+            "attempts": [
+                [a.attempt_id, a.attempt_no, a.state.value, a.finished_at]
+                for a in unit.attempts(key.digest)
+            ],
+        }
+    return _digest(
+        {
+            "preparation_revision_id": target.candidate.preparation_revision_id,
+            "candidate_fingerprint": target.candidate.fingerprint,
+            "artifact_set_digest": None if grant is None else _artifacts_digest(grant),
+            "asset_profile": None if grant is None else grant.asset_profile,
+            "endpoint": [endpoint.method, endpoint.host, endpoint.path],
+            "account": [target.key.marketplace_key, target.key.marketplace_account_id],
+            "replay_scopes": scopes,
         }
     )
 

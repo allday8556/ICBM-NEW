@@ -885,3 +885,79 @@ def _only_key(container: Container) -> str:
     with sqlite3.connect(container.config.data_dir / "runtime" / "icbm.db") as raw:
         (key,) = raw.execute("SELECT replay_key FROM asset_upload_attempts").fetchone()
     return str(key)
+
+
+# ---------------------------------------------------------------- restore targets (§7)
+
+
+def test_a_proven_non_application_changes_the_asset_restore_target(
+    container: Container, account: str
+) -> None:
+    # Review 5827905179 control 1: the proof taken for state S0 never admits the retry.
+    grant_id = grant(container, account, [DERIVED_A], budget=2)
+    release(container)
+    recording = ProvenProofs()
+    first, _ = uploads(
+        container,
+        sender=ScriptedSender(script=[TransmissionPrecluded("refused locally")]),
+        proofs=recording,
+    )
+    assert first.upload(request(grant_id, DERIVED_A)).attempt.state is (
+        UploadAttemptState.NOT_APPLIED_PROVEN
+    )
+    before = recording.restore_targets[-1]
+    stale, sender = uploads(
+        container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={before})
+    )
+    refused(live_model.RESTORE_PROOF_ABSENT, lambda: stale.upload(request(grant_id, DERIVED_A)))
+    assert sender.calls == []
+    now = ProvenProofs()
+    reader, _ = uploads(container, proofs=now)
+    reader.readiness(grant_id)
+    after = now.restore_targets[-1]
+    assert after != before
+    fresh, fresh_sender = uploads(
+        container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={after})
+    )
+    assert fresh.upload(request(grant_id, DERIVED_A)).prepared is not None
+    assert len(fresh_sender.calls) == 1
+
+
+def test_another_selected_artifacts_replay_state_stales_the_asset_restore_target(
+    container: Container, account: str
+) -> None:
+    # Review 5827905179 control 2: B's new replay state stales the target taken before A.
+    grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
+    release(container)
+    recording = ProvenProofs()
+    reader, _ = uploads(container, proofs=recording)
+    reader.readiness(grant_id)
+    before = recording.restore_targets[-1]
+    service, _ = uploads(container, sender=ScriptedSender(script=[applied(REF_B)]))
+    assert service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).prepared
+    stale, sender = uploads(
+        container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={before})
+    )
+    refused(live_model.RESTORE_PROOF_ABSENT, lambda: stale.upload(request(grant_id, DERIVED_A)))
+    assert sender.calls == []
+
+
+def test_an_unreadable_attempt_owner_yields_no_restore_target(
+    container: Container, account: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Review 5827905179 control 4: no readable attempt truth, no current restore target.
+    grant_id = grant(container, account, [DERIVED_A])
+    release(container)
+    proofs = ProvenProofs()
+    service, sender = uploads(container, sender=ScriptedSender(script=[applied()]), proofs=proofs)
+
+    def unreadable(self: LiveUnit, key: Any) -> Any:
+        raise OperationalError("SELECT", {}, Exception("disk I/O error"))
+
+    monkeypatch.setattr(LiveUnit, "attempts", unreadable)
+    refusal = refused(
+        live_model.RESTORE_PROOF_ABSENT, lambda: service.upload(request(grant_id, DERIVED_A))
+    )
+    reasons = {layer["reason"] for layer in refusal.details["layers"]}
+    assert live_model.ATTEMPT_OWNER_UNREADABLE in reasons
+    assert proofs.restore_targets == [] and sender.calls == []
