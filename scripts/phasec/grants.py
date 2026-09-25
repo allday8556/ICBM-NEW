@@ -6,7 +6,7 @@ names the campaign, its exact code SHA, the stage, the authorization comment id 
 scope:
 
 * **C0**: the frozen C0 ceilings. Its authorization is pinned in this audited code
-  (``5826469852``); a campaign is created only under it.
+  (``issuecomment-5826469852``); a campaign is created only under it.
 * **C1**: the supplier, exactly two distinct target digests and the frozen C1 ceilings.
 * **C2**: the exact EPR, sample set and PASS ValidationRun this campaign's own C1 recorded, and
   the window size K = 3.
@@ -27,7 +27,7 @@ from scripts.phasec.ceilings import CEILINGS, STAGES
 from scripts.phasec.ledger import AUTHORIZATION, Campaign, LedgerRefused, sha256
 
 GRANT_SCHEMA = "icbm-adaptive-phase-c-grant/v1"
-C0_AUTHORIZATION = "5826469852"  # Issue #110: the C0 tooling authorization
+C0_AUTHORIZATION = "issuecomment-5826469852"  # Issue #110: the C0 tooling authorization
 FIELDS = frozenset({"schema", "campaign_id", "code_sha", "stage", "authorization", "scope"})
 SCOPE_FIELDS: Mapping[str, frozenset[str]] = {
     "C0": frozenset({"ceilings"}),
@@ -98,9 +98,17 @@ def check_grant(campaign: Campaign, grant: Any) -> dict[str, Any]:
         )
     authorization = grant["authorization"]
     if not isinstance(authorization, str) or not AUTHORIZATION.fullmatch(authorization):
-        raise GrantRefused("a grant names the numeric id of its authorization comment")
-    if any(int(authorization) <= int(g.authorization) for g in campaign.grants.values()):
-        raise GrantRefused("a grant's authorization is newer than every grant before it")
+        raise GrantRefused(
+            "a grant names its authorization as issuecomment-<id> or pullrequestreview-<id>"
+        )
+    kind, number = authorization.split("-")
+    if any(
+        g.authorization.split("-")[0] == kind and int(number) <= int(g.authorization.split("-")[1])
+        for g in campaign.grants.values()
+    ):
+        raise GrantRefused(
+            "a grant's authorization is newer than every grant before it of the same kind"
+        )
     scope = grant["scope"]
     if not isinstance(scope, dict) or set(scope) != SCOPE_FIELDS[stage]:
         raise GrantRefused(f"a {stage} scope holds exactly {sorted(SCOPE_FIELDS[stage])}")

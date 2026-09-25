@@ -368,7 +368,12 @@ def test_the_frozen_capture_and_its_candidate_read_back_after_a_restart(
 
 # ================================================================ the harness
 
-C1_AUTH, C2_AUTH, C3_AUTH, C4_AUTH = "5900000001", "5900000002", "5900000003", "5900000004"
+C1_AUTH, C2_AUTH, C3_AUTH, C4_AUTH = (
+    "issuecomment-5900000001",
+    "issuecomment-5900000002",
+    "issuecomment-5900000003",
+    "issuecomment-5900000004",
+)
 OTHER_TARGET = "f" * 64
 
 
@@ -470,7 +475,7 @@ class Harness:
         )
 
 
-C0 = "5826469852"
+C0 = "issuecomment-5826469852"
 
 
 def refused(result: tuple[int, Any], why: str) -> None:
@@ -624,7 +629,7 @@ def test_a_second_command_on_the_same_campaign_fails_campaign_in_use(harness: Ha
 
 
 def test_stages_open_only_by_typed_grants_once_each_and_in_order(
-    harness: Harness, config: AppConfig
+    harness: Harness, config: AppConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Review 5313663701 B2: a stage is a typed grant, not a numeric self-assertion.
     target = harness.target()
@@ -633,7 +638,10 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
         harness.authorize("C2", C1_AUTH, **c2_scope(C1("r", "s" * 64, "e" * 64, "v"))),
         "next stage of this campaign is C1",
     )
-    refused(harness.authorize("C1", "1111111", **c1_scope(target)), "newer than every grant")
+    refused(
+        harness.authorize("C1", "issuecomment-1111111", **c1_scope(target)),
+        "newer than every grant",
+    )
     refused(
         harness.authorize("C1", C1_AUTH, supplier_key=SUPPLIER_KEY, target_digests=[target]),
         "exactly 2 distinct sorted target digests",
@@ -653,10 +661,20 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
         harness("authorize-stage", "--grant", str(path), approve=harness.phrase("authorize-stage")),
         "approval phrase",
     )
+    # The grant file is read once: the phrase is checked against, and the ledger records, it.
+    reads: list[Path] = []
+    real_load = harness_module._load_grant
+
+    def counted(grant_path: Path) -> Any:
+        reads.append(grant_path)
+        return real_load(grant_path)
+
+    monkeypatch.setattr(harness_module, "_load_grant", counted)
     assert harness.ledger().campaign().current_stage == "C0"
     code, result = harness.authorize("C1", C1_AUTH, **c1_scope(target))
     assert code == EXIT_OK, result
-    refused(harness.authorize("C1", "5900000009", **c1_scope(target)), "next stage")
+    assert len(reads) == 1, reads
+    refused(harness.authorize("C1", "issuecomment-5900000009", **c1_scope(target)), "next stage")
     code, result = harness(
         "request-capture", "--supplier", SUPPLIER_KEY, "--target-url", PRODUCT_URL, approve="no"
     )
@@ -900,8 +918,10 @@ def test_a_campaign_is_created_only_under_the_pinned_c0_authorization(
     shop: FakeGateway,
 ) -> None:
     h = Harness(campaign_root, config.data_dir, environ, clock, shop)
-    code, result = h("init", "--campaign-id", CAMPAIGN, "--authorization", "5826469853")
-    assert code == EXIT_REFUSED and "C0 authorization 5826469852" in result["refused"]
+    code, result = h(
+        "init", "--campaign-id", CAMPAIGN, "--authorization", "issuecomment-5826469853"
+    )
+    assert code == EXIT_REFUSED and "C0 authorization issuecomment-5826469852" in result["refused"]
     assert not (campaign_root / "campaign.sqlite3").exists()
 
 

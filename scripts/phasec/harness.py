@@ -202,6 +202,9 @@ def run(
         _require_exact_code(ledger.campaign(), code_sha)
         with ledger.writer():
             campaign = ledger.campaign()
+            if args.command == "authorize-stage":
+                # Read once: the phrase is checked against, and the ledger records, this object.
+                args.grant_document = _load_grant(args.grant)
             _gate(campaign, args, spec)
             if not spec.data_root:
                 return _authorize_stage(ledger, campaign, args, out)
@@ -253,7 +256,7 @@ def _load_grant(path: Path) -> Any:
 def phrase_for(campaign: Campaign, args: argparse.Namespace) -> str:
     """The exact approval phrase this command needs."""
     if args.command == "authorize-stage":
-        grant = _load_grant(args.grant)
+        grant = args.grant_document
         stage = grant.get("stage") if isinstance(grant, dict) else None
         return approval_phrase(campaign, args.command, f"{stage} GRANT {grant_digest(grant)[:16]}")
     return approval_phrase(campaign, args.command)
@@ -281,7 +284,7 @@ def _authorize_stage(
     ledger: CampaignLedger, campaign: Campaign, args: argparse.Namespace, out: TextIO
 ) -> int:
     assert args.command == "authorize-stage"
-    grant = check_grant(campaign, _load_grant(args.grant))
+    grant = check_grant(campaign, args.grant_document)
     event = ledger.authorize(
         grant,
         actor=_actor(args),

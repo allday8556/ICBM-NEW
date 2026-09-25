@@ -10,6 +10,9 @@ the accepted M3 campaign-ledger pattern:
   ``<campaign-root>/campaign.lock`` (``msvcrt.locking`` / ``fcntl.flock``); a second command on the
   same campaign fails ``CAMPAIGN_IN_USE`` before it reads or writes anything else.
 * **Append-only.** Triggers refuse every UPDATE and DELETE. Events are hash-chained as well.
+* **Crash recovery.** A read opens the file normally with ``query_only`` on, so SQLite itself
+  rolls back a hot journal a crashed write left behind; a read-only open could not, and would
+  leave the campaign unreadable.
 * **Tamper and tail-loss evident.** Every read verifies that the stored schema is exactly the one
   this module creates (a dropped trigger is detected), that the event and reservation sequences
   run 1..n up to SQLite's own high-water mark (a removed tail is detected), and the hash chain.
@@ -48,8 +51,10 @@ LOCK = "campaign.lock"
 SCHEMA = "icbm-adaptive-phase-c-campaign/v2"
 GENESIS = "0" * 64
 CAMPAIGN_ID = re.compile(r"^phase-c-[a-z0-9][a-z0-9-]{2,40}$")
-# A GitHub comment id: numeric, and small enough for SQLite's own integer comparison.
-AUTHORIZATION = re.compile(r"^[1-9][0-9]{5,17}$")
+# An architect authorization, named as its GitHub anchor: an issue comment or a pull-request
+# review. The two id sequences are separate, so ids are compared only within one kind; the number is
+# small enough for SQLite's own integer comparison.
+AUTHORIZATION = re.compile(r"^(issuecomment|pullrequestreview)-[1-9][0-9]{5,17}$")
 INTENDED = "INTENDED"
 ACTION_REFUSED = "ACTION_REFUSED"
 
@@ -116,7 +121,10 @@ CREATE TRIGGER grants_in_order BEFORE INSERT ON grants BEGIN
     SELECT RAISE(ABORT, 'AUTHORIZATION_NOT_NEWER')
         WHERE EXISTS (
             SELECT 1 FROM grants
-            WHERE CAST(authorization AS INTEGER) >= CAST(NEW.authorization AS INTEGER)
+            WHERE substr(authorization, 1, instr(authorization, '-'))
+                    = substr(NEW.authorization, 1, instr(NEW.authorization, '-'))
+                AND CAST(substr(authorization, instr(authorization, '-') + 1) AS INTEGER)
+                    >= CAST(substr(NEW.authorization, instr(NEW.authorization, '-') + 1) AS INTEGER)
         );
 END;
 CREATE TRIGGER reservations_guard BEFORE INSERT ON reservations BEGIN
@@ -311,11 +319,13 @@ class CampaignLedger:
 
     @contextmanager
     def _read(self) -> Iterator[sqlite3.Connection]:
-        """A read-only connection; a file SQLite cannot read is refused, never a crash."""
+        """A connection that writes nothing (``query_only``) yet can still roll back the hot journal
+        of a crashed write; a file SQLite cannot read is refused, never a crash."""
         if not self.path.is_file():
             raise LedgerRefused("no campaign ledger in this campaign root")
         try:
-            with closing(sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)) as db:
+            with closing(sqlite3.connect(self.path, isolation_level=None)) as db:
+                db.execute("PRAGMA query_only=ON")
                 yield db
         except sqlite3.DatabaseError:
             raise LedgerRefused("the campaign ledger cannot be read as its own schema") from None
@@ -580,7 +590,12 @@ class CampaignLedger:
     ) -> dict[str, Any]:
         """Record one stage grant that ``grants.check_grant`` already admitted."""
         with self._transaction() as db:
-            self._verify(db)
+            campaign = self._verify(db)
+            if any(event["correlation_id"] == correlation_id for event in campaign.events):
+                raise LedgerRefused(
+                    "a correlation names one action of this campaign",
+                    code="PHASE_C_CORRELATION_REUSED",
+                )
             return self._authorize(db, grant, actor, correlation_id)
 
     def intend(

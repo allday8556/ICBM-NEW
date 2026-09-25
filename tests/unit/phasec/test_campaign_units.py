@@ -10,6 +10,8 @@ behaviour without a supplier read.
 import contextlib
 import re
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -76,7 +78,8 @@ def grant(stage: str, authorization: str, **scope: Any) -> dict[str, Any]:
 
 def open_c1(ledger: CampaignLedger) -> None:
     checked = check_grant(
-        ledger.campaign(), grant("C1", "5900000001", supplier_key="s", target_digests=TARGETS)
+        ledger.campaign(),
+        grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS),
     )
     ledger.authorize(checked, actor="op", correlation_id="c1")
 
@@ -107,8 +110,8 @@ def test_a_campaign_freezes_its_identity_code_and_ceilings_and_grants_only_c0(
             c0_grant=c0_grant(CAMPAIGN, SHA, C0_AUTHORIZATION),
             actor="op",
         )
-    with pytest.raises(GrantRefused, match="5826469852"):
-        c0_grant(CAMPAIGN, SHA, "5826469853")
+    with pytest.raises(GrantRefused, match="issuecomment-5826469852"):
+        c0_grant(CAMPAIGN, SHA, "issuecomment-5826469853")
 
 
 def test_every_write_is_durable_and_needs_the_writer_lock(
@@ -200,19 +203,34 @@ def test_the_ceilings_are_those_review_5312911203_froze() -> None:
 def test_stages_advance_once_each_in_order_by_typed_grants(ledger: CampaignLedger) -> None:
     campaign = ledger.campaign()
     for bad, why in (
-        (grant("C2", "5900000001"), "next stage of this campaign is C1"),
-        (grant("C1", "1111111", supplier_key="s", target_digests=TARGETS), "newer"),
-        (grant("C1", "5900000001", supplier_key="s", target_digests=TARGETS[:1]), "exactly 2"),
-        (grant("C1", "5900000001", supplier_key="s", target_digests=TARGETS[::-1]), "sorted"),
-        (grant("C1", "5900000001", supplier_key="s"), "scope holds exactly"),
-        (grant("C1", "see-thread", supplier_key="s", target_digests=TARGETS), "numeric id"),
-        ({**grant("C1", "5900000001"), "code_sha": "b" * 40}, "another exact code SHA"),
-        ({**grant("C1", "5900000001"), "campaign_id": "phase-c-other"}, "another campaign"),
-        ({**grant("C1", "5900000001"), "extra": 1}, "a grant holds exactly"),
+        (grant("C2", "issuecomment-5900000001"), "next stage of this campaign is C1"),
+        (grant("C1", "issuecomment-1111111", supplier_key="s", target_digests=TARGETS), "newer"),
+        (
+            grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS[:1]),
+            "exactly 2",
+        ),
+        (
+            grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS[::-1]),
+            "sorted",
+        ),
+        (grant("C1", "issuecomment-5900000001", supplier_key="s"), "scope holds exactly"),
+        (
+            grant("C1", "see-thread", supplier_key="s", target_digests=TARGETS),
+            "issuecomment-<id> or pullrequestreview-<id>",
+        ),
+        (
+            {**grant("C1", "issuecomment-5900000001"), "code_sha": "b" * 40},
+            "another exact code SHA",
+        ),
+        (
+            {**grant("C1", "issuecomment-5900000001"), "campaign_id": "phase-c-other"},
+            "another campaign",
+        ),
+        ({**grant("C1", "issuecomment-5900000001"), "extra": 1}, "a grant holds exactly"),
     ):
         with pytest.raises(GrantRefused, match=why):
             check_grant(campaign, bad)
-    wide = grant("C1", "5900000001", supplier_key="s", target_digests=TARGETS)
+    wide = grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS)
     wide["scope"]["ceilings"] = {**CEILINGS["C1"], "product_reads": 40}
     with pytest.raises(GrantRefused, match="frozen C1 ceilings"):
         check_grant(campaign, wide)
@@ -221,7 +239,7 @@ def test_stages_advance_once_each_in_order_by_typed_grants(ledger: CampaignLedge
     with pytest.raises(GrantRefused, match="next stage of this campaign is C2"):
         check_grant(
             ledger.campaign(),
-            grant("C1", "5900000002", supplier_key="s", target_digests=TARGETS),
+            grant("C1", "issuecomment-5900000002", supplier_key="s", target_digests=TARGETS),
         )
 
 
@@ -230,10 +248,10 @@ def test_the_grants_table_enforces_the_order_even_without_the_checks(
 ) -> None:
     # Bypassing check_grant, the table still refuses a skipped stage and an older authorization.
     with pytest.raises(LedgerRefused) as skipped:
-        ledger.authorize(grant("C2", "5900000001"), actor="op", correlation_id="x")
+        ledger.authorize(grant("C2", "issuecomment-5900000001"), actor="op", correlation_id="x")
     assert skipped.value.code == "STAGE_OUT_OF_ORDER"
     with pytest.raises(LedgerRefused) as older:
-        ledger.authorize(grant("C1", "5800000000"), actor="op", correlation_id="y")
+        ledger.authorize(grant("C1", "issuecomment-5800000000"), actor="op", correlation_id="y")
     assert older.value.code == "AUTHORIZATION_NOT_NEWER"
     assert ledger.campaign().current_stage == "C0"
 
@@ -248,7 +266,7 @@ def test_a_c2_grant_names_only_this_campaigns_own_pass_validation(ledger: Campai
         "window_min_size": 3,
     }
     with pytest.raises(GrantRefused, match="own C1 recorded"):
-        check_grant(ledger.campaign(), grant("C2", "5900000002", **scope))
+        check_grant(ledger.campaign(), grant("C2", "issuecomment-5900000002", **scope))
     ledger.intend("validate", actor="op", correlation_id="v", payload={})
     ledger.record(
         "VALIDATE",
@@ -258,8 +276,10 @@ def test_a_c2_grant_names_only_this_campaigns_own_pass_validation(ledger: Campai
     )
     for wrong in ({"validation_run_id": "run-2"}, {"window_min_size": 4}, {"supplier_key": "t"}):
         with pytest.raises(GrantRefused):
-            check_grant(ledger.campaign(), grant("C2", "5900000002", **{**scope, **wrong}))
-    checked = check_grant(ledger.campaign(), grant("C2", "5900000002", **scope))
+            check_grant(
+                ledger.campaign(), grant("C2", "issuecomment-5900000002", **{**scope, **wrong})
+            )
+    checked = check_grant(ledger.campaign(), grant("C2", "issuecomment-5900000002", **scope))
     ledger.authorize(checked, actor="op", correlation_id="c2")
     assert ledger.campaign().grants["C2"].scope["epr_digest"] == "e" * 64
 
@@ -437,3 +457,62 @@ def test_a_damaged_ledger_file_is_refused_not_a_crash(ledger: CampaignLedger) ->
         ledger.campaign()
     with pytest.raises(LedgerRefused):
         ledger.intend("x", actor="op", correlation_id="k", payload={})
+
+
+def test_a_write_that_crashed_midway_is_rolled_back_and_the_campaign_still_reads(
+    ledger: CampaignLedger,
+) -> None:
+    # Self-review of 5313663701 B4: a crash mid-transaction leaves a hot journal behind. A
+    # read-only open cannot roll it back and would leave the campaign unreadable for good.
+    open_c1(ledger)
+    before = ledger.campaign()
+    crash = (
+        "import os, sqlite3\n"
+        f"db = sqlite3.connect({str(ledger.path)!r}, isolation_level=None)\n"
+        "db.execute('PRAGMA cache_size=1')\n"
+        "db.execute('BEGIN IMMEDIATE')\n"
+        "for i in range(20000):\n"
+        '    db.execute("INSERT INTO refusals (at, stage, class, reason, correlation_id)'
+        " VALUES ('t', 'C1', 'x', 'y', 'z')\")\n"
+        "os._exit(1)\n"
+    )
+    subprocess.run([sys.executable, "-c", crash], check=False)
+    assert Path(f"{ledger.path}-journal").exists(), "the crash left a hot journal"
+    assert ledger.campaign() == before
+    assert ledger.refusals() == [], "the crashed write never happened"
+    assert not Path(f"{ledger.path}-journal").exists()
+    ledger.intend("x", actor="op", correlation_id="after-crash", payload={})
+
+
+def test_authorizations_are_newer_only_within_their_own_kind(ledger: CampaignLedger) -> None:
+    # Issue comments and pull-request reviews are separate GitHub id sequences.
+    review = grant("C1", "pullrequestreview-5313663701", supplier_key="s", target_digests=TARGETS)
+    ledger.authorize(check_grant(ledger.campaign(), review), actor="op", correlation_id="c1")
+    older = {
+        "supplier_key": "s",
+        "epr_digest": "e" * 64,
+        "sample_digests": ["5" * 64],
+        "validation_run_id": "run-1",
+        "window_min_size": 3,
+    }
+    with pytest.raises(GrantRefused, match="same kind"):
+        check_grant(ledger.campaign(), grant("C2", "pullrequestreview-5313663700", **older))
+    with pytest.raises(LedgerRefused) as table:
+        ledger.authorize(
+            grant("C2", "issuecomment-5826469851"), actor="op", correlation_id="c2-older"
+        )
+    assert table.value.code == "AUTHORIZATION_NOT_NEWER"
+    assert ledger.campaign().authorized["C1"] == "pullrequestreview-5313663701"
+
+
+def test_a_stage_grant_never_reuses_a_correlation(ledger: CampaignLedger) -> None:
+    ledger.intend("x", actor="op", correlation_id="k", payload={})
+    ledger.record("X", actor="op", correlation_id="k", payload={})
+    checked = check_grant(
+        ledger.campaign(),
+        grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS),
+    )
+    with pytest.raises(LedgerRefused) as reused:
+        ledger.authorize(checked, actor="op", correlation_id="k")
+    assert reused.value.code == "PHASE_C_CORRELATION_REUSED"
+    assert ledger.campaign().current_stage == "C0"
