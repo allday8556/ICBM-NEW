@@ -8,6 +8,7 @@ revision-history and review documents legitimately keep older prototype names.
 import argparse
 import ast
 import hashlib
+import inspect
 import re
 from pathlib import Path
 
@@ -32,6 +33,9 @@ OWNERSHIP_ADR = DOCS / "adr" / "0006-single-data-directory-process-ownership.md"
 REVIEW_ADR = DOCS / "adr" / "0016-gate2-human-review-path-and-review-item-owner.md"
 ADAPTIVE_ADR = DOCS / "adr" / "0017-adaptive-collector-profile-extraction-and-shadow-validation.md"
 ADAPTIVE_PROPOSAL = DOCS / "review" / "ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md"
+LIVE_ADR = DOCS / "adr" / "0018-gate3-pre-live-safety-and-bounded-live-authorization.md"
+M5_ACCEPTANCE = DOCS / "acceptance" / "M5.md"
+GLOSSARY_MD = DOCS / "GLOSSARY.md"
 ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
 # The owners whose truth a ReviewItem indexes; none of them may read the review owner (G2-02).
 REVIEWED_OWNERS = (
@@ -408,6 +412,256 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     closed = _section(adr, r"^14\. The cross-audit items, closed$")
     assert len(re.findall(r"^\| [1-6] \|", closed, re.M)) == 6
     assert closed.count("**yes**") == 2
+
+
+def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
+    """ADR-0018 (Gate 3 G3-0): the pre-LIVE safety contract, before any schema or runtime."""
+    from app.system.execution_mode import M0_POLICY, ExecutionModeService
+
+    adr = _read(LIVE_ADR)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
+    assert "5821078540" in adr
+    # The roadmap names the contract file and its kickoff; the other canonical docs cite it.
+    roadmap = _read(ROADMAP_MD)
+    assert f"contract `docs/adr/{LIVE_ADR.name}`" in roadmap and "5821078540" in roadmap
+    for canonical in (ARCHITECTURE_MD, M5_ACCEPTANCE, GLOSSARY_MD):
+        assert "ADR-0018" in _read(canonical), canonical.name
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 30)]
+    # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
+    assert "refused before any transmission" in invariants["G3-02"]
+    assert "grant of its stage" in invariants["G3-02"]
+    assert "UI text and checkboxes are never authority" in invariants["G3-03"]
+    assert "never refunded, an UNKNOWN included" in invariants["G3-04"]
+    assert "EXPIRED, REVOKED and EXHAUSTED are terminal" in invariants["G3-05"]
+    assert "never authorizes a blind CREATE or upload replay" in invariants["G3-07"]
+    # D4: the brake is fail closed, survives restart, and never rewrites an UNKNOWN.
+    assert "absent or unreadable means ENGAGED" in invariants["G3-08"]
+    assert "never rewrites an UNKNOWN" in invariants["G3-09"]
+    assert "never resurrects" in invariants["G3-10"]
+    assert "brake stays CREATE-only, unchanged and not weakened" in invariants["G3-11"]
+    # D2 and D3: no ComplianceGate, eligibility is never a PASS, and the evidence blocker holds.
+    assert "implements no ComplianceGate" in invariants["G3-12"]
+    assert "never a COMPLIANCE PASS" in invariants["G3-13"]
+    assert "CREATE and SEARCH stay NOT_ADOPTED" in invariants["G3-14"]
+    assert "zero-result search are never proof of remote absence" in invariants["G3-15"]
+    # D5-D7: proven prerequisites, not declarations.
+    assert "a declaration is not a drill" in invariants["G3-16"]
+    # Review 5821787401: the drill proves the REGISTER chain too, and never manufactures it.
+    for element in (
+        "RegistrationSnapshot",
+        "RegistrationIntent with its idempotency key and state",
+        "execution-scope brake state",
+        "by identity and state",
+        "recorded as absent, never created",
+    ):
+        assert element in invariants["G3-16"], element
+    drill = _section(adr, r"^7\. Backup and restore")
+    for element in (
+        "**the REGISTER chain**",
+        "**idempotency key**",
+        "the REGISTER **execution-scope brake** state (ADR-0014 §26) for the CREATE endpoint group",
+        "**no ADR-0014 §26\n  scope row is part of an ASSET proof**",
+        "**The ASSET restore proof**",
+        "**The CREATE restore proof**",
+        "**A pre-freeze proof is never accepted",
+        "the proof is **stale**",
+        "**the durable upload-attempt and replay state over the whole replay-conflict scope**",
+        "**whatever\n  grant, preparation revision, candidate fingerprint or local profile it was "
+        "started under**",
+        "a proof that\n  inspects only the current candidate's or profile's attempts "
+        "proves nothing",
+        "upload-attempt state of the whole replay-conflict scope for ASSET",
+    ):
+        assert element in drill, element
+    assert "never discarded" in invariants["G3-17"]
+    assert "no server-owned blocker is hidden" in invariants["G3-18"]
+    assert "never permission to write" in invariants["G3-19"]
+    # Review 5822405880: two mutation stages, each exactly bound, proven and gated at send time.
+    for element in (
+        "ASSET_MUTATION_READY before an upload",
+        "CREATE_MUTATION_READY before a CREATE",
+        "mandatory send-time layers",
+        "eligibility, restore proof, retention and visual acceptance",
+        "never depends on a PREPARED Intent",
+    ):
+        assert element in invariants["G3-19"], element
+    for element in (
+        "preparation revision, candidate fingerprint, selected artifact set and asset profile",
+        "the Snapshot, Intent and idempotency key",
+        "no unit-less or wildcard grant exists",
+        "one stage never widens into the other",
+    ):
+        assert element in invariants["G3-21"], element
+    assert "never re-uploaded blindly" in invariants["G3-22"]
+    assert "evidence is kept while it is unresolved" in invariants["G3-22"]
+    assert "never persisted, hashed or logged" in invariants["G3-23"]
+    # Review 5823321537: a durable ASSET upload-attempt owner is a prerequisite of any upload.
+    for key, element in (
+        ("G3-24", "recorded the attempt as started in the same atomic unit that consumes"),
+        (
+            "G3-24",
+            "terminalized exactly once as APPLIED_PROVEN, NOT_APPLIED_PROVEN or UPLOAD_UNKNOWN",
+        ),
+        ("G3-25", "not terminal after a crash or restart is UPLOAD_UNKNOWN"),
+        ("G3-25", "never proof that no unresolved upload exists"),
+        ("G3-25", "only APPLIED_PROVEN yields a known provider asset identity"),
+        ("G3-26", "ASSET_MUTATION_READY requires that durable owner"),
+        ("G3-26", "no started or unresolved UPLOAD_UNKNOWN attempt in the replay-conflict scope"),
+        ("G3-26", "never depends on an ADR-0014 §26 scope row"),
+        ("G3-27", "needs a new CREATE grant and a fresh restore proof"),
+        ("G3-16", "never an ADR-0014 §26 row"),
+    ):
+        assert element in invariants[key], (key, element)
+    owner = _section(adr, r"^3\.4 The durable ASSET upload-attempt owner")
+    for element in (
+        "**Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` at this main.**",
+        "If that commit fails, **nothing is transmitted**.",
+        "**No record is not proof.**",
+        "A restart never erases this fence.",
+    ):
+        assert element in owner, element
+    # Reviews 5823765435, 5824235764 and 5825163444: the replay fence is keyed by the conservative
+    # wire boundary only; every local or locally chosen value is provenance and never keys it.
+    for key, element in (
+        ("G3-28", "attempt provenance and the ASSET replay-conflict key are separate"),
+        (
+            "G3-28",
+            "the key is exactly the marketplace, the canonical account, the normalized wire "
+            "endpoint identity (HTTP method, provider host and path) and the exact outbound "
+            "content digest;",
+        ),
+        (
+            "G3-28",
+            "the multipart file name, MIME or type metadata, local artifact kind, derivation_id, "
+            "candidate fingerprint, preparation revision, grant, Draft revision, listing, "
+            "category, policy state, local profile label, local endpoint-mapping revision, "
+            "provider-document version label and any ICBM adoption or contract label are "
+            "provenance only and never enter or narrow it, even when serialized on the wire",
+        ),
+        ("G3-28", "ambiguity takes the wider scope"),
+        (
+            "G3-28",
+            "an undeterminable wire endpoint identity or content digest keeps the ASSET stage "
+            "BLOCKED",
+        ),
+        (
+            "G3-29",
+            "across a new grant, preparation revision, candidate fingerprint, derivation, local "
+            "artifact kind, file name, MIME or type metadata, local profile or contract/adoption "
+            "label change, restart or batch",
+        ),
+        ("G3-29", "inspect the whole scope, never only the current candidate's attempts"),
+        ("G3-29", "only NOT_APPLIED_PROVEN clears it for a retry"),
+        (
+            "G3-29",
+            "an APPLIED_PROVEN in that scope keeps a fresh upload with the same key blocked, "
+            "whatever file name, MIME or type metadata, candidate, derivation, local artifact "
+            "kind, profile or contract label asks, until a separately adopted reuse/rebind path "
+            "exists",
+        ),
+        ("G3-16", "upload-attempt state over the whole replay-conflict scope"),
+    ):
+        assert element in invariants[key], (key, element)
+    provenance, fence = owner.split(
+        "- **Replay-conflict key — the conservative wire boundary.**", 1
+    )
+    provenance = provenance.split("- **Provenance.**", 1)[1]
+    key_fields, fence_rule = fence.split("- **Replay fence, over the whole", 1)
+    # The key is exactly the four wire-boundary fields; nothing local is a key field.
+    key_list = re.findall(r"^  - (.*)$", key_fields.split("\n\n", 1)[0], re.M)
+    assert key_list == [
+        "the marketplace;",
+        "the canonical account;",
+        "the normalized wire endpoint identity: HTTP method, provider host and path;",
+        "the exact outbound content digest of the uploaded binary.",
+    ]
+    flat = " ".join(key_fields.split())
+    for element in (
+        "one `POST /v1/product-images/upload` with one `imageFiles` multipart part",
+        "The path includes a version segment only when that segment is actually in the path.",
+        "**Nothing else keys a replay scope. Provenance only, never a key field, and never "
+        "narrowing the scope**: the multipart file name, MIME or type metadata, the local "
+        "source-or-derived artifact kind, the `derivation_id`, the candidate fingerprint, "
+        "preparation revision, grant, Draft revision, listing text, category, policy state, any "
+        "local profile label, a local endpoint-mapping revision, a provider-document version "
+        "label and any ICBM adoption or contract label.",
+        "**Even when such a value is serialized on the wire, it never makes a new replay key**",
+        "the same bytes sent under another file name or MIME type are the same scope",
+        "a changed ICBM contract or adoption label with an unchanged method, host and path never "
+        "opens a new one",
+        "A local identity used to derive a serialized file name or type is no exception.",
+        "with the same outbound bytes are **one** replay-conflict scope",
+        "**Ambiguity is resolved by the wider scope, never by inventing another key.**",
+        "never as a key that narrows this fence",
+        "**If the wire endpoint identity or the outbound content digest cannot be determined, the "
+        "ASSET stage stays `BLOCKED`.**",
+    ):
+        assert element in flat, element
+    flat_provenance = " ".join(provenance.split())
+    for element in (
+        "local artifact tuple (the local source-or-derived artifact kind, SHA-256 and "
+        "`derivation_id`)",
+        "its local adoption or contract label",
+        "the multipart file name and MIME or type metadata actually sent",
+        "it never decides which attempts block another**",
+    ):
+        assert element in flat_provenance, element
+    flat_fence = " ".join(fence_rule.split())
+    for element in (
+        "attempt **anywhere in a replay-conflict key's scope** blocks every new upload",
+        "another derivation or local artifact kind of the same bytes, another file name or MIME "
+        "or type metadata, a local profile or contract/adoption label change,",
+        "a new candidate fingerprint",
+        "Changing local provenance never erases an unresolved remote-mutation ambiguity.",
+        "A `NOT_APPLIED_PROVEN` attempt may clear that ambiguity for a retry",
+        "fresh ASSET restore proof",
+        "**The same key governs `APPLIED_PROVEN`.**",
+        "**keeps a fresh upload with that key blocked**",
+        "**never re-sent merely because the file name, MIME or type metadata, derivation, local "
+        "artifact kind, candidate, preparation, grant, profile or local contract label changed**",
+        "until one is adopted a fresh upload in that scope stays blocked",
+    ):
+        assert element in flat_fence, element
+    # The liveness cost of the conservative key is recorded, never used to narrow it.
+    consequences = " ".join(adr.split("\n## Consequences", 1)[1].split("\n## ", 1)[0].split())
+    assert "**The ASSET replay key is deliberately over-conservative**" in consequences
+    assert "it is **never** a reason to narrow the replay key" in consequences
+    assert "the exact artifact, candidate and profile" not in adr
+    assert "provider-visible upload-request identity" not in adr
+    assert "kind, SHA-256 and derivation identity — or an equivalent" not in adr
+    grant = _section(adr, r"^3\.2 What a grant binds")
+    assert "**A grant's exact unit is authorization provenance, never a replay boundary.**" in grant
+    for element in (
+        "bound to a target state digest and stale once that state changes",
+        "taken after the freeze",
+        "which it may never record as absent",
+        "a pre-freeze proof never gates a CREATE",
+    ):
+        assert element in invariants["G3-16"], element
+    stages = _section(adr, r"^10\. Mutation-stage readiness")
+    assert "**it is a mandatory layer of the send-time" in stages
+    assert "**The ASSET stage never depends on a `PREPARED` Intent**" in stages
+    assert "**`ASSET_MUTATION_READY` is `BLOCKED` at this main**" in stages
+    assert "proven from that owner and never from row absence" in stages
+    assert "**no started or unresolved `UPLOAD_UNKNOWN` attempt in the replay-conflict scope**" in (
+        stages
+    )
+    assert "whatever grant, preparation revision, candidate fingerprint or local profile" in stages
+    assert "**The ASSET readiness queries the whole replay-conflict scope**" in stages
+    assert "a readiness that does is not\n  `ASSET_MUTATION_READY`" in stages
+    safety = _section(adr, r"^4\.3 The whole safety stack")
+    assert "the stage's mutation readiness is `READY`" in safety
+    assert "**for the CREATE stage only**" in safety
+    assert "**The ASSET stage has no §26\n   scope owner" in safety
+    assert "`ASSET_MUTATION_READY` before an upload" in safety
+    assert "`CREATE_MUTATION_READY` before a CREATE" in safety
+    # G3-0 changes no runtime: the M0 policy still refuses LIVE, and M5 is still PENDING.
+    assert M0_POLICY == "M0_DRY_RUN_ONLY"
+    assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
+    assert "Status: **PENDING**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
+    assert "authorizes nothing to run" in adr.split("\n---", 1)[0]
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:
