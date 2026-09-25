@@ -287,3 +287,15 @@ class CollectionRun(Base):
     # the source identity rather than on whichever accepted URL form was submitted.
     source_product_id: Mapped[str | None] = mapped_column(String(80))
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The shadow decision this run froze at its first product-read reservation (ADR-0017 §10.1,
+    # migration 0025): ENABLED with the switch entry and the exact bundle it named, or DISABLED.
+    # NULL only on a run that never reserved a read, or that predates the field; such a run is
+    # never shadow-eligible. Written once, by the run store, and never changed (trigger).
+    shadow_decision: Mapped[str | None] = mapped_column(String(8))
+    shadow_switch_entry_id: Mapped[str | None] = mapped_column(String(36))
+    shadow_bundle_key: Mapped[str | None] = mapped_column(Text)
+    # When the first product read was reserved; ``product_read_at`` moves with every retry.
+    first_product_read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Whether the run was settled RECORDED by the recovery path, from a revision an earlier
+    # attempt had already appended (ADR-0017 §11.2). NULL before migration 0025 and until settled.
+    settled_by_recovery: Mapped[bool | None] = mapped_column(Boolean)

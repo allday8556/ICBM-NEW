@@ -2,11 +2,21 @@
 
 import os
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
 from app.audit.service import AuditLog
+from app.collect.adaptive.hooks import HookManifest
+from app.collect.adaptive_shadow.runner import ShadowRunner
+from app.collect.adaptive_shadow.store import ADR_RETENTION, ShadowEvidenceStore
+from app.collect.adaptive_shadow.switch import ShadowSwitch
+from app.collect.adaptive_store.gate import (
+    SupplierGate,
+    build_supplier_gate,
+    registered_suppliers,
+)
+from app.collect.adaptive_store.store import AdaptiveProfileStore, AdaptiveValidationStore
 from app.collect.assets import SourceAssetStore
 from app.collect.collection import (
     CollectionGateway,
@@ -151,6 +161,10 @@ class Container:
     smartstore: SmartStoreConnectService
     review_items: ReviewItemStore
     review_reconciler: ReviewReconciler
+    adaptive_profiles: AdaptiveProfileStore
+    adaptive_validation: AdaptiveValidationStore
+    shadow_switch: ShadowSwitch
+    shadow_evidence: ShadowEvidenceStore
     ownership: DataDirLease
 
 
@@ -169,6 +183,8 @@ def build_container(
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
     smartstore_caller: SmartStoreEndpointCaller | None = None,
+    adaptive_supplier_gate: SupplierGate | None = None,
+    adaptive_hook_manifests: Mapping[str, HookManifest] | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -277,7 +293,32 @@ def build_container(
     # materialized after a run is RECORDED, or by an explicit call; never by a startup sweep.
     product_store = ProductFoundationStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
-    runs = CollectionRunStore(db, clock)
+    registered_collections = (
+        tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
+    )
+    # Adaptive Collector (ADR-0017; P2 persistence, P3 shadow foundation). A supplier is admitted
+    # only with a registered CONNECT definition and a registered COLLECT access envelope. No
+    # supplier has a switch entry, so every run freezes DISABLED and the shadow never runs until
+    # a separately authorized Phase C opening enables one.
+    process_run_id = str(uuid.uuid4())
+    adaptive_gate = adaptive_supplier_gate or build_supplier_gate(
+        registered_suppliers(suppliers, (r.collection for r in registered_collections))
+    )
+    adaptive_profiles = AdaptiveProfileStore(db, clock, adaptive_gate)
+    adaptive_validation = AdaptiveValidationStore(db, clock, adaptive_gate, adaptive_profiles)
+    hook_manifests = dict(adaptive_hook_manifests or {})
+    shadow_switch = ShadowSwitch(
+        db, clock, adaptive_gate, adaptive_profiles, adaptive_validation, hook_manifests
+    )
+    shadow_evidence = ShadowEvidenceStore(
+        db,
+        clock,
+        supplier_gate=adaptive_gate,
+        profiles=adaptive_profiles,
+        retention=ADR_RETENTION,
+        process_run_id=process_run_id,
+    )
+    runs = CollectionRunStore(db, clock, shadow_freezer=shadow_switch.freeze)
 
     def after_recorded(collection_run_id: str) -> None:
         """What follows a durably RECORDED run: the Product, then the review fast path. The review
@@ -305,10 +346,9 @@ def build_container(
         recorder=source_asset_recorder,
         sessions=collection_sessions or connect,
         gateway=collection_gateway or DeferredCollectionGateway(),
-        collections=(
-            tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
-        ),
+        collections=registered_collections,
         after_recorded=after_recorded,
+        shadow=ShadowRunner(adaptive_profiles, shadow_evidence, hook_manifests),
     )
     registry.register(collection.job_definition())
 
@@ -425,7 +465,7 @@ def build_container(
         review_items,
         ReviewCoverageStore(db, clock, audit),
         clock,
-        process_run_id=str(uuid.uuid4()),
+        process_run_id=process_run_id,
         interval_s=config.review_reconcile_interval_s,
         max_age_s=config.review_coverage_max_age_s,
     )
@@ -498,6 +538,10 @@ def build_container(
         smartstore=smartstore,
         review_items=review_items,
         review_reconciler=review_reconciler,
+        adaptive_profiles=adaptive_profiles,
+        adaptive_validation=adaptive_validation,
+        shadow_switch=shadow_switch,
+        shadow_evidence=shadow_evidence,
         ownership=ownership,
     )
 

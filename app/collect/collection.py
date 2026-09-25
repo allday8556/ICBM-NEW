@@ -51,6 +51,7 @@ from app.collect.runs import (
     PacingKey,
     SameProductTooSoon,
 )
+from app.collect.shadow import FrozenRun, ShadowInput, ShadowStep
 from app.collect.sourceassets import (
     FetchedImage,
     RevalidatedImage,
@@ -73,6 +74,7 @@ from integrations.suppliers.collection import (
     ImageResponse,
     ReadKind,
     SourceIdentity,
+    SourceIdentityResult,
     SupplierCollection,
 )
 from integrations.suppliers.collection import ImageRole as SourceRole
@@ -255,6 +257,7 @@ class ProductCollectionService:
         gateway: CollectionGateway,
         collections: Sequence[RegisteredCollection] = (),
         after_recorded: Callable[[str], object] | None = None,
+        shadow: ShadowStep | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -269,6 +272,10 @@ class ProductCollectionService:
         # handed in so COLLECT never depends on it. It is idempotent, so a replayed attempt of a
         # RECORDED run calls it again and changes nothing that already follows the run.
         self._after_recorded = after_recorded
+        # The one-fetch shadow comparison (ADR-0017 §10), handed in so COLLECT never depends on
+        # the Adaptive packages. It runs only for a run whose frozen decision is ENABLED, only
+        # after the canonical write, in its own unit, and nothing it does reaches the run.
+        self._shadow = shadow
 
     # ------------------------------------------------------------------ submission
 
@@ -428,6 +435,7 @@ class ProductCollectionService:
                 record.collection_run_id,
                 revision_id=appended.revision_id,
                 facts_status=appended.facts_status,
+                recovered=True,
             )
             self._recorded(record.collection_run_id)
             return
@@ -471,7 +479,7 @@ class ProductCollectionService:
         # One real product read, taken durably before anything is sent. Every attempt passes
         # through here — a retry of this same run included — so the same product is never read
         # twice inside the interval ADR-0010 §4 fixes, restart or no restart.
-        self._runs.reserve_product_read(
+        frozen = self._runs.reserve_product_read(
             run_id,
             key=pacing_key(collection, product_url),
             interval_s=profile.limits.same_product_interval_s,
@@ -490,31 +498,42 @@ class ProductCollectionService:
                 "collect.identity_unresolved",
                 extra={"collection_run_id": run_id, "supplier": supplier_key},
             )
+            self._shadow_step(
+                frozen,
+                run_id=run_id,
+                registered=registered,
+                product_url=product_url,
+                document=document,
+                identity=identity,
+                collected=None,
+                candidates=(),
+                images=(),
+                revision_id=None,
+            )
             return CollectionResult(None, None, identity.reason)
         # The source has now said which product this is, so that is what the interval follows
         # from here: another accepted form of this product's URL buys no second read.
         self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
+        candidates = tuple(collection.roles.classify(document.body, product_url))
         images = self._images(
             profile,
-            collection.roles.classify(document.body, product_url),
+            candidates,
             budget=budget,
             known=self._known_assets(supplier_key, identity.source_product_id),
         )
-        stored = self._revisions.append(
-            CollectedFacts(
-                supplier_key=supplier_key,
-                source_product_id=identity.source_product_id,
-                source_url=product_url,
-                captured_at=captured_at,
-                extractor_revision=registered.extractor_revision,
-                extractor_fingerprint=registered.extractor_fingerprint,
-                collection_run_id=run_id,
-                correlation_id=get_correlation_id() or new_correlation_id(),
-                fields=collection.fields(document),
-                images=images,
-            ),
-            url_policy=url_policy_of(profile),
+        collected = CollectedFacts(
+            supplier_key=supplier_key,
+            source_product_id=identity.source_product_id,
+            source_url=product_url,
+            captured_at=captured_at,
+            extractor_revision=registered.extractor_revision,
+            extractor_fingerprint=registered.extractor_fingerprint,
+            collection_run_id=run_id,
+            correlation_id=get_correlation_id() or new_correlation_id(),
+            fields=collection.fields(document),
+            images=images,
         )
+        stored = self._revisions.append(collected, url_policy=url_policy_of(profile))
         logger.info(
             "collect.recorded",
             extra={
@@ -524,7 +543,61 @@ class ProductCollectionService:
                 "image_refs": len(stored.images),
             },
         )
+        # The revision's unit has committed; only now may the shadow look (ADR-0017 §10.1).
+        self._shadow_step(
+            frozen,
+            run_id=run_id,
+            registered=registered,
+            product_url=product_url,
+            document=document,
+            identity=identity,
+            collected=collected,
+            candidates=candidates,
+            images=images,
+            revision_id=stored.revision_id,
+        )
         return CollectionResult(stored.revision_id, stored.facts_status, None)
+
+    def _shadow_step(
+        self,
+        frozen: FrozenRun,
+        *,
+        run_id: str,
+        registered: RegisteredCollection,
+        product_url: str,
+        document: DocumentView,
+        identity: SourceIdentityResult,
+        collected: CollectedFacts | None,
+        candidates: tuple[ImageCandidate, ...],
+        images: tuple[ImageReference, ...],
+        revision_id: str | None,
+    ) -> None:
+        """Hand the shadow what this run already holds, and nothing it could spend.
+
+        Only a run whose frozen decision is ENABLED reaches the step, so a disabled run makes no
+        Adaptive call at all. The canonical write has committed before this is called and no unit
+        is open here. The step promises never to raise; if it ever does, the run does not notice.
+        """
+        if self._shadow is None or frozen.shadow.decision != "ENABLED":
+            return
+        try:
+            self._shadow(
+                ShadowInput(
+                    collection_run_id=run_id,
+                    supplier_key=registered.supplier_key,
+                    source_url=product_url,
+                    frozen=frozen,
+                    document=document,
+                    identity=identity,
+                    collected=collected,
+                    url_policy=url_policy_of(registered.collection.profile),
+                    candidates=candidates,
+                    images=images,
+                    revision_id=revision_id,
+                )
+            )
+        except Exception:
+            logger.exception("collect.shadow_escaped", extra={"collection_run_id": run_id})
 
     # ------------------------------------------------------------------ images
 

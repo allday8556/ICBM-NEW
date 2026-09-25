@@ -1285,13 +1285,27 @@ def _enforcing(database: Path) -> sqlite3.Connection:
     return connection
 
 
+# Columns later revisions append: 0015 (PR-Q) on ``source_bindings`` and 0025 (Adaptive P3)
+# on ``collection_runs``, nullable and never backfilled.
+LATER_COLUMNS = frozenset(
+    {
+        "quantity_offer_id",
+        "shadow_decision",
+        "shadow_switch_entry_id",
+        "shadow_bundle_key",
+        "first_product_read_at",
+        "settled_by_recovery",
+    }
+)
+
+
 def _rows(database: Path) -> dict[str, list[tuple[object, ...]]]:
     """Every row of every table, on the columns both revisions have."""
     with contextlib.closing(sqlite3.connect(database)) as connection:
         rows = {}
         for table in PRESERVED:
             names = [r[1] for r in connection.execute(f"PRAGMA table_info({table})")]
-            columns = ", ".join(n for n in names if n != "quantity_offer_id")
+            columns = ", ".join(n for n in names if n not in LATER_COLUMNS)
             rows[table] = connection.execute(
                 f"SELECT {columns} FROM {table} ORDER BY 1, 2"
             ).fetchall()

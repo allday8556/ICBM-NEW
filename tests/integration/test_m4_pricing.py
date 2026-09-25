@@ -706,11 +706,25 @@ M4_TABLES = (
 )
 
 
+# Columns later revisions append: 0015 (PR-Q) on ``source_bindings`` and 0025 (Adaptive P3)
+# on ``collection_runs``, nullable and never backfilled.
+LATER_COLUMNS = frozenset(
+    {
+        "quantity_offer_id",
+        "shadow_decision",
+        "shadow_switch_entry_id",
+        "shadow_bundle_key",
+        "first_product_read_at",
+        "settled_by_recovery",
+    }
+)
+
+
 def _columns(connection: sqlite3.Connection, table: str) -> str:
-    """Every column but the one migration 0015 (PR-Q) appended to ``source_bindings``, so rows
-    compare across revisions on what each of them holds."""
+    """Every column but those later revisions appended, so rows compare across revisions on what
+    each of them holds."""
     names = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
-    return ", ".join(name for name in names if name != "quantity_offer_id")
+    return ", ".join(name for name in names if name not in LATER_COLUMNS)
 
 
 def _rows(database: Path) -> dict[str, list[tuple[object, ...]]]:
