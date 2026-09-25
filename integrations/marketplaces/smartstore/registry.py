@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 PROVIDER = "SMARTSTORE"
 # The provider API group the packet's AI-use guide gives for product registration, lookup and the
@@ -308,6 +309,28 @@ def resolve(endpoint_id: object) -> EndpointContract:
     if contract is None:
         raise EndpointNotAdoptedError(f"{endpoint_id!s} is not an ADOPTED SmartStore endpoint")
     return contract
+
+
+# ---------------------------------------------------------------- the wire identity (ADR-0018)
+
+# Other spellings that name this same provider host. None is known: any other host — a proxy, an
+# alias, an IP literal — is refused by the server-owned host rule, never given a replay key.
+HOST_ALIASES: Mapping[str, str] = {}
+
+
+def canonical_host() -> str:
+    """The provider's one canonical host, for the server-owned host rule (ADR-0018 §3.4)."""
+    return PROVIDER_HOST
+
+
+def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
+    """The raw ``(method, host, path)`` one ADOPTED endpoint's request goes to.
+
+    The path is the one actually on the wire — the base path plus the endpoint path — because
+    the ASSET replay key is the wire boundary (ADR-0018 §3.4). The server normalizes it.
+    """
+    contract = resolve(endpoint_id)
+    return str(contract.method), PROVIDER_HOST, urlsplit(BASE_URL).path + contract.path
 
 
 # ---------------------------------------------------------------- endpoint-mapping revision

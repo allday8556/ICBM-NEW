@@ -50,6 +50,36 @@ class FakeSender:
 
 
 @dataclass
+class HarnessAuthority:
+    """The harness's stand-in for the ADR-0018 send-time safety stack. It never reaches anything.
+
+    The harness drives the REGISTER CREATE state machine with the fake sender above, so the stack
+    the production owners wire — whose M0 execution-mode layer refuses every CREATE — would stop
+    every scenario before the state machine it exists to exercise. This seam admits each CREATE
+    the state machine reaches and counts it; the real stack's refusals are the unit and
+    integration suites'. No marketplace mutation can follow an admission here: the only sender
+    behind it is :class:`FakeSender`.
+    """
+
+    admitted: list[tuple[str, int]] = field(default_factory=list)
+
+    def admit_create(
+        self,
+        session: Any,
+        *,
+        intent: Any,
+        attempt_no: int,
+        endpoint_adopted: bool,
+        actor: str,
+        correlation_id: str,
+    ) -> None:
+        self.admitted.append((intent.intent_id, attempt_no))
+
+    def record_refusal(self, refusal: Any, **_: Any) -> None:  # pragma: no cover - never refuses
+        raise AssertionError("the harness authority never refuses")
+
+
+@dataclass
 class FakeReadback:
     """What the marketplace would return for a read-back, as the scenario declares it."""
 

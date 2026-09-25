@@ -44,7 +44,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, Protocol
+
+from sqlalchemy.orm import Session
 
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.clock import Clock
@@ -53,6 +55,7 @@ from app.jobs.models import JobState
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, TerminalJob
 from app.jobs.service import JobService
+from app.live.model import MutationRefused, MutationStage
 from app.products.image_model import ImageAssetKind
 from app.products.model import ReadinessStatus
 from app.register.model import (
@@ -122,6 +125,39 @@ ACTIVE_JOB_STATES: Final = (
 )
 # The Intent states a CREATE may be queued for: everything else is reconciled or done (§8-§10).
 SENDABLE_STATES: Final = (IntentState.PREPARED, IntentState.FAILED)
+
+
+# ---------------------------------------------------------------- the LIVE authority
+
+
+class CreateAuthority(Protocol):
+    """The send-time safety stack as the CREATE path sees it (ADR-0018 §4.3).
+
+    Production wires ``app.live.stack.SafetyStack``: at this main its execution-mode layer refuses
+    every CREATE (``M0_DRY_RUN_ONLY``), and so does every unproven prerequisite. ``admit_create``
+    runs inside the unit that opens the attempt and spends the matching CREATE grant there.
+    """
+
+    def admit_create(
+        self,
+        session: Session,
+        *,
+        intent: IntentRecord,
+        attempt_no: int,
+        endpoint_adopted: bool,
+        actor: str,
+        correlation_id: str,
+    ) -> Any: ...
+
+    def record_refusal(
+        self,
+        refusal: MutationRefused,
+        *,
+        stage: MutationStage,
+        target_ref: str,
+        actor: str,
+        correlation_id: str,
+    ) -> None: ...
 
 
 # ---------------------------------------------------------------- failures
@@ -535,6 +571,7 @@ class RegistrationExecutionService:
         compare: ReadbackComparator,
         projection: WireProjector,
         clock: Clock,
+        authority: CreateAuthority,
         policy: ExecutionPolicy | None = None,
         actor: str = "worker",
     ) -> None:
@@ -547,6 +584,7 @@ class RegistrationExecutionService:
         self._compare = compare
         self._projection = projection
         self._clock = clock
+        self._authority = authority
         self._policy = policy or ExecutionPolicy()
         self._actor = actor
 
@@ -611,13 +649,38 @@ class RegistrationExecutionService:
             )
         fresh = self._gate(intent, snapshot, request, prepared, generation)
         sanitized_request = self._sanitized_request(snapshot, fresh)
-        with self._registrations.transaction() as unit:
-            attempt = unit.start_attempt(
-                intent.intent_id,
-                sanitized_request=sanitized_request,
-                sanitizer_profile_version=self._sanitizer_version(fresh),
+        try:
+            with self._registrations.transaction() as unit:
+                attempt = unit.start_attempt(
+                    intent.intent_id,
+                    sanitized_request=sanitized_request,
+                    sanitizer_profile_version=self._sanitizer_version(fresh),
+                    correlation_id=correlation_id,
+                )
+                # ADR-0018 §4.3: the send-time safety stack, deny by default, in the very unit
+                # that opens the attempt. Its grant is spent here or the attempt never existed.
+                self._authority.admit_create(
+                    unit.session,
+                    intent=intent,
+                    attempt_no=attempt.attempt_no,
+                    endpoint_adopted=self._sender.available(),
+                    actor=self._actor,
+                    correlation_id=correlation_id,
+                )
+        except MutationRefused as refusal:
+            # The unit rolled back: no Attempt, no spent grant, the Intent unmoved, nothing sent.
+            self._authority.record_refusal(
+                refusal,
+                stage=MutationStage.CREATE,
+                target_ref=target_ref(intent.intent_id),
+                actor=self._actor,
                 correlation_id=correlation_id,
             )
+            raise ExecutionRefused(
+                refusal.code,
+                "the send-time safety stack refuses this CREATE; nothing is sent",
+                details=refusal.details,
+            ) from refusal
         handoff = self._sender.send(
             payload=self._payload_of(snapshot.registration_snapshot_id),
             idempotency_key=intent.idempotency_key,

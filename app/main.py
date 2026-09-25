@@ -109,6 +109,9 @@ def create_app(
             services.connect.normalize_on_startup()
             # Likewise a persisted marketplace auth READY is never trusted (M2 PR-B, §17 #17).
             services.marketplace_capability.normalize_on_startup()
+            # ADR-0018 §3.4 (G3-25): an ASSET upload an earlier process left STARTED is settled
+            # UPLOAD_UNKNOWN before anything else runs. A restart never erases the replay fence.
+            services.asset_uploads.settle_interrupted(correlation_id="startup-asset-settlement")
             # ADR-0017 §11.2 (P3): the shadow owner's startup pass, before the worker runs a
             # collection: the missing outcomes of every open evidence window, then the raw bounds.
             # Its failure is logged and never keeps the application from serving.

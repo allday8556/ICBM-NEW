@@ -63,6 +63,7 @@ from scripts.m5accept.seams import (
     DeclaredProjector,
     FakeReadback,
     FakeSender,
+    HarnessAuthority,
     RecordingLookup,
 )
 
@@ -176,6 +177,7 @@ def open_owners(
             compare=comparator,
             projection=projector,
             clock=the_clock,
+            authority=HarnessAuthority(),
             policy=policy or ExecutionPolicy(),
         )
         registry = JobRegistry()

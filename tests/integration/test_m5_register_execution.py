@@ -64,6 +64,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
     SmartStoreReconcileLookup,
 )
+from tests.live_support import AdmittingAuthority
 from tests.product_support import Collections, count, raw
 from tests.register_support import (
     CID,
@@ -257,6 +258,7 @@ def execution(container: Container, prep: Preparation, **overrides: Any) -> Exec
         compare=comparator,
         projection=projector,
         clock=container.clock,
+        authority=overrides.get("authority") or AdmittingAuthority(),
         policy=overrides.get("policy") or ExecutionPolicy(),
     )
     return Execution(service, sender, readback, lookup, comparator, projector)

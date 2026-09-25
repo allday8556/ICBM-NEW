@@ -475,6 +475,10 @@ ADAPTIVE_TABLES = (
     "adaptive_evidence_windows",
     "adaptive_evidence_window_events",
     "adaptive_shadow_ledger_events",
+    # Gate 3 area 1 (ADR-0018 §12).
+    "live_grants",
+    "protected_write_brakes",
+    "asset_upload_attempts",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
