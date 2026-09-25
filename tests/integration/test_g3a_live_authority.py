@@ -16,6 +16,7 @@ from sqlalchemy.exc import OperationalError
 from app.config import AppConfig
 from app.container import Container
 from app.core.errors import InputValidationError, PolicyBlockedError
+from app.core.execution import ExecutionMode
 from app.live import model as live_model
 from app.live.assets import (
     AssetUploadRequest,
@@ -41,6 +42,7 @@ from app.live.stack import (
 )
 from app.live.store import ArtifactRef, LiveAuthorityStore, LiveUnit
 from app.products.image_model import ImageAssetKind
+from app.system.execution_mode import ExecutionModeState
 from tests.live_support import (
     FixedCandidates,
     PermittedMode,
@@ -87,6 +89,15 @@ def account(container: Container, config: AppConfig) -> str:
 def smartstore(container: Container, config: AppConfig) -> str:
     """A canonical SmartStore account: the production host rule knows this marketplace."""
     return establish(container, config, "smartstore", "uid-smartstore-g3a-1")
+
+
+class NotLive:
+    """The M0 execution mode, as a stand-in the tests can pass explicitly."""
+
+    def state(self) -> ExecutionModeState:
+        return ExecutionModeState(
+            mode=ExecutionMode.DRY_RUN, live_writes_permitted=False, policy="M0_DRY_RUN_ONLY"
+        )
 
 
 def store_of(container: Container) -> LiveAuthorityStore:
@@ -929,9 +940,10 @@ def test_another_selected_artifacts_replay_state_stales_the_asset_restore_target
     # Review 5827905179 control 2: B's new replay state stales the target taken before A.
     grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
     release(container)
+    # The target of an admission of A itself, taken while the execution mode still refuses it.
     recording = ProvenProofs()
-    reader, _ = uploads(container, proofs=recording)
-    reader.readiness(grant_id)
+    held, _ = uploads(container, proofs=recording, mode=NotLive())
+    refused(live_model.MODE_NOT_LIVE, lambda: held.upload(request(grant_id, DERIVED_A)))
     before = recording.restore_targets[-1]
     service, _ = uploads(container, sender=ScriptedSender(script=[applied(REF_B)]))
     assert service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).prepared
