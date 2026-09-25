@@ -522,95 +522,114 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         "A restart never erases this fence.",
     ):
         assert element in owner, element
-    # Reviews 5823765435 and 5824235764: the replay fence is keyed by the provider-visible upload
-    # request itself; the local artifact tuple and every other provenance field never key it.
+    # Reviews 5823765435, 5824235764 and 5825163444: the replay fence is keyed by the conservative
+    # wire boundary only; every local or locally chosen value is provenance and never keys it.
     for key, element in (
         ("G3-28", "attempt provenance and the ASSET replay-conflict key are separate"),
         (
             "G3-28",
-            "the key is exactly the marketplace, canonical account, provider upload endpoint and "
-            "contract identity, and the canonical provider-visible upload-request identity",
+            "the key is exactly the marketplace, the canonical account, the normalized wire "
+            "endpoint identity (HTTP method, provider host and path) and the exact outbound "
+            "content digest;",
         ),
         (
             "G3-28",
-            "at least the exact outbound binary digest and every provider-visible upload parameter "
-            "that can materially change the remote mutation",
+            "the multipart file name, MIME or type metadata, local artifact kind, derivation_id, "
+            "candidate fingerprint, preparation revision, grant, Draft revision, listing, "
+            "category, policy state, local profile label, local endpoint-mapping revision, "
+            "provider-document version label and any ICBM adoption or contract label are "
+            "provenance only and never enter or narrow it, even when serialized on the wire",
         ),
+        ("G3-28", "ambiguity takes the wider scope"),
         (
             "G3-28",
-            "the derivation_id, the local source-or-derived artifact kind, the grant, preparation "
-            "revision, candidate fingerprint, Draft revision, listing, category, policy state and "
-            "a local profile label never enter or narrow it",
-        ),
-        ("G3-28", "only a provider-visible serialized value may participate"),
-        (
-            "G3-28",
-            "an undeterminable provider-visible request identity keeps the ASSET stage BLOCKED",
+            "an undeterminable wire endpoint identity or content digest keeps the ASSET stage "
+            "BLOCKED",
         ),
         (
             "G3-29",
             "across a new grant, preparation revision, candidate fingerprint, derivation, local "
-            "artifact kind, local profile change, restart or batch",
+            "artifact kind, file name, MIME or type metadata, local profile or contract/adoption "
+            "label change, restart or batch",
         ),
         ("G3-29", "inspect the whole scope, never only the current candidate's attempts"),
         ("G3-29", "only NOT_APPLIED_PROVEN clears it for a retry"),
         (
             "G3-29",
             "an APPLIED_PROVEN in that scope keeps a fresh upload with the same key blocked, "
-            "whatever candidate, derivation or local artifact kind asks, until a separately "
-            "adopted reuse/rebind path exists",
+            "whatever file name, MIME or type metadata, candidate, derivation, local artifact "
+            "kind, profile or contract label asks, until a separately adopted reuse/rebind path "
+            "exists",
         ),
         ("G3-16", "upload-attempt state over the whole replay-conflict scope"),
     ):
         assert element in invariants[key], (key, element)
-    provenance, fence = owner.split("- **Replay-conflict key.**", 1)
+    provenance, fence = owner.split(
+        "- **Replay-conflict key — the conservative wire boundary.**", 1
+    )
+    provenance = provenance.split("- **Provenance.**", 1)[1]
     key_fields, fence_rule = fence.split("- **Replay fence, over the whole", 1)
-    # The key is exactly the provider mutation's own fields; the local artifact tuple is provenance.
+    # The key is exactly the four wire-boundary fields; nothing local is a key field.
     key_list = re.findall(r"^  - (.*)$", key_fields.split("\n\n", 1)[0], re.M)
     assert key_list == [
         "the marketplace;",
         "the canonical account;",
-        "the provider upload endpoint and contract identity;",
-        "the canonical provider-visible upload-request identity.",
+        "the normalized wire endpoint identity: HTTP method, provider host and path;",
+        "the exact outbound content digest of the uploaded binary.",
     ]
-    assert (
-        "local artifact tuple (the local source-or-derived artifact kind, SHA-256 and"
-        in (provenance.split("- **Provenance.**", 1)[1])
-    )
-    assert "`derivation_id`" in provenance.split("- **Provenance.**", 1)[1]
-    assert "it never decides which attempts\n  block another**" in owner
+    flat = " ".join(key_fields.split())
     for element in (
-        "**The canonical provider-visible upload-request identity** is derived from what is "
-        "actually\n  transmitted, and from nothing else.",
-        "**the exact outbound binary (content) digest**",
-        "**every provider-visible upload parameter that\n  can materially change the remote "
-        "mutation**",
-        "**Local identity never enters the key and never narrows it**: not the `derivation_id`, "
-        "the local\n  source-or-derived artifact kind,",
-        "**only the provider-visible serialized value**",
-        "Draft revision, listing text, category, policy state or any local profile label. If",
-        "a local label that leaves the\n  provider-visible request unchanged cannot make a second "
-        "key.",
-        "that send the same bytes with the same provider-visible parameters are **one**\n"
-        "  replay-conflict scope",
-        "**A replay-conflict key whose canonical provider-visible\n  upload-request identity "
-        "cannot be determined keeps the ASSET stage `BLOCKED`.**",
+        "one `POST /v1/product-images/upload` with one `imageFiles` multipart part",
+        "The path includes a version segment only when that segment is actually in the path.",
+        "**Nothing else keys a replay scope. Provenance only, never a key field, and never "
+        "narrowing the scope**: the multipart file name, MIME or type metadata, the local "
+        "source-or-derived artifact kind, the `derivation_id`, the candidate fingerprint, "
+        "preparation revision, grant, Draft revision, listing text, category, policy state, any "
+        "local profile label, a local endpoint-mapping revision, a provider-document version "
+        "label and any ICBM adoption or contract label.",
+        "**Even when such a value is serialized on the wire, it never makes a new replay key**",
+        "the same bytes sent under another file name or MIME type are the same scope",
+        "a changed ICBM contract or adoption label with an unchanged method, host and path never "
+        "opens a new one",
+        "A local identity used to derive a serialized file name or type is no exception.",
+        "with the same outbound bytes are **one** replay-conflict scope",
+        "**Ambiguity is resolved by the wider scope, never by inventing another key.**",
+        "never as a key that narrows this fence",
+        "**If the wire endpoint identity or the outbound content digest cannot be determined, the "
+        "ASSET stage stays `BLOCKED`.**",
     ):
-        assert element in key_fields, element
+        assert element in flat, element
+    flat_provenance = " ".join(provenance.split())
+    for element in (
+        "local artifact tuple (the local source-or-derived artifact kind, SHA-256 and "
+        "`derivation_id`)",
+        "its local adoption or contract label",
+        "the multipart file name and MIME or type metadata actually sent",
+        "it never decides which attempts block another**",
+    ):
+        assert element in flat_provenance, element
+    flat_fence = " ".join(fence_rule.split())
     for element in (
         "attempt **anywhere in a replay-conflict key's scope** blocks every new upload",
-        "another\n  derivation or local artifact kind behind the same provider-visible request",
+        "another derivation or local artifact kind of the same bytes, another file name or MIME "
+        "or type metadata, a local profile or contract/adoption label change,",
         "a new candidate fingerprint",
-        "Changing local provenance never erases an unresolved\n  remote-mutation ambiguity.",
+        "Changing local provenance never erases an unresolved remote-mutation ambiguity.",
         "A `NOT_APPLIED_PROVEN` attempt may clear that ambiguity for a retry",
-        "fresh ASSET\n    restore proof",
+        "fresh ASSET restore proof",
         "**The same key governs `APPLIED_PROVEN`.**",
         "**keeps a fresh upload with that key blocked**",
-        "because the candidate, preparation, grant, derivation or local artifact kind changed**",
-        "until one is adopted a fresh upload in that scope stays\n    blocked",
+        "**never re-sent merely because the file name, MIME or type metadata, derivation, local "
+        "artifact kind, candidate, preparation, grant, profile or local contract label changed**",
+        "until one is adopted a fresh upload in that scope stays blocked",
     ):
-        assert element in fence_rule, element
+        assert element in flat_fence, element
+    # The liveness cost of the conservative key is recorded, never used to narrow it.
+    consequences = " ".join(adr.split("\n## Consequences", 1)[1].split("\n## ", 1)[0].split())
+    assert "**The ASSET replay key is deliberately over-conservative**" in consequences
+    assert "it is **never** a reason to narrow the replay key" in consequences
     assert "the exact artifact, candidate and profile" not in adr
+    assert "provider-visible upload-request identity" not in adr
     assert "kind, SHA-256 and derivation identity — or an equivalent" not in adr
     grant = _section(adr, r"^3\.2 What a grant binds")
     assert "**A grant's exact unit is authorization provenance, never a replay boundary.**" in grant
