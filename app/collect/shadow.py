@@ -11,8 +11,9 @@ Adaptive packages, so the canonical owners never depend on them.
     an explicit *disabled*. The run store freezes that answer on the run, once. It never writes.
 
 ``ShadowStep``
-    Called by the collection **after** the canonical revision has been appended (or on the
-    identity-unresolved return), with only what the run already holds in memory: the one
+    Called by the collection **after** the canonical write has committed — the revision append,
+    or on the identity-unresolved path the durable ``NO_REVISION`` outcome itself — with only what
+    the run already holds in memory: the one
     ``DocumentView``, the canonical facts and image candidates, the observed checksums and the
     frozen decision. It opens its own write unit, never raises into the run, and has no gateway,
     session, budget or egress handle to spend.

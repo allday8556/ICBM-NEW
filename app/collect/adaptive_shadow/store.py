@@ -60,7 +60,7 @@ from app.collect.adaptive_shadow.models import (
 from app.collect.adaptive_shadow.switch import running_bundle
 from app.collect.adaptive_store.gate import SupplierGate
 from app.collect.adaptive_store.store import AdaptiveProfileStore
-from app.collect.models import CollectionOutcome, CollectionRun
+from app.collect.models import CollectionOutcome, CollectionRun, ProductFactsRevision
 from app.core.clock import Clock
 from app.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
 from app.db.database import Database
@@ -74,6 +74,7 @@ ADAPTIVE_RETENTION_INVALID = "ADAPTIVE_RETENTION_INVALID"
 ADAPTIVE_SHADOW_TAMPERED = "ADAPTIVE_SHADOW_TAMPERED"
 ADAPTIVE_WINDOW_NOT_FOUND = "ADAPTIVE_WINDOW_NOT_FOUND"
 ADAPTIVE_SHADOW_RECORD_NOT_FOUND = "ADAPTIVE_SHADOW_RECORD_NOT_FOUND"
+ADAPTIVE_SHADOW_BINDING_REFUSED = "ADAPTIVE_SHADOW_BINDING_REFUSED"
 
 RECORD_DIGEST_SCHEME = "icbm-shadow-record/v1"
 # ADR-0017 §10.5: the hard raw bounds. A configured bound may be tighter, never looser.
@@ -195,6 +196,33 @@ def _event(row: LedgerEvent) -> Event:
         ) from error
 
 
+def _same_instant(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return False
+    if left.tzinfo is None:
+        left = left.replace(tzinfo=right.tzinfo)
+    if right.tzinfo is None:
+        right = right.replace(tzinfo=left.tzinfo)
+    return left == right
+
+
+def _bound(session: Session, row: ShadowRecord) -> bool:
+    """Whether a raw record belongs to its canonical run exactly as that run froze it: the same
+    supplier, an ENABLED decision for the same bundle, and only that run's own revision."""
+    run = session.get(CollectionRun, row.collection_run_id)
+    if (
+        run is None
+        or run.supplier_key != row.supplier_key
+        or run.shadow_decision != "ENABLED"
+        or run.shadow_bundle_key != row.bundle_key
+    ):
+        return False
+    if row.revision_id is None:
+        return True
+    revision = session.get(ProductFactsRevision, row.revision_id)
+    return revision is not None and revision.collection_run_id == row.collection_run_id
+
+
 def _fold(events: Sequence[Event]) -> State:
     try:
         return fold(events)
@@ -245,8 +273,29 @@ class ShadowEvidenceStore:
     ) -> str | None:
         """The shadow's own write unit: its raw record and, when the run falls in a window, its
         ``OUTCOME_RECORDED``. Returns the window it counted in, if any. Never nested in a
-        canonical unit (the collection has none open when the step runs)."""
+        canonical unit (the collection has none open when the step runs).
+
+        The canonical run is the authority (review 5312254605 B3): the write is refused unless the
+        run froze ENABLED for this supplier and this exact bundle at this first reservation, and
+        the revision is that run's own. The window is chosen from the run's frozen values alone.
+        """
         with self._db.write() as session:
+            run = session.get(CollectionRun, collection_run_id)
+            if (
+                run is None
+                or run.supplier_key != supplier_key
+                or run.shadow_decision != "ENABLED"
+                or run.shadow_switch_entry_id is None
+                or run.shadow_bundle_key != bundle_key
+                or not _same_instant(run.first_product_read_at, first_product_read_at)
+            ):
+                raise _evidence_refused(
+                    ADAPTIVE_SHADOW_BINDING_REFUSED,
+                    "a shadow record binds exactly the run's frozen supplier, decision, bundle and"
+                    " first reservation",
+                )
+            frozen_at = run.first_product_read_at
+            assert frozen_at is not None
             row = ShadowRecord(
                 collection_run_id=collection_run_id,
                 supplier_key=supplier_key,
@@ -260,9 +309,13 @@ class ShadowEvidenceStore:
                 recorded_at=self._clock.now(),
             )
             row.record_digest = _record_digest(row)
+            if not _bound(session, row):
+                raise _evidence_refused(
+                    ADAPTIVE_SHADOW_BINDING_REFUSED, "the revision is not the run's own"
+                )
             session.add(row)
             session.flush()
-            window = self._window_of(session, supplier_key, bundle_key, first_product_read_at)
+            window = self._window_of(session, run.supplier_key, run.shadow_bundle_key, frozen_at)
             if window is None:
                 return None
             self._append(
@@ -331,7 +384,12 @@ class ShadowEvidenceStore:
             row = session.get(ShadowRecord, collection_run_id)
             if row is None:
                 raise NotFoundError(ADAPTIVE_SHADOW_RECORD_NOT_FOUND, "no raw shadow record")
+            bound = _bound(session, row)
             session.expunge(row)
+        if not bound:
+            raise ShadowEvidenceTampered(
+                ADAPTIVE_SHADOW_TAMPERED, "a raw shadow record no longer binds its canonical run"
+            )
         if _record_digest(row) != row.record_digest:
             raise ShadowEvidenceTampered(
                 ADAPTIVE_SHADOW_TAMPERED, "a raw shadow record does not recompute"
@@ -359,6 +417,20 @@ class ShadowEvidenceStore:
             .order_by(LedgerEvent.seq)
         ).all()
         return tuple(_event(row) for row in rows)
+
+    def _window_events(
+        self, session: Session, run: CollectionRun, window_id: str
+    ) -> tuple[Event, ...]:
+        """The ledger of a run eligible for this window. Every event must name this exact window:
+        a run's evidence is never counted in, or rebound to, another window (B3)."""
+        events = self._events(session, run.collection_run_id)
+        if any(event.window_id != window_id for event in events):
+            raise ShadowEvidenceTampered(
+                ADAPTIVE_SHADOW_TAMPERED,
+                "a run's ledger names a window other than the one it froze its eligibility for",
+                details={"collection_run_id": run.collection_run_id},
+            )
+        return events
 
     def state(self, collection_run_id: str) -> State | None:
         """The run's effective state, or ``None`` when it has no ledger event (yet)."""
@@ -433,7 +505,9 @@ class ShadowEvidenceStore:
         with self._db.write() as session:
             expired = set(
                 session.scalars(
-                    select(ShadowRecord.collection_run_id).where(ShadowRecord.recorded_at < cutoff)
+                    select(ShadowRecord.collection_run_id).where(
+                        ShadowRecord.recorded_at <= cutoff  # at most 90 days: the boundary goes
+                    )
                 )
             )
             suppliers = session.scalars(select(ShadowRecord.supplier_key).distinct()).all()
@@ -622,7 +696,7 @@ class ShadowEvidenceStore:
             runs = self._eligible(session, window)
             states: dict[str, tuple[State, int]] = {}
             for run in runs:
-                events = self._events(session, run.collection_run_id)
+                events = self._window_events(session, run, window.window_id)
                 if not events:
                     raise _evidence_refused(
                         ADAPTIVE_WINDOW_REFUSED, "a run of this window has no outcome"
@@ -824,7 +898,7 @@ class ShadowEvidenceStore:
                 if window.closed:
                     continue
                 for run in self._eligible(session, window):
-                    if self._events(session, run.collection_run_id):
+                    if self._window_events(session, run, window.window_id):
                         continue
                     cause = (
                         Cause.SHADOW_MISSING_AFTER_RECOVERY
@@ -861,7 +935,7 @@ class ShadowEvidenceStore:
     def _window_evidence(self, session: Session, window: WindowRecord) -> WindowEvidence:
         states: dict[str, State] = {}
         for run in self._eligible(session, window):
-            events = self._events(session, run.collection_run_id)
+            events = self._window_events(session, run, window.window_id)
             if events:
                 states[run.collection_run_id] = _fold(events)
             else:

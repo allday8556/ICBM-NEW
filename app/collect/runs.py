@@ -197,22 +197,28 @@ class CollectionRunStore:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             row.source_product_id = source_product_id
 
-    def recorded(
-        self,
-        run_id: str,
-        *,
-        revision_id: str,
-        facts_status: FactsStatus,
-        recovered: bool = False,
-    ) -> None:
-        """``recovered`` says the recovery path settled it, from a revision an earlier attempt had
-        already appended: the canonical history ADR-0017 §11.2 reads."""
+    def recorded(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
+        """RECORDED by the attempt that appended the revision: ``settled_by_recovery`` is false."""
         self._finish(
             run_id,
             CollectionOutcome.RECORDED,
             revision_id=revision_id,
             facts_status=facts_status,
-            recovered=recovered,
+            recovered=False,
+        )
+
+    def recovered(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
+        """RECORDED by the recovery path, from a revision an earlier attempt had already appended
+        and died before settling: ``settled_by_recovery`` is true. This is the canonical history
+        ADR-0017 §11.2 reads, so only that one branch of the collection calls it (a repository
+        rule), and the database lets the marker be set only in the settling update, only on a
+        RECORDED run, and never changed afterwards (migration 0025)."""
+        self._finish(
+            run_id,
+            CollectionOutcome.RECORDED,
+            revision_id=revision_id,
+            facts_status=facts_status,
+            recovered=True,
         )
 
     def no_revision(self, run_id: str, *, reason: str) -> None:
@@ -231,7 +237,7 @@ class CollectionRunStore:
         revision_id: str | None = None,
         facts_status: FactsStatus | None = None,
         detail: str | None = None,
-        recovered: bool | None = None,
+        recovered: bool = False,
     ) -> None:
         with self._db.write() as session:
             row = session.get(CollectionRun, run_id)
@@ -246,8 +252,7 @@ class CollectionRunStore:
             row.facts_status = facts_status
             row.detail = detail
             row.finished_at = self._clock.now()
-            if outcome == CollectionOutcome.RECORDED:
-                row.settled_by_recovery = bool(recovered)
+            row.settled_by_recovery = recovered if outcome == CollectionOutcome.RECORDED else None
 
     def get(self, run_id: str) -> CollectionRunRecord:
         with self._db.read() as session:

@@ -373,7 +373,7 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert ADAPTIVE_ADR.name in proposal
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 29)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 30)]
     # The truth vocabulary the design must not widen is exactly what the code holds.
     assert {s.value for s in FieldStatus} == {"CONFIRMED", "ABSENT", "REVIEW_REQUIRED"}
     assert {level.value for level in FieldLevel} == {"CORE", "COVERAGE"}
@@ -400,6 +400,11 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert "append-only event stream per collection_run_id" in invariants["AC-27"]
     assert "the denominator counts each run once" in invariants["AC-27"]
     assert "a closeout is never revised, versioned or mutated" in invariants["AC-28"]
+    # P3 (Issue #110 5824551569): the exact-bundle, no-nonce rule closes carry-forward 5818794101.
+    assert "a content-identical EPR is the same bundle" in invariants["AC-29"]
+    assert "only a content-different EPR starts fresh evidence" in invariants["AC-29"]
+    clears = _section(adr, r"^11\.3 ")
+    assert "Exact bundles, no nonce" in clears and "5818794101" in clears
     # ADR-0010 §7's historical level label is aligned with COVERAGE, not left as a second name.
     (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
     levels = _section(_read(collect_adr), r"^7\. Facts: two levels")
@@ -1197,6 +1202,31 @@ def test_only_the_shadow_switch_moves_an_epr_into_or_out_of_shadow() -> None:
         isinstance(node, ast.FunctionDef) and node.name == "_switch_transition"
         for node in ast.walk(store)
     )
+
+
+def test_only_the_recovery_branch_settles_a_run_by_recovery() -> None:
+    # Review 5312254605 B2: settled_by_recovery decides the one non-blocking missing-shadow cause,
+    # so exactly one call site — the collection's revision-recovery branch — may set it true.
+    callers = [
+        (path, node.lineno)
+        for path, tree in _production_modules().items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "recovered"
+    ]
+    assert [path for path, _ in callers] == ["app/collect/collection.py"], callers
+    tree = ast.parse((REPO_ROOT / "app/collect/collection.py").read_text("utf-8"))
+    (run_job,) = (
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run_job"
+    )
+    recovery = next(
+        n
+        for n in ast.walk(run_job)
+        if isinstance(n, ast.If)
+        and any(isinstance(c, ast.Attribute) and c.attr == "for_run" for c in ast.walk(n.test))
+    )
+    assert any(
+        isinstance(n, ast.Attribute) and n.attr == "recovered" for n in ast.walk(recovery)
+    ), "the marker is set inside the branch that found an already-appended revision"
 
 
 def test_the_canonical_collection_knows_only_the_shadow_seam() -> None:

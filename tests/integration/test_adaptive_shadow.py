@@ -48,6 +48,7 @@ from app.collect.adaptive_shadow.store import (
     ADAPTIVE_BUNDLE_BLOCKED,
     ADAPTIVE_RESOLUTION_REFUSED,
     ADAPTIVE_RETENTION_INVALID,
+    ADAPTIVE_SHADOW_BINDING_REFUSED,
     ADAPTIVE_WINDOW_REFUSED,
     RawRetention,
     ShadowEvidenceStore,
@@ -65,7 +66,7 @@ from app.db.migrate import alembic_config, current_revision, upgrade_to_head
 from app.jobs.models import JobState
 from integrations.suppliers.collection import CollectionProfile, DocumentView, ReadKind
 from integrations.suppliers.transport.collection import RequestBudget
-from scripts.m3collect.fake_shop import PRODUCT_URL, SUPPLIER_KEY, FakeGateway
+from scripts.m3collect.fake_shop import PRODUCT_URL, SUPPLIER_KEY, FakeGateway, page
 from tests.adaptive_support import epr, template
 from tests.conftest import make_config
 from tests.shadow_support import (
@@ -631,14 +632,22 @@ def test_the_adr_count_bound_is_five_thousand_raw_records_per_supplier(
     # The production bounds exactly (90 days, 5,000): 5,001 raw records, the oldest pruned first.
     with container(config, clock, shop) as app:
         _, bundle_key = enabled_profile(app)
+        entry = app.shadow_switch.current(SUPPLIER_KEY)
+        assert entry is not None
         start = clock.now()
         runs = [f"run-{i:05d}" for i in range(5001)]
+        frozen = (entry.entry_id, bundle_key, str(start))
         with contextlib.closing(raw(config)) as connection:
             connection.executemany(
                 "INSERT INTO collection_runs (collection_run_id, job_id, correlation_id,"
-                " supplier_key, source_url, outcome, detail, requested_at, finished_at)"
-                " VALUES (?, ?, 'c', ?, ?, 'NO_REVISION', 'x', ?, ?)",
-                [(run, run, SUPPLIER_KEY, PRODUCT_URL, str(start), str(start)) for run in runs],
+                " supplier_key, source_url, outcome, detail, requested_at, finished_at,"
+                " shadow_decision, shadow_switch_entry_id, shadow_bundle_key,"
+                " first_product_read_at)"
+                " VALUES (?, ?, 'c', ?, ?, 'NO_REVISION', 'x', ?, ?, 'ENABLED', ?, ?, ?)",
+                [
+                    (run, run, SUPPLIER_KEY, PRODUCT_URL, str(start), str(start), *frozen)
+                    for run in runs
+                ],
             )
             connection.executemany(
                 "INSERT INTO adaptive_shadow_records VALUES (?, ?, NULL, ?, 'MATCH', NULL, '{}',"
@@ -920,6 +929,255 @@ def test_an_exact_bundle_with_a_permanent_cause_is_never_retried_under_another_d
         _, fresh_bundle = enabled_profile(app, "fixed", sold_out_words=["품절", "일시품절"])
         assert fresh_bundle != bundle_key
         declare(app, fresh_bundle)
+
+
+# ================================================================ review 5312254605
+
+
+def test_a_no_revision_run_is_settled_before_its_shadow_runs(
+    config: AppConfig, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unresolved = FakeGateway(documents=[page(product_id="")], images=gateway().images)
+    with container(config, clock, unresolved) as app:
+        enabled_profile(app)
+        seen: list[CollectionOutcome] = []
+        real = app.collection._shadow
+        assert real is not None
+
+        def watching(shadow: Any) -> None:
+            seen.append(app.collection.run(shadow.collection_run_id).outcome)
+            real(shadow)
+
+        app.collection._shadow = watching
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        assert seen == [CollectionOutcome.NO_REVISION], "B1: the canonical answer is durable first"
+        assert app.shadow_evidence.record(run_id).revision_id is None
+
+
+def test_a_process_killed_after_a_durable_no_revision_never_refetches_and_blocks(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    unresolved = FakeGateway(documents=[page(product_id="")], images=gateway().images)
+    with container(config, clock, unresolved) as app:
+        _, bundle_key = enabled_profile(app)
+        window = declare(app, bundle_key)
+        submitted = app.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+
+        def killed(_: object) -> None:
+            raise ProcessKilled
+
+        app.collection._shadow = killed  # type: ignore[assignment]
+        with pytest.raises(ProcessKilled):
+            app.collection._run_job(job_context(app, submitted.collection_run_id, 1))
+        run = app.collection.run(submitted.collection_run_id)
+        assert run.outcome is CollectionOutcome.NO_REVISION and run.settled_by_recovery is None
+    assert unresolved.document_reads == 1
+    clock.advance(INTERVAL + 1)
+    with container(config, clock, unresolved) as restarted:
+        restarted.collection._run_job(job_context(restarted, submitted.collection_run_id, 2))
+        assert unresolved.document_reads == 1, "a settled NO_REVISION run is never read again"
+        run = restarted.collection.run(submitted.collection_run_id)
+        assert run.outcome is CollectionOutcome.NO_REVISION
+        assert restarted.shadow_evidence.reconcile() == 1
+        assert restarted.shadow_evidence.reconcile() == 0
+        assert restarted.shadow_evidence.state(submitted.collection_run_id) == State(
+            CountAs.INCOMPLETE, Cause.SHADOW_MISSING
+        ), "not the recovery exception: blocking"
+        assert len(restarted.shadow_evidence.events(submitted.collection_run_id)) == 1
+        assert restarted.shadow_evidence.bundle(bundle_key).verdict is BundleVerdict.BLOCKED
+        assert window in restarted.shadow_evidence.bundle(bundle_key).reasons[0]
+
+
+def test_the_recovery_marker_is_a_structural_canonical_invariant(
+    config: AppConfig, clock: FakeClock, shop: FakeGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with container(config, clock, shop) as app:
+        _, bundle_key = enabled_profile(app)
+        window = declare(app, bundle_key)
+
+        def broken(self: ShadowEvidenceStore, **_: object) -> None:
+            raise RuntimeError("the shadow's own unit fails")
+
+        monkeypatch.setattr(ShadowEvidenceStore, "record_outcome", broken)
+        recorded = collect_once(app, clock, PRODUCT_URL)
+        monkeypatch.undo()
+        assert app.collection.run(recorded).settled_by_recovery is False, "explicit on settling"
+        unresolved_run = collect_once(app, clock, "https://shop.collect.invalid/product/sample/1/")
+    with contextlib.closing(raw(config)) as connection:
+        for statement, run_id in (
+            # A normal RECORDED run can never later become recovery-settled (and so never turn its
+            # blocking SHADOW_MISSING into the recovery exception), nor lose its marker.
+            (
+                "UPDATE collection_runs SET settled_by_recovery = 1 WHERE collection_run_id = ?",
+                recorded,
+            ),
+            (
+                "UPDATE collection_runs SET settled_by_recovery = NULL WHERE collection_run_id = ?",
+                recorded,
+            ),
+            # Only a RECORDED run carries a marker.
+            (
+                "UPDATE collection_runs SET settled_by_recovery = 1 WHERE collection_run_id = ?",
+                unresolved_run,
+            ),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement, (run_id,))
+    with container(config, clock, shop) as app:
+        app.shadow_evidence.reconcile(window)
+        assert app.shadow_evidence.state(recorded) == State(
+            CountAs.INCOMPLETE, Cause.SHADOW_MISSING
+        )
+
+
+def test_a_run_settles_recorded_only_with_an_explicit_marker(
+    config: AppConfig, clock: FakeClock, shop: FakeGateway
+) -> None:
+    with container(config, clock, shop) as app:
+        submitted = app.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+
+        def killed(*_: object, **__: object) -> None:
+            raise ProcessKilled
+
+        runs = app.collection._runs
+        runs.recorded = killed  # type: ignore[method-assign]
+        with pytest.raises(ProcessKilled):
+            app.collection._run_job(job_context(app, submitted.collection_run_id, 1))
+        del runs.recorded
+        (revision_id, facts_status) = rows(
+            config,
+            "SELECT revision_id, facts_status FROM product_facts_revisions"
+            " WHERE collection_run_id = ?",
+            submitted.collection_run_id,
+        )[0]
+    with contextlib.closing(raw(config)) as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE collection_runs SET outcome = 'RECORDED', revision_id = ?, facts_status = ?,"
+            " finished_at = requested_at WHERE collection_run_id = ?",
+            (revision_id, facts_status, submitted.collection_run_id),
+        )
+
+
+def test_a_raw_record_binds_exactly_its_canonical_frozen_run(
+    config: AppConfig, clock: FakeClock, shop: FakeGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with container(config, clock, shop) as app:
+        _, bundle_key = enabled_profile(app)
+
+        def broken(self: ShadowEvidenceStore, **_: object) -> None:
+            raise RuntimeError("no record, so the test writes one itself")
+
+        monkeypatch.setattr(ShadowEvidenceStore, "record_outcome", broken)
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        monkeypatch.undo()
+        run = app.collection.run(run_id)
+        assert run.frozen is not None and run.revision_id is not None
+        other_bundle = bundle_key_of(save_profile(app, "other"))
+        good: dict[str, Any] = {
+            "collection_run_id": run_id,
+            "supplier_key": SUPPLIER_KEY,
+            "revision_id": run.revision_id,
+            "bundle_key": bundle_key,
+            "first_product_read_at": run.frozen.first_product_read_at,
+            "verdict": RunVerdict.MATCH,
+            "severity": None,
+            "comparison": {},
+            "correlation_id": CORRELATION,
+        }
+        app.shadow_switch.disable(SUPPLIER_KEY, actor=OPERATOR, reason="OFF", correlation_id="c")
+        disabled = collect_once(app, clock, "https://shop.collect.invalid/product/sample/1/")
+        for wrong in (
+            {"supplier_key": "othershop"},
+            {"bundle_key": other_bundle},
+            {"first_product_read_at": run.frozen.first_product_read_at + timedelta(seconds=1)},
+            {"revision_id": "0" * 36},
+            {"collection_run_id": "no-such-run"},
+        ):
+            with pytest.raises(AppError) as error:
+                app.shadow_evidence.record_outcome(**{**good, **wrong})
+            refused(error, ADAPTIVE_SHADOW_BINDING_REFUSED)
+        assert count(config, "adaptive_shadow_records") == 0
+        # The database refuses a raw record its run never froze.
+        with contextlib.closing(raw(config)) as connection:
+            for run_key, bundle in ((run_id, other_bundle), (disabled, bundle_key)):
+                with pytest.raises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "INSERT INTO adaptive_shadow_records VALUES (?, ?, NULL, ?, 'MATCH', NULL,"
+                        " '{}', ?, 'p', '2026-09-13 00:00:00.000000')",
+                        (run_key, SUPPLIER_KEY, bundle, "0" * 64),
+                    )
+        app.shadow_evidence.record_outcome(**good)
+        assert app.shadow_evidence.record(run_id).bundle_key == bundle_key
+
+
+def test_a_ledger_event_names_only_the_window_its_run_froze_for(
+    config: AppConfig, clock: FakeClock, shop: FakeGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script(monkeypatch, RunVerdict.MISMATCH)
+    with container(config, clock, shop) as app:
+        _, bundle_key = enabled_profile(app)
+        first = declare(app, bundle_key)
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        app.shadow_evidence.end(first, actor=OPERATOR, reason="END")
+        second = declare(app, bundle_key)
+        # The database refuses an event in a window the run is not eligible for.
+        with contextlib.closing(raw(config)) as connection, pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO adaptive_shadow_ledger_events SELECT 'e-y', collection_run_id, 2, ?,"
+                " 'RAW_PRUNED_UNRESOLVED', 'INCOMPLETE', 'PRUNED_BEFORE_RESOLUTION', NULL, NULL,"
+                " NULL, NULL, NULL, process_run_id, actor, correlation_id, occurred_at"
+                " FROM adaptive_shadow_ledger_events WHERE collection_run_id = ?",
+                (second, run_id),
+            )
+    # Rebound out of band, the run's evidence is refused, never counted in either window.
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute("DROP TRIGGER trg_adaptive_shadow_ledger_events_no_update")
+        connection.execute(
+            "UPDATE adaptive_shadow_ledger_events SET window_id = ? WHERE collection_run_id = ?",
+            (second, run_id),
+        )
+        connection.commit()
+    with container(config, clock, shop) as app:
+        with pytest.raises(ShadowEvidenceTampered):
+            app.shadow_evidence.window_evidence(first)
+        with pytest.raises(ShadowEvidenceTampered):
+            app.shadow_evidence.reconcile(first)
+        assert app.shadow_evidence.window_evidence(second).states == {}
+
+
+def test_a_raw_record_changed_away_from_its_run_fails_closed(
+    config: AppConfig, clock: FakeClock, shop: FakeGateway
+) -> None:
+    with container(config, clock, shop) as app:
+        enabled_profile(app)
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        other = bundle_key_of(save_profile(app, "other"))
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute("DROP TRIGGER trg_adaptive_shadow_records_no_update")
+        connection.execute("UPDATE adaptive_shadow_records SET bundle_key = ?", (other,))
+        connection.commit()
+    with container(config, clock, shop) as app, pytest.raises(ShadowEvidenceTampered):
+        app.shadow_evidence.record(run_id)
+
+
+@pytest.mark.parametrize(
+    ("age", "pruned"), [(timedelta(days=90), 1), (timedelta(days=90, seconds=-1), 0)]
+)
+def test_the_age_bound_includes_its_exact_boundary(
+    config: AppConfig,
+    clock: FakeClock,
+    shop: FakeGateway,
+    monkeypatch: pytest.MonkeyPatch,
+    age: timedelta,
+    pruned: int,
+) -> None:
+    script(monkeypatch, RunVerdict.MATCH)
+    with container(config, clock, shop) as app:
+        enabled_profile(app)
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        recorded_at = app.shadow_evidence.record(run_id).recorded_at
+        clock.advance((recorded_at + age - clock.now()).total_seconds())
+        assert app.shadow_evidence.prune().pruned == pruned
 
 
 # ================================================================ restart, tamper, migration

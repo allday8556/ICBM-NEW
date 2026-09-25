@@ -32,6 +32,11 @@ keeps NULL and is never shadow-eligible. Once frozen, the four frozen columns ne
   and leaves ``SHADOW`` for ``DRAFT`` only when it no longer does (a trigger on the P2 lifecycle).
 - A ledger event after the first follows only an ``UNRESOLVED_MISMATCH`` state, in the same
   window. At most one window per supplier is open.
+- A raw record belongs to a run frozen ``ENABLED`` for its supplier and bundle, and names only
+  that run's own revision; a ledger event names exactly the window the run's frozen decision and
+  first reservation make it eligible for.
+- ``settled_by_recovery`` is carried only by a ``RECORDED`` run, is set explicitly in the update
+  that settles it, and never changes afterwards.
 
 **Downgrade fails closed.** It refuses while any of the new tables holds a row, or any run froze an
 ``ENABLED`` decision: shadow evidence is never silently destroyed. A ``DISABLED`` decision, and the
@@ -154,6 +159,27 @@ def upgrade() -> None:
     op.execute(
         f"CREATE TRIGGER trg_{RUNS}_shadow_frozen BEFORE UPDATE ON {RUNS}"
         f" BEGIN {frozen} {shape} END"
+    )
+    # The recovery marker decides the one non-blocking missing-shadow cause (§11.2), so it is a
+    # structural invariant (review 5312254605 B2): only a RECORDED run carries it; a run settles
+    # RECORDED with an explicit true or false in that same update; and a settled run's marker
+    # never changes, so no later edit can turn SHADOW_MISSING into the recovery exception.
+    only_recorded = _raise(
+        f"{RUNS}: only a RECORDED run carries a recovery marker",
+        "NEW.settled_by_recovery IS NOT NULL AND NEW.outcome <> 'RECORDED'",
+    )
+    _trigger(RUNS, "recovery_insert", "INSERT", only_recorded)
+    settles = _raise(
+        f"{RUNS}: a run settles RECORDED with an explicit recovery marker",
+        "OLD.outcome = 'PENDING' AND NEW.outcome = 'RECORDED' AND NEW.settled_by_recovery IS NULL",
+    )
+    fixed = _raise(
+        f"{RUNS}: a settled run keeps its recovery marker",
+        "OLD.outcome <> 'PENDING' AND NEW.settled_by_recovery IS NOT OLD.settled_by_recovery",
+    )
+    op.execute(
+        f"CREATE TRIGGER trg_{RUNS}_recovery_update BEFORE UPDATE ON {RUNS}"
+        f" BEGIN {only_recorded} {settles} {fixed} END"
     )
 
     # ------------------------------------------------------------ the shadow switch
@@ -382,8 +408,23 @@ def _install_triggers() -> None:
             f" AND {_latest_switch_of_epr()} IS ('ENABLE:' || NEW.epr_digest))",
         ),
     )
-    # Raw records: never updated; deleted only by their retention.
+    # Raw records: never updated; deleted only by their retention; bound to the canonical run's
+    # frozen ENABLED decision, its supplier and bundle, and to that run's own revision (B3).
     _immutable(RECORDS, deletable=True)
+    _trigger(
+        RECORDS,
+        "of_its_frozen_run",
+        "INSERT",
+        _raise(
+            f"{RECORDS}: a raw record belongs to a run frozen ENABLED for its supplier and bundle",
+            f"NOT EXISTS (SELECT 1 FROM {RUNS} r WHERE r.collection_run_id = NEW.collection_run_id"
+            " AND r.supplier_key = NEW.supplier_key AND r.shadow_decision = 'ENABLED'"
+            " AND r.shadow_bundle_key = NEW.bundle_key)"
+            " OR (NEW.revision_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM"
+            " product_facts_revisions p WHERE p.revision_id = NEW.revision_id"
+            " AND p.collection_run_id = NEW.collection_run_id))",
+        ),
+    )
     # Windows: append-only, one open window per supplier, events in their own order.
     _immutable(WINDOWS)
     _trigger(
@@ -416,7 +457,23 @@ def _install_triggers() -> None:
         ),
     )
     # The ledger: append-only, in order, one window per run, and nothing after a terminal state.
+    # A run's events name exactly the window its frozen decision makes it eligible for (B3).
     _immutable(LEDGER)
+    _trigger(
+        LEDGER,
+        "in_its_frozen_window",
+        "INSERT",
+        _raise(
+            f"{LEDGER}: an event names the window the run froze its eligibility for",
+            f"NOT EXISTS (SELECT 1 FROM {RUNS} r, {WINDOWS} w"
+            " WHERE r.collection_run_id = NEW.collection_run_id AND w.window_id = NEW.window_id"
+            " AND r.supplier_key = w.supplier_key AND r.shadow_decision = 'ENABLED'"
+            " AND r.shadow_bundle_key = w.bundle_key"
+            " AND r.first_product_read_at >= w.declared_at"
+            f" AND NOT EXISTS (SELECT 1 FROM {WINDOW_EVENTS} e WHERE e.window_id = w.window_id"
+            " AND e.kind = 'ENDED' AND e.occurred_at <= r.first_product_read_at))",
+        ),
+    )
     before = (
         f"(SELECT l.count_as || ':' || COALESCE(l.cause, '') || ':' || l.window_id"
         f" FROM {LEDGER} l WHERE l.collection_run_id = NEW.collection_run_id"
@@ -465,6 +522,8 @@ def downgrade() -> None:
     op.execute(f"DROP TRIGGER trg_{TRANSITIONS}_shadow_follows_the_switch")
     for table in CREATED:
         op.drop_table(table)
+    op.execute(f"DROP TRIGGER trg_{RUNS}_recovery_update")
+    op.execute(f"DROP TRIGGER trg_{RUNS}_recovery_insert")
     op.execute(f"DROP TRIGGER trg_{RUNS}_shadow_frozen")
     op.execute(f"DROP TRIGGER trg_{RUNS}_shadow_shape_insert")
     for column in reversed(RUN_COLUMNS):

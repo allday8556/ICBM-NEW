@@ -431,11 +431,10 @@ class ProductCollectionService:
                     "revision_id": appended.revision_id,
                 },
             )
-            self._runs.recorded(
+            self._runs.recovered(
                 record.collection_run_id,
                 revision_id=appended.revision_id,
                 facts_status=appended.facts_status,
-                recovered=True,
             )
             self._recorded(record.collection_run_id)
             return
@@ -498,6 +497,11 @@ class ProductCollectionService:
                 "collect.identity_unresolved",
                 extra={"collection_run_id": run_id, "supplier": supplier_key},
             )
+            reason = identity.reason or "the identity is unresolved"
+            # The canonical answer is durable before the shadow looks (ADR-0017 §10.1; review
+            # 5312254605 B1): a crash after this point leaves a settled NO_REVISION run that is
+            # never read again, and its missing shadow is the blocking SHADOW_MISSING.
+            self._runs.no_revision(run_id, reason=reason)
             self._shadow_step(
                 frozen,
                 run_id=run_id,
@@ -510,7 +514,7 @@ class ProductCollectionService:
                 images=(),
                 revision_id=None,
             )
-            return CollectionResult(None, None, identity.reason)
+            return CollectionResult(None, None, reason)
         # The source has now said which product this is, so that is what the interval follows
         # from here: another accepted form of this product's URL buys no second read.
         self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
@@ -575,8 +579,9 @@ class ProductCollectionService:
         """Hand the shadow what this run already holds, and nothing it could spend.
 
         Only a run whose frozen decision is ENABLED reaches the step, so a disabled run makes no
-        Adaptive call at all. The canonical write has committed before this is called and no unit
-        is open here. The step promises never to raise; if it ever does, the run does not notice.
+        Adaptive call at all. The canonical write has committed before this is called — the
+        revision append, or the NO_REVISION outcome itself — and no unit is open here. The step
+        promises never to raise; if it ever does, the run does not notice.
         """
         if self._shadow is None or frozen.shadow.decision != "ENABLED":
             return
