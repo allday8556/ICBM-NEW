@@ -189,6 +189,7 @@ def _event(row: LedgerEvent) -> Event:
             adaptive_failed_closed=row.adaptive_failed_closed,
             window_id=row.window_id,
             process_run_id=row.process_run_id,
+            revision_id=row.revision_id,
         )
     except ValueError as error:
         raise ShadowEvidenceTampered(
@@ -206,9 +207,33 @@ def _same_instant(left: datetime | None, right: datetime | None) -> bool:
     return left == right
 
 
+class _NoEvidence:
+    """A run that may carry no shadow evidence: no appended revision, and not NO_REVISION."""
+
+
+NO_EVIDENCE = _NoEvidence()
+
+
+def _canonical_revision(session: Session, run: CollectionRun) -> str | _NoEvidence | None:
+    """The one revision identity a run's shadow evidence must carry (ADR-0017 §10.5; review
+    5312390108): the exact revision the run appended when it appended one — whether or not the run
+    is settled yet — NULL only for a run that is durably NO_REVISION, and nothing otherwise."""
+    appended = session.scalar(
+        select(ProductFactsRevision.revision_id).where(
+            ProductFactsRevision.collection_run_id == run.collection_run_id
+        )
+    )
+    if appended is not None:
+        return appended
+    if run.outcome == CollectionOutcome.NO_REVISION.value:
+        return None
+    return NO_EVIDENCE
+
+
 def _bound(session: Session, row: ShadowRecord) -> bool:
     """Whether a raw record belongs to its canonical run exactly as that run froze it: the same
-    supplier, an ENABLED decision for the same bundle, and only that run's own revision."""
+    supplier, an ENABLED decision for the same bundle, and exactly its canonical revision
+    identity."""
     run = session.get(CollectionRun, row.collection_run_id)
     if (
         run is None
@@ -217,10 +242,8 @@ def _bound(session: Session, row: ShadowRecord) -> bool:
         or run.shadow_bundle_key != row.bundle_key
     ):
         return False
-    if row.revision_id is None:
-        return True
-    revision = session.get(ProductFactsRevision, row.revision_id)
-    return revision is not None and revision.collection_run_id == row.collection_run_id
+    expected = _canonical_revision(session, run)
+    return expected is not NO_EVIDENCE and row.revision_id == expected
 
 
 def _fold(events: Sequence[Event]) -> State:
@@ -311,7 +334,9 @@ class ShadowEvidenceStore:
             row.record_digest = _record_digest(row)
             if not _bound(session, row):
                 raise _evidence_refused(
-                    ADAPTIVE_SHADOW_BINDING_REFUSED, "the revision is not the run's own"
+                    ADAPTIVE_SHADOW_BINDING_REFUSED,
+                    "the evidence names exactly the revision the run appended, and none only for a"
+                    " durable NO_REVISION run",
                 )
             session.add(row)
             session.flush()
@@ -428,6 +453,18 @@ class ShadowEvidenceStore:
             raise ShadowEvidenceTampered(
                 ADAPTIVE_SHADOW_TAMPERED,
                 "a run's ledger names a window other than the one it froze its eligibility for",
+                details={"collection_run_id": run.collection_run_id},
+            )
+        # The outcome names exactly the run's canonical revision identity; nothing later names one.
+        expected = _canonical_revision(session, run)
+        if events and (
+            expected is NO_EVIDENCE
+            or events[0].revision_id != expected
+            or any(event.revision_id is not None for event in events[1:])
+        ):
+            raise ShadowEvidenceTampered(
+                ADAPTIVE_SHADOW_TAMPERED,
+                "a run's recorded outcome does not name the revision the run appended",
                 details={"collection_run_id": run.collection_run_id},
             )
         return events
@@ -893,7 +930,7 @@ class ShadowEvidenceStore:
             else:
                 ids = session.scalars(select(EvidenceWindow.window_id)).all()
                 windows = [self._window_record(session, w) for w in ids]
-            missing: list[tuple[str, str, Cause]] = []
+            missing: list[tuple[str, str, Cause, str | None]] = []
             for window in windows:
                 if window.closed:
                     continue
@@ -906,9 +943,11 @@ class ShadowEvidenceStore:
                         and run.settled_by_recovery
                         else Cause.SHADOW_MISSING
                     )
-                    missing.append((run.collection_run_id, window.window_id, cause))
+                    revision = _canonical_revision(session, run)
+                    assert not isinstance(revision, _NoEvidence)  # eligible runs are terminal
+                    missing.append((run.collection_run_id, window.window_id, cause, revision))
         appended = 0
-        for run_id, target, cause in missing:
+        for run_id, target, cause, revision_id in missing:
             with self._db.write() as session:
                 if self._events(session, run_id):
                     continue  # another reconciliation got there first
@@ -918,6 +957,7 @@ class ShadowEvidenceStore:
                     target,
                     EventKind.OUTCOME_RECORDED,
                     outcome_state(None, cause),
+                    revision_id=revision_id,
                     actor=SYSTEM,
                     correlation_id=f"reconcile:{run_id}",
                 )

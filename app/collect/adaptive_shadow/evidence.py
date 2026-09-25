@@ -158,6 +158,7 @@ class Event:
     adaptive_failed_closed: bool | None = None
     window_id: str | None = None
     process_run_id: str | None = None
+    revision_id: str | None = None
 
 
 def fold(events: Sequence[Event]) -> State:

@@ -460,6 +460,8 @@ def test_a_failing_shadow_write_leaves_the_canonical_commit_intact(
         monkeypatch.undo()
         # The missing outcome is made visible, and it blocks: it is not a recovery.
         assert app.shadow_evidence.reconcile(window) == 1
+        (outcome,) = app.shadow_evidence.events(run.collection_run_id)
+        assert outcome.revision_id == run.revision_id, "the exact canonical revision is recorded"
         assert app.shadow_evidence.state(run.collection_run_id) == State(
             CountAs.INCOMPLETE, Cause.SHADOW_MISSING
         )
@@ -983,7 +985,8 @@ def test_a_process_killed_after_a_durable_no_revision_never_refetches_and_blocks
         assert restarted.shadow_evidence.state(submitted.collection_run_id) == State(
             CountAs.INCOMPLETE, Cause.SHADOW_MISSING
         ), "not the recovery exception: blocking"
-        assert len(restarted.shadow_evidence.events(submitted.collection_run_id)) == 1
+        (outcome,) = restarted.shadow_evidence.events(submitted.collection_run_id)
+        assert outcome.revision_id is None, "a NO_REVISION run's outcome names no revision"
         assert restarted.shadow_evidence.bundle(bundle_key).verdict is BundleVerdict.BLOCKED
         assert window in restarted.shadow_evidence.bundle(bundle_key).reasons[0]
 
@@ -1158,6 +1161,135 @@ def test_a_raw_record_changed_away_from_its_run_fails_closed(
         connection.commit()
     with container(config, clock, shop) as app, pytest.raises(ShadowEvidenceTampered):
         app.shadow_evidence.record(run_id)
+
+
+def test_shadow_evidence_names_exactly_the_revision_its_run_appended(
+    config: AppConfig, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ADR-0017 §10.5, review 5312390108: present when the run appended a revision, absent only
+    # for a durable NO_REVISION run, and no evidence at all for any other run.
+    unresolved_page = page(product_id="")
+    shop = FakeGateway(documents=[page(), unresolved_page], images=gateway().images)
+
+    def broken(self: ShadowEvidenceStore, **_: object) -> None:
+        raise RuntimeError("no record, so the test writes them itself")
+
+    with container(config, clock, shop) as app:
+        _, bundle_key = enabled_profile(app)
+        monkeypatch.setattr(ShadowEvidenceStore, "record_outcome", broken)
+        recorded = app.collection.run(collect_once(app, clock, PRODUCT_URL))
+        unresolved = app.collection.run(
+            collect_once(app, clock, "https://shop.collect.invalid/product/sample/1/")
+        )
+        monkeypatch.undo()
+        assert (
+            recorded.revision_id is not None and unresolved.outcome is CollectionOutcome.NO_REVISION
+        )
+        assert recorded.frozen is not None and unresolved.frozen is not None
+
+        def attempt(run: Any, revision_id: str | None) -> None:
+            app.shadow_evidence.record_outcome(
+                collection_run_id=run.collection_run_id,
+                supplier_key=SUPPLIER_KEY,
+                revision_id=revision_id,
+                bundle_key=bundle_key,
+                first_product_read_at=run.frozen.first_product_read_at,
+                verdict=RunVerdict.MATCH,
+                severity=None,
+                comparison={},
+                correlation_id=CORRELATION,
+            )
+
+        for run, revision_id in (
+            (recorded, None),  # 1. a RECORDED run's evidence never drops its revision
+            (unresolved, recorded.revision_id),  # 2. a NO_REVISION run names none
+        ):
+            with pytest.raises(AppError) as error:
+                attempt(run, revision_id)
+            refused(error, ADAPTIVE_SHADOW_BINDING_REFUSED)
+        # A PENDING run that appended nothing carries no evidence at all.
+        entry = app.shadow_switch.current(SUPPLIER_KEY)
+        assert entry is not None
+        with contextlib.closing(raw(config)) as connection:
+            connection.execute(
+                "INSERT INTO collection_runs (collection_run_id, job_id, correlation_id,"
+                " supplier_key, source_url, outcome, requested_at, shadow_decision,"
+                " shadow_switch_entry_id, shadow_bundle_key, first_product_read_at)"
+                " VALUES ('pending-run', 'pending-job', 'c', ?, ?, 'PENDING', ?, 'ENABLED',"
+                " ?, ?, ?)",
+                (
+                    SUPPLIER_KEY,
+                    PRODUCT_URL,
+                    str(clock.now()),
+                    entry.entry_id,
+                    bundle_key,
+                    str(recorded.frozen.first_product_read_at),
+                ),
+            )
+            connection.commit()
+            # The database holds the same shape whoever writes.
+            insert = (
+                "INSERT INTO adaptive_shadow_records VALUES (?, ?, ?, ?, 'MATCH', NULL, '{}', ?,"
+                " 'p', '2026-09-13 00:00:00.000000')"
+            )
+            for run_id, revision_id in (
+                (recorded.collection_run_id, None),
+                (unresolved.collection_run_id, recorded.revision_id),
+                ("pending-run", None),
+            ):
+                with pytest.raises(sqlite3.IntegrityError):
+                    connection.execute(
+                        insert, (run_id, SUPPLIER_KEY, revision_id, bundle_key, "0" * 64)
+                    )
+        with pytest.raises(AppError) as error:
+            app.shadow_evidence.record_outcome(
+                collection_run_id="pending-run",
+                supplier_key=SUPPLIER_KEY,
+                revision_id=None,
+                bundle_key=bundle_key,
+                first_product_read_at=recorded.frozen.first_product_read_at,
+                verdict=RunVerdict.MATCH,
+                severity=None,
+                comparison={},
+                correlation_id=CORRELATION,
+            )
+        refused(error, ADAPTIVE_SHADOW_BINDING_REFUSED)
+        # The right shapes are accepted.
+        attempt(recorded, recorded.revision_id)
+        attempt(unresolved, None)
+        assert app.shadow_evidence.record(recorded.collection_run_id).revision_id == (
+            recorded.revision_id
+        )
+        assert app.shadow_evidence.record(unresolved.collection_run_id).revision_id is None
+
+
+@pytest.mark.parametrize("tampered", ["NULL", "'00000000-0000-0000-0000-000000000000'"])
+def test_a_ledger_outcome_rebound_to_another_revision_fails_closed(
+    config: AppConfig,
+    clock: FakeClock,
+    shop: FakeGateway,
+    monkeypatch: pytest.MonkeyPatch,
+    tampered: str,
+) -> None:
+    script(monkeypatch, RunVerdict.MISMATCH)
+    with container(config, clock, shop) as app:
+        _, bundle_key = enabled_profile(app)
+        window = declare(app, bundle_key)
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        (outcome,) = app.shadow_evidence.events(run_id)
+        assert outcome.revision_id == app.collection.run(run_id).revision_id
+    with contextlib.closing(raw(config)) as connection:
+        connection.execute("DROP TRIGGER trg_adaptive_shadow_ledger_events_no_update")
+        connection.execute(f"UPDATE adaptive_shadow_ledger_events SET revision_id = {tampered}")
+        connection.commit()
+    with container(config, clock, shop) as app:
+        for read in (
+            lambda: app.shadow_evidence.window_evidence(window),
+            lambda: app.shadow_evidence.reconcile(window),
+            lambda: app.shadow_evidence.bundle(bundle_key),
+        ):
+            with pytest.raises(ShadowEvidenceTampered):
+                read()
 
 
 @pytest.mark.parametrize(

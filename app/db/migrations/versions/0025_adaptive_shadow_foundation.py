@@ -32,9 +32,10 @@ keeps NULL and is never shadow-eligible. Once frozen, the four frozen columns ne
   and leaves ``SHADOW`` for ``DRAFT`` only when it no longer does (a trigger on the P2 lifecycle).
 - A ledger event after the first follows only an ``UNRESOLVED_MISMATCH`` state, in the same
   window. At most one window per supplier is open.
-- A raw record belongs to a run frozen ``ENABLED`` for its supplier and bundle, and names only
-  that run's own revision; a ledger event names exactly the window the run's frozen decision and
-  first reservation make it eligible for.
+- A raw record belongs to a run frozen ``ENABLED`` for its supplier and bundle; it and the run's
+  ``OUTCOME_RECORDED`` name exactly the revision that run appended, and NULL only when the run is
+  durably ``NO_REVISION`` (a run with neither carries no evidence). A ledger event names exactly the
+  window the run's frozen decision and first reservation make it eligible for.
 - ``settled_by_recovery`` is carried only by a ``RECORDED`` run, is set explicitly in the update
   that settles it, and never changes afterwards.
 
@@ -120,13 +121,29 @@ def _trigger(table: str, name: str, event: str, body: str) -> None:
 
 
 def _raise(message: str, condition: str) -> str:
-    return f"SELECT RAISE(ABORT, '{message}') WHERE {condition};"
+    quoted = message.replace("'", "''")  # a message is an SQL string literal
+    return f"SELECT RAISE(ABORT, '{quoted}') WHERE {condition};"
 
 
 def _immutable(table: str, *, deletable: bool = False) -> None:
     _trigger(table, "no_update", "UPDATE", _raise(f"a {table} row is never updated", "1"))
     if not deletable:
         _trigger(table, "no_delete", "DELETE", _raise(f"a {table} row is never deleted", "1"))
+
+
+def _revision_misbound(column: str) -> str:
+    """True when ``column`` is not the run's canonical revision identity (ADR-0017 §10.5; review
+    5312390108): the exact revision the run appended when one exists, and NULL only for a run
+    that is durably NO_REVISION. Any other run carries no shadow evidence at all."""
+    appended = (
+        "(SELECT p.revision_id FROM product_facts_revisions p"
+        " WHERE p.collection_run_id = NEW.collection_run_id LIMIT 1)"
+    )
+    outcome = f"(SELECT r.outcome FROM {RUNS} r WHERE r.collection_run_id = NEW.collection_run_id)"
+    return (
+        f"({appended} IS NOT NULL AND {column} IS NOT {appended})"
+        f" OR ({appended} IS NULL AND ({column} IS NOT NULL OR {outcome} IS NOT 'NO_REVISION'))"
+    )
 
 
 def upgrade() -> None:
@@ -416,13 +433,12 @@ def _install_triggers() -> None:
         "of_its_frozen_run",
         "INSERT",
         _raise(
-            f"{RECORDS}: a raw record belongs to a run frozen ENABLED for its supplier and bundle",
+            f"{RECORDS}: a raw record belongs to a run frozen ENABLED for its supplier and"
+            " bundle, and names exactly the revision that run appended (NULL only for NO_REVISION)",
             f"NOT EXISTS (SELECT 1 FROM {RUNS} r WHERE r.collection_run_id = NEW.collection_run_id"
             " AND r.supplier_key = NEW.supplier_key AND r.shadow_decision = 'ENABLED'"
             " AND r.shadow_bundle_key = NEW.bundle_key)"
-            " OR (NEW.revision_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM"
-            " product_facts_revisions p WHERE p.revision_id = NEW.revision_id"
-            " AND p.collection_run_id = NEW.collection_run_id))",
+            f" OR {_revision_misbound('NEW.revision_id')}",
         ),
     )
     # Windows: append-only, one open window per supplier, events in their own order.
@@ -472,6 +488,17 @@ def _install_triggers() -> None:
             " AND r.first_product_read_at >= w.declared_at"
             f" AND NOT EXISTS (SELECT 1 FROM {WINDOW_EVENTS} e WHERE e.window_id = w.window_id"
             " AND e.kind = 'ENDED' AND e.occurred_at <= r.first_product_read_at))",
+        ),
+    )
+    _trigger(
+        LEDGER,
+        "revision_of_its_run",
+        "INSERT",
+        _raise(
+            f"{LEDGER}: a run's outcome names exactly the revision it appended (NULL only for"
+            " NO_REVISION), and no later event names one",
+            f"(NEW.kind = 'OUTCOME_RECORDED' AND ({_revision_misbound('NEW.revision_id')}))"
+            " OR (NEW.kind <> 'OUTCOME_RECORDED' AND NEW.revision_id IS NOT NULL)",
         ),
     )
     before = (
