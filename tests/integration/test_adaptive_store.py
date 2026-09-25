@@ -1109,7 +1109,7 @@ def test_0024_is_additive_and_keeps_every_existing_object_and_row(tmp_path: Path
         raw.commit()
         rows = raw.execute("SELECT * FROM review_coverage").fetchall()
     before = _schema(database)
-    upgrade_to_head(url)
+    command.upgrade(alembic_config(url), AT_0024)
     after = _schema(database)
     assert {name: after[name] for name in before} == before
     assert {name for name in after if name.startswith(("adaptive_", "trg_adaptive_"))} >= set(

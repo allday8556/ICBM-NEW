@@ -127,10 +127,18 @@ M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_PO
 # coverage watermark, G2-C the owner truth token of that watermark. None is registration
 # state, so the registration guards below still apply to them unchanged. Nothing else follows.
 # Adaptive Collector P2 (ADR-0017, Issue #110 5822024807) adds the profile and validation
-# persistence owner after Gate 2. It holds no registration state either.
+# persistence owner after Gate 2, and P3 (Issue #110 5824551569) the shadow foundation. Neither
+# holds registration state.
 G2_HEAD = "0023_g2_review_coverage_fence"
-SCHEMA_HEAD = "0024_adaptive_profile_validation"
-AFTER_M5 = ("0021_g2_review_items", "0022_g2_review_coverage", G2_HEAD, SCHEMA_HEAD)
+ADAPTIVE_P2 = "0024_adaptive_profile_validation"
+SCHEMA_HEAD = "0025_adaptive_shadow_foundation"
+AFTER_M5 = (
+    "0021_g2_review_items",
+    "0022_g2_review_coverage",
+    G2_HEAD,
+    ADAPTIVE_P2,
+    SCHEMA_HEAD,
+)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",

@@ -17,9 +17,10 @@ Two stores, one owner of the seven migration-0024 tables:
     current freshness. A sample belongs to one supplier and is retained while any run references
     it; every read of a run recomputes its ordered sample set from the linked sample rows.
 
-``SHADOW`` is lifecycle vocabulary only in P2. Nothing here enters it: ADR-0017 §7.1 requires
-``VALIDATED`` plus the per-supplier shadow switch, and the switch, with the frozen per-run shadow
-decision of §10.1, belongs to a later slice (review ``5311392575`` B1).
+Nothing here enters ``SHADOW`` on its own: ADR-0017 §7.1 requires ``VALIDATED`` plus the
+per-supplier shadow switch (review ``5311392575`` B1). Only the shadow-switch owner
+(``app.collect.adaptive_shadow.switch``, P3) moves an EPR into or out of ``SHADOW``, inside the same
+write unit as the switch entry that justifies it, and the database refuses any other way in.
 
 Nothing here reads a supplier, writes a ``ProductFactsRevision``, activates a profile or runs a
 shadow. It writes no audit event: its own append-only tables are the record, and an audit event
@@ -86,9 +87,15 @@ ADAPTIVE_TAMPERED = "ADAPTIVE_TAMPERED"
 Kind = Literal["EXTRACTION_PROFILE", "PAGE_TEMPLATE"]
 Origin = Literal["OPERATOR", "AI_PROPOSAL", "IMPORT"]
 State = Literal["DRAFT", "SHADOW", "RETIRED"]
-# The transitions P2 performs, and the states each may follow. RETIRED is final. There is no
-# entry into SHADOW here (module docstring).
+# The transitions this store performs on its own, and the states each may follow. RETIRED is
+# final. There is no entry into SHADOW here (module docstring).
 _FOLLOWS: dict[State, frozenset[State]] = {"RETIRED": frozenset({"DRAFT", "SHADOW"})}
+# The transitions only the shadow-switch owner performs, inside its own write unit, as its switch
+# history moves (ADR-0017 §7.1: SHADOW is VALIDATED plus the per-supplier shadow switch; P3).
+_SWITCH_FOLLOWS: dict[State, frozenset[State]] = {
+    "SHADOW": frozenset({"DRAFT"}),
+    "DRAFT": frozenset({"SHADOW"}),
+}
 
 
 class AdaptiveTampered(AppError):
@@ -380,32 +387,58 @@ class AdaptiveProfileStore:
     ) -> None:
         self._epr_row(epr_digest)
         with self._db.write() as session:
-            last = session.scalars(
-                select(AdaptiveProfileTransition)
-                .where(AdaptiveProfileTransition.epr_digest == epr_digest)
-                .order_by(AdaptiveProfileTransition.seq.desc())
-                .limit(1)
-            ).first()
-            if last is None:
-                raise AdaptiveTampered(ADAPTIVE_TAMPERED, "an EPR without a lifecycle")
-            from_state: State = last.to_state  # type: ignore[assignment]
-            if from_state not in _FOLLOWS.get(to_state, frozenset()):
-                raise _invalid(
-                    ADAPTIVE_LIFECYCLE_REFUSED,
-                    f"an EPR in {from_state} is never moved to {to_state}",
-                    from_state=from_state,
-                    to_state=to_state,
-                )
-            self._append(
-                session,
-                epr_digest,
-                last.seq + 1,
-                from_state,
-                to_state,
-                reason,
-                actor,
-                correlation_id,
+            self._move(session, epr_digest, to_state, actor, reason, correlation_id, _FOLLOWS)
+
+    def _switch_transition(
+        self,
+        session: Session,
+        epr_digest: str,
+        to_state: State,
+        *,
+        actor: str,
+        reason: str,
+        correlation_id: str,
+    ) -> None:
+        """``DRAFT → SHADOW`` or ``SHADOW → DRAFT`` inside the shadow-switch owner's own write unit,
+        which has just appended the switch entry that justifies it. Nothing else calls this."""
+        self._move(session, epr_digest, to_state, actor, reason, correlation_id, _SWITCH_FOLLOWS)
+
+    def _move(
+        self,
+        session: Session,
+        epr_digest: str,
+        to_state: State,
+        actor: str,
+        reason: str,
+        correlation_id: str,
+        follows: dict[State, frozenset[State]],
+    ) -> None:
+        last = session.scalars(
+            select(AdaptiveProfileTransition)
+            .where(AdaptiveProfileTransition.epr_digest == epr_digest)
+            .order_by(AdaptiveProfileTransition.seq.desc())
+            .limit(1)
+        ).first()
+        if last is None:
+            raise AdaptiveTampered(ADAPTIVE_TAMPERED, "an EPR without a lifecycle")
+        from_state: State = last.to_state  # type: ignore[assignment]
+        if from_state not in follows.get(to_state, frozenset()):
+            raise _invalid(
+                ADAPTIVE_LIFECYCLE_REFUSED,
+                f"an EPR in {from_state} is never moved to {to_state}",
+                from_state=from_state,
+                to_state=to_state,
             )
+        self._append(
+            session,
+            epr_digest,
+            last.seq + 1,
+            from_state,
+            to_state,
+            reason,
+            actor,
+            correlation_id,
+        )
 
     # -------------------------------------------------------------- reads
 

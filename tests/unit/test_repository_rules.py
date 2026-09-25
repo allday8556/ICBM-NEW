@@ -377,7 +377,7 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert ADAPTIVE_ADR.name in proposal
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 29)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 30)]
     # The truth vocabulary the design must not widen is exactly what the code holds.
     assert {s.value for s in FieldStatus} == {"CONFIRMED", "ABSENT", "REVIEW_REQUIRED"}
     assert {level.value for level in FieldLevel} == {"CORE", "COVERAGE"}
@@ -404,6 +404,11 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     assert "append-only event stream per collection_run_id" in invariants["AC-27"]
     assert "the denominator counts each run once" in invariants["AC-27"]
     assert "a closeout is never revised, versioned or mutated" in invariants["AC-28"]
+    # P3 (Issue #110 5824551569): the exact-bundle, no-nonce rule closes carry-forward 5818794101.
+    assert "a content-identical EPR is the same bundle" in invariants["AC-29"]
+    assert "only a content-different EPR starts fresh evidence" in invariants["AC-29"]
+    clears = _section(adr, r"^11\.3 ")
+    assert "Exact bundles, no nonce" in clears and "5818794101" in clears
     # ADR-0010 §7's historical level label is aligned with COVERAGE, not left as a second name.
     (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
     levels = _section(_read(collect_adr), r"^7\. Facts: two levels")
@@ -1346,11 +1351,15 @@ ADAPTIVE_STORE_MAY_IMPORT = frozenset(
 )
 
 
+ADAPTIVE_PACKAGES = (
+    "app.collect.adaptive",
+    "app.collect.adaptive_store",
+    "app.collect.adaptive_shadow",
+)
+
+
 def _is_adaptive(name: str) -> bool:
-    return any(
-        name == package or name.startswith(f"{package}.")
-        for package in ("app.collect.adaptive", "app.collect.adaptive_store")
-    )
+    return any(name == package or name.startswith(f"{package}.") for package in ADAPTIVE_PACKAGES)
 
 
 def test_the_adaptive_store_imports_only_what_persistence_needs() -> None:
@@ -1371,29 +1380,152 @@ def test_the_disposable_phase_b_prototype_never_reached_the_repository() -> None
     )
 
 
-# Who may import the Adaptive packages at all (P2): the packages themselves, and the schema
-# aggregate for the persistence owner's models. No COLLECT runtime, container, route, job or
-# script wires the Adaptive Collector yet.
-ADAPTIVE_IMPORTERS = {"app/db/metadata.py": {"app.collect.adaptive_store"}}
+# ADR-0017 P3 (Issue #110 5824551569): the shadow owner may read the canonical run and fact
+# models and the canonical side of the shadow seam, and write only its own tables. It may not
+# import a canonical writer (the revision store, source-asset recorder, run store, collection,
+# review, product, audit or job owners), a transport, a session or anything that reaches a network
+# (S1, S4, S6).
+ADAPTIVE_SHADOW_ROOT = "app/collect/adaptive_shadow/"
+ADAPTIVE_SHADOW_MAY_IMPORT = frozenset(
+    {
+        "collections",
+        "collections.abc",
+        "dataclasses",
+        "datetime",
+        "enum",
+        "json",
+        "logging",
+        "typing",
+        "urllib.parse",
+        "uuid",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "app.core.clock",
+        "app.core.errors",
+        "app.db.base",
+        "app.db.database",
+        "app.db.types",
+        "app.collect.facts",
+        "app.collect.urls",
+        "app.collect.models",
+        "app.collect.shadow",
+        "integrations.suppliers.collection",
+    }
+)
+SHADOW_OWN_MODELS = frozenset(
+    {"ShadowSwitchEntry", "ShadowRecord", "EvidenceWindow", "EvidenceWindowEvent", "LedgerEvent"}
+)
 
 
-def test_nothing_in_production_wires_the_adaptive_collector_yet() -> None:
+def test_the_shadow_owner_imports_no_canonical_writer_and_no_network() -> None:
+    modules = {p: t for p, t in _production_modules().items() if p.startswith(ADAPTIVE_SHADOW_ROOT)}
+    assert {f"{ADAPTIVE_SHADOW_ROOT}{m}.py" for m in ("runner", "store", "switch")} <= set(modules)
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert name in ADAPTIVE_SHADOW_MAY_IMPORT or _is_adaptive(name), f"{path}: {name}"
+
+
+def test_the_shadow_owner_constructs_only_its_own_rows() -> None:
+    # S4: the canonical models are read through queries, never built or added.
+    for path, tree in _production_modules().items():
+        if not path.startswith(ADAPTIVE_SHADOW_ROOT):
+            continue
+        canonical = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module in ("app.collect.models", "app.jobs.models")
+            for alias in node.names
+        }
+        built = {_callee(call) for call in ast.walk(tree) if isinstance(call, ast.Call)}
+        assert not (canonical & built), f"{path}: {sorted(canonical & built)}"
+
+
+def test_only_the_shadow_switch_moves_an_epr_into_or_out_of_shadow() -> None:
+    callers = {
+        path
+        for path, tree in _production_modules().items()
+        if any(
+            isinstance(node, ast.Attribute) and node.attr == "_switch_transition"
+            for node in ast.walk(tree)
+        )
+    }
+    assert callers == {f"{ADAPTIVE_SHADOW_ROOT}switch.py"}
+    store = ast.parse((REPO_ROOT / "app/collect/adaptive_store/store.py").read_text("utf-8"))
+    assert any(
+        isinstance(node, ast.FunctionDef) and node.name == "_switch_transition"
+        for node in ast.walk(store)
+    )
+
+
+def test_only_the_recovery_branch_settles_a_run_by_recovery() -> None:
+    # Review 5312254605 B2: settled_by_recovery decides the one non-blocking missing-shadow cause,
+    # so exactly one call site — the collection's revision-recovery branch — may set it true.
+    callers = [
+        (path, node.lineno)
+        for path, tree in _production_modules().items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "recovered"
+    ]
+    assert [path for path, _ in callers] == ["app/collect/collection.py"], callers
+    tree = ast.parse((REPO_ROOT / "app/collect/collection.py").read_text("utf-8"))
+    (run_job,) = (
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run_job"
+    )
+    recovery = next(
+        n
+        for n in ast.walk(run_job)
+        if isinstance(n, ast.If)
+        and any(isinstance(c, ast.Attribute) and c.attr == "for_run" for c in ast.walk(n.test))
+    )
+    assert any(
+        isinstance(n, ast.Attribute) and n.attr == "recovered" for n in ast.walk(recovery)
+    ), "the marker is set inside the branch that found an already-appended revision"
+
+
+def test_the_canonical_collection_knows_only_the_shadow_seam() -> None:
+    # The canonical owners depend on the protocols of app.collect.shadow, never on an Adaptive
+    # package; only the container composes the two.
+    for path in ("app/collect/collection.py", "app/collect/runs.py", "app/collect/shadow.py"):
+        tree = ast.parse((REPO_ROOT / path).read_text("utf-8"))
+        assert not any(_is_adaptive(name) for name in _imported_modules(tree)), path
+
+
+# Who may import the Adaptive packages at all: the packages themselves, the schema aggregate for
+# their models, and the container that composes them (P3). No COLLECT owner, route, job or script
+# imports them.
+ADAPTIVE_IMPORTERS = {
+    "app/db/metadata.py": {"app.collect.adaptive_store", "app.collect.adaptive_shadow"},
+    "app/container.py": {
+        "app.collect.adaptive.hooks",
+        "app.collect.adaptive_shadow.runner",
+        "app.collect.adaptive_shadow.store",
+        "app.collect.adaptive_shadow.switch",
+        "app.collect.adaptive_store.gate",
+        "app.collect.adaptive_store.store",
+    },
+}
+
+
+def test_only_the_container_wires_the_adaptive_collector() -> None:
     roots = [*PRODUCTION_ROOTS, REPO_ROOT / "scripts"]
     for root in roots:
         for file in root.rglob("*.py"):
             relative = file.relative_to(REPO_ROOT).as_posix()
-            if relative.startswith((ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT)):
+            if relative.startswith((ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT, ADAPTIVE_SHADOW_ROOT)):
                 continue
             allowed = ADAPTIVE_IMPORTERS.get(relative, set())
             for name in _imported_modules(ast.parse(file.read_text("utf-8"))):
                 if _is_adaptive(name):
                     assert name in allowed, f"{relative}: {name}"
-    # The pure core never reaches its own persistence owner.
+    # The pure core never reaches its persistence or shadow owner, and the persistence owner
+    # never reaches the shadow owner.
     for path, tree in _production_modules().items():
+        names = _imported_modules(tree)
         if path.startswith(ADAPTIVE_ROOT):
-            assert not any(
-                n.startswith("app.collect.adaptive_store") for n in _imported_modules(tree)
-            ), path
+            assert not any(n.startswith(ADAPTIVE_PACKAGES[1:]) for n in names), path
+        if path.startswith(ADAPTIVE_STORE_ROOT):
+            assert not any(n.startswith("app.collect.adaptive_shadow") for n in names), path
 
 
 # Issue #52 ruling 5711123764 §1: the REAL acceptance harness orchestrates and never collects.
@@ -1776,6 +1908,14 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "adaptive_validation_samples",
         "adaptive_validation_runs",
         "adaptive_validation_run_samples",
+        # Adaptive Collector P3 (ADR-0017 §10, §11; Issue #110 5824551569): the non-canonical
+        # shadow owner. The switch history, raw shadow records, the evidence ledger and the
+        # evidence windows; no ACTIVE table and no shadow ReviewItem.
+        "adaptive_shadow_switch_entries",
+        "adaptive_shadow_records",
+        "adaptive_evidence_windows",
+        "adaptive_evidence_window_events",
+        "adaptive_shadow_ledger_events",
     }
     offenders = [
         path

@@ -926,6 +926,20 @@ dies before the shadow's own unit commits.
     event stays in the history.
   - The other three blocking causes can never clear. They are cleared for the bundle only by a
     **new EPR**, which is a new bundle with new windows. The old bundle's evidence stays recorded.
+  - **Exact bundles, no nonce** (clarification closing carry-forward `5818794101` item 1; P3
+    authorization `5824551569` item 9). An EPR is content-addressed (§3, §5.2): lineage, origin,
+    author and change note lie outside its content, and the strict schema admits no key a nonce
+    could hide in. A content-identical EPR is therefore the **same** digest, the same bundle and
+    the same evidence, whoever saves it and however often.
+    - `PRUNED_BEFORE_RESOLUTION`, `IMAGE_UNMATCHABLE` and `SHADOW_MISSING` are permanent blocking
+      evidence for that exact EPR digest and bundle. No same-bundle retry, re-save, re-issue under a
+      nonce or counter, or new window clears them, and a bundle holding one — or a `FAIL` window — is
+      given no further window.
+    - "A new EPR" means a **genuinely content-different** EPR, with a different content digest.
+      Only such an EPR starts fresh bundle evidence. No semantic nonce or counter may be introduced
+      to manufacture one.
+    - `SHADOW_MISSING_AFTER_RECOVERY` remains the one same-bundle supersession (§11.2), and
+      `UNRESOLVED_MISMATCH` clears only by `RESOLUTION_RECORDED`.
 - **Fixing a bundle.** A `FAIL` disqualifies the bundle, and a fix is a new EPR with new windows.
   Every window of the bundle — `INCOMPLETE` and superseded ones included — is listed in the evidence
   by `collection_run_id`, with each run's effective state, its cause and its full event
@@ -1055,6 +1069,7 @@ AC-25  A ValidationRun that includes a SAMPLE_TRUNCATED sample ends INCOMPLETE, 
 AC-26  A blocking INCOMPLETE cause (UNRESOLVED_MISMATCH, PRUNED_BEFORE_RESOLUTION, IMAGE_UNMATCHABLE, SHADOW_MISSING) blocks the bundle until resolved or replaced by a new EPR; only SHADOW_MISSING_AFTER_RECOVERY permits a recorded supersession, and no window is ever abandoned
 AC-27  The window ledger is an append-only event stream per collection_run_id; one effective state per run is derived from it; the denominator counts each run once; RAW_PRUNED_UNRESOLVED is appended only while the effective state is UNRESOLVED_MISMATCH
 AC-28  A window final-closes only when every run's effective state is terminal; a closeout is never revised, versioned or mutated
+AC-29  Blocking evidence is bound to the exact content-addressed EPR: a content-identical EPR is the same bundle, so no re-save, nonce or counter clears PRUNED_BEFORE_RESOLUTION, IMAGE_UNMATCHABLE or SHADOW_MISSING; only a content-different EPR starts fresh evidence (carry-forward 5818794101)
 ```
 
 ## Consequences

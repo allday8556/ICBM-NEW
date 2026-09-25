@@ -109,6 +109,13 @@ def create_app(
             services.connect.normalize_on_startup()
             # Likewise a persisted marketplace auth READY is never trusted (M2 PR-B, §17 #17).
             services.marketplace_capability.normalize_on_startup()
+            # ADR-0017 §11.2 (P3): the shadow owner's startup pass, before the worker runs a
+            # collection: the missing outcomes of every open evidence window, then the raw bounds.
+            # Its failure is logged and never keeps the application from serving.
+            try:
+                services.shadow_evidence.on_startup()
+            except Exception:
+                logger.exception("app.shadow_startup_failed")
             await services.worker.start()
             # Gate 2 (ADR-0016 §4): every review producer's startup full reconciliation, before
             # the application serves, then its bounded periodic pass.

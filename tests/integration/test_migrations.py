@@ -102,8 +102,15 @@ CANONICAL_TABLES = (
     "adaptive_validation_samples",
     "adaptive_validation_runs",
     "adaptive_validation_run_samples",
+    # Adaptive Collector P3 (ADR-0017 §10, §11; Issue #110 5824551569): the shadow switch, raw
+    # shadow records, the evidence ledger and the evidence windows.
+    "adaptive_shadow_switch_entries",
+    "adaptive_shadow_records",
+    "adaptive_evidence_windows",
+    "adaptive_evidence_window_events",
+    "adaptive_shadow_ledger_events",
 )
-HEAD = "0024_adaptive_profile_validation"
+HEAD = "0025_adaptive_shadow_foundation"
 
 
 def _url(path: Path) -> str:

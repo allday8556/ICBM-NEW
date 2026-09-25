@@ -15,6 +15,7 @@ terminal outcome, and that outcome is the whole contract:
 content, no URL of a provider's making and no credential ever reaches this row.
 """
 
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -25,10 +26,13 @@ from sqlalchemy.orm import Session
 
 from app.collect.facts import FactsStatus
 from app.collect.models import CollectionOutcome, CollectionRun
+from app.collect.shadow import DISABLED, FrozenRun, FrozenShadow, ShadowFreezer
 from app.core.clock import Clock
 from app.core.errors import NotFoundError, RateLimitedError
 from app.db.database import Database
 from app.jobs.models import Job
+
+logger = logging.getLogger("icbm.collect")
 
 
 class SameProductTooSoon(RateLimitedError):
@@ -85,12 +89,19 @@ class CollectionRunRecord:
     pacing_key: str | None
     source_product_id: str | None
     finished_at: datetime | None
+    frozen: FrozenRun | None = None
+    settled_by_recovery: bool | None = None
 
 
 class CollectionRunStore:
-    def __init__(self, db: Database, clock: Clock) -> None:
+    def __init__(
+        self, db: Database, clock: Clock, *, shadow_freezer: ShadowFreezer | None = None
+    ) -> None:
         self._db = db
         self._clock = clock
+        # Who answers a run's shadow decision at its first reservation (ADR-0017 §10.1). Without
+        # one every run freezes an explicit DISABLED, so no run is ever shadow-eligible by default.
+        self._shadow_freezer = shadow_freezer
 
     def open(
         self,
@@ -124,7 +135,7 @@ class CollectionRunStore:
         session.flush()
         return run_id
 
-    def reserve_product_read(self, run_id: str, *, key: PacingKey, interval_s: float) -> None:
+    def reserve_product_read(self, run_id: str, *, key: PacingKey, interval_s: float) -> FrozenRun:
         """Take one real product read, or refuse because the last one was too recent.
 
         Every attempt passes through here, a retry of this same run included: what is stored is
@@ -132,6 +143,12 @@ class CollectionRunStore:
         the write are one transaction, so two runs racing for one product cannot both pass, and a
         restart sees what the earlier attempt committed. It is taken *before* the request, so a
         refusal has sent nothing.
+
+        The **first** reservation also freezes the run's shadow decision, in this same unit
+        (ADR-0017 §10.1): the switch entry in effect and the exact bundle it names, or DISABLED,
+        and when that first read was reserved. A retry keeps what the first froze and never asks
+        again, so a later switch or bundle change affects later runs only. The freeze only reads;
+        if the freezer cannot answer, the run freezes DISABLED and its read goes ahead unchanged.
         """
         with self._db.write() as session:
             row = session.get(CollectionRun, run_id)
@@ -143,6 +160,24 @@ class CollectionRunStore:
                 raise SameProductTooSoon(remaining)
             row.pacing_key = key.url
             row.product_read_at = now
+            if row.shadow_decision is None:
+                frozen = self._freeze(session, row.supplier_key)
+                row.shadow_decision = frozen.decision
+                row.shadow_switch_entry_id = frozen.switch_entry_id
+                row.shadow_bundle_key = frozen.bundle_key
+                row.first_product_read_at = now
+            frozen_run = _frozen(row)
+            assert frozen_run is not None
+            return frozen_run
+
+    def _freeze(self, session: Session, supplier_key: str) -> FrozenShadow:
+        if self._shadow_freezer is None:
+            return DISABLED
+        try:
+            return self._shadow_freezer(session, supplier_key)
+        except Exception:
+            logger.exception("collect.shadow_freeze_failed", extra={"supplier": supplier_key})
+            return DISABLED
 
     def seconds_until_readable(self, key: PacingKey, *, interval_s: float) -> float:
         """How long this product must still be left alone. Read-only; reserves nothing."""
@@ -163,11 +198,27 @@ class CollectionRunStore:
             row.source_product_id = source_product_id
 
     def recorded(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
+        """RECORDED by the attempt that appended the revision: ``settled_by_recovery`` is false."""
         self._finish(
             run_id,
             CollectionOutcome.RECORDED,
             revision_id=revision_id,
             facts_status=facts_status,
+            recovered=False,
+        )
+
+    def recovered(self, run_id: str, *, revision_id: str, facts_status: FactsStatus) -> None:
+        """RECORDED by the recovery path, from a revision an earlier attempt had already appended
+        and died before settling: ``settled_by_recovery`` is true. This is the canonical history
+        ADR-0017 §11.2 reads, so only that one branch of the collection calls it (a repository
+        rule), and the database lets the marker be set only in the settling update, only on a
+        RECORDED run, and never changed afterwards (migration 0025)."""
+        self._finish(
+            run_id,
+            CollectionOutcome.RECORDED,
+            revision_id=revision_id,
+            facts_status=facts_status,
+            recovered=True,
         )
 
     def no_revision(self, run_id: str, *, reason: str) -> None:
@@ -186,6 +237,7 @@ class CollectionRunStore:
         revision_id: str | None = None,
         facts_status: FactsStatus | None = None,
         detail: str | None = None,
+        recovered: bool = False,
     ) -> None:
         with self._db.write() as session:
             row = session.get(CollectionRun, run_id)
@@ -200,6 +252,7 @@ class CollectionRunStore:
             row.facts_status = facts_status
             row.detail = detail
             row.finished_at = self._clock.now()
+            row.settled_by_recovery = recovered if outcome == CollectionOutcome.RECORDED else None
 
     def get(self, run_id: str) -> CollectionRunRecord:
         with self._db.read() as session:
@@ -304,4 +357,17 @@ def _record(row: CollectionRun) -> CollectionRunRecord:
         pacing_key=row.pacing_key,
         source_product_id=row.source_product_id,
         finished_at=row.finished_at,
+        frozen=_frozen(row),
+        settled_by_recovery=row.settled_by_recovery,
     )
+
+
+def _frozen(row: CollectionRun) -> FrozenRun | None:
+    if row.shadow_decision is None or row.first_product_read_at is None:
+        return None
+    shadow = (
+        FrozenShadow("ENABLED", row.shadow_switch_entry_id, row.shadow_bundle_key)
+        if row.shadow_decision == "ENABLED"
+        else DISABLED
+    )
+    return FrozenRun(shadow, row.first_product_read_at)

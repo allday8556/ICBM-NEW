@@ -21,7 +21,7 @@ from app.collect.collection import (
     pacing_key,
 )
 from app.collect.facts import FactsStatus, FieldStatus, ImageIssue, ImageRole
-from app.collect.models import CollectionOutcome, CollectionRun
+from app.collect.models import CollectionOutcome
 from app.collect.runs import CollectionRunStore, SameProductTooSoon
 from app.collect.urls import UrlPolicy
 from app.config import AppConfig
@@ -451,19 +451,33 @@ def test_a_run_that_died_after_appending_recovers_instead_of_collecting_again(
     # leaves a retryable job; the next attempt must finish from the revision already appended and
     # must not read the provider or append a second one.
     submitted = collecting.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
-    run_once(collecting)
-    recorded = collecting.collection.run(submitted.collection_run_id)
-    assert recorded.revision_id is not None
 
-    # Rewind the run to what a crash would have left behind: the revision exists, the run does not
-    # know it yet.
-    with collecting.db.write() as session:
-        row = session.get(CollectionRun, submitted.collection_run_id)
-        assert row is not None
-        row.outcome = CollectionOutcome.PENDING
-        row.revision_id = None
-        row.facts_status = None
-        row.finished_at = None
+    # The process dies after the revision's unit committed and before the run is settled: the
+    # revision exists, the run does not know it yet. (A settled run is never rewound to simulate
+    # this: its recovery marker is fixed once settled, migration 0025.)
+    class ProcessKilled(BaseException):
+        pass
+
+    def killed(*_: object, **__: object) -> None:
+        raise ProcessKilled
+
+    runs = collecting.collection._runs
+    runs.recorded = killed  # type: ignore[method-assign]
+    context = JobContext(
+        job_id=submitted.job_id,
+        job_type=COLLECT_PRODUCT_JOB,
+        attempt_no=1,
+        max_attempts=3,
+        correlation_id=submitted.correlation_id,
+        target_ref=SUPPLIER_KEY,
+        payload={},
+    )
+    with pytest.raises(ProcessKilled):
+        collecting.collection._run_job(context)
+    del runs.recorded
+    pending = collecting.collection.run(submitted.collection_run_id)
+    assert pending.outcome is CollectionOutcome.PENDING and pending.revision_id is None
+    (recorded,) = collecting.source_truth.history(SUPPLIER_KEY, "4242").revisions
     reads_before, images_before = gateway.document_reads, len(gateway.image_reads)
 
     collecting.collection._run_job(
@@ -483,6 +497,7 @@ def test_a_run_that_died_after_appending_recovers_instead_of_collecting_again(
     assert settled.revision_id == recorded.revision_id, (
         "the revision already appended is the answer"
     )
+    assert settled.settled_by_recovery is True, "the recovery branch marks the run it settles"
     assert gateway.document_reads == reads_before, "recovery reads no provider"
     assert len(gateway.image_reads) == images_before
     assert len(collecting.source_truth.history(SUPPLIER_KEY, "4242").revisions) == 1
