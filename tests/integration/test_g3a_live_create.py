@@ -18,7 +18,7 @@ from app.container import Container
 from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.live import model as live_model
 from app.live.authority import LiveAuthorityService
-from app.live.model import GrantState, MutationStage
+from app.live.model import GrantState, MutationRefused, MutationStage
 from app.live.stack import SafetyStack
 from app.live.store import ArtifactRef, LiveAuthorityStore
 from app.products.model import ReadinessStatus
@@ -515,3 +515,210 @@ def test_a_section_26_scope_change_stales_the_create_restore_target(
     )
     result = execution(container, prep, authority=fresh).service.run(context(ready))
     assert result.intent_state is IntentState.CONFIRMED
+
+
+# ---------------------------------------------------------------- send-time atomicity (§4.3)
+
+
+def _permitted_stack(container: Container, proofs: Any = None) -> SafetyStack:
+    return SafetyStack(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        mode=PermittedMode(),
+        proofs=proofs or ProvenProofs(),
+        clock=container.clock,
+    )
+
+
+def test_a_paused_section_26_scope_blocks_create_readiness_whatever_the_proofs(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Review 5840851448 control 1: every other layer proven, §26 PAUSED ⇒ BLOCKED by §26 alone.
+    from app.register.execution import CREATE_ENDPOINT_GROUP
+
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    create_grant(container, ready.intent_id)
+    _pause(store, account, CREATE_ENDPOINT_GROUP)
+    intent = store.intent(ready.intent_id)
+    assert intent is not None
+    readiness = _permitted_stack(container).create_readiness(
+        intent,
+        attempt_no=1,
+        endpoint_adopted=True,
+        scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
+    )
+    assert readiness.missing == (live_model.SCOPE_NOT_ACTIVE,)
+
+
+def test_a_scope_paused_after_the_send_gate_refuses_inside_the_attempt_unit(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Control 2: the outer read says ACTIVE, §26 is paused before the mutation-start unit.
+    from app.register.execution import CREATE_ENDPOINT_GROUP
+
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    grant_id = create_grant(container, ready.intent_id)
+    run = execution(container, prep, authority=_permitted_stack(container))
+    gate = run.service._gate
+
+    def gate_then_pause(*args: Any, **kwargs: Any) -> Any:
+        result = gate(*args, **kwargs)
+        _pause(store, account, CREATE_ENDPOINT_GROUP)
+        return result
+
+    run.service._gate = gate_then_pause  # type: ignore[method-assign]
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    reasons = {layer["reason"] for layer in refused.value.details["layers"]}
+    assert live_model.SCOPE_NOT_ACTIVE in reasons
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    grant = container.live_authority.grant_record(grant_id)
+    assert grant is not None and (grant.budget_used, grant.state) == (0, GrantState.ACTIVE)
+
+
+def test_a_dependency_written_after_the_send_gate_refuses_the_create(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Control 4: the final preflight was READY, then the unit's Draft moved before the Attempt.
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    grant_id = create_grant(container, ready.intent_id)
+    other = ready_item(container, sources, "9876")
+    run = execution(container, prep, authority=_permitted_stack(container))
+    gate = run.service._gate
+
+    def gate_then_move(*args: Any, **kwargs: Any) -> Any:
+        result = gate(*args, **kwargs)
+        with store.transaction() as unit:
+            unit.add_draft_item(
+                ready.draft_id,
+                other.item_id,
+                other.pricing_snapshot_id,
+                added_by="operator",
+                correlation_id=CID,
+            )
+        return result
+
+    run.service._gate = gate_then_move  # type: ignore[method-assign]
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    assert refused.value.code == live_model.TRUTH_MOVED
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    grant = container.live_authority.grant_record(grant_id)
+    assert grant is not None and grant.budget_used == 0
+
+
+def _bytes_of(container: Container, artifact: ArtifactRef) -> bytes:
+    from app.products.image_model import ImageAssetKind
+
+    if artifact.asset_kind is ImageAssetKind.SOURCE_ASSET:
+        return container.source_assets.read(artifact.sha256)
+    from app.products.image_store import DerivedImageStore
+    from app.collect.imagedecode import HeaderImageDecoder
+
+    store = DerivedImageStore(
+        container.config.derived_images_dir, container.db, HeaderImageDecoder()
+    )
+    return store.read(artifact.sha256)
+
+
+def test_a_preparation_revised_after_the_candidate_read_refuses_the_upload(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Control 3: the candidate was read READY, then the preparation moved before STARTED.
+    from app.live.assets import AssetUploadRequest, AssetUploadService, UploadSendResult
+    from app.live.model import UploadAttemptState, WireHostPolicy
+    from app.live.stack import CandidateState
+    from tests.live_support import ScriptedSender
+
+    revision, candidate, _ = ready_preparation(container, sources, store, account, prep)
+    authority = LiveAuthorityService(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        registrations=store,
+        preparations=Evaluator(candidate),
+    )
+    selected = [
+        ArtifactRef(image.asset_kind, image.sha256, image.derivation_id)
+        for item in candidate.resolved.items
+        for image in item.images
+    ]
+    granted = asset_grant(
+        authority,
+        container,
+        account,
+        preparation_revision_id=revision,
+        candidate_fingerprint=candidate.candidate_fingerprint,
+        artifacts=selected,
+        asset_profile=candidate.resolved.target.asset_policy.profile,
+    )
+    release(container)
+
+    class ReadThenRevise:
+        """The candidate read returns the current READY truth; the preparation then moves."""
+
+        def current(self, preparation_revision_id: str) -> CandidateState:
+            state = CandidateState(
+                preparation_revision_id,
+                current=True,
+                ready=True,
+                fingerprint=candidate.candidate_fingerprint,
+            )
+            record = store.preparation_of_revision(preparation_revision_id)
+            assert record is not None
+            with store.transaction() as unit:
+                unit.revise_preparation(
+                    record.preparation_id,
+                    item_ids=list(record.current.item_ids),
+                    inputs=encode_inputs(decode_inputs(record.current)),
+                    authored_by="operator",
+                    correlation_id=CID,
+                )
+            return state
+
+    sender = ScriptedSender(
+        script=[UploadSendResult(UploadAttemptState.APPLIED_PROVEN, provider_asset_ref="p-ref")],
+        marketplace_key=MARKET,
+    )
+    live = LiveAuthorityStore(container.db, container.clock, container.audit)
+    uploads = AssetUploadService(
+        store=live,
+        stack=_permitted_stack(container),
+        sender=sender,
+        hosts=WireHostPolicy({MARKET: "api.commerce.naver.com"}),
+        candidates=ReadThenRevise(),
+        clock=container.clock,
+    )
+    artifact = selected[0]
+    with pytest.raises(MutationRefused) as refused:
+        uploads.upload(
+            AssetUploadRequest(
+                grant_id=granted.grant_id,
+                artifact=artifact,
+                content=_bytes_of(container, artifact),
+                file_name="a.png",
+                media_type="image/png",
+                actor="operator",
+                correlation_id=CID,
+            )
+        )
+    assert refused.value.code == live_model.TRUTH_MOVED
+    assert sender.calls == [] and count(container.config, "asset_upload_attempts") == 0
+    kept = live.grant_record(granted.grant_id)
+    assert kept is not None and kept.budget_used == 0

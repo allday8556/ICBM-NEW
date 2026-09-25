@@ -51,7 +51,9 @@ from app.live.model import (
     REPLAY_UNRESOLVED,
     RESTORE_PROOF_ABSENT,
     RETENTION_UNPROVEN,
+    SCOPE_NOT_ACTIVE,
     SENDER_NOT_WIRED,
+    TRUTH_MOVED,
     VISUAL_UNRECORDED,
     BrakeState,
     Layer,
@@ -68,6 +70,7 @@ from app.live.store import (
     UploadAttemptRecord,
     UploadProvenance,
 )
+from app.register.model import ExecutionScopeState
 from app.register.store import IntentRecord, ScopeRecord
 
 # A second selection of the same outbound bytes in one unit: one upload may serve it only through
@@ -199,6 +202,7 @@ class SafetyStack:
         attempt_no: int,
         endpoint_adopted: bool,
         scope: ScopeRecord,
+        truth_fence: int,
         actor: str,
         correlation_id: str,
     ) -> GrantRecord:
@@ -210,6 +214,9 @@ class SafetyStack:
         and generation are part of the restore target a CREATE proof must match (§7).
         """
         unit = self._store.unit(session)
+        # First, before this unit writes anything: no owner wrote since the final preflight was
+        # evaluated, while the write coordinator now keeps every other writer out (§4.3).
+        truth_held = unit.owner_writes() == truth_fence
         grant = self._create_grant(unit, intent, attempt_no)
         layers = self._common(
             unit,
@@ -219,6 +226,8 @@ class SafetyStack:
             endpoint_adopted=endpoint_adopted,
         )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        layers.append(_scope_layer(scope))
+        layers.append(_layer(Layer.SEND_TIME_TRUTH, truth_held, TRUTH_MOVED))
         _refuse_unless_all(layers)
         assert grant is not None
         return unit.consume(grant.grant_id, actor=actor, correlation_id=correlation_id)
@@ -241,6 +250,8 @@ class SafetyStack:
                 endpoint_adopted=endpoint_adopted,
             )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        # §10: the §26 brake ACTIVE is its own requirement, whatever a restore proof says.
+        layers.append(_scope_layer(scope))
         return _readiness(MutationStage.CREATE, layers)
 
     def _create_grant(
@@ -268,11 +279,19 @@ class SafetyStack:
         target: AssetTarget,
         provenance: UploadProvenance,
         *,
+        truth_fence: int,
         process_run_id: str,
         actor: str,
         correlation_id: str,
     ) -> UploadAttemptRecord:
-        """Admit one upload and record it ``STARTED`` with its budget spent, in ``unit``."""
+        """Admit one upload and record it ``STARTED`` with its budget spent, in ``unit``.
+
+        ``truth_fence`` is the owner-write count read just before the candidate was evaluated.
+        Read again here first, under the write coordinator, it proves no owner — preparation, M4,
+        policy, metadata, capability, account, grant or brake — wrote in between, so the candidate
+        this admission rests on is still the current one at the mutation-start boundary (§4.3).
+        """
+        truth_held = unit.owner_writes() == truth_fence
         grant = unit.grant_record(target.grant_id)
         layers = self._asset_layers(unit, target, grant)
         layers.insert(
@@ -287,6 +306,7 @@ class SafetyStack:
                 PROVENANCE_NOT_GRANTED,
             ),
         )
+        layers.append(_layer(Layer.SEND_TIME_TRUTH, truth_held, TRUTH_MOVED))
         _refuse_unless_all(layers)
         assert grant is not None
         return unit.start_upload(
@@ -478,6 +498,14 @@ class SafetyStack:
             _layer(Layer.VISUAL_ACCEPTANCE, proofs.visual_acceptance_recorded(), VISUAL_UNRECORDED),
         ]
 
+    # ------------------------------------------------------------------ the send-time fence
+
+    def truth_fence(self) -> int:
+        """The owner-write count now: read just before a stage gate is evaluated, and again as the
+        first read of the mutation-start unit (Gate 2 G2-C's fence, used at send time)."""
+        with self._store.reading() as unit:
+            return unit.owner_writes()
+
     # ------------------------------------------------------------------ refusals
 
     def record_refusal(
@@ -506,6 +534,12 @@ class SafetyStack:
 
 def _layer(layer: Layer, satisfied: bool, reason: str | None) -> LayerView:
     return LayerView(layer=layer, satisfied=satisfied, reason_code=None if satisfied else reason)
+
+
+def _scope_layer(scope: ScopeRecord) -> LayerView:
+    return _layer(
+        Layer.EXECUTION_SCOPE, scope.state is ExecutionScopeState.ACTIVE, SCOPE_NOT_ACTIVE
+    )
 
 
 def _refuse_unless_all(layers: Sequence[LayerView]) -> None:

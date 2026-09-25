@@ -71,10 +71,14 @@ class HarnessAuthority:
         attempt_no: int,
         endpoint_adopted: bool,
         scope: Any,
+        truth_fence: int,
         actor: str,
         correlation_id: str,
     ) -> None:
         self.admitted.append((intent.intent_id, attempt_no))
+
+    def truth_fence(self) -> int:
+        return 0
 
     def record_refusal(self, refusal: Any, **_: Any) -> None:  # pragma: no cover - never refuses
         raise AssertionError("the harness authority never refuses")

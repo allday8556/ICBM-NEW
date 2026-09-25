@@ -146,9 +146,14 @@ class CreateAuthority(Protocol):
         attempt_no: int,
         endpoint_adopted: bool,
         scope: ScopeRecord,
+        truth_fence: int,
         actor: str,
         correlation_id: str,
     ) -> Any: ...
+
+    def truth_fence(self) -> int:
+        """The owner-write count now (``AuditLog.owner_writes``), read before the send gate."""
+        ...
 
     def record_refusal(
         self,
@@ -648,32 +653,44 @@ class RegistrationExecutionService:
                 "further sends in this marketplace/account/endpoint-group scope are stopped",
                 details=budget.canonical(),
             )
+        # The owner-write fence, read before the final preflight is re-evaluated: the unit below
+        # reads it again first, under the write coordinator, and refuses if any owner wrote in
+        # between — so the send gate is still current at the mutation-start boundary (§4.3).
+        truth_fence = self._authority.truth_fence()
         fresh = self._gate(intent, snapshot, request, prepared, generation)
         sanitized_request = self._sanitized_request(snapshot, fresh)
         try:
             with self._registrations.transaction() as unit:
+                attempts = unit.attempts(intent.intent_id)
+                next_attempt = max((a.attempt_no for a in attempts), default=0)
+                # ADR-0018 §4.3: the send-time safety stack, deny by default, in the very unit
+                # that opens the attempt and before it writes anything: the fence, ADR-0014 §26's
+                # CREATE-only brake (ACTIVE, read here by its owner), and the grant, spent here.
+                self._authority.admit_create(
+                    unit.session,
+                    intent=intent,
+                    attempt_no=next_attempt + 1,
+                    endpoint_adopted=self._sender.available(),
+                    scope=unit.execution_scope(
+                        intent.marketplace_key,
+                        intent.marketplace_account_id,
+                        self._policy.endpoint_group,
+                    ),
+                    truth_fence=truth_fence,
+                    actor=self._actor,
+                    correlation_id=correlation_id,
+                )
                 attempt = unit.start_attempt(
                     intent.intent_id,
                     sanitized_request=sanitized_request,
                     sanitizer_profile_version=self._sanitizer_version(fresh),
                     correlation_id=correlation_id,
                 )
-                # ADR-0018 §4.3: the send-time safety stack, deny by default, in the very unit
-                # that opens the attempt. Its grant is spent here or the attempt never existed.
-                self._authority.admit_create(
-                    unit.session,
-                    intent=intent,
-                    attempt_no=attempt.attempt_no,
-                    endpoint_adopted=self._sender.available(),
-                    # §7: the §26 brake as its owner reads it in this unit is part of the target.
-                    scope=unit.execution_scope(
-                        intent.marketplace_key,
-                        intent.marketplace_account_id,
-                        self._policy.endpoint_group,
-                    ),
-                    actor=self._actor,
-                    correlation_id=correlation_id,
-                )
+                if attempt.attempt_no != next_attempt + 1:  # pragma: no cover - one writer
+                    raise ExecutionRefused(
+                        "REGISTER_ATTEMPT_NUMBER_MOVED",
+                        "the attempt opened is not the one its grant was spent on",
+                    )
         except MutationRefused as refusal:
             # The unit rolled back: no Attempt, no spent grant, the Intent unmoved, nothing sent.
             self._authority.record_refusal(

@@ -137,6 +137,11 @@ class AssetUploadService:
             # nothing starts, nothing is spent, nothing is sent, and it is audited (§3.3).
             grant = self._grant(request)
             key = self._key(grant, request.content, request.artifact)
+            with self._store.transaction() as unit:
+                unit.expire_due(correlation_id=request.correlation_id)
+            # The owner-write fence, read before the candidate: admission re-reads it first
+            # under the write coordinator and refuses if any owner wrote in between (§4.3).
+            truth_fence = self._stack.truth_fence()
             candidate = self._candidates.current(grant.preparation_revision_id or "")
             provenance = UploadProvenance(
                 preparation_revision_id=candidate.preparation_revision_id,
@@ -147,8 +152,6 @@ class AssetUploadService:
                 file_name=request.file_name,
                 media_type=request.media_type,
             )
-            with self._store.transaction() as unit:
-                unit.expire_due(correlation_id=request.correlation_id)
             with self._store.transaction() as unit:
                 attempt = self._stack.admit_asset(
                     unit,
@@ -161,6 +164,7 @@ class AssetUploadService:
                         sender_wired=self._sender.available(),
                     ),
                     provenance,
+                    truth_fence=truth_fence,
                     process_run_id=self.process_run_id,
                     actor=request.actor,
                     correlation_id=request.correlation_id,

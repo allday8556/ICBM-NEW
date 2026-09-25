@@ -111,6 +111,10 @@ class Layer(StrEnum):
     ATTEMPT_OWNER = "ATTEMPT_OWNER"
     REPLAY_FENCE = "REPLAY_FENCE"
     STAGE_GATE = "STAGE_GATE"
+    # ADR-0014 §26: the CREATE-only execution-scope brake, an independent CREATE layer (§4.3 6).
+    EXECUTION_SCOPE = "EXECUTION_SCOPE"
+    # The send-time truth fence: no owner write since the stage gate was evaluated (§4.3).
+    SEND_TIME_TRUTH = "SEND_TIME_TRUTH"
 
 
 # Why a layer refuses. Codes only.
@@ -132,6 +136,8 @@ CANDIDATE_NOT_READY: Final = "LIVE_ASSET_CANDIDATE_NOT_READY"
 CANDIDATE_DRIFT: Final = "LIVE_ASSET_CANDIDATE_DRIFT"
 ARTIFACT_NOT_GRANTED: Final = "LIVE_ASSET_ARTIFACT_NOT_IN_GRANT"
 CONTENT_DIGEST_MISMATCH: Final = "LIVE_ASSET_CONTENT_DIGEST_MISMATCH"
+SCOPE_NOT_ACTIVE: Final = "LIVE_CREATE_EXECUTION_SCOPE_NOT_ACTIVE"
+TRUTH_MOVED: Final = "LIVE_SEND_TIME_TRUTH_MOVED"
 
 
 class MutationRefused(AppError):

@@ -718,6 +718,10 @@ class LiveUnit:
 
     # ------------------------------------------------------------------ audit
 
+    def owner_writes(self) -> int:
+        """The owner-write fence read in this unit (``AuditLog.owner_writes``, Gate 2 G2-C)."""
+        return self._audit.owner_writes(self.session)
+
     def refusal(
         self,
         *,

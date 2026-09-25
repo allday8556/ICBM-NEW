@@ -72,6 +72,17 @@ def _to_record(event: AuditEvent) -> AuditEventRecord:
     )
 
 
+def _owner_writes(session: Session) -> int:
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.event_type.not_like("REVIEW\\_%", escape="\\"))
+        )
+        or 0
+    )
+
+
 class AuditLog:
     """Append-only: this class exposes no update or delete, and the database enforces it too."""
 
@@ -116,22 +127,20 @@ class AuditLog:
         )
         return record
 
-    def owner_writes(self) -> int:
+    def owner_writes(self, session: Session | None = None) -> int:
         """How many events every owner except the review owner has appended (Gate 2 G2-C).
 
         Every owner change the REGISTER preflight can read is audited in its own unit of work, and
         this log is append-only, so the count only grows: a review producer uses it as a fence
         that no sequence of owner writes can bring back to an earlier value. The review owner's
-        own events are left out, so its reconciliation never moves the fence it is checked by."""
-        with self._db.read() as session:
-            return int(
-                session.scalar(
-                    select(func.count())
-                    .select_from(AuditEvent)
-                    .where(AuditEvent.event_type.not_like("REVIEW\\_%", escape="\\"))
-                )
-                or 0
-            )
+        own events are left out, so its reconciliation never moves the fence it is checked by.
+
+        With ``session`` it is read inside that open unit — the Gate 3 send-time fence reads it
+        under the write coordinator, before the unit writes anything of its own (ADR-0018 §4.3)."""
+        if session is not None:
+            return _owner_writes(session)
+        with self._db.read() as own:
+            return _owner_writes(own)
 
     def list_events(
         self, *, correlation_id: str | None = None, limit: int = 100
