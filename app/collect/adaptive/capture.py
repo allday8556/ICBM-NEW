@@ -455,15 +455,25 @@ def capture_sample(
         expected_json=canonical_json(expected_payload),
         provenance_json=canonical_json(provenance),
         truncated=sanitizer.truncated,
-        digest=digest(
-            SAMPLE_DIGEST_SCHEME,
-            {
-                "structure": structure,
-                "expected": expected_payload,
-                "provenance": provenance,
-                "truncated": sanitizer.truncated,
-            },
-        ),
+        digest=sample_digest(structure, expected_payload, provenance, sanitizer.truncated),
+    )
+
+
+def sample_digest(
+    structure: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    provenance: Mapping[str, Any],
+    truncated: bool,
+) -> str:
+    """A sample's content digest, recomputable from its stored parts (read-back, tamper check)."""
+    return digest(
+        SAMPLE_DIGEST_SCHEME,
+        {
+            "structure": dict(structure),
+            "expected": dict(expected),
+            "provenance": dict(provenance),
+            "truncated": truncated,
+        },
     )
 
 

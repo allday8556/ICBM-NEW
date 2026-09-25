@@ -126,8 +126,11 @@ M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_PO
 # Gate 2 (ADR-0016) adds the ReviewItem owner after the M5 head: G2-A its items, G2-B its
 # coverage watermark, G2-C the owner truth token of that watermark. None is registration
 # state, so the registration guards below still apply to them unchanged. Nothing else follows.
-SCHEMA_HEAD = "0023_g2_review_coverage_fence"
-AFTER_M5 = ("0021_g2_review_items", "0022_g2_review_coverage", SCHEMA_HEAD)
+# Adaptive Collector P2 (ADR-0017, Issue #110 5822024807) adds the profile and validation
+# persistence owner after Gate 2. It holds no registration state either.
+G2_HEAD = "0023_g2_review_coverage_fence"
+SCHEMA_HEAD = "0024_adaptive_profile_validation"
+AFTER_M5 = ("0021_g2_review_items", "0022_g2_review_coverage", G2_HEAD, SCHEMA_HEAD)
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
     r"|marketplace_asset|registration_intent|registration_attempt",

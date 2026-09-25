@@ -461,6 +461,16 @@ TARGET_POLICY_TABLES = (
 )
 # Gate 2 G2-A (migration 0021, ADR-0016): the ReviewItem owner, after the registration tables.
 REVIEW_TABLES = ("review_items", "review_item_events", "review_coverage")
+# Adaptive Collector P2 (migration 0024, ADR-0017 §3, §7): after the review tables.
+ADAPTIVE_TABLES = (
+    "adaptive_profile_revisions",
+    "adaptive_profile_pins",
+    "adaptive_profile_lint",
+    "adaptive_profile_transitions",
+    "adaptive_validation_samples",
+    "adaptive_validation_runs",
+    "adaptive_validation_run_samples",
+)
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
     "marketplace_key, marketplace_account_id, endpoint_group, state, pause_reason,"
@@ -2024,7 +2034,11 @@ def test_0017_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     command.downgrade(alembic_config(url), "0016_m5_registration_foundation")
     # 0017 owns exactly the scope table; the tables later migrations add step down with it.
     assert before - _tables(tmp_path / "icbm.db") == (
-        {SCOPES} | set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES) | set(REVIEW_TABLES)
+        {SCOPES}
+        | set(PREPARATION_TABLES)
+        | set(TARGET_POLICY_TABLES)
+        | set(REVIEW_TABLES)
+        | set(ADAPTIVE_TABLES)
     )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
@@ -2066,7 +2080,10 @@ def test_0018_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     command.downgrade(alembic_config(url), "0017_m5_registration_execution_scope")
     # 0018 owns exactly the preparation tables; the tables later migrations add step down too.
     assert before - _tables(tmp_path / "icbm.db") == (
-        set(PREPARATION_TABLES) | set(TARGET_POLICY_TABLES) | set(REVIEW_TABLES)
+        set(PREPARATION_TABLES)
+        | set(TARGET_POLICY_TABLES)
+        | set(REVIEW_TABLES)
+        | set(ADAPTIVE_TABLES)
     )
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

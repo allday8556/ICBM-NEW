@@ -1010,9 +1010,12 @@ def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> No
 DYNAMIC_ESCAPES = frozenset({"__import__", "exec", "eval", "compile", "__builtins__"})
 
 
-def test_source_truth_path_has_no_dynamic_import_escape() -> None:
-    modules = {p: t for p, t in _production_modules().items() if p.startswith(SOURCE_TRUTH_ROOTS)}
-    assert "app/collect/adaptive/engine.py" in modules
+def test_production_code_has_no_dynamic_import_escape() -> None:
+    # P1 held this for the source-truth path; P2 wires persistence into ``app/`` (Issue #110
+    # 5822923514 carry-forward 1), so it now holds for every production module.
+    modules = _production_modules()
+    assert {"app/collect/adaptive/engine.py", "app/collect/adaptive_store/store.py"} <= set(modules)
+    assert {"app/main.py", "integrations/suppliers/registry.py"} <= set(modules)
     for path, tree in modules.items():
         for name in _imported_modules(tree):
             assert name.split(".")[0] != "importlib", f"{path}: {name}"
@@ -1056,25 +1059,87 @@ def test_the_adaptive_core_imports_only_pure_modules() -> None:
             allowed = (
                 name in ADAPTIVE_STDLIB
                 or name in ADAPTIVE_MAY_IMPORT
-                or name.startswith("app.collect.adaptive")
+                or name == "app.collect.adaptive"
+                or name.startswith("app.collect.adaptive.")
             )
             assert allowed, f"{path}: {name}"
 
 
+# ADR-0017 P2 (Issue #110 5822024807): the persistence owner may reach the database, the clock,
+# the error vocabulary, the pure core and the supplier registry (its gate) — and nothing that
+# acts: no network, browser, gateway, session, COLLECT runtime, review or audit owner.
+ADAPTIVE_STORE_ROOT = "app/collect/adaptive_store/"
+ADAPTIVE_STORE_MAY_IMPORT = frozenset(
+    {
+        "collections.abc",
+        "dataclasses",
+        "datetime",
+        "json",
+        "typing",
+        "uuid",
+        "pydantic",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "app.core.clock",
+        "app.core.errors",
+        "app.db.base",
+        "app.db.database",
+        "app.db.types",
+        "integrations.suppliers.base",
+        "integrations.suppliers.collection",
+        "integrations.suppliers.registry",
+    }
+)
+
+
+def _is_adaptive(name: str) -> bool:
+    return any(
+        name == package or name.startswith(f"{package}.")
+        for package in ("app.collect.adaptive", "app.collect.adaptive_store")
+    )
+
+
+def test_the_adaptive_store_imports_only_what_persistence_needs() -> None:
+    modules = {p: t for p, t in _production_modules().items() if p.startswith(ADAPTIVE_STORE_ROOT)}
+    assert f"{ADAPTIVE_STORE_ROOT}store.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert name in ADAPTIVE_STORE_MAY_IMPORT or _is_adaptive(name), f"{path}: {name}"
+
+
 def test_the_disposable_phase_b_prototype_never_reached_the_repository() -> None:
-    # ADR-0017 §13: the prototype was evidence only; production code is written fresh.
-    assert not (REPO_ROOT / "prototypes").exists()
+    prototypes = REPO_ROOT / "prototypes"
+    assert not prototypes.exists(), (
+        f"{prototypes} exists. The Adaptive Collector Phase B prototype (PR #114, closed unmerged) "
+        "is evidence only and is never promoted or copied into the repository (ADR-0017 §13); "
+        "production Adaptive code is written fresh under app/collect/adaptive*/. Remove the "
+        "directory (a leftover local checkout, or a copy) rather than weakening this rule."
+    )
 
 
-def test_nothing_in_production_wires_the_adaptive_core_yet() -> None:
+# Who may import the Adaptive packages at all (P2): the packages themselves, and the schema
+# aggregate for the persistence owner's models. No COLLECT runtime, container, route, job or
+# script wires the Adaptive Collector yet.
+ADAPTIVE_IMPORTERS = {"app/db/metadata.py": {"app.collect.adaptive_store"}}
+
+
+def test_nothing_in_production_wires_the_adaptive_collector_yet() -> None:
     roots = [*PRODUCTION_ROOTS, REPO_ROOT / "scripts"]
     for root in roots:
         for file in root.rglob("*.py"):
             relative = file.relative_to(REPO_ROOT).as_posix()
-            if relative.startswith(ADAPTIVE_ROOT):
+            if relative.startswith((ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT)):
                 continue
+            allowed = ADAPTIVE_IMPORTERS.get(relative, set())
             for name in _imported_modules(ast.parse(file.read_text("utf-8"))):
-                assert not name.startswith("app.collect.adaptive"), f"{relative}: {name}"
+                if _is_adaptive(name):
+                    assert name in allowed, f"{relative}: {name}"
+    # The pure core never reaches its own persistence owner.
+    for path, tree in _production_modules().items():
+        if path.startswith(ADAPTIVE_ROOT):
+            assert not any(
+                n.startswith("app.collect.adaptive_store") for n in _imported_modules(tree)
+            ), path
 
 
 # Issue #52 ruling 5711123764 §1: the REAL acceptance harness orchestrates and never collects.
@@ -1447,6 +1512,16 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # Gate 2 G2-B (ADR-0016 §4, §7): each review producer's coverage watermark and its
         # known indexing failure. Whether coverage is current is derived, never stored.
         "review_coverage",
+        # Adaptive Collector P2 (ADR-0017 §3, §7, Issue #110 5822923514): immutable EPR/PTR
+        # revisions with their pins and DRAFT lint, the append-only EPR lifecycle, local-only
+        # samples and validation runs. No VALIDATED or ACTIVE table: VALIDATED is derived.
+        "adaptive_profile_revisions",
+        "adaptive_profile_pins",
+        "adaptive_profile_lint",
+        "adaptive_profile_transitions",
+        "adaptive_validation_samples",
+        "adaptive_validation_runs",
+        "adaptive_validation_run_samples",
     }
     offenders = [
         path
