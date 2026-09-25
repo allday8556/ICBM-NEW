@@ -626,8 +626,8 @@ def _bytes_of(container: Container, artifact: ArtifactRef) -> bytes:
 
     if artifact.asset_kind is ImageAssetKind.SOURCE_ASSET:
         return container.source_assets.read(artifact.sha256)
-    from app.products.image_store import DerivedImageStore
     from app.collect.imagedecode import HeaderImageDecoder
+    from app.products.image_store import DerivedImageStore
 
     store = DerivedImageStore(
         container.config.derived_images_dir, container.db, HeaderImageDecoder()
