@@ -8,6 +8,9 @@
   owner's own write unit, after the canonical revision committed.
 - ``finalize`` cuts a new immutable ValidationSample from a candidate with the operator's scope and
   expected facts and stores it through the P2 owner. A correction is a new sample.
+- Every candidate belongs to the campaign whose request its run consumed. ``finalize`` refuses a
+  candidate of any other campaign (review ``5313663701`` B3): a campaign never finalizes, and so
+  never validates, another campaign's capture.
 """
 
 import uuid
@@ -76,6 +79,7 @@ class RequestRecord:
 class CandidateView:
     collection_run_id: str
     request_id: str
+    campaign_id: str
     supplier_key: str
     revision_id: str
     status: str
@@ -251,6 +255,12 @@ class CaptureStore:
             row = session.get(CaptureCandidateRecord, collection_run_id)
             if row is None:
                 raise NotFoundError(ADAPTIVE_CAPTURE_NOT_FOUND, "no capture for that run")
+            request = session.get(CaptureRequest, row.request_id)
+            if request is None:
+                raise CaptureTampered(
+                    ADAPTIVE_CAPTURE_TAMPERED, "a stored capture candidate has no request"
+                )
+            campaign_id = request.campaign_id
             session.expunge(row)
         candidate = None
         if row.status == "CAPTURED":
@@ -269,6 +279,7 @@ class CaptureStore:
         return CandidateView(
             row.collection_run_id,
             row.request_id,
+            campaign_id,
             row.supplier_key,
             row.revision_id,
             row.status,
@@ -297,13 +308,17 @@ class CaptureStore:
         self,
         collection_run_id: str,
         *,
+        campaign_id: str,
         scope: OperatorScope,
         expected: dict[str, object],
         stored_by: str,
         correlation_id: str,
     ) -> ValidationSample:
-        """A new immutable ValidationSample from one captured candidate, stored through P2."""
+        """A new immutable ValidationSample from one captured candidate of ``campaign_id``,
+        stored through P2."""
         view = self.candidate(collection_run_id)
+        if view.campaign_id != campaign_id:
+            raise _capture_refused("a campaign finalizes only its own capture candidates")
         if view.candidate is None:
             raise _capture_refused("only a captured candidate becomes a sample")
         try:

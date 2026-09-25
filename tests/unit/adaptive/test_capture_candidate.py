@@ -1,8 +1,12 @@
 """Capture candidates (Phase C C0, Issue #110 `5826469852` item 3–4).
 
 A candidate is cut from a whole document in memory with no operator scope; a sample is cut from the
-candidate with the operator's scope later. The sample must be exactly what ``capture_sample`` cuts
-from the page itself with the same scope, including every bound.
+candidate with the operator's scope later. The sample's structure and truncation must be exactly
+what ``capture_sample`` cuts from the page itself with the same scope, including every bound. Its
+``excluded`` diagnostics hold the same entries, but not byte-identically when the operator excludes
+a region: the candidate path lists the generic exclusions first and then the operator's, each in
+document order, where the page path interleaves them (review ``5313663701``, judgment 2). Its
+provenance also names the candidate, so the two sample digests are never claimed equal.
 """
 
 import json

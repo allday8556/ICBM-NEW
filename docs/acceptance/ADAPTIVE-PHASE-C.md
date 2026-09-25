@@ -10,7 +10,16 @@
   `5312911203`. ADR-0006 stopped-app supplement: review `5313045448`. Opening closeout: `5826469328`.
 - Stage authorizations: C0 `5826469852`. C1, C2, C3 and C4 are **not authorized**.
 - Tooling: the Phase C harness `scripts/phase_c.py` / `scripts/phasec/` (C0). It is the only caller
-  of the Phase C operator actions, and it runs only with the ICBM application stopped.
+  of the Phase C operator actions, and it runs only with the ICBM application stopped. After
+  review `5313663701`:
+  - every command runs only at the campaign's exact clean code SHA;
+  - the campaign ledger is a crash-durable, single-writer, append-only SQLite file in the
+    campaign root;
+  - a stage opens only through a typed grant, C0 → C4, once each, with a strictly newer
+    authorization id. The C1 grant freezes exactly two target digests, C2 the exact EPR,
+    samples and PASS run, and C3 and C4 the one window;
+  - the frozen ceilings are enforced by ledger reservations;
+  - a campaign acts only on objects its own ledger bound.
 
 ---
 

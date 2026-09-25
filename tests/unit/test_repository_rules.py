@@ -1774,6 +1774,13 @@ def test_the_harness_composes_the_owners_only_under_the_data_root_lease() -> Non
 
 
 def test_the_harness_never_opens_sqlite_reaches_a_network_or_submits_a_collection() -> None:
+    # The live data root is reached only through the composed owners. The one SQLite file the
+    # harness opens is its own campaign ledger (review 5313663701 B4): only ``ledger.py`` imports
+    # ``sqlite3``, and it imports nothing of the application, so it cannot name a data root.
+    ledger = f"{PHASE_C_HARNESS}ledger.py"
+    ledger_imports = _imported_modules(ast.parse((REPO_ROOT / ledger).read_text("utf-8")))
+    assert "sqlite3" in ledger_imports
+    assert not any(n == "app" or n.startswith("app.") for n in ledger_imports), ledger_imports
     forbidden_modules = (
         "sqlite3",
         "sqlalchemy",
@@ -1788,7 +1795,7 @@ def test_the_harness_never_opens_sqlite_reaches_a_network_or_submits_a_collectio
     for path, tree in _phase_c_modules().items():
         if not path.startswith((PHASE_C_HARNESS, "scripts/phase_c.py")):
             continue
-        names = _imported_modules(tree)
+        names = _imported_modules(tree) - ({"sqlite3"} if path == ledger else set())
         assert not any(n == f or n.startswith(f"{f}.") for n in names for f in forbidden_modules), (
             path,
             names,
