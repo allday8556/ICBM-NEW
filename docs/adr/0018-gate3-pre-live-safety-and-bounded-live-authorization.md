@@ -11,7 +11,9 @@ of Gate 3 (Issue #89), on exact main `267d6a9eb20788819a8863f59a9c8f8e47700870` 
   grant binding, restore proof and send-time readiness — §3.1, §7, §10), and `5823321537` (a durable
   ASSET upload-attempt owner is a prerequisite of any upload; the ADR-0014 §26 scope brake stays
   CREATE-only — §3.4, §4.3, §7, §10), and `5823765435` (the upload replay fence is keyed by the
-  provider mutation itself, never narrowed by local provenance — §3.2, §3.4, §7, §10).
+  provider mutation itself, never narrowed by local provenance — §3.2, §3.4, §7, §10), and
+  `5824235764` (that key is the canonical provider-visible upload request: a `derivation_id` or a
+  local artifact kind is provenance only, and `APPLIED_PROVEN` is fenced by the same key — §3.4).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§12).
 
@@ -189,26 +191,37 @@ amended, it amends it then. This ADR freezes its semantics now; its tables and c
 slice's:
 - **Provenance.** One durable attempt identity is bound, for audit, to the exact ASSET grant, the
   marketplace and canonical account, the exact preparation revision, the candidate fingerprint, the
-  exact artifact key (kind, SHA-256, derivation identity), the asset profile, the upload endpoint
-  group, and an attempt number and correlation identity. **Provenance records why and under what an
-  attempt was made; it never decides which attempts block another** (review `5823765435`).
+  local artifact tuple (the local source-or-derived artifact kind, SHA-256 and `derivation_id`),
+  the asset profile, the upload endpoint group, and an attempt number and correlation identity.
+  **Provenance records why and under what an attempt was made; it never decides which attempts
+  block another** (reviews `5823765435`, `5824235764`).
 - **Replay-conflict key.** Separately, every attempt carries an **ASSET replay-conflict key** that
-  identifies **the provider mutation itself**, and only that. For the current one-artifact
-  SmartStore upload it binds at least:
+  identifies **the provider mutation itself**, and only that. It is exactly:
   - the marketplace;
   - the canonical account;
-  - the upload endpoint and contract identity;
-  - the exact outbound artifact identity — kind, SHA-256 and derivation identity — or an equivalent
-    sanitized canonical upload-request identity.
+  - the provider upload endpoint and contract identity;
+  - the canonical provider-visible upload-request identity.
 
-  **The grant identity, preparation revision, candidate fingerprint, Draft revision, listing text,
-  category, policy state and any local profile label never enter it and never narrow it.** A
-  profile or version enters the key only through the provider-visible upload request identity it
-  actually changes; a local label that leaves the provider-visible request unchanged cannot make a
-  second key. The candidate fingerprint in particular spans many non-asset dependencies (listing,
-  category, pricing, policy, capability, duplicate evidence); editing any of them leaves the same
-  upload the same provider mutation. **A replay-conflict key that cannot be determined keeps the
-  ASSET stage `BLOCKED`.**
+  **The canonical provider-visible upload-request identity** is derived from what is actually
+  transmitted, and from nothing else. For the current single-artifact upload it includes at least
+  **the exact outbound binary (content) digest** and **every provider-visible upload parameter that
+  can materially change the remote mutation** — for example a MIME type, file name or type field,
+  when the adopted contract actually sends it.
+
+  **Local identity never enters the key and never narrows it**: not the `derivation_id`, the local
+  source-or-derived artifact kind, the grant identity, preparation revision, candidate fingerprint,
+  Draft revision, listing text, category, policy state or any local profile label. If one of them is
+  itself serialized into the provider request, **only the provider-visible serialized value**
+  participates, never the local identity behind it. So two derivations, or a source and a derived
+  artifact, that send the same bytes with the same provider-visible parameters are **one**
+  replay-conflict scope — M4 lets another recipe or execution producing equal bytes be another
+  derivation sharing one artifact (`app/products/images.py`). A profile or version enters the key
+  only through the provider-visible request it actually changes; a local label that leaves the
+  provider-visible request unchanged cannot make a second key. The candidate fingerprint in
+  particular spans many non-asset dependencies (listing, category, pricing, policy, capability,
+  duplicate evidence); editing any of them leaves the same upload the same provider mutation.
+  **A replay-conflict key whose canonical provider-visible
+  upload-request identity cannot be determined keeps the ASSET stage `BLOCKED`.**
 - **Start before transmission, atomically with the budget.** Before any provider transmission, the
   attempt is durably recorded as **started in the same atomic unit of work that consumes the ASSET
   grant's budget**. If that commit fails, **nothing is transmitted**.
@@ -224,16 +237,20 @@ slice's:
   no unresolved upload exists; it keeps the ASSET stage `BLOCKED`.
 - **Replay fence, over the whole replay-conflict scope.** A started or unresolved `UPLOAD_UNKNOWN`
   attempt **anywhere in a replay-conflict key's scope** blocks every new upload with that key —
-  **across a new grant, a new preparation revision, a new candidate fingerprint, a local profile
-  change, a restart, a job re-run or a new batch** — until separately admissible reconciliation or
-  reuse evidence resolves it (ADR-0014 §5). Changing local provenance never erases an unresolved
+  **across a new grant, a new preparation revision, a new candidate fingerprint, another
+  derivation or local artifact kind behind the same provider-visible request, a local profile
+  change, a restart, a job re-run or a new batch** — until separately admissible reconciliation
+  or reuse evidence resolves it (ADR-0014 §5). Changing local provenance never erases an unresolved
   remote-mutation ambiguity.
   - A `NOT_APPLIED_PROVEN` attempt may clear that ambiguity for a retry, and the retry still needs
     a new or current matching ASSET grant, a current `ASSET_MUTATION_READY` and a fresh ASSET
     restore proof.
-  - An `APPLIED_PROVEN` attempt is **never re-uploaded merely because the candidate, preparation or
-    grant changed**; reusing or rebinding its provider asset identity for a later candidate follows
-    only separately admissible reuse evidence under its own contract, and nothing here adopts one.
+  - **The same key governs `APPLIED_PROVEN`.** An `APPLIED_PROVEN` attempt in a replay-conflict
+    scope **keeps a fresh upload with that key blocked**: the upload is **never re-sent merely
+    because the candidate, preparation, grant, derivation or local artifact kind changed**. Its
+    provider asset identity may be reused or rebound only through a separately adopted reuse/rebind
+    path; nothing here adopts one, so until one is adopted a fresh upload in that scope stays
+    blocked.
 
 ### 4. The protected-write brake — the kill switch (D4)
 
@@ -526,8 +543,8 @@ G3-24  no upload is transmitted unless a durable ASSET upload-attempt owner has 
 G3-25  a started attempt not terminal after a crash or restart is UPLOAD_UNKNOWN unless admissible evidence proves transmission was precluded; missing or unreadable attempt truth is never proof that no unresolved upload exists; only APPLIED_PROVEN yields a known provider asset identity
 G3-26  ASSET_MUTATION_READY requires that durable owner and no started or unresolved UPLOAD_UNKNOWN attempt in the replay-conflict scope of any selected artifact, and is BLOCKED while the owner does not exist; the ASSET stage never depends on an ADR-0014 §26 scope row
 G3-27  a CREATE grant and restore proof authorize only the state they were issued for; after a NOT_APPLIED_PROVEN attempt any permitted retry needs a new CREATE grant and a fresh restore proof and readiness, and an UNKNOWN still forbids any resend
-G3-28  attempt provenance and the ASSET replay-conflict key are separate: the key identifies the provider mutation itself (marketplace, canonical account, upload endpoint and contract identity, exact outbound artifact identity), and the grant, preparation revision, candidate fingerprint, Draft revision, listing, category, policy state and a local profile label never enter or narrow it; an undeterminable key keeps the ASSET stage BLOCKED
-G3-29  a started or unresolved UPLOAD_UNKNOWN anywhere in a replay-conflict scope blocks every new upload with that key across a new grant, preparation revision, candidate fingerprint, local profile change, restart or batch; ASSET restore proofs and ASSET_MUTATION_READY inspect the whole scope, never only the current candidate's attempts; only NOT_APPLIED_PROVEN clears it for a retry, which still needs a matching grant, readiness and a fresh restore proof; an APPLIED_PROVEN is never re-uploaded merely because the candidate changed
+G3-28  attempt provenance and the ASSET replay-conflict key are separate: the key is exactly the marketplace, canonical account, provider upload endpoint and contract identity, and the canonical provider-visible upload-request identity (at least the exact outbound binary digest and every provider-visible upload parameter that can materially change the remote mutation); the derivation_id, the local source-or-derived artifact kind, the grant, preparation revision, candidate fingerprint, Draft revision, listing, category, policy state and a local profile label never enter or narrow it, and only a provider-visible serialized value may participate; an undeterminable provider-visible request identity keeps the ASSET stage BLOCKED
+G3-29  a started or unresolved UPLOAD_UNKNOWN anywhere in a replay-conflict scope blocks every new upload with that key across a new grant, preparation revision, candidate fingerprint, derivation, local artifact kind, local profile change, restart or batch; ASSET restore proofs and ASSET_MUTATION_READY inspect the whole scope, never only the current candidate's attempts; only NOT_APPLIED_PROVEN clears it for a retry, which still needs a matching grant, readiness and a fresh restore proof; an APPLIED_PROVEN in that scope keeps a fresh upload with the same key blocked, whatever candidate, derivation or local artifact kind asks, until a separately adopted reuse/rebind path exists
 ```
 
 ## Consequences
