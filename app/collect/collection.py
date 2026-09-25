@@ -51,7 +51,7 @@ from app.collect.runs import (
     PacingKey,
     SameProductTooSoon,
 )
-from app.collect.shadow import FrozenRun, ShadowInput, ShadowStep
+from app.collect.shadow import CaptureInput, CaptureStep, FrozenRun, ShadowInput, ShadowStep
 from app.collect.sourceassets import (
     FetchedImage,
     RevalidatedImage,
@@ -258,6 +258,7 @@ class ProductCollectionService:
         collections: Sequence[RegisteredCollection] = (),
         after_recorded: Callable[[str], object] | None = None,
         shadow: ShadowStep | None = None,
+        capture: CaptureStep | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -276,6 +277,9 @@ class ProductCollectionService:
         # the Adaptive packages. It runs only for a run whose frozen decision is ENABLED, only
         # after the canonical write, in its own unit, and nothing it does reaches the run.
         self._shadow = shadow
+        # The Phase C in-memory sample capture (C0), handed in the same way. It runs only for a run
+        # frozen REQUESTED, after the canonical revision and the shadow, and never reaches the run.
+        self._capture = capture
 
     # ------------------------------------------------------------------ submission
 
@@ -373,6 +377,16 @@ class ProductCollectionService:
 
     def run(self, collection_run_id: str) -> CollectionRunRecord:
         return self._runs.get(collection_run_id)
+
+    def target_of(self, supplier_key: str, product_url: str) -> str:
+        """The normalized in-scope target a product URL is paced on (ADR-0010 §4), after the same
+        target check a submission makes. Read-only; nothing is requested."""
+        registered = self._registered(supplier_key)
+        try:
+            check_target(registered.collection.profile, product_url, ReadKind.PRODUCT_READ)
+        except CollectionTargetRefused as refused:
+            raise InputValidationError("COLLECT_URL_REFUSED", refused.message) from None
+        return pacing_key(registered.collection, product_url).url
 
     def recent_runs(self, limit: int | None = None) -> tuple[CollectionRunRecord, ...]:
         """The newest runs, newest first: what the COLLECT screen follows after a reload."""
@@ -560,7 +574,44 @@ class ProductCollectionService:
             images=images,
             revision_id=stored.revision_id,
         )
+        self._capture_step(
+            frozen,
+            run_id=run_id,
+            supplier_key=supplier_key,
+            document=document,
+            revision_id=stored.revision_id,
+        )
         return CollectionResult(stored.revision_id, stored.facts_status, None)
+
+    def _capture_step(
+        self,
+        frozen: FrozenRun,
+        *,
+        run_id: str,
+        supplier_key: str,
+        document: DocumentView,
+        revision_id: str,
+    ) -> None:
+        """Hand the capture the one document this run already read, only when the run froze a
+        capture request. The canonical revision has committed; nothing here reaches the run."""
+        if (
+            self._capture is None
+            or frozen.capture is None
+            or frozen.capture.decision != "REQUESTED"
+        ):
+            return
+        try:
+            self._capture(
+                CaptureInput(
+                    collection_run_id=run_id,
+                    supplier_key=supplier_key,
+                    capture=frozen.capture,
+                    document=document,
+                    revision_id=revision_id,
+                )
+            )
+        except Exception:
+            logger.exception("collect.capture_escaped", extra={"collection_run_id": run_id})
 
     def _shadow_step(
         self,

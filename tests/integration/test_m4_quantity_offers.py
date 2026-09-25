@@ -1295,6 +1295,8 @@ LATER_COLUMNS = frozenset(
         "shadow_bundle_key",
         "first_product_read_at",
         "settled_by_recovery",
+        "capture_decision",
+        "capture_request_id",
     }
 )
 

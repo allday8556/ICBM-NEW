@@ -2,6 +2,7 @@
 
 from app.audit import models as _audit_models  # noqa: F401
 from app.collect import models as _collect_models  # noqa: F401
+from app.collect.adaptive_capture import models as _adaptive_capture_models  # noqa: F401
 from app.collect.adaptive_shadow import models as _adaptive_shadow_models  # noqa: F401
 from app.collect.adaptive_store import models as _adaptive_models  # noqa: F401
 from app.connect import account_models as _account_models  # noqa: F401

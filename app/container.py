@@ -8,6 +8,8 @@ from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.adaptive.hooks import HookManifest
+from app.collect.adaptive_capture.runner import CaptureRunner
+from app.collect.adaptive_capture.store import CaptureStore
 from app.collect.adaptive_shadow.runner import ShadowRunner
 from app.collect.adaptive_shadow.store import ADR_RETENTION, ShadowEvidenceStore
 from app.collect.adaptive_shadow.switch import ShadowSwitch
@@ -175,6 +177,7 @@ class Container:
     adaptive_validation: AdaptiveValidationStore
     shadow_switch: ShadowSwitch
     shadow_evidence: ShadowEvidenceStore
+    capture_store: CaptureStore
     ownership: DataDirLease
 
 
@@ -328,7 +331,14 @@ def build_container(
         retention=ADR_RETENTION,
         process_run_id=process_run_id,
     )
-    runs = CollectionRunStore(db, clock, shadow_freezer=shadow_switch.freeze)
+    # Phase C C0: the in-memory sample capture. Off for every run unless the Phase C harness left a
+    # capture request for its target, consumed at the run's first reservation.
+    capture_store = CaptureStore(
+        db, clock, supplier_gate=adaptive_gate, validation=adaptive_validation
+    )
+    runs = CollectionRunStore(
+        db, clock, shadow_freezer=shadow_switch.freeze, capture_freezer=capture_store.freeze
+    )
 
     def after_recorded(collection_run_id: str) -> None:
         """What follows a durably RECORDED run: the Product, then the review fast path. The review
@@ -359,6 +369,7 @@ def build_container(
         collections=registered_collections,
         after_recorded=after_recorded,
         shadow=ShadowRunner(adaptive_profiles, shadow_evidence, hook_manifests),
+        capture=CaptureRunner(capture_store),
     )
     registry.register(collection.job_definition())
 
@@ -588,6 +599,7 @@ def build_container(
         adaptive_validation=adaptive_validation,
         shadow_switch=shadow_switch,
         shadow_evidence=shadow_evidence,
+        capture_store=capture_store,
         ownership=ownership,
     )
 
