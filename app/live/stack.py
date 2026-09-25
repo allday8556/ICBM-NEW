@@ -27,7 +27,7 @@ even ``READY`` is never permission to write.
 import hashlib
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -48,6 +48,7 @@ from app.live.model import (
     MODE_NOT_LIVE,
     REPLAY_APPLIED_REUSE_NOT_ADOPTED,
     REPLAY_KEY_UNDETERMINABLE,
+    REPLAY_UNRESOLVED,
     RESTORE_PROOF_ABSENT,
     RETENTION_UNPROVEN,
     SENDER_NOT_WIRED,
@@ -74,6 +75,8 @@ from app.register.store import IntentRecord
 REPLAY_DUPLICATE_IN_UNIT = "LIVE_ASSET_REPLAY_DUPLICATE_IN_UNIT_REUSE_NOT_ADOPTED"
 # The upload's provenance is not the unit its grant names (profile, artifact, revision, candidate).
 PROVENANCE_NOT_GRANTED = "LIVE_ASSET_PROVENANCE_NOT_GRANTED"
+# Another selected artifact of the grant is STARTED or UPLOAD_UNKNOWN: the stage is held (G3-26).
+REPLAY_UNRESOLVED_IN_UNIT = "LIVE_ASSET_REPLAY_UNRESOLVED_IN_UNIT"
 
 
 class Verdict(StrEnum):
@@ -308,6 +311,7 @@ class SafetyStack:
             artifacts: list[ArtifactReadiness] = []
             seen: set[str] = set()
             first_key: ReplayKey | None = None
+            owner_unreadable = False
             for artifact in () if grant is None else grant.artifacts:
                 try:
                     key = keys(artifact)
@@ -321,7 +325,11 @@ class SafetyStack:
                     )
                     continue
                 seen.add(key.digest)
-                blocked = _fence(unit, key)
+                try:
+                    blocked = _fence(unit, key)
+                except SQLAlchemyError:
+                    blocked = ATTEMPT_OWNER_UNREADABLE
+                    owner_unreadable = True
                 artifacts.append(ArtifactReadiness(artifact, key.digest, blocked is None, blocked))
             if grant is None or first_key is None:
                 layers = [
@@ -342,6 +350,11 @@ class SafetyStack:
                     grant,
                     fence=False,
                 )
+        if owner_unreadable:
+            layers.append(_layer(Layer.ATTEMPT_OWNER, False, ATTEMPT_OWNER_UNREADABLE))
+        if any(a.reason_code == REPLAY_UNRESOLVED for a in artifacts):
+            # G3-26: one unresolved selected artifact holds the whole stage.
+            layers.append(_layer(Layer.REPLAY_FENCE, False, REPLAY_UNRESOLVED_IN_UNIT))
         if not any(a.uploadable for a in artifacts):
             reason = artifacts[0].reason_code if artifacts else GRANT_MISSING
             layers.append(_layer(Layer.REPLAY_FENCE, False, reason or GRANT_MISSING))
@@ -392,11 +405,15 @@ class SafetyStack:
         if fence:
             try:
                 blocked = _fence(unit, target.key)
+                unresolved = _unresolved_elsewhere(unit, target.key, grant)
             except SQLAlchemyError:
                 layers.append(_layer(Layer.ATTEMPT_OWNER, False, ATTEMPT_OWNER_UNREADABLE))
             else:
                 layers.append(_layer(Layer.ATTEMPT_OWNER, True, None))
                 layers.append(_layer(Layer.REPLAY_FENCE, blocked is None, blocked or ""))
+                # G3-26: a STARTED or UPLOAD_UNKNOWN of **any** selected artifact holds the whole
+                # stage. An APPLIED_PROVEN stays artifact-local (cross-audit 7 item 1).
+                layers.append(_layer(Layer.REPLAY_FENCE, not unresolved, REPLAY_UNRESOLVED_IN_UNIT))
         candidate = target.candidate
         layers.append(
             _layer(
@@ -512,6 +529,19 @@ def _readiness(
 
 def _fence(unit: LiveUnit, key: ReplayKey) -> str | None:
     return unit.fence(key)
+
+
+def _unresolved_elsewhere(unit: LiveUnit, key: ReplayKey, grant: GrantRecord | None) -> bool:
+    """Whether any **other** selected artifact of the grant has a STARTED or UPLOAD_UNKNOWN attempt
+    under the same account and wire endpoint: the whole-set read G3-26 requires before a start."""
+    if grant is None:
+        return False
+    for artifact in grant.artifacts:
+        if artifact.sha256 == key.content_sha256:
+            continue
+        if _fence(unit, replace(key, content_sha256=artifact.sha256)) == REPLAY_UNRESOLVED:
+            return True
+    return False
 
 
 def _create_digest(intent: IntentRecord, attempt_no: int) -> str:

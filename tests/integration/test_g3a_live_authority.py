@@ -32,7 +32,13 @@ from app.live.model import (
     UploadAttemptState,
     WireHostPolicy,
 )
-from app.live.stack import REPLAY_DUPLICATE_IN_UNIT, CandidateState, SafetyStack, Verdict
+from app.live.stack import (
+    REPLAY_DUPLICATE_IN_UNIT,
+    REPLAY_UNRESOLVED_IN_UNIT,
+    CandidateState,
+    SafetyStack,
+    Verdict,
+)
 from app.live.store import ArtifactRef, LiveAuthorityStore, LiveUnit
 from app.products.image_model import ImageAssetKind
 from tests.live_support import (
@@ -670,20 +676,114 @@ def test_a_crash_leaves_started_and_the_next_process_settles_it_unknown(
 def test_an_unrecordable_or_raising_sender_result_is_unknown_never_applied(
     container: Container, account: str
 ) -> None:
-    grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
+    # Two grants of one artifact each: an unresolved A must not be what refuses B here.
+    grant_a = grant(container, account, [DERIVED_A])
+    grant_b = grant(container, account, [DERIVED_B])
     release(container)
     unsafe = UploadSendResult(
         UploadAttemptState.APPLIED_PROVEN, provider_asset_ref="https://x.example/a?token=secret"
     )
     service, _ = uploads(container, sender=ScriptedSender(script=[unsafe, ValueError("boom")]))
-    first = service.upload(request(grant_id, DERIVED_A))
-    second = service.upload(request(grant_id, DERIVED_B, BYTES_B))
+    first = service.upload(request(grant_a, DERIVED_A))
+    second = service.upload(request(grant_b, DERIVED_B, BYTES_B))
     assert first.attempt.state is UploadAttemptState.UPLOAD_UNKNOWN and first.prepared is None
     assert second.attempt.state is UploadAttemptState.UPLOAD_UNKNOWN and second.prepared is None
     assert (first.attempt.outcome_reason, second.attempt.outcome_reason) == (
         "UPLOAD_RESULT_UNRECORDABLE",
         "SENDER_RAISED",
     )
+
+
+def test_an_unresolved_selected_artifact_holds_the_whole_asset_stage(
+    container: Container, account: str
+) -> None:
+    # G3-26 (review 5827063895 B2): A+B selected, B UPLOAD_UNKNOWN, A otherwise open.
+    grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
+    release(container)
+    service, sender = uploads(container, sender=ScriptedSender(script=[RuntimeError("reset")]))
+    assert (
+        service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).attempt.state
+        is UploadAttemptState.UPLOAD_UNKNOWN
+    )
+    readiness = service.readiness(grant_id)
+    assert readiness.verdict is Verdict.BLOCKED
+    assert REPLAY_UNRESOLVED_IN_UNIT in readiness.missing
+    spent = store_of(container).grant_record(grant_id)
+    assert spent is not None
+    refused(REPLAY_UNRESOLVED_IN_UNIT, lambda: service.upload(request(grant_id, DERIVED_A)))
+    # A started nothing and spent nothing; only B's one attempt was ever sent.
+    assert [row[1] for row in attempts(container)] == [SHA_B]
+    after = store_of(container).grant_record(grant_id)
+    assert after is not None and after.budget_used == spent.budget_used == 1
+    assert len(sender.calls) == 1
+
+
+def test_an_applied_selected_artifact_stays_artifact_local(
+    container: Container, account: str
+) -> None:
+    # Cross-audit 7 item 1 is kept: an APPLIED_PROVEN A never holds a different artifact B.
+    grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
+    release(container)
+    service, _ = uploads(container, sender=ScriptedSender(script=[applied(), applied(REF_B)]))
+    assert service.upload(request(grant_id, DERIVED_A)).prepared is not None
+    assert service.readiness(grant_id).verdict is Verdict.READY
+    assert service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).prepared
+
+
+def test_an_unreadable_attempt_owner_refuses_and_blocks_the_stage(
+    container: Container, account: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
+    release(container)
+    service, sender = uploads(container, sender=ScriptedSender(script=[applied()]))
+
+    def unreadable(self: LiveUnit, key: Any) -> Any:
+        raise OperationalError("SELECT", {}, Exception("disk I/O error"))
+
+    monkeypatch.setattr(LiveUnit, "fence", unreadable)
+    refused(
+        live_model.ATTEMPT_OWNER_UNREADABLE, lambda: service.upload(request(grant_id, DERIVED_A))
+    )
+    readiness = service.readiness(grant_id)
+    assert readiness.verdict is Verdict.BLOCKED
+    assert live_model.ATTEMPT_OWNER_UNREADABLE in readiness.missing
+    assert sender.calls == [] and count(container.config, "asset_upload_attempts") == 0
+
+
+def test_a_missing_or_wrong_stage_grant_is_an_audited_refusal(
+    container: Container, account: str
+) -> None:
+    # Review 5827063895 B3: deny by default, before anything starts, and audited.
+    release(container)
+    service, sender = uploads(container, sender=ScriptedSender(script=[applied()]))
+    missing = "00000000-0000-4000-8000-000000000000"
+    refused(live_model.GRANT_MISSING, lambda: service.upload(request(missing, DERIVED_A)))
+    with store_of(container).transaction() as unit:
+        now = container.clock.now()
+        create = unit.issue_create_grant(
+            marketplace_key=MARKET,
+            marketplace_account_id=account,
+            registration_snapshot_id="snap-not-an-asset-unit",
+            intent_id="intent-not-an-asset-unit",
+            idempotency_key="idem-not-an-asset-unit",
+            create_attempt_no=1,
+            not_before=now,
+            expires_at=now + timedelta(hours=1),
+            approved_by="operator",
+            authorization_ref=APPROVAL,
+            correlation_id=CID,
+        ).grant_id
+    refused(live_model.GRANT_MISSING, lambda: service.upload(request(create, DERIVED_A)))
+    denials = [
+        e
+        for e in container.audit.list_events(limit=200)
+        if e.event_type == "LIVE_MUTATION_REFUSED" and e.reason_code == live_model.GRANT_MISSING
+    ]
+    assert {e.target_ref for e in denials} == {f"live_grant:{missing}", f"live_grant:{create}"}
+    assert all(e.outcome == "DENIED" for e in denials)
+    assert sender.calls == [] and count(container.config, "asset_upload_attempts") == 0
+    kept = store_of(container).grant_record(create)
+    assert kept is not None and kept.budget_used == 0
 
 
 def test_the_upload_must_be_the_granted_artifact_under_the_current_candidate(

@@ -441,7 +441,9 @@ def build_container(
     safety_stack = SafetyStack(
         store=live_store, mode=execution_mode, proofs=UnprovenStageProofs(), clock=clock
     )
-    live_authority = LiveAuthorityService(store=live_store, registrations=registrations)
+    live_authority = LiveAuthorityService(
+        store=live_store, registrations=registrations, preparations=registration_preparations
+    )
     registration_execution = RegistrationExecutionService(
         registrations=registrations,
         preflight=registration_preflight,

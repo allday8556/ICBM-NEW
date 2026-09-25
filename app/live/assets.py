@@ -25,10 +25,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.core.clock import Clock
-from app.core.errors import InputValidationError, NotFoundError
+from app.core.errors import InputValidationError
 from app.live.model import (
     ARTIFACT_NOT_GRANTED,
     CONTENT_DIGEST_MISMATCH,
+    GRANT_MISSING,
     MutationRefused,
     MutationStage,
     ReplayKey,
@@ -131,8 +132,10 @@ class AssetUploadService:
     # ------------------------------------------------------------------ the upload
 
     def upload(self, request: AssetUploadRequest) -> AssetUploadResult:
-        grant = self._grant(request)
         try:
+            # A missing or wrong-stage grant is a deny-by-default refusal like any other layer:
+            # nothing starts, nothing is spent, nothing is sent, and it is audited (§3.3).
+            grant = self._grant(request)
             key = self._key(grant, request.content, request.artifact)
             candidate = self._candidates.current(grant.preparation_revision_id or "")
             provenance = UploadProvenance(
@@ -166,7 +169,7 @@ class AssetUploadService:
             self._stack.record_refusal(
                 refusal,
                 stage=MutationStage.ASSET,
-                target_ref=f"live_grant:{grant.grant_id}",
+                target_ref=f"live_grant:{request.grant_id}",
                 actor=request.actor,
                 correlation_id=request.correlation_id,
             )
@@ -264,7 +267,9 @@ class AssetUploadService:
     def _grant(self, request: AssetUploadRequest) -> GrantRecord:
         grant = self._store.grant_record(request.grant_id)
         if grant is None or grant.stage is not MutationStage.ASSET:
-            raise NotFoundError("LIVE_ASSET_GRANT_NOT_FOUND", "no ASSET grant with this identity")
+            raise MutationRefused(
+                GRANT_MISSING, "no ASSET grant with this identity; nothing is sent"
+            )
         return grant
 
     def _key(self, grant: GrantRecord, content: bytes, artifact: ArtifactRef) -> ReplayKey:
@@ -326,8 +331,9 @@ class PreparationCandidateGate:
         return CandidateState(
             preparation_revision_id,
             current=current,
-            ready=result.status is ReadinessStatus.READY,
-            fingerprint=result.dependency_fingerprint,
+            # The same verdict the ASSET grant was issued on: READY and an upload permitted.
+            ready=result.status is ReadinessStatus.READY and result.upload_permitted,
+            fingerprint=result.candidate_fingerprint,
         )
 
 

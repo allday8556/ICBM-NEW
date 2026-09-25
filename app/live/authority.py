@@ -3,8 +3,11 @@
 A grant is created only by an explicit protected action that names every field (§3); this owner
 validates each named identity against its own owner before the store records it:
 
-- an ASSET grant names a preparation revision that exists and belongs to the named canonical
-  account, the exact candidate fingerprint, the exact selected artifact set and the asset profile;
+- an ASSET grant binds the preparation's **current** revision, and its unit is derived from the
+  preparation owner's current candidate evaluation: it must be ``READY`` and permit an upload, and
+  the named candidate fingerprint, the exact selected M4 artifact set (kind, SHA-256, derivation
+  identity) and the target policy's asset profile must equal what that evaluation derives. The
+  caller's values are expectations only; a mismatch refuses and records nothing;
 - a CREATE grant names an Intent that exists, belongs to the named account, is ``PREPARED`` or
   proven not applied, with its own Snapshot and idempotency key, and **the next attempt number**
   — so it authorizes exactly that one attempt, and a retry after ``NOT_APPLIED_PROVEN`` needs a
@@ -17,20 +20,40 @@ capability, readiness, preflight, ComplianceGate, provider truth, write status o
 
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Protocol
 
 from app.core.errors import InputValidationError, NotFoundError
 from app.live.model import MutationStage
 from app.live.store import ArtifactRef, BrakeRecord, GrantRecord, LiveAuthorityStore
+from app.products.model import ReadinessStatus
 from app.register.model import IntentState
+from app.register.preparation import PreflightResult
 from app.register.store import RegistrationStore
 
 SENDABLE = (IntentState.PREPARED, IntentState.FAILED)
 
 
+class CandidateEvaluator(Protocol):
+    """The preparation owner's candidate evaluation (``RegistrationPreparationService``)."""
+
+    def evaluate(self, preparation_id: str) -> PreflightResult: ...
+
+
+def _grant_refusal(code: str, message: str, **details: object) -> InputValidationError:
+    return InputValidationError(code, message, details=dict(details))
+
+
 class LiveAuthorityService:
-    def __init__(self, *, store: LiveAuthorityStore, registrations: RegistrationStore) -> None:
+    def __init__(
+        self,
+        *,
+        store: LiveAuthorityStore,
+        registrations: RegistrationStore,
+        preparations: CandidateEvaluator,
+    ) -> None:
         self._store = store
         self._registrations = registrations
+        self._preparations = preparations
 
     # ------------------------------------------------------------------ grants (§3)
 
@@ -50,6 +73,8 @@ class LiveAuthorityService:
         authorization_ref: str,
         correlation_id: str,
     ) -> GrantRecord:
+        # The unit comes from the owners, never from the caller (review 5827063895 B1). The caller's
+        # values are only expectations: any mismatch refuses, and no grant is recorded.
         preparation = self._registrations.preparation_of_revision(preparation_revision_id)
         if preparation is None:
             raise NotFoundError("LIVE_GRANT_PREPARATION_NOT_FOUND", "no such preparation revision")
@@ -57,8 +82,44 @@ class LiveAuthorityService:
             marketplace_key,
             marketplace_account_id,
         ):
-            raise InputValidationError(
+            raise _grant_refusal(
                 "LIVE_GRANT_ACCOUNT_MISMATCH", "the preparation belongs to another account"
+            )
+        if preparation.current.preparation_revision_id != preparation_revision_id:
+            raise _grant_refusal(
+                "LIVE_GRANT_PREPARATION_NOT_CURRENT",
+                "an ASSET grant binds the preparation's current revision only",
+            )
+        candidate = self._preparations.evaluate(preparation.preparation_id)
+        if candidate.status is not ReadinessStatus.READY or not candidate.upload_permitted:
+            raise _grant_refusal(
+                "LIVE_GRANT_CANDIDATE_NOT_READY",
+                "an ASSET grant needs a READY candidate preflight that permits an upload",
+                status=candidate.status.value,
+            )
+        if candidate_fingerprint != candidate.candidate_fingerprint:
+            raise _grant_refusal(
+                "LIVE_GRANT_CANDIDATE_MISMATCH",
+                "the named candidate fingerprint is not the current READY candidate's",
+            )
+        selected = {
+            ArtifactRef(image.asset_kind, image.sha256, image.derivation_id)
+            for item in candidate.resolved.items
+            for image in item.images
+        }
+        named = list(artifacts)
+        if len(named) != len(set(named)) or set(named) != selected:
+            raise _grant_refusal(
+                "LIVE_GRANT_ARTIFACT_SET_MISMATCH",
+                "an ASSET grant names exactly the current selected artifact set",
+                missing=len(selected - set(named)),
+                extra=len(set(named) - selected),
+            )
+        profile = candidate.resolved.target.asset_policy.profile
+        if asset_profile != profile:
+            raise _grant_refusal(
+                "LIVE_GRANT_PROFILE_MISMATCH",
+                "an ASSET grant names the current target policy's asset profile",
             )
         with self._store.transaction() as unit:
             return unit.issue_asset_grant(

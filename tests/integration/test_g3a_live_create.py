@@ -6,7 +6,9 @@ grant that names this Snapshot, Intent, idempotency key and attempt number — a
 proven non-application needs a new grant.
 """
 
+from dataclasses import replace
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -15,9 +17,12 @@ from app.connect.marketplace.capability import RemoteOutcome
 from app.container import Container
 from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.live import model as live_model
+from app.live.authority import LiveAuthorityService
 from app.live.model import GrantState, MutationStage
 from app.live.stack import SafetyStack
-from app.live.store import LiveAuthorityStore
+from app.live.store import ArtifactRef, LiveAuthorityStore
+from app.products.model import ReadinessStatus
+from app.register.authoring import AuthoredInputs, decode_inputs, encode_inputs
 from app.register.execution import ExecutionRefused
 from app.register.model import IntentState
 from app.register.store import RegistrationStore
@@ -30,7 +35,16 @@ from tests.integration.test_m5_register_execution import (
 )
 from tests.live_support import PermittedMode, ProvenProofs
 from tests.product_support import Collections, count
-from tests.register_support import MARKET, Preparation, establish, preparation
+from tests.register_support import (
+    MARKET,
+    Preparation,
+    draft,
+    establish,
+    no_match,
+    preparation,
+    ready_item,
+    request,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -270,3 +284,165 @@ def test_an_expired_or_revoked_create_grant_never_matches(
         run.service.run(context(ready))
     assert refused.value.code == live_model.GRANT_MISSING
     assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+
+
+# ---------------------------------------------------------------- the ASSET grant unit (B1)
+
+
+class Evaluator:
+    """The preparation owner's candidate evaluation, answered by the real preflight owner."""
+
+    def __init__(self, result: Any) -> None:
+        self.result = result
+
+    def evaluate(self, preparation_id: str) -> Any:
+        return self.result
+
+
+def ready_preparation(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> tuple[str, Any, Any]:
+    """A durable preparation of one real M4 Item, and the real READY candidate of its unit."""
+    item = ready_item(container, sources, "1234")
+    draft_id = draft(store, account, [item])
+    req = request(store, draft_id, account, [item])
+    first = prep.service.candidate(req)
+    req = replace(req, duplicate_evidence=no_match(first))
+    candidate = prep.service.candidate(req)
+    assert candidate.status is ReadinessStatus.READY and candidate.upload_permitted
+    with store.transaction() as unit:
+        record = unit.create_preparation(
+            draft_id,
+            item_ids=list(candidate.resolved.unit_item_ids),
+            inputs=encode_inputs(AuthoredInputs(req.category, req.listing, req.detail)),
+            created_by="operator",
+            correlation_id=CID,
+        )
+    return record.current.preparation_revision_id, candidate, first
+
+
+def asset_grant(
+    authority: LiveAuthorityService, container: Container, account: str, **values: Any
+) -> Any:
+    now = container.clock.now()
+    return authority.issue_asset_grant(
+        **(
+            {
+                "marketplace_key": MARKET,
+                "marketplace_account_id": account,
+                "budget": 2,
+                "not_before": now,
+                "expires_at": now + timedelta(hours=1),
+                "approved_by": "operator",
+                "authorization_ref": APPROVAL,
+                "correlation_id": CID,
+            }
+            | values
+        )
+    )
+
+
+def test_an_asset_grant_is_derived_from_the_owners_never_from_the_caller(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    revision, candidate, not_ready = ready_preparation(container, sources, store, account, prep)
+    authority = LiveAuthorityService(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        registrations=store,
+        preparations=Evaluator(candidate),
+    )
+    selected = sorted(
+        {
+            ArtifactRef(image.asset_kind, image.sha256, image.derivation_id)
+            for item in candidate.resolved.items
+            for image in item.images
+        },
+        key=lambda a: a.sha256,
+    )
+    assert selected
+    profile = candidate.resolved.target.asset_policy.profile
+    exact = {
+        "preparation_revision_id": revision,
+        "candidate_fingerprint": candidate.candidate_fingerprint,
+        "artifacts": selected,
+        "asset_profile": profile,
+    }
+    other = selected[0]
+    wrong = [
+        ({"candidate_fingerprint": "c" * 64}, "LIVE_GRANT_CANDIDATE_MISMATCH"),
+        ({"artifacts": [*selected, ArtifactRef(other.asset_kind, "d" * 64, None)]},
+         "LIVE_GRANT_ARTIFACT_SET_MISMATCH"),  # an extra artifact
+        ({"artifacts": selected[1:]}, "LIVE_GRANT_ARTIFACT_SET_MISMATCH"),  # a missing one
+        ({"artifacts": [ArtifactRef(other.asset_kind, other.sha256, "substituted-derivation"),
+                        *selected[1:]]}, "LIVE_GRANT_ARTIFACT_SET_MISMATCH"),  # substituted
+        ({"artifacts": [*selected, selected[0]]}, "LIVE_GRANT_ARTIFACT_SET_MISMATCH"),
+        ({"asset_profile": "caller-chosen-profile"}, "LIVE_GRANT_PROFILE_MISMATCH"),
+    ]  # fmt: skip
+    for override, code in wrong:
+        with pytest.raises(InputValidationError) as refused:
+            asset_grant(authority, container, account, **(exact | override))
+        assert refused.value.code == code, override
+    # A candidate that is not READY, or that permits no upload, grants nothing.
+    blocked = LiveAuthorityService(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        registrations=store,
+        preparations=Evaluator(not_ready),
+    )
+    with pytest.raises(InputValidationError) as refused:
+        asset_grant(blocked, container, account, **exact)
+    assert refused.value.code == "LIVE_GRANT_CANDIDATE_NOT_READY"
+    assert count(container.config, "live_grants") == 0
+    # The exact unit is granted, bound to what the owners derived.
+    granted = asset_grant(authority, container, account, **exact)
+    assert granted.candidate_fingerprint == candidate.candidate_fingerprint
+    assert sorted(granted.artifacts, key=lambda a: a.sha256) == selected
+    assert granted.asset_profile == profile
+
+
+def test_an_asset_grant_binds_only_the_current_preparation_revision(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    revision, candidate, _ = ready_preparation(container, sources, store, account, prep)
+    preparation = store.preparation_of_revision(revision)
+    assert preparation is not None
+    with store.transaction() as unit:
+        unit.revise_preparation(
+            preparation.preparation_id,
+            item_ids=list(preparation.current.item_ids),
+            inputs=encode_inputs(decode_inputs(preparation.current)),
+            authored_by="operator",
+            correlation_id=CID,
+        )
+    authority = LiveAuthorityService(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        registrations=store,
+        preparations=Evaluator(candidate),
+    )
+    with pytest.raises(InputValidationError) as refused:
+        asset_grant(
+            authority,
+            container,
+            account,
+            preparation_revision_id=revision,
+            candidate_fingerprint=candidate.candidate_fingerprint,
+            artifacts=[
+                ArtifactRef(image.asset_kind, image.sha256, image.derivation_id)
+                for item in candidate.resolved.items
+                for image in item.images
+            ],
+            asset_profile=candidate.resolved.target.asset_policy.profile,
+        )
+    assert refused.value.code == "LIVE_GRANT_PREPARATION_NOT_CURRENT"
+    assert count(container.config, "live_grants") == 0
