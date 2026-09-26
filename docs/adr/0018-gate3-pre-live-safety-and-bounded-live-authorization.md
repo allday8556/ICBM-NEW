@@ -19,6 +19,14 @@ of Gate 3 (Issue #89), on exact main `267d6a9eb20788819a8863f59a9c8f8e47700870` 
   §3.4, Consequences).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§12).
+- Amended after merge by the architect decision `5845062336` (design `5845034124`, after the
+  area 4 closeout `5844770185`):
+  - §6.1 records the revised safety strategy of ADR-0014 §28 — never resend while the outcome is
+    unknown, positive-only reconcile, durable ambiguity isolation — and its explicit
+    residual-risk acceptance gate;
+  - §9, §10, §11, G3-14 and the new G3-30 and G3-31 follow it.
+  - **The provider-evidence verdict stays `INSUFFICIENT`, and nothing is adopted or authorized
+    to run.**
 
 **It authorizes nothing to run.** It authorizes no migration, model, service, route, execution-mode
 change, LIVE grant, kill switch, backup or restore code, retention runtime, visual test runtime,
@@ -42,8 +50,9 @@ remote branch immediately before writing.
 Date: 2026-09-24 UTC (2026-09-25 KST)
 Related:
 - ADR-0014 (SmartStore REGISTER): its CREATE, `UNKNOWN`, reconcile, read-back, sanitizer and
-  execution-scope rules stay the only authority for what they govern. This ADR adds a layer in
-  front of them and changes no sentence, invariant or ruling of ADR-0014.
+  execution-scope rules — as amended by its own §28 (`5845062336`) — stay the only authority for
+  what they govern. This ADR adds a layer in front of them and changes no sentence, invariant or
+  ruling of ADR-0014.
 - ADR-0011 (raw read-back retention): unchanged; §8 below only adds prerequisites.
 - ADR-0016 (Gate 2): unchanged. A LIVE grant never creates, closes or resolves a ReviewItem.
 
@@ -330,11 +339,49 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 - The official-evidence verdict stays **`INSUFFICIENT`** (Issue #89 `5768312853` / `5768347233`;
   `docs/acceptance/M5.md` §9.1).
 - **No LIVE grant, brake release, backup proof, retention proof, visual acceptance or user approval
-  can override that verdict.** The canary stays **`BLOCKED`** until new official provider evidence
-  independently supports the CREATE and reconcile safety contract of ADR-0014, and the endpoints
-  concerned are separately adopted.
+  can override that verdict.** The area 4 re-review confirmed it (`5844652548`, closeout
+  `5844770185`). It holds for idempotent replay and for remote-absence proof, and it is never
+  turned into either.
 - In particular, **an ICBM seller-side code and a zero-result search remain insufficient proof of
   remote absence** (ADR-0014 §7, §17.2).
+- The canary stays **`BLOCKED`**. Under the strategy of §6.1, it can leave `BLOCKED` only when all
+  of these hold:
+  - CREATE and the positive-only reconcile path are separately adopted under ADR-0014 §28;
+  - every other prerequisite of this ADR is green;
+  - the residual-risk acceptance of §6.1 is recorded.
+
+#### 6.1 The revised safety strategy (architect decision `5845062336`)
+
+```text
+before    prove remote absence before retry
+now       never resend while the outcome is unknown
+          + positive-only reconcile
+          + durable ambiguity isolation                    (ADR-0014 §28)
+```
+
+- **This is a deliberate change of the canary's safety strategy, not a rewording.** It weakens no
+  refusal:
+  - an `UNKNOWN` is never resent and keeps its conflict scope closed (G3-07);
+  - no grant is issued for it;
+  - no lookup, code or approval proves absence (G3-15).
+- **Why the verdict no longer has to be overturned:** under this strategy no path resends on an
+  unknown outcome, and no path needs remote absence. An `UNKNOWN` ends only on positive evidence of
+  presence followed by Snapshot verification, or on later machine proof of non-application
+  (ADR-0014 §28.2, §28.3).
+- **What the endpoints still need, each in its own separately authorized adoption slice:**
+  - CREATE, under the official wire contract: request, response, and an error classification that
+    separates a definitive rejection from an ambiguous outcome;
+  - SEARCH, limited to positive reconcile: exact request, response and pagination contract.
+- **The residual risk, which must be accepted explicitly:**
+
+  > a product may be live in SmartStore after an ambiguous CREATE while ICBM has not yet recovered
+  > the provider identity, leaving that listing temporarily outside normal confirmed price/stock
+  > monitoring.
+
+  **Opening any real canary under this contract requires a separate, explicit user and architect
+  acceptance of this residual risk**, recorded in GitHub, in addition to every other Gate-3
+  prerequisite. The acceptance authorizes nothing by itself. It is one more precondition, and no
+  grant, proof or readiness implies it.
 
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 
@@ -451,6 +498,11 @@ the accepted code SHA changed in between:
 
 This is UI acceptance only. It authorizes no provider mutation.
 
+**The registration read state (ADR-0014 §28.5)** — the lower-right registration status card and its
+detail panel — joins the required surfaces and state selectors of this acceptance, or their
+successor, when it is implemented. It is proven inside the harness, never re-recorded outside it.
+Any merged commit is a new accepted code SHA, so an earlier visual acceptance never covers it.
+
 ### 10. Mutation-stage readiness
 
 Each stage has its own derived, read-only readiness, and **it is a mandatory layer of the send-time
@@ -459,7 +511,8 @@ at send time. Each requirement is proven from its own durable evidence, never as
 
 | requirement | `ASSET_MUTATION_READY` (before an upload) | `CREATE_MUTATION_READY` (before a CREATE) |
 | --- | --- | --- |
-| endpoint adoption (§6) | `IMAGE_UPLOAD_ADOPTED` | `CREATE_ADOPTED` and `RECONCILE_PATH_ADOPTED` — **not met** |
+| endpoint adoption (§6) | `IMAGE_UPLOAD_ADOPTED` | `CREATE_ADOPTED` and `RECONCILE_PATH_ADOPTED`, the latter positive-only (ADR-0014 §28) — **not met** |
+| residual-risk acceptance (§6.1) | the canary cannot open without it | an explicit, recorded user and architect acceptance — **not recorded** |
 | grant (§3) | an `ACTIVE` ASSET grant matching the exact preparation revision, candidate fingerprint, artifact set and asset profile | an `ACTIVE` CREATE grant matching the exact Snapshot, Intent and idempotency key |
 | protected-write brake (§4) | `RELEASED` | `RELEASED` |
 | canary eligibility (§5) | `CANARY_NON_REGULATED` | `CANARY_NON_REGULATED` |
@@ -492,7 +545,8 @@ at send time. Each requirement is proven from its own durable evidence, never as
 - Execution stays **`DRY_RUN` / `M0_DRY_RUN_ONLY`**; LIVE stays forbidden.
 - The canary stays **`BLOCKED`**; marketplace mutations stay **0**.
 - ComplianceGate has no owner; M6 and M6.5 are not started.
-- ADR-0014 §9–§11, §15, §17, §24 and §26, ADR-0011, ADR-0015 and ADR-0016 are unchanged.
+- ADR-0014 §9, §15, §24 and §26, ADR-0011, ADR-0015 and ADR-0016 are unchanged. ADR-0014 §10,
+  §11, §17.2 and §22 are narrowed only by ADR-0014 §28 (`5845062336`).
 
 ### 12. The Gate 3 slices
 
@@ -538,7 +592,7 @@ G3-10  releasing the brake needs a new explicit audited authorization and never 
 G3-11  every layer of the safety stack must allow a mutation at send time; the ADR-0014 §26 execution-scope brake stays CREATE-only, unchanged and not weakened, and gates the CREATE stage only
 G3-12  Gate 3 implements no ComplianceGate and puts no compliance logic in a grant
 G3-13  the first canary uses only a product proven outside every regulated category by its reviewed category metadata; that proof is eligibility, never a COMPLIANCE PASS, and without it the canary stays BLOCKED
-G3-14  CREATE and SEARCH stay NOT_ADOPTED and the provider-evidence verdict stays INSUFFICIENT; no grant, brake, backup, retention, visual acceptance or approval overrides it
+G3-14  CREATE and SEARCH stay NOT_ADOPTED until separately authorized adoption slices under ADR-0014 §28, and the provider-evidence verdict stays INSUFFICIENT for idempotent replay and remote-absence proof; no grant, brake, backup, retention, visual acceptance or approval overrides it or turns it into such a proof
 G3-15  an ICBM seller-side code and a zero-result search are never proof of remote absence
 G3-16  each mutation stage needs its own current restore proof into a separate fresh root on the current schema head, bound to a target state digest and stale once that state changes; a CREATE restore proof is taken after the freeze and proves, by identity and state, the RegistrationSnapshot, the RegistrationIntent with its idempotency key and state, and the execution-scope brake state, which it may never record as absent; a pre-freeze proof never gates a CREATE; an ASSET restore proof proves the durable upload-attempt state over the whole replay-conflict scope and never an ADR-0014 §26 row; only state that cannot yet exist is recorded as absent, never created; a declaration is not a drill
 G3-17  canary evidence is sanitized before hash or persist, durable REGISTER rows are never deleted, no canary evidence is deleted before M5 acceptance, and evidence tied to an unresolved condition is never discarded
@@ -554,6 +608,8 @@ G3-26  ASSET_MUTATION_READY requires that durable owner and no started or unreso
 G3-27  a CREATE grant and restore proof authorize only the state they were issued for; after a NOT_APPLIED_PROVEN attempt any permitted retry needs a new CREATE grant and a fresh restore proof and readiness, and an UNKNOWN still forbids any resend
 G3-28  attempt provenance and the ASSET replay-conflict key are separate: the key is exactly the marketplace, the canonical account, the normalized wire endpoint identity (HTTP method, provider host and path) and the exact outbound content digest; the multipart file name, MIME or type metadata, local artifact kind, derivation_id, candidate fingerprint, preparation revision, grant, Draft revision, listing, category, policy state, local profile label, local endpoint-mapping revision, provider-document version label and any ICBM adoption or contract label are provenance only and never enter or narrow it, even when serialized on the wire; ambiguity takes the wider scope; an undeterminable wire endpoint identity or content digest keeps the ASSET stage BLOCKED
 G3-29  a started or unresolved UPLOAD_UNKNOWN anywhere in a replay-conflict scope blocks every new upload with that key across a new grant, preparation revision, candidate fingerprint, derivation, local artifact kind, file name, MIME or type metadata, local profile or contract/adoption label change, restart or batch; ASSET restore proofs and ASSET_MUTATION_READY inspect the whole scope, never only the current candidate's attempts; only NOT_APPLIED_PROVEN clears it for a retry, which still needs a matching grant, readiness and a fresh restore proof; an APPLIED_PROVEN in that scope keeps a fresh upload with the same key blocked, whatever file name, MIME or type metadata, candidate, derivation, local artifact kind, profile or contract label asks, until a separately adopted reuse/rebind path exists
+G3-30  the canary's CREATE safety strategy is never resend while the outcome is unknown, positive-only reconcile and durable ambiguity isolation (ADR-0014 §28); opening any real canary also requires a recorded explicit user and architect acceptance of the residual risk that a listing may be live while its provider identity is unrecovered
+G3-31  the registration read state and its status card and detail panel are surfaces of the visual acceptance contract when implemented; a merged commit is a new accepted code SHA and never inherits an earlier visual acceptance
 ```
 
 ## Consequences

@@ -878,6 +878,27 @@ EXPECTED_INVARIANTS = {
     "M5-30": "the registration preparation stores the operator's authored inputs only,"
     " append-only, and a Snapshot proves which exact revision froze it; a job payload is an"
     " execution copy and never the authoring source",
+    # Architect decision 5845062336: positive-only reconcile and the registration read state.
+    "M5-31": "for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity"
+    " candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the"
+    " provider identity recovered only when that candidate is read back by its provider product"
+    " number and carries the same ICBM sellerManagementCode; zero, several or no lookup result"
+    " never proves presence or absence and never authorizes a CREATE",
+    "M5-32": "presence is not success: a recovered provider identity is read back and compared"
+    " with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider"
+    " identity ends the seller-code search",
+    "M5-33": "an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity"
+    " or later machine proof of non-application; an ordinary definitive rejection is"
+    " NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN",
+    "M5-34": "every reconcile check is recorded append-only, single-flight per Intent, bounded in"
+    " schedule and provider-read quota, and retained while its ambiguity is unresolved; a quota"
+    " refusal never fails an Intent",
+    "M5-35": "the read states 등록중, 등록성공, 재확인필요 and 등록실패 are one total, disjoint"
+    " server-side partition of durable per-Intent state, derived and never stored; a batch's"
+    " four counts sum to its Intents",
+    "M5-36": "a timeout, a lost response, an unknown outcome or a zero-result search is never"
+    " 등록실패; a real canary under §28 needs an explicit user and architect acceptance of its"
+    " residual risk",
 }
 
 
@@ -1186,6 +1207,67 @@ RULES: dict[str, Rule] = {
     ),
 }
 
+RULES["S28 positive-only reconcile, presence is not success, one total read state"] = Rule(
+    (
+        "**This is a deliberate safety-policy change, not a rewording.**",
+        "**Presence and success are separate proofs.**",
+        "**It does not prove registration success.**",
+        "**Success is still §11 and only §11.**",
+        "**A recovered provider identity ends the search.**",
+        "**The operator's number is never the evidence**",
+        "**`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application",
+        "An ordinary definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its"
+        " own Attempt directly; it never passes through `UNKNOWN`.",
+        "**Single-flight per Intent.**",
+        "It never converts the Intent to a failure and never ends its ambiguity.",
+        "**one server-side partition**",
+        "**An unmatched durable state is a defect.**",
+        "**The verification deadline is a server policy value**",
+        "**Opening any real canary under this contract requires a separate, explicit user and"
+        " architect acceptance of this residual risk**",
+        "**No new `ReviewKind` is introduced.**",
+    ),
+    (
+        r"zero[- ]result (search|lookup)[^.]{0,40}(proves?|establish(es)?|shows?) (the )?"
+        r"(product|listing)? ?(was not created|absen)",
+        r"(UNKNOWN|재확인필요|timeout|lost response)[^.]{0,40}(is|are) (shown|displayed|recorded)"
+        r" as 등록실패",
+        r"(recovered|exact) (provider )?(identity|candidate) (is|proves) (registration )?success",
+    ),
+)
+
+RULES["S28.2 a search candidate is not presence until its read-back carries the code"] = Rule(
+    (
+        "exactly one exact candidate a presence candidate only (an identity-recovery candidate);"
+        " nothing is proven yet; it is read back by its provider product number",
+        "candidate read-back carries the same ICBM code provider-side presence for this Intent"
+        " (APPLIED_PROVEN); the recovered provider identity is persisted durably; then Snapshot"
+        " comparison",
+        "candidate read-back fails or shows another code no presence proof and no recovered"
+        " identity; remains UNKNOWN (재확인필요); never absence, never a resend",
+        "**An exact search candidate is only a presence candidate. It becomes a presence proof"
+        " only when all of these hold:**",
+        "that candidate is read back by its provider product number and carries the same code",
+    ),
+    (
+        r"(exactly one |an? |the )?exact (ICBM-identity |search )?candidate (itself |alone )?"
+        r"(proves|is|establishes) (provider-side )?(presence|a presence proof)",
+    ),
+)
+
+RULES["S17.2 the verdict stands; adoption never waits for it to be overturned"] = Rule(
+    (
+        "therefore stay `NOT_ADOPTED`, and `product_registration.write` stays `UNVERIFIED`",
+        "New official evidence overturning this verdict is **not** the adoption condition",
+        "each endpoint is adopted only in its own separately authorized adoption slice",
+        "CREATE bound to §28's never-resend rule, SEARCH for positive-only reconcile only",
+    ),
+    (
+        r"NOT_ADOPTED`? until (new )?official evidence (resolves|overturns|removes)",
+        r"adopt\w* only (if|when|once|after) (new )?official evidence (resolves|overturns|removes)",
+    ),
+)
+
 # One affirmative sentence per rule that has forbidden phrasings: each must be caught.
 VIOLATIONS = {
     "A1": "When SmartStore needs a smaller image, M5 resizes the artifact itself.",
@@ -1213,6 +1295,10 @@ VIOLATIONS = {
     "D2": "After a cooldown, the scope resumes without any operator action.",
     "D3": "A resume rewrites the recorded attempt it forgives.",
     "D4": "The budget is counted across all endpoint groups of the account.",
+    # "S28.2" precedes "S28": the first key that prefixes a rule name supplies its sample.
+    "S28.2": "Exactly one exact candidate proves presence for the Intent.",
+    "S28": "A zero-result search proves the product was not created.",
+    "S17.2": "CREATE and SEARCH stay NOT_ADOPTED until new official evidence resolves it.",
 }
 
 
@@ -1428,6 +1514,8 @@ def test_an_operator_assertion_never_establishes_a_remote_outcome() -> None:
     table = contract_table(adr, "resolution evidence")
     assert resolution_problems(table) == []
     assert table["operator assertion alone (resolved_by = USER)"] == "no"
+    # Architect decision 5845062336 (§28.2): for SmartStore a lookup is positive evidence only.
+    assert table["provider lookup by the listing identity (positive only)"] == "no"
 
 
 def test_user_says_it_was_not_created_cannot_free_the_unknown() -> None:
