@@ -320,6 +320,9 @@ Acceptance evidence belongs in `docs/acceptance/`, not chat. It records correlat
 
 - Read the canonical documents before starting; do not ask the user to re-explain rules already written here.
 - Implement the current milestone only. Do not horizontally expand before the first vertical closes.
+- **Registration authoring / AI sequencing (ADR-0019):** before the first vertical closes, an individual registration editor may implement the provider-zero/manual authoring path only. Do not pull forward AI provider execution, SearchSignalAdapter/provider metadata reads for AI, multi-marketplace AI, or bulk AI merely to complete the screen. The editor must work fully without AI.
+- An AI button never authorizes a provider endpoint. If the task depends on marketplace data, its endpoint must already be reviewed/adopted; otherwise the capability stays unavailable.
+- Do not create a second product/enrichment truth to support the editor. Reuse ProductFacts/Product/Item/image/Pricing owners and REGISTER preparation/Draft owners; later AI attaches through the accepted enrichment contract.
 - When the roadmap or architecture is ambiguous, do not pick a convenient interpretation and proceed.
 - Raise blockers early and plainly.
 - Report what was actually verified separately from what was assumed.
@@ -344,6 +347,8 @@ Every M5 implementation PR is merged (#90–#96) and main is green. **That is no
 The current approved visual source is the prototype recorded in `docs/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.
 
 The accepted milestone sequence is `ROADMAP.md` §12. Implement one milestone at a time, and do not begin horizontal supplier/marketplace expansion before the first vertical (§12 below) closes.
+
+ADR-0019 additionally fixes the registration-authoring/AI order: the manual individual editor may be completed before that close, but product/MD AI runtime implementation begins only after the first vertical is accepted, starting with the shared AI foundation and then the dependency-ordered SmartStore tasks. Bulk AI and multi-marketplace AI are later expansion work.
 
 ---
 
