@@ -2274,6 +2274,13 @@ class RegistrationUnit:
         ``EXTERNALLY_REMOVED``. An operator's assertion is not an :class:`AbsenceEvidence`."""
         row = self._active_registration(registration_id)
         kind = AbsenceEvidence(evidence_kind)
+        if kind is AbsenceEvidence.PROVIDER_LOOKUP:
+            # ADR-0014 §17.2, §28: no lookup result is remote-absence evidence, so it can never
+            # terminalize a registration or free the group for a fresh one.
+            raise InputValidationError(
+                "REGISTER_LOOKUP_NEVER_PROVES_ABSENCE",
+                "a provider lookup never proves that a listing is absent",
+            )
         _require_text(recorded_by=recorded_by)
         row.lifecycle_state = RegistrationLifecycle.EXTERNALLY_REMOVED.value
         row.absence_observed_at = self._clock.now()

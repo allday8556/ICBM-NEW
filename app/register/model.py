@@ -110,7 +110,12 @@ class ResolutionEvidence(StrEnum):
 
 
 class AbsenceEvidence(StrEnum):
-    """ADR-0014 §14 (R4): only provider evidence proves a listing absent."""
+    """ADR-0014 §14 (R4): only provider evidence proves a listing absent.
+
+    ``PROVIDER_LOOKUP`` stays a value of the stored vocabulary only (the check constraint of
+    migration 0016). It is never admissible: a provider lookup never proves remote absence
+    (§17.2, §28), so :meth:`RegistrationUnit.record_external_absence` refuses it.
+    """
 
     PROVIDER_READ_BACK = "PROVIDER_READ_BACK"
     PROVIDER_LOOKUP = "PROVIDER_LOOKUP"

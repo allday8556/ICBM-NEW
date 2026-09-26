@@ -1770,15 +1770,34 @@ def test_a_proven_external_absence_keeps_history_and_frees_a_fresh_registration(
             f" absence_evidence_digest = '{'7' * 64}', absence_recorded_by = 'o'",
             match="CHECK",
         )
-    with store.transaction() as unit:
-        removed = unit.record_external_absence(
+    # ADR-0014 §17.2, §28: a lookup-derived absence is refused. It neither terminalizes the
+    # registration nor frees the group for a fresh registration.
+    with pytest.raises(InputValidationError, match="never proves"), store.transaction() as unit:
+        unit.record_external_absence(
             registration_id,
             evidence_kind=AbsenceEvidence.PROVIDER_LOOKUP,
             sanitized_evidence={"lookup": "absent"},
             recorded_by=OPERATOR,
             correlation_id=CID,
         )
+    kept = store.registration(registration_id)
+    assert kept is not None and kept.lifecycle_state is RegistrationLifecycle.ACTIVE
+    # The group stays live (§13), so a fresh registration of it is still blocked.
+    live = (kept.marketplace_key, kept.marketplace_account_id, [item.group])
+    with store.transaction() as unit:
+        assert unit.live_registrations(*live) == (registration_id,)
+    # Only an admissible provider read-back proves the listing absent.
+    with store.transaction() as unit:
+        removed = unit.record_external_absence(
+            registration_id,
+            evidence_kind=AbsenceEvidence.PROVIDER_READ_BACK,
+            sanitized_evidence={"read_back": "absent"},
+            recorded_by=OPERATOR,
+            correlation_id=CID,
+        )
     assert removed.lifecycle_state is RegistrationLifecycle.EXTERNALLY_REMOVED
+    with store.transaction() as unit:
+        assert unit.live_registrations(*live) == ()
     # History stays: the registration, its Snapshot, its Intent and its attempts.
     assert (
         count(config, "marketplace_registrations"),
