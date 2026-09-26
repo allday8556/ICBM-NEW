@@ -410,6 +410,12 @@ AI may assist with:
 
 AI output never replaces unsupported factual source data.
 
+**Sequencing boundary — ADR-0019.** The first SmartStore vertical does not wait for AI execution. Registration Management must provide a complete manual individual-product authoring path first: basic information, image selection, options/SKU, required product-information notice inputs, detail-page authoring, pricing/cost display, marketplace fields, preview and preflight. That path must remain fully usable with no AI provider configured.
+
+The individual editor may reserve the canonical AI entry points already defined by Canonical v3.1 §7, but it must not pull forward AI provider calls, marketplace metadata/search endpoints, SearchSignalAdapter, bulk AI or horizontal marketplace expansion merely to make the UI look complete. An unavailable capability is shown as unavailable; no mock/fallback result becomes product truth.
+
+Product/MD AI execution is implemented after the first vertical closes, in the dependency order recorded in ADR-0019 and Issue #30: AI foundation → product name → search-signal/tags → category → options → notice/factual validation. Marketplace-dependent tasks wait for their provider read contract to be adopted.
+
 ## Registration readiness
 
 One readiness service validates:
@@ -579,6 +585,8 @@ Task-oriented services:
 
 AI does not become a parallel database or workflow engine.
 
+The **product/MD enrichment contract already exists** in Canonical v3.1 §7 and Issue #30; Phase 7 does not redefine it. ADR-0019 only delays its runtime implementation until the first transaction vertical is proven, so the manual registration path is not blocked by AI and the same AI foundation can later serve every marketplace. Phase 7 remains the broader AI/Insight expansion after that foundation exists.
+
 ## Analytics
 
 Analytics is a read model over operational data:
@@ -646,15 +654,28 @@ M0 Foundation                                   ACCEPTED 2026-09-13
 → FIRST VERTICAL two consecutive passes in fresh sessions
 ```
 
+Before the first vertical closes, registration-authoring work is limited to the provider-zero/manual path authorized under ADR-0019. **Do not implement AI provider execution, marketplace-dependent AI reads, multi-marketplace AI fan-out or bulk AI as part of the individual-editor work.**
+
 Only after the first vertical is accepted:
 
 ```text
-Add suppliers one by one
+AI foundation for product/MD authoring
+  PromptTemplate + PlatformPolicy revisions
+  AIProvider execution + structured EnrichmentResult
+  provenance/fingerprint/STALE + lock/concurrency
+→ SmartStore product-name enrichment
+→ SmartStore search-signal/tag enrichment
+→ SmartStore category enrichment
+→ SmartStore option enrichment
+→ notice/factual validation assistance
+→ Add suppliers one by one through the accepted collector contract
 → Add Coupang
 → Add 11st
-→ Bulk registration / automation
-→ AI insight / analytics expansion
+→ Bulk AI + bulk registration / automation
+→ AI Shopping Insight / analytics expansion
 ```
+
+Marketplace-dependent enrichment steps may start only after their required provider read endpoints are reviewed/adopted. Product-name enrichment has no inherent marketplace metadata-read dependency; tag/search, category, option and notice tasks do.
 
 ---
 
@@ -702,6 +723,8 @@ Accepted so far:
 - M4 — canonical Product DB + image pipeline + pricing/readiness foundations (Issue #80, ADR-0013, PR #81–#87, `docs/acceptance/M4.md`), accepted on the final offline acceptance run of the merged harness at exact main `57a6676` (146/146 checks, architect acceptance 5740024056). The acceptance is bounded by M4.md §2: no source SKUs, grouping/MERGE, M5 work, provider calls or quantity resale guidance.
 
 Next, in order:
+
+**Registration-authoring boundary (ADR-0019):** while M5 and the first vertical remain open, the individual registration editor may be completed as a provider-zero/manual authoring surface, using existing canonical owners. It must work without AI. AI execution, SearchSignalAdapter/provider metadata adoption for AI, multi-marketplace AI and bulk AI stay deferred until the first vertical closes. This is an implementation-order rule, not a new milestone and not M5 acceptance.
 
 1. M5 — SmartStore REGISTER idempotency/reconcile/read-back (§12; Issue #89). Each PR was separately authorized in GitHub, and **all of them are merged**. This is implementation history, not acceptance:
 
