@@ -14,7 +14,7 @@ import { authLine, statusChip } from '../core/capability.js';
 import { fragment, h } from '../core/dom.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
-import { platformTag } from '../core/platform.js';
+import { platformWordmark } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
 import { capabilityProjection } from './capability-projection.js';
 import { permissionAttestationPanel } from './permission-attestation.js';
@@ -200,7 +200,7 @@ function renderItem(item, state) {
   if (item.button) return button(item.button, item.variant);
   if (item.marketplaceStatus) {
     return item.marketplaceStatus.map((key) =>
-      h('div', { class: 'alert-row', 'data-marketplace': key }, h('span', {}, platformTag(key)), connectionChip(key, state)),
+      h('div', { class: 'alert-row', 'data-marketplace': key }, h('span', {}, platformWordmark(key)), connectionChip(key, state)),
     );
   }
   if (item.capabilityProjection) return state.truth(item.capabilityProjection).projection;
@@ -280,7 +280,7 @@ export default {
         PLATFORM_TABS,
         tabKey,
         (key) => ctx.navigate('settings', { tab: key }),
-        (tab) => (tab.marketplace ? platformTag(tab.marketplace) : tab.label),
+        (tab) => (tab.marketplace ? platformWordmark(tab.marketplace) : tab.label),
       ),
       h(
         'div',
