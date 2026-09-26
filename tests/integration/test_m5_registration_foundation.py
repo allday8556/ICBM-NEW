@@ -488,6 +488,7 @@ ADAPTIVE_TABLES = (
     "adaptive_phase_c_read_refusals",
     "restore_drills",
     "retention_proofs",
+    "visual_acceptances",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

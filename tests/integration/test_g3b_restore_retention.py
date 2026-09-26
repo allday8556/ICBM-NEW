@@ -145,7 +145,10 @@ def asset_grant(container: Container, unit: dict[str, str]) -> tuple[str, Any]:
 
 def proofs(container: Container) -> DurableStageProofs:
     return DurableStageProofs(
-        store=live(container), retention=container.retention, schema_head=head_revision
+        store=live(container),
+        retention=container.retention,
+        visual=container.visual_acceptance,
+        schema_head=head_revision,
     )
 
 
@@ -201,7 +204,10 @@ def test_an_asset_drill_restores_the_exact_pre_upload_chain_into_a_fresh_root(
     assert container.asset_uploads.restore_target(grant_id) == result.target_digest
     # A drill proves its own schema head only.
     other_head = DurableStageProofs(
-        store=live(container), retention=container.retention, schema_head=lambda: "other-head"
+        store=live(container),
+        retention=container.retention,
+        visual=container.visual_acceptance,
+        schema_head=lambda: "other-head",
     )
     assert not other_head.restore_proof(MutationStage.ASSET, result.target_digest)
     # The drill record is append-only.

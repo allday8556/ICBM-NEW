@@ -89,6 +89,7 @@ PROTECTED_TABLES: Final = (
     "asset_upload_attempts",
     "restore_drills",
     "retention_proofs",
+    "visual_acceptances",
 )
 FORWARD_ONLY_TRIGGERS: Final = (
     "trg_live_grants_forward_only",

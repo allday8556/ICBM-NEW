@@ -23,11 +23,23 @@ import { KIND_LABEL } from '../components/review-counts.js';
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
 const CANARY = '/api/v1/register/canary';
+const LIVE = '/api/v1/register/live';
 const TITLE = '등록관리';
 const HELP =
   '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
 const CANARY_HELP =
   '실제 마켓 쓰기는 별도 승인이 필요한 제한 캠페인입니다. 이 영역은 준비 상태만 보여주며 아무 것도 승인하지 않습니다.';
+
+const LIVE_HELP =
+  '보호 쓰기 브레이크와 실행 권한(grant)은 서버가 가진 상태 그대로입니다. 준비도는 서버가 계산한 결과이며, 이 화면에서 아무 것도 승인하거나 기록하지 않습니다.';
+
+const BRAKE_LABEL = { ENGAGED: '잠김', RELEASED: '해제됨' };
+const GRANT_LABEL = { ACTIVE: '유효', EXPIRED: '만료됨', REVOKED: '회수됨', EXHAUSTED: '소진됨' };
+const STAGE_LABEL = { ASSET: '이미지 업로드', CREATE: '상품 등록' };
+const PROOF_LABEL = {
+  evidence_retention_ready: '증거 보존 증명',
+  visual_acceptance_recorded: '화면 검수 기록',
+};
 
 const INTENT_LABEL = {
   PREPARED: '전송 준비됨',
@@ -107,6 +119,22 @@ const REASON_COPY = {
   EXECUTION_SCOPE_STOPPED: '전송이 중단된 범위입니다.',
   MORE_THAN_ONE_UNIT_SELECTED: '카나리는 한 건만 대상으로 합니다.',
   RUNTIME_NOT_CLEAN: '실행 중인 코드가 정확한 커밋이 아닙니다.',
+  LIVE_EXECUTION_MODE_NOT_LIVE: '실행 모드가 LIVE가 아닙니다.',
+  LIVE_PROTECTED_WRITE_BRAKE_ENGAGED: '보호 쓰기 브레이크가 잠겨 있습니다.',
+  LIVE_PROTECTED_WRITE_BRAKE_UNREADABLE: '보호 쓰기 브레이크 상태를 읽을 수 없습니다.',
+  LIVE_GRANT_NO_MATCHING_ACTIVE_GRANT: '일치하는 유효 실행 권한이 없습니다.',
+  LIVE_ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
+  LIVE_SENDER_NOT_WIRED: '전송 경로가 연결되어 있지 않습니다.',
+  LIVE_CANARY_ELIGIBILITY_UNPROVEN: '카나리 대상 적격성이 증명되지 않았습니다.',
+  LIVE_RESTORE_PROOF_ABSENT: '이 대상의 복원 증명이 없습니다.',
+  LIVE_EVIDENCE_RETENTION_UNPROVEN: '증거 보존이 증명되지 않았습니다.',
+  LIVE_VISUAL_ACCEPTANCE_UNRECORDED: '현재 코드의 화면 검수 기록이 없습니다.',
+  LIVE_ASSET_ATTEMPT_OWNER_UNREADABLE: '업로드 시도 기록을 읽을 수 없습니다.',
+  LIVE_ASSET_REPLAY_UNRESOLVED: '같은 이미지의 미확인 업로드가 남아 있습니다.',
+  LIVE_ASSET_REPLAY_APPLIED_REUSE_NOT_ADOPTED: '이미 반영된 이미지의 재사용 경로가 채택되지 않았습니다.',
+  LIVE_ASSET_REPLAY_KEY_UNDETERMINABLE: '업로드 대상을 식별할 수 없습니다.',
+  LIVE_ASSET_CANDIDATE_NOT_READY: '후보 Preflight가 READY가 아닙니다.',
+  LIVE_ASSET_CANDIDATE_DRIFT: '실행 권한 발급 이후 후보가 바뀌었습니다.',
 };
 
 function kv(label, value) {
@@ -645,6 +673,69 @@ function canaryPanel(canary) {
   );
 }
 
+function grantRow(grant) {
+  const readiness = grant.readiness
+    ? fragment(
+        chip(grant.readiness.verdict, grant.readiness.verdict === 'READY' ? 'good' : 'bad'),
+        h(
+          'ul',
+          { class: 'requirement-list' },
+          ...grant.readiness.missing.map((code) => h('li', { 'data-missing': code }, REASON_COPY[code] ?? code)),
+        ),
+      )
+    : h('span', { class: 'mini' }, '등록 단계 준비도는 카나리 준비도에서 확인합니다.');
+  return h(
+    'tr',
+    { 'data-grant': grant.grant_id, 'data-grant-state': grant.state, 'data-stage': grant.stage },
+    h('td', {}, STAGE_LABEL[grant.stage] ?? grant.stage),
+    h('td', {}, chip(GRANT_LABEL[grant.state] ?? grant.state, grant.state === 'ACTIVE' ? 'good' : 'warn')),
+    h('td', { class: 'mono' }, grant.marketplace_account_id),
+    h('td', {}, `${grant.budget_used} / ${grant.budget_max}`),
+    h('td', {}, dotDateTime(grant.expires_at)),
+    h('td', {}, readiness),
+  );
+}
+
+// The pre-LIVE safety state (ADR-0018 §9, §10): the protected-write brake, the unit-independent
+// proofs and every grant with the ASSET readiness the server derives for it. Read-only.
+function livePanel(live) {
+  const brake = live.brake;
+  return h(
+    'section',
+    { class: 'panel register-live', 'data-role': 'live-panel' },
+    withHelp(h('h2', { class: 'panel-title' }, '보호 쓰기 · 실행 권한'), LIVE_HELP),
+    h(
+      'div',
+      { 'data-role': 'live-brake', 'data-brake-state': brake.state },
+      kv('보호 쓰기 브레이크', BRAKE_LABEL[brake.state] ?? brake.state),
+      chip(brake.state, brake.state === 'RELEASED' ? 'good' : 'bad'),
+      brake.recorded
+        ? null
+        : h('div', { class: 'mini', 'data-reason': 'BRAKE_NOT_RECORDED' }, '기록이 없어 기본값인 잠김으로 판단합니다.'),
+      brake.reason_code ? h('div', { class: 'mini', 'data-reason': brake.reason_code }, brake.reason_code) : null,
+    ),
+    h(
+      'ul',
+      { class: 'requirement-list', 'data-role': 'live-proofs' },
+      ...Object.entries(live.proofs).map(([name, proven]) =>
+        h(
+          'li',
+          { 'data-proof': name, 'data-satisfied': proven ? 'true' : 'false' },
+          h('span', {}, PROOF_LABEL[name] ?? name),
+          chip(proven ? '증명됨' : '미증명', proven ? 'good' : 'warn'),
+        ),
+      ),
+    ),
+    h(
+      'div',
+      { 'data-role': 'live-grants' },
+      live.grants.length
+        ? table(['단계', '상태', '계정', '예산', '만료', '준비도'], live.grants.map(grantRow))
+        : h('div', { class: 'mini', 'data-grant-state': 'NONE' }, '발급된 실행 권한이 없습니다.'),
+    ),
+  );
+}
+
 export default {
   key: 'register',
   title: TITLE,
@@ -655,11 +746,13 @@ export default {
     let screen;
     let overview;
     let canary;
+    let live;
     try {
-      [screen, overview, canary] = await Promise.all([
+      [screen, overview, canary, live] = await Promise.all([
         getJson(SCREEN),
         getJson(OVERVIEW),
         getJson(CANARY),
+        getJson(LIVE),
       ]);
     } catch (error) {
       return fragment(head, errorState(error));
@@ -669,6 +762,7 @@ export default {
       return fragment(
         head,
         canaryPanel(canary),
+        livePanel(live),
         emptyState({
           title: '등록 후보가 없습니다',
           copy: '통합DB에서 등록 가능한 상품을 선택하면 Preflight를 거쳐 등록할 수 있습니다.',
@@ -701,6 +795,7 @@ export default {
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
       canaryPanel(canary),
+      livePanel(live),
       ...reviews,
       ...panels,
     );

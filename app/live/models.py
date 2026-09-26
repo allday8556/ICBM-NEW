@@ -352,3 +352,50 @@ class RetentionProof(Base):
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
     actor: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
+
+
+class VisualAcceptance(Base):
+    """One reviewed populated visual and responsive acceptance (ADR-0018 §9; Gate 3 area 3).
+
+    Append-only, and only ever a PASSED report: a report that fails its contract is never recorded.
+    It is current only for exactly the code it accepted — the running application's code digest
+    (``app.core.code_identity``) — at exactly its schema head; the git commit it ran at is kept as
+    provenance, with the reviewer and the review reference that accepted it.
+    """
+
+    __tablename__ = "visual_acceptances"
+    __table_args__ = (
+        CheckConstraint(
+            "length(code_sha) = 40 AND code_sha NOT GLOB '*[^0-9a-f]*'", name="code_sha_hex"
+        ),
+        CheckConstraint(_hex64("code_digest"), name="code_digest_hex"),
+        CheckConstraint(_hex64("report_digest"), name="report_digest_hex"),
+        CheckConstraint(
+            "json_valid(evidence_json) AND json_type(evidence_json) = 'object'",
+            name="evidence_is_object",
+        ),
+        CheckConstraint("target_count > 0 AND check_count > 0", name="checks_present"),
+        CheckConstraint(
+            "schema_head <> '' AND harness_version <> '' AND scenario <> ''",
+            name="identity_present",
+        ),
+        CheckConstraint("approved_by <> '' AND authorization_ref <> ''", name="review_present"),
+        CheckConstraint("actor <> '' AND correlation_id <> ''", name="actor_present"),
+        Index("ix_visual_acceptances_code_digest", "code_digest", "schema_head"),
+    )
+
+    acceptance_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code_sha: Mapped[str] = mapped_column(String(40))
+    code_digest: Mapped[str] = mapped_column(String(64))
+    schema_head: Mapped[str] = mapped_column(String(64))
+    report_digest: Mapped[str] = mapped_column(String(64))
+    harness_version: Mapped[str] = mapped_column(String(64))
+    scenario: Mapped[str] = mapped_column(String(64))
+    target_count: Mapped[int] = mapped_column(Integer)
+    check_count: Mapped[int] = mapped_column(Integer)
+    evidence_json: Mapped[str] = mapped_column(Text)
+    approved_by: Mapped[str] = mapped_column(String(64))
+    authorization_ref: Mapped[str] = mapped_column(String(128))
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    actor: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))

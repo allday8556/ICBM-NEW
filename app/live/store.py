@@ -63,6 +63,7 @@ from app.live.models import (
     ProtectedWriteBrake,
     RestoreDrill,
     RetentionProof,
+    VisualAcceptance,
 )
 from app.products.image_model import ImageAssetKind
 from app.register.sanitize import require_clean, safe_provider_reference
@@ -871,6 +872,96 @@ class LiveUnit:
             )
         )
         return bool(found)
+
+    # ------------------------------------------------------------------ visual acceptance (§9)
+
+    def record_visual_acceptance(
+        self,
+        *,
+        code_sha: str,
+        code_digest: str,
+        schema_head: str,
+        report_digest: str,
+        harness_version: str,
+        scenario: str,
+        target_count: int,
+        check_count: int,
+        evidence: Mapping[str, Any],
+        approved_by: str,
+        authorization_ref: str,
+        actor: str,
+        correlation_id: str,
+    ) -> str:
+        """Record one reviewed PASSED visual acceptance. The only writer of
+        ``visual_acceptances``; the report was verified by ``app.live.visual`` before this."""
+        if not approved_by or not actor or not correlation_id:
+            raise _invalid("a visual acceptance names its reviewer, actor and correlation")
+        if not _COMMENT_ID.match(authorization_ref):
+            raise _invalid("the review reference is a GitHub comment identity")
+        require_clean(dict(evidence))
+        row = VisualAcceptance(
+            acceptance_id=str(uuid.uuid4()),
+            code_sha=code_sha,
+            code_digest=code_digest,
+            schema_head=schema_head,
+            report_digest=report_digest,
+            harness_version=harness_version,
+            scenario=scenario,
+            target_count=target_count,
+            check_count=check_count,
+            evidence_json=json.dumps(dict(evidence), sort_keys=True, default=str),
+            approved_by=approved_by,
+            authorization_ref=authorization_ref,
+            recorded_at=self._clock.now(),
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._event(
+            AuditEventType.VISUAL_ACCEPTANCE_RECORDED,
+            "record_visual_acceptance",
+            actor,
+            correlation_id,
+            f"visual_acceptance:{row.acceptance_id}",
+            after={
+                "code_sha": code_sha,
+                "code_digest": code_digest,
+                "schema_head": schema_head,
+                "report_digest": report_digest,
+            },
+            details={"approved_by": approved_by, "authorization_ref": authorization_ref},
+        )
+        return row.acceptance_id
+
+    def visual_accepted(self, code_digest: str, schema_head: str) -> bool:
+        """Whether a reviewed visual acceptance holds for exactly this running code and head."""
+        found = self.session.scalar(
+            select(func.count())
+            .select_from(VisualAcceptance)
+            .where(
+                VisualAcceptance.code_digest == code_digest,
+                VisualAcceptance.schema_head == schema_head,
+            )
+        )
+        return bool(found)
+
+    def visual_acceptances(self, *, limit: int = 20) -> tuple[dict[str, Any], ...]:
+        rows = self.session.scalars(
+            select(VisualAcceptance).order_by(VisualAcceptance.recorded_at.desc()).limit(limit)
+        ).all()
+        return tuple(
+            {
+                "acceptance_id": row.acceptance_id,
+                "code_sha": row.code_sha,
+                "code_digest": row.code_digest,
+                "schema_head": row.schema_head,
+                "report_digest": row.report_digest,
+                "authorization_ref": row.authorization_ref,
+                "recorded_at": row.recorded_at,
+            }
+            for row in rows
+        )
 
     # ------------------------------------------------------------------ audit
 
