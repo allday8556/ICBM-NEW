@@ -137,15 +137,16 @@ must not introduce a parallel "edited product" database that copies ProductFacts
 state.
 
 The first-vertical authoring path is deterministic/manual and remains fully usable with every AI
-capability unavailable. This restates the existing M5 rule in Issue #89 §14; it is not a new AI
-availability requirement introduced here.
+capability unavailable. This restates repository-canonical M5 requirements: ADR-0014 §18 says M5
+registers with no AI provider configured, and `docs/acceptance/M5.md` §2 keeps AI outside M5
+acceptance. It is not a new AI availability requirement introduced here.
 
 Before that vertical is accepted, the approved/prototype UX may reserve an AI control's final
-position, but the production runtime must not expose it as actionable until an authoritative server
-capability/owner exists. If no server owner can state why the capability is unavailable, the client
-must not invent or hardcode that reason. The UI must not manufacture a result, call an unadopted
-platform endpoint, or create an interim client-owned enrichment store merely to make the control
-active.
+position, but the production runtime must not render that control at all until an authoritative
+server capability/owner exists. A disabled placeholder with no authoritative reason is not a valid
+runtime state. If no server owner can state why the capability is unavailable, the client must not
+invent or hardcode that reason. The UI must not manufacture a result, call an unadopted platform
+endpoint, or create an interim client-owned enrichment store merely to make the control active.
 
 When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
 Issue #30 contracts:
@@ -172,9 +173,11 @@ Issue #30 contracts:
 **AI_INITIAL timing stays unresolved until the AI implementation contract.** Canonical v3.1 §7.6
 defines target-scoped name/tag projections and also says the first collection auto-applies an
 initial recommendation, while Gate 1 can establish the RegistrationTargetSet later. This
-clarification does not amend the frozen canonical text. Until the implementation contract names the
-first eligible target/enrichment event, an absent `final_name` uses the canonical
-`original_name` fallback and no collection-time platform projection is fabricated.
+clarification does not amend the frozen canonical text. The first SmartStore AI slice therefore
+covers recommendation generation/presentation only; automatic application as `AI_INITIAL` remains
+deferred until that timing contract names the first eligible target/enrichment event. Until then,
+an absent `final_name` uses the canonical `original_name` fallback and no collection-time
+platform projection is fabricated.
 
 Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
 facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
