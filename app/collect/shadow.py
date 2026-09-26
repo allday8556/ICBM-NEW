@@ -1,8 +1,9 @@
-"""The canonical side of the one-fetch shadow seam (ADR-0017 §10.1; Issue #110 P3 `5824551569`).
+"""The canonical side of the Adaptive seams: the one-fetch shadow (ADR-0017 §10.1; Issue #110 P3
+`5824551569`) and the in-memory sample capture (Phase C C0, `5826469852`).
 
-COLLECT core owns the run, and this is all it knows about a shadow comparison: two protocols that
-something else implements, and the plain values it hands across. Nothing here imports the
-Adaptive packages, so the canonical owners never depend on them.
+COLLECT core owns the run, and this is all it knows about either: protocols that something else
+implements, and the plain values it hands across. Nothing here imports the Adaptive packages, so
+the canonical owners never depend on them.
 
 ``ShadowFreezer``
     Called by the run store **inside** the canonical write unit of a run's first product-read
@@ -17,6 +18,17 @@ Adaptive packages, so the canonical owners never depend on them.
     ``DocumentView``, the canonical facts and image candidates, the observed checksums and the
     frozen decision. It opens its own write unit, never raises into the run, and has no gateway,
     session, budget or egress handle to spend.
+
+``CaptureFreezer``
+    Called by the run store inside the same first-reservation unit. It answers ``FrozenCapture``:
+    ``REQUESTED`` with the one pending capture request it consumes for this run's target, or
+    ``OFF`` — the default. A retry never asks again, and a run whose first reservation predates
+    the seam has no decision at all and is never captured.
+
+``CaptureStep``
+    Called after the canonical revision append, and after the shadow step, only for a run frozen
+    ``REQUESTED``. It receives the one in-memory ``DocumentView`` and keeps only sanitized capture
+    material, never the page body. It never raises into the run and cannot change its outcome.
 """
 
 from dataclasses import dataclass, field
@@ -30,6 +42,7 @@ from app.collect.urls import UrlPolicy
 from integrations.suppliers.collection import DocumentView, ImageCandidate, SourceIdentityResult
 
 ShadowDecision = Literal["ENABLED", "DISABLED"]
+CaptureDecision = Literal["REQUESTED", "OFF"]
 
 
 @dataclass(frozen=True)
@@ -57,16 +70,56 @@ DISABLED = FrozenShadow("DISABLED")
 
 
 @dataclass(frozen=True)
+class FrozenCapture:
+    """One run's capture decision, frozen at its first product-read reservation (C0). Default
+    ``OFF``; ``REQUESTED`` names the one capture request the run consumed."""
+
+    decision: CaptureDecision
+    request_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.decision == "REQUESTED") != (self.request_id is not None):
+            raise ValueError("a requested capture names its request, and only it")
+
+
+CAPTURE_OFF = FrozenCapture("OFF")
+
+
+@dataclass(frozen=True)
 class FrozenRun:
-    """What a run froze, read back from the canonical run record: the only input the shadow step
-    and Phase C eligibility ever use, never the switch's current setting."""
+    """What a run froze, read back from the canonical run record: the only input the shadow step,
+    the capture step and Phase C eligibility ever use, never the current configuration.
+
+    ``capture`` is ``None`` for a run whose first reservation predates the capture seam: such a run
+    is never captured, and nothing is backfilled.
+    """
 
     shadow: FrozenShadow
     first_product_read_at: datetime
+    capture: FrozenCapture | None = None
 
 
 class ShadowFreezer(Protocol):
     def __call__(self, session: Session, supplier_key: str) -> FrozenShadow: ...
+
+
+class CaptureFreezer(Protocol):
+    def __call__(self, session: Session, supplier_key: str, target: str) -> FrozenCapture: ...
+
+
+@dataclass(frozen=True)
+class CaptureInput:
+    """What a capture may use: the one document the run already read, in memory only."""
+
+    collection_run_id: str
+    supplier_key: str
+    capture: FrozenCapture
+    document: DocumentView = field(repr=False)
+    revision_id: str
+
+
+class CaptureStep(Protocol):
+    def __call__(self, capture: CaptureInput) -> None: ...
 
 
 @dataclass(frozen=True)

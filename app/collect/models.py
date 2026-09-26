@@ -255,6 +255,8 @@ class CollectionRun(Base):
         ),
         CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
         Index("ix_collection_runs_job_id", "job_id"),
+        # Each capture request is consumed by at most one run (Phase C C0, migration 0027).
+        Index("ix_collection_runs_capture_request_id", "capture_request_id", unique=True),
         Index("ix_collection_runs_supplier", "supplier_key", "requested_at"),
         Index("ix_collection_runs_pacing", "supplier_key", "pacing_key", "product_read_at"),
         Index(
@@ -299,3 +301,8 @@ class CollectionRun(Base):
     # Whether the run was settled RECORDED by the recovery path, from a revision an earlier
     # attempt had already appended (ADR-0017 §11.2). NULL before migration 0025 and until settled.
     settled_by_recovery: Mapped[bool | None] = mapped_column(Boolean)
+    # The capture decision this run froze at its genuinely first product-read reservation (Phase
+    # C C0, migration 0027): REQUESTED with the one capture request it consumed, or OFF. NULL for a
+    # run first read before the seam existed; such a run is never captured, and none is backfilled.
+    capture_decision: Mapped[str | None] = mapped_column(String(10))
+    capture_request_id: Mapped[str | None] = mapped_column(String(36))

@@ -26,7 +26,15 @@ from sqlalchemy.orm import Session
 
 from app.collect.facts import FactsStatus
 from app.collect.models import CollectionOutcome, CollectionRun
-from app.collect.shadow import DISABLED, FrozenRun, FrozenShadow, ShadowFreezer
+from app.collect.shadow import (
+    CAPTURE_OFF,
+    DISABLED,
+    CaptureFreezer,
+    FrozenCapture,
+    FrozenRun,
+    FrozenShadow,
+    ShadowFreezer,
+)
 from app.core.clock import Clock
 from app.core.errors import NotFoundError, RateLimitedError
 from app.db.database import Database
@@ -95,13 +103,21 @@ class CollectionRunRecord:
 
 class CollectionRunStore:
     def __init__(
-        self, db: Database, clock: Clock, *, shadow_freezer: ShadowFreezer | None = None
+        self,
+        db: Database,
+        clock: Clock,
+        *,
+        shadow_freezer: ShadowFreezer | None = None,
+        capture_freezer: CaptureFreezer | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
         # Who answers a run's shadow decision at its first reservation (ADR-0017 §10.1). Without
         # one every run freezes an explicit DISABLED, so no run is ever shadow-eligible by default.
         self._shadow_freezer = shadow_freezer
+        # Who answers a run's capture decision at its first reservation (Phase C C0). Without one
+        # every new run freezes OFF: capture is never on by default.
+        self._capture_freezer = capture_freezer
 
     def open(
         self,
@@ -158,8 +174,15 @@ class CollectionRunStore:
             remaining = _remaining(_last_read(session, key), now, interval_s)
             if remaining > 0:
                 raise SameProductTooSoon(remaining)
+            first_reservation = row.product_read_at is None
             row.pacing_key = key.url
             row.product_read_at = now
+            if first_reservation and row.capture_decision is None:
+                # Only a run's genuinely first reservation decides its capture: a run first read
+                # before the seam existed stays without a decision and is never captured.
+                capture = self._freeze_capture(session, row.supplier_key, key.url)
+                row.capture_decision = capture.decision
+                row.capture_request_id = capture.request_id
             if row.shadow_decision is None:
                 frozen = self._freeze(session, row.supplier_key)
                 row.shadow_decision = frozen.decision
@@ -169,6 +192,15 @@ class CollectionRunStore:
             frozen_run = _frozen(row)
             assert frozen_run is not None
             return frozen_run
+
+    def _freeze_capture(self, session: Session, supplier_key: str, target: str) -> FrozenCapture:
+        if self._capture_freezer is None:
+            return CAPTURE_OFF
+        try:
+            return self._capture_freezer(session, supplier_key, target)
+        except Exception:
+            logger.exception("collect.capture_freeze_failed", extra={"supplier": supplier_key})
+            return CAPTURE_OFF
 
     def _freeze(self, session: Session, supplier_key: str) -> FrozenShadow:
         if self._shadow_freezer is None:
@@ -370,4 +402,11 @@ def _frozen(row: CollectionRun) -> FrozenRun | None:
         if row.shadow_decision == "ENABLED"
         else DISABLED
     )
-    return FrozenRun(shadow, row.first_product_read_at)
+    capture = (
+        None
+        if row.capture_decision is None
+        else FrozenCapture("REQUESTED", row.capture_request_id)
+        if row.capture_decision == "REQUESTED"
+        else CAPTURE_OFF
+    )
+    return FrozenRun(shadow, row.first_product_read_at, capture)

@@ -479,6 +479,10 @@ ADAPTIVE_TABLES = (
     "live_grants",
     "protected_write_brakes",
     "asset_upload_attempts",
+    "adaptive_capture_requests",
+    "adaptive_capture_candidates",
+    "adaptive_phase_c_commands",
+    "adaptive_phase_c_command_results",
     "restore_drills",
     "retention_proofs",
 )

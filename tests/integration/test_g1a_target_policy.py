@@ -464,6 +464,10 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "live_grants",
         "protected_write_brakes",
         "asset_upload_attempts",
+        "adaptive_capture_requests",
+        "adaptive_capture_candidates",
+        "adaptive_phase_c_commands",
+        "adaptive_phase_c_command_results",
         "restore_drills",
         "retention_proofs",
     }

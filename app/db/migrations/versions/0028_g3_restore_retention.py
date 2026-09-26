@@ -1,7 +1,7 @@
 """Gate 3 area 2: the restore-drill record and the evidence-retention proof record.
 
-Revision ID: 0027_g3_restore_retention
-Revises: 0026_g3_live_authority
+Revision ID: 0028_g3_restore_retention
+Revises: 0027_adaptive_capture_seam
 Create Date: 2026-09-26
 
 Issue #89 Gate 3, area 2 of ADR-0018 §12, under ADR-0018 §7 and §8. It creates two append-only
@@ -23,8 +23,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0027_g3_restore_retention"
-down_revision: str | None = "0026_g3_live_authority"
+revision: str = "0028_g3_restore_retention"
+down_revision: str | None = "0027_adaptive_capture_seam"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
