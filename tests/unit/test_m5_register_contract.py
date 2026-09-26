@@ -1234,6 +1234,19 @@ RULES["S28 positive-only reconcile, presence is not success, one total read stat
     ),
 )
 
+RULES["S17.2 the verdict stands; adoption never waits for it to be overturned"] = Rule(
+    (
+        "therefore stay `NOT_ADOPTED`, and `product_registration.write` stays `UNVERIFIED`",
+        "New official evidence overturning this verdict is **not** the adoption condition",
+        "each endpoint is adopted only in its own separately authorized adoption slice",
+        "CREATE bound to §28's never-resend rule, SEARCH for positive-only reconcile only",
+    ),
+    (
+        r"NOT_ADOPTED`? until (new )?official evidence (resolves|overturns|removes)",
+        r"adopt\w* only (if|when|once|after) (new )?official evidence (resolves|overturns|removes)",
+    ),
+)
+
 # One affirmative sentence per rule that has forbidden phrasings: each must be caught.
 VIOLATIONS = {
     "A1": "When SmartStore needs a smaller image, M5 resizes the artifact itself.",
@@ -1262,6 +1275,7 @@ VIOLATIONS = {
     "D3": "A resume rewrites the recorded attempt it forgives.",
     "D4": "The budget is counted across all endpoint groups of the account.",
     "S28": "A zero-result search proves the product was not created.",
+    "S17.2": "CREATE and SEARCH stay NOT_ADOPTED until new official evidence resolves it.",
 }
 
 

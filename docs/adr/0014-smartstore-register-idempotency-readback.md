@@ -453,9 +453,12 @@ transmission-precluded evidence and another explicitly reviewed machine or provi
 possibly transmitted CREATE whose ambiguity no admissible evidence resolves stays `UNKNOWN` with its
 conflict scope closed, and is never blindly replayed.
 
-`SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED` until
-new official evidence resolves those blockers, and `product_registration.write` stays `UNVERIFIED`
-(§16). This subsection records a verdict. It relaxes no rule of §7, §10 or §16.
+`SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED`, and
+`product_registration.write` stays `UNVERIFIED` (§16). New official evidence overturning this verdict
+is **not** the adoption condition: each endpoint is adopted only in its own separately authorized
+adoption slice under §28 and ADR-0018 §6.1 — CREATE bound to §28's never-resend rule, SEARCH for
+positive-only reconcile only. This subsection records a verdict. It relaxes no rule of §7, §10 or
+§16.
 
 Gate 3 area 4 re-reviewed the provider evidence and confirmed the verdict (Issue #89 `5844652548`, closeout
 `5844770185`). The seller management code is now **officially non-unique**, and an incident response that
