@@ -163,7 +163,9 @@ class PhaseCReadAccounting:
             self._refusal(binding, request_class, "UNKNOWN_CLASS")
             raise _send_refused("UNKNOWN_CLASS", f"{request_class} is not a Phase C request class")
         try:
-            with self._db.write() as session:
+            # Committed with synchronous=FULL: the reservation survives even a power loss before the
+            # send it permits.
+            with self._db.write(durable=True) as session:
                 budget = session.get(
                     PhaseCReadBudget, (binding.campaign_id, binding.stage, request_class)
                 )

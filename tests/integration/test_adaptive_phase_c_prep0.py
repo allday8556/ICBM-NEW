@@ -30,6 +30,7 @@ from typing import Any
 
 import pytest
 from alembic import command
+from sqlalchemy import text
 
 from app.collect.adaptive_capture.accounting import PhaseCSendRefused
 from app.collect.adaptive_store.gate import build_supplier_gate
@@ -441,7 +442,7 @@ class _BrokenDb:
             raise RuntimeError("the data root cannot be read")
         return self._real.read()
 
-    def write(self) -> Any:
+    def write(self, **_: Any) -> Any:
         raise RuntimeError("the data root cannot be written")
 
 
@@ -520,3 +521,15 @@ def test_0028_is_additive_and_its_downgrade_never_destroys_accounting(
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(live), "0027_adaptive_capture_seam")
     assert rows(config, "SELECT COUNT(*) FROM adaptive_phase_c_read_budgets") == [(6,)]
+
+
+def test_a_reservation_commits_with_full_synchronous_and_restores_normal(
+    config: AppConfig, clock: FakeClock, secrets: MemorySecretStore
+) -> None:
+    with application(config, clock, shop(), Connect(), secrets) as app:
+        with app.db.write(durable=True) as session:
+            assert session.execute(text("PRAGMA synchronous")).scalar() == 2  # FULL
+        with app.db.write() as session:
+            assert session.execute(text("PRAGMA synchronous")).scalar() == 1  # NORMAL
+        with app.db.read() as session:
+            assert session.execute(text("PRAGMA synchronous")).scalar() == 1
