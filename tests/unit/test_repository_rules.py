@@ -8,6 +8,7 @@ revision-history and review documents legitimately keep older prototype names.
 import argparse
 import ast
 import hashlib
+import importlib
 import inspect
 import re
 from pathlib import Path
@@ -667,6 +668,134 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
     assert "Status: **PENDING**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
     assert "authorizes nothing to run" in adr.split("\n---", 1)[0]
+
+
+# ---------------------------------------------------------------- Gate 3 area 1 (ADR-0018 §12)
+
+LIVE_OWNER = "app/live/store.py"
+LIVE_ROWS = frozenset({"LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt"})
+
+
+def test_only_the_live_owner_writes_the_live_tables() -> None:
+    """ADR-0018 §3, §3.4, §4: one writer for grants, the brake and ASSET attempts."""
+    users = {
+        path
+        for path, tree in _production_modules().items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name | ast.alias)
+        and (node.id if isinstance(node, ast.Name) else node.name) in LIVE_ROWS
+    }
+    # The models module defines the rows; only the owner names them to build, change or read one.
+    assert users == {LIVE_OWNER}
+
+
+def test_the_live_owners_reach_no_provider() -> None:
+    """Gate 3 area 1 is provider-zero: the owners import no client, transport or adapter."""
+    allowed = (
+        "__future__",
+        "collections.abc",
+        "contextlib",
+        "dataclasses",
+        "datetime",
+        "enum",
+        "hashlib",
+        "ipaddress",
+        "json",
+        "logging",
+        "re",
+        "typing",
+        "uuid",
+        "sqlalchemy",
+        "app.audit",
+        "app.connect.accounts",
+        "app.core.clock",
+        "app.core.errors",
+        "app.core.execution",
+        "app.db.base",
+        "app.db.database",
+        "app.db.types",
+        "app.live",
+        "app.products.image_model",
+        "app.products.model",
+        "app.register.model",
+        "app.register.preparation",
+        "app.register.sanitize",
+        "app.register.store",
+    )
+    modules = {p: t for p, t in _production_modules().items() if p.startswith("app/live/")}
+    assert {"app/live/stack.py", "app/live/assets.py", LIVE_OWNER} <= set(modules)
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert any(name == a or name.startswith(f"{a}.") for a in allowed), f"{path}: {name}"
+
+
+def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
+    """At this main the stack reads the M0 execution-mode owner and no proof exists; the CREATE
+    owner is wired to that stack, and the ASSET path to a sender that sends nothing."""
+    tree = ast.parse((REPO_ROOT / "app/container.py").read_text("utf-8"))
+    (stack,) = _calls(tree, "SafetyStack")
+    mode, proofs = _keyword(stack, "mode"), _keyword(stack, "proofs")
+    assert isinstance(mode, ast.Name) and mode.id == "execution_mode"
+    assert isinstance(proofs, ast.Call) and _callee(proofs) == "UnprovenStageProofs"
+    (execution,) = _calls(tree, "RegistrationExecutionService")
+    authority = _keyword(execution, "authority")
+    assert isinstance(authority, ast.Name) and authority.id == "safety_stack"
+    (uploads,) = _calls(tree, "AssetUploadService")
+    sender = _keyword(uploads, "sender")
+    assert isinstance(sender, ast.Call) and _callee(sender) == "UnwiredAssetSender"
+    # No production module can build a permitting mode, a proven proof or an admitting authority.
+    for path, module in _production_modules().items():
+        defined = {n.name for n in ast.walk(module) if isinstance(n, ast.ClassDef)}
+        assert not defined & {"PermittedMode", "ProvenProofs", "AdmittingAuthority"}, path
+        senders = [
+            n.name
+            for n in ast.walk(module)
+            if isinstance(n, ast.ClassDef)
+            and not any(isinstance(b, ast.Name) and b.id == "Protocol" for b in n.bases)
+            and any(
+                isinstance(f, ast.FunctionDef)
+                and f.name == "send"
+                and "content" in {a.arg for a in f.args.kwonlyargs}
+                for f in n.body
+            )
+        ]
+        assert senders in ([], ["UnwiredAssetSender"]), (path, senders)
+    unwired = inspect.getsource(importlib.import_module("app.live.assets").UnwiredAssetSender)
+    assert "return False" in unwired and "raise TransmissionPrecluded" in unwired
+
+
+def test_no_application_module_constructs_the_image_upload_adapter() -> None:
+    """The adopted upload caller is reachable only through a wired ASSET sender, and none is."""
+    users = {
+        path for path, tree in _production_modules().items() if _calls(tree, "ImageUploadAdapter")
+    }
+    assert users == set()
+
+
+def test_the_asset_replay_key_is_the_wire_boundary_and_the_fence_is_in_the_schema() -> None:
+    """G3-28, G3-29: four key fields; the partial unique index fences every non-proven state."""
+    from app.live.model import FENCING_UPLOAD_STATES, UploadAttemptState, replay_key
+    from app.live.models import AssetUploadAttempt
+
+    assert list(inspect.signature(replay_key).parameters) == [
+        "marketplace_key",
+        "marketplace_account_id",
+        "endpoint",
+        "content_sha256",
+    ]
+    assert (
+        set(UploadAttemptState) - {UploadAttemptState.NOT_APPLIED_PROVEN} == FENCING_UPLOAD_STATES
+    )
+    (fence,) = [i for i in AssetUploadAttempt.__table__.indexes if i.name.endswith("_replay_fence")]
+    assert fence.unique and [c.name for c in fence.columns] == ["replay_key"]
+    where = str(fence.dialect_options["sqlite"]["where"])
+    for state in FENCING_UPLOAD_STATES:
+        assert f"'{state.value}'" in where
+    assert "'NOT_APPLIED_PROVEN'" not in where
+    migration = (REPO_ROOT / "app/db/migrations/versions/0026_g3_live_authority.py").read_text(
+        "utf-8"
+    )
+    assert "state IN ('APPLIED_PROVEN', 'STARTED', 'UPLOAD_UNKNOWN')" in migration
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:
@@ -1916,6 +2045,11 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "adaptive_evidence_windows",
         "adaptive_evidence_window_events",
         "adaptive_shadow_ledger_events",
+        # Gate 3 area 1 (ADR-0018 §3, §3.4, §4): the LIVE grant, the protected-write brake and the
+        # durable ASSET upload-attempt owner.
+        "live_grants",
+        "protected_write_brakes",
+        "asset_upload_attempts",
     }
     offenders = [
         path

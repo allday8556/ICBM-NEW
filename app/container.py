@@ -56,6 +56,11 @@ from app.jobs.registry import JobDefinition, JobRegistry
 from app.jobs.runner import JobRunner
 from app.jobs.service import JobService
 from app.jobs.worker import JobWorker
+from app.live.assets import AssetUploadService, PreparationCandidateGate, UnwiredAssetSender
+from app.live.authority import LiveAuthorityService
+from app.live.model import WireHostPolicy
+from app.live.stack import SafetyStack, UnprovenStageProofs
+from app.live.store import LiveAuthorityStore
 from app.operate.service import OperateService
 from app.products.image_store import DerivedImageStore
 from app.products.images import ProductImageService
@@ -102,8 +107,10 @@ from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
+from integrations.marketplaces.smartstore import registry as smartstore_registry
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.execution import MARKETPLACE_KEY as SMARTSTORE_KEY
 from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
     SmartStoreReadback,
@@ -154,6 +161,9 @@ class Container:
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
+    live_authority: LiveAuthorityService
+    safety_stack: SafetyStack
+    asset_uploads: AssetUploadService
     register: RegisterService
     drafting: DraftCommandService
     marketplace_capability: MarketplaceCapabilityService
@@ -424,6 +434,16 @@ def build_container(
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
     # no code path here can mutate the marketplace; the read-back seam is PR-D's adopted one.
+    # Gate 3 area 1 (ADR-0018 §3, §3.4, §4, §10): the pre-LIVE safety owners. The stack reads the
+    # execution-mode owner, whose M0 policy refuses every LIVE write, and no eligibility, restore,
+    # retention or visual proof exists yet, so every mutation it judges is refused at this main.
+    live_store = LiveAuthorityStore(db, clock, audit)
+    safety_stack = SafetyStack(
+        store=live_store, mode=execution_mode, proofs=UnprovenStageProofs(), clock=clock
+    )
+    live_authority = LiveAuthorityService(
+        store=live_store, registrations=registrations, preparations=registration_preparations
+    )
     registration_execution = RegistrationExecutionService(
         registrations=registrations,
         preflight=registration_preflight,
@@ -437,8 +457,31 @@ def build_container(
         compare=smartstore_readback,
         projection=smartstore_product.project,
         clock=clock,
+        authority=safety_stack,
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
+    # The ASSET upload path (§3.4) with its durable attempt owner. No provider sender is wired:
+    # the sender declares the adopted wire endpoint (replay key, readiness) and sends nothing.
+    upload_wire = smartstore_registry.wire_identity(
+        smartstore_registry.EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
+    )
+    asset_uploads = AssetUploadService(
+        store=live_store,
+        stack=safety_stack,
+        sender=UnwiredAssetSender(
+            marketplace_key=SMARTSTORE_KEY,
+            wire=upload_wire,
+            contract_label=smartstore_registry.SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+            adopted=smartstore_registry.EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
+            in smartstore_registry.ADOPTED,
+        ),
+        hosts=WireHostPolicy(
+            {SMARTSTORE_KEY: smartstore_registry.canonical_host()},
+            {SMARTSTORE_KEY: smartstore_registry.HOST_ALIASES},
+        ),
+        candidates=PreparationCandidateGate(registration_preparations, registrations),
+        clock=clock,
+    )
     # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with its producers: COLLECT / M3
     # (G2-B), M4 base readiness, REGISTER execution and REGISTER preparations (G2-C). Each
     # process run has its own identity:
@@ -531,6 +574,9 @@ def build_container(
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,
         registration_execution=registration_execution,
+        live_authority=live_authority,
+        safety_stack=safety_stack,
+        asset_uploads=asset_uploads,
         register=register_service,
         drafting=drafting,
         marketplace_capability=marketplace_capability,

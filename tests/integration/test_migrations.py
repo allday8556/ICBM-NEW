@@ -109,8 +109,13 @@ CANONICAL_TABLES = (
     "adaptive_evidence_windows",
     "adaptive_evidence_window_events",
     "adaptive_shadow_ledger_events",
+    # Gate 3 area 1 (ADR-0018 §3, §3.4, §4): the LIVE grant, the protected-write brake and the
+    # durable ASSET upload-attempt owner.
+    "live_grants",
+    "protected_write_brakes",
+    "asset_upload_attempts",
 )
-HEAD = "0025_adaptive_shadow_foundation"
+HEAD = "0026_g3_live_authority"
 
 
 def _url(path: Path) -> str:

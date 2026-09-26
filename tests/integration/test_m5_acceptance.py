@@ -190,7 +190,7 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["checks_passed"] == report["checks_total"] >= 50
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
     assert report["execution_mode"] == "DRY_RUN"
-    assert report["database_revision"] == "0025_adaptive_shadow_foundation"
+    assert report["database_revision"] == "0026_g3_live_authority"
 
 
 @pytest.mark.parametrize("names", REQUIRED_CHECKS.values(), ids=REQUIRED_CHECKS.keys())
@@ -211,6 +211,14 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "WIRE_PROJECTION",
         "PUBLISHED_STATE",
         "ACCOUNT_BINDING",
+        "LIVE_AUTHORITY",
+    }
+    # Gate 3 area 1: the production safety stack refuses every CREATE under M0, so the harness
+    # authority that admits is declared as a stand-in, never hidden.
+    assert declared["LIVE_AUTHORITY"] == {
+        "reason": "M0_EXECUTION_POLICY_REFUSES_LIVE",
+        "endpoint_id": None,
+        "endpoint_adopted": None,
     }
     assert declared["CREATE_HANDOFF"] == {
         "reason": "ENDPOINT_NOT_ADOPTED",

@@ -1391,7 +1391,7 @@ def test_0025_is_additive_and_its_downgrade_never_destroys_a_frozen_decision(
             return dict(found.fetchall())
 
     before = schema()
-    upgrade_to_head(url)
+    command.upgrade(alembic_config(url), "0025_adaptive_shadow_foundation")
     after = schema()
     changed = {name for name in before if before[name] != after[name]}
     assert changed == {"collection_runs"}, "only the run record gains its nullable columns"
@@ -1413,7 +1413,7 @@ def test_0025_is_additive_and_its_downgrade_never_destroys_a_frozen_decision(
     # An empty shadow owner steps down; a frozen decision or any shadow row never does.
     command.downgrade(alembic_config(url), "0024_adaptive_profile_validation")
     assert schema() == before
-    upgrade_to_head(url)
+    command.upgrade(alembic_config(url), "0025_adaptive_shadow_foundation")
     engine = create_sqlite_engine(url)
     try:
         assert current_revision(engine) == "0025_adaptive_shadow_foundation"

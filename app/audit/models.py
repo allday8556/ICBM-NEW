@@ -92,6 +92,15 @@ class AuditEventType(StrEnum):
     # later complete full pass. Producer name and our own failure code only.
     REVIEW_COVERAGE_FAILURE_RECORDED = "REVIEW_COVERAGE_FAILURE_RECORDED"
     REVIEW_COVERAGE_RECOVERED = "REVIEW_COVERAGE_RECOVERED"
+    # Gate 3 area 1 (ADR-0018 §3, §3.4, §4): the pre-LIVE safety owners. Every grant transition,
+    # every brake change, every ASSET attempt start and settlement, and every refused mutation.
+    LIVE_GRANT_ISSUED = "LIVE_GRANT_ISSUED"
+    LIVE_GRANT_CONSUMED = "LIVE_GRANT_CONSUMED"
+    LIVE_GRANT_ENDED = "LIVE_GRANT_ENDED"
+    PROTECTED_WRITE_BRAKE_CHANGED = "PROTECTED_WRITE_BRAKE_CHANGED"
+    ASSET_UPLOAD_ATTEMPT_STARTED = "ASSET_UPLOAD_ATTEMPT_STARTED"
+    ASSET_UPLOAD_ATTEMPT_SETTLED = "ASSET_UPLOAD_ATTEMPT_SETTLED"
+    LIVE_MUTATION_REFUSED = "LIVE_MUTATION_REFUSED"
 
 
 class AuditOutcome(StrEnum):
