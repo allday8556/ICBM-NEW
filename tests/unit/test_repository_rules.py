@@ -433,7 +433,7 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     contract-only and runtime-zero, before any extension code, endpoint or migration."""
     adr = _read(TRANSPORT_ADR)
     assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
-    for source in ("5844537419", "5844538783", "5844496942"):
+    for source in ("5844537419", "5844538783", "5844496942", "5845042878", "5845080203"):
         assert source in adr, source
     # The canonical documents cite it; the roadmap names the file and the decision.
     roadmap = _read(ROADMAP_MD)
@@ -466,7 +466,7 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "Amendment note (ADR-0019" in _section(adaptive, heading), heading
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 19)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 27)]
     # Two transports, one pipeline, Collection Management kept.
     assert "exactly two acquisition transports" in invariants["AC-01"]
     assert "Collection Management is kept" in invariants["AC-01"]
@@ -495,6 +495,20 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     assert "No legacy ICBM extension code" in invariants["AC-16"]
     assert "by contract only" in invariants["AC-17"] and "belong to E1" in invariants["AC-17"]
     assert "authorizes no extension code, endpoint, migration" in invariants["AC-18"]
+    # Ruling 5845080203: UI ownership and state semantics are contract (section 12).
+    assert "only the capture UX" in invariants["AC-19"]
+    assert "owns canonical run management" in invariants["AC-20"]
+    assert "never collapsed in any UI" in invariants["AC-21"]
+    assert "REVIEW is not a run outcome and AUTH is not a field state" in invariants["AC-21"]
+    assert "appear only after the server-owned result or read-back" in invariants["AC-22"]
+    assert "a JSON download is never the primary handoff" in invariants["AC-22"]
+    assert "no image download or source-asset action" in invariants["AC-23"]
+    assert "never causes authenticated whole-DOM local persistence" in invariants["AC-24"]
+    assert "never an in-app capture button" in invariants["AC-25"]
+    assert "no general BrowserCapturePolicy editor" in invariants["AC-26"]
+    ui = _section(adr, r"^12\. UI ownership and state semantics")
+    assert "`docs/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR" in ui
+    assert "`REVIEW` is not a run outcome, and `AUTH` is not a field state" in ui
     # The code facts the contract relies on still hold (F2): EXTENSION is not yet a transport.
     from integrations.suppliers.base import SupplierTransport
 

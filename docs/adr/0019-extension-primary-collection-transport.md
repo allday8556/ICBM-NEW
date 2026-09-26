@@ -7,6 +7,11 @@ Collector: a contract-only, runtime-zero step.
 - It records the decision's rulings (D1–D7) and binding rules as contract, before any code. Where
   the decision asked the ADR to define a rule, the rule is defined here and is open to the
   exact-head audit.
+- Amended before merge by the architect ruling `5845080203`, which binds the UI ownership and state
+  semantics of the Issue #126 follow-up `5845042878` into this contract (§12). The exact-head audit
+  `5325435055` on `406549a6` was superseded for audit by that ruling. It also confirmed three
+  points: the §3 security boundary stays; transport alone is never drift, while observed evidence
+  differences still give `EVIDENCE_DRIFT`; and list-queue caps are mandatory.
 - It amends ADR-0010 and ADR-0017 **by amendment notes only**. Their text, their rulings and the
   ADR-0017 invariants AC-01 to AC-29 are neither rewritten nor renumbered.
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
@@ -18,6 +23,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - the architect decision `5844537419` on Issue #126 (D1–D7, the binding rules, the E0–E3 sequence);
 - the Issue #126 proposal, recording the operator's requirement and the old extension's failures;
 - the Phase C C1 STOP report `5844496942` and its disposition `5844538783` on Issue #110;
+- the Issue #126 UI follow-up `5845042878` and the ruling `5845080203` that binds it here (§12);
 - the contracts this ADR builds on and does not replace: ADR-0006 (one owner per data root),
   ADR-0007 (CONNECT), ADR-0010 (COLLECT and `ProductFactsRevision`), ADR-0013 (the canonical
   Product and its current source revision pointer), ADR-0017 (the Adaptive Collector).
@@ -234,6 +240,57 @@ Each step needs its own authorization. E1 follows only after this ADR merges.
 - a browser image byte relay;
 - a new `EvidenceKind`.
 
+### 12. UI ownership and state semantics (ruling `5845080203`)
+
+These rules bind ownership and state semantics, not visual styling. The visual prototype is promoted
+separately: **`docs/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR**. It switches only when the
+operator approves a concrete prototype revision and its file name, fingerprint and repository copy
+are recorded under that file's own process.
+
+1. **The Chrome extension side panel owns only the capture UX:**
+   - single-product click capture;
+   - list-link discovery and the progress of the bounded queue (§8);
+   - the supplier/session and ICBM connection indication;
+   - the field value and evidence preview;
+   - extension-local exception and transport states.
+2. **ICBM Collection Management owns canonical run management:**
+   - the `DIRECT_URL` fallback submission;
+   - the history, progress and results of both `EXTENSION` and `DIRECT_URL` runs;
+   - the canonical review entry points;
+   - run and job failures.
+3. **The state axes are separate and are never collapsed in any UI:**
+   - the **run outcome**: `RECORDED`, `NO_REVISION` or `FAILED`;
+   - the **facts status and field truth**, with the existing canonical semantics: `CONFIRMED`,
+     `ABSENT`, `REVIEW_REQUIRED`;
+   - the **failure class and code**, for example `AUTH`.
+
+   **`REVIEW` is not a run outcome, and `AUTH` is not a field state.** `AUTH` is a run- or
+   job-level stop or failure condition.
+4. **The extension's acknowledgement:**
+   - Before the server-owned canonical result exists, the extension shows only transport states
+     such as `전송됨` / `처리 중`.
+   - `RECORDED`, `NO_REVISION` or `FAILED` appears only after the server-owned result or its
+     read-back. `ICBM에 전달됨 · RECORDED` is such a read-back.
+   - A JSON download is never the primary handoff. Extension results go to ICBM, and canonical
+     result state comes back from the application.
+5. **Images.**
+   - The extension may preview a sanitized candidate reference, its role and its order only.
+   - It has no image download or source-asset action.
+   - The canonical checksum and the source asset stay server-owned (§7), and a browser byte relay
+     stays unauthorized.
+6. **A disconnected ICBM.**
+   - The extension never persists an authenticated whole DOM locally because ICBM is unreachable.
+   - Any future retry buffer needs its own, separately defined capture-envelope, sanitization and
+     retention contract. Without that contract the extension fails closed and keeps no page
+     material.
+7. **The Collection Management start screen.**
+   - Its `EXTENSION` area is connection and entry guidance and recent intake/status. It is never an
+     in-app capture button; the capture action happens in Chrome.
+   - `DIRECT_URL` is the actionable fallback form inside ICBM.
+8. **The `BrowserCapturePolicy` UI.**
+   - E1 has no general operator policy editor.
+   - E1 may expose only the diagnostics the bounded KM single-click acceptance requires.
+
 ## Invariants
 
 ```text
@@ -255,6 +312,14 @@ AC-15  A list-page queue is bounded by declared caps; a missing cap refuses fail
 AC-16  No legacy ICBM extension code is inspected, copied or transplanted; only single-click collection and list-link discovery are inherited as requirements
 AC-17  In E0 EXTENSION is a reviewed transport by contract only; changing CollectionProfile or SupplierTransport and activating the transport belong to E1
 AC-18  This ADR authorizes no extension code, endpoint, migration, supplier read, C1 resumption, ACTIVE, byte relay or new EvidenceKind; each later slice needs its own authorization
+AC-19  The Chrome extension side panel owns only the capture UX: single-product click capture, list-link discovery and bounded queue progress, supplier/session and ICBM connection indication, field value and evidence preview, and extension-local exception and transport states
+AC-20  ICBM Collection Management owns canonical run management: the DIRECT_URL fallback submission, the history, progress and results of both transports, the canonical review entry points and run and job failures
+AC-21  Run outcome (RECORDED, NO_REVISION, FAILED), facts status and field truth (CONFIRMED, ABSENT, REVIEW_REQUIRED) and failure class or code are separate axes, never collapsed in any UI; REVIEW is not a run outcome and AUTH is not a field state
+AC-22  Before the server-owned canonical result the extension shows only transport states; RECORDED, NO_REVISION and FAILED appear only after the server-owned result or read-back; a JSON download is never the primary handoff
+AC-23  The extension may preview a sanitized candidate image reference, role and order only; it has no image download or source-asset action
+AC-24  A disconnected ICBM never causes authenticated whole-DOM local persistence; a retry buffer needs its own separately defined capture-envelope, sanitization and retention contract, and without it the extension fails closed
+AC-25  The EXTENSION area of the Collection Management start screen is connection and entry guidance and recent intake or status, never an in-app capture button; DIRECT_URL is the actionable fallback form
+AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics the bounded KM single-click acceptance requires; docs/UI_SOURCE_OF_TRUTH.md changes only when an approved prototype revision and its fingerprint are recorded under its own process
 ```
 
 ## Consequences
@@ -274,6 +339,8 @@ AC-18  This ADR authorizes no extension code, endpoint, migration, supplier read
 
 - Issue #126 — the proposal and the architect decision `5844537419`.
 - Issue #110 — the C1 STOP report `5844496942` and its disposition `5844538783`.
+- Issue #126 — the UI follow-up `5845042878` and the ruling `5845080203` (§12); the superseded audit
+  `5325435055`.
 - ADR-0010 §3, §4, §5, §8, §9, §12, §13 (amendment notes).
 - ADR-0017 §2, §5, §7.3, §10, §15 (amendment notes).
 - `docs/ARCHITECTURE.md` §4 COLLECT; `docs/GLOSSARY.md` §3a; `ROADMAP.md` §14.3.
