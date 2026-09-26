@@ -114,8 +114,11 @@ CANONICAL_TABLES = (
     "live_grants",
     "protected_write_brakes",
     "asset_upload_attempts",
+    # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
+    "restore_drills",
+    "retention_proofs",
 )
-HEAD = "0026_g3_live_authority"
+HEAD = "0027_g3_restore_retention"
 
 
 def _url(path: Path) -> str:

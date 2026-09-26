@@ -436,6 +436,8 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "live_grants",
         "protected_write_brakes",
         "asset_upload_attempts",
+        "restore_drills",
+        "retention_proofs",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

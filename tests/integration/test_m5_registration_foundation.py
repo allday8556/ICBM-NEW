@@ -479,6 +479,8 @@ ADAPTIVE_TABLES = (
     "live_grants",
     "protected_write_brakes",
     "asset_upload_attempts",
+    "restore_drills",
+    "retention_proofs",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

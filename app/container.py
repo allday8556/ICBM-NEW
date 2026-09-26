@@ -58,8 +58,11 @@ from app.jobs.service import JobService
 from app.jobs.worker import JobWorker
 from app.live.assets import AssetUploadService, PreparationCandidateGate, UnwiredAssetSender
 from app.live.authority import LiveAuthorityService
+from app.live.drill import DrillPaths, RestoreDrillService
 from app.live.model import WireHostPolicy
-from app.live.stack import SafetyStack, UnprovenStageProofs
+from app.live.proofs import DurableStageProofs
+from app.live.retention import RetentionProofService
+from app.live.stack import SafetyStack
 from app.live.store import LiveAuthorityStore
 from app.operate.service import OperateService
 from app.products.image_store import DerivedImageStore
@@ -164,6 +167,8 @@ class Container:
     live_authority: LiveAuthorityService
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
+    restore_drills: RestoreDrillService
+    retention: RetentionProofService
     register: RegisterService
     drafting: DraftCommandService
     marketplace_capability: MarketplaceCapabilityService
@@ -438,8 +443,20 @@ def build_container(
     # execution-mode owner, whose M0 policy refuses every LIVE write, and no eligibility, restore,
     # retention or visual proof exists yet, so every mutation it judges is refused at this main.
     live_store = LiveAuthorityStore(db, clock, audit)
+    # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs are durable
+    # owners now; eligibility (§5) and visual acceptance (§9) still have none, so both stay false.
+    retention = RetentionProofService(
+        db=db,
+        store=live_store,
+        job_types=registry.job_types,
+        safe_retention_profile_version=smartstore_registry.SAFE_RETENTION_PROFILE_VERSION,
+        schema_head=head_revision,
+    )
+    stage_proofs = DurableStageProofs(
+        store=live_store, retention=retention, schema_head=head_revision
+    )
     safety_stack = SafetyStack(
-        store=live_store, mode=execution_mode, proofs=UnprovenStageProofs(), clock=clock
+        store=live_store, mode=execution_mode, proofs=stage_proofs, clock=clock
     )
     live_authority = LiveAuthorityService(
         store=live_store, registrations=registrations, preparations=registration_preparations
@@ -481,6 +498,18 @@ def build_container(
         ),
         candidates=PreparationCandidateGate(registration_preparations, registrations),
         clock=clock,
+    )
+    restore_drills = RestoreDrillService(
+        db=db,
+        audit=audit,
+        paths=DrillPaths(data_dir=config.data_dir, database_path=config.database_path),
+        store=live_store,
+        stack=safety_stack,
+        assets=asset_uploads,
+        preparations=registration_preparations,
+        registrations=registrations,
+        clock=clock,
+        schema_head=head_revision,
     )
     # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with its producers: COLLECT / M3
     # (G2-B), M4 base readiness, REGISTER execution and REGISTER preparations (G2-C). Each
@@ -577,6 +606,8 @@ def build_container(
         live_authority=live_authority,
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
+        restore_drills=restore_drills,
+        retention=retention,
         register=register_service,
         drafting=drafting,
         marketplace_capability=marketplace_capability,

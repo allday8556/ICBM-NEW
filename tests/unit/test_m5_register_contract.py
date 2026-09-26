@@ -37,6 +37,10 @@ ROADMAP_MD = REPO_ROOT / "ROADMAP.md"
 MIGRATIONS = REPO_ROOT / "app" / "db" / "migrations" / "versions"
 REGISTER_SERVICE = "app/register/service.py"
 CODE_ROOTS = ("app", "integrations", "scripts")
+# Gate 3 area 2 (ADR-0018 §7, §8): the restore drill and the retention proof read owner tables to
+# compare and guard evidence. They never write them; `test_the_evidence_readers_only_read` in
+# tests/unit/test_repository_rules.py proves it.
+EVIDENCE_READERS = frozenset({"app/live/drill.py", "app/live/retention.py"})
 
 
 def _normalized(text: str) -> str:
@@ -134,13 +138,16 @@ ADAPTIVE_P2 = "0024_adaptive_profile_validation"
 ADAPTIVE_P3 = "0025_adaptive_shadow_foundation"
 # Gate 3 area 1 (ADR-0018 §12): the LIVE grant, the brake and the ASSET upload-attempt owner. None
 # of its tables is registration state: a grant references an Intent, it never is one.
-SCHEMA_HEAD = "0026_g3_live_authority"
+G3_AREA_1 = "0026_g3_live_authority"
+# Gate 3 area 2 (ADR-0018 §12): the restore-drill and evidence-retention proof records.
+SCHEMA_HEAD = "0027_g3_restore_retention"
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
     G2_HEAD,
     ADAPTIVE_P2,
     ADAPTIVE_P3,
+    G3_AREA_1,
     SCHEMA_HEAD,
 )
 REGISTRATION_STATE = re.compile(
@@ -310,7 +317,7 @@ def registration_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str
     names a registration model or table, and so could write around the store."""
     offenders = []
     for where, source in sources:
-        if where in REGISTRATION_OWNERS or "/migrations/" in where:
+        if where in REGISTRATION_OWNERS or where in EVIDENCE_READERS or "/migrations/" in where:
             continue
         for node in ast.walk(ast.parse(source)):
             named = (
@@ -389,7 +396,7 @@ RUNTIME_ROOTS = ("app/", "integrations/")
 def owned_writer_problems(sources: Iterable[tuple[str, str]], owned: OwnedTables) -> list[str]:
     offenders = []
     for where, source in sources:
-        if where in owned.owners or "/migrations/" in where:
+        if where in owned.owners or where in EVIDENCE_READERS or "/migrations/" in where:
             continue
         for node in ast.walk(ast.parse(source)):
             named = (
@@ -589,7 +596,7 @@ ACCOUNT_TABLE_NAMES = re.compile(r"\b(seller_entities|marketplace_accounts)\b(?!
 def account_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
     offenders = []
     for where, source in sources:
-        if where in ACCOUNT_OWNERS or "/migrations/" in where:
+        if where in ACCOUNT_OWNERS or where in EVIDENCE_READERS or "/migrations/" in where:
             continue
         for node in ast.walk(ast.parse(source)):
             named = (
