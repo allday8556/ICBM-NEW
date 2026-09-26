@@ -15,11 +15,21 @@
   - every command runs only at the campaign's exact clean code SHA;
   - the campaign ledger is a crash-durable, single-writer, append-only SQLite file in the
     campaign root;
-  - a stage opens only through a typed grant, C0 → C4, once each, with a strictly newer
-    authorization id. The C1 grant freezes exactly two target digests, C2 the exact EPR,
-    samples and PASS run, and C3 and C4 the one window;
+  - a stage opens only through a typed grant, C0 → C4, once each, recorded as the exact bytes
+    that were read. Its authorization is an opaque anchor (`issuecomment-<id>` /
+    `pullrequestreview-<id>`), used once and never compared by size. The C1 grant freezes exactly
+    two target digests, C2 the exact EPR, samples and PASS run, and C3 and C4 the one window;
   - the frozen ceilings are enforced by ledger reservations;
-  - a campaign acts only on objects its own ledger bound.
+  - a campaign acts only on objects its own ledger bound;
+  - every command that changes the data root is reserved in the data root
+    (`adaptive_phase_c_commands`) under one stable correlation before the change, and settled
+    after it. After a crash, a command without a result is reconciled from owner truth:
+    - proven applied → recorded as recovered;
+    - proven not applied → `NOT_APPLIED`, and its reservation is released for a safe retry;
+    - ambiguous → the campaign goes on `HOLD`, and the command stays unresolved in the data root.
+
+    While any command is unresolved, no campaign on that data root runs an evidence command, so
+    a new campaign cannot walk around it.
 
 ---
 

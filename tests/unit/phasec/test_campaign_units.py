@@ -8,6 +8,8 @@ behaviour without a supplier read.
 """
 
 import contextlib
+import hashlib
+import json
 import re
 import sqlite3
 import subprocess
@@ -65,7 +67,7 @@ def ledger(tmp_path: Path) -> Iterator[CampaignLedger]:
         yield ledger
 
 
-def grant(stage: str, authorization: str, **scope: Any) -> dict[str, Any]:
+def grant_of(stage: str, authorization: str, **scope: Any) -> dict[str, Any]:
     return {
         "schema": GRANT_SCHEMA,
         "campaign_id": CAMPAIGN,
@@ -76,12 +78,19 @@ def grant(stage: str, authorization: str, **scope: Any) -> dict[str, Any]:
     }
 
 
+def encode(value: Any) -> bytes:
+    return json.dumps(value).encode("utf-8")
+
+
+def grant(stage: str, authorization: str, **scope: Any) -> bytes:
+    """A grant as the exact bytes an operator would copy."""
+    return encode(grant_of(stage, authorization, **scope))
+
+
 def open_c1(ledger: CampaignLedger) -> None:
-    checked = check_grant(
-        ledger.campaign(),
-        grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS),
-    )
-    ledger.authorize(checked, actor="op", correlation_id="c1")
+    raw_grant = grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS)
+    check_grant(ledger.campaign(), raw_grant)
+    ledger.authorize(raw_grant, actor="op", correlation_id="c1")
 
 
 @contextlib.contextmanager
@@ -149,7 +158,14 @@ def test_every_table_is_append_only(ledger: CampaignLedger) -> None:
         reservations=[("collection_submissions", TARGETS[0])],
     )
     with raw(ledger) as db:
-        for table in ("campaign", "ceilings", "events", "grants", "reservations"):
+        for table in (
+            "campaign",
+            "ceilings",
+            "events",
+            "correlations",
+            "grants",
+            "reservations",
+        ):
             with pytest.raises(sqlite3.IntegrityError, match="append-only"):
                 db.execute(f"DELETE FROM {table}")
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
@@ -204,7 +220,10 @@ def test_stages_advance_once_each_in_order_by_typed_grants(ledger: CampaignLedge
     campaign = ledger.campaign()
     for bad, why in (
         (grant("C2", "issuecomment-5900000001"), "next stage of this campaign is C1"),
-        (grant("C1", "issuecomment-1111111", supplier_key="s", target_digests=TARGETS), "newer"),
+        (
+            grant("C1", C0_AUTHORIZATION, supplier_key="s", target_digests=TARGETS),
+            "opens one stage of a campaign, once",
+        ),
         (
             grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS[:1]),
             "exactly 2",
@@ -219,21 +238,22 @@ def test_stages_advance_once_each_in_order_by_typed_grants(ledger: CampaignLedge
             "issuecomment-<id> or pullrequestreview-<id>",
         ),
         (
-            {**grant("C1", "issuecomment-5900000001"), "code_sha": "b" * 40},
+            encode({**grant_of("C1", "issuecomment-5900000001"), "code_sha": "b" * 40}),
             "another exact code SHA",
         ),
         (
-            {**grant("C1", "issuecomment-5900000001"), "campaign_id": "phase-c-other"},
+            encode({**grant_of("C1", "issuecomment-5900000001"), "campaign_id": "phase-c-other"}),
             "another campaign",
         ),
-        ({**grant("C1", "issuecomment-5900000001"), "extra": 1}, "a grant holds exactly"),
+        (encode({**grant_of("C1", "issuecomment-5900000001"), "extra": 1}), "holds exactly"),
+        (b"\xff not utf-8", "UTF-8 JSON"),
     ):
-        with pytest.raises(GrantRefused, match=why):
+        with pytest.raises(LedgerRefused, match=why):
             check_grant(campaign, bad)
-    wide = grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS)
+    wide = grant_of("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS)
     wide["scope"]["ceilings"] = {**CEILINGS["C1"], "product_reads": 40}
     with pytest.raises(GrantRefused, match="frozen C1 ceilings"):
-        check_grant(campaign, wide)
+        check_grant(campaign, encode(wide))
     open_c1(ledger)
     assert ledger.campaign().current_stage == "C1"
     with pytest.raises(GrantRefused, match="next stage of this campaign is C2"):
@@ -246,13 +266,13 @@ def test_stages_advance_once_each_in_order_by_typed_grants(ledger: CampaignLedge
 def test_the_grants_table_enforces_the_order_even_without_the_checks(
     ledger: CampaignLedger,
 ) -> None:
-    # Bypassing check_grant, the table still refuses a skipped stage and an older authorization.
+    # Bypassing check_grant, the table still refuses a skipped stage and a reused authorization.
     with pytest.raises(LedgerRefused) as skipped:
         ledger.authorize(grant("C2", "issuecomment-5900000001"), actor="op", correlation_id="x")
     assert skipped.value.code == "STAGE_OUT_OF_ORDER"
-    with pytest.raises(LedgerRefused) as older:
-        ledger.authorize(grant("C1", "issuecomment-5800000000"), actor="op", correlation_id="y")
-    assert older.value.code == "AUTHORIZATION_NOT_NEWER"
+    with pytest.raises(LedgerRefused) as reused:
+        ledger.authorize(grant("C1", C0_AUTHORIZATION), actor="op", correlation_id="y")
+    assert reused.value.code == "PHASE_C_AUTHORIZATION_REUSED"
     assert ledger.campaign().current_stage == "C0"
 
 
@@ -279,8 +299,9 @@ def test_a_c2_grant_names_only_this_campaigns_own_pass_validation(ledger: Campai
             check_grant(
                 ledger.campaign(), grant("C2", "issuecomment-5900000002", **{**scope, **wrong})
             )
-    checked = check_grant(ledger.campaign(), grant("C2", "issuecomment-5900000002", **scope))
-    ledger.authorize(checked, actor="op", correlation_id="c2")
+    raw_grant = grant("C2", "issuecomment-5900000002", **scope)
+    check_grant(ledger.campaign(), raw_grant)
+    ledger.authorize(raw_grant, actor="op", correlation_id="c2")
     assert ledger.campaign().grants["C2"].scope["epr_digest"] == "e" * 64
 
 
@@ -338,7 +359,7 @@ def test_an_intent_is_answered_once_and_an_unfinished_one_stops_the_campaign(
     assert ledger.campaign().unfinished() == ["k"]
     with pytest.raises(LedgerRefused) as blocked:
         ledger.intend("b", actor="op", correlation_id="k2", payload={})
-    assert blocked.value.code == "PHASE_C_UNFINISHED_ACTION"
+    assert blocked.value.code == "UNFINISHED_ACTION", "the correlations table enforces it"
     with pytest.raises(LedgerRefused):
         ledger.record("A", actor="op", correlation_id="other", payload={})
     ledger.record("A", actor="op", correlation_id="k", payload={})
@@ -484,35 +505,77 @@ def test_a_write_that_crashed_midway_is_rolled_back_and_the_campaign_still_reads
     ledger.intend("x", actor="op", correlation_id="after-crash", payload={})
 
 
-def test_authorizations_are_newer_only_within_their_own_kind(ledger: CampaignLedger) -> None:
-    # Issue comments and pull-request reviews are separate GitHub id sequences.
-    review = grant("C1", "pullrequestreview-5313663701", supplier_key="s", target_digests=TARGETS)
-    ledger.authorize(check_grant(ledger.campaign(), review), actor="op", correlation_id="c1")
-    older = {
-        "supplier_key": "s",
-        "epr_digest": "e" * 64,
-        "sample_digests": ["5" * 64],
-        "validation_run_id": "run-1",
-        "window_min_size": 3,
-    }
-    with pytest.raises(GrantRefused, match="same kind"):
-        check_grant(ledger.campaign(), grant("C2", "pullrequestreview-5313663700", **older))
-    with pytest.raises(LedgerRefused) as table:
-        ledger.authorize(
-            grant("C2", "issuecomment-5826469851"), actor="op", correlation_id="c2-older"
+def test_an_authorization_is_an_opaque_identity_used_once(ledger: CampaignLedger) -> None:
+    # Never compared by size: a smaller-looking id of either kind is as good as any other.
+    small = grant("C1", "pullrequestreview-12", supplier_key="s", target_digests=TARGETS)
+    check_grant(ledger.campaign(), small)
+    ledger.authorize(small, actor="op", correlation_id="c1")
+    assert ledger.campaign().authorized["C1"] == "pullrequestreview-12"
+    with pytest.raises(LedgerRefused) as reused:
+        ledger.authorize(grant("C2", "pullrequestreview-12"), actor="op", correlation_id="c2")
+    assert reused.value.code == "PHASE_C_AUTHORIZATION_REUSED"
+    ledger.authorize(grant("C2", "issuecomment-7"), actor="op", correlation_id="c2")
+    assert ledger.campaign().current_stage == "C2"
+
+
+def test_a_grant_is_recorded_as_the_exact_bytes_it_was_read_as(ledger: CampaignLedger) -> None:
+    pretty = json.dumps(
+        grant_of("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS),
+        indent=2,
+    ).encode("utf-8")
+    check_grant(ledger.campaign(), pretty)
+    ledger.authorize(pretty, actor="op", correlation_id="c1")
+    recorded = ledger.campaign().grants["C1"]
+    assert recorded.digest == hashlib.sha256(pretty).hexdigest()
+    with raw(ledger) as db:
+        (text,) = db.execute("SELECT grant_text FROM grants WHERE stage = 'C1'").fetchone()
+    assert text.encode("utf-8") == pretty
+
+
+def test_a_proven_not_applied_command_releases_its_reservation(ledger: CampaignLedger) -> None:
+    open_c1(ledger)
+    for index, outcome in enumerate(("REQUEST_CAPTURE", "NOT_APPLIED")):
+        ledger.intend(
+            "request-capture",
+            actor="op",
+            correlation_id=f"r{index}",
+            payload={},
+            reservations=[("collection_submissions", TARGETS[index])],
         )
-    assert table.value.code == "AUTHORIZATION_NOT_NEWER"
-    assert ledger.campaign().authorized["C1"] == "pullrequestreview-5313663701"
+        ledger.record(outcome, actor="op", correlation_id=f"r{index}", payload={})
+    assert ledger.counts("C1")["collection_submissions"] == 1
+    assert len(ledger.reservations("C1")) == 2, "the released one stays recorded"
+    ledger.intend(
+        "request-capture",
+        actor="op",
+        correlation_id="r2",
+        payload={},
+        reservations=[("collection_submissions", TARGETS[1])],
+    )
+    assert ledger.counts("C1")["collection_submissions"] == 2
+
+
+def test_an_ambiguous_command_puts_the_campaign_on_hold(ledger: CampaignLedger) -> None:
+    ledger.intend("x", actor="op", correlation_id="k", payload={})
+    ledger.hold(actor="op", correlation_id="k", reason="owner truth could not be read")
+    campaign = ledger.campaign()
+    assert [h["correlation_id"] for h in campaign.held()] == ["k"]
+    assert campaign.unfinished() == []
+    with pytest.raises(LedgerRefused):
+        ledger.record("X", actor="op", correlation_id="k", payload={})
+    with pytest.raises(LedgerRefused) as held:
+        ledger.intend("y", actor="op", correlation_id="k2", payload={})
+    assert held.value.code == "CAMPAIGN_HOLD"
+    with raw(ledger) as db, pytest.raises(sqlite3.IntegrityError, match="HELD"):
+        db.execute("INSERT INTO outcomes VALUES ('k', 1, 99)")
 
 
 def test_a_stage_grant_never_reuses_a_correlation(ledger: CampaignLedger) -> None:
     ledger.intend("x", actor="op", correlation_id="k", payload={})
     ledger.record("X", actor="op", correlation_id="k", payload={})
-    checked = check_grant(
-        ledger.campaign(),
-        grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS),
-    )
+    raw_grant = grant("C1", "issuecomment-5900000001", supplier_key="s", target_digests=TARGETS)
+    check_grant(ledger.campaign(), raw_grant)
     with pytest.raises(LedgerRefused) as reused:
-        ledger.authorize(checked, actor="op", correlation_id="k")
+        ledger.authorize(raw_grant, actor="op", correlation_id="k")
     assert reused.value.code == "PHASE_C_CORRELATION_REUSED"
     assert ledger.campaign().current_stage == "C0"

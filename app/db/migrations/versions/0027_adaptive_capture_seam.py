@@ -20,14 +20,19 @@ consumed by at most one run (unique index), and a frozen decision never changes.
 - ``adaptive_capture_candidates``: what a requested run's capture produced — the sanitized
   candidate (never the page body), or why there is none. At most one per run; it belongs to that
   run's request and that run's own revision.
+- ``adaptive_phase_c_commands`` / ``adaptive_phase_c_command_results``: every Phase C harness
+  command that changes this data root, reserved under its stable correlation before the change,
+  and what it was proven to have done (``APPLIED``, ``RECOVERED`` or ``NOT_APPLIED``). A
+  reservation without a result is an unresolved command; while one exists no campaign on this data
+  root acts (review ``5313663701`` follow-up).
 
 **What the database enforces.** Requests and candidates are never updated or deleted. A run's
 capture decision has its shape, names a request of its own supplier, and is never changed once
 frozen. A candidate belongs to a run frozen ``REQUESTED`` for exactly its request and names that
 run's own revision.
 
-**Downgrade fails closed.** It refuses while any request or candidate exists, or any run froze a
-``REQUESTED`` decision. An ``OFF`` decision carries no capture evidence; the step down keeps every
+**Downgrade fails closed.** It refuses while any request, candidate or harness command exists, or any run
+froze a ``REQUESTED`` decision. An ``OFF`` decision carries no capture evidence; the step down keeps every
 run row and drops only the new columns.
 """
 
@@ -44,7 +49,9 @@ depends_on: str | Sequence[str] | None = None
 RUNS = "collection_runs"
 REQUESTS = "adaptive_capture_requests"
 CANDIDATES = "adaptive_capture_candidates"
-CREATED = (CANDIDATES, REQUESTS)
+COMMANDS = "adaptive_phase_c_commands"
+RESULTS = "adaptive_phase_c_command_results"
+CREATED = (RESULTS, COMMANDS, CANDIDATES, REQUESTS)
 RUN_COLUMNS = ("capture_decision", "capture_request_id")
 RUN_INDEX = "ix_collection_runs_capture_request_id"
 
@@ -141,6 +148,32 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("collection_run_id", name=op.f(f"pk_{CANDIDATES}")),
     )
 
+    op.create_table(
+        COMMANDS,
+        sa.Column("correlation_id", sa.String(length=64), nullable=False),
+        sa.Column("campaign_id", sa.String(length=64), nullable=False),
+        sa.Column("command", sa.String(length=24), nullable=False),
+        sa.Column("reserved_at", sa.DateTime(), nullable=False),
+        _check(COMMANDS, "correlation_id <> ''", "correlation_present"),
+        _check(COMMANDS, "campaign_id <> ''", "campaign_present"),
+        _check(COMMANDS, "command <> ''", "command_present"),
+        sa.PrimaryKeyConstraint("correlation_id", name=op.f(f"pk_{COMMANDS}")),
+    )
+    op.create_index("ix_adaptive_phase_c_commands_campaign_id", COMMANDS, ["campaign_id"])
+    op.create_table(
+        RESULTS,
+        sa.Column("correlation_id", sa.String(length=64), nullable=False),
+        sa.Column("outcome", sa.String(length=12), nullable=False),
+        sa.Column("settled_at", sa.DateTime(), nullable=False),
+        _check(RESULTS, "outcome IN ('APPLIED', 'RECOVERED', 'NOT_APPLIED')", "outcome_valid"),
+        sa.ForeignKeyConstraint(
+            ["correlation_id"],
+            [f"{COMMANDS}.correlation_id"],
+            name=op.f(f"fk_{RESULTS}_correlation_id_{COMMANDS}"),
+        ),
+        sa.PrimaryKeyConstraint("correlation_id", name=op.f(f"pk_{RESULTS}")),
+    )
+
     # ------------------------------------------------------------ the canonical run record
     op.add_column(RUNS, sa.Column("capture_decision", sa.String(length=10), nullable=True))
     op.add_column(RUNS, sa.Column("capture_request_id", sa.String(length=36), nullable=True))
@@ -169,6 +202,8 @@ def upgrade() -> None:
     # ------------------------------------------------------------ requests and candidates
     _immutable(REQUESTS)
     _immutable(CANDIDATES)
+    _immutable(COMMANDS)
+    _immutable(RESULTS)
     _trigger(
         CANDIDATES,
         "of_its_requested_run",

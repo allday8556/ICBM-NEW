@@ -5,18 +5,34 @@ Every command after ``init`` runs this sequence, and each step refuses before th
 effect:
 
 1. validate both roots;
-2. read and verify the campaign ledger, read-only;
+2. read and verify the campaign ledger;
 3. **require the exact clean checkout the campaign was created at** (B1): another SHA or an
    unclean checkout is refused before any lock, lease, database, artifact or ledger effect;
 4. take the campaign's exclusive writer lock (``CAMPAIGN_IN_USE`` otherwise) and re-read it;
 5. require the command's stage to be the campaign's **current** stage (stages advance only by
-   typed grants, C0 → C4, once each), its typed approval phrase, and no unfinished action;
+   typed grants, C0 → C4, once each) and its typed approval phrase;
 6. for a data-root command, **acquire the ADR-0006 data-directory lease** (a live server or
    another harness fails ``DATA_DIR_IN_USE`` before any database, log or service effect), check
    the schema head and compose the production owners with that lease;
-7. check that every object the command names belongs to this campaign (B3), commit the intent
-   and its ceiling reservations to the campaign ledger, act through the owners' public APIs, and
-   commit the outcome.
+7. **reconcile** every command of this campaign that has no proven result against owner truth
+   (below), then refuse an evidence command while this campaign is on ``HOLD`` or while any other
+   campaign has an unresolved command on this data root;
+8. check that every object the command names belongs to this campaign (B3), and run it.
+
+**A command that changes the data root** keeps one stable correlation throughout:
+
+- the campaign ledger commits its intent and ceiling reservations;
+- the data root's command owner reserves it;
+- the owner acts, stamping that correlation where its own record carries one;
+- the data root settles it ``APPLIED``, and the campaign ledger commits its outcome.
+
+After a crash, the next data-root command reconciles each reservation that has no result:
+
+- a change proven applied is recorded as recovered;
+- a change proven not applied is recorded ``NOT_APPLIED``, which releases its reservation for a
+  safe retry;
+- anything else is ambiguous. It puts the campaign on ``HOLD`` and stays unresolved in the data
+  root, so no campaign — this one or a new one — acts on that data root until it is resolved.
 
 It never opens the live database itself and never submits a product collection. In C0 only
 stage C0 is granted, so every evidence command is refused against a real campaign; the C0 tests
@@ -43,24 +59,27 @@ from app.collect.adaptive_shadow.store import RAW_MAX_AGE
 from app.collect.adaptive_shadow.switch import bundle_key_of
 from app.config import AppConfig
 from app.container import Container, build_container
-from app.core.errors import AppError
+from app.core.errors import AppError, NotFoundError
 from app.core.ownership import DataDirLease, DataDirOwnershipError, acquire_data_dir
 from scripts.phasec.artifacts import (
     ARTIFACT_SCHEMA,
     ArtifactRefused,
     canonical,
     read_resolution,
+    resolution_reference,
     write_resolution,
 )
 from scripts.phasec.grants import c0_grant, check_grant, grant_digest, supplier_of
 from scripts.phasec.ledger import (
     ACTION_REFUSED,
+    NOT_APPLIED,
     Campaign,
     CampaignInUse,
     CampaignLedger,
     LedgerRefused,
     approval_phrase,
     now,
+    parse_grant,
 )
 from scripts.phasec.roots import REPO_ROOT, RootsRefused, require_roots
 
@@ -70,7 +89,8 @@ EXIT_DATA_DIR_IN_USE = 3
 EXIT_CAMPAIGN_IN_USE = 4
 CANDIDATES = "candidates"
 CLOSEOUTS = "closeouts"
-HARNESS_VERSION = "phase-c-harness-2"
+HARNESS_VERSION = "phase-c-harness-3"
+APPLIED, RECOVERED = "APPLIED", "RECOVERED"
 
 Compose = Callable[[AppConfig, DataDirLease], Container]
 CodeSha = Callable[[], str]
@@ -100,7 +120,7 @@ class Refused(RuntimeError):
 class Command:
     stages: frozenset[str] | None  # the current stages it runs in; None for reads
     data_root: bool  # it composes the owners over the live data root (stopped-app)
-    evidence: bool  # it can affect real evidence: approval phrase, no unfinished action
+    evidence: bool  # it can affect real evidence: approval phrase, nothing unresolved
 
 
 def _in(*stages: str) -> frozenset[str]:
@@ -132,7 +152,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--campaign-root", required=True, type=Path)
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--actor")
-    parser.add_argument("--correlation")
     parser.add_argument("--approve", default="")
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init")
@@ -203,13 +222,13 @@ def run(
         with ledger.writer():
             campaign = ledger.campaign()
             if args.command == "authorize-stage":
-                # Read once: the phrase is checked against, and the ledger records, this object.
-                args.grant_document = _load_grant(args.grant)
+                # Read once: the phrase names, the check parses and the ledger records these bytes.
+                args.grant_bytes = _read_grant(args.grant)
             _gate(campaign, args, spec)
             if not spec.data_root:
                 return _authorize_stage(ledger, campaign, args, out)
             assert data_root is not None
-            return _with_data_root(ledger, campaign, args, data_root, env, compose, out)
+            return _with_data_root(ledger, campaign, args, spec, data_root, env, compose, out)
     except CampaignInUse as refused:
         _emit(out, {"refused": str(refused), "code": refused.code})
         return EXIT_CAMPAIGN_IN_USE
@@ -246,19 +265,20 @@ def _actor(args: argparse.Namespace) -> str:
     return str(args.actor)
 
 
-def _load_grant(path: Path) -> Any:
+def _read_grant(path: Path) -> bytes:
     try:
-        return json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
-        raise Refused("the grant is one JSON object copied from its authorization") from None
+        return path.read_bytes()
+    except OSError:
+        raise Refused("the grant is one file copied from its authorization") from None
 
 
 def phrase_for(campaign: Campaign, args: argparse.Namespace) -> str:
     """The exact approval phrase this command needs."""
     if args.command == "authorize-stage":
-        grant = args.grant_document
+        raw: bytes = args.grant_bytes
+        grant = parse_grant(raw)
         stage = grant.get("stage") if isinstance(grant, dict) else None
-        return approval_phrase(campaign, args.command, f"{stage} GRANT {grant_digest(grant)[:16]}")
+        return approval_phrase(campaign, args.command, f"{stage} GRANT {grant_digest(raw)[:16]}")
     return approval_phrase(campaign, args.command)
 
 
@@ -273,26 +293,41 @@ def _gate(campaign: Campaign, args: argparse.Namespace, spec: Command) -> None:
         _actor(args)
         if args.approve != phrase_for(campaign, args):
             raise Refused("the typed approval phrase does not match this command")
-        if unfinished := campaign.unfinished():
-            raise Refused(
-                f"this campaign has an unfinished action ({unfinished[0]}): its evidence is"
-                " incomplete, so it accepts no further evidence command"
-            )
+        if not spec.data_root:
+            # Reconciliation needs owner truth; only a data-root command reaches it.
+            _refuse_unresolved(campaign, foreign=())
+
+
+def _refuse_unresolved(campaign: Campaign, foreign: Sequence[Any]) -> None:
+    if held := campaign.held():
+        raise Refused(
+            f"this campaign is on HOLD: command {held[0]['correlation_id']} is ambiguous"
+            f" ({held[0]['reason']}); it accepts no evidence command until that is resolved"
+        )
+    if unfinished := campaign.unfinished():
+        raise Refused(
+            f"this campaign has a command without a proven result ({unfinished[0]}); run a"
+            " data-root command such as status to reconcile it first"
+        )
+    if foreign:
+        raise Refused(
+            f"campaign {foreign[0].campaign_id} has an unresolved Phase C command on this data"
+            f" root ({foreign[0].correlation_id}); no campaign acts here until it is reconciled"
+            " from its own campaign root"
+        )
 
 
 def _authorize_stage(
     ledger: CampaignLedger, campaign: Campaign, args: argparse.Namespace, out: TextIO
 ) -> int:
     assert args.command == "authorize-stage"
-    grant = check_grant(campaign, args.grant_document)
+    raw: bytes = args.grant_bytes
+    grant = check_grant(campaign, raw)
     event = ledger.authorize(
-        grant,
-        actor=_actor(args),
-        correlation_id=args.correlation or f"{campaign.campaign_id}:stage:{grant['stage']}",
+        raw, actor=_actor(args), correlation_id=f"{campaign.campaign_id}:stage:{grant['stage']}"
     )
     _emit(
-        out,
-        {"authorized": grant["stage"], "grant_digest": grant_digest(grant), "seq": event["seq"]},
+        out, {"authorized": grant["stage"], "grant_digest": grant_digest(raw), "seq": event["seq"]}
     )
     return EXIT_OK
 
@@ -301,6 +336,7 @@ def _with_data_root(
     ledger: CampaignLedger,
     campaign: Campaign,
     args: argparse.Namespace,
+    spec: Command,
     data_root: Path,
     env: Mapping[str, str],
     compose: Compose,
@@ -318,6 +354,14 @@ def _with_data_root(
         try:
             if not app.readiness.schema_at_head():
                 raise Refused("the data root's schema is not at head: run `icbm db upgrade` first")
+            campaign = reconcile(app, ledger, campaign, _actor(args))
+            if spec.evidence:
+                foreign = [
+                    c
+                    for c in app.phase_c_commands.unresolved()
+                    if c.campaign_id != campaign.campaign_id
+                ]
+                _refuse_unresolved(campaign, foreign)
             result = HANDLERS[args.command](app, ledger, campaign, args)
         finally:
             app.db.dispose()
@@ -333,38 +377,324 @@ def _kind(command: str) -> str:
     return command.upper().replace("-", "_")
 
 
+def new_correlation() -> str:
+    """One command's stable identity, from its intent to its result and its reconciliation. The
+    hyphenated form reads as an identifier, never as a secret value, to the artifact scan."""
+    return f"phase-c:{uuid.uuid4()}"
+
+
+# ================================================================ owner truth
+
+
+@dataclass(frozen=True)
+class Proof:
+    verdict: str  # APPLIED, NOT_APPLIED or AMBIGUOUS
+    payload: Mapping[str, Any] | None = None
+    reason: str = ""
+
+
+def _applied(**payload: Any) -> Proof:
+    return Proof("APPLIED", payload)
+
+
+PROVEN_NOT_APPLIED = Proof("NOT_APPLIED")
+
+
+def _ambiguous(reason: str) -> Proof:
+    return Proof("AMBIGUOUS", None, reason)
+
+
+Probe = Callable[[Container, CampaignLedger, Campaign, Mapping[str, Any], str], Proof]
+
+
+def _probe_request(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    request = app.capture_store.request_by_correlation(k)
+    if request is None:
+        return PROVEN_NOT_APPLIED  # the request row carries its command's correlation
+    if request.campaign_id != campaign.campaign_id or request.target_digest != intent.get(
+        "target_digest"
+    ):
+        return _ambiguous(
+            "a capture request under this correlation names another campaign or target"
+        )
+    return _applied(request_id=request.request_id, target_digest=request.target_digest)
+
+
+def _probe_finalize(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    try:
+        sample = app.adaptive_validation.sample(str(intent["sample_digest"]))
+    except NotFoundError:
+        return PROVEN_NOT_APPLIED  # the sample's digest was fixed before it was stored
+    return _applied(
+        collection_run_id=intent["collection_run_id"],
+        request_id=intent["request_id"],
+        sample_digest=sample.digest,
+        truncated=sample.truncated,
+    )
+
+
+def _probe_validate(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    for stored in app.adaptive_validation.runs(str(intent["epr"])):
+        if stored.run.digest() == intent["run_digest"]:
+            if sorted(stored.sample_digests) != intent["samples"]:
+                return _ambiguous("the stored run names other samples than its command")
+            return _applied(
+                epr=intent["epr"],
+                samples=intent["samples"],
+                run_id=stored.run_id,
+                verdict=intent["verdict"],
+            )
+    return PROVEN_NOT_APPLIED
+
+
+def _switch_probe(action: str) -> Probe:
+    def probe(
+        app: Container,
+        ledger: CampaignLedger,
+        campaign: Campaign,
+        intent: Mapping[str, Any],
+        k: str,
+    ) -> Proof:
+        found = [
+            e for e in app.shadow_switch.entries(supplier_of(campaign)) if e.correlation_id == k
+        ]
+        if not found:
+            return PROVEN_NOT_APPLIED  # a switch entry carries its command's correlation
+        (entry,) = found
+        if entry.action != action:
+            return _ambiguous("the switch entry under this correlation is another action")
+        if action == "DISABLE":
+            return _applied(entry_id=entry.entry_id)
+        return _applied(entry_id=entry.entry_id, epr=entry.epr_digest, bundle_key=entry.bundle_key)
+
+    return probe
+
+
+def _probe_declare(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    found = [w for w in app.shadow_evidence.windows(supplier_of(campaign)) if w.correlation_id == k]
+    if not found:
+        return PROVEN_NOT_APPLIED  # a window carries its command's correlation
+    (window,) = found
+    return _applied(window_id=window.window_id, epr=intent["epr"], bundle_key=window.bundle_key)
+
+
+def _probe_resolve(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    resolution = app.shadow_evidence.resolution_of(str(intent["collection_run_id"]))
+    if resolution is None:
+        return PROVEN_NOT_APPLIED  # a run holds at most one resolution
+    correlation, reference, count_as = resolution
+    if correlation != k or reference != intent["evidence_ref"]:
+        return _ambiguous("the run's resolution came from another command")
+    try:
+        read_resolution(ledger.root, reference)
+    except ArtifactRefused:
+        return _ambiguous("the run is resolved but its artifact is missing or changed")
+    return _applied(
+        collection_run_id=intent["collection_run_id"],
+        window_id=intent["window_id"],
+        evidence_ref=reference,
+        count_as=count_as,
+    )
+
+
+def _probe_end(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    # Only this campaign's own C4 grant names this window, and only its end command ends it.
+    window = app.shadow_evidence.window(str(intent["window_id"]))
+    return PROVEN_NOT_APPLIED if window.ended_at is None else _applied(window_id=window.window_id)
+
+
+def _probe_close(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    window = app.shadow_evidence.window(str(intent["window_id"]))
+    if not window.closed or window.closeout is None:
+        return PROVEN_NOT_APPLIED
+    if not _keep_closeout(ledger, window.window_id, window.closeout):
+        return _ambiguous("the kept closeout differs from the owner's recorded closeout")
+    return _applied(window_id=window.window_id, verdict=window.closeout["verdict"])
+
+
+PROBES: Mapping[str, Probe] = {
+    "request-capture": _probe_request,
+    "finalize-sample": _probe_finalize,
+    "validate": _probe_validate,
+    "enable": _switch_probe("ENABLE"),
+    "disable": _switch_probe("DISABLE"),
+    "declare": _probe_declare,
+    "resolve": _probe_resolve,
+    "end": _probe_end,
+    "close": _probe_close,
+}
+
+
+def _prove(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    try:
+        return PROBES[str(intent["command"])](app, ledger, campaign, intent, k)
+    except (AppError, LedgerRefused, ArtifactRefused, KeyError) as unreadable:
+        return _ambiguous(f"owner truth could not be read ({type(unreadable).__name__})")
+
+
+def _settle(
+    app: Container,
+    ledger: CampaignLedger,
+    campaign: Campaign,
+    actor: str,
+    correlation: str,
+    *,
+    refusal: str | None = None,
+) -> Proof:
+    """Answer one command of this campaign from owner truth, or hold it."""
+    intent = campaign.intent(correlation)
+    record = app.phase_c_commands.command(correlation)
+    if intent is None:
+        # The data root reserved a command this ledger never intended: its history is not this
+        # campaign's history (a lost or restored ledger). Nothing is guessed.
+        ledger.hold(
+            actor=actor,
+            correlation_id=correlation,
+            reason="the data root holds a command of this campaign its ledger does not know",
+        )
+        return _ambiguous("unknown to the ledger")
+    proof = _prove(app, ledger, campaign, intent, correlation)
+    kind = _kind(str(intent["command"]))
+    not_applied = refusal or NOT_APPLIED
+    if record is None:
+        # The data-root reservation precedes every change, so nothing was ever attempted.
+        if proof.verdict == "APPLIED":
+            proof = _ambiguous("owner truth holds a change the data root never reserved")
+        else:
+            ledger.record(
+                not_applied,
+                actor=actor,
+                correlation_id=correlation,
+                payload={"command": intent["command"], "reason": "NEVER_RESERVED"},
+            )
+            return PROVEN_NOT_APPLIED
+    elif record.outcome is not None:
+        # Settled in the data root; only the ledger's outcome was lost.
+        agrees = (record.outcome in (APPLIED, RECOVERED)) == (proof.verdict == "APPLIED")
+        if not agrees or proof.verdict == "AMBIGUOUS":
+            proof = _ambiguous("the data root's settled result contradicts owner truth")
+    elif proof.verdict == "APPLIED":
+        app.phase_c_commands.settle(correlation, RECOVERED)
+    elif proof.verdict == "NOT_APPLIED":
+        app.phase_c_commands.settle(correlation, "NOT_APPLIED")
+    if proof.verdict == "APPLIED":
+        assert proof.payload is not None
+        ledger.record(
+            kind,
+            actor=actor,
+            correlation_id=correlation,
+            payload={**proof.payload, "recovered": True},
+        )
+    elif proof.verdict == "NOT_APPLIED":
+        ledger.record(
+            not_applied,
+            actor=actor,
+            correlation_id=correlation,
+            payload={"command": intent["command"], "reason": refusal or "PROVEN_NOT_APPLIED"},
+        )
+    else:
+        ledger.hold(actor=actor, correlation_id=correlation, reason=proof.reason)
+    return proof
+
+
+def reconcile(app: Container, ledger: CampaignLedger, campaign: Campaign, actor: str) -> Campaign:
+    """Every command of this campaign without a proven result, answered from owner truth.
+
+    - an intent with no outcome is proven applied, proven not applied, or held;
+    - a data-root command this ledger never intended (a lost or restored ledger) is held;
+    - a command the ledger answered but the data root left unsettled is settled from the
+      ledger's outcome only when owner truth agrees; otherwise the command is refused and the
+      data root stays unresolved, so no campaign acts on it.
+    """
+    held = {h["correlation_id"] for h in campaign.held()}
+    pending = list(campaign.unfinished())
+    known = campaign.intents()
+    for record in app.phase_c_commands.of_campaign(campaign.campaign_id):
+        k = record.correlation_id
+        if k in held or k in pending:
+            continue
+        if k not in known:
+            pending.append(k)
+        elif record.outcome is None:
+            _settle_answered(app, ledger, campaign, k)
+    for correlation in pending:
+        _settle(app, ledger, ledger.campaign(), actor, correlation)
+    return ledger.campaign()
+
+
+def _settle_answered(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, correlation: str
+) -> None:
+    intent = campaign.intent(correlation)
+    assert intent is not None
+    answer = next(
+        e for e in campaign.events if e["correlation_id"] == correlation and e["kind"] != "INTENDED"
+    )
+    applied = answer["kind"] not in (NOT_APPLIED, ACTION_REFUSED)
+    proof = _prove(app, ledger, campaign, intent, correlation)
+    if proof.verdict != ("APPLIED" if applied else "NOT_APPLIED"):
+        raise Refused(
+            f"command {correlation} is answered in the campaign ledger but owner truth disagrees;"
+            " the data root keeps it unresolved"
+        )
+    app.phase_c_commands.settle(correlation, RECOVERED if applied else "NOT_APPLIED")
+
+
 def _act(
+    app: Container,
     ledger: CampaignLedger,
     campaign: Campaign,
     args: argparse.Namespace,
-    effect: Callable[[str], dict[str, Any]],
+    correlation: str,
+    effect: Callable[[], dict[str, Any]],
     *,
-    intent: Mapping[str, Any] | None = None,
+    intent: Mapping[str, Any],
     reservations: Sequence[tuple[str, str]] = (),
 ) -> dict[str, Any]:
-    """Intent and reservations first, then the live-data effect, then its outcome."""
+    """Intent and reservations, the data-root reservation, the change, its settlement, then the
+    outcome — all under one correlation."""
     actor = _actor(args)
-    correlation = str(
-        args.correlation or f"{campaign.campaign_id}:{args.command}:{uuid.uuid4().hex[:12]}"
-    )
     ledger.intend(
         args.command,
         actor=actor,
         correlation_id=correlation,
-        payload=dict(intent or {}),
+        payload=dict(intent),
         reservations=reservations,
     )
+    app.phase_c_commands.reserve(
+        correlation_id=correlation, campaign_id=campaign.campaign_id, command=args.command
+    )
     try:
-        payload = effect(correlation)
+        payload = effect()
     except (AppError, Refused, ArtifactRefused) as refused:
-        # The owner refused before it wrote anything: record that, so the intent is answered.
-        ledger.record(
-            ACTION_REFUSED,
-            actor=actor,
-            correlation_id=correlation,
-            payload={"command": args.command, "code": getattr(refused, "code", None)},
-        )
+        # An owner refused: prove what that left, never assume it.
+        code = str(getattr(refused, "code", None) or type(refused).__name__)
+        proof = _settle(app, ledger, ledger.campaign(), actor, correlation, refusal=ACTION_REFUSED)
+        if proof.verdict == "APPLIED":
+            assert proof.payload is not None
+            return dict(proof.payload)
+        if proof.verdict == "AMBIGUOUS":
+            raise Refused(
+                f"the command is ambiguous and this campaign is now on HOLD ({code})"
+            ) from None
         raise
+    app.phase_c_commands.settle(correlation, APPLIED)
     ledger.record(_kind(args.command), actor=actor, correlation_id=correlation, payload=payload)
     return payload
 
@@ -424,7 +754,12 @@ def _status(app: Container, ledger: CampaignLedger, campaign: Campaign, args: An
         "ceilings": campaign.ceilings,
         "reserved": {stage: ledger.counts(stage) for stage in campaign.grants},
         "refusals": len(ledger.refusals()),
+        "hold": campaign.held(),
         "unfinished_actions": campaign.unfinished(),
+        "unresolved_commands": [
+            {"campaign_id": c.campaign_id, "correlation_id": c.correlation_id, "command": c.command}
+            for c in app.phase_c_commands.unresolved()
+        ],
         "switch": None
         if switch is None
         else {
@@ -518,11 +853,12 @@ def _request_capture(app: Container, ledger: CampaignLedger, campaign: Campaign,
         raise Refused("a capture is requested only for a target the C1 grant names")
     if any(
         r["class"] == "target_identities" and r["subject_digest"] == digest
-        for r in ledger.reservations("C1")
+        for r in ledger.reservations("C1", live=True)
     ):
         raise Refused("each C1 target is requested once; a spent reservation stays spent")
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         request_id = app.capture_store.request(
             campaign_id=campaign.campaign_id,
             supplier_key=args.supplier,
@@ -536,9 +872,11 @@ def _request_capture(app: Container, ledger: CampaignLedger, campaign: Campaign,
     # One unit of the C1 submission ceiling and of the target ceiling: the ordinary operator
     # collection that consumes this request is the submission.
     return _act(
+        app,
         ledger,
         campaign,
         args,
+        correlation,
         effect,
         intent={"target_digest": digest},
         reservations=[("collection_submissions", digest), ("target_identities", digest)],
@@ -566,14 +904,20 @@ def _finalize_sample(app: Container, ledger: CampaignLedger, campaign: Campaign,
     expected = json.loads(args.expected.read_text("utf-8"))
     if not isinstance(expected, dict):
         raise Refused("the expected facts are one JSON object the operator authored")
-    scope = _operator_scope(args.scope, _actor(args))
+    # Cut in memory first: the sample's digest is fixed before the command that stores it.
+    sample = app.capture_store.prepare_sample(
+        args.run,
+        campaign_id=campaign.campaign_id,
+        scope=_operator_scope(args.scope, _actor(args)),
+        expected=expected,
+    )
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
-        sample = app.capture_store.finalize(
+    def effect() -> dict[str, Any]:
+        app.capture_store.store_sample(
             args.run,
+            sample,
             campaign_id=campaign.campaign_id,
-            scope=scope,
-            expected=expected,
             stored_by=_actor(args),
             correlation_id=correlation,
         )
@@ -584,7 +928,19 @@ def _finalize_sample(app: Container, ledger: CampaignLedger, campaign: Campaign,
             "truncated": sample.truncated,
         }
 
-    return _act(ledger, campaign, args, effect, intent={"collection_run_id": args.run})
+    return _act(
+        app,
+        ledger,
+        campaign,
+        args,
+        correlation,
+        effect,
+        intent={
+            "collection_run_id": args.run,
+            "request_id": view.request_id,
+            "sample_digest": sample.digest,
+        },
+    )
 
 
 def _validate(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
@@ -599,8 +955,9 @@ def _validate(app: Container, ledger: CampaignLedger, campaign: Campaign, args: 
     bundle = app.adaptive_profiles.load_bundle(args.epr)
     samples = [app.adaptive_validation.sample(d) for d in digests]
     result = validate(bundle, samples, negatives=SYNTHETIC_NEGATIVES)
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         run_id = app.adaptive_validation.record_run(
             bundle, result, samples, recorded_by=_actor(args), correlation_id=correlation
         )
@@ -611,7 +968,20 @@ def _validate(app: Container, ledger: CampaignLedger, campaign: Campaign, args: 
             "verdict": result.verdict.value,
         }
 
-    return _act(ledger, campaign, args, effect, intent={"epr": args.epr, "samples": digests})
+    return _act(
+        app,
+        ledger,
+        campaign,
+        args,
+        correlation,
+        effect,
+        intent={
+            "epr": args.epr,
+            "samples": digests,
+            "run_digest": result.digest(),
+            "verdict": result.verdict.value,
+        },
+    )
 
 
 # ================================================================ C2
@@ -624,27 +994,31 @@ def _enable(app: Container, ledger: CampaignLedger, campaign: Campaign, args: An
     bundle = app.adaptive_profiles.load_bundle(args.epr)
     samples = [app.adaptive_validation.sample(d) for d in scope["sample_digests"]]
     freshness = freshness_tuple(bundle, samples, None)
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         entry = app.shadow_switch.enable(
             args.epr, freshness, actor=_actor(args), reason="PHASE_C", correlation_id=correlation
         )
         return {"entry_id": entry, "epr": args.epr, "bundle_key": bundle_key_of(args.epr)}
 
-    return _act(ledger, campaign, args, effect, intent={"epr": args.epr})
+    return _act(app, ledger, campaign, args, correlation, effect, intent={"epr": args.epr})
 
 
 def _disable(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
     if args.supplier != supplier_of(campaign):
         raise Refused("a campaign turns off only its own supplier's shadow")
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         entry = app.shadow_switch.disable(
             args.supplier, actor=_actor(args), reason="PHASE_C", correlation_id=correlation
         )
         return {"entry_id": entry}
 
-    return _act(ledger, campaign, args, effect, intent={"supplier_key": args.supplier})
+    return _act(
+        app, ledger, campaign, args, correlation, effect, intent={"supplier_key": args.supplier}
+    )
 
 
 def _declare(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
@@ -656,8 +1030,9 @@ def _declare(app: Container, ledger: CampaignLedger, campaign: Campaign, args: A
     if args.supersedes is not None and _one(campaign, "DECLARE", window_id=args.supersedes) is None:
         raise Refused("a campaign supersedes only a window it declared itself")
     record = app.adaptive_profiles.record(args.epr)
+    correlation = new_correlation()
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         window = app.shadow_evidence.declare(
             record.supplier_key,
             bundle_key_of(args.epr),
@@ -669,7 +1044,7 @@ def _declare(app: Container, ledger: CampaignLedger, campaign: Campaign, args: A
         )
         return {"window_id": window, "epr": args.epr, "bundle_key": bundle_key_of(args.epr)}
 
-    return _act(ledger, campaign, args, effect, intent={"epr": args.epr})
+    return _act(app, ledger, campaign, args, correlation, effect, intent={"epr": args.epr})
 
 
 # ================================================================ C3 and C4
@@ -681,24 +1056,24 @@ def _resolve(app: Container, ledger: CampaignLedger, campaign: Campaign, args: A
     if args.run not in app.shadow_evidence.window_evidence(window).states:
         raise Refused("a campaign resolves only a run eligible in its own C3 window")
     run = app.collection.run(args.run)
+    correlation = new_correlation()
+    artifact = {
+        "schema": ARTIFACT_SCHEMA,
+        "campaign_id": campaign.campaign_id,
+        "collection_run_id": args.run,
+        "revision_id": run.revision_id or "NO_REVISION",
+        "mismatch_dimensions": sorted(args.dimension),
+        "source_evidence": sorted(args.source_evidence),
+        "resolution": args.resolution,
+        "adaptive_failed_closed": args.adaptive_failed_closed == "yes",
+        "actor": _actor(args),
+        "correlation_id": correlation,
+        "at": now(),
+    }
+    reference = resolution_reference(artifact)  # checked and named before anything is written
 
-    def effect(correlation: str) -> dict[str, Any]:
-        reference = write_resolution(
-            ledger.root,
-            {
-                "schema": ARTIFACT_SCHEMA,
-                "campaign_id": campaign.campaign_id,
-                "collection_run_id": args.run,
-                "revision_id": run.revision_id or "NO_REVISION",
-                "mismatch_dimensions": sorted(args.dimension),
-                "source_evidence": sorted(args.source_evidence),
-                "resolution": args.resolution,
-                "adaptive_failed_closed": args.adaptive_failed_closed == "yes",
-                "actor": _actor(args),
-                "correlation_id": correlation,
-                "at": now(),
-            },
-        )
+    def effect() -> dict[str, Any]:
+        write_resolution(ledger.root, artifact)
         read_resolution(ledger.root, reference)  # it exists and hashes, before the event
         state = app.shadow_evidence.resolve(
             args.run,
@@ -715,7 +1090,15 @@ def _resolve(app: Container, ledger: CampaignLedger, campaign: Campaign, args: A
             "count_as": state.count_as.value,
         }
 
-    return _act(ledger, campaign, args, effect, intent={"collection_run_id": args.run})
+    return _act(
+        app,
+        ledger,
+        campaign,
+        args,
+        correlation,
+        effect,
+        intent={"collection_run_id": args.run, "window_id": window, "evidence_ref": reference},
+    )
 
 
 def _own_window(campaign: Campaign, window: str) -> None:
@@ -726,28 +1109,41 @@ def _own_window(campaign: Campaign, window: str) -> None:
 def _end(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
     _own_window(campaign, args.window)
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         app.shadow_evidence.end(args.window, actor=_actor(args), reason="PHASE_C")
         return {"window_id": args.window}
 
-    return _act(ledger, campaign, args, effect, intent={"window_id": args.window})
+    return _act(
+        app, ledger, campaign, args, new_correlation(), effect, intent={"window_id": args.window}
+    )
+
+
+def _keep_closeout(ledger: CampaignLedger, window_id: str, closeout: Mapping[str, Any]) -> bool:
+    """Keep the owner's closeout in the campaign root; ``False`` if another one is already kept."""
+    directory = ledger.root / CLOSEOUTS
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{window_id}.json"
+    content = canonical(dict(closeout))
+    if path.exists():
+        return path.read_text("utf-8") == content
+    with path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+    return True
 
 
 def _close(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
     _own_window(campaign, args.window)
-    closeouts: list[Any] = []
 
-    def effect(correlation: str) -> dict[str, Any]:
+    def effect() -> dict[str, Any]:
         closeout = app.shadow_evidence.close(args.window, actor=_actor(args), reason="PHASE_C")
-        directory = ledger.root / CLOSEOUTS
-        directory.mkdir(parents=True, exist_ok=True)
-        with (directory / f"{args.window}.json").open("x", encoding="utf-8", newline="\n") as f:
-            f.write(canonical(closeout))
-        closeouts.append(closeout)
+        if not _keep_closeout(ledger, args.window, closeout):
+            raise Refused("another closeout is already kept for this window")
         return {"window_id": args.window, "verdict": closeout["verdict"]}
 
-    _act(ledger, campaign, args, effect, intent={"window_id": args.window})
-    return closeouts[0]
+    _act(app, ledger, campaign, args, new_correlation(), effect, intent={"window_id": args.window})
+    closeout = app.shadow_evidence.window(args.window).closeout
+    assert closeout is not None
+    return closeout
 
 
 HANDLERS: Mapping[str, Callable[[Container, CampaignLedger, Campaign, Any], Any]] = {

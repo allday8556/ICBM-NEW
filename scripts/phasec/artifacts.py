@@ -66,8 +66,7 @@ def evidence_ref(campaign_id: str, sha256: str) -> str:
     return f"phase-c:{campaign_id}:resolution:{sha256}"
 
 
-def write_resolution(campaign_root: Path, artifact: Mapping[str, Any]) -> str:
-    """Write one resolution artifact and return its ``evidence_ref``."""
+def _checked(artifact: Mapping[str, Any]) -> tuple[dict[str, Any], str, str]:
     content = dict(artifact)
     if set(content) != FIELDS or content.get("schema") != ARTIFACT_SCHEMA:
         raise ArtifactRefused("a resolution artifact holds exactly its fields")
@@ -78,7 +77,19 @@ def write_resolution(campaign_root: Path, artifact: Mapping[str, Any]) -> str:
         if _FORBIDDEN.search(text) or residual_findings(text):
             raise ArtifactRefused("a resolution artifact never holds page, URL or secret material")
     serialized = canonical(content)
-    sha = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return content, serialized, hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def resolution_reference(artifact: Mapping[str, Any]) -> str:
+    """The ``evidence_ref`` an artifact will have, checked, before anything is written: a command
+    reserves it first, so its reconciliation can look for exactly that reference."""
+    content, _, sha = _checked(artifact)
+    return evidence_ref(content["campaign_id"], sha)
+
+
+def write_resolution(campaign_root: Path, artifact: Mapping[str, Any]) -> str:
+    """Write one resolution artifact and return its ``evidence_ref``."""
+    content, serialized, sha = _checked(artifact)
     directory = campaign_root / RESOLUTIONS
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{sha}.json"

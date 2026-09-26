@@ -1632,6 +1632,7 @@ ADAPTIVE_IMPORTERS = {
     },
     "app/container.py": {
         "app.collect.adaptive.hooks",
+        "app.collect.adaptive_capture.commands",
         "app.collect.adaptive_capture.runner",
         "app.collect.adaptive_capture.store",
         "app.collect.adaptive_shadow.runner",
@@ -1678,12 +1679,15 @@ def test_only_the_container_wires_the_adaptive_collector() -> None:
 # finalization, the shadow switch, windows, resolutions). Outside the Adaptive packages, only the
 # container builds them, the app lifespan calls the shadow owner's startup pass, and the harness
 # uses them; no route, service, job or other script ever reaches them.
-PHASE_C_OWNERS = frozenset({"shadow_switch", "shadow_evidence", "capture_store"})
+PHASE_C_OWNERS = frozenset(
+    {"shadow_switch", "shadow_evidence", "capture_store", "phase_c_commands"}
+)
 PHASE_C_OWNER_MODULES = frozenset(
     {
         "app.collect.adaptive_shadow.switch",
         "app.collect.adaptive_shadow.store",
         "app.collect.adaptive_capture.store",
+        "app.collect.adaptive_capture.commands",
     }
 )
 
@@ -2220,6 +2224,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # capture candidates of requested runs; never a page body.
         "adaptive_capture_requests",
         "adaptive_capture_candidates",
+        "adaptive_phase_c_commands",
+        "adaptive_phase_c_command_results",
     }
     offenders = [
         path

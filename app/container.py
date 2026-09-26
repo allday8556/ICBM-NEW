@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.adaptive.hooks import HookManifest
+from app.collect.adaptive_capture.commands import PhaseCCommandStore
 from app.collect.adaptive_capture.runner import CaptureRunner
 from app.collect.adaptive_capture.store import CaptureStore
 from app.collect.adaptive_shadow.runner import ShadowRunner
@@ -178,6 +179,7 @@ class Container:
     shadow_switch: ShadowSwitch
     shadow_evidence: ShadowEvidenceStore
     capture_store: CaptureStore
+    phase_c_commands: PhaseCCommandStore
     ownership: DataDirLease
 
 
@@ -600,6 +602,7 @@ def build_container(
         shadow_switch=shadow_switch,
         shadow_evidence=shadow_evidence,
         capture_store=capture_store,
+        phase_c_commands=PhaseCCommandStore(db, clock),
         ownership=ownership,
     )
 

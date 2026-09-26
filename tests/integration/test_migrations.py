@@ -116,6 +116,8 @@ CANONICAL_TABLES = (
     "asset_upload_attempts",
     "adaptive_capture_requests",
     "adaptive_capture_candidates",
+    "adaptive_phase_c_commands",
+    "adaptive_phase_c_command_results",
 )
 HEAD = "0027_adaptive_capture_seam"
 

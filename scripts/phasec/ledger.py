@@ -9,24 +9,32 @@ the accepted M3 campaign-ledger pattern:
 * **Single writer.** A whole harness command holds an exclusive OS lock on
   ``<campaign-root>/campaign.lock`` (``msvcrt.locking`` / ``fcntl.flock``); a second command on the
   same campaign fails ``CAMPAIGN_IN_USE`` before it reads or writes anything else.
-* **Append-only.** Triggers refuse every UPDATE and DELETE. Events are hash-chained as well.
 * **Crash recovery.** A read opens the file normally with ``query_only`` on, so SQLite itself
   rolls back a hot journal a crashed write left behind; a read-only open could not, and would
   leave the campaign unreadable.
+* **Append-only.** Triggers refuse every UPDATE and DELETE. Events are hash-chained as well.
 * **Tamper and tail-loss evident.** Every read verifies that the stored schema is exactly the one
   this module creates (a dropped trigger is detected), that the event and reservation sequences
-  run 1..n up to SQLite's own high-water mark (a removed tail is detected), and the hash chain.
-* **Typed stage grants.** A grant is an immutable, typed scope (``scripts/phasec/grants.py``); the
-  ``grants`` table admits the stages strictly in order C0 → C4, once each, and only with a strictly
-  newer authorization comment id than every grant before it.
+  run 1..n up to SQLite's own high-water mark (a removed tail is detected), the hash chain, and
+  that every index table agrees with the events it indexes.
+* **One identity per correlation.** ``correlations`` holds every correlation an event opens
+  (creation, a stage grant, an intent) under a PRIMARY KEY, so a correlation is never reused;
+  ``outcomes`` admits at most one outcome per intent, and only for an intent.
+* **Typed stage grants.** A grant is the exact bytes of a typed JSON object
+  (``scripts/phasec/grants.py``), stored as read and named by the SHA-256 of those bytes. Its
+  authorization is an opaque GitHub anchor (``issuecomment-<id>`` / ``pullrequestreview-<id>``),
+  used once; it is never compared by size. The ``grants`` table admits the stages strictly in
+  order C0 → C4, once each.
 * **Frozen ceilings that are enforced.** The per-stage ceilings are written once, at creation. A
   reservation is admitted only in the current stage and only while its class stays under its
-  ceiling; a trigger refuses the rest, and every refusal is itself recorded. Nothing resets a
-  reservation: a spent one stays spent.
-* **Intent before effect.** A command that changes the live data root first commits an
-  ``INTENDED`` event with its reservations, then acts, then commits its outcome under the same
-  correlation. An intent with no outcome is an unfinished action, and the campaign then refuses
-  every further evidence command (fail-closed).
+  ceiling; a trigger refuses the rest, and every refusal is itself recorded. A reservation stays
+  spent unless its command is proven not to have changed anything (``NOT_APPLIED``), which
+  releases it for a safe retry.
+* **Intent before effect, reconciled after a crash.** A command first commits an ``INTENDED``
+  event with its reservations, then the harness reserves it in the data root, acts, and commits
+  the outcome under the same correlation. An intent with no outcome is reconciled against owner
+  truth: proven applied, proven not applied, or ambiguous — which puts the campaign on ``HOLD``,
+  where it accepts no further intent.
 
 The ledger holds no URL, cookie or secret: identifiers, digests, states, counts and times.
 """
@@ -48,17 +56,31 @@ from scripts.phasec.ceilings import CEILINGS, STAGES
 
 LEDGER = "campaign.sqlite3"
 LOCK = "campaign.lock"
-SCHEMA = "icbm-adaptive-phase-c-campaign/v2"
+SCHEMA = "icbm-adaptive-phase-c-campaign/v3"
 GENESIS = "0" * 64
 CAMPAIGN_ID = re.compile(r"^phase-c-[a-z0-9][a-z0-9-]{2,40}$")
-# An architect authorization, named as its GitHub anchor: an issue comment or a pull-request
-# review. The two id sequences are separate, so ids are compared only within one kind; the number is
-# small enough for SQLite's own integer comparison.
-AUTHORIZATION = re.compile(r"^(issuecomment|pullrequestreview)-[1-9][0-9]{5,17}$")
+# An architect authorization, named as its GitHub anchor. It is an opaque identity: equal or not,
+# never older or newer.
+AUTHORIZATION = re.compile(r"^(issuecomment|pullrequestreview)-[1-9][0-9]{0,19}$")
+CREATED = "CAMPAIGN_CREATED"
+AUTHORIZED = "STAGE_AUTHORIZED"
 INTENDED = "INTENDED"
+HOLD = "CAMPAIGN_HOLD"
+NOT_APPLIED = "NOT_APPLIED"
 ACTION_REFUSED = "ACTION_REFUSED"
+OPENING = (CREATED, AUTHORIZED, INTENDED)
 
-_TABLES = ("campaign", "ceilings", "events", "grants", "reservations", "refusals")
+_TABLES = (
+    "campaign",
+    "ceilings",
+    "events",
+    "correlations",
+    "outcomes",
+    "holds",
+    "grants",
+    "reservations",
+    "refusals",
+)
 _SCHEMA = """
 CREATE TABLE campaign (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -84,12 +106,26 @@ CREATE TABLE events (
     prev TEXT NOT NULL CHECK (length(prev) = 64),
     hash TEXT NOT NULL UNIQUE CHECK (length(hash) = 64)
 );
+CREATE TABLE correlations (
+    correlation_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('CAMPAIGN_CREATED', 'STAGE_AUTHORIZED', 'INTENDED')),
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES events (seq)
+);
+CREATE TABLE outcomes (
+    correlation_id TEXT PRIMARY KEY REFERENCES correlations (correlation_id),
+    applied INTEGER NOT NULL CHECK (applied IN (0, 1)),
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES events (seq)
+);
+CREATE TABLE holds (
+    correlation_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES events (seq)
+);
 CREATE TABLE grants (
     stage_index INTEGER PRIMARY KEY,
     stage TEXT NOT NULL UNIQUE CHECK (stage = 'C' || stage_index),
     authorization TEXT NOT NULL UNIQUE,
     grant_digest TEXT NOT NULL CHECK (length(grant_digest) = 64),
-    grant_json TEXT NOT NULL,
+    grant_text TEXT NOT NULL,
     event_seq INTEGER NOT NULL UNIQUE REFERENCES events (seq)
 );
 CREATE TABLE reservations (
@@ -98,7 +134,7 @@ CREATE TABLE reservations (
     stage TEXT NOT NULL,
     class TEXT NOT NULL,
     subject_digest TEXT NOT NULL CHECK (length(subject_digest) = 64),
-    correlation_id TEXT NOT NULL
+    correlation_id TEXT NOT NULL REFERENCES correlations (correlation_id)
 );
 CREATE TABLE refusals (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,23 +145,43 @@ CREATE TABLE refusals (
     correlation_id TEXT NOT NULL
 );
 CREATE VIEW current_stage AS SELECT stage FROM grants ORDER BY stage_index DESC LIMIT 1;
+CREATE VIEW live_reservations AS
+    SELECT r.* FROM reservations r
+    WHERE NOT EXISTS (
+        SELECT 1 FROM outcomes o WHERE o.correlation_id = r.correlation_id AND o.applied = 0
+    );
 CREATE TRIGGER campaign_once BEFORE INSERT ON campaign BEGIN
     SELECT RAISE(ABORT, 'CAMPAIGN_EXISTS') WHERE (SELECT COUNT(*) FROM events) > 0;
 END;
 CREATE TRIGGER ceilings_at_creation BEFORE INSERT ON ceilings BEGIN
     SELECT RAISE(ABORT, 'CEILINGS_FROZEN') WHERE (SELECT COUNT(*) FROM events) > 0;
 END;
+CREATE TRIGGER intents_one_at_a_time BEFORE INSERT ON correlations WHEN NEW.kind = 'INTENDED'
+BEGIN
+    SELECT RAISE(ABORT, 'CAMPAIGN_HOLD') WHERE EXISTS (SELECT 1 FROM holds);
+    SELECT RAISE(ABORT, 'UNFINISHED_ACTION')
+        WHERE EXISTS (
+            SELECT 1 FROM correlations c
+            WHERE c.kind = 'INTENDED'
+                AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.correlation_id = c.correlation_id)
+        );
+END;
+CREATE TRIGGER outcomes_answer_an_intent BEFORE INSERT ON outcomes BEGIN
+    SELECT RAISE(ABORT, 'NOT_AN_INTENT')
+        WHERE NOT EXISTS (
+            SELECT 1 FROM correlations WHERE correlation_id = NEW.correlation_id
+                AND kind = 'INTENDED'
+        );
+    SELECT RAISE(ABORT, 'HELD')
+        WHERE EXISTS (SELECT 1 FROM holds WHERE correlation_id = NEW.correlation_id);
+END;
+CREATE TRIGGER holds_of_an_unanswered_command BEFORE INSERT ON holds BEGIN
+    SELECT RAISE(ABORT, 'ANSWERED')
+        WHERE EXISTS (SELECT 1 FROM outcomes WHERE correlation_id = NEW.correlation_id);
+END;
 CREATE TRIGGER grants_in_order BEFORE INSERT ON grants BEGIN
     SELECT RAISE(ABORT, 'STAGE_OUT_OF_ORDER')
         WHERE NEW.stage_index IS NOT (SELECT COALESCE(MAX(stage_index), -1) + 1 FROM grants);
-    SELECT RAISE(ABORT, 'AUTHORIZATION_NOT_NEWER')
-        WHERE EXISTS (
-            SELECT 1 FROM grants
-            WHERE substr(authorization, 1, instr(authorization, '-'))
-                    = substr(NEW.authorization, 1, instr(NEW.authorization, '-'))
-                AND CAST(substr(authorization, instr(authorization, '-') + 1) AS INTEGER)
-                    >= CAST(substr(NEW.authorization, instr(NEW.authorization, '-') + 1) AS INTEGER)
-        );
 END;
 CREATE TRIGGER reservations_guard BEFORE INSERT ON reservations BEGIN
     SELECT RAISE(ABORT, 'STAGE_NOT_CURRENT')
@@ -133,8 +189,10 @@ CREATE TRIGGER reservations_guard BEFORE INSERT ON reservations BEGIN
     SELECT RAISE(ABORT, 'CLASS_NOT_BUDGETED')
         WHERE NOT EXISTS (SELECT 1 FROM ceilings WHERE stage = NEW.stage AND class = NEW.class);
     SELECT RAISE(ABORT, 'CEILING')
-        WHERE (SELECT COUNT(*) FROM reservations WHERE stage = NEW.stage AND class = NEW.class)
-            >= (SELECT ceiling FROM ceilings WHERE stage = NEW.stage AND class = NEW.class);
+        WHERE (
+            SELECT COUNT(*) FROM live_reservations
+            WHERE stage = NEW.stage AND class = NEW.class
+        ) >= (SELECT ceiling FROM ceilings WHERE stage = NEW.stage AND class = NEW.class);
 END;
 """ + "".join(
     f"CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} "
@@ -165,6 +223,10 @@ def sha256(value: Any) -> str:
     return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
 
 
+def bytes_digest(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _event_hash(event: Mapping[str, Any]) -> str:
     return sha256({key: value for key, value in event.items() if key != "hash"})
 
@@ -175,6 +237,16 @@ def now() -> str:
 
 def _ceilings() -> dict[str, dict[str, int]]:
     return {stage: dict(values) for stage, values in CEILINGS.items()}
+
+
+def parse_grant(raw: bytes) -> Any:
+    """The JSON a grant's exact bytes hold; the same bytes are digested and recorded."""
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise LedgerRefused(
+            "a grant is one UTF-8 JSON object", code="PHASE_C_GRANT_REFUSED"
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -210,11 +282,32 @@ class Campaign:
         """The payloads of the recorded outcomes of one kind, in ledger order."""
         return [event["payload"] for event in self.events if event["kind"] == kind]
 
+    def intent(self, correlation_id: str) -> Mapping[str, Any] | None:
+        for event in self.events:
+            if event["kind"] == INTENDED and event["correlation_id"] == correlation_id:
+                payload: Mapping[str, Any] = event["payload"]
+                return payload
+        return None
+
+    def intents(self) -> set[str]:
+        return {e["correlation_id"] for e in self.events if e["kind"] == INTENDED}
+
+    def held(self) -> list[Mapping[str, Any]]:
+        """The commands this campaign holds as ambiguous (``HOLD``), with why."""
+        return [
+            {"correlation_id": e["correlation_id"], **e["payload"]}
+            for e in self.events
+            if e["kind"] == HOLD
+        ]
+
     def unfinished(self) -> list[str]:
-        """The correlations whose intent has no recorded outcome."""
-        intents = [e["correlation_id"] for e in self.events if e["kind"] == INTENDED]
-        done = {e["correlation_id"] for e in self.events if e["kind"] != INTENDED}
-        return [correlation for correlation in intents if correlation not in done]
+        """The correlations whose intent has neither an outcome nor a hold."""
+        closed = {e["correlation_id"] for e in self.events if e["kind"] not in OPENING}
+        return [
+            e["correlation_id"]
+            for e in self.events
+            if e["kind"] == INTENDED and e["correlation_id"] not in closed
+        ]
 
 
 # ---------------------------------------------------------------- the OS writer lock
@@ -291,7 +384,12 @@ def _expected_schema() -> set[tuple[str, str, str]]:
 
 
 def _reason(error: sqlite3.Error) -> str:
-    return str(error).split(":")[-1].strip() or "REFUSED"
+    text = str(error)
+    if "correlations.correlation_id" in text:
+        return "PHASE_C_CORRELATION_REUSED"
+    if "grants.authorization" in text:
+        return "PHASE_C_AUTHORIZATION_REUSED"
+    return text.split(":")[-1].strip() or "REFUSED"
 
 
 class CampaignLedger:
@@ -345,8 +443,11 @@ class CampaignLedger:
                 except BaseException:
                     db.execute("ROLLBACK")
                     raise
-        except sqlite3.IntegrityError:
-            raise
+        except sqlite3.IntegrityError as refused:
+            reason = _reason(refused)
+            raise LedgerRefused(
+                f"the campaign ledger refused this: {reason}", code=reason
+            ) from None
         except sqlite3.DatabaseError:
             raise LedgerRefused("the campaign ledger cannot be written as its own schema") from None
 
@@ -384,6 +485,25 @@ class CampaignLedger:
         row = db.execute("SELECT seq FROM sqlite_sequence WHERE name = ?", (table,)).fetchone()
         return 0 if row is None else int(row[0])
 
+    @staticmethod
+    def _indexes_agree(db: sqlite3.Connection, events: list[dict[str, Any]]) -> None:
+        """Every index table holds exactly what the events it indexes say."""
+        opened = {
+            (e["correlation_id"], e["kind"], e["seq"]) for e in events if e["kind"] in OPENING
+        }
+        if set(db.execute("SELECT correlation_id, kind, event_seq FROM correlations")) != opened:
+            raise LedgerRefused("the campaign's correlations do not match its events")
+        answered = {
+            (e["correlation_id"], 0 if e["kind"] in (NOT_APPLIED, ACTION_REFUSED) else 1, e["seq"])
+            for e in events
+            if e["kind"] not in (*OPENING, HOLD)
+        }
+        if set(db.execute("SELECT correlation_id, applied, event_seq FROM outcomes")) != answered:
+            raise LedgerRefused("the campaign's outcomes do not match its events")
+        held = {(e["correlation_id"], e["seq"]) for e in events if e["kind"] == HOLD}
+        if set(db.execute("SELECT correlation_id, event_seq FROM holds")) != held:
+            raise LedgerRefused("the campaign's holds do not match its events")
+
     def _verify(self, db: sqlite3.Connection) -> Campaign:
         if _schema_of(db) != _expected_schema():
             raise LedgerRefused("the campaign ledger's schema is not the one this harness writes")
@@ -395,8 +515,9 @@ class CampaignLedger:
         reservations = [r for (r,) in db.execute("SELECT seq FROM reservations ORDER BY seq")]
         if reservations != list(range(1, self._high_water(db, "reservations") + 1)):
             raise LedgerRefused("campaign reservations are missing from the ledger")
-        if not events or events[0]["kind"] != "CAMPAIGN_CREATED":
+        if not events or events[0]["kind"] != CREATED:
             raise LedgerRefused("the campaign ledger does not start with CAMPAIGN_CREATED")
+        self._indexes_agree(db, events)
         created = events[0]["payload"]
         row = db.execute(
             "SELECT schema, campaign_id, code_sha, ceilings_json FROM campaign"
@@ -420,22 +541,23 @@ class CampaignLedger:
             raise LedgerRefused("the campaign was created with other ceilings than this harness")
         by_seq = {event["seq"]: event for event in events}
         grants: dict[str, Grant] = {}
-        for stage, authorization, digest, body, seq in db.execute(
-            "SELECT stage, authorization, grant_digest, grant_json, event_seq "
+        for stage, authorization, digest, text, seq in db.execute(
+            "SELECT stage, authorization, grant_digest, grant_text, event_seq "
             "FROM grants ORDER BY stage_index"
         ):
-            grant = json.loads(body)
+            grant = json.loads(text)
             event = by_seq.get(seq)
             if (
-                sha256(grant) != digest
+                bytes_digest(text.encode("utf-8")) != digest
                 or event is None
-                or event["kind"] != "STAGE_AUTHORIZED"
+                or event["kind"] != AUTHORIZED
                 or event["payload"] != {"stage": stage, "grant_digest": digest, "grant": grant}
                 or grant.get("authorization") != authorization
+                or grant.get("stage") != stage
             ):
                 raise LedgerRefused(f"the {stage} grant does not match its ledger event")
             grants[stage] = Grant(stage, authorization, digest, grant)
-        authorizations = sum(event["kind"] == "STAGE_AUTHORIZED" for event in events)
+        authorizations = sum(event["kind"] == AUTHORIZED for event in events)
         if "C0" not in grants or authorizations != len(grants):
             raise LedgerRefused("the campaign's grants do not match its events")
         return Campaign(
@@ -453,8 +575,10 @@ class CampaignLedger:
     def events(self) -> tuple[Mapping[str, Any], ...]:
         return self.campaign().events
 
-    def reservations(self, stage: str | None = None) -> list[dict[str, Any]]:
-        query = "SELECT seq, stage, class, subject_digest, correlation_id FROM reservations"
+    def reservations(self, stage: str | None = None, *, live: bool = False) -> list[dict[str, Any]]:
+        """The reservations, oldest first; ``live`` leaves out those NOT_APPLIED released."""
+        table = "live_reservations" if live else "reservations"
+        query = f"SELECT seq, stage, class, subject_digest, correlation_id FROM {table}"
         params: tuple[str, ...] = ()
         if stage is not None:
             query += " WHERE stage = ?"
@@ -468,8 +592,9 @@ class CampaignLedger:
         ]
 
     def counts(self, stage: str) -> dict[str, int]:
+        """The live reservations of one stage per class: what its ceilings are measured against."""
         found: dict[str, int] = {}
-        for reservation in self.reservations(stage):
+        for reservation in self.reservations(stage, live=True):
             found[reservation["class"]] = found.get(reservation["class"], 0) + 1
         return {name: found.get(name, 0) for name in CEILINGS[stage]}
 
@@ -521,40 +646,40 @@ class CampaignLedger:
                 event["hash"],
             ),
         )
+        if kind in OPENING:
+            db.execute(
+                "INSERT INTO correlations VALUES (?, ?, ?)", (correlation_id, kind, event["seq"])
+            )
+        elif kind == HOLD:
+            db.execute("INSERT INTO holds VALUES (?, ?)", (correlation_id, event["seq"]))
+        else:
+            applied = 0 if kind in (NOT_APPLIED, ACTION_REFUSED) else 1
+            db.execute(
+                "INSERT INTO outcomes VALUES (?, ?, ?)", (correlation_id, applied, event["seq"])
+            )
         return event
 
     def _authorize(
-        self, db: sqlite3.Connection, grant: Mapping[str, Any], actor: str, correlation_id: str
+        self, db: sqlite3.Connection, raw: bytes, actor: str, correlation_id: str
     ) -> dict[str, Any]:
+        grant = parse_grant(raw)
+        text = raw.decode("utf-8")
         stage = str(grant["stage"])
-        digest = sha256(grant)
+        digest = bytes_digest(raw)
         event = self._append(
             db,
-            "STAGE_AUTHORIZED",
+            AUTHORIZED,
             actor,
             correlation_id,
-            {"stage": stage, "grant_digest": digest, "grant": dict(grant)},
+            {"stage": stage, "grant_digest": digest, "grant": grant},
         )
-        try:
-            db.execute(
-                "INSERT INTO grants VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    STAGES.index(stage),
-                    stage,
-                    str(grant["authorization"]),
-                    digest,
-                    canonical(grant),
-                    event["seq"],
-                ),
-            )
-        except sqlite3.IntegrityError as refused:
-            reason = _reason(refused)
-            raise LedgerRefused(f"the {stage} grant is refused: {reason}", code=reason) from None
+        db.execute(
+            "INSERT INTO grants VALUES (?, ?, ?, ?, ?, ?)",
+            (STAGES.index(stage), stage, str(grant["authorization"]), digest, text, event["seq"]),
+        )
         return event
 
-    def create(
-        self, *, campaign_id: str, code_sha: str, c0_grant: Mapping[str, Any], actor: str
-    ) -> None:
+    def create(self, *, campaign_id: str, code_sha: str, c0_grant: bytes, actor: str) -> None:
         if not CAMPAIGN_ID.fullmatch(campaign_id):
             raise LedgerRefused("a campaign id is phase-c-<lowercase words>")
         if not re.fullmatch(r"[0-9a-f]{40}", code_sha):
@@ -573,7 +698,7 @@ class CampaignLedger:
                     db.execute("INSERT INTO ceilings VALUES (?, ?, ?)", (stage, name, value))
             self._append(
                 db,
-                "CAMPAIGN_CREATED",
+                CREATED,
                 actor,
                 f"{campaign_id}:created",
                 {
@@ -585,18 +710,11 @@ class CampaignLedger:
             )
             self._authorize(db, c0_grant, actor, f"{campaign_id}:stage:C0")
 
-    def authorize(
-        self, grant: Mapping[str, Any], *, actor: str, correlation_id: str
-    ) -> dict[str, Any]:
-        """Record one stage grant that ``grants.check_grant`` already admitted."""
+    def authorize(self, raw: bytes, *, actor: str, correlation_id: str) -> dict[str, Any]:
+        """Record one stage grant, as the exact bytes ``grants.check_grant`` already admitted."""
         with self._transaction() as db:
-            campaign = self._verify(db)
-            if any(event["correlation_id"] == correlation_id for event in campaign.events):
-                raise LedgerRefused(
-                    "a correlation names one action of this campaign",
-                    code="PHASE_C_CORRELATION_REUSED",
-                )
-            return self._authorize(db, grant, actor, correlation_id)
+            self._verify(db)
+            return self._authorize(db, raw, actor, correlation_id)
 
     def intend(
         self,
@@ -607,24 +725,18 @@ class CampaignLedger:
         payload: Mapping[str, Any],
         reservations: Sequence[tuple[str, str]] = (),
     ) -> dict[str, Any]:
-        """Commit an action's intent and its reservations before its live-data effect.
+        """Commit an action's intent and its reservations before any live-data effect.
 
         A reservation the ceilings refuse rolls the whole intent back; the refusal is then
         recorded on its own and nothing further happens."""
         refused: tuple[str, str, str] | None = None
         with self._transaction() as db:
             campaign = self._verify(db)
-            if campaign.unfinished():
-                raise LedgerRefused(
-                    "this campaign has an unfinished action", code="PHASE_C_UNFINISHED_ACTION"
-                )
-            if any(event["correlation_id"] == correlation_id for event in campaign.events):
-                raise LedgerRefused(
-                    "a correlation names one action of this campaign",
-                    code="PHASE_C_CORRELATION_REUSED",
-                )
             stage = campaign.current_stage
-            db.execute("SAVEPOINT intent")
+            event = self._append(
+                db, INTENDED, actor, correlation_id, {"command": command, "stage": stage, **payload}
+            )
+            db.execute("SAVEPOINT reservations")
             for name, subject in reservations:
                 try:
                     db.execute(
@@ -636,16 +748,10 @@ class CampaignLedger:
                     refused = (stage, name, _reason(error))
                     break
             if refused is None:
-                db.execute("RELEASE intent")
-                return self._append(
-                    db,
-                    INTENDED,
-                    actor,
-                    correlation_id,
-                    {"command": command, "stage": stage, **payload},
-                )
-            db.execute("ROLLBACK TO intent")
-            db.execute("RELEASE intent")
+                db.execute("RELEASE reservations")
+                return event
+            db.execute("ROLLBACK")  # the intent goes with its refused reservations
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO refusals (at, stage, class, reason, correlation_id) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -658,14 +764,28 @@ class CampaignLedger:
     def record(
         self, kind: str, *, actor: str, correlation_id: str, payload: Mapping[str, Any]
     ) -> dict[str, Any]:
-        """Commit the outcome of one intended action, or its refusal."""
-        if kind == INTENDED:
-            raise LedgerRefused("an outcome is never another intent")
+        """Commit the one outcome of an unfinished intent: its command's own kind when applied,
+        ``NOT_APPLIED`` / ``ACTION_REFUSED`` when proven not to have changed anything."""
+        if kind in (*OPENING, HOLD):
+            raise LedgerRefused("an outcome is never an intent, a grant or a hold")
         with self._transaction() as db:
             campaign = self._verify(db)
             if correlation_id not in campaign.unfinished():
                 raise LedgerRefused("an outcome answers one unfinished intent of this campaign")
             return self._append(db, kind, actor, correlation_id, payload)
+
+    def hold(self, *, actor: str, correlation_id: str, reason: str) -> dict[str, Any]:
+        """Put the campaign on HOLD for one command whose effect is ambiguous: no outcome is ever
+        guessed for it, and the campaign accepts no further intent."""
+        with self._transaction() as db:
+            campaign = self._verify(db)
+            if any(h["correlation_id"] == correlation_id for h in campaign.held()):
+                return next(
+                    dict(e)
+                    for e in campaign.events
+                    if e["kind"] == HOLD and e["correlation_id"] == correlation_id
+                )
+            return self._append(db, HOLD, actor, correlation_id, {"reason": reason})
 
 
 def approval_phrase(campaign: Campaign, command: str, subject: str = "") -> str:

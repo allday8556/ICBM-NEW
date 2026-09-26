@@ -73,6 +73,7 @@ class RequestRecord:
     requested_at: datetime
     expires_at: datetime
     consumed_by: str | None
+    correlation_id: str
 
 
 @dataclass(frozen=True)
@@ -136,10 +137,19 @@ class CaptureStore:
         return request_id
 
     def requests(self, campaign_id: str) -> tuple[RequestRecord, ...]:
+        return self._requests(CaptureRequest.campaign_id == campaign_id)
+
+    def request_by_correlation(self, correlation_id: str) -> RequestRecord | None:
+        """The request one harness command wrote, if it wrote one: owner truth for its
+        reconciliation."""
+        found = self._requests(CaptureRequest.correlation_id == correlation_id)
+        return found[0] if found else None
+
+    def _requests(self, where: object) -> tuple[RequestRecord, ...]:
         with self._db.read() as session:
             rows = session.scalars(
                 select(CaptureRequest)
-                .where(CaptureRequest.campaign_id == campaign_id)
+                .where(where)  # type: ignore[arg-type]
                 .order_by(CaptureRequest.requested_at, CaptureRequest.request_id)
             ).all()
             out = []
@@ -159,6 +169,7 @@ class CaptureStore:
                         row.requested_at,
                         row.expires_at,
                         consumer,
+                        row.correlation_id,
                     )
                 )
             return tuple(out)
@@ -316,19 +327,56 @@ class CaptureStore:
     ) -> ValidationSample:
         """A new immutable ValidationSample from one captured candidate of ``campaign_id``,
         stored through P2."""
+        sample = self.prepare_sample(
+            collection_run_id, campaign_id=campaign_id, scope=scope, expected=expected
+        )
+        self.store_sample(
+            collection_run_id,
+            sample,
+            campaign_id=campaign_id,
+            stored_by=stored_by,
+            correlation_id=correlation_id,
+        )
+        return sample
+
+    def prepare_sample(
+        self,
+        collection_run_id: str,
+        *,
+        campaign_id: str,
+        scope: OperatorScope,
+        expected: dict[str, object],
+    ) -> ValidationSample:
+        """Cut the sample in memory and store nothing: its digest is known before the harness
+        reserves the command that stores it."""
         view = self.candidate(collection_run_id)
         if view.campaign_id != campaign_id:
             raise _capture_refused("a campaign finalizes only its own capture candidates")
         if view.candidate is None:
             raise _capture_refused("only a captured candidate becomes a sample")
         try:
-            sample = sample_from_candidate(view.candidate, scope, expected)
+            return sample_from_candidate(view.candidate, scope, expected)
         except CaptureRefused as refused:
             raise _capture_refused(str(refused)) from None
+
+    def store_sample(
+        self,
+        collection_run_id: str,
+        sample: ValidationSample,
+        *,
+        campaign_id: str,
+        stored_by: str,
+        correlation_id: str,
+    ) -> None:
+        """Store a prepared sample through P2, only for its own candidate and campaign."""
+        view = self.candidate(collection_run_id)
+        if view.campaign_id != campaign_id:
+            raise _capture_refused("a campaign finalizes only its own capture candidates")
+        if view.candidate is None or sample.provenance.get("candidate") != view.candidate.digest:
+            raise _capture_refused("a sample is stored only for the candidate it was cut from")
         self._validation.save_sample(
             sample,
             supplier_key=view.supplier_key,
             stored_by=stored_by,
             correlation_id=correlation_id,
         )
-        return sample

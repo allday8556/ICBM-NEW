@@ -1,12 +1,17 @@
 """Typed, immutable Phase C stage grants (Issue #110; review `5313663701` B2).
 
 A stage opens only through a grant: one JSON object whose every field is fixed. The architect's
-authorization comment carries it, and the operator copies it verbatim into the campaign root. It
-names the campaign, its exact code SHA, the stage, the authorization comment id and the stage's
-scope:
+authorization carries it, and the operator copies it verbatim into a file. The harness reads that
+file's bytes once: the approval phrase names the SHA-256 of exactly those bytes, ``check_grant``
+parses exactly those bytes, and the ledger records exactly those bytes. A grant names the
+campaign, its exact code SHA, the stage, its authorization and the stage's scope:
 
 * **C0**: the frozen C0 ceilings. Its authorization is pinned in this audited code
   (``issuecomment-5826469852``); a campaign is created only under it.
+
+An authorization is an opaque GitHub anchor, ``issuecomment-<id>`` or ``pullrequestreview-<id>``:
+it is used once per campaign and never compared by size. The order of the stages is the
+campaign ledger's own: C0 → C1 → C2 → C3 → C4, once each.
 * **C1**: the supplier, exactly two distinct target digests and the frozen C1 ceilings.
 * **C2**: the exact EPR, sample set and PASS ValidationRun this campaign's own C1 recorded, and
   the window size K = 3.
@@ -14,9 +19,9 @@ scope:
 * **C4**: that same window, for end and close.
 
 ``check_grant`` refuses anything else: another campaign or SHA, a skipped or repeated stage, an
-authorization that is not strictly newer than every grant before it, extra or missing fields,
-other ceilings, or a scope this campaign's own ledger does not already hold. The ledger then
-stores the grant as it was checked; the ``grants`` table enforces the order again.
+authorization already used, extra or missing fields, other ceilings, or a scope this campaign's
+own ledger does not already hold. The ``grants`` table enforces the order and the single use
+again.
 """
 
 import re
@@ -24,7 +29,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from scripts.phasec.ceilings import CEILINGS, STAGES
-from scripts.phasec.ledger import AUTHORIZATION, Campaign, LedgerRefused, sha256
+from scripts.phasec.ledger import (
+    AUTHORIZATION,
+    Campaign,
+    LedgerRefused,
+    bytes_digest,
+    canonical,
+    parse_grant,
+)
 
 GRANT_SCHEMA = "icbm-adaptive-phase-c-grant/v1"
 C0_AUTHORIZATION = "issuecomment-5826469852"  # Issue #110: the C0 tooling authorization
@@ -53,16 +65,17 @@ class GrantRefused(LedgerRefused):
         super().__init__(message, code="PHASE_C_GRANT_REFUSED")
 
 
-def grant_digest(grant: Mapping[str, Any]) -> str:
-    return sha256(grant)
+def grant_digest(raw: bytes) -> str:
+    """The SHA-256 of a grant's exact bytes: what the approval phrase names and the ledger keeps."""
+    return bytes_digest(raw)
 
 
-def c0_grant(campaign_id: str, code_sha: str, authorization: str) -> dict[str, Any]:
+def c0_grant(campaign_id: str, code_sha: str, authorization: str) -> bytes:
     if authorization != C0_AUTHORIZATION:
         raise GrantRefused(
             f"a campaign is created only under the C0 authorization {C0_AUTHORIZATION}"
         )
-    return {
+    grant = {
         "schema": GRANT_SCHEMA,
         "campaign_id": campaign_id,
         "code_sha": code_sha,
@@ -70,6 +83,7 @@ def c0_grant(campaign_id: str, code_sha: str, authorization: str) -> dict[str, A
         "authorization": authorization,
         "scope": {"ceilings": dict(CEILINGS["C0"])},
     }
+    return canonical(grant).encode("utf-8")
 
 
 def _one(campaign: Campaign, kind: str, **match: Any) -> Mapping[str, Any] | None:
@@ -81,8 +95,9 @@ def _one(campaign: Campaign, kind: str, **match: Any) -> Mapping[str, Any] | Non
     return found[-1] if found else None
 
 
-def check_grant(campaign: Campaign, grant: Any) -> dict[str, Any]:
-    """The grant exactly as it may be recorded for ``campaign``'s next stage, or a refusal."""
+def check_grant(campaign: Campaign, raw: bytes) -> dict[str, Any]:
+    """The grant these exact bytes hold, if they may be recorded for ``campaign``'s next stage."""
+    grant = parse_grant(raw)
     if not isinstance(grant, dict) or set(grant) != FIELDS:
         raise GrantRefused(f"a grant holds exactly {sorted(FIELDS)}")
     if grant["schema"] != GRANT_SCHEMA:
@@ -101,14 +116,8 @@ def check_grant(campaign: Campaign, grant: Any) -> dict[str, Any]:
         raise GrantRefused(
             "a grant names its authorization as issuecomment-<id> or pullrequestreview-<id>"
         )
-    kind, number = authorization.split("-")
-    if any(
-        g.authorization.split("-")[0] == kind and int(number) <= int(g.authorization.split("-")[1])
-        for g in campaign.grants.values()
-    ):
-        raise GrantRefused(
-            "a grant's authorization is newer than every grant before it of the same kind"
-        )
+    if any(authorization == g.authorization for g in campaign.grants.values()):
+        raise GrantRefused("an authorization opens one stage of a campaign, once")
     scope = grant["scope"]
     if not isinstance(scope, dict) or set(scope) != SCOPE_FIELDS[stage]:
         raise GrantRefused(f"a {stage} scope holds exactly {sorted(SCOPE_FIELDS[stage])}")

@@ -9,6 +9,7 @@ from app.db.base import Base
 from app.db.types import UTCDateTime
 
 CANDIDATE_STATUSES = ("CAPTURED", "REFUSED")
+COMMAND_OUTCOMES = ("APPLIED", "RECOVERED", "NOT_APPLIED")
 REQUEST_MAX_HOURS = 24
 
 
@@ -81,3 +82,36 @@ class CaptureCandidateRecord(Base):
     candidate_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     refusal: Mapped[str | None] = mapped_column(Text, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class PhaseCCommand(Base):
+    """One Phase C harness command, reserved in the data root under its stable correlation before
+    it changes anything here. Never updated or deleted."""
+
+    __tablename__ = "adaptive_phase_c_commands"
+    __table_args__ = (
+        Index("ix_adaptive_phase_c_commands_campaign_id", "campaign_id"),
+        CheckConstraint("correlation_id <> ''", name="correlation_present"),
+        CheckConstraint("campaign_id <> ''", name="campaign_present"),
+        CheckConstraint("command <> ''", name="command_present"),
+    )
+
+    correlation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(64))
+    command: Mapped[str] = mapped_column(String(24))
+    reserved_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class PhaseCCommandResult(Base):
+    """What one reserved command did, proven against owner truth: at most one per command."""
+
+    __tablename__ = "adaptive_phase_c_command_results"
+    __table_args__ = (
+        CheckConstraint("outcome IN ('APPLIED', 'RECOVERED', 'NOT_APPLIED')", name="outcome_valid"),
+    )
+
+    correlation_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("adaptive_phase_c_commands.correlation_id"), primary_key=True
+    )
+    outcome: Mapped[str] = mapped_column(String(12))
+    settled_at: Mapped[datetime] = mapped_column(UTCDateTime)

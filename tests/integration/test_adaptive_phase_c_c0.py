@@ -20,6 +20,7 @@ this proves:
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import shutil
@@ -38,6 +39,7 @@ import app.collect.adaptive_capture.runner as capture_runner
 import app.collect.adaptive_shadow.runner as shadow_runner
 import scripts.phasec.harness as harness_module
 from app.collect.adaptive.validation import ValidationRun, Verdict, freshness_tuple
+from app.collect.adaptive_capture.commands import PhaseCCommandStore
 from app.collect.adaptive_capture.store import CaptureStore
 from app.collect.adaptive_shadow.compare import Comparison
 from app.collect.adaptive_shadow.evidence import RunVerdict
@@ -447,8 +449,9 @@ class Harness:
             "scope": {"ceilings": dict(CEILINGS[stage]), **scope},
         }
         path = self.campaign_root.parent / f"{self.campaign_id}-{stage}-{authorization}.json"
-        path.write_text(json.dumps(grant), "utf-8")
-        subject = f"{stage} GRANT {grant_digest(grant)[:16]}"
+        raw = json.dumps(grant).encode("utf-8")
+        path.write_bytes(raw)
+        subject = f"{stage} GRANT {grant_digest(raw)[:16]}"
         return path, approval_phrase(self.ledger().campaign(), "authorize-stage", subject)
 
     def authorize(self, stage: str, authorization: str, **scope: Any) -> tuple[int, Any]:
@@ -639,8 +642,8 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
         "next stage of this campaign is C1",
     )
     refused(
-        harness.authorize("C1", "issuecomment-1111111", **c1_scope(target)),
-        "newer than every grant",
+        harness.authorize("C1", C0, **c1_scope(target)),
+        "opens one stage of a campaign, once",
     )
     refused(
         harness.authorize("C1", C1_AUTH, supplier_key=SUPPLIER_KEY, target_digests=[target]),
@@ -661,19 +664,22 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
         harness("authorize-stage", "--grant", str(path), approve=harness.phrase("authorize-stage")),
         "approval phrase",
     )
-    # The grant file is read once: the phrase is checked against, and the ledger records, it.
+    # The grant file is read once: the phrase names, the check parses and the ledger records
+    # exactly those bytes.
     reads: list[Path] = []
-    real_load = harness_module._load_grant
+    real_read = harness_module._read_grant
 
-    def counted(grant_path: Path) -> Any:
+    def counted(grant_path: Path) -> bytes:
         reads.append(grant_path)
-        return real_load(grant_path)
+        return real_read(grant_path)
 
-    monkeypatch.setattr(harness_module, "_load_grant", counted)
+    monkeypatch.setattr(harness_module, "_read_grant", counted)
     assert harness.ledger().campaign().current_stage == "C0"
     code, result = harness.authorize("C1", C1_AUTH, **c1_scope(target))
     assert code == EXIT_OK, result
     assert len(reads) == 1, reads
+    recorded = harness.ledger().campaign().grants["C1"]
+    assert recorded.digest == hashlib.sha256(reads[0].read_bytes()).hexdigest()
     refused(harness.authorize("C1", "issuecomment-5900000009", **c1_scope(target)), "next stage")
     code, result = harness(
         "request-capture", "--supplier", SUPPLIER_KEY, "--target-url", PRODUCT_URL, approve="no"
@@ -702,7 +708,8 @@ def test_the_c1_grant_bounds_every_capture_request_by_its_frozen_ceilings(
     counts = harness.ledger().counts("C1")
     assert (counts["collection_submissions"], counts["target_identities"]) == (1, 1)
     assert count(config, "adaptive_capture_requests") == 1
-    # An owner refusal answers its intent, and the spent reservation stays spent.
+    # An owner refusal is proven NOT_APPLIED: it answers its intent and releases its reservation
+    # for a safe retry.
     other = Harness(
         harness.campaign_root.parent / "second",
         harness.data_root,
@@ -726,8 +733,10 @@ def test_the_c1_grant_bounds_every_capture_request_by_its_frozen_ceilings(
     kinds = [e["kind"] for e in other.ledger().events()]
     assert kinds[-2:] == ["INTENDED", "ACTION_REFUSED"]
     assert other.ledger().campaign().unfinished() == []
+    assert other.ledger().counts("C1")["collection_submissions"] == 0
+    assert other.request()[0] == EXIT_OK
     refused(other.request(), "requested once")
-    assert count(config, "adaptive_capture_requests") == 1
+    assert count(config, "adaptive_capture_requests") == 2
 
 
 def test_the_c1_grant_refuses_a_target_it_does_not_name(
@@ -744,22 +753,160 @@ def test_the_c1_grant_refuses_a_target_it_does_not_name(
     assert count(config, "adaptive_capture_requests") == 0
 
 
-def test_an_unfinished_action_stops_the_campaign_fail_closed(
-    harness: Harness, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+class Crash(BaseException):
+    """The process dying at one point of a command: nothing after it runs."""
+
+
+def _crash_after(target: Any, name: str) -> Callable[..., Any]:
+    real = getattr(target, name)
+
+    def crashing(*args: Any, **kwargs: Any) -> Any:
+        real(*args, **kwargs)
+        raise Crash(name)
+
+    return crashing
+
+
+CRASH_POINTS = {
+    # after the campaign ledger's intent, before the data root reserved the command
+    "intent": (CampaignLedger, "intend", False),
+    # after the data-root reservation, before the change
+    "reserved": (PhaseCCommandStore, "reserve", False),
+    # after the change, before the data root settled it
+    "changed": (CaptureStore, "request", True),
+    # after the data root settled it, before the ledger's outcome
+    "settled": (PhaseCCommandStore, "settle", True),
+}
+
+
+@pytest.mark.parametrize("point", CRASH_POINTS)
+def test_a_crashed_command_is_reconciled_from_owner_truth(
+    harness: Harness,
+    config: AppConfig,
+    clock: FakeClock,
+    shop: FakeGateway,
+    monkeypatch: pytest.MonkeyPatch,
+    point: str,
+) -> None:
+    # Follow-up to 5313663701 B4: a command without a result is never bypassed by starting over;
+    # after a restart it is answered from owner truth.
+    target, name, applied = CRASH_POINTS[point]
+    assert harness.authorize("C1", C1_AUTH, **c1_scope(harness.target()))[0] == EXIT_OK
+    with monkeypatch.context() as crash:
+        crash.setattr(target, name, _crash_after(target, name))
+        with pytest.raises(Crash):
+            harness.request()
+    (intent,) = [e for e in harness.ledger().events() if e["kind"] == "INTENDED"]
+    correlation = intent["correlation_id"]
+    code, status = harness("status", "--supplier", SUPPLIER_KEY)  # the restart reconciles
+    assert code == EXIT_OK, status
+    assert status["unfinished_actions"] == [] and status["hold"] == []
+    assert status["unresolved_commands"] == []
+    answer = harness.ledger().events()[-1]
+    assert answer["correlation_id"] == correlation, "one stable identity, intent to answer"
+    if applied:
+        assert answer["kind"] == "REQUEST_CAPTURE" and answer["payload"]["recovered"] is True
+        with container(config, clock, shop) as app:
+            request = app.capture_store.request_by_correlation(correlation)
+            assert request is not None and request.request_id == answer["payload"]["request_id"]
+            record = app.phase_c_commands.command(correlation)
+            assert record is not None and record.outcome in {"APPLIED", "RECOVERED"}
+        assert count(config, "adaptive_capture_requests") == 1
+        refused(harness.request(), "requested once")  # never a second change
+    else:
+        assert answer["kind"] == "NOT_APPLIED"
+        assert count(config, "adaptive_capture_requests") == 0
+        assert harness.ledger().counts("C1")["collection_submissions"] == 0, "released"
+        assert harness.request()[0] == EXIT_OK, "a proven NOT_APPLIED command is safely retried"
+    assert count(config, "adaptive_capture_requests") == 1
+
+
+def test_a_new_campaign_cannot_walk_around_another_campaigns_unresolved_command(
+    harness: Harness,
+    config: AppConfig,
+    environ: dict[str, str],
+    clock: FakeClock,
+    shop: FakeGateway,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert harness.authorize("C1", C1_AUTH, **c1_scope(harness.target()))[0] == EXIT_OK
+    with monkeypatch.context() as crash:
+        crash.setattr(CaptureStore, "request", _crash_after(CaptureStore, "request"))
+        with pytest.raises(Crash):
+            harness.request()
+    fresh = Harness(
+        tmp_path_factory.mktemp("campaign-fresh") / "campaign",
+        config.data_dir,
+        environ,
+        clock,
+        shop,
+        campaign_id="phase-c-synthetic-fresh",
+    )
+    fresh.init()
+    assert fresh.authorize("C1", C1_AUTH, **c1_scope(fresh.target()))[0] == EXIT_OK
+    refused(fresh.request(), f"campaign {CAMPAIGN} has an unresolved Phase C command")
+    assert count(config, "adaptive_capture_requests") == 1
+    # Only the owning campaign reconciles it; then the data root is clear again.
+    assert harness("status", "--supplier", SUPPLIER_KEY)[0] == EXIT_OK
+    assert fresh.request()[0] == EXIT_OK
+    assert count(config, "adaptive_capture_requests") == 2
 
-    def crash(*_: Any, **__: Any) -> str:
-        raise RuntimeError("the process died between the intent and the outcome")
 
-    monkeypatch.setattr(CaptureStore, "request", crash)
-    with pytest.raises(RuntimeError):
-        harness.request()
-    monkeypatch.undo()
+def test_an_ambiguous_command_holds_its_campaign_and_every_campaign_on_the_data_root(
+    harness: Harness,
+    config: AppConfig,
+    environ: dict[str, str],
+    clock: FakeClock,
+    shop: FakeGateway,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert harness.authorize("C1", C1_AUTH, **c1_scope(harness.target()))[0] == EXIT_OK
+    with monkeypatch.context() as crash:
+        crash.setattr(CaptureStore, "request", _crash_after(CaptureStore, "request"))
+        with pytest.raises(Crash):
+            harness.request()
+    with monkeypatch.context() as unprovable:
+        unprovable.setitem(
+            harness_module.PROBES,
+            "request-capture",
+            lambda *_: harness_module.Proof("AMBIGUOUS", None, "synthetic: owner truth unreadable"),
+        )
+        code, status = harness("status", "--supplier", SUPPLIER_KEY)
+    assert code == EXIT_OK and status["hold"][0]["reason"].startswith("synthetic")
+    assert len(status["unresolved_commands"]) == 1, "the data root keeps it unresolved"
+    refused(harness.request(), "on HOLD")
+    # Owner truth readable again: a HOLD is never lifted by a guess.
+    assert harness("status", "--supplier", SUPPLIER_KEY)[1]["hold"]
+    refused(harness.request(), "on HOLD")
+    for suffix in ("b", "c"):
+        other = Harness(
+            tmp_path_factory.mktemp(f"campaign-{suffix}") / "campaign",
+            config.data_dir,
+            environ,
+            clock,
+            shop,
+            campaign_id=f"phase-c-synthetic-{suffix}",
+        )
+        other.init()
+        assert other.authorize("C1", C1_AUTH, **c1_scope(other.target()))[0] == EXIT_OK
+        refused(other.request(), "has an unresolved Phase C command")
+    assert count(config, "adaptive_capture_requests") == 1
+
+
+def test_a_restored_older_ledger_cannot_hide_a_command_from_the_data_root(
+    harness: Harness, config: AppConfig
+) -> None:
+    assert harness.authorize("C1", C1_AUTH, **c1_scope(harness.target()))[0] == EXIT_OK
+    ledger_file = harness.ledger().path
+    older = ledger_file.read_bytes()
+    assert harness.request()[0] == EXIT_OK
+    ledger_file.write_bytes(older)  # a consistent, older copy of the campaign's own ledger
     code, status = harness("status", "--supplier", SUPPLIER_KEY)
-    assert code == EXIT_OK and len(status["unfinished_actions"]) == 1
-    refused(harness.request(), "unfinished action")
-    assert count(config, "adaptive_capture_requests") == 0
+    assert code == EXIT_OK and "does not know" in status["hold"][0]["reason"]
+    refused(harness.request(), "on HOLD")
+    assert count(config, "adaptive_capture_requests") == 1
 
 
 def test_the_harness_runs_c1_to_c4_end_to_end_on_a_synthetic_root(
