@@ -8,6 +8,10 @@ Status: **ACCEPTED** 2026-09-19. This is PR-A of Issue #89 (kickoff `5740316498`
 - It is extended by the architect decision `5749504280` (PR-E review `5260076445`): §26 and invariants M5-25–M5-27 add the REGISTER execution-scope send brake, the one owner PR-E was missing, together with the migration that owner needs.
 - It is extended by the architect decision `5751540323` (PR-F review `5261280389`): §27 and invariant M5-30 add the durable registration preparation — the operator's authored inputs, append-only, with the provenance of the Snapshot a revision froze — together with the migration that owner needs (`0018`).
 - It is amended by the architect decisions `5765557497` and `5765663972`: §17.1 adopts `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` alone, bounded, with no durable upload owner and no LIVE authority.
+- It is amended by the architect decision `5845062336` (design `5845034124`, design authorization `5844955173`, after the Gate 3 area 4 closeout `5844770185`):
+  - §28 and invariants M5-31–M5-36 replace, for SmartStore, the unreachable "retry after proven remote absence" path with positive-only reconcile, recovered provider identity, durable reconcile checks and one total, disjoint registration read state;
+  - §10, §11, §17.2 and §22 are narrowed where they read on it;
+  - the amendment is contract only: it authorizes no schema, migration, runtime code, endpoint adoption, provider call, LIVE change or canary.
 
 Apart from the two migrations §26 and §27 name, it authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call; the single endpoint adoption it authorizes is the bounded IMAGE UPLOAD of §17.1, which authorizes no real upload. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
 
@@ -250,18 +254,18 @@ UNKNOWN
    REVIEW_REQUIRED, unresolved
 ```
 
-- CREATE is retried only after `NOT_APPLIED_PROVEN` is established or remote absence is deterministically proven under the listing identity.
+- CREATE is retried only after `NOT_APPLIED_PROVEN` is established or remote absence is deterministically proven under the listing identity. **For SmartStore no lookup can prove remote absence (§17.2), so only later machine proof of non-application re-opens a CREATE (§28.3).** A lookup is positive evidence only (§28.2).
 - **Unresolved ambiguity stays `UNKNOWN` with a `REVIEW_REQUIRED` workflow overlay. It is never silently `FAILED`.** `FAILED` requires `NOT_APPLIED_PROVEN`.
 
 **Who may resolve an UNKNOWN (review `5255157251`, B3).** `resolved_by = USER` may record a workflow or operator decision, or acknowledge and accept evidence. It is never the evidence:
 - **An operator assertion alone never establishes `NOT_APPLIED_PROVEN` or remote absence, and never releases an unresolved UNKNOWN conflict scope.**
-- **Changing `UNKNOWN` to `NOT_APPLIED_PROVEN` or absent requires evidence that satisfies the adopted, operation-specific proof contract**: a read-back, a lookup by the listing identity, transmission-precluded evidence, or another explicitly reviewed machine or provider proof.
+- **Changing `UNKNOWN` to `NOT_APPLIED_PROVEN` or absent requires evidence that satisfies the adopted, operation-specific proof contract**: a read-back under the adopted contract, transmission-precluded evidence, or another explicitly reviewed machine or provider proof. A lookup by the listing identity is positive evidence only: it may prove that a product exists (§28.2), never that one is absent.
 - **The operator may be the actor who records or accepts that evidence, but is not itself the evidence.** A resolution record always references the evidence it relies on.
 
 ```text
 resolution evidence                                       may establish NOT_APPLIED_PROVEN / remote absence
 provider read-back under the adopted contract             yes
-provider lookup by the listing identity                   yes
+provider lookup by the listing identity (positive only)   no
 transmission-precluded evidence (no transport handoff)    yes
 another explicitly reviewed machine/provider proof        yes
 operator assertion alone (resolved_by = USER)             no
@@ -310,6 +314,7 @@ A registration succeeds only when **all** hold:
 | required attributes | an exact, policy-defined comparison |
 
 - The read-back normalizer and the comparison contract carry versions, and each verification records them.
+- **A provider identity recovered by positive reconcile (§28.2) is a presence proof, not a success.** It is read back and compared exactly like one returned by the CREATE response.
 - **`MarketplaceRegistration` and `MarketplaceRegistrationItem` are the durable result after verification passes.** They are never created or updated before, and they are never the source of the comparison.
 - Provider option order or option-name normalization never breaks correspondence: `registration_item_key` does.
 
@@ -452,6 +457,14 @@ conflict scope closed, and is never blindly replayed.
 new official evidence resolves those blockers, and `product_registration.write` stays `UNVERIFIED`
 (§16). This subsection records a verdict. It relaxes no rule of §7, §10 or §16.
 
+Gate 3 area 4 re-reviewed the provider evidence and confirmed the verdict (Issue #89 `5844652548`, closeout
+`5844770185`). The seller management code is now **officially non-unique**, and an incident response that
+never arrived is officially not proof of non-application. §28 therefore does not try to satisfy this verdict;
+it adopts a strategy that never needs remote absence. The verdict itself stands unchanged. **No lookup result,
+seller-side code, grant, proof or approval ever becomes remote-absence evidence for SmartStore.** For CREATE,
+§17's "idempotency and read-back behaviour" adoption requirement is met by recording the provider's actual
+(absent) idempotency and binding the endpoint to §28's never-resend rule — never by assuming idempotency.
+
 ### 18. AI is optional
 
 - **M5 registers with no AI provider configured.** An operator-confirmed or manual category or field value completes the first vertical without AI.
@@ -485,6 +498,7 @@ Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is
 - The Registration Management surface displays **server-owned** state only: the selected Product and Items, listing shape, target account, category and required-field state, each Item's selling price and price basis from its `PricingSnapshot`, base, pricing and preflight status with every reason code, selected publication images and QA, the Snapshot identity, the Intent state (`PREPARED | SENT | CONFIRMED | UNKNOWN | FAILED`), the reconcile and read-back result, and the marketplace identity after verification.
 - The UI never recomputes price or readiness, never turns `UNKNOWN` into `FAILED` for display, **never retries CREATE directly**, never invents category, notice or option compatibility, and **never shows a 2xx response as `CONFIRMED`** before server read-back verification.
 - A retry or reconcile action appears only when the server contract allows it.
+- **The operator-facing outcome is the §28.5 read state** (등록중, 등록성공, 재확인필요, 등록실패), derived by one server-side partition. Its reconcile action is "등록확인 재시도", a read-only reconcile; there is no "register again" action for 재확인필요.
 - After a reload, the screen reconstructs the same durable Draft, Intent, Attempt and Registration state from the server.
 
 ### 23. The M5 / M6 boundary
@@ -551,6 +565,139 @@ Snapshot provenance                which exact revision, and which fingerprint, 
 - **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). IMAGE UPLOAD adoption adds no operator route or LIVE authority; CREATE and product search remain `NOT_ADOPTED` (§17, §24).
 - **Unowned authoring revisions (architect decision `5800619183`).** No owner exists yet for the category-mapping and detail-composition revisions, so the durable target policy holds both as `null` (ADR-0015 §2) and refuses a client-supplied value. Authoring still proceeds: the authoring metadata of a reviewed category is served with both revisions `null`, and a preparation stores them as `null` exactly — no default, sentinel or stand-in revision is ever created, and the `null` is part of the inputs fingerprint. **The revisions are server-owned** (review `5801915996`): a preparation create or update whose submitted revisions are not **exactly** the account's current target-policy values (`null` included) is refused whole as `REGISTER_AUTHORING_REVISION_NOT_OWNED` (422) and writes nothing. A revision is owner-held only when the target holds one and the authored one equals it exactly; otherwise the candidate preflight reports `AUTHORING_REVISIONS_UNOWNED` (`REVIEW_REQUIRED`), not a missing policy or missing metadata, and evaluates every other rule as before; it is never `READY` while either revision is unowned. **Freezing stays fail-closed**: a Snapshot is refused before anything is persisted, the Snapshot builder refuses a null or unequal revision even if handed a READY result, and the `registration_snapshots` constraints are unchanged, so no Snapshot, batch, Intent or Attempt exists for such a unit. Real owners for both revisions are a later, separately authorized decision.
 
+### 28. Positive-only reconcile, recovered provider identity and the registration read state (architect decision `5845062336`)
+
+Gate 3 area 4 closed `INSUFFICIENT` (Issue #89 `5844652548` → `5844770185`): SmartStore offers no CREATE idempotency key, a response-less or 5xx CREATE is officially not proof of non-application, the seller management code is officially non-unique, the seller-code search is non-exact, and nothing makes a zero-result search authoritative. So **no SmartStore evidence can prove remote absence**, and §10's "retry after proven absence" path cannot exist for this provider. This section replaces that path with a strategy that never needs it. It is based on the design proposal `5845034124` (design authorization `5844955173`) and the three corrections the architect made mandatory in `5845062336`.
+
+#### 28.1 The strategy
+
+```text
+before this amendment    prove remote absence before retry
+this amendment           never resend while the outcome is unknown
+                         + positive-only reconcile
+                         + durable ambiguity isolation
+```
+
+- **This is a deliberate safety-policy change, not a rewording.** It changes nothing in §9 or §10 that forbids a resend: an `UNKNOWN` CREATE is still never resent, and its conflict scope still stays closed.
+- **What changes is how an `UNKNOWN` can end.** It can end on positive evidence that the product exists (§28.2), or on later machine proof that nothing was applied (§28.3). It can never end on evidence of absence, because none exists.
+- **The residual risk is accepted explicitly, never implicitly (§28.7).** A real canary under this contract needs its own recorded acceptance of that risk (ADR-0018 §6.1).
+
+#### 28.2 Positive-only reconcile: presence proof, then content verification
+
+**Presence and success are separate proofs.**
+
+```text
+reconcile result                                   what it proves / what follows
+exactly one exact candidate                        provider-side presence for this Intent; the recovered provider identity is persisted durably; then read-back and Snapshot comparison
+read-back comparison PASS                          CONFIRMED (등록성공)
+read-back comparison MISMATCH                      the provider identity stays durably known; 재확인필요
+more than one exact candidate                      no auto-selection; 재확인필요
+zero candidates                                    remains UNKNOWN (재확인필요); never absence, never a resend
+lookup unavailable, error or quota refusal         nothing is proven; the Intent state is unchanged
+```
+
+- **An exact candidate is a presence proof only under all of these conditions:**
+  - the listing identity is ICBM-generated (§7);
+  - its local uniqueness and non-reuse invariant is proven;
+  - the provider returns exactly one product whose `sellerManagementCode` is exactly equal to it — equality checked locally, never the provider's similar or partial match;
+  - that candidate is read back by its provider product number and carries the same code.
+
+  Presence proves the CREATE applied (`APPLIED_PROVEN`, resolved by the lookup and the read-back) and that the recovered identity belongs to this Intent. **It does not prove registration success.**
+- **Success is still §11 and only §11.** The recovered identity is read back and compared with the immutable `RegistrationSnapshot`. Only a comparison PASS makes the Intent `CONFIRMED` and writes `MarketplaceRegistration`.
+- **A recovered provider identity ends the search.** Once a concrete provider product is durably known for the Intent, later reconciles read back by that identity. They never repeat the seller-code search, and they never replace a known identity with a search result.
+- **Both provider identities are kept.** SmartStore issues an origin-product number and one or more channel-product numbers. Neither is ever lost. Which one `marketplace_product_id` holds canonically, and where the other is stored, is decided by the implementation slice under this rule.
+- **An operator-supplied provider number is only a candidate lookup target.** If the implementation ever accepts one, proof is still provider read-back, exact ICBM identity and Snapshot verification. **The operator's number is never the evidence** (§10, M5-23).
+- **The seller-code search is used for positive reconcile only.** It is never used to authorize a CREATE, and it is never used as duplicate absence (§13, §17.2).
+
+#### 28.3 How an `UNKNOWN` may end, and what may never follow it
+
+- **`UNKNOWN → SENT`** (towards `CONFIRMED` or a read-back mismatch) happens only through the positive reconcile of §28.2, or through a read-back by an already known provider identity.
+- **`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application: transmission-precluded evidence, or another explicitly reviewed machine proof (§10's table). An ordinary definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its own Attempt directly; it never passes through `UNKNOWN`.
+- **No CREATE follows an unresolved `UNKNOWN`:**
+  - `UNKNOWN` cannot open a CREATE Attempt; a CREATE requested for it is refused, for example as `REGISTER_UNKNOWN_REQUIRES_RECONCILE`;
+  - the reconcile path cannot import or call the CREATE sender;
+  - no CREATE grant is issued for it (ADR-0018 §3);
+  - it stays in its blocking conflict scope (§10);
+  - the UI offers no "register again" action for 재확인필요.
+- **A true re-CREATE exists only after machine-proven non-application.** Even then it still needs the existing fresh grant, fresh restore proof and send-time readiness (ADR-0018 §3, §7, §10).
+
+#### 28.4 The durable reconcile-check owner (contract only)
+
+Every reconcile of an Intent, automatic or operator-triggered, is recorded by one owner. The names below are provisional. The table, columns and migration need their own authorization.
+
+```text
+registration reconcile check        append-only, one row per check of one Intent
+  intent_id / seq
+  trigger                           AUTO | OPERATOR | OPERATOR_CANDIDATE
+  started_at / finished_at
+  result                            ZERO | ONE_VERIFIED | ONE_MISMATCH | MULTIPLE | LOOKUP_UNAVAILABLE | ERROR
+  candidate_count
+  evidence_digest                   SHA-256 of the sanitized canonical evidence representation (§15), never of wire bytes
+  next_due_at
+```
+
+- **Single-flight per Intent.** While a check of an Intent is running, no second one starts. A repeated trigger before `next_due_at` coalesces into the pending check; it never multiplies provider reads.
+- **Append-only and protected.** A check is never updated after it finishes and never deleted. It is REGISTER evidence under ADR-0018 §8, and it is retained at least while the ambiguity it concerns is unresolved.
+- **The automatic schedule is bounded and read-only.** It is a finite series of checks, whose exact values are implementation policy, followed by an exception-only operator action.
+  - It consumes a bounded provider-read quota budget of its own.
+  - A `GW.QUOTA_LIMIT` or other rate refusal defers the next check. It never converts the Intent to a failure and never ends its ambiguity.
+  - An exhausted schedule leaves the Intent `재확인필요`.
+- **It decides nothing by itself.** A check records what was observed. The Intent's outcome still moves only through the owners and the rules of §9–§11 and §28.2–§28.3.
+
+#### 28.5 The user-facing registration read state
+
+The operator sees four registration states. They are **one server-side partition** of the durable per-Intent state:
+- the partition is **total** — no durable state is unclassified;
+- it is **disjoint** — no state has two labels;
+- it is derived on read and **never stored** as a second truth, like `PARTIAL` (§12).
+
+```text
+durable per-Intent state                                                           read state
+CONFIRMED                                                                          등록성공
+UNKNOWN, unresolved                                                                재확인필요
+APPLIED_PROVEN with a read-back MISMATCH                                           재확인필요
+SENT + APPLIED_PROVEN + NOT_VERIFIED, within the verification deadline             등록중
+SENT + APPLIED_PROVEN + NOT_VERIFIED, past the verification deadline               재확인필요
+SENT with an Attempt still in flight and no outcome recorded                       등록중
+PREPARED, queued or sendable                                                       등록중
+FAILED with an automatic retry of the same Intent scheduled under §9               등록중
+PREPARED with no transmission and an already-terminal local or pre-send failure    등록실패
+FAILED with no automatic retry scheduled (machine-proven non-application or a       등록실패
+  definitive provider rejection)
+```
+
+- **The verification deadline is a server policy value**, versioned with the partition. It is never UI logic.
+- **Exactly one partition function exists, on the server.** Every screen, card, panel and counter uses it; no JavaScript recalculates a state.
+  - **An unmatched durable state is a defect.** It is refused and surfaced; it is never defaulted to a label.
+  - **Implementation tests must prove** that every valid durable state maps to exactly one label; that a batch's four counts sum exactly to its Intent count; and that boundary transitions (dispatch, outcome, deadline, reconcile) never double-count or drop an Intent.
+- **Batch counters are derived** by registration batch from this partition, never stored. The last confirmation time and the confirmation-attempt count come from §28.4.
+- **The reason shown with a state comes from the owners:** the latest Attempt and outcome, the latest reconcile check, and the verification. It is never UI-local.
+- **The registration status card and its detail panel are Gate-3 visual surfaces.** The lower-right card coexists with the transient toasts; its expanded panel shows each product's name, ICBM seller code, state, reason, request time, last confirmation time, confirmation attempts and action. Both read this partition.
+  - 재확인필요 stays visible after the transient run view is dismissed.
+  - When they are implemented, both join ADR-0018 §9's visual acceptance contract (its required surfaces and state selectors, or their successor). Re-recording them outside that harness does not count.
+- **Only failure is red.** 등록실패 is shown only for machine-proven non-application or a definitive rejection. A timeout, a lost response, an unknown outcome or a zero-result search is never shown as a failure (§22).
+
+#### 28.6 Review items
+
+The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 condition. **No new `ReviewKind` is introduced.**
+
+#### 28.7 The residual risk, and its acceptance gate
+
+> A product may be live in SmartStore after an ambiguous CREATE while ICBM has not yet recovered the provider identity, leaving that listing temporarily outside normal confirmed price/stock monitoring.
+
+- Until positive reconcile succeeds, such a row stays visibly 재확인필요, keeps its conflict scope closed, and never enters normal confirmed-registration operations.
+- **Opening any real canary under this contract requires a separate, explicit user and architect acceptance of this residual risk** (ADR-0018 §6.1), in addition to every other Gate-3 prerequisite.
+
+#### 28.8 What this amendment does not decide or authorize
+
+- **Not decided here:**
+  - the tables, columns, enum spellings and migration of §28.4;
+  - the canonical persistence of the two provider identities;
+  - the automatic schedule and quota values;
+  - the verification deadline value;
+  - the routes and the card's implementation.
+- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile.
+
 ## Invariants
 
 The binding invariants of this ADR, in one place. The contract tests pin this block.
@@ -586,6 +733,12 @@ M5-27  the failure budget counts attempts only after the scope's latest accepted
 M5-28  a scope's budget is counted from that scope's own operation history, and a budget the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is refused
 M5-29  a brake reason is recorded only with the measured class that caused it
 M5-30  the registration preparation stores the operator's authored inputs only, append-only, and a Snapshot proves which exact revision froze it; a job payload is an execution copy and never the authoring source
+M5-31  for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity candidate proves presence and recovers the provider identity; zero, several or no lookup result never proves absence and never authorizes a CREATE
+M5-32  presence is not success: a recovered provider identity is read back and compared with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider identity ends the seller-code search
+M5-33  an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity or later machine proof of non-application; an ordinary definitive rejection is NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN
+M5-34  every reconcile check is recorded append-only, single-flight per Intent, bounded in schedule and provider-read quota, and retained while its ambiguity is unresolved; a quota refusal never fails an Intent
+M5-35  the read states 등록중, 등록성공, 재확인필요 and 등록실패 are one total, disjoint server-side partition of durable per-Intent state, derived and never stored; a batch's four counts sum to its Intents
+M5-36  a timeout, a lost response, an unknown outcome or a zero-result search is never 등록실패; a real canary under §28 needs an explicit user and architect acceptance of its residual risk
 ```
 
 ## Rulings (Issue #89 addendum `5740352676`)
@@ -622,6 +775,7 @@ The eight fail-closed readings submitted in Issue #89 comment `5740555092` were 
   - `docs/acceptance/M5.md` stays `PENDING` and names the bounded acceptance;
   - `docs/ARCHITECTURE.md` and `ROADMAP.md` reference this ADR.
 - **The status documents** (CLAUDE.md §11, `ROADMAP.md` §14, README) name Issue #89 and this ADR as the M5 track. M5 stays CURRENT.
+- **The §28 amendment (`5845062336`)** extends the pinned invariants block to M5-36 and pins §28's rules and the positive-only lookup row of §10's resolution-evidence table. It changes no runtime, schema or adoption.
 
 ## References
 

@@ -441,7 +441,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0018" in _read(canonical), canonical.name
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(G3-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 30)]
+    assert list(invariants) == [f"G3-{n:02d}" for n in range(1, 32)]
     # D1: deny by default, exact scope, terminal states, no blind replay, never UI authority.
     assert "refused before any transmission" in invariants["G3-02"]
     assert "grant of its stage" in invariants["G3-02"]
@@ -459,6 +459,25 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "never a COMPLIANCE PASS" in invariants["G3-13"]
     assert "CREATE and SEARCH stay NOT_ADOPTED" in invariants["G3-14"]
     assert "zero-result search are never proof of remote absence" in invariants["G3-15"]
+    # Architect decision 5845062336: the revised strategy keeps the verdict and adds a risk gate.
+    assert (
+        "stays INSUFFICIENT for idempotent replay and remote-absence proof" in invariants["G3-14"]
+    )
+    for element in (
+        "never resend while the outcome is unknown, positive-only reconcile and durable"
+        " ambiguity isolation",
+        "recorded explicit user and architect acceptance of the residual risk",
+    ):
+        assert element in invariants["G3-30"], element
+    assert "never inherits an earlier visual acceptance" in invariants["G3-31"]
+    strategy = _section(adr, r"^6\.1 The revised safety strategy")
+    for element in (
+        "**This is a deliberate change of the canary's safety strategy, not a rewording.**",
+        "**Opening any real canary under this contract requires a separate, explicit user and"
+        " architect\n  acceptance of this residual risk**",
+        "no path needs remote absence",
+    ):
+        assert element in strategy, element
     # D5-D7: proven prerequisites, not declarations.
     assert "a declaration is not a drill" in invariants["G3-16"]
     # Review 5821787401: the drill proves the REGISTER chain too, and never manufactures it.

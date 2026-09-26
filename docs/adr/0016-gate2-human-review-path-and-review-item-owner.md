@@ -11,6 +11,9 @@ acceptance `5804516180`.
   only while that coverage is current (§4, §7, G2-09, G2-14, G2-19).
 - **Its implementation authority becomes effective only after this exact contract PR is audited,
   independently cross-audited and merged**, and even then only slice by slice (§11).
+- Noted by the architect decision `5845062336` (ADR-0014 §28.6): the registration read state's
+  재확인필요 conditions reuse the existing `REGISTRATION_ERROR` kind. **No new `ReviewKind` is
+  introduced**, and G2-03 is unchanged.
 
 **It authorizes no migration, model, service, route, producer, dashboard counter behaviour, UI
 action, test for new behaviour, ComplianceGate, endpoint adoption or provider call.** Each slice it
@@ -103,6 +106,12 @@ owner**.
 - `FULFILLMENT`
 
 A new kind needs an amendment of this ADR.
+
+`REGISTRATION_ERROR` also carries every 재확인필요 condition of ADR-0014 §28 — an unresolved
+`UNKNOWN`, a read-back mismatch, and an applied-proven outcome whose verification is overdue — as
+conditions of the REGISTER execution producer (architect decision `5845062336`). Adding such a
+condition to that producer is a producer change inside this kind, never a new kind, and it follows
+this ADR's producer, recovery and coverage rules unchanged.
 
 **What every ReviewItem references.** Every ReviewItem references, from its producing owner only:
 - the **kind**;
