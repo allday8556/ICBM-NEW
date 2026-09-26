@@ -585,6 +585,8 @@ class RegistrationExecutionService:
         self._preflight = preflight
         self._sender = sender
         self._readback = readback
+        # The seam of the separately authorized positive-only reconcile slice (ADR-0014 §28.2).
+        # Nothing in this service consults it while product search is NOT_ADOPTED.
         self._lookup = lookup
         self._capability = capability
         self._compare = compare
@@ -880,7 +882,13 @@ class RegistrationExecutionService:
     # ------------------------------------------------------------------ reconcile (§10, §7)
 
     def reconcile(self, intent_id: str, *, correlation_id: str) -> ExecutionResult:
-        """Settle an UNKNOWN with provider evidence only. An operator's word is never evidence."""
+        """Settle an UNKNOWN with provider evidence only. An operator's word is never evidence.
+
+        Only a read-back by an already known provider identity settles it here (ADR-0014 §28.3).
+        The seller-code lookup is never consulted: product search is ``NOT_ADOPTED``, a lookup
+        never proves remote absence, and the positive-only reconcile of §28.2 is a separately
+        authorized slice. Without a known identity the ambiguity stays an ambiguity.
+        """
         intent = self._intent(intent_id)
         if intent.state is not IntentState.UNKNOWN:
             raise ExecutionRefused(
@@ -900,41 +908,14 @@ class RegistrationExecutionService:
                 correlation_id,
                 marketplace_product_id=intent.marketplace_product_id,
             )
-        if not self._lookup.available():
-            # §10 and PR-D: no adopted lookup contract, so the ambiguity stays an ambiguity. The
-            # conflict scope is not freed and nothing is fabricated.
-            raise ExecutionRefused(
-                "REGISTER_RECONCILE_UNAVAILABLE",
-                "no adopted provider lookup can resolve this UNKNOWN; it stays unresolved",
-                error_class=ErrorClass.REVIEW_REQUIRED,
-                details={"intent_id": intent_id, "listing_identity": snapshot.listing_identity},
-            )
-        found = self._lookup.find(
-            marketplace_account_id=intent.marketplace_account_id,
-            listing_identity=snapshot.listing_identity,
-        )
-        product_id = found.get("marketplace_product_id")
-        if product_id:
-            return self._resolve(
-                intent_id,
-                RemoteOutcome.APPLIED_PROVEN,
-                ResolutionEvidence.PROVIDER_LOOKUP,
-                found,
-                correlation_id,
-                marketplace_product_id=str(product_id),
-            )
-        if found.get("absence_proven"):
-            return self._resolve(
-                intent_id,
-                RemoteOutcome.NOT_APPLIED_PROVEN,
-                ResolutionEvidence.PROVIDER_LOOKUP,
-                found,
-                correlation_id,
-            )
+        # §28 and §17.2: no lookup result is evidence here, whatever it says and whether or not a
+        # lookup reports itself available. The conflict scope is not freed, nothing is fabricated,
+        # and no CREATE can follow (§28.3).
         raise ExecutionRefused(
-            "REGISTER_RECONCILE_INCONCLUSIVE",
-            "the lookup proved neither presence nor absence; the Intent stays UNKNOWN",
+            "REGISTER_RECONCILE_UNAVAILABLE",
+            "no admissible provider evidence can resolve this UNKNOWN; it stays unresolved",
             error_class=ErrorClass.REVIEW_REQUIRED,
+            details={"intent_id": intent_id, "listing_identity": snapshot.listing_identity},
         )
 
     def _resolve(
@@ -947,14 +928,11 @@ class RegistrationExecutionService:
         *,
         marketplace_product_id: str | None = None,
     ) -> ExecutionResult:
-        # The resolver names how the evidence was obtained, and the store's own constraint pairs
-        # them: READ_BACK with PROVIDER_READ_BACK, LOOKUP with PROVIDER_LOOKUP. USER is never
-        # used here, because an operator's word is not evidence (§10, B3).
-        resolver = (
-            ResolvedBy.READ_BACK
-            if evidence_kind is ResolutionEvidence.PROVIDER_READ_BACK
-            else ResolvedBy.LOOKUP
-        )
+        # The resolver names how the evidence was obtained: this service resolves by read-back
+        # only, and the store pairs READ_BACK with PROVIDER_READ_BACK. USER is never used here,
+        # because an operator's word is not evidence (§10, B3).
+        assert evidence_kind is ResolutionEvidence.PROVIDER_READ_BACK
+        resolver = ResolvedBy.READ_BACK
         with self._registrations.transaction() as unit:
             settled = unit.resolve_unknown(
                 intent_id,
