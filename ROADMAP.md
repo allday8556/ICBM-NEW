@@ -420,12 +420,12 @@ Before the first vertical closes:
 - the registration list / quick-review panel / full individual editor UX may be frozen and wired to
   **existing server-owned** Product, image, Item, Pricing, readiness, Draft/Preparation and review state;
 - the approved/prototype UX may reserve locations for the existing Canonical v3.1 enrichment tasks,
-  but the production runtime must not expose an actionable AI control until an authoritative server
-  capability/owner exists for that control. If no such owner exists, do not hardcode an
-  "unavailable" reason in JavaScript merely to fill the slot;
+  but the production runtime must not render that AI control at all until an authoritative server
+  capability/owner exists for it. Do not leave a reasonless disabled placeholder, and do not
+  hardcode an "unavailable" reason in JavaScript merely to fill the slot;
 - the baseline authoring path must remain deterministic/manual and work with **no AI provider**.
-  This is not a new strengthening invented by Issue #127: M5 Issue #89 §14 already requires
-  REGISTER correctness with no AI provider configured.
+  This restates repository-canonical M5 requirements: ADR-0014 §18 says M5 registers with no AI
+  provider configured, and `docs/acceptance/M5.md` §2 repeats that AI is outside M5 acceptance.
 
 Do **not** implement an interim AI path merely to make those controls active. In particular, do not
 pull forward AI-provider execution, PromptTemplate runtime execution, SearchSignalAdapter, platform
@@ -686,7 +686,8 @@ AI authoring foundation
   → lock + optimistic concurrency
 
 → SmartStore single-product authoring AI
-  recommended_name
+  recommended_name recommendation generation/presentation
+  (AI_INITIAL automatic application remains deferred to the timing contract below)
   → tag/search-signal candidate registration in ENDPOINT_MATRIX
   → official-evidence review
   → endpoint adoption only if sufficient
