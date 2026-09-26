@@ -880,8 +880,10 @@ EXPECTED_INVARIANTS = {
     " execution copy and never the authoring source",
     # Architect decision 5845062336: positive-only reconcile and the registration read state.
     "M5-31": "for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity"
-    " candidate proves presence and recovers the provider identity; zero, several or no lookup"
-    " result never proves absence and never authorizes a CREATE",
+    " candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the"
+    " provider identity recovered only when that candidate is read back by its provider product"
+    " number and carries the same ICBM sellerManagementCode; zero, several or no lookup result"
+    " never proves presence or absence and never authorizes a CREATE",
     "M5-32": "presence is not success: a recovered provider identity is read back and compared"
     " with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider"
     " identity ends the seller-code search",
@@ -1234,6 +1236,25 @@ RULES["S28 positive-only reconcile, presence is not success, one total read stat
     ),
 )
 
+RULES["S28.2 a search candidate is not presence until its read-back carries the code"] = Rule(
+    (
+        "exactly one exact candidate a presence candidate only (an identity-recovery candidate);"
+        " nothing is proven yet; it is read back by its provider product number",
+        "candidate read-back carries the same ICBM code provider-side presence for this Intent"
+        " (APPLIED_PROVEN); the recovered provider identity is persisted durably; then Snapshot"
+        " comparison",
+        "candidate read-back fails or shows another code no presence proof and no recovered"
+        " identity; remains UNKNOWN (재확인필요); never absence, never a resend",
+        "**An exact search candidate is only a presence candidate. It becomes a presence proof"
+        " only when all of these hold:**",
+        "that candidate is read back by its provider product number and carries the same code",
+    ),
+    (
+        r"(exactly one |an? |the )?exact (ICBM-identity |search )?candidate (itself |alone )?"
+        r"(proves|is|establishes) (provider-side )?(presence|a presence proof)",
+    ),
+)
+
 RULES["S17.2 the verdict stands; adoption never waits for it to be overturned"] = Rule(
     (
         "therefore stay `NOT_ADOPTED`, and `product_registration.write` stays `UNVERIFIED`",
@@ -1274,6 +1295,8 @@ VIOLATIONS = {
     "D2": "After a cooldown, the scope resumes without any operator action.",
     "D3": "A resume rewrites the recorded attempt it forgives.",
     "D4": "The budget is counted across all endpoint groups of the account.",
+    # "S28.2" precedes "S28": the first key that prefixes a rule name supplies its sample.
+    "S28.2": "Exactly one exact candidate proves presence for the Intent.",
     "S28": "A zero-result search proves the product was not created.",
     "S17.2": "CREATE and SEARCH stay NOT_ADOPTED until new official evidence resolves it.",
 }

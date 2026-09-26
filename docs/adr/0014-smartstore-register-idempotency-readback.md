@@ -591,7 +591,9 @@ this amendment           never resend while the outcome is unknown
 
 ```text
 reconcile result                                   what it proves / what follows
-exactly one exact candidate                        provider-side presence for this Intent; the recovered provider identity is persisted durably; then read-back and Snapshot comparison
+exactly one exact candidate                        a presence candidate only (an identity-recovery candidate); nothing is proven yet; it is read back by its provider product number
+candidate read-back carries the same ICBM code     provider-side presence for this Intent (APPLIED_PROVEN); the recovered provider identity is persisted durably; then Snapshot comparison
+candidate read-back fails or shows another code    no presence proof and no recovered identity; remains UNKNOWN (재확인필요); never absence, never a resend
 read-back comparison PASS                          CONFIRMED (등록성공)
 read-back comparison MISMATCH                      the provider identity stays durably known; 재확인필요
 more than one exact candidate                      no auto-selection; 재확인필요
@@ -599,7 +601,7 @@ zero candidates                                    remains UNKNOWN (재확인필
 lookup unavailable, error or quota refusal         nothing is proven; the Intent state is unchanged
 ```
 
-- **An exact candidate is a presence proof only under all of these conditions:**
+- **An exact search candidate is only a presence candidate. It becomes a presence proof only when all of these hold:**
   - the listing identity is ICBM-generated (§7);
   - its local uniqueness and non-reuse invariant is proven;
   - the provider returns exactly one product whose `sellerManagementCode` is exactly equal to it — equality checked locally, never the provider's similar or partial match;
@@ -736,7 +738,7 @@ M5-27  the failure budget counts attempts only after the scope's latest accepted
 M5-28  a scope's budget is counted from that scope's own operation history, and a budget the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is refused
 M5-29  a brake reason is recorded only with the measured class that caused it
 M5-30  the registration preparation stores the operator's authored inputs only, append-only, and a Snapshot proves which exact revision froze it; a job payload is an execution copy and never the authoring source
-M5-31  for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity candidate proves presence and recovers the provider identity; zero, several or no lookup result never proves absence and never authorizes a CREATE
+M5-31  for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the provider identity recovered only when that candidate is read back by its provider product number and carries the same ICBM sellerManagementCode; zero, several or no lookup result never proves presence or absence and never authorizes a CREATE
 M5-32  presence is not success: a recovered provider identity is read back and compared with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider identity ends the seller-code search
 M5-33  an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity or later machine proof of non-application; an ordinary definitive rejection is NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN
 M5-34  every reconcile check is recorded append-only, single-flight per Intent, bounded in schedule and provider-read quota, and retained while its ambiguity is unresolved; a quota refusal never fails an Intent
