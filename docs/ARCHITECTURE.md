@@ -134,6 +134,64 @@ The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readb
 - An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 - **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
 
+#### Registration authoring and AI boundary
+
+Issue #127 records the sequencing clarification for the Registration Management redesign.
+
+The operator surface may have three depths — a list for batch-oriented work, a quick-review panel,
+and a full one-product editor — but **screen depth does not create new truth owners**. The full editor
+must read/write through the existing Product, image, Item/Pricing, readiness and REGISTER owners. It
+must not introduce a parallel "edited product" database that copies ProductFacts or marketplace
+state.
+
+The first-vertical authoring path is deterministic/manual and remains fully usable with every AI
+capability unavailable. This restates repository-canonical M5 requirements: ADR-0014 §18 says M5
+registers with no AI provider configured, and `docs/acceptance/M5.md` §2 keeps AI outside M5
+acceptance. It is not a new AI availability requirement introduced here.
+
+Before that vertical is accepted, the approved/prototype UX may reserve an AI control's final
+position, but the production runtime must not render that control at all until an authoritative
+server capability/owner exists. A disabled placeholder with no authoritative reason is not a valid
+runtime state. If no server owner can state why the capability is unavailable, the client must not
+invent or hardcode that reason. The UI must not manufacture a result, call an unadopted platform
+endpoint, or create an interim client-owned enrichment store merely to make the control active.
+
+When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
+Issue #30 contracts:
+- tasks remain independent (`recommended_name`, `recommended_tags`, category validation,
+  required-option mapping and fact review), with platform-specific name/tag projections where the
+  canonical contract already defines them;
+- runtime prompt composition remains persisted `ROLE + PlatformPolicy + PROMPT task`, through the
+  ADR-0012 provider-neutral AI port;
+- `AI_UNREVIEWED` stays visible but is not itself a registration blocker;
+- final user-approved values use the canonical `field × marketplace × account` lock boundary, and
+  optimistic-concurrency mismatches are skipped rather than overwritten;
+- the storage scope of an AI recommendation/cache is decided by its implementation contract and is
+  **not** inferred from the final-value lock scope;
+- Product-information notice AI may validate/normalize/flag supported facts but never invents a
+  missing legal/source fact;
+- a platform search/tag/metadata signal enters only through an adopted platform contract and the
+  appropriate adapter. SearchSignalAdapter is not a bypass around the endpoint registry. For an
+  endpoint not yet represented in the matrix, the order is candidate registration → official
+  evidence review → adoption only if sufficient → adapter implementation;
+- efficacy/functionality/target expressions reach final tags only when the deterministic evidence
+  and platform-policy requirements of Canonical v3.1 §7.8 are satisfied. AI is not the final policy
+  owner.
+
+**AI_INITIAL timing stays unresolved until the AI implementation contract.** Canonical v3.1 §7.6
+defines target-scoped name/tag projections and also says the first collection auto-applies an
+initial recommendation, while Gate 1 can establish the RegistrationTargetSet later. This
+clarification does not amend the frozen canonical text. The first SmartStore AI slice therefore
+covers recommendation generation/presentation only; automatic application as `AI_INITIAL` remains
+deferred until that timing contract names the first eligible target/enrichment event. Until then,
+an absent `final_name` uses the canonical `original_name` fallback and no collection-time
+platform projection is fabricated.
+
+Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
+facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
+Bulk AI and bulk registration are later orchestration over accepted single-product paths, not a
+separate truth system.
+
 ### OPERATE
 Owns everything after publication.
 
