@@ -14,6 +14,7 @@
 """
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -30,9 +31,12 @@ from app.collect.adaptive.capture import (
     sample_from_candidate,
 )
 from app.collect.adaptive_capture.models import (
+    BUDGET_SCOPES,
+    READ_CLASSES,
     REQUEST_MAX_HOURS,
     CaptureCandidateRecord,
     CaptureRequest,
+    PhaseCReadBudget,
 )
 from app.collect.adaptive_store.gate import SupplierGate
 from app.collect.adaptive_store.store import AdaptiveValidationStore
@@ -55,6 +59,16 @@ class CaptureTampered(AppError):
 
 def _capture_refused(message: str) -> InputValidationError:
     return InputValidationError(ADAPTIVE_CAPTURE_REFUSED, message)
+
+
+def _validate_read_budget(read_budget: Mapping[str, tuple[str, int]]) -> None:
+    if set(read_budget) != set(READ_CLASSES):
+        raise _capture_refused("a Phase C read budget names every request class")
+    for scope, ceiling in read_budget.values():
+        if scope not in BUDGET_SCOPES or isinstance(ceiling, bool) or ceiling < 0:
+            raise _capture_refused("a Phase C ceiling is a scope and a non-negative count")
+    if read_budget["CONNECT_AUTHENTICATE"][1] != 0:
+        raise _capture_refused("CONNECT_AUTHENTICATE is a hard zero for a Phase C run")
 
 
 def target_digest(supplier_key: str, target: str) -> str:
@@ -114,14 +128,23 @@ class CaptureStore:
         lifetime: timedelta,
         requested_by: str,
         correlation_id: str,
+        read_budget: Mapping[str, tuple[str, int]] | None = None,
+        stage: str = "C1",
     ) -> str:
+        """One capture request. With ``read_budget`` (class -> (scope, ceiling)) it also registers
+        the campaign's frozen Phase C read ceilings for ``stage`` in the same unit, once: a later
+        request of the campaign must name exactly the same ceilings (C1 PREP-0)."""
         if not self._admits(supplier_key):
             raise _capture_refused("a capture is requested only for a registered supplier")
         if not timedelta(0) < lifetime <= timedelta(hours=REQUEST_MAX_HOURS):
             raise _capture_refused(f"a capture request lapses within {REQUEST_MAX_HOURS} hours")
+        if read_budget is not None:
+            _validate_read_budget(read_budget)
         now = self._clock.now()
         request_id = str(uuid.uuid4())
         with self._db.write() as session:
+            if read_budget is not None:
+                self._register_budget(session, campaign_id, stage, read_budget, now)
             session.add(
                 CaptureRequest(
                     request_id=request_id,
@@ -135,6 +158,38 @@ class CaptureStore:
                 )
             )
         return request_id
+
+    @staticmethod
+    def _register_budget(
+        session: Session,
+        campaign_id: str,
+        stage: str,
+        read_budget: Mapping[str, tuple[str, int]],
+        now: datetime,
+    ) -> None:
+        stored = {
+            row.request_class: (row.scope, row.ceiling)
+            for row in session.scalars(
+                select(PhaseCReadBudget).where(
+                    PhaseCReadBudget.campaign_id == campaign_id, PhaseCReadBudget.stage == stage
+                )
+            )
+        }
+        if stored:
+            if stored != dict(read_budget):
+                raise _capture_refused("a campaign's Phase C read ceilings are frozen once")
+            return
+        for request_class, (scope, ceiling) in sorted(read_budget.items()):
+            session.add(
+                PhaseCReadBudget(
+                    campaign_id=campaign_id,
+                    stage=stage,
+                    request_class=request_class,
+                    scope=scope,
+                    ceiling=ceiling,
+                    registered_at=now,
+                )
+            )
 
     def requests(self, campaign_id: str) -> tuple[RequestRecord, ...]:
         return self._requests(CaptureRequest.campaign_id == campaign_id)

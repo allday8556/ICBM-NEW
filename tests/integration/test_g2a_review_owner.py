@@ -680,6 +680,9 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "adaptive_capture_candidates",
         "adaptive_phase_c_commands",
         "adaptive_phase_c_command_results",
+        "adaptive_phase_c_read_budgets",
+        "adaptive_phase_c_reads",
+        "adaptive_phase_c_read_refusals",
         "restore_drills",
         "retention_proofs",
     }

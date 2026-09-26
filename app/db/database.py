@@ -79,7 +79,11 @@ class Database:
             yield session
 
     @contextmanager
-    def write(self) -> Iterator[Session]:
+    def write(self, *, durable: bool = False) -> Iterator[Session]:
+        """One serialized write unit. ``durable`` commits it with ``synchronous=FULL``, so the
+        commit survives an operating-system crash or power loss as well as a process crash, then
+        restores the connection's ordinary ``NORMAL``: for a record that must exist before an
+        external effect it permits, such as a Phase C send reservation (C1 PREP-0)."""
         if self._writer == threading.get_ident():
             # The enclosing unit is poisoned as well: it rolls back even if a caller swallows
             # this refusal as an ordinary AppError and carries on (Gate 2 G2-C, review
@@ -94,16 +98,39 @@ class Database:
             self._writer = threading.get_ident()
             self._nested_refused = False
             try:
-                with self._sessions.begin() as session:
-                    yield session
-                    if self._nested_refused:
-                        raise DatabaseWriteReentryError(
-                            DATABASE_WRITE_REENTRANT,
-                            "a nested write was refused inside this unit; the unit rolls back",
-                        )
+                if durable:
+                    with self._durable_session() as session:
+                        yield session
+                        self._refuse_poisoned()
+                else:
+                    with self._sessions.begin() as session:
+                        yield session
+                        self._refuse_poisoned()
             finally:
                 self._writer = None
                 self._nested_refused = False
+
+    def _refuse_poisoned(self) -> None:
+        if self._nested_refused:
+            raise DatabaseWriteReentryError(
+                DATABASE_WRITE_REENTRANT,
+                "a nested write was refused inside this unit; the unit rolls back",
+            )
+
+    @contextmanager
+    def _durable_session(self) -> Iterator[Session]:
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA synchronous=FULL")
+            connection.commit()
+            try:
+                with (
+                    Session(bind=connection, expire_on_commit=False) as session,
+                    session.begin(),
+                ):
+                    yield session
+            finally:
+                connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
+                connection.commit()
 
     def ping(self) -> None:
         with self.engine.connect() as connection:

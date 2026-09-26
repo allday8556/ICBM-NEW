@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import inspect
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -1814,6 +1815,7 @@ ADAPTIVE_IMPORTERS = {
     },
     "app/container.py": {
         "app.collect.adaptive.hooks",
+        "app.collect.adaptive_capture.accounting",
         "app.collect.adaptive_capture.commands",
         "app.collect.adaptive_capture.runner",
         "app.collect.adaptive_capture.store",
@@ -1862,7 +1864,7 @@ def test_only_the_container_wires_the_adaptive_collector() -> None:
 # container builds them, the app lifespan calls the shadow owner's startup pass, and the harness
 # uses them; no route, service, job or other script ever reaches them.
 PHASE_C_OWNERS = frozenset(
-    {"shadow_switch", "shadow_evidence", "capture_store", "phase_c_commands"}
+    {"shadow_switch", "shadow_evidence", "capture_store", "phase_c_commands", "phase_c_reads"}
 )
 PHASE_C_OWNER_MODULES = frozenset(
     {
@@ -1870,6 +1872,7 @@ PHASE_C_OWNER_MODULES = frozenset(
         "app.collect.adaptive_shadow.store",
         "app.collect.adaptive_capture.store",
         "app.collect.adaptive_capture.commands",
+        "app.collect.adaptive_capture.accounting",
     }
 )
 
@@ -1987,7 +1990,20 @@ def test_the_harness_never_opens_sqlite_reaches_a_network_or_submits_a_collectio
             names,
         )
         attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-        assert not attributes & {"submit", "run_next", "read_document", "read_image"}, path
+        # C1 PREP-0: nor does it collect, read a supplier's CONNECT or policy target, or log in.
+        assert not attributes & {
+            "submit",
+            "run_next",
+            "collect",
+            "read_document",
+            "read_image",
+            "read_discovered_policy",
+            "collection_session",
+            "ensure_connected",
+            "verify",
+            "fetch",
+            "login",
+        }, path
 
 
 def test_the_capture_owner_imports_no_canonical_writer_and_no_network() -> None:
@@ -1997,7 +2013,7 @@ def test_the_capture_owner_imports_no_canonical_writer_and_no_network() -> None:
     assert {f"{ADAPTIVE_CAPTURE_ROOT}{m}.py" for m in ("runner", "store", "controls")} <= set(
         modules
     )
-    allowed = ADAPTIVE_SHADOW_MAY_IMPORT | {"types"}
+    allowed = ADAPTIVE_SHADOW_MAY_IMPORT | {"types", "hashlib"}
     for path, tree in modules.items():
         for name in _imported_modules(tree):
             assert name in allowed or _is_adaptive(name), f"{path}: {name}"
@@ -2408,6 +2424,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "adaptive_capture_candidates",
         "adaptive_phase_c_commands",
         "adaptive_phase_c_command_results",
+        "adaptive_phase_c_read_budgets",
+        "adaptive_phase_c_reads",
+        "adaptive_phase_c_read_refusals",
         # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
         "restore_drills",
         "retention_proofs",
@@ -2471,3 +2490,33 @@ def test_no_runtime_code_references_the_legacy_project() -> None:
         and re.search(r"ICBM-PROJECT|icbm_project", p.read_text("utf-8"), re.I)
     ]
     assert offenders == []
+
+
+# ------------------------------------------------ Phase C C1 PREP-0 (Issue #110 5841947773)
+
+
+def test_the_phase_c_harness_is_type_checked_in_ci() -> None:
+    """``scripts.phasec`` is among the strictly type-checked packages; removing it fails CI."""
+    config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text("utf-8"))["tool"]["mypy"]
+    assert "scripts.phasec" in config["packages"]
+    assert config["strict"] is True and config.get("warn_unused_ignores") is True
+
+
+def test_only_the_collection_and_connect_send_points_reach_the_send_guard() -> None:
+    """Every accounted send point is a known one: the collection's request budget and its
+    guard scope, and CONNECT's fetch and login. Nothing else reserves, and only the collection
+    sets a guard."""
+    importers: dict[str, set[str]] = {}
+    for path, tree in _production_modules().items():
+        if "app.core.send_guard" in _imported_modules(tree):
+            called = {
+                c.func.id
+                for c in ast.walk(tree)
+                if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+            }
+            importers[path] = called & {"reserve_send", "guarding"}
+    assert importers == {
+        "app/collect/collection.py": {"reserve_send", "guarding"},
+        "app/connect/service.py": {"reserve_send"},
+        "app/collect/shadow.py": set(),
+    }, importers

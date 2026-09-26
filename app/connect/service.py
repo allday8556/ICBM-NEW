@@ -55,6 +55,12 @@ from app.core.errors import (
     UnknownOutcomeError,
 )
 from app.core.safe_payload import safe_payload
+from app.core.send_guard import (
+    CONNECT_AUTHENTICATE,
+    CONNECT_CONTROL_READ,
+    CONNECT_PROTECTED_READ,
+    reserve_send,
+)
 from app.db.database import Database
 from app.jobs.policy import RetryPolicy
 from app.jobs.records import JobRecord
@@ -743,6 +749,9 @@ class ConnectService:
         credentials = self._credentials.load(key)
         if credentials is None:
             raise AuthError("SUPPLIER_CREDENTIALS_MISSING", "no stored supplier login")
+        # A Phase-C-accounted collection never logs in: its CONNECT_AUTHENTICATE ceiling is zero,
+        # so this refuses before any login attempt is counted or transmitted (C1 PREP-0).
+        reserve_send(CONNECT_AUTHENTICATE, key)
         new_session = self._authenticate(definition, credentials, expired=expired, trigger=trigger)
         self._update(key, lambda _s, row: self._move(row, S.VERIFYING, trigger=trigger))
         proof = self._prove(definition, new_session)
@@ -766,6 +775,12 @@ class ConnectService:
     def _read(
         self, definition: SupplierDefinition, kind: RequestKind, session: bytes | None
     ) -> ReadOutcome:
+        # Inside a Phase-C-accounted collection the read is durably reserved first, or refused
+        # before it is sent; anywhere else this does nothing (C1 PREP-0).
+        reserve_send(
+            CONNECT_CONTROL_READ if kind is RequestKind.CONTROL_READ else CONNECT_PROTECTED_READ,
+            definition.probe.target,
+        )
         try:
             response = self._gateway.fetch(definition, kind=kind, session=session)
         except (TransientError, RateLimitedError) as exc:

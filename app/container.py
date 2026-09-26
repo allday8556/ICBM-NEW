@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from app.audit.service import AuditLog
 from app.collect.adaptive.hooks import HookManifest
+from app.collect.adaptive_capture.accounting import PhaseCReadAccounting
 from app.collect.adaptive_capture.commands import PhaseCCommandStore
 from app.collect.adaptive_capture.runner import CaptureRunner
 from app.collect.adaptive_capture.store import CaptureStore
@@ -185,6 +186,7 @@ class Container:
     shadow_evidence: ShadowEvidenceStore
     capture_store: CaptureStore
     phase_c_commands: PhaseCCommandStore
+    phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
 
 
@@ -340,6 +342,8 @@ def build_container(
     )
     # Phase C C0: the in-memory sample capture. Off for every run unless the Phase C harness left a
     # capture request for its target, consumed at the run's first reservation.
+    # C1 PREP-0: the durable accounting of every send of a Phase-C-accounted collection.
+    phase_c_reads = PhaseCReadAccounting(db, clock)
     capture_store = CaptureStore(
         db, clock, supplier_gate=adaptive_gate, validation=adaptive_validation
     )
@@ -377,6 +381,7 @@ def build_container(
         after_recorded=after_recorded,
         shadow=ShadowRunner(adaptive_profiles, shadow_evidence, hook_manifests),
         capture=CaptureRunner(capture_store),
+        accounting=phase_c_reads,
     )
     registry.register(collection.job_definition())
 
@@ -634,6 +639,7 @@ def build_container(
         shadow_evidence=shadow_evidence,
         capture_store=capture_store,
         phase_c_commands=PhaseCCommandStore(db, clock),
+        phase_c_reads=phase_c_reads,
         ownership=ownership,
     )
 

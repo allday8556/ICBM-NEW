@@ -53,7 +53,7 @@ from app.core.errors import InputValidationError
 from app.core.ownership import DataDirLease, acquire_data_dir
 from app.db.migrate import alembic_config, upgrade_to_head
 from scripts.m3collect.fake_shop import PRODUCT_URL, SUPPLIER_KEY, FakeGateway, StubSessions, page
-from scripts.phasec.ceilings import CEILINGS
+from scripts.phasec.ceilings import CEILINGS, read_budget
 from scripts.phasec.grants import GRANT_SCHEMA, grant_digest
 from scripts.phasec.harness import (
     EXIT_CAMPAIGN_IN_USE,
@@ -134,6 +134,7 @@ def request_capture(app: Container, *, lifetime: timedelta = timedelta(hours=1))
         lifetime=lifetime,
         requested_by=OPERATOR,
         correlation_id="corr-c0",
+        read_budget=read_budget("C1"),
     )
 
 
@@ -456,7 +457,10 @@ class Harness:
 
     def authorize(self, stage: str, authorization: str, **scope: Any) -> tuple[int, Any]:
         path, phrase = self.write_grant(stage, authorization, **scope)
-        return self("authorize-stage", "--grant", str(path), approve=phrase)
+        published = grant_digest(path.read_bytes())
+        return self(
+            "authorize-stage", "--grant", str(path), "--published-sha256", published, approve=phrase
+        )
 
     def target(self) -> str:
         code, result = self(
@@ -611,7 +615,16 @@ def test_every_command_runs_only_at_the_campaigns_exact_clean_code_sha(
 
     for argv, approve in (
         (("status", "--supplier", SUPPLIER_KEY), None),
-        (("authorize-stage", "--grant", str(path)), phrase),
+        (
+            (
+                "authorize-stage",
+                "--grant",
+                str(path),
+                "--published-sha256",
+                grant_digest(path.read_bytes()),
+            ),
+            phrase,
+        ),
         (("request-capture", "--supplier", SUPPLIER_KEY, "--target-url", PRODUCT_URL), "x"),
     ):
         code, result = harness(*argv, approve=approve, code_sha=lambda: "d" * 40)
@@ -661,7 +674,14 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
     refused(harness.authorize("C1", C1_AUTH, **c1_scope(target), extra=True), "scope holds")
     path, _ = harness.write_grant("C1", C1_AUTH, **c1_scope(target))
     refused(
-        harness("authorize-stage", "--grant", str(path), approve=harness.phrase("authorize-stage")),
+        harness(
+            "authorize-stage",
+            "--grant",
+            str(path),
+            "--published-sha256",
+            grant_digest(path.read_bytes()),
+            approve=harness.phrase("authorize-stage"),
+        ),
         "approval phrase",
     )
     # The grant file is read once: the phrase names, the check parses and the ledger records
@@ -689,6 +709,37 @@ def test_stages_open_only_by_typed_grants_once_each_and_in_order(
     assert campaign.current_stage == "C1" and campaign.authorized == {"C0": C0, "C1": C1_AUTH}
     assert campaign.grants["C1"].scope["target_digests"] == sorted([target, OTHER_TARGET])
     assert count(config, "adaptive_capture_requests") == 0
+
+
+def test_a_grant_is_accepted_only_for_the_exact_bytes_its_authorization_published(
+    harness: Harness, config: AppConfig
+) -> None:
+    # C1 PREP-0 item 4: the operator names the SHA-256 the canonical authorization published; a
+    # grant file whose exact bytes do not hash to it is refused, and nothing is recorded.
+    path, phrase = harness.write_grant("C1", C1_AUTH, **c1_scope(harness.target()))
+    before = harness.ledger().path.read_bytes()
+    for published in ("0" * 64, "not-a-digest", grant_digest(path.read_bytes() + b" ")):
+        refused(
+            harness(
+                "authorize-stage",
+                "--grant",
+                str(path),
+                "--published-sha256",
+                published,
+                approve=phrase,
+            ),
+            "do not hash to the SHA-256",
+        )
+    assert harness.ledger().path.read_bytes() == before
+    code, result = harness(
+        "authorize-stage",
+        "--grant",
+        str(path),
+        "--published-sha256",
+        grant_digest(path.read_bytes()).upper(),
+        approve=phrase,
+    )
+    assert code == EXIT_OK and result["grant_digest"] == grant_digest(path.read_bytes())
 
 
 def test_the_c1_grant_bounds_every_capture_request_by_its_frozen_ceilings(

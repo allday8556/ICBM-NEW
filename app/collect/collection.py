@@ -51,7 +51,14 @@ from app.collect.runs import (
     PacingKey,
     SameProductTooSoon,
 )
-from app.collect.shadow import CaptureInput, CaptureStep, FrozenRun, ShadowInput, ShadowStep
+from app.collect.shadow import (
+    CaptureInput,
+    CaptureStep,
+    FrozenRun,
+    SendAccounting,
+    ShadowInput,
+    ShadowStep,
+)
 from app.collect.sourceassets import (
     FetchedImage,
     RevalidatedImage,
@@ -63,6 +70,7 @@ from app.collect.urls import UrlPolicy
 from app.core.clock import Clock
 from app.core.correlation import get_correlation_id, new_correlation_id
 from app.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
+from app.core.send_guard import guarding, reserve_send
 from app.db.database import Database
 from app.jobs.policy import RetryPolicy
 from app.jobs.registry import JobContext, JobDefinition, TerminalJob
@@ -238,6 +246,11 @@ class RunBudget:
             raise CollectionBudgetRefused(
                 "COLLECT_BUDGET_EXHAUSTED", f"this run may not make another {kind.value}"
             )
+        try:
+            reserve_send(kind.value, subject)
+        except AppError as refused:
+            # A Phase C refusal is a budget refusal to the collection: nothing is sent.
+            raise CollectionBudgetRefused(refused.code, refused.message) from None
         self.spent[kind] = used + 1
 
 
@@ -259,6 +272,7 @@ class ProductCollectionService:
         after_recorded: Callable[[str], object] | None = None,
         shadow: ShadowStep | None = None,
         capture: CaptureStep | None = None,
+        accounting: SendAccounting | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -280,6 +294,7 @@ class ProductCollectionService:
         # The Phase C in-memory sample capture (C0), handed in the same way. It runs only for a run
         # frozen REQUESTED, after the canonical revision and the shadow, and never reaches the run.
         self._capture = capture
+        self._accounting = accounting
 
     # ------------------------------------------------------------------ submission
 
@@ -454,7 +469,10 @@ class ProductCollectionService:
             return
         try:
             result = self.collect(
-                record.supplier_key, record.source_url, run_id=record.collection_run_id
+                record.supplier_key,
+                record.source_url,
+                run_id=record.collection_run_id,
+                attempt_no=context.attempt_no,
             )
         except AppError as error:
             if COLLECT_POLICY.allows_retry(error.error_class, context.attempt_no):
@@ -481,7 +499,9 @@ class ProductCollectionService:
         if self._after_recorded is not None:
             self._after_recorded(collection_run_id)
 
-    def collect(self, supplier_key: str, product_url: str, *, run_id: str) -> CollectionResult:
+    def collect(
+        self, supplier_key: str, product_url: str, *, run_id: str, attempt_no: int = 1
+    ) -> CollectionResult:
         """Read one product and append its revision, or say why there is none."""
         registered = self._registered(supplier_key)
         collection = registered.collection
@@ -497,6 +517,37 @@ class ProductCollectionService:
             key=pacing_key(collection, product_url),
             interval_s=profile.limits.same_product_interval_s,
         )
+        # A run its frozen capture request binds to a Phase C campaign has every send of this
+        # attempt durably reserved first; the binding is checked, or refused, before any send. Any
+        # other run gets no guard and is unchanged (C1 PREP-0).
+        guard = (
+            None
+            if self._accounting is None
+            else self._accounting.bind(
+                collection_run_id=run_id,
+                supplier_key=supplier_key,
+                target=pacing_key(collection, product_url).url,
+                capture=frozen.capture,
+                attempt_no=attempt_no,
+            )
+        )
+        with guarding(guard):
+            return self._collect_frozen(
+                registered, product_url, run_id=run_id, budget=budget, frozen=frozen
+            )
+
+    def _collect_frozen(
+        self,
+        registered: RegisteredCollection,
+        product_url: str,
+        *,
+        run_id: str,
+        budget: RunBudget,
+        frozen: FrozenRun,
+    ) -> CollectionResult:
+        collection = registered.collection
+        profile = collection.profile
+        supplier_key = registered.supplier_key
         captured_at = self._clock.now()
         document = self._gateway.read_document(
             profile,

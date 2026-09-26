@@ -51,3 +51,17 @@ CEILINGS: Final = MappingProxyType(
         "C4": dict(_ZERO),
     }
 )
+
+
+def read_budget(stage: str) -> dict[str, tuple[str, int]]:
+    """A stage's frozen ceilings as the data root's per-class Phase C read budget (C1 PREP-0):
+    ``CAMPAIGN`` counts over the whole stage, ``ATTEMPT`` over one collection attempt."""
+    ceilings = CEILINGS[stage]
+    return {
+        "PRODUCT_READ": ("CAMPAIGN", ceilings["product_reads"]),
+        "IMAGE_REQUEST": ("ATTEMPT", ceilings.get("image_requests_per_attempt", 0)),
+        "POLICY_READ": ("CAMPAIGN", ceilings["policy_reads"]),
+        "CONNECT_CONTROL_READ": ("CAMPAIGN", ceilings["connect_control_reads"]),
+        "CONNECT_PROTECTED_READ": ("CAMPAIGN", ceilings["connect_protected_reads"]),
+        "CONNECT_AUTHENTICATE": ("CAMPAIGN", ceilings["connect_authenticate"]),
+    }
