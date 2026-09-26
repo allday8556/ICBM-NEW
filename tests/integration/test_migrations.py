@@ -118,8 +118,11 @@ CANONICAL_TABLES = (
     "adaptive_capture_candidates",
     "adaptive_phase_c_commands",
     "adaptive_phase_c_command_results",
+    "adaptive_phase_c_read_budgets",
+    "adaptive_phase_c_reads",
+    "adaptive_phase_c_read_refusals",
 )
-HEAD = "0027_adaptive_capture_seam"
+HEAD = "0028_phase_c_read_accounting"
 
 
 def _url(path: Path) -> str:

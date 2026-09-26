@@ -29,6 +29,13 @@ the canonical owners never depend on them.
     Called after the canonical revision append, and after the shadow step, only for a run frozen
     ``REQUESTED``. It receives the one in-memory ``DocumentView`` and keeps only sanitized capture
     material, never the page body. It never raises into the run and cannot change its outcome.
+
+``SendAccounting``
+    Called by the collection right after the first-reservation unit, before any send (C1 PREP-0,
+    ``5841947773``). For a run whose frozen capture request binds it to a Phase C campaign it
+    answers the ``SendGuard`` that durably reserves each of the attempt's sends, or refuses before
+    any send when the binding is missing, mismatched or unreadable. For every other run it answers
+    ``None`` and the run is exactly as before.
 """
 
 from dataclasses import dataclass, field
@@ -39,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from app.collect.facts import CollectedFacts, ImageReference
 from app.collect.urls import UrlPolicy
+from app.core.send_guard import SendGuard
 from integrations.suppliers.collection import DocumentView, ImageCandidate, SourceIdentityResult
 
 ShadowDecision = Literal["ENABLED", "DISABLED"]
@@ -120,6 +128,20 @@ class CaptureInput:
 
 class CaptureStep(Protocol):
     def __call__(self, capture: CaptureInput) -> None: ...
+
+
+class SendAccounting(Protocol):
+    def bind(
+        self,
+        *,
+        collection_run_id: str,
+        supplier_key: str,
+        target: str,
+        capture: "FrozenCapture | None",
+        attempt_no: int,
+    ) -> SendGuard | None:
+        """The guard that accounts this attempt's sends, ``None`` for an unaccounted run, or an
+        ``AppError`` refusing the run before any send."""
 
 
 @dataclass(frozen=True)

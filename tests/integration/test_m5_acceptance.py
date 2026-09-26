@@ -190,7 +190,7 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["checks_passed"] == report["checks_total"] >= 50
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
     assert report["execution_mode"] == "DRY_RUN"
-    assert report["database_revision"] == "0027_adaptive_capture_seam"
+    assert report["database_revision"] == "0028_phase_c_read_accounting"
 
 
 @pytest.mark.parametrize("names", REQUIRED_CHECKS.values(), ids=REQUIRED_CHECKS.keys())

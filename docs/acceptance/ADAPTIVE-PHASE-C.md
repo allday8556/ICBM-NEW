@@ -8,7 +8,7 @@
   §7, §10, §11 (AC-01 to AC-29).
 - Plan: `docs/review/ADAPTIVE-PHASE-C-OPENING-BY-CLAUDE.md` (PR #119). Q1–Q7 decisions: review
   `5312911203`. ADR-0006 stopped-app supplement: review `5313045448`. Opening closeout: `5826469328`.
-- Stage authorizations: C0 `5826469852`. C1, C2, C3 and C4 are **not authorized**.
+- Stage authorizations: C0 `5826469852` (closed `5841947278`); C1 PREP-0 hardening `5841947773`. C1, C2, C3 and C4 are **not authorized**.
 - Tooling: the Phase C harness `scripts/phase_c.py` / `scripts/phasec/` (C0). It is the only caller
   of the Phase C operator actions, and it runs only with the ICBM application stopped. After
   review `5313663701`:
@@ -30,6 +30,17 @@
 
     While any command is unresolved, no campaign on that data root runs an evidence command, so
     a new campaign cannot walk around it.
+
+- Send accounting (C1 PREP-0; migration 0028):
+  - An ordinary collection becomes Phase-C-accounted only when its frozen capture request binds it to a campaign that registered its read ceilings.
+  - Each actual send is reserved in the data root before it is sent, and each reservation is committed first:
+    - `PRODUCT_READ` and `IMAGE_REQUEST` at the collection transport's budget;
+    - `CONNECT_CONTROL_READ` and `CONNECT_PROTECTED_READ` at the CONNECT fetch.
+  - `CONNECT_AUTHENTICATE` is a hard zero, refused before any login is attempted.
+  - Retries and restarts consume the same frozen ceilings. `IMAGE_REQUEST` is bounded per attempt.
+  - A missing binding, a target mismatch, an unreadable owner or a ceiling refuses before the send.
+  - Ordinary collections are unchanged.
+- A stage grant is accepted only when its exact bytes hash to the SHA-256 its canonical authorization published (`--published-sha256`).
 
 ---
 
