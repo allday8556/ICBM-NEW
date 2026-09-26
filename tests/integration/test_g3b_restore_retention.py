@@ -572,6 +572,15 @@ def test_evidence_retention_is_proven_from_the_live_checks_and_fails_closed(
         schema_head=head_revision,
     )
     assert not purging.checks().passed and not purging.ready()
+    # Checks that still pass but differ from what was proven are not proven: a new profile version.
+    moved = RetentionProofService(
+        db=container.db,
+        store=live(container),
+        job_types=lambda: ["register.create"],
+        safe_retention_profile_version="smartstore-safe-retention/v2",
+        schema_head=head_revision,
+    )
+    assert moved.checks().passed and not moved.ready()
     # A lost delete guard fails the live checks: the earlier proof is no longer current.
     with sqlite3.connect(config.data_dir / "runtime" / "icbm.db") as raw:
         raw.execute("DROP TRIGGER trg_registration_intents_no_delete")
