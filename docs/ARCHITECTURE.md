@@ -83,11 +83,19 @@ Owns supplier and marketplace connectivity only. Supplier CONNECT is supplier-ge
 
 ### COLLECT
 Owns source evidence and source facts. Collection is supplier-generic (`docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md`):
-- every source read goes through a common collection gateway, separate from the CONNECT proof port;
+- a document arrives by one of two acquisition transports (`docs/adr/0019-extension-primary-collection-transport.md`):
+  - **`EXTENSION`** is primary. The operator's own Chrome, through a first-party MV3 extension, captures the current product page on a click, and later a list page's products through a bounded queue. The product scope is cut first under an independent `BrowserCapturePolicy`, and the page is sent to a paired loopback ingest.
+  - **`DIRECT_URL`** is the fallback, submitted from Collection Management.
+- both transports converge into one `DocumentView`, one collection-run lifecycle and one server-owned pipeline.
+  - The extension is transport only.
+  - The existing KM extractor stays the only revision writer, and Adaptive stays shadow.
+  - Transport is provenance, never a drift input.
+- Collection Management is kept. It shows the run, status and review history of both transports and owns the direct-URL submission.
+- the direct-URL read goes through a common collection gateway, separate from the CONNECT proof port;
 - suppliers contribute pure collection definitions and parsers;
 - COLLECT persists ProductFactsRevision source truth from M3, while the canonical Product arrives in M4.
 
-The Adaptive Collector contract is `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` (Issue #110). It authorizes no implementation by itself. Three production slices exist: the offline core (P1, `app/collect/adaptive/`), the profile and validation persistence owner (P2, `app/collect/adaptive_store/`, migration 0024) and the shadow foundation (P3, `app/collect/adaptive_shadow/`, migration 0025). P2 stores immutable EPR/PTR revisions with their DRAFT lint findings, the append-only lifecycle log, supplier-bound local-only validation samples and validation runs; `VALIDATED` is derived, never stored. P3 adds the append-only per-supplier shadow switch (the only way into `SHADOW`), freezes each run's shadow decision and exact bundle on the canonical run record at its first product-read reservation, runs the one-fetch shadow comparison after the canonical commit in its own write unit, and keeps the raw shadow records (90 days and 5,000 per supplier, whichever first), the evidence ledger and the evidence windows. Phase C stage C0 (`app/collect/adaptive_capture/`, migration 0027, and the stopped-app harness `scripts/phase_c.py`) adds an in-memory ValidationSample capture seam, off by default and frozen per run at its first reservation, and the only operator path for the Phase C actions; the evidence scaffold is `docs/acceptance/ADAPTIVE-PHASE-C.md` (PENDING). C1 PREP-0 (migration 0028) adds the durable accounting of every actual send of a Phase-C-accounted collection, reserved before transmission, with CONNECT authentication a hard zero; ordinary collections are unchanged. **No supplier's switch is on, so no run is shadowed or captured and no window is open**: each later stage needs its own authorization. There is no Adaptive `ProductFactsRevision` write and no `ACTIVE`, each of which needs its own authorized slice:
+The Adaptive Collector contract is `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` (Issue #110). It authorizes no implementation by itself. Three production slices exist: the offline core (P1, `app/collect/adaptive/`), the profile and validation persistence owner (P2, `app/collect/adaptive_store/`, migration 0024) and the shadow foundation (P3, `app/collect/adaptive_shadow/`, migration 0025). P2 stores immutable EPR/PTR revisions with their DRAFT lint findings, the append-only lifecycle log, supplier-bound local-only validation samples and validation runs; `VALIDATED` is derived, never stored. P3 adds the append-only per-supplier shadow switch (the only way into `SHADOW`), freezes each run's shadow decision and exact bundle on the canonical run record at its first product-read reservation, runs the one-fetch shadow comparison after the canonical commit in its own write unit, and keeps the raw shadow records (90 days and 5,000 per supplier, whichever first), the evidence ledger and the evidence windows. Phase C stage C0 (`app/collect/adaptive_capture/`, migration 0027, and the stopped-app harness `scripts/phase_c.py`) adds an in-memory ValidationSample capture seam, off by default and frozen per run at its first reservation, and the only operator path for the Phase C actions; the evidence scaffold is `docs/acceptance/ADAPTIVE-PHASE-C.md` (PENDING). C1 PREP-0 (migration 0028) adds the durable accounting of every actual send of a Phase-C-accounted collection, reserved before transmission, with CONNECT authentication a hard zero; ordinary collections are unchanged. C1 PREP-1 adds the reviewed operator path for profile persistence. The server-transport C1 campaign `phase-c-kmretail-01` is **INCOMPLETE / STOPPED and preserved** (Issue #110 `5844538783`) with no Adaptive verdict, and its C2–C4 plan is paused and superseded for execution by ADR-0019. The Adaptive work is kept as the extraction and validation core behind the extension-primary transport. **No supplier's switch is on, so no run is shadowed or captured and no window is open**: each later stage needs its own authorization. There is no Adaptive `ProductFactsRevision` write and no `ACTIVE`, each of which needs its own authorized slice:
 - it is a second implementation of the same parser seam: a generic engine interprets an immutable, digested `ExtractionProfileRevision` bundle, and the gateway, budget, image fetch, revision store and job owners stay as above;
 - the access envelope (`CollectionProfile`) is never profile data and is never widened at run time;
 - a shadow comparison reads the same one fetch, writes nothing canonical and makes zero AI/OCR calls; the canonical extractor stays the only revision writer until a separate cutover ADR.
@@ -125,6 +133,64 @@ The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readb
 - Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
 - An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 - **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
+
+#### Registration authoring and AI boundary
+
+Issue #127 records the sequencing clarification for the Registration Management redesign.
+
+The operator surface may have three depths — a list for batch-oriented work, a quick-review panel,
+and a full one-product editor — but **screen depth does not create new truth owners**. The full editor
+must read/write through the existing Product, image, Item/Pricing, readiness and REGISTER owners. It
+must not introduce a parallel "edited product" database that copies ProductFacts or marketplace
+state.
+
+The first-vertical authoring path is deterministic/manual and remains fully usable with every AI
+capability unavailable. This restates repository-canonical M5 requirements: ADR-0014 §18 says M5
+registers with no AI provider configured, and `docs/acceptance/M5.md` §2 keeps AI outside M5
+acceptance. It is not a new AI availability requirement introduced here.
+
+Before that vertical is accepted, the approved/prototype UX may reserve an AI control's final
+position, but the production runtime must not render that control at all until an authoritative
+server capability/owner exists. A disabled placeholder with no authoritative reason is not a valid
+runtime state. If no server owner can state why the capability is unavailable, the client must not
+invent or hardcode that reason. The UI must not manufacture a result, call an unadopted platform
+endpoint, or create an interim client-owned enrichment store merely to make the control active.
+
+When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
+Issue #30 contracts:
+- tasks remain independent (`recommended_name`, `recommended_tags`, category validation,
+  required-option mapping and fact review), with platform-specific name/tag projections where the
+  canonical contract already defines them;
+- runtime prompt composition remains persisted `ROLE + PlatformPolicy + PROMPT task`, through the
+  ADR-0012 provider-neutral AI port;
+- `AI_UNREVIEWED` stays visible but is not itself a registration blocker;
+- final user-approved values use the canonical `field × marketplace × account` lock boundary, and
+  optimistic-concurrency mismatches are skipped rather than overwritten;
+- the storage scope of an AI recommendation/cache is decided by its implementation contract and is
+  **not** inferred from the final-value lock scope;
+- Product-information notice AI may validate/normalize/flag supported facts but never invents a
+  missing legal/source fact;
+- a platform search/tag/metadata signal enters only through an adopted platform contract and the
+  appropriate adapter. SearchSignalAdapter is not a bypass around the endpoint registry. For an
+  endpoint not yet represented in the matrix, the order is candidate registration → official
+  evidence review → adoption only if sufficient → adapter implementation;
+- efficacy/functionality/target expressions reach final tags only when the deterministic evidence
+  and platform-policy requirements of Canonical v3.1 §7.8 are satisfied. AI is not the final policy
+  owner.
+
+**AI_INITIAL timing stays unresolved until the AI implementation contract.** Canonical v3.1 §7.6
+defines target-scoped name/tag projections and also says the first collection auto-applies an
+initial recommendation, while Gate 1 can establish the RegistrationTargetSet later. This
+clarification does not amend the frozen canonical text. The first SmartStore AI slice therefore
+covers recommendation generation/presentation only; automatic application as `AI_INITIAL` remains
+deferred until that timing contract names the first eligible target/enrichment event. Until then,
+an absent `final_name` uses the canonical `original_name` fallback and no collection-time
+platform projection is fabricated.
+
+Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
+facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
+Bulk AI and bulk registration are later orchestration over accepted single-product paths, not a
+separate truth system.
 
 ### OPERATE
 Owns everything after publication.

@@ -69,6 +69,15 @@ M4 = canonical Product identity + current accepted revision link + enrichment/pr
 
 ### 3. Port and adapter boundary
 
+> **Amendment note (ADR-0019 §1, §2).**
+> - A `DocumentView` can now also arrive through the operator's own browser: the first-party Chrome
+>   extension, the `EXTENSION` transport, which is primary. This gateway, as `DIRECT_URL`, becomes
+>   the fallback.
+> - "HTTP or browser execution" below means **server-side** execution. It is not the operator's
+>   browser.
+> - The gateway's ownership of policy and session is unchanged, and so is every owner after the
+>   `DocumentView`.
+
 COLLECT gets its **own** supplier-generic port, separate from the CONNECT proof port:
 
 ```text
@@ -112,6 +121,12 @@ ProductFactsRevision persistence                       app/collect/
 
 ### 4. Request policy and budgets (addendum A)
 
+> **Amendment note (ADR-0019 §8, §10).**
+> - Reads that go through the extension are also subject to the frozen budgets and to pacing.
+> - The reserving owner is the server: every automated read is server-issued work, reserved before
+>   it happens. The extension's own clock never decides.
+> - A missing cap still refuses fail-closed before any read.
+
 - **Operator-supplied one-product scope only** (§2).
 - **Pacing:** the supplier `RequestPolicy` applies unchanged. For KM통상 that is one request at a time, at least 2.0 s between request starts, and a 20 s timeout.
 - **Same-product interval: at least 60 s between real reads of the same product** (ruling on Q2). This is on top of the supplier spacing.
@@ -132,6 +147,9 @@ ProductFactsRevision persistence                       app/collect/
 - **No hidden parser-debug loop.** Parser development runs on sanitized fixtures. Real reads happen only through the budgeted gateway, only in an approved step.
 
 ### 5. Source reconnaissance before freezing selectors and hosts
+
+> **Amendment note (ADR-0019 §1).** Reconnaissance may also run through the extension transport.
+> The principle that caps are frozen in advance is unchanged.
 
 Before the final KM통상 parser and profile are frozen (PR-C), one bounded reconnaissance runs against the chosen real test product.
 
@@ -268,6 +286,10 @@ Every field reports `CONFIRMED`, `ABSENT` or `REVIEW_REQUIRED`. No OCR or AI may
 
 ### 8. Evidence model
 
+> **Amendment note (ADR-0019 §4).** Evidence gains transport provenance (`TransportKind`, and for
+> `EXTENSION` the `BrowserCapturePolicy` revision). The evidence notation of §4 and every digest
+> input are unchanged; transport is not a digest input.
+
 Evidence is separate from normalized facts, and **product-scoped**. The authenticated page can hold member data, so it is never persisted blindly.
 
 Each evidence entry holds:
@@ -300,6 +322,9 @@ If product-information notice facts exist **only inside an image**:
 - **no OCR or AI fills them in during M3.**
 
 ### 9. Source images (addendum B and clarification `5672418057`)
+
+> **Amendment note (ADR-0019 §7).** The server's policed fetch stays the owner of the canonical
+> checksum and the source asset. A browser byte relay is not authorized.
 
 **Pipeline:**
 
@@ -412,6 +437,9 @@ mixed / insufficient evidence      → REVIEW_REQUIRED
 
 ### 12. Extraction identity (addendum C; PR #55 review `5204359614` §2)
 
+> **Amendment note (ADR-0019 §4).** Transport is not extraction identity. It enters no
+> `extractor_revision`, fingerprint or semantic input.
+
 > **Amendment note (ADR-0017 §5.2, §5.6).** For a code extractor this section is unchanged. For
 > profile-interpreted extraction, the semantic identity is the tuple of the engine's
 > `extractor_revision`, the profile schema version and the `ExtractionProfileRevision` digest; hook
@@ -448,6 +476,9 @@ Mechanical guards (implemented with the parser, PR-C):
 3. **Clean-tree campaigns.** The acceptance harness runs only at an exact commit with a clean tree (the M2 P0 precedent), so a local uncommitted edit cannot produce accepted revisions under a stale pin.
 
 ### 13. AI, OCR and marketplace isolation — hard M3 gate
+
+> **Amendment note (ADR-0019 §11).** Introducing the extension does not loosen this hard gate: AI
+> and OCR stay at zero calls in production collection, whatever the transport.
 
 M3 acceptance proves:
 
