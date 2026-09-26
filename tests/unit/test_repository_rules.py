@@ -794,6 +794,8 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "§3.4 does not exist" not in " ".join(stages.split())
     assert "but **no implementation**" not in adr
     assert "None of them is implemented at this main" not in adr
+    assert "A later slice that implements a grant or the brake adds a migration" not in adr
+    assert "added migration `0026_g3_live_authority`" in " ".join(adr.split())
     assert "proven from that owner and never from row absence" in stages
     assert "**no started or unresolved `UPLOAD_UNKNOWN` attempt in the replay-conflict scope**" in (
         stages

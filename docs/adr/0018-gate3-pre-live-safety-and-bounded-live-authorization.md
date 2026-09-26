@@ -627,7 +627,9 @@ G3-31  the registration read state and its status card and detail panel are surf
   `M0_DRY_RUN_ONLY`, no ASSET sender is wired, canary eligibility has no owner, and CREATE/SEARCH
   adoption and the residual-risk acceptance (§6.1) are missing independently, so the canary is
   `BLOCKED` for several independent reasons at once.
-- A later slice that implements a grant or the brake adds a migration under its own authorization.
+- The grant and the protected-write brake were implemented, with the ASSET upload-attempt owner, by
+  the separately authorized Gate 3 area 1 slice, which added migration `0026_g3_live_authority`
+  under its own authorization.
 - **The ASSET replay key is deliberately over-conservative** (§3.4): an `APPLIED_PROVEN` upload of
   the same content to the same account and wire endpoint blocks every fresh upload of it. That is
   a known liveness limitation — an asset already applied cannot be uploaded again after candidate
