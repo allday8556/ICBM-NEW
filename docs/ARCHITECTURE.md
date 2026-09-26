@@ -137,10 +137,15 @@ must not introduce a parallel "edited product" database that copies ProductFacts
 state.
 
 The first-vertical authoring path is deterministic/manual and remains fully usable with every AI
-capability unavailable. Before that vertical is accepted, an AI control may reserve its final UI
-position or display a server-owned unavailable reason, but the UI must not manufacture a result,
-call an unadopted platform endpoint, or create an interim client-owned enrichment store merely to
-make the control active.
+capability unavailable. This restates the existing M5 rule in Issue #89 §14; it is not a new AI
+availability requirement introduced here.
+
+Before that vertical is accepted, the approved/prototype UX may reserve an AI control's final
+position, but the production runtime must not expose it as actionable until an authoritative server
+capability/owner exists. If no server owner can state why the capability is unavailable, the client
+must not invent or hardcode that reason. The UI must not manufacture a result, call an unadopted
+platform endpoint, or create an interim client-owned enrichment store merely to make the control
+active.
 
 When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
 Issue #30 contracts:
@@ -157,10 +162,19 @@ Issue #30 contracts:
 - Product-information notice AI may validate/normalize/flag supported facts but never invents a
   missing legal/source fact;
 - a platform search/tag/metadata signal enters only through an adopted platform contract and the
-  appropriate adapter. SearchSignalAdapter is not a bypass around the endpoint registry;
+  appropriate adapter. SearchSignalAdapter is not a bypass around the endpoint registry. For an
+  endpoint not yet represented in the matrix, the order is candidate registration → official
+  evidence review → adoption only if sufficient → adapter implementation;
 - efficacy/functionality/target expressions reach final tags only when the deterministic evidence
   and platform-policy requirements of Canonical v3.1 §7.8 are satisfied. AI is not the final policy
   owner.
+
+**AI_INITIAL timing stays unresolved until the AI implementation contract.** Canonical v3.1 §7.6
+defines target-scoped name/tag projections and also says the first collection auto-applies an
+initial recommendation, while Gate 1 can establish the RegistrationTargetSet later. This
+clarification does not amend the frozen canonical text. Until the implementation contract names the
+first eligible target/enrichment event, an absent `final_name` uses the canonical
+`original_name` fallback and no collection-time platform projection is fabricated.
 
 Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
 facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
