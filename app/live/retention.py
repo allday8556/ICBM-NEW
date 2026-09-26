@@ -5,16 +5,22 @@ the retention checks **as they are now**, read from the live database and the ru
 
 - every canary-scope durable table — the REGISTER rows, the pre-LIVE owners, the audit trail, the
   review owner, and the M4 product, pricing and image truth a Snapshot and a drill rest on — keeps
-  its ``BEFORE DELETE`` refusal trigger, so no row of that evidence can be deleted by any path;
-- the forward-only triggers of the grant, the brake and the ASSET attempt owner are in place, so
-  unresolved evidence (an ``UPLOAD_UNKNOWN``, a consumed grant) cannot be rewritten away;
+  a ``BEFORE DELETE`` trigger whose body is an **unconditional** ``RAISE(ABORT, …)``, so no row of
+  that evidence can be deleted by any path;
+- **the semantics, not the names**: every trigger on those tables — the delete guards, the
+  append-only and transition guards, and the forward-only triggers of the grant, the brake and the
+  ASSET attempt owner, so unresolved evidence (an ``UPLOAD_UNKNOWN``, a consumed grant) cannot be
+  rewritten away — is exactly the trigger the shipped migrations build at head
+  (``app.db.schema_contract``): a same-name no-op replacement, a dropped or an extra trigger fails;
 - **no automatic deletion is authorized**: no registered job type names a delete, purge, prune,
   cleanup or retention action (a later deletion policy needs its own decision);
 - the sanitizer and the adapter's safe-retention profile versions evidence is recorded under.
 
-Any failed check makes the proof FAILED and the readiness false. A change of schema head or of any
-check makes an earlier proof stale. Sanitation before hash or persist stays the owners' rule
-(ADR-0014 §15); this proof only shows that the path which keeps the evidence is intact.
+Any failed check makes the proof FAILED and the readiness false. The checks carry the digest of the
+contract's guard SQL and of the live guard SQL, so a change of schema head, of any guard's
+semantics or of any other check makes an earlier proof stale. Sanitation before hash or persist
+stays the owners' rule (ADR-0014 §15); this proof only shows that the path which keeps the
+evidence is intact.
 """
 
 import hashlib
@@ -26,11 +32,19 @@ from typing import Any, Final
 from sqlalchemy import text
 
 from app.db.database import Database
+from app.db.schema_contract import (
+    MANIFEST_QUERY,
+    SchemaManifest,
+    digest_of,
+    expected_manifest,
+    manifest_of,
+    refuses_every_delete,
+)
 from app.live.model import RETENTION_CHECK_FAILED, ProofVerdict
 from app.live.store import LiveAuthorityStore
 from app.register.sanitize import SANITIZER_RULES_VERSION
 
-RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v1"
+RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v2"
 
 # Every table whose rows are canary evidence or the chain a restore proof compares (§7, §8).
 PROTECTED_TABLES: Final = (
@@ -113,35 +127,63 @@ class RetentionProofService:
 
     def checks(self) -> RetentionChecks:
         """The retention checks as they are now. Unreadable truth fails them, never passes them."""
+        head = self._head()
+        live: SchemaManifest | None
+        contract: SchemaManifest | None
         try:
             with self._db.read() as session:
-                rows = session.execute(
-                    text("SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'trigger'")
-                ).all()
+                live = manifest_of(session.execute(text(MANIFEST_QUERY)).tuples().all())
         except Exception:
-            rows = None
+            live = None
+        try:
+            contract = expected_manifest(head) if head else None
+        except Exception:
+            contract = None
         deleting = sorted(
             job for job in self._job_types() if any(word in job.lower() for word in _DELETING_WORDS)
         )
-        if rows is None:
-            checks: dict[str, Any] = {"version": RETENTION_CHECKS_VERSION, "readable": False}
+        if live is None or contract is None:
+            checks: dict[str, Any] = {
+                "version": RETENTION_CHECKS_VERSION,
+                "readable": live is not None,
+                "schema_contract": contract is not None,
+            }
             return RetentionChecks(checks, passed=False)
-        guarded = {table for _, table, sql in rows if "BEFORE DELETE" in (sql or "").upper()}
-        names = {name for name, _, _ in rows}
+        expected = {table: contract.on_table(table) for table in PROTECTED_TABLES}
+        present = {table: live.on_table(table) for table in PROTECTED_TABLES}
+        forward = {o.name: o for guards in expected.values() for o in guards.values()}
         checks = {
             "version": RETENTION_CHECKS_VERSION,
             "readable": True,
-            "schema_head": self._head(),
-            "no_delete_triggers": {table: table in guarded for table in PROTECTED_TABLES},
-            "forward_only_triggers": {name: name in names for name in FORWARD_ONLY_TRIGGERS},
+            "schema_contract": True,
+            "schema_head": head,
+            # Every delete of the table is refused by a live trigger, whatever else it has.
+            "no_delete_triggers": {
+                table: any(refuses_every_delete(o, table) for o in present[table].values())
+                for table in PROTECTED_TABLES
+            },
+            # Every trigger of the table is exactly the contract's: none dropped, altered or added.
+            "guards_match_contract": {
+                table: present[table] == expected[table] for table in PROTECTED_TABLES
+            },
+            "forward_only_triggers": {
+                name: name in forward and live.objects.get(f"trigger:{name}") == forward[name]
+                for name in FORWARD_ONLY_TRIGGERS
+            },
+            "contract_guard_digest": digest_of(
+                o for guards in expected.values() for o in guards.values()
+            ),
+            "live_guard_digest": digest_of(
+                o for guards in present.values() for o in guards.values()
+            ),
             "deleting_job_types": deleting,
             "automatic_deletion_authorized": False,
             "sanitizer_rules_version": SANITIZER_RULES_VERSION,
             "safe_retention_profile_version": self._profile,
         }
         passed = (
-            bool(checks["schema_head"])
-            and all(checks["no_delete_triggers"].values())
+            all(checks["no_delete_triggers"].values())
+            and all(checks["guards_match_contract"].values())
             and all(checks["forward_only_triggers"].values())
             and not deleting
         )

@@ -635,12 +635,16 @@ def test_a_restore_that_changes_an_element_fails_the_drill(
     def backup_then_tamper(source: sqlite3.Connection, restored_db: Path) -> None:
         backup(source, restored_db)
         with sqlite3.connect(restored_db) as restored:
-            for (name,) in restored.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            guards = restored.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'trigger'"
                 " AND tbl_name = 'registration_drafts'"
-            ).fetchall():
+            ).fetchall()
+            for name, _ in guards:
                 restored.execute(f"DROP TRIGGER {name}")
             restored.execute("UPDATE registration_drafts SET draft_revision = draft_revision + 9")
+            # The schema is put back exactly: only the row differs.
+            for _, sql in guards:
+                restored.execute(sql)
 
     monkeypatch.setattr(drill_module, "_backup_into_fresh_root", backup_then_tamper)
     result = container.restore_drills.drill_asset(
@@ -650,3 +654,259 @@ def test_a_restore_that_changes_an_element_fails_the_drill(
     by_name = {record["element"]: record for record in result.evidence["elements"]}
     assert by_name["draft"]["match"] is False
     assert not proofs(container).restore_proof(MutationStage.ASSET, result.target_digest)
+
+
+# ---------------------------------------------------------------- the restored schema itself (B1)
+
+NO_OP_DELETE_GUARD = (
+    "CREATE TRIGGER trg_registration_intents_no_delete BEFORE DELETE ON registration_intents"
+    " BEGIN SELECT 1; END"
+)
+
+
+def _first_index(connection: sqlite3.Connection, table: str) -> str:
+    row = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL"
+        " ORDER BY name",
+        (table,),
+    ).fetchone()
+    assert row is not None, table
+    return str(row[0])
+
+
+@pytest.mark.parametrize("damage", ["dropped-index", "no-op-trigger", "extra-trigger"])
+def test_a_restored_schema_that_differs_from_the_contract_fails_the_drill_with_no_row_changed(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    fresh: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    damage: str,
+) -> None:
+    unit = durable_unit(api, container, config)
+    grant_id, _ = asset_grant(container, unit)
+    from app.live import drill as drill_module
+
+    backup = drill_module._backup_into_fresh_root
+    expected: dict[str, str] = {}
+
+    def backup_then_damage_the_schema_only(source: sqlite3.Connection, restored_db: Path) -> None:
+        backup(source, restored_db)
+        with sqlite3.connect(restored_db) as restored:
+            if damage == "dropped-index":
+                index = _first_index(restored, "registration_intents")
+                restored.execute(f"DROP INDEX {index}")
+                expected["difference"] = f"missing:index:{index}"
+            elif damage == "no-op-trigger":
+                restored.execute("DROP TRIGGER trg_registration_intents_no_delete")
+                restored.execute(NO_OP_DELETE_GUARD)
+                expected["difference"] = "changed:trigger:trg_registration_intents_no_delete"
+            else:
+                restored.execute(
+                    "CREATE TRIGGER trg_extra BEFORE INSERT ON live_grants BEGIN SELECT 1; END"
+                )
+                expected["difference"] = "unexpected:trigger:trg_extra"
+
+    monkeypatch.setattr(drill_module, "_backup_into_fresh_root", backup_then_damage_the_schema_only)
+    result = container.restore_drills.drill_asset(
+        grant_id, restore_root=fresh(damage), actor=OPERATOR, correlation_id=CID
+    )
+    evidence = result.evidence
+    # Integrity, the Alembic marker and every row still match: only the schema proves the damage.
+    assert evidence["integrity"] == "ok" and evidence["schema_head"] == head_revision()
+    assert all(record["match"] for record in evidence["elements"])
+    assert all(artifact["match"] for artifact in evidence["artifacts"])
+    assert (result.verdict, result.failure_code) == (
+        ProofVerdict.FAILED,
+        live_model.DRILL_SCHEMA_MISMATCH,
+    )
+    assert evidence["schema"]["differences"] == [expected["difference"]]
+    assert not proofs(container).restore_proof(MutationStage.ASSET, result.target_digest)
+
+
+def test_the_expected_schema_is_never_read_from_the_active_root(
+    api: TestClient, container: Container, config: AppConfig, fresh: Any
+) -> None:
+    unit = durable_unit(api, container, config)
+    grant_id, _ = asset_grant(container, unit)
+    # Damage the active root itself: the backup carries it, and the contract still refuses it.
+    with sqlite3.connect(config.data_dir / "runtime" / "icbm.db") as raw:
+        index = _first_index(raw, "registration_intents")
+        raw.execute(f"DROP INDEX {index}")
+    result = container.restore_drills.drill_asset(
+        grant_id, restore_root=fresh("damaged-source"), actor=OPERATOR, correlation_id=CID
+    )
+    assert result.failure_code == live_model.DRILL_SCHEMA_MISMATCH
+    assert result.evidence["schema"]["differences"] == [f"missing:index:{index}"]
+
+
+# ---------------------------------------------------------------- the one consistent point (B3)
+
+
+@pytest.mark.parametrize("stage", ["ASSET", "CREATE"])
+def test_an_owner_write_during_the_first_target_read_fails_the_drill(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    fresh: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    """The fence is read before the first owner read the target rests on, so a write landing
+    inside that read is a moved source — never a baseline the stale read is then proved against."""
+    if stage == "ASSET":
+        unit = durable_unit(api, container, config)
+        ref, _ = asset_grant(container, unit)
+        owner: Any = container.restore_drills._store
+        method = "grant_record"
+    else:
+        frozen, _ = frozen_unit(api, container, config)
+        ref = frozen.intent.intent_id
+        owner = container.restore_drills._registrations
+        method = "intent"
+    real = getattr(owner, method)
+    calls = {"n": 0}
+
+    def read_then_write(*args: Any, **kwargs: Any) -> Any:
+        found = real(*args, **kwargs)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            container.live_authority.engage_brake(
+                actor=OPERATOR, reason_code="CONCURRENT_WRITE", correlation_id=CID
+            )
+        return found
+
+    monkeypatch.setattr(owner, method, read_then_write)
+    drill = (
+        container.restore_drills.drill_asset
+        if stage == "ASSET"
+        else container.restore_drills.drill_create
+    )
+    result = drill(ref, restore_root=fresh(f"first-{stage}"), actor=OPERATOR, correlation_id=CID)
+    assert (result.verdict, result.failure_code) == (
+        ProofVerdict.FAILED,
+        live_model.DRILL_SOURCE_MOVED,
+    )
+    assert not proofs(container).restore_proof(MutationStage(stage), result.target_digest)
+
+
+def test_an_intent_moved_after_the_target_was_derived_fails_the_create_drill(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    fresh: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even a move no audited owner made (here: raw SQL, PREPARED → FAILED) between deriving the
+    target and the backup fails the drill: under the write coordinator the Intent, Attempts and
+    §26 scope are re-read and the target recomputed, so no PASSED proof binds a stale Intent."""
+    frozen, _ = frozen_unit(api, container, config)
+    intent_id = frozen.intent.intent_id
+    from app.live import drill as drill_module
+
+    real = drill_module.unit_elements
+
+    def derive_then_move_the_intent(*args: Any) -> Any:
+        elements = real(*args)
+        with sqlite3.connect(config.data_dir / "runtime" / "icbm.db") as raw:
+            raw.execute(
+                "UPDATE registration_intents SET state = 'FAILED' WHERE intent_id = ?", (intent_id,)
+            )
+        return elements
+
+    monkeypatch.setattr(drill_module, "unit_elements", derive_then_move_the_intent)
+    result = container.restore_drills.drill_create(
+        intent_id, restore_root=fresh("moved-intent"), actor=OPERATOR, correlation_id=CID
+    )
+    assert (result.verdict, result.failure_code) == (
+        ProofVerdict.FAILED,
+        live_model.DRILL_SOURCE_MOVED,
+    )
+    assert not proofs(container).restore_proof(MutationStage.CREATE, result.target_digest)
+
+
+# ---------------------------------------------------------------- guard semantics (B2)
+
+
+def _replace_trigger(config: AppConfig, name: str, sql: str) -> str:
+    with sqlite3.connect(config.data_dir / "runtime" / "icbm.db") as raw:
+        row = raw.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?", (name,)
+        ).fetchone()
+        assert row is not None, name
+        raw.execute(f"DROP TRIGGER {name}")
+        raw.execute(sql)
+    return str(row[0])
+
+
+GUARDED_TABLE = {
+    "trg_registration_intents_no_delete": "registration_intents",
+    "trg_live_grants_forward_only": "live_grants",
+    "trg_audit_events_no_update": "audit_events",
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "no_op"),
+    [
+        ("trg_registration_intents_no_delete", NO_OP_DELETE_GUARD),
+        (
+            "trg_live_grants_forward_only",
+            "CREATE TRIGGER trg_live_grants_forward_only BEFORE UPDATE ON live_grants"
+            " BEGIN SELECT 1; END",
+        ),
+        (
+            "trg_audit_events_no_update",
+            "CREATE TRIGGER trg_audit_events_no_update BEFORE UPDATE ON audit_events"
+            " BEGIN SELECT 1; END",
+        ),
+    ],
+)
+def test_a_same_name_no_op_guard_makes_evidence_retention_not_ready(
+    api: TestClient, container: Container, config: AppConfig, name: str, no_op: str
+) -> None:
+    retention = container.retention
+    _, verdict = retention.prove(actor=OPERATOR, correlation_id=CID)
+    assert verdict is ProofVerdict.PASSED and retention.ready()
+    proven = retention.checks()
+    original = _replace_trigger(config, name, no_op)
+    now = retention.checks()
+    # The name is still there; the semantics are not: the checks fail and the proof is stale.
+    assert not now.passed and not retention.ready()
+    assert now.digest != proven.digest
+    table = GUARDED_TABLE[name]
+    assert now.checks["guards_match_contract"][table] is False
+    if name in now.checks["forward_only_triggers"]:
+        assert now.checks["forward_only_triggers"][name] is False
+    if name.endswith("_no_delete"):
+        assert now.checks["no_delete_triggers"][table] is False
+    _, failed = retention.prove(actor=OPERATOR, correlation_id=CID)
+    assert failed is ProofVerdict.FAILED
+    # The exact guard back: the earlier PASSED proof matches again.
+    _replace_trigger(config, name, original)
+    assert retention.checks().digest == proven.digest and retention.ready()
+
+
+def test_only_an_unconditional_abort_refuses_every_delete() -> None:
+    from app.db.schema_contract import SchemaObject, refuses_every_delete
+
+    def guard(sql: str, name: str = "trg_t_no_delete") -> SchemaObject:
+        return SchemaObject("trigger", name, "t", sql)
+
+    head = "CREATE TRIGGER trg_t_no_delete BEFORE DELETE ON t BEGIN"
+    assert refuses_every_delete(guard(f"{head} SELECT RAISE(ABORT, 't is kept'); END"), "t")
+    assert refuses_every_delete(guard(f"{head} SELECT RAISE(ABORT, 't is kept') WHERE 1; END"), "t")
+    for weakened in (
+        f"{head} SELECT 1; END",
+        f"{head} SELECT RAISE(IGNORE); END",
+        f"{head} SELECT RAISE(ABORT, 'x') WHERE OLD.id = 'y'; END",
+        "CREATE TRIGGER trg_t_no_delete BEFORE DELETE ON t WHEN 0 BEGIN"
+        " SELECT RAISE(ABORT, 'x'); END",
+        "CREATE TRIGGER trg_t_no_delete BEFORE UPDATE ON t BEGIN SELECT RAISE(ABORT, 'x'); END",
+    ):
+        assert not refuses_every_delete(guard(weakened), "t"), weakened
+    # A guard of another table, or under another name than its own, guards nothing here.
+    assert not refuses_every_delete(guard(f"{head} SELECT RAISE(ABORT, 'x'); END"), "u")
+    assert not refuses_every_delete(
+        guard(f"{head} SELECT RAISE(ABORT, 'x'); END", name="trg_other"), "t"
+    )

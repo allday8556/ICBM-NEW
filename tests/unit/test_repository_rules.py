@@ -59,6 +59,9 @@ DATABASE_OPENERS = {
     "app/container.py": "require_ownership",  # the application Database
     "app/db/migrations/env.py": "require_ownership",  # schema migrations
     "app/db/migrate.py": "read-only",  # `icbm db current` (mode=ro)
+    # Gate 3 area 2 (ADR-0018 §7, §8): reads back, read-only, the schema the shipped migrations
+    # build in a private temporary directory — the expected schema, never a data directory.
+    "app/db/schema_contract.py": "read-only",
     # Gate 3 area 2 (ADR-0018 §7): the drill reads the active database read-only and writes only
     # the backup into a separate fresh restore root, never a data directory.
     "app/live/drill.py": "read-only or fresh restore root",
@@ -721,6 +724,8 @@ def test_the_live_owners_reach_no_provider() -> None:
         "app.core.execution",
         "app.db.base",
         "app.db.database",
+        # Gate 3 area 2: the expected schema the shipped migrations build (drill and retention).
+        "app.db.schema_contract",
         "app.db.types",
         "app.live",
         "app.products.image_model",

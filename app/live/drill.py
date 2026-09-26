@@ -2,19 +2,25 @@
 
 A drill proves one stage's exact target, taken at one consistent point:
 
-1. the chain the stage rests on is derived from the owners — for ASSET the preparation owner's
+1. the owner-write fence is read **first**, before any owner read the target rests on;
+2. the chain the stage rests on is derived from the owners — for ASSET the preparation owner's
    current candidate and the grant; for CREATE the frozen Snapshot, its Intent and the execution
    copy of the exact revision that produced it — and turned into **elements**: owner rows named
    by their identities, each required, optional or required to be absent;
-2. the restore target is the stack's own target digest for that stage (the digest admission
+3. the restore target is the stack's own target digest for that stage (the digest admission
    computes at send time), so the proof is stale as soon as any of that state moves;
-3. under the process write coordinator — no other writer can move the source — the owner-write
-   fence is re-read (a write since step 1 fails the drill), the database is backed up with
-   SQLite's online backup API into a **separate fresh root** (WAL-consistent; never a file copy),
-   every element is read from the source, and the selected artifacts' bytes are copied;
-4. the restored root proves ``PRAGMA integrity_check`` = ``ok`` and the Alembic head, and every
-   element and artifact is compared **by identity and state** with the source;
-5. one append-only drill record keeps the sanitized evidence — identities, states, counts,
+4. under the process write coordinator — no other writer can move the source — the fence is
+   re-read (any audited owner write since step 1 fails the drill), a CREATE drill re-reads its
+   Intent, Attempts and §26 scope and recomputes the target and stage verdict (any difference fails
+   it), the database is backed up with SQLite's online backup API into a **separate fresh root**
+   (WAL-consistent; never a file copy), every element is read from the source, and the selected
+   artifacts' bytes are copied;
+5. the restored root proves ``PRAGMA integrity_check`` = ``ok``, the Alembic head, and **its schema
+   itself**: every table, index, trigger and view, with its SQL, equals the schema the shipped
+   migrations build at that head (``app.db.schema_contract``) — a dropped index or a no-op trigger
+   fails the drill even when no row changed; then every element and artifact is compared **by
+   identity and state** with the source;
+6. one append-only drill record keeps the sanitized evidence — identities, states, counts,
    digests, versions, times and every element recorded as absent. No path, credential, secret or
    raw payload enters it.
 
@@ -35,11 +41,13 @@ from app.audit.service import AuditLog
 from app.core.clock import Clock
 from app.core.errors import InputValidationError, NotFoundError
 from app.db.database import Database
+from app.db.schema_contract import MANIFEST_QUERY, SchemaManifest, expected_manifest, manifest_of
 from app.live.model import (
     DRILL_ARTIFACT_MISMATCH,
     DRILL_ELEMENT_MISMATCH,
     DRILL_INTEGRITY_FAILED,
     DRILL_REQUIRED_ELEMENT_ABSENT,
+    DRILL_SCHEMA_MISMATCH,
     DRILL_SCHEMA_NOT_AT_HEAD,
     DRILL_SOURCE_MOVED,
     DRILL_STAGE_MISMATCH,
@@ -53,7 +61,7 @@ from app.products.image_model import ImageAssetKind
 from app.register.model import IntentState
 from app.register.store import RegistrationStore
 
-DRILL_VERSION: Final = "restore-drill/v1"
+DRILL_VERSION: Final = "restore-drill/v2"
 CREATE_ENDPOINT_GROUP: Final = "product_registration"
 _SENDABLE = (IntentState.PREPARED, IntentState.FAILED)
 
@@ -289,10 +297,11 @@ class RestoreDrillService:
     ) -> DrillResult:
         """Prove the exact pre-upload chain of one ASSET grant (§7 'The ASSET restore proof')."""
         root = self._fresh_root(restore_root)
+        # The fence comes before every owner read the target rests on (§7's consistent point).
+        fence = self._stack.truth_fence()
         grant = self._store.grant_record(grant_id)
         if grant is None or grant.stage is not MutationStage.ASSET:
             raise NotFoundError("DRILL_GRANT_NOT_FOUND", "no ASSET grant with this identity")
-        fence = self._stack.truth_fence()
         preparation = self._registrations.preparation_of_revision(
             grant.preparation_revision_id or ""
         )
@@ -351,10 +360,11 @@ class RestoreDrillService:
     ) -> DrillResult:
         """Prove the exact post-freeze chain of one Intent (§7 'The CREATE restore proof')."""
         root = self._fresh_root(restore_root)
+        # The fence comes before every owner read the target rests on (§7's consistent point).
+        fence = self._stack.truth_fence()
         intent = self._registrations.intent(intent_id)
         if intent is None:
             raise NotFoundError("DRILL_INTENT_NOT_FOUND", "no registration Intent")
-        fence = self._stack.truth_fence()
         snapshot_id = intent.registration_snapshot_id
         provenance = self._registrations.snapshot_preparation(snapshot_id)
         if provenance is None:
@@ -372,6 +382,22 @@ class RestoreDrillService:
         target = self._stack.create_restore_target(
             intent, attempt_no=len(attempts) + 1, scope=scope
         )
+
+        def settle() -> tuple[str, bool] | None:
+            """The target and stage verdict re-derived from the owners' plain reads, run under
+            the write coordinator: the one state the backup takes, or a moved source."""
+            now = self._registrations.intent(intent_id)
+            if now is None:
+                return None
+            again = self._stack.create_restore_target(
+                now,
+                attempt_no=len(self._registrations.attempts(intent_id)) + 1,
+                scope=self._registrations.execution_scope(
+                    now.marketplace_key, now.marketplace_account_id, CREATE_ENDPOINT_GROUP
+                ),
+            )
+            return again, now.state in _SENDABLE
+
         resolved = copy.final.resolved
         elements = unit_elements(resolved, preparation, provenance.preparation_revision_id)
         elements += [
@@ -449,6 +475,7 @@ class RestoreDrillService:
             correlation_id,
             stage_ok=intent.state in _SENDABLE,
             scope_state=scope.state.value,
+            settle=settle,
         )
 
     # ------------------------------------------------------------------ the common drill
@@ -467,17 +494,22 @@ class RestoreDrillService:
         *,
         stage_ok: bool,
         scope_state: str | None = None,
+        settle: Callable[[], tuple[str, bool] | None] | None = None,
     ) -> DrillResult:
         started = self._clock.now()
         head = self._head() or ""
+        # Derived before the consistent point: never built while the write coordinator is held.
+        contract = _contract(head)
         restored_db = root / "runtime" / self._paths.database_path.name
         source: dict[str, Reading] = {}
-        moved = False
         # The consistent point: no other writer can move the source while the backup is taken.
         with self._db.write() as session:
-            if self._audit.owner_writes(session) != fence:
-                moved = True
-            else:
+            # Any audited owner write since the fence, or — for CREATE — a target or stage verdict
+            # the owners no longer derive, is a moved source.
+            moved = self._audit.owner_writes(session) != fence or (
+                settle is not None and settle() != (target, stage_ok)
+            )
+            if not moved:
                 restored_db.parent.mkdir(parents=True, exist_ok=True)
                 with _Readonly(self._paths.database_path) as src:
                     _backup_into_fresh_root(src, restored_db)
@@ -493,12 +525,14 @@ class RestoreDrillService:
             "target_digest": target,
             "schema_head": head,
             "scope_state": scope_state,
+            "schema_contract_digest": None if contract is None else contract.digest,
         }
         failure: str | None = None
         integrity: str | None = None
         backup_digest: str | None = None
         records: list[dict[str, Any]] = []
         files: list[dict[str, Any]] = []
+        schema: dict[str, Any] = {}
         if moved:
             failure = DRILL_SOURCE_MOVED
         else:
@@ -506,6 +540,16 @@ class RestoreDrillService:
             with _Readonly(restored_db) as restored:
                 integrity = str(restored.execute("PRAGMA integrity_check").fetchone()[0])
                 version = restored.execute("SELECT version_num FROM alembic_version").fetchone()
+                restored_schema = manifest_of(restored.execute(MANIFEST_QUERY).fetchall())
+                schema = {
+                    "restored_digest": restored_schema.digest,
+                    # Object keys only (code-defined names): never SQL text or row content.
+                    "differences": (
+                        ["contract-unavailable"]
+                        if contract is None
+                        else contract.differences(restored_schema)
+                    ),
+                }
                 for element in elements:
                     before, after = source[element.name], read_element(restored, element)
                     records.append(
@@ -539,9 +583,15 @@ class RestoreDrillService:
                 integrity=integrity,
                 version=None if version is None else str(version[0]),
                 head=head,
+                schema_differences=schema["differences"],
                 stage_ok=stage_ok,
             )
-        evidence |= {"integrity": integrity, "elements": records, "artifacts": files}
+        evidence |= {
+            "integrity": integrity,
+            "schema": schema,
+            "elements": records,
+            "artifacts": files,
+        }
         absent = [r["element"] for r in records if r["state"] == "ABSENT"]
         evidence["absent"] = absent
         verdict = ProofVerdict.PASSED if failure is None else ProofVerdict.FAILED
@@ -591,12 +641,15 @@ def _judge(
     integrity: str | None,
     version: str | None,
     head: str,
+    schema_differences: Sequence[str],
     stage_ok: bool,
 ) -> str | None:
     if integrity != "ok":
         return DRILL_INTEGRITY_FAILED
     if not head or version != head:
         return DRILL_SCHEMA_NOT_AT_HEAD
+    if schema_differences:
+        return DRILL_SCHEMA_MISMATCH
     by_name = {record["element"]: record for record in records}
     if not stage_ok or any(e.must_be_absent and by_name[e.name]["rows"] for e in elements):
         return DRILL_STAGE_MISMATCH
@@ -607,6 +660,16 @@ def _judge(
     if not all(file["match"] for file in files):
         return DRILL_ARTIFACT_MISMATCH
     return None
+
+
+def _contract(head: str) -> SchemaManifest | None:
+    """The expected schema at ``head``; unavailable fails the drill, it never passes it."""
+    if not head:
+        return None
+    try:
+        return expected_manifest(head)
+    except Exception:
+        return None
 
 
 def _backup_into_fresh_root(source: sqlite3.Connection, restored_db: Path) -> None:
