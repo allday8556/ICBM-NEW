@@ -1439,13 +1439,26 @@ def test_only_machine_or_provider_evidence_resolves_an_unknown(
         intent_id,
         match="CHECK",
     )  # transmission-precluded evidence proves absence only
+    # ADR-0014 §17.2, §28: a provider lookup never proves absence, whoever records it.
+    for resolver in (ResolvedBy.USER, ResolvedBy.LOOKUP):
+        with pytest.raises(InputValidationError, match="never proves"), store.transaction() as unit:
+            unit.resolve_unknown(
+                intent_id,
+                outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+                resolved_by=resolver,
+                evidence_kind=ResolutionEvidence.PROVIDER_LOOKUP,
+                sanitized_evidence={"lookup": "no listing under the listing identity"},
+                correlation_id=CID,
+                actor=OPERATOR,
+            )
+    assert store.intent(intent_id).state is IntentState.UNKNOWN
     with store.transaction() as unit:
         resolved = unit.resolve_unknown(
             intent_id,
             outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
             resolved_by=ResolvedBy.USER,
-            evidence_kind=ResolutionEvidence.PROVIDER_LOOKUP,
-            sanitized_evidence={"lookup": "no listing under the listing identity"},
+            evidence_kind=ResolutionEvidence.TRANSMISSION_PRECLUDED,
+            sanitized_evidence={"phase": "before transmission"},
             correlation_id=CID,
             actor=OPERATOR,
         )
@@ -1453,7 +1466,7 @@ def test_only_machine_or_provider_evidence_resolves_an_unknown(
     (attempt,) = store.attempts(intent_id)
     assert (attempt.resolved_by, attempt.resolution_evidence_kind, attempt.ambiguous_result) == (
         ResolvedBy.USER,
-        ResolutionEvidence.PROVIDER_LOOKUP,
+        ResolutionEvidence.TRANSMISSION_PRECLUDED,
         False,
     )
     _refused(
@@ -1565,13 +1578,26 @@ def test_only_a_proven_not_applied_resolution_frees_the_scope(
     item = _priced(container, config, sources)
     first = _intent(store, _freeze(store, [item]).registration_snapshot_id)
     _finish(store, first, RemoteOutcome.UNKNOWN)
-    with store.transaction() as unit:
+    # A lookup-derived "absence" is refused, so it never frees the scope (§17.2, §28).
+    with pytest.raises(InputValidationError, match="never proves"), store.transaction() as unit:
         unit.resolve_unknown(
             first,
             outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
             resolved_by=ResolvedBy.LOOKUP,
             evidence_kind=ResolutionEvidence.PROVIDER_LOOKUP,
             sanitized_evidence={"lookup": "absent"},
+            correlation_id=CID,
+            actor=OPERATOR,
+        )
+    with pytest.raises(RegistrationConflictError):
+        _intent(store, _freeze(store, [item]).registration_snapshot_id)
+    with store.transaction() as unit:
+        unit.resolve_unknown(
+            first,
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            resolved_by=ResolvedBy.USER,
+            evidence_kind=ResolutionEvidence.TRANSMISSION_PRECLUDED,
+            sanitized_evidence={"phase": "before transmission"},
             correlation_id=CID,
             actor=OPERATOR,
         )
@@ -1744,15 +1770,34 @@ def test_a_proven_external_absence_keeps_history_and_frees_a_fresh_registration(
             f" absence_evidence_digest = '{'7' * 64}', absence_recorded_by = 'o'",
             match="CHECK",
         )
-    with store.transaction() as unit:
-        removed = unit.record_external_absence(
+    # ADR-0014 §17.2, §28: a lookup-derived absence is refused. It neither terminalizes the
+    # registration nor frees the group for a fresh registration.
+    with pytest.raises(InputValidationError, match="never proves"), store.transaction() as unit:
+        unit.record_external_absence(
             registration_id,
             evidence_kind=AbsenceEvidence.PROVIDER_LOOKUP,
             sanitized_evidence={"lookup": "absent"},
             recorded_by=OPERATOR,
             correlation_id=CID,
         )
+    kept = store.registration(registration_id)
+    assert kept is not None and kept.lifecycle_state is RegistrationLifecycle.ACTIVE
+    # The group stays live (§13), so a fresh registration of it is still blocked.
+    live = (kept.marketplace_key, kept.marketplace_account_id, [item.group])
+    with store.transaction() as unit:
+        assert unit.live_registrations(*live) == (registration_id,)
+    # Only an admissible provider read-back proves the listing absent.
+    with store.transaction() as unit:
+        removed = unit.record_external_absence(
+            registration_id,
+            evidence_kind=AbsenceEvidence.PROVIDER_READ_BACK,
+            sanitized_evidence={"read_back": "absent"},
+            recorded_by=OPERATOR,
+            correlation_id=CID,
+        )
     assert removed.lifecycle_state is RegistrationLifecycle.EXTERNALLY_REMOVED
+    with store.transaction() as unit:
+        assert unit.live_registrations(*live) == ()
     # History stays: the registration, its Snapshot, its Intent and its attempts.
     assert (
         count(config, "marketplace_registrations"),

@@ -1865,6 +1865,16 @@ class RegistrationUnit:
                 "an applied outcome names its provider identity, and only an applied one does",
             )
         evidence = ResolutionEvidence(evidence_kind)
+        if proven is RemoteOutcome.NOT_APPLIED_PROVEN and (
+            evidence is ResolutionEvidence.PROVIDER_LOOKUP
+            or ResolvedBy(resolved_by) is ResolvedBy.LOOKUP
+        ):
+            # ADR-0014 §17.2, §28: a provider lookup never proves remote absence, so it can never
+            # free an UNKNOWN towards FAILED and a new CREATE.
+            raise InputValidationError(
+                "REGISTER_LOOKUP_NEVER_PROVES_ABSENCE",
+                "a provider lookup never proves that a CREATE was not applied",
+            )
         attempt = self._latest_attempt(intent_id)
         assert attempt is not None and attempt.remote_outcome == RemoteOutcome.UNKNOWN.value
         attempt.resolved_outcome = proven.value
@@ -2264,6 +2274,13 @@ class RegistrationUnit:
         ``EXTERNALLY_REMOVED``. An operator's assertion is not an :class:`AbsenceEvidence`."""
         row = self._active_registration(registration_id)
         kind = AbsenceEvidence(evidence_kind)
+        if kind is AbsenceEvidence.PROVIDER_LOOKUP:
+            # ADR-0014 §17.2, §28: no lookup result is remote-absence evidence, so it can never
+            # terminalize a registration or free the group for a fresh one.
+            raise InputValidationError(
+                "REGISTER_LOOKUP_NEVER_PROVES_ABSENCE",
+                "a provider lookup never proves that a listing is absent",
+            )
         _require_text(recorded_by=recorded_by)
         row.lifecycle_state = RegistrationLifecycle.EXTERNALLY_REMOVED.value
         row.absence_observed_at = self._clock.now()

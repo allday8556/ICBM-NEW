@@ -6,6 +6,7 @@ owner makes before and after it talks to anything (kickoff §4, §5, §9, §10).
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -375,6 +376,28 @@ def test_an_operator_assertion_is_not_a_resolution_evidence_kind() -> None:
         "REVIEWED_MACHINE_PROOF",
     }
     assert ResolvedBy.USER in set(ResolvedBy)
+
+
+def test_reconcile_never_consults_a_lookup_and_no_code_reads_a_lookup_absence() -> None:
+    # ADR-0014 §17.2, §28: product search is NOT_ADOPTED, a lookup never proves remote absence,
+    # and positive-only reconcile is a separately authorized slice. The pre-§28 path in which a
+    # lookup result settled an UNKNOWN (and so freed a new CREATE) must not come back.
+    import ast
+    import inspect
+    import textwrap
+
+    from app.register import execution
+
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(execution.RegistrationExecutionService.reconcile))
+    )
+    touched = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    assert "_lookup" not in touched
+    assert "PROVIDER_LOOKUP" not in touched
+    repo = Path(__file__).resolve().parents[2]
+    for root in ("app", "integrations"):
+        for path in (repo / root).rglob("*.py"):
+            assert "absence_proven" not in path.read_text("utf-8"), path
 
 
 def test_a_prepared_asset_reference_travels_only_when_it_is_safe() -> None:
