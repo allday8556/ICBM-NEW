@@ -751,7 +751,15 @@ Merged owners are not an operable path. These gaps are recorded facts at the cur
 Before any real marketplace write, and independently of endpoint adoption:
 
 - a **bounded LIVE authorization contract** (§14.1; decided in ADR-0018, owners implemented provider-zero in Gate 3 area 1, LIVE still refused by `M0_DRY_RUN_ONLY`) and the user's explicit scope approval;
-- **provider evidence that resolves the CREATE and reconcile blockers** (Issue #89 `5768312853`): an official CREATE idempotency or ambiguous-outcome replay-safety guarantee, a deterministic account-scoped lookup with proven uniqueness and completeness, and read-after-write freshness that makes a zero-result lookup authoritative;
+- **the CREATE safety strategy of ADR-0018 §6.1 and ADR-0014 §28** (Issue #89 `5845062336`):
+  - The provider-evidence verdict stays `INSUFFICIENT` (Issue #89 `5768312853`, re-confirmed by the area 4 closeout `5844770185`). There is no official CREATE idempotency or ambiguous-outcome replay-safety guarantee, no lookup with proven uniqueness and completeness, and no read-after-write freshness that would make a zero-result lookup authoritative.
+  - The verdict is not overturned. It is no longer the reopening condition.
+  - Instead, all of the following must hold:
+    - CREATE and the positive-only reconcile path are each separately adopted;
+    - an `UNKNOWN` CREATE is never resent;
+    - a zero-result lookup never proves absence;
+    - every Gate-3 readiness prerequisite holds;
+    - an explicit user and architect acceptance of the residual risk is recorded — the risk that a listing may be live while its provider identity is unrecovered;
 - a **ComplianceGate owner**, or a canary product proven outside every regulated category (ADR-0018 §5);
 - a proven **backup and restore drill** of the canonical data root (ADR-0018 §7);
 - a **complete evidence-retention policy**, end to end, over sanitized provider evidence (ADR-0018 §8);
