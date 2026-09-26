@@ -114,8 +114,12 @@ CANONICAL_TABLES = (
     "live_grants",
     "protected_write_brakes",
     "asset_upload_attempts",
+    "adaptive_capture_requests",
+    "adaptive_capture_candidates",
+    "adaptive_phase_c_commands",
+    "adaptive_phase_c_command_results",
 )
-HEAD = "0026_g3_live_authority"
+HEAD = "0027_adaptive_capture_seam"
 
 
 def _url(path: Path) -> str:

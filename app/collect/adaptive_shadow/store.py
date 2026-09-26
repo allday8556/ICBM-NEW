@@ -161,6 +161,7 @@ class WindowRecord:
     superseded: bool
     events: tuple[str, ...]
     closeout: dict[str, object] | None
+    correlation_id: str
 
 
 def _record_digest(row: ShadowRecord) -> str:
@@ -468,6 +469,20 @@ class ShadowEvidenceStore:
                 details={"collection_run_id": run.collection_run_id},
             )
         return events
+
+    def resolution_of(self, collection_run_id: str) -> tuple[str, str, str] | None:
+        """The run's one resolution as ``(correlation_id, evidence_ref, count_as)``, or ``None``:
+        owner truth for reconciling the harness command that asked for it."""
+        with self._db.read() as session:
+            row = session.scalars(
+                select(LedgerEvent).where(
+                    LedgerEvent.collection_run_id == collection_run_id,
+                    LedgerEvent.kind == "RESOLUTION_RECORDED",
+                )
+            ).first()
+            if row is None or row.evidence_ref is None:
+                return None
+            return row.correlation_id, row.evidence_ref, row.count_as
 
     def state(self, collection_run_id: str) -> State | None:
         """The run's effective state, or ``None`` when it has no ledger event (yet)."""
@@ -840,6 +855,7 @@ class ShadowEvidenceStore:
             closeout=None
             if closed is None or closed.detail_json is None
             else json.loads(closed.detail_json),
+            correlation_id=row.correlation_id,
         )
 
     def _open_window(self, session: Session, supplier_key: str) -> str | None:

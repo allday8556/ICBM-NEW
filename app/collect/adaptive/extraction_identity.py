@@ -19,4 +19,4 @@ EXTRACTOR_INPUTS = (
     "app/collect/adaptive/profiles.py",
     "app/collect/adaptive/validation.py",
 )
-EXTRACTOR_FINGERPRINT = "3345acb0ad90b5cce1bdb89b34e57d150b90c7a546309cc6d13d643a0f2fab64"
+EXTRACTOR_FINGERPRINT = "90594482f3fb0e9661eec66bb018017670e509aaf72aee1a0d1447040301ec03"

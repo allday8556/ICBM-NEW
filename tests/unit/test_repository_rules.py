@@ -1484,6 +1484,7 @@ ADAPTIVE_PACKAGES = (
     "app.collect.adaptive",
     "app.collect.adaptive_store",
     "app.collect.adaptive_shadow",
+    "app.collect.adaptive_capture",
 )
 
 
@@ -1624,9 +1625,16 @@ def test_the_canonical_collection_knows_only_the_shadow_seam() -> None:
 # their models, and the container that composes them (P3). No COLLECT owner, route, job or script
 # imports them.
 ADAPTIVE_IMPORTERS = {
-    "app/db/metadata.py": {"app.collect.adaptive_store", "app.collect.adaptive_shadow"},
+    "app/db/metadata.py": {
+        "app.collect.adaptive_store",
+        "app.collect.adaptive_shadow",
+        "app.collect.adaptive_capture",
+    },
     "app/container.py": {
         "app.collect.adaptive.hooks",
+        "app.collect.adaptive_capture.commands",
+        "app.collect.adaptive_capture.runner",
+        "app.collect.adaptive_capture.store",
         "app.collect.adaptive_shadow.runner",
         "app.collect.adaptive_shadow.store",
         "app.collect.adaptive_shadow.switch",
@@ -1634,6 +1642,10 @@ ADAPTIVE_IMPORTERS = {
         "app.collect.adaptive_store.store",
     },
 }
+# Phase C C0 (Issue #110 5826469852 item 2, 6): the harness under scripts/phasec is the only other
+# importer, and the only non-test caller of the Phase C operator actions.
+PHASE_C_HARNESS = "scripts/phasec/"
+ADAPTIVE_CAPTURE_ROOT = "app/collect/adaptive_capture/"
 
 
 def test_only_the_container_wires_the_adaptive_collector() -> None:
@@ -1641,8 +1653,12 @@ def test_only_the_container_wires_the_adaptive_collector() -> None:
     for root in roots:
         for file in root.rglob("*.py"):
             relative = file.relative_to(REPO_ROOT).as_posix()
-            if relative.startswith((ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT, ADAPTIVE_SHADOW_ROOT)):
+            if relative.startswith(
+                (ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT, ADAPTIVE_SHADOW_ROOT, ADAPTIVE_CAPTURE_ROOT)
+            ):
                 continue
+            if relative.startswith(PHASE_C_HARNESS):
+                continue  # the harness: pinned by the Phase C rules below
             allowed = ADAPTIVE_IMPORTERS.get(relative, set())
             for name in _imported_modules(ast.parse(file.read_text("utf-8"))):
                 if _is_adaptive(name):
@@ -1655,6 +1671,160 @@ def test_only_the_container_wires_the_adaptive_collector() -> None:
             assert not any(n.startswith(ADAPTIVE_PACKAGES[1:]) for n in names), path
         if path.startswith(ADAPTIVE_STORE_ROOT):
             assert not any(n.startswith("app.collect.adaptive_shadow") for n in names), path
+
+
+# ------------------------------------------------------------ Phase C C0 (Issue #110 5826469852)
+
+# The container attributes behind the Phase C operator actions (capture requests and sample
+# finalization, the shadow switch, windows, resolutions). Outside the Adaptive packages, only the
+# container builds them, the app lifespan calls the shadow owner's startup pass, and the harness
+# uses them; no route, service, job or other script ever reaches them.
+PHASE_C_OWNERS = frozenset(
+    {"shadow_switch", "shadow_evidence", "capture_store", "phase_c_commands"}
+)
+PHASE_C_OWNER_MODULES = frozenset(
+    {
+        "app.collect.adaptive_shadow.switch",
+        "app.collect.adaptive_shadow.store",
+        "app.collect.adaptive_capture.store",
+        "app.collect.adaptive_capture.commands",
+    }
+)
+
+
+def _phase_c_modules() -> dict[str, ast.Module]:
+    roots = [*PRODUCTION_ROOTS, REPO_ROOT / "scripts"]
+    return {
+        path.relative_to(REPO_ROOT).as_posix(): ast.parse(path.read_text("utf-8"))
+        for root in roots
+        for path in root.rglob("*.py")
+    }
+
+
+def test_only_the_harness_reaches_the_phase_c_operator_actions() -> None:
+    adaptive = (ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT, ADAPTIVE_SHADOW_ROOT, ADAPTIVE_CAPTURE_ROOT)
+    users: dict[str, set[str]] = {}
+    for path, tree in _phase_c_modules().items():
+        if path.startswith(adaptive):
+            continue
+        reached = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and node.attr in PHASE_C_OWNERS
+        } | {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module in PHASE_C_OWNER_MODULES
+        }
+        if reached:
+            users[path] = reached
+    assert {p for p in users if not p.startswith(PHASE_C_HARNESS)} == {
+        "app/container.py",
+        "app/main.py",
+    }, users
+    assert users["app/main.py"] == {"shadow_evidence"}
+    main = ast.parse((REPO_ROOT / "app/main.py").read_text("utf-8"))
+    calls = {
+        node.attr
+        for node in ast.walk(main)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "shadow_evidence"
+    }
+    assert calls == {"on_startup"}, "the app itself only runs the startup pass"
+    assert {p for p in users if p.startswith(PHASE_C_HARNESS)} == {
+        f"{PHASE_C_HARNESS}harness.py"
+    }, users
+
+
+def _within_lease(tree: ast.Module, callee: str) -> bool:
+    """Every call to ``callee`` sits lexically inside ``with <lease>:`` over an
+    ``acquire_data_dir(...)`` result that was bound before it."""
+    leases: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and _callee(node.value) == "acquire_data_dir"
+        ):
+            leases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    guarded: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.With) and any(
+            isinstance(item.context_expr, ast.Name) and item.context_expr.id in leases
+            for item in node.items
+        ):
+            guarded |= {id(inner) for inner in ast.walk(node)}
+    calls = [c for c in ast.walk(tree) if isinstance(c, ast.Call) and _callee(c) == callee]
+    return bool(calls) and all(id(call) in guarded for call in calls)
+
+
+def test_the_harness_composes_the_owners_only_under_the_data_root_lease() -> None:
+    # Supplement 5313045448: acquire the ADR-0006 lease, then compose, then act, all under it.
+    tree = ast.parse((REPO_ROOT / PHASE_C_HARNESS / "harness.py").read_text("utf-8"))
+    assert _within_lease(tree, "compose"), "the owners are composed only under the lease"
+    handlers = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "HANDLERS"
+    ]
+    assert handlers and all(
+        id(node)
+        in {id(inner) for w in ast.walk(tree) if isinstance(w, ast.With) for inner in ast.walk(w)}
+        for node in handlers
+    ), "every handler runs under the lease"
+
+
+def test_the_harness_never_opens_sqlite_reaches_a_network_or_submits_a_collection() -> None:
+    # The live data root is reached only through the composed owners. The one SQLite file the
+    # harness opens is its own campaign ledger (review 5313663701 B4): only ``ledger.py`` imports
+    # ``sqlite3``, and it imports nothing of the application, so it cannot name a data root.
+    ledger = f"{PHASE_C_HARNESS}ledger.py"
+    ledger_imports = _imported_modules(ast.parse((REPO_ROOT / ledger).read_text("utf-8")))
+    assert "sqlite3" in ledger_imports
+    assert not any(n == "app" or n.startswith("app.") for n in ledger_imports), ledger_imports
+    forbidden_modules = (
+        "sqlite3",
+        "sqlalchemy",
+        "httpx",
+        "requests",
+        "socket",
+        "urllib.request",
+        "playwright",
+        "integrations.suppliers.transport",
+        "app.db.database",
+    )
+    for path, tree in _phase_c_modules().items():
+        if not path.startswith((PHASE_C_HARNESS, "scripts/phase_c.py")):
+            continue
+        names = _imported_modules(tree) - ({"sqlite3"} if path == ledger else set())
+        assert not any(n == f or n.startswith(f"{f}.") for n in names for f in forbidden_modules), (
+            path,
+            names,
+        )
+        attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        assert not attributes & {"submit", "run_next", "read_document", "read_image"}, path
+
+
+def test_the_capture_owner_imports_no_canonical_writer_and_no_network() -> None:
+    modules = {
+        p: t for p, t in _production_modules().items() if p.startswith(ADAPTIVE_CAPTURE_ROOT)
+    }
+    assert {f"{ADAPTIVE_CAPTURE_ROOT}{m}.py" for m in ("runner", "store", "controls")} <= set(
+        modules
+    )
+    allowed = ADAPTIVE_SHADOW_MAY_IMPORT | {"types"}
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            assert name in allowed or _is_adaptive(name), f"{path}: {name}"
+
+
+def test_the_collection_knows_only_the_capture_seam() -> None:
+    tree = ast.parse((REPO_ROOT / "app/collect/collection.py").read_text("utf-8"))
+    assert "app.collect.shadow" in _imported_modules(tree)
+    assert not any(_is_adaptive(name) for name in _imported_modules(tree))
 
 
 # Issue #52 ruling 5711123764 §1: the REAL acceptance harness orchestrates and never collects.
@@ -2050,6 +2220,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "live_grants",
         "protected_write_brakes",
         "asset_upload_attempts",
+        # Adaptive Collector Phase C C0 (Issue #110 5826469852): capture requests and the sanitized
+        # capture candidates of requested runs; never a page body.
+        "adaptive_capture_requests",
+        "adaptive_capture_candidates",
+        "adaptive_phase_c_commands",
+        "adaptive_phase_c_command_results",
     }
     offenders = [
         path

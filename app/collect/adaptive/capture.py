@@ -15,6 +15,14 @@ capture's own reader and generic rules decide what is proof material:
 A final, independent scan of the sanitized structure refuses the sample on any residual secret or
 private material, so nothing unsafe is ever returned as proof material. A block over the embedded
 bounds is kept by digest only and marks the sample ``SAMPLE_TRUNCATED``.
+
+**Capture candidates (Phase C C0, Issue #110 `5826469852`).** An ordinary collection holds its
+document in memory only, and the operator is not there to choose a boundary. So the collection may
+cut a *candidate*: the same sanitizer and final scan over the whole document, with every region
+the generic rules exclude recorded, and no operator scope. The body is discarded; only the
+candidate is kept. Later the operator records a scope over the candidate and the expected facts,
+and ``sample_from_candidate`` cuts the sample from it — exactly the structure ``capture_sample``
+would have cut from the page with the same scope, bounds included.
 """
 
 import json
@@ -30,6 +38,8 @@ from app.collect.adaptive.canonical import NonFiniteValue, canonical_json, diges
 
 CAPTURE_REVISION = "adaptive-capture-1"
 SAMPLE_DIGEST_SCHEME = "icbm-validation-sample/v1"
+CANDIDATE_DIGEST_SCHEME = "icbm-capture-candidate/v1"
+TRUNCATED_BLOCK_SCHEME = "icbm-truncated-block/v1"
 BLOCK_MAX_BYTES = 64 * 1024
 SAMPLE_EMBEDDED_MAX_BYTES = 256 * 1024
 
@@ -252,9 +262,17 @@ class _Sanitizer:
     excluded: list[list[str]] = field(default_factory=list)
     embedded_bytes: int = 0
     truncated: bool = False
+    # A candidate applies only the per-block bound (the per-sample bound is applied when a sample
+    # is cut from it) and records each removal and exclusion with its ancestors' boundaries.
+    per_sample_bound: bool = True
+    trace: bool = False
+    stack: list[str] = field(default_factory=list)
+
+    def _where(self, node: Mapping[str, Any]) -> list[str]:
+        return [boundary_of(node), *self.stack] if self.trace else [boundary_of(node)]
 
     def removed(self, what: str, node: Mapping[str, Any]) -> None:
-        self.removals.append([what, boundary_of(node)])
+        self.removals.append([what, *self._where(node)])
 
     def _strip_query(self, value: str, what: str, node: Mapping[str, Any]) -> str:
         parts = urlsplit(value)
@@ -301,16 +319,13 @@ class _Sanitizer:
         data = self.data(data, node)
         size = len(canonical_json(data).encode("utf-8"))
         attrs = {"type": node["attrs"]["type"]} if "type" in node["attrs"] else {}
-        if size > BLOCK_MAX_BYTES or self.embedded_bytes + size > SAMPLE_EMBEDDED_MAX_BYTES:
+        over_sample = (
+            self.per_sample_bound and self.embedded_bytes + size > SAMPLE_EMBEDDED_MAX_BYTES
+        )
+        if size > BLOCK_MAX_BYTES or over_sample:
             # Digest only, for diagnostics; the sample can never support a PASS (V8).
             self.truncated = True
-            return {
-                "tag": "script",
-                "attrs": attrs,
-                "children": [],
-                "truncated": True,
-                "digest": digest("icbm-truncated-block/v1", data),
-            }
+            return _truncated_block(attrs, data)
         self.embedded_bytes += size
         kept: Node = {"tag": "script", "attrs": attrs, "children": [], "data": data}
         if assignment is not None:
@@ -355,20 +370,34 @@ class _Sanitizer:
             return self.script(node)
         region = _region(node)
         if region is not None:
-            self.excluded.append([boundary_of(node), region.value])
+            self.excluded.append([self._where(node)[0], region.value, *self._where(node)[1:]])
             return None
         tokens = _tokens(node)
         operator = next((e for e in self.scope.exclusions if e.token.lower() in tokens), None)
         if operator is not None:
             self.excluded.append([boundary_of(node), f"OPERATOR_{operator.reason.value}"])
             return None
+        if self.trace:
+            self.stack.insert(0, boundary_of(node))
         children: list[Any] = []
         for child in node["children"]:
             if isinstance(child, str):
                 children.append(child)
             elif (kept := self.element(child)) is not None:
                 children.append(kept)
+        if self.trace:
+            self.stack.pop(0)
         return {"tag": tag, "attrs": self.attributes(node), "children": children}
+
+
+def _truncated_block(attrs: Mapping[str, str], data: Any) -> Node:
+    return {
+        "tag": "script",
+        "attrs": dict(attrs),
+        "children": [],
+        "truncated": True,
+        "digest": digest(TRUNCATED_BLOCK_SCHEME, data),
+    }
 
 
 # ---------------------------------------------------------------- the final gate
@@ -456,6 +485,163 @@ def capture_sample(
         provenance_json=canonical_json(provenance),
         truncated=sanitizer.truncated,
         digest=sample_digest(structure, expected_payload, provenance, sanitizer.truncated),
+    )
+
+
+# ---------------------------------------------------------------- capture candidates (C0)
+
+
+@dataclass(frozen=True)
+class CaptureCandidate:
+    """The sanitized whole document an ordinary collection may keep, before any operator scope.
+
+    ``excluded`` and ``removals`` name kinds and boundaries, each followed by its ancestors'
+    boundaries, so a later scope can take exactly the entries inside it. Never a captured value.
+    """
+
+    structure_json: str
+    excluded_json: str
+    removals_json: str
+    digest: str
+
+    @property
+    def structure(self) -> dict[str, Any]:
+        loaded: dict[str, Any] = json.loads(self.structure_json)
+        return loaded
+
+    @property
+    def excluded(self) -> list[list[str]]:
+        loaded: list[list[str]] = json.loads(self.excluded_json)
+        return loaded
+
+    @property
+    def removals(self) -> list[list[str]]:
+        loaded: list[list[str]] = json.loads(self.removals_json)
+        return loaded
+
+    def regions(self) -> list[tuple[str, str]]:
+        """Every region the generic rules excluded, for the operator to confirm."""
+        return [(entry[0], entry[1]) for entry in self.excluded]
+
+
+def candidate_digest(
+    structure: Mapping[str, Any], excluded: list[list[str]], removals: list[list[str]]
+) -> str:
+    return digest(
+        CANDIDATE_DIGEST_SCHEME,
+        {
+            "capture_revision": CAPTURE_REVISION,
+            "structure": dict(structure),
+            "excluded": excluded,
+            "removals": removals,
+        },
+    )
+
+
+def capture_candidate(html: str) -> CaptureCandidate:
+    """Sanitize a whole document in memory, with the capture's own rules and no scope. The page
+    body is never part of what is returned; a residual refuses the candidate."""
+    sanitizer = _Sanitizer(OperatorScope("", "", "", ()), per_sample_bound=False, trace=True)
+    structure = sanitizer.element(_read(html))
+    if structure is None:
+        raise CaptureRefused("the document holds nothing the capture keeps")
+    if residual := final_scan(structure):
+        raise CaptureRefused(f"residual secret or private material: {residual}")
+    return CaptureCandidate(
+        structure_json=canonical_json(structure),
+        excluded_json=canonical_json(sanitizer.excluded),
+        removals_json=canonical_json(sanitizer.removals),
+        digest=candidate_digest(structure, sanitizer.excluded, sanitizer.removals),
+    )
+
+
+def _inside(entry: list[str], where: str, *, self_counts: bool) -> bool:
+    return where in entry[2:] or (self_counts and entry[1] == where)
+
+
+@dataclass
+class _Cut:
+    scope: OperatorScope
+    excluded: list[list[str]]
+    embedded_bytes: int = 0
+    truncated: bool = False
+
+    def node(self, node: Node) -> Node | None:
+        tokens = _tokens(node)
+        operator = next((e for e in self.scope.exclusions if e.token.lower() in tokens), None)
+        if operator is not None:
+            self.excluded.append([boundary_of(node), f"OPERATOR_{operator.reason.value}"])
+            return None
+        if node.get("truncated"):
+            self.truncated = True
+            return dict(node)
+        if "data" in node:
+            size = len(canonical_json(node["data"]).encode("utf-8"))
+            if self.embedded_bytes + size > SAMPLE_EMBEDDED_MAX_BYTES:
+                # The per-sample bound, exactly where the capture's own sanitizer applies it.
+                self.truncated = True
+                return _truncated_block(node.get("attrs", {}), node["data"])
+            self.embedded_bytes += size
+            return dict(node)
+        children: list[Any] = []
+        for child in node.get("children", ()):
+            if isinstance(child, str):
+                children.append(child)
+            elif (kept := self.node(child)) is not None:
+                children.append(kept)
+        return {**node, "children": children}
+
+
+def sample_from_candidate(
+    candidate: CaptureCandidate, scope: OperatorScope, expected: Mapping[str, Any]
+) -> ValidationSample:
+    """Cut one sample from a candidate with the operator's scope: the structure ``capture_sample``
+    cuts from the page. It takes no profile, and its provenance names the candidate, never one."""
+    structure = candidate.structure
+    if candidate_digest(structure, candidate.excluded, candidate.removals) != candidate.digest:
+        raise CaptureRefused("the capture candidate does not recompute to its digest")
+    boundary = resolve_boundary(structure, scope.product_boundary)
+    where = boundary_of(boundary)
+    detected = [entry for entry in candidate.excluded if _inside(entry, where, self_counts=False)]
+    unconfirmed = [
+        entry[0]
+        for entry in detected
+        if entry[1] != RegionClass.NAVIGATION.value and entry[0] not in scope.confirmed_regions
+    ]
+    if unconfirmed:
+        raise CaptureRefused(f"the operator has not confirmed excluded regions: {unconfirmed}")
+    cut = _Cut(scope, [[entry[0], entry[1]] for entry in detected])
+    region = cut.node(boundary)
+    if region is None:
+        raise CaptureRefused("the product boundary was excluded by the operator's own scope")
+    sample: Node = {"tag": "#document", "attrs": {}, "children": [region]}
+    if residual := final_scan(sample):
+        raise CaptureRefused(f"residual secret or private material: {residual}")
+    provenance = {
+        "capture_revision": CAPTURE_REVISION,
+        "candidate": candidate.digest,
+        "scope": {
+            "decided_by": scope.decided_by,
+            "decided_at": scope.decided_at,
+            "product_boundary": scope.product_boundary,
+            "boundary_element": where,
+            "confirmed_regions": list(scope.confirmed_regions),
+            "exclusions": [[e.token, e.reason.value] for e in scope.exclusions],
+        },
+        "excluded": cut.excluded,
+        "removals": [
+            [entry[0], entry[1]]
+            for entry in candidate.removals
+            if _inside(entry, where, self_counts=True)
+        ],
+    }
+    expected_payload = dict(expected)
+    return ValidationSample(
+        structure_json=canonical_json(sample),
+        expected_json=canonical_json(expected_payload),
+        provenance_json=canonical_json(provenance),
+        truncated=cut.truncated,
+        digest=sample_digest(sample, expected_payload, provenance, cut.truncated),
     )
 
 
