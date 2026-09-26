@@ -60,6 +60,12 @@ DATABASE_OPENERS = {
     "app/container.py": "require_ownership",  # the application Database
     "app/db/migrations/env.py": "require_ownership",  # schema migrations
     "app/db/migrate.py": "read-only",  # `icbm db current` (mode=ro)
+    # Gate 3 area 2 (ADR-0018 §7, §8): reads back, read-only, the schema the shipped migrations
+    # build in a private temporary directory — the expected schema, never a data directory.
+    "app/db/schema_contract.py": "read-only",
+    # Gate 3 area 2 (ADR-0018 §7): the drill reads the active database read-only and writes only
+    # the backup into a separate fresh restore root, never a data directory.
+    "app/live/drill.py": "read-only or fresh restore root",
 }
 _OPENING_CALLS = {"Database", "create_sqlite_engine", "create_engine"}
 
@@ -674,7 +680,9 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 # ---------------------------------------------------------------- Gate 3 area 1 (ADR-0018 §12)
 
 LIVE_OWNER = "app/live/store.py"
-LIVE_ROWS = frozenset({"LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt"})
+LIVE_ROWS = frozenset(
+    {"LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt", "RestoreDrill", "RetentionProof"}
+)
 
 
 def test_only_the_live_owner_writes_the_live_tables() -> None:
@@ -703,7 +711,10 @@ def test_the_live_owners_reach_no_provider() -> None:
         "ipaddress",
         "json",
         "logging",
+        "pathlib",
         "re",
+        "shutil",
+        "sqlite3",
         "typing",
         "uuid",
         "sqlalchemy",
@@ -714,6 +725,8 @@ def test_the_live_owners_reach_no_provider() -> None:
         "app.core.execution",
         "app.db.base",
         "app.db.database",
+        # Gate 3 area 2: the expected schema the shipped migrations build (drill and retention).
+        "app.db.schema_contract",
         "app.db.types",
         "app.live",
         "app.products.image_model",
@@ -737,7 +750,14 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     (stack,) = _calls(tree, "SafetyStack")
     mode, proofs = _keyword(stack, "mode"), _keyword(stack, "proofs")
     assert isinstance(mode, ast.Name) and mode.id == "execution_mode"
-    assert isinstance(proofs, ast.Call) and _callee(proofs) == "UnprovenStageProofs"
+    # Area 2: the restore and retention proofs are durable owners; eligibility (§5) and visual
+    # acceptance (§9) have none yet, so the durable proof source answers False for both.
+    assert isinstance(proofs, ast.Name) and proofs.id == "stage_proofs"
+    (durable,) = _calls(tree, "DurableStageProofs")
+    assert durable is not None
+    source = importlib.import_module("app.live.proofs").DurableStageProofs
+    for never in ("canary_non_regulated", "visual_acceptance_recorded"):
+        assert inspect.getsource(getattr(source, never)).rstrip().endswith("return False"), never
     (execution,) = _calls(tree, "RegistrationExecutionService")
     authority = _keyword(execution, "authority")
     assert isinstance(authority, ast.Name) and authority.id == "safety_stack"
@@ -797,6 +817,164 @@ def test_the_asset_replay_key_is_the_wire_boundary_and_the_fence_is_in_the_schem
         "utf-8"
     )
     assert "state IN ('APPLIED_PROVEN', 'STARTED', 'UPLOAD_UNKNOWN')" in migration
+
+
+# The owner rows the REGISTER preflight, the send gate and the safety stack read, and the one
+# production module that creates each. Gate 3 area 1 carry-forward: the send-time fence is the
+# audited owner-write count, so a new writer of this truth is a review point — it must be an
+# audited owner write before it is added here, or the fence stops covering it.
+PREFLIGHT_TRUTH_WRITERS = {
+    **dict.fromkeys(
+        (
+            "RegistrationDraft", "RegistrationDraftItem", "RegistrationSnapshot",
+            "RegistrationItemSnapshot", "RegistrationBatch", "RegistrationIntent",
+            "RegistrationAttempt", "MarketplaceRegistration", "MarketplaceRegistrationItem",
+            "DuplicateOverride", "RegistrationExecutionScope", "RegistrationPreparation",
+            "RegistrationPreparationRevision", "RegistrationPreparationItem",
+            "RegistrationSnapshotPreparation",
+        ),
+        "app/register/store.py",
+    ),
+    **dict.fromkeys(
+        ("RegistrationTargetPolicy", "RegistrationTargetPolicyRevision",
+         "RegistrationTargetPolicyCurrent"),
+        "app/register/target_policy.py",
+    ),
+    **dict.fromkeys(
+        ("RegistrationCategoryMetadata", "RegistrationCategoryMetadataRevision",
+         "RegistrationCategoryMetadataCurrent"),
+        "app/register/category_metadata.py",
+    ),
+    **dict.fromkeys(
+        ("ProductGroup", "ProductItem", "GroupMember", "GroupMembershipRevision",
+         "ListingComposition", "SourceBinding", "SourceProduct", "CurrentSourceRevisionMove",
+         "QuantityOffer"),
+        "app/products/store.py",
+    ),
+    **dict.fromkeys(
+        ("PricingSnapshot", "CurrentPricingSnapshotMove"), "app/products/pricing_store.py"
+    ),
+    **dict.fromkeys(
+        ("DerivedImageArtifact", "DerivedImageDerivation", "DerivedImageDerivationInput",
+         "DerivedImageDerivationRoot", "ImageSelectionRevision", "ImageSelectionOutput",
+         "ImageSelectionSourceDecision", "CurrentImageSelectionMove", "ImageQaResult"),
+        "app/products/image_store.py",
+    ),
+    **dict.fromkeys(("ProductFactsRevision", "ProductFactsField", "ProductFactsEvidence",
+                     "ProductFactsImageRef"), "app/collect/revisions.py"),
+    "SourceAsset": "app/collect/assets.py",
+    **dict.fromkeys(("MarketplaceAccount", "SellerEntity"), "app/connect/accounts.py"),
+    **dict.fromkeys(("MarketplaceCapability", "MarketplaceWorkflowOverlay"),
+                    "app/connect/marketplace/service.py"),
+    "MarketplaceConnection": "app/connect/smartstore/service.py",
+    **dict.fromkeys(("LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt", "RestoreDrill",
+                     "RetentionProof"), "app/live/store.py"),
+}  # fmt: skip
+
+
+def test_the_truth_the_register_preflight_reads_has_one_reviewed_writer_each() -> None:
+    """Area 1 carry-forward: no new writer of preflight-read truth appears without review."""
+    constructed: dict[str, set[str]] = {}
+    for path, tree in _production_modules().items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in PREFLIGHT_TRUTH_WRITERS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert constructed == {name: {path} for name, path in PREFLIGHT_TRUTH_WRITERS.items()}
+
+
+def test_every_reviewed_writer_of_preflight_truth_appends_to_the_audit_log() -> None:
+    """Each pinned writer module (or the owner that drives it) appends owner audit events."""
+    drivers = {
+        "app/products/store.py": ("app/products/materializer.py", "app/products/service.py"),
+        "app/products/pricing_store.py": ("app/products/pricing.py",),
+        "app/products/image_store.py": ("app/products/images.py",),
+        "app/collect/revisions.py": ("app/collect/revisions.py", "app/collect/collection.py"),
+        "app/collect/assets.py": ("app/collect/assets.py", "app/collect/collection.py"),
+    }
+    modules = _production_modules()
+    for writer in sorted(set(PREFLIGHT_TRUTH_WRITERS.values())):
+        owners = drivers.get(writer, (writer,))
+        audited = any(
+            _calls(modules[owner], "append") or _calls(modules[owner], "_event")
+            for owner in owners
+            if owner in modules
+        )
+        assert audited, writer
+
+
+def test_the_drill_writes_only_into_the_fresh_root_it_validated() -> None:
+    """ADR-0018 §7: the one writable connection is opened by the drill run, after the root was
+    validated as fresh and outside the active data root."""
+    tree = ast.parse((REPO_ROOT / "app/live/drill.py").read_text("utf-8"))
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    callers = {name for name, fn in functions.items() if _calls(fn, "_backup_into_fresh_root")}
+    assert callers == {"_run"}
+    for stage in ("drill_asset", "drill_create"):
+        body = functions[stage]
+        fresh = [c.lineno for c in _calls(body, "_fresh_root")]
+        run = [c.lineno for c in _calls(body, "_run")]
+        assert fresh and run and min(fresh) < min(run), stage
+
+
+def test_a_create_drill_never_records_the_register_chain_as_absent() -> None:
+    """ADR-0018 §7: a CREATE proof never records the Snapshot or the Intent as absent."""
+    tree = ast.parse((REPO_ROOT / "app/live/drill.py").read_text("utf-8"))
+    chain = {"snapshot", "item_snapshots", "snapshot_provenance", "batch", "intent"}
+    seen = set()
+    for call in _calls(tree, "Element"):
+        name = call.args[0] if call.args else None
+        if isinstance(name, ast.Constant) and name.value in chain:
+            seen.add(name.value)
+            for keyword in ("required", "must_be_absent"):
+                value = _keyword(call, keyword)
+                expected = keyword == "required"
+                assert value is None or (
+                    isinstance(value, ast.Constant) and value.value is expected
+                )
+    assert seen == chain
+
+
+def test_the_evidence_readers_only_read() -> None:
+    """The drill and the retention proof name owner tables only to read them: no write SQL, no row
+    added, and the active database opened read-only (the restore root aside)."""
+    # A statement that writes starts with its verb; a word inside a check (BEFORE DELETE) does not.
+    write = re.compile(
+        r"^\s*(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO|DROP\s+\w|ALTER\s+\w"
+        r"|CREATE\s+\w)",
+        re.IGNORECASE,
+    )
+    for path in ("app/live/drill.py", "app/live/retention.py"):
+        tree = ast.parse((REPO_ROOT / path).read_text("utf-8"))
+        texts = [node.value for node in _code_strings(tree)]
+        assert not [text for text in texts if write.search(text)], path
+        assert not _calls(tree, "add") and not _calls(tree, "delete"), path
+        assert not _calls(tree, "commit"), path
+
+
+def test_no_production_code_deletes_protected_evidence() -> None:
+    """ADR-0018 §8: no automatic deletion of canary-scope evidence is authorized."""
+    from app.live.retention import PROTECTED_TABLES
+
+    offenders = []
+    for path, tree in _production_modules().items():
+        if "/migrations/" in path:
+            continue
+        for node in _code_strings(tree):
+            text = node.value.upper()
+            for table in PROTECTED_TABLES:
+                if f"DELETE FROM {table.upper()}" in text:
+                    offenders.append(f"{path}:{node.lineno}:{table}")
+        for call in _calls(tree, "delete"):
+            offenders.extend(
+                f"{path}:{call.lineno}"
+                for arg in call.args
+                if isinstance(arg, ast.Name) and arg.id in PREFLIGHT_TRUTH_WRITERS
+            )
+    assert offenders == []
 
 
 def test_no_reviewed_owner_reads_the_review_owner() -> None:
@@ -884,6 +1062,10 @@ def test_production_database_openers_are_gated() -> None:
             if gate == "require_ownership":
                 gates = [c.lineno for c in _calls(function, "require_ownership")]
                 assert gates and min(gates) < call.lineno, f"{where} opens before require_ownership"
+            elif gate == "read-only or fresh restore root" and getattr(function, "name", "") == (
+                "_backup_into_fresh_root"
+            ):
+                continue
             else:
                 texts = [
                     n.value
@@ -2245,6 +2427,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "adaptive_phase_c_read_budgets",
         "adaptive_phase_c_reads",
         "adaptive_phase_c_read_refusals",
+        # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
+        "restore_drills",
+        "retention_proofs",
     }
     offenders = [
         path

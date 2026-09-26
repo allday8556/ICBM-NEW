@@ -121,8 +121,11 @@ CANONICAL_TABLES = (
     "adaptive_phase_c_read_budgets",
     "adaptive_phase_c_reads",
     "adaptive_phase_c_read_refusals",
+    # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
+    "restore_drills",
+    "retention_proofs",
 )
-HEAD = "0028_phase_c_read_accounting"
+HEAD = "0029_g3_restore_retention"
 
 
 def _url(path: Path) -> str:

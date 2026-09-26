@@ -257,6 +257,33 @@ class AssetUploadService:
             sender_wired=self._sender.available(),
         )
 
+    # ------------------------------------------------------------------ restore targets (§7)
+
+    def restore_target(self, grant_id: str) -> str | None:
+        """The ASSET restore target of this grant now: exactly what admission would compute."""
+        grant = self._store.grant_record(grant_id)
+        if grant is None or grant.stage is not MutationStage.ASSET or not grant.artifacts:
+            return None
+        try:
+            key = self._key_for(grant, grant.artifacts[0].sha256)
+        except MutationRefused:
+            return None
+        candidate = self._candidates.current(grant.preparation_revision_id or "")
+        return self._stack.asset_restore_target(grant_id, key, candidate)
+
+    def replay_keys(self, grant_id: str) -> tuple[str, ...]:
+        """The replay-conflict key of every selected artifact of this grant (§3.4)."""
+        grant = self._store.grant_record(grant_id)
+        if grant is None:
+            return ()
+        keys: list[str] = []
+        for artifact in grant.artifacts:
+            try:
+                keys.append(self._key_for(grant, artifact.sha256).digest)
+            except MutationRefused:
+                return ()
+        return tuple(sorted(set(keys)))
+
     # ------------------------------------------------------------------ restart (§3.4, G3-25)
 
     def settle_interrupted(self, *, correlation_id: str) -> tuple[str, ...]:

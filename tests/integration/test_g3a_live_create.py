@@ -19,7 +19,7 @@ from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.live import model as live_model
 from app.live.authority import LiveAuthorityService
 from app.live.model import GrantState, MutationRefused, MutationStage
-from app.live.stack import SafetyStack
+from app.live.stack import SafetyStack, StageGate
 from app.live.store import ArtifactRef, LiveAuthorityStore
 from app.products.model import ReadinessStatus
 from app.register.authoring import AuthoredInputs, decode_inputs, encode_inputs
@@ -479,6 +479,7 @@ def test_a_section_26_scope_change_stales_the_create_restore_target(
             attempt_no=1,
             endpoint_adopted=True,
             scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
+            stage_gate=StageGate(ready=True),
         )
         return proofs.restore_targets[-1]
 
@@ -550,6 +551,7 @@ def test_a_paused_section_26_scope_blocks_create_readiness_whatever_the_proofs(
         attempt_no=1,
         endpoint_adopted=True,
         scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
+        stage_gate=StageGate(ready=True),
     )
     assert readiness.missing == (live_model.SCOPE_NOT_ACTIVE,)
 

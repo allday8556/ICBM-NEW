@@ -39,6 +39,7 @@ from app.live.model import (
     BrakeState,
     GrantState,
     MutationStage,
+    ProofVerdict,
     UploadAttemptState,
 )
 
@@ -271,3 +272,83 @@ class AssetUploadAttempt(Base):
     provider_asset_ref: Mapped[str | None] = mapped_column(Text)
     outcome_reason: Mapped[str | None] = mapped_column(String(64))
     evidence_json: Mapped[str | None] = mapped_column(Text)
+
+
+class RestoreDrill(Base):
+    """One restore drill (ADR-0018 §7): its target, its verdict and its sanitized evidence.
+
+    Append-only. A PASSED drill is a restore proof only for exactly its stage and target digest,
+    at exactly its schema head; any change of that state makes it stale by construction.
+    """
+
+    __tablename__ = "restore_drills"
+    __table_args__ = (
+        CheckConstraint(_in("stage", MutationStage), name="stage_valid"),
+        CheckConstraint(_in("verdict", ProofVerdict), name="verdict_valid"),
+        CheckConstraint(_hex64("target_digest"), name="target_digest_hex"),
+        CheckConstraint(
+            "backup_digest IS NULL OR " + _hex64("backup_digest"), name="backup_digest_hex"
+        ),
+        CheckConstraint(_hex64("restore_root_digest"), name="restore_root_digest_hex"),
+        CheckConstraint(
+            "(verdict = 'PASSED') = (failure_code IS NULL)"
+            " AND (verdict <> 'PASSED' OR (integrity = 'ok' AND backup_digest IS NOT NULL))",
+            name="passed_is_complete",
+        ),
+        CheckConstraint(
+            "json_valid(evidence_json) AND json_type(evidence_json) = 'object'",
+            name="evidence_is_object",
+        ),
+        CheckConstraint("unit_ref <> '' AND schema_head <> ''", name="identity_present"),
+        CheckConstraint("actor <> '' AND correlation_id <> ''", name="actor_present"),
+        Index("ix_restore_drills_stage_target_digest", "stage", "target_digest"),
+    )
+
+    drill_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    stage: Mapped[str] = mapped_column(String(16))
+    unit_ref: Mapped[str] = mapped_column(String(64))
+    target_digest: Mapped[str] = mapped_column(String(64))
+    verdict: Mapped[str] = mapped_column(String(16))
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    schema_head: Mapped[str] = mapped_column(String(64))
+    integrity: Mapped[str | None] = mapped_column(String(32))
+    backup_digest: Mapped[str | None] = mapped_column(String(64))
+    restore_root_digest: Mapped[str] = mapped_column(String(64))
+    element_count: Mapped[int] = mapped_column(Integer)
+    absent_count: Mapped[int] = mapped_column(Integer)
+    evidence_json: Mapped[str] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    actor: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+
+
+class RetentionProof(Base):
+    """One evidence-retention proof (ADR-0018 §8): the checks it ran and their verdict.
+
+    Append-only. It is current only while its check digest equals the live checks' digest at the
+    same schema head.
+    """
+
+    __tablename__ = "retention_proofs"
+    __table_args__ = (
+        CheckConstraint(_in("verdict", ProofVerdict), name="verdict_valid"),
+        CheckConstraint(_hex64("check_digest"), name="check_digest_hex"),
+        CheckConstraint("(verdict = 'PASSED') = (failure_code IS NULL)", name="passed_is_clean"),
+        CheckConstraint(
+            "json_valid(checks_json) AND json_type(checks_json) = 'object'",
+            name="checks_is_object",
+        ),
+        CheckConstraint("schema_head <> ''", name="schema_head_present"),
+        CheckConstraint("actor <> '' AND correlation_id <> ''", name="actor_present"),
+    )
+
+    proof_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    verdict: Mapped[str] = mapped_column(String(16))
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    schema_head: Mapped[str] = mapped_column(String(64))
+    check_digest: Mapped[str] = mapped_column(String(64))
+    checks_json: Mapped[str] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    actor: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
