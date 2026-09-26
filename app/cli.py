@@ -1,4 +1,5 @@
-"""``icbm`` command line: serve the application and manage the database schema.
+"""``icbm`` command line: serve the application, manage the database schema, and record a reviewed
+visual acceptance (ADR-0018 §9) — the only path by which one is ever recorded.
 
 Data-directory ownership (ADR-0006) is the default: every command acquires the exclusive
 data-directory lock before it does anything, unless it is listed in ``READ_ONLY_COMMANDS``.
@@ -7,8 +8,11 @@ read-only here and in ADR-0006 (a repository test keeps the two lists equal).
 """
 
 import argparse
+import json
 import sys
+import uuid
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from app import __version__
 from app.config import AppConfig, ConfigError
@@ -34,6 +38,9 @@ _IN_USE_HINTS: dict[Command, str] = {
     ("db", "upgrade"): (
         "Stop the ICBM server using this data directory, then retry the database upgrade."
     ),
+    ("live", "record-visual-acceptance"): (
+        "Stop the ICBM server using this data directory, then retry the recording."
+    ),
 }
 
 
@@ -46,16 +53,30 @@ def build_parser() -> argparse.ArgumentParser:
     db_commands = db.add_subparsers(dest="db_command", required=True)
     db_commands.add_parser("upgrade", help="apply Alembic migrations up to head")
     db_commands.add_parser("current", help="print the applied schema revision (read-only)")
+    live = commands.add_parser("live", help="Gate 3 pre-LIVE records (ADR-0018)")
+    live_commands = live.add_subparsers(dest="live_command", required=True)
+    visual = live_commands.add_parser(
+        "record-visual-acceptance",
+        help="record a reviewed populated visual acceptance report (ADR-0018 §9)",
+    )
+    visual.add_argument("--report", required=True, type=Path, help="the harness report JSON")
+    visual.add_argument("--approved-by", required=True, help="the reviewer who accepted it")
+    visual.add_argument(
+        "--authorization-ref", required=True, help="the GitHub comment id that accepted it"
+    )
+    visual.add_argument("--actor", required=True, help="who runs this command")
     return parser
 
 
 def _command_of(args: argparse.Namespace) -> Command:
     if args.command == "db":
         return ("db", args.db_command)
+    if args.command == "live":
+        return ("live", args.live_command)
     return (args.command,)
 
 
-def _serve(config: AppConfig, lease: DataDirLease) -> int:
+def _serve(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
     import uvicorn
 
     from app.main import create_app
@@ -71,12 +92,46 @@ def _serve(config: AppConfig, lease: DataDirLease) -> int:
     return 0
 
 
-def _db_upgrade(config: AppConfig, lease: DataDirLease) -> int:
+def _db_upgrade(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
     from app.db.migrate import head_revision, upgrade_to_head
 
     configure_logging(config.log_level, config.log_dir)
     upgrade_to_head(config.database_url, ownership=lease)
     print(f"database at head {head_revision()}: {config.database_path}")
+    return 0
+
+
+def _record_visual_acceptance(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Record one reviewed visual acceptance report, or refuse and record nothing. The commit it
+    must match is the one this process was composed at (``app.core.code_identity``)."""
+    from app.container import build_container
+    from app.core.errors import AppError
+
+    configure_logging(config.log_level, config.log_dir)
+    try:
+        report = json.loads(args.report.read_text("utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"VISUAL_REPORT_UNREADABLE: {exc}", file=sys.stderr)
+        return 1
+    container = build_container(config, ownership=lease)
+    try:
+        acceptance_id = container.visual_acceptance.record(
+            report,
+            approved_by=args.approved_by,
+            authorization_ref=args.authorization_ref,
+            actor=args.actor,
+            correlation_id=f"visual-acceptance-{uuid.uuid4()}",
+        )
+    except AppError as exc:
+        print(f"{exc.code}: {exc}", file=sys.stderr)
+        for problem in (exc.details or {}).get("problems", ()):
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+    finally:
+        container.db.dispose()
+    print(f"visual acceptance recorded: {acceptance_id} ({report['code_sha']})")
     return 0
 
 
@@ -91,9 +146,10 @@ def _db_current(config: AppConfig) -> int:
 
 
 # Commands that mutate canonical state, schema, durable jobs or application-owned files.
-OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease], int]] = {
+OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Namespace], int]] = {
     ("serve",): _serve,
     ("db", "upgrade"): _db_upgrade,
+    ("live", "record-visual-acceptance"): _record_visual_acceptance,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).
 READ_ONLY_COMMANDS: dict[Command, Callable[[AppConfig], int]] = {
@@ -138,4 +194,4 @@ def main(argv: Sequence[str] | None = None) -> int:
         _report(exc, None)
         return EXIT_OWNERSHIP_UNAVAILABLE
     with lease:
-        return OWNING_COMMANDS[command](config, lease)
+        return OWNING_COMMANDS[command](config, lease, args)

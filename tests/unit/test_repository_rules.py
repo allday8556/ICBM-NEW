@@ -681,8 +681,50 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 
 LIVE_OWNER = "app/live/store.py"
 LIVE_ROWS = frozenset(
-    {"LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt", "RestoreDrill", "RetentionProof"}
+    {
+        "LiveGrant",
+        "ProtectedWriteBrake",
+        "AssetUploadAttempt",
+        "RestoreDrill",
+        "RetentionProof",
+        "VisualAcceptance",
+    }
 )
+
+
+def test_a_visual_acceptance_is_recorded_only_through_the_verified_command() -> None:
+    """ADR-0018 §9 (Gate 3 area 3, authorization 5843380581): ``VISUAL_ACCEPTANCE_RECORDED`` is
+    never asserted. The one writer records only what ``app.live.visual`` verified, and the only
+    caller of that recorder is the ``icbm live record-visual-acceptance`` command: no route, page
+    or other module can record or assert a visual acceptance."""
+    modules = _production_modules()
+    writers = {
+        path
+        for path, tree in modules.items()
+        for call in _calls(tree)
+        if _callee(call) == "record_visual_acceptance"
+    }
+    assert writers == {"app/live/visual.py"}
+    recorders = {
+        path
+        for path, tree in modules.items()
+        for call in _calls(tree)
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "record"
+        and isinstance(call.func.value, ast.Attribute)
+        and call.func.value.attr == "visual_acceptance"
+    }
+    assert recorders == {"app/cli.py"}
+    importers = {
+        path for path, tree in modules.items() if "app.live.visual" in _imported_modules(tree)
+    }
+    assert importers <= {"app/container.py", "app/live/proofs.py"}, importers
+    for path, tree in modules.items():
+        if path.startswith("app/api/"):
+            assert not [m for m in _imported_modules(tree) if m.startswith("app.live")], path
+    for page in (REPO_ROOT / "ui/web").rglob("*.js"):
+        text = page.read_text("utf-8")
+        assert "visual-acceptance" not in text and "record-visual" not in text, page
 
 
 def test_only_the_live_owner_writes_the_live_tables() -> None:
@@ -750,14 +792,29 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     (stack,) = _calls(tree, "SafetyStack")
     mode, proofs = _keyword(stack, "mode"), _keyword(stack, "proofs")
     assert isinstance(mode, ast.Name) and mode.id == "execution_mode"
-    # Area 2: the restore and retention proofs are durable owners; eligibility (§5) and visual
-    # acceptance (§9) have none yet, so the durable proof source answers False for both.
+    # Area 2: the restore and retention proofs are durable owners. Area 3: visual acceptance is the
+    # reviewed record of exactly the running code (its digest, taken once at composition) at the
+    # current head. Eligibility (§5) has no owner yet, so the durable proof source answers False.
     assert isinstance(proofs, ast.Name) and proofs.id == "stage_proofs"
     (durable,) = _calls(tree, "DurableStageProofs")
-    assert durable is not None
+    visual = _keyword(durable, "visual")
+    assert isinstance(visual, ast.Name) and visual.id == "visual_acceptance"
+    (recorder,) = _calls(tree, "VisualAcceptanceService")
+    for keyword in ("code_sha", "code_identity"):
+        bound = _keyword(recorder, keyword)
+        assert isinstance(bound, ast.Lambda) and isinstance(bound.body, ast.Name), keyword
+    (digest,) = _calls(tree, "running_code_digest")
+    assert ast.unparse(digest) == "running_code_digest(config.ui_dir)"
+    (sha,) = _calls(tree, "running_checkout_sha")
+    assert ast.unparse(sha) == "running_checkout_sha()"
     source = importlib.import_module("app.live.proofs").DurableStageProofs
-    for never in ("canary_non_regulated", "visual_acceptance_recorded"):
-        assert inspect.getsource(getattr(source, never)).rstrip().endswith("return False"), never
+    never = inspect.getsource(source.canary_non_regulated)
+    assert never.rstrip().endswith("return False")
+    recorded = inspect.getsource(source.visual_acceptance_recorded)
+    assert recorded.rstrip().endswith("return self._visual.recorded()")
+    owner = inspect.getsource(importlib.import_module("app.live.visual").VisualAcceptanceService)
+    assert "unit.visual_accepted(sha, self._code(), head)" in owner
+    assert 'if not sha or sha != report["code_sha"]:' in owner
     (execution,) = _calls(tree, "RegistrationExecutionService")
     authority = _keyword(execution, "authority")
     assert isinstance(authority, ast.Name) and authority.id == "safety_stack"
@@ -868,7 +925,7 @@ PREFLIGHT_TRUTH_WRITERS = {
                     "app/connect/marketplace/service.py"),
     "MarketplaceConnection": "app/connect/smartstore/service.py",
     **dict.fromkeys(("LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt", "RestoreDrill",
-                     "RetentionProof"), "app/live/store.py"),
+                     "RetentionProof", "VisualAcceptance"), "app/live/store.py"),
 }  # fmt: skip
 
 
@@ -2430,6 +2487,7 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
         "restore_drills",
         "retention_proofs",
+        "visual_acceptances",
     }
     offenders = [
         path

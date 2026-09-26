@@ -104,6 +104,8 @@ class AuditEventType(StrEnum):
     # Gate 3 area 2 (ADR-0018 §7, §8): every restore drill and every evidence-retention proof.
     RESTORE_DRILL_RECORDED = "RESTORE_DRILL_RECORDED"
     RETENTION_PROOF_RECORDED = "RETENTION_PROOF_RECORDED"
+    # Gate 3 area 3 (ADR-0018 §9): every reviewed populated visual acceptance recorded.
+    VISUAL_ACCEPTANCE_RECORDED = "VISUAL_ACCEPTANCE_RECORDED"
 
 
 class AuditOutcome(StrEnum):

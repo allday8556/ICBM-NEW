@@ -144,7 +144,9 @@ ADAPTIVE_C0 = "0027_adaptive_capture_seam"
 # Adaptive Phase C C1 PREP-0 (Issue #110): the send accounting, never registration state.
 ADAPTIVE_C1_PREP0 = "0028_phase_c_read_accounting"
 # Gate 3 area 2 (ADR-0018 §12): the restore-drill and evidence-retention proof records.
-SCHEMA_HEAD = "0029_g3_restore_retention"
+G3_AREA2 = "0029_g3_restore_retention"
+# Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record, never registration state.
+SCHEMA_HEAD = "0030_g3_visual_acceptance"
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -154,6 +156,7 @@ AFTER_M5 = (
     G3_AREA1,
     ADAPTIVE_C0,
     ADAPTIVE_C1_PREP0,
+    G3_AREA2,
     SCHEMA_HEAD,
 )
 REGISTRATION_STATE = re.compile(

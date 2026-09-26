@@ -14,6 +14,8 @@ No route here can reach a marketplace mutation: CREATE stays NOT_ADOPTED, and th
 result is derived and read-only — it authorizes nothing.
 """
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -72,6 +74,13 @@ def _correlation() -> str:
 @router.get("/overview")
 def overview(container: ContainerDep) -> RegisterOverview:
     return container.register.overview()
+
+
+@router.get("/live")
+def live_status(container: ContainerDep) -> dict[str, Any]:
+    """The protected-write brake, the grants and their ASSET readiness, and the unit-independent
+    proofs (ADR-0018 §9, §10). Read-only: it records, grants and authorizes nothing."""
+    return container.live_status.status()
 
 
 @router.get("/draft-targets")

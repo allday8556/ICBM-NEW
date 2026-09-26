@@ -124,8 +124,10 @@ CANONICAL_TABLES = (
     # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs.
     "restore_drills",
     "retention_proofs",
+    # Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record.
+    "visual_acceptances",
 )
-HEAD = "0029_g3_restore_retention"
+HEAD = "0030_g3_visual_acceptance"
 
 
 def _url(path: Path) -> str:

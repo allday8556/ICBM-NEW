@@ -49,6 +49,7 @@ from app.connect.sessions import (
 )
 from app.connect.smartstore.service import SmartStoreConnectService
 from app.core.clock import Clock, SystemClock
+from app.core.code_identity import running_checkout_sha, running_code_digest
 from app.core.egress import EGRESS
 from app.core.ownership import DataDirLease, require_ownership
 from app.core.secrets import SecretStore, build_secret_store
@@ -67,7 +68,9 @@ from app.live.model import WireHostPolicy
 from app.live.proofs import DurableStageProofs
 from app.live.retention import RetentionProofService
 from app.live.stack import SafetyStack
+from app.live.status import LiveStatusService
 from app.live.store import LiveAuthorityStore
+from app.live.visual import VisualAcceptanceService
 from app.operate.service import OperateService
 from app.products.image_store import DerivedImageStore
 from app.products.images import ProductImageService
@@ -173,6 +176,8 @@ class Container:
     asset_uploads: AssetUploadService
     restore_drills: RestoreDrillService
     retention: RetentionProofService
+    visual_acceptance: VisualAcceptanceService
+    live_status: LiveStatusService
     register: RegisterService
     drafting: DraftCommandService
     marketplace_capability: MarketplaceCapabilityService
@@ -462,7 +467,10 @@ def build_container(
     # retention or visual proof exists yet, so every mutation it judges is refused at this main.
     live_store = LiveAuthorityStore(db, clock, audit)
     # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs are durable
-    # owners now; eligibility (§5) and visual acceptance (§9) still have none, so both stay false.
+    # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the
+    # commit this process runs at and its running code digest (both taken once at composition), at
+    # the current schema head.
+    # Eligibility (§5) still has no owner, so it stays false.
     retention = RetentionProofService(
         db=db,
         store=live_store,
@@ -470,8 +478,19 @@ def build_container(
         safe_retention_profile_version=smartstore_registry.SAFE_RETENTION_PROFILE_VERSION,
         schema_head=head_revision,
     )
+    code_sha = running_checkout_sha()
+    code_identity = running_code_digest(config.ui_dir)
+    visual_acceptance = VisualAcceptanceService(
+        store=live_store,
+        code_sha=lambda: code_sha,
+        code_identity=lambda: code_identity,
+        schema_head=head_revision,
+    )
     stage_proofs = DurableStageProofs(
-        store=live_store, retention=retention, schema_head=head_revision
+        store=live_store,
+        retention=retention,
+        visual=visual_acceptance,
+        schema_head=head_revision,
     )
     safety_stack = SafetyStack(
         store=live_store, mode=execution_mode, proofs=stage_proofs, clock=clock
@@ -516,6 +535,15 @@ def build_container(
         ),
         candidates=PreparationCandidateGate(registration_preparations, registrations),
         clock=clock,
+    )
+    # Gate 3 area 3 (§9): the read-only projection of the brake, the grants, their ASSET readiness
+    # and the unit-independent proofs, which 등록관리 shows. It writes and authorizes nothing.
+    live_status = LiveStatusService(
+        store=live_store,
+        registrations=registrations,
+        assets=asset_uploads,
+        retention_ready=retention.ready,
+        visual_recorded=visual_acceptance.recorded,
     )
     restore_drills = RestoreDrillService(
         db=db,
@@ -626,6 +654,8 @@ def build_container(
         asset_uploads=asset_uploads,
         restore_drills=restore_drills,
         retention=retention,
+        visual_acceptance=visual_acceptance,
+        live_status=live_status,
         register=register_service,
         drafting=drafting,
         marketplace_capability=marketplace_capability,

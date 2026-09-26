@@ -121,3 +121,30 @@ jobs:
           name: m0-acceptance-evidence
           path: ${{ runner.temp }}/m0-acceptance
           if-no-files-found: error
+
+  g3-visual-acceptance:
+    name: Gate 3 populated visual acceptance (Windows, clean checkout)
+    needs: [quality, tests, migrations]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c constraints.txt -e ".[dev]"
+      # ADR-0018 §9: the populated first-vertical scenario in a real browser, every required surface
+      # at 1920x1080 and 1080x1920. The run refuses a dirty checkout itself. Its report is evidence
+      # of this exact commit only; nothing here records a visual acceptance (only the reviewed
+      # `icbm live record-visual-acceptance` command does, at the report's own commit).
+      - name: Run the populated visual acceptance harness
+        run: python scripts/g3_visual_acceptance.py run --root "${{ runner.temp }}/g3-visual"
+      - name: Verify the report against the contract
+        run: python scripts/g3_visual_acceptance.py verify "${{ runner.temp }}/g3-visual/g3-visual-report.json"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: g3-visual-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/g3-visual/g3-visual-report.json
+            ${{ runner.temp }}/g3-visual/screens
+          if-no-files-found: error
