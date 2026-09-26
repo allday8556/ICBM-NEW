@@ -419,9 +419,13 @@ Before the first vertical closes:
 
 - the registration list / quick-review panel / full individual editor UX may be frozen and wired to
   **existing server-owned** Product, image, Item, Pricing, readiness, Draft/Preparation and review state;
-- locations for the existing Canonical v3.1 enrichment tasks may be present, and an unavailable
-  capability may be shown with a server-owned reason;
+- the approved/prototype UX may reserve locations for the existing Canonical v3.1 enrichment tasks,
+  but the production runtime must not expose an actionable AI control until an authoritative server
+  capability/owner exists for that control. If no such owner exists, do not hardcode an
+  "unavailable" reason in JavaScript merely to fill the slot;
 - the baseline authoring path must remain deterministic/manual and work with **no AI provider**.
+  This is not a new strengthening invented by Issue #127: M5 Issue #89 §14 already requires
+  REGISTER correctness with no AI provider configured.
 
 Do **not** implement an interim AI path merely to make those controls active. In particular, do not
 pull forward AI-provider execution, PromptTemplate runtime execution, SearchSignalAdapter, platform
@@ -683,7 +687,10 @@ AI authoring foundation
 
 → SmartStore single-product authoring AI
   recommended_name
-  → tag/search-signal adoption + SearchSignalAdapter + recommended_tags
+  → tag/search-signal candidate registration in ENDPOINT_MATRIX
+  → official-evidence review
+  → endpoint adoption only if sufficient
+  → SearchSignalAdapter + recommended_tags
   → category/options/notice validation only when their authoritative metadata contracts exist
 
 → Add Coupang
@@ -698,6 +705,15 @@ AI authoring foundation
 
 This is a dependency order for the registration/AI lane, not permission to start any of those
 slices before the first vertical is accepted.
+
+**AI_INITIAL timing clarification is intentionally deferred.** Canonical v3.1 §7.6 says both that
+platform name/tag projections are created only for the `RegistrationTargetSet` and that the first
+collection auto-applies an initial recommendation. Gate 1 makes target selection a later,
+server-revalidated registration decision, so a collection may legitimately have no target set.
+Issue #127 does not amend that frozen rule. The future AI implementation contract must define the
+exact first-eligible target/enrichment event that may create `AI_INITIAL`. Until that contract
+lands, the first vertical uses the existing deterministic rule that an absent `final_name` falls
+back to `original_name`; no collection-time AI projection is invented.
 
 ---
 
