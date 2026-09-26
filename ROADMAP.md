@@ -616,7 +616,7 @@ The standalone HTML prototype maps to the architecture as follows:
 | UI | Runtime responsibility |
 |---|---|
 | Dashboard | overall status/read models and navigation |
-| Collection Management | supplier connection + collection execution + evidence review |
+| Collection Management | supplier connection + collection execution + evidence review; after ADR-0019, the run/status/review history of both acquisition transports and the direct-URL fallback (kept, never removed) |
 | Integrated DB | canonical Product truth |
 | Registration Management | readiness + platform payload + create/read-back |
 | Order Management | marketplace orders mapped to canonical products |
@@ -762,3 +762,10 @@ Before any real marketplace write, and independently of endpoint adoption:
 The implemented source and pricing schema is **KRW-only** (`docs/ARCHITECTURE.md` §6). A second-currency supplier such as 1688 or Rakuten first needs a currency and FX-snapshot schema extension decided in an ADR. No such extension is authorized, and no migration for it may be written before that decision.
 
 A second supplier is meant to be onboarded through the Adaptive Collector (Issue #110, `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md`): a validated profile instead of a new supplier-specific parser. That contract authorizes no implementation by itself; its Phase B prototype, production slices and KM통상 shadow Phase C each need their own authorization, and its second-supplier Phase D stays deferred until the first vertical closes (`CLAUDE.md` §12).
+
+**Extension-primary COLLECT transport** (Issue #126, `docs/adr/0019-extension-primary-collection-transport.md`, architect decision `5844537419`):
+- **`EXTENSION`** — the operator's own Chrome, through a first-party extension — is the primary COLLECT capture transport. **`DIRECT_URL`** is the fallback.
+- Collection Management is kept. It owns the run, status and review history of both transports and the direct-URL fallback.
+- The Adaptive work (P1–P3, C0, PREP-0, PREP-1) is not discarded. It stays the common extraction and validation core.
+- Issue #110 C1 is recorded as **INCOMPLETE / STOPPED** and preserved (`5844538783`). The old-transport C2–C4 execution plan is **PAUSED / SUPERSEDED FOR EXECUTION**.
+- ADR-0019 is E0, contract only. **E1 and every later step each need their own authorization.**

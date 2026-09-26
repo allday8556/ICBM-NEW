@@ -36,6 +36,7 @@ REVIEW_ADR = DOCS / "adr" / "0016-gate2-human-review-path-and-review-item-owner.
 ADAPTIVE_ADR = DOCS / "adr" / "0017-adaptive-collector-profile-extraction-and-shadow-validation.md"
 ADAPTIVE_PROPOSAL = DOCS / "review" / "ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md"
 LIVE_ADR = DOCS / "adr" / "0018-gate3-pre-live-safety-and-bounded-live-authorization.md"
+TRANSPORT_ADR = DOCS / "adr" / "0019-extension-primary-collection-transport.md"
 M5_ACCEPTANCE = DOCS / "acceptance" / "M5.md"
 GLOSSARY_MD = DOCS / "GLOSSARY.md"
 ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
@@ -425,6 +426,79 @@ def test_the_adaptive_collector_contract_is_recorded_and_pinned() -> None:
     closed = _section(adr, r"^14\. The cross-audit items, closed$")
     assert len(re.findall(r"^\| [1-6] \|", closed, re.M)) == 6
     assert closed.count("**yes**") == 2
+
+
+def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
+    """ADR-0019 (Issue #126 5844537419, E0): the extension-primary COLLECT transport contract,
+    contract-only and runtime-zero, before any extension code, endpoint or migration."""
+    adr = _read(TRANSPORT_ADR)
+    assert re.search(r"^Status: \*\*ACCEPTED\*\*", adr, re.M)
+    for source in ("5844537419", "5844538783", "5844496942"):
+        assert source in adr, source
+    # The canonical documents cite it; the roadmap names the file and the decision.
+    roadmap = _read(ROADMAP_MD)
+    assert f"`docs/adr/{TRANSPORT_ADR.name}`" in roadmap and "5844537419" in roadmap
+    for canonical in (ARCHITECTURE_MD, GLOSSARY_MD):
+        assert "ADR-0019" in _read(canonical) or TRANSPORT_ADR.name in _read(canonical), canonical
+    collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
+    assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
+    # ADR-0010 and ADR-0017 are amended by notes at exactly the named sections, text preserved.
+    (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
+    collect = _read(collect_adr)
+    for heading in (
+        r"^3\. Port and adapter boundary",
+        r"^4\. Request policy and budgets",
+        r"^5\. Source reconnaissance",
+        r"^8\. Evidence model",
+        r"^9\. Source images",
+        r"^12\. Extraction identity",
+        r"^13\. AI, OCR and marketplace isolation",
+    ):
+        assert "Amendment note (ADR-0019" in _section(collect, heading), heading
+    adaptive = _read(ADAPTIVE_ADR)
+    for heading in (
+        r"^2\. What is authorized, phase by phase",
+        r"^5\. Extraction identity and comparability",
+        r"^7\.3 `ValidationSample`",
+        r"^10\. One-fetch shadow comparison",
+        r"^15\. What this ADR does not decide",
+    ):
+        assert "Amendment note (ADR-0019" in _section(adaptive, heading), heading
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 19)]
+    # Two transports, one pipeline, Collection Management kept.
+    assert "exactly two acquisition transports" in invariants["AC-01"]
+    assert "Collection Management is kept" in invariants["AC-01"]
+    assert "never the server-side browser execution" in invariants["AC-02"]
+    assert "refused, never defaulted" in invariants["AC-03"]
+    # Transport only; the writer and ACTIVE are unchanged.
+    assert "never writes the database, a ProductFactsRevision" in invariants["AC-04"]
+    assert "only ProductFactsRevision writer" in invariants["AC-05"]
+    assert "ACTIVE is forbidden until a separate cutover ADR" in invariants["AC-05"]
+    assert "in addition to the existing loopback client and CSRF checks" in invariants["AC-06"]
+    assert "never sends cookies, request headers" in invariants["AC-07"]
+    # Provenance, never identity; observed evidence still drifts.
+    assert "first introduced by this ADR" in invariants["AC-08"]
+    assert "never by itself a drift event" in invariants["AC-08"]
+    assert "EVIDENCE_DRIFT under the existing rules" in invariants["AC-09"]
+    # The capture-topology owner and its fixed order (the C1 correction).
+    assert "separate from EPR and PTR" in invariants["AC-10"]
+    assert (
+        "CollectionProfile keeps owning host, path, query, pacing and transport"
+        in (invariants["AC-11"])
+    )
+    assert "a whole authenticated page is never sent or retained" in invariants["AC-12"]
+    assert "private material inside the product scope still refuses" in invariants["AC-13"]
+    assert "a browser byte relay is not authorized" in invariants["AC-14"]
+    assert "a missing cap refuses fail closed" in invariants["AC-15"]
+    assert "No legacy ICBM extension code" in invariants["AC-16"]
+    assert "by contract only" in invariants["AC-17"] and "belong to E1" in invariants["AC-17"]
+    assert "authorizes no extension code, endpoint, migration" in invariants["AC-18"]
+    # The code facts the contract relies on still hold (F2): EXTENSION is not yet a transport.
+    from integrations.suppliers.base import SupplierTransport
+
+    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER"}
 
 
 def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:

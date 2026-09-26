@@ -102,11 +102,19 @@ One row per `collection_run_id`, including every INCOMPLETE and superseded one:
 
 ## 4. Current state
 
+**C1 INCOMPLETE / STOPPED — no Adaptive validation verdict.** See the Issue #110 records `5844381853`
+(CONNECT READY), `5844496942` (the two collections, both capture candidates refused) and
+`5844538783` (the STOP disposition).
+- The campaign `phase-c-kmretail-01` and its data root are preserved as evidence and are never
+  reused.
+- The old-transport C2–C4 plan is superseded for execution by ADR-0019. An extension-transport
+  Phase C is a new, separately authorized campaign.
+
 | item | state |
 | --- | --- |
 | KM통상 EPR/PTR | none |
 | ValidationSample from KM통상 | none |
 | shadow switch entry | none (every supplier is off) |
 | evidence window | none |
-| supplier reads for Phase C | 0 |
+| supplier reads for Phase C | C1 (accounted): PRODUCT 2, CONTROL 2, PROTECTED 2, AUTHENTICATE 0, POLICY 0, IMAGE 12 + 13 (one refused at the ceiling). The one authorized CONNECT, outside the accounting: AUTHENTICATE 1, CONTROL 1, PROTECTED 1 |
 | verdict | none |
