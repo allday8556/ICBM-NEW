@@ -49,7 +49,7 @@ from app.connect.sessions import (
 )
 from app.connect.smartstore.service import SmartStoreConnectService
 from app.core.clock import Clock, SystemClock
-from app.core.code_identity import running_code_digest
+from app.core.code_identity import running_checkout_sha, running_code_digest
 from app.core.egress import EGRESS
 from app.core.ownership import DataDirLease, require_ownership
 from app.core.secrets import SecretStore, build_secret_store
@@ -467,8 +467,9 @@ def build_container(
     # retention or visual proof exists yet, so every mutation it judges is refused at this main.
     live_store = LiveAuthorityStore(db, clock, audit)
     # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs are durable
-    # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the code
-    # this process runs (its code digest, taken once at composition) at the current schema head.
+    # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the
+    # commit this process runs at and its running code digest (both taken once at composition), at
+    # the current schema head.
     # Eligibility (§5) still has no owner, so it stays false.
     retention = RetentionProofService(
         db=db,
@@ -477,9 +478,13 @@ def build_container(
         safe_retention_profile_version=smartstore_registry.SAFE_RETENTION_PROFILE_VERSION,
         schema_head=head_revision,
     )
+    code_sha = running_checkout_sha()
     code_identity = running_code_digest(config.ui_dir)
     visual_acceptance = VisualAcceptanceService(
-        store=live_store, code_identity=lambda: code_identity, schema_head=head_revision
+        store=live_store,
+        code_sha=lambda: code_sha,
+        code_identity=lambda: code_identity,
+        schema_head=head_revision,
     )
     stage_proofs = DurableStageProofs(
         store=live_store,

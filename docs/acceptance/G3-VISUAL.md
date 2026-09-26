@@ -14,14 +14,20 @@ It is never an exact-main proof.
 `0030_g3_visual_acceptance`). The table is append-only, and its triggers refuse any update or
 delete.
 
-**The record matches the running code and schema.**
-- Its **running code digest** equals the digest the application computed for the code it runs
-  (`app/core/code_identity.py`). That digest covers the `app` and `integrations` packages, the
-  served UI directory and the dependency pins, with line endings normalized.
+**The record matches the accepted code SHA, the running code and the schema.**
+- Its **commit** equals the commit the application runs at. That is ADR-0018 §9's accepted code
+  SHA, read once at composition from the checkout's own git metadata (`app/core/code_identity.py`,
+  `checkout_sha`).
+- As an additional integrity binding, its **running code digest** equals the digest the
+  application computed for the code it runs. That digest covers the `app` and `integrations`
+  packages, the served UI directory and the dependency pins, with line endings normalized.
 - Its schema head equals the application's current schema head.
 
-**What moves the digest.** Documents and evidence never move it. Any change to executed or served
-code does, and that makes every earlier record stale.
+**What makes a record stale.**
+- Any new commit, including a documents-only, tests-only or harness-only one, is another accepted
+  code SHA (§9: "again … when the accepted code SHA changed").
+- A change to executed or served code in the working tree moves the digest.
+- An install with no readable checkout has no SHA, and no record is ever current for it.
 
 **The record was written by the one path.** The only path is
 `icbm live record-visual-acceptance`, an owning command that holds the data directory. It records
@@ -29,7 +35,7 @@ a report only when every one of these holds:
 1. The report verifies against the contract below (`app/live/visual.py`, `verify_report`).
 2. Its code digest is the running code's.
 3. Its schema head is current.
-4. The checkout's HEAD is the exact commit the run was taken at.
+4. Its commit is the commit the application runs at.
 5. A reviewer and the GitHub comment that accepted it are named.
 
 If any fails, it refuses and records nothing. No HTTP route, UI action or other module can record
@@ -132,8 +138,10 @@ owners and routes into a fresh dedicated root:
        --approved-by <reviewer> --authorization-ref <comment id> --actor <operator>
    ```
 
-   Publishing evidence under `docs/` does not change the running code digest. The recorder still
-   requires HEAD to be the report's commit, so recording happens at that commit.
+   The record is current only while the application runs at exactly that commit. Publishing the
+   evidence under `docs/` in a later commit is itself a new accepted code SHA. A run meant to gate a
+   mutation stage must therefore be taken, reviewed and recorded at the commit the operator runs
+   when that stage is authorized.
 
 ## 5. Recorded runs
 

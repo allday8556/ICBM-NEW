@@ -358,9 +358,10 @@ class VisualAcceptance(Base):
     """One reviewed populated visual and responsive acceptance (ADR-0018 §9; Gate 3 area 3).
 
     Append-only, and only ever a PASSED report: a report that fails its contract is never recorded.
-    It is current only for exactly the code it accepted — the running application's code digest
-    (``app.core.code_identity``) — at exactly its schema head; the git commit it ran at is kept as
-    provenance, with the reviewer and the review reference that accepted it.
+    It is current only for exactly the commit it accepted (ADR-0018 §9's accepted code SHA)
+    and, as an additional integrity binding, exactly the running application's code digest
+    (``app.core.code_identity``), at exactly its schema head; it names the reviewer and the
+    review reference that accepted it.
     """
 
     __tablename__ = "visual_acceptances"

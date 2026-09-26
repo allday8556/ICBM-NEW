@@ -9,7 +9,6 @@ read-only here and in ADR-0006 (a repository test keeps the two lists equal).
 
 import argparse
 import json
-import subprocess
 import sys
 import uuid
 from collections.abc import Callable, Sequence
@@ -102,27 +101,11 @@ def _db_upgrade(config: AppConfig, lease: DataDirLease, args: argparse.Namespace
     return 0
 
 
-def _checkout_head() -> str | None:
-    """The commit the application's checkout is at, or ``None`` when it cannot be read."""
-    from app.core.code_identity import REPOSITORY_ROOT
-
-    try:
-        found = subprocess.run(
-            ["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "--verify", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return found.stdout.strip() or None
-
-
 def _record_visual_acceptance(
     config: AppConfig, lease: DataDirLease, args: argparse.Namespace
 ) -> int:
-    """Record one reviewed visual acceptance report, or refuse and record nothing."""
+    """Record one reviewed visual acceptance report, or refuse and record nothing. The commit it
+    must match is the one this process was composed at (``app.core.code_identity``)."""
     from app.container import build_container
     from app.core.errors import AppError
 
@@ -136,7 +119,6 @@ def _record_visual_acceptance(
     try:
         acceptance_id = container.visual_acceptance.record(
             report,
-            checkout_head=_checkout_head(),
             approved_by=args.approved_by,
             authorization_ref=args.authorization_ref,
             actor=args.actor,

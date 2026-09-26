@@ -800,17 +800,21 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     visual = _keyword(durable, "visual")
     assert isinstance(visual, ast.Name) and visual.id == "visual_acceptance"
     (recorder,) = _calls(tree, "VisualAcceptanceService")
-    identity = _keyword(recorder, "code_identity")
-    assert isinstance(identity, ast.Lambda) and isinstance(identity.body, ast.Name)
+    for keyword in ("code_sha", "code_identity"):
+        bound = _keyword(recorder, keyword)
+        assert isinstance(bound, ast.Lambda) and isinstance(bound.body, ast.Name), keyword
     (digest,) = _calls(tree, "running_code_digest")
     assert ast.unparse(digest) == "running_code_digest(config.ui_dir)"
+    (sha,) = _calls(tree, "running_checkout_sha")
+    assert ast.unparse(sha) == "running_checkout_sha()"
     source = importlib.import_module("app.live.proofs").DurableStageProofs
     never = inspect.getsource(source.canary_non_regulated)
     assert never.rstrip().endswith("return False")
     recorded = inspect.getsource(source.visual_acceptance_recorded)
     assert recorded.rstrip().endswith("return self._visual.recorded()")
     owner = inspect.getsource(importlib.import_module("app.live.visual").VisualAcceptanceService)
-    assert "unit.visual_accepted(self._code(), head)" in owner
+    assert "unit.visual_accepted(sha, self._code(), head)" in owner
+    assert 'if not sha or sha != report["code_sha"]:' in owner
     (execution,) = _calls(tree, "RegistrationExecutionService")
     authority = _keyword(execution, "authority")
     assert isinstance(authority, ast.Name) and authority.id == "safety_stack"

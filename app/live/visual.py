@@ -1,8 +1,11 @@
 """The populated visual and responsive acceptance (ADR-0018 §9; Gate 3 area 3).
 
 ``VISUAL_ACCEPTANCE_RECORDED`` is never asserted. It holds only while a **reviewed** record exists
-for exactly the code the process runs (``app.core.code_identity``) at exactly its schema head, and
-a record exists only through this module's one path:
+for **exactly the accepted code SHA** the process runs at — the commit its checkout is at — and, as
+an additional integrity binding, exactly its running code digest (``app.core.code_identity``), at
+exactly its schema head. Any new commit, a documents-only, tests-only or harness-only one included,
+makes every earlier record stale (ADR-0018 §9). A record exists only through this module's one
+path:
 
 1. a harness (``scripts/g3_visual_acceptance.py``) drives the populated first-vertical scenario in a
    real browser over a served application, at every required viewport, through every required
@@ -11,9 +14,9 @@ a record exists only through this module's one path:
    viewports cannot be dropped, every required check must be present and passed, the required
    populated state must have rendered, no external request, console or page error may exist, and
    nothing in it may carry secret material or a URL;
-3. ``VisualAcceptanceService.record`` records it only when, in addition, its code digest is the
-   running code's, its schema head is the current head, the checkout's HEAD is the commit the run
-   was taken at, and a reviewer and a review reference (a GitHub comment identity) are named.
+3. ``VisualAcceptanceService.record`` records it only when, in addition, its commit is the commit
+   this process runs at, its code digest is the running code's, its schema head is the current
+   head, and a reviewer and a review reference (a GitHub comment identity) are named.
 
 A passing browser run alone never records anything, and no HTTP route or UI action reaches this
 module: the only caller is the ``icbm live record-visual-acceptance`` command (a repository rule
@@ -247,10 +250,12 @@ class VisualAcceptanceService:
         self,
         *,
         store: LiveAuthorityStore,
+        code_sha: Callable[[], str | None],
         code_identity: Callable[[], str],
         schema_head: Callable[[], str | None],
     ) -> None:
         self._store = store
+        self._sha = code_sha
         self._code = code_identity
         self._head = schema_head
 
@@ -258,7 +263,6 @@ class VisualAcceptanceService:
         self,
         report: Mapping[str, Any],
         *,
-        checkout_head: str | None,
         approved_by: str,
         authorization_ref: str,
         actor: str,
@@ -280,7 +284,8 @@ class VisualAcceptanceService:
             raise InputValidationError(
                 VISUAL_SCHEMA_NOT_CURRENT, "the report was taken at another schema head"
             )
-        if checkout_head != report["code_sha"]:
+        sha = self._sha()
+        if not sha or sha != report["code_sha"]:
             raise InputValidationError(
                 VISUAL_COMMIT_NOT_CHECKED_OUT,
                 "a report is recorded only at the exact commit it was taken at",
@@ -309,12 +314,13 @@ class VisualAcceptanceService:
             )
 
     def recorded(self) -> bool:
-        """``VISUAL_ACCEPTANCE_RECORDED``: a reviewed record of exactly this code at this head."""
-        head = self._head()
-        if not head:
+        """``VISUAL_ACCEPTANCE_RECORDED``: a reviewed record of exactly this commit and running
+        code at this head. No readable commit or head: never recorded."""
+        sha, head = self._sha(), self._head()
+        if not sha or not head:
             return False
         with self._store.reading() as unit:
-            return unit.visual_accepted(self._code(), head)
+            return unit.visual_accepted(sha, self._code(), head)
 
 
 __all__ = [

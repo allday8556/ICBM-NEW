@@ -934,12 +934,14 @@ class LiveUnit:
         )
         return row.acceptance_id
 
-    def visual_accepted(self, code_digest: str, schema_head: str) -> bool:
-        """Whether a reviewed visual acceptance holds for exactly this running code and head."""
+    def visual_accepted(self, code_sha: str, code_digest: str, schema_head: str) -> bool:
+        """Whether a reviewed visual acceptance holds for exactly this commit, running code and
+        head."""
         found = self.session.scalar(
             select(func.count())
             .select_from(VisualAcceptance)
             .where(
+                VisualAcceptance.code_sha == code_sha,
                 VisualAcceptance.code_digest == code_digest,
                 VisualAcceptance.schema_head == schema_head,
             )

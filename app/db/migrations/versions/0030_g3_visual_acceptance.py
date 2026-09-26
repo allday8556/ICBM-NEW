@@ -8,7 +8,7 @@ Issue #89 Gate 3, area 3 of ADR-0018 §12, under ADR-0018 §9 (authorization 584
 one append-only table and its triggers, and touches no other table, row, trigger or index.
 
 **What the database enforces.** ``visual_acceptances``: a record names the git commit it ran at
-(40 hex), the running code digest and report digest (64 hex each), its schema head, harness
+(40 hex, the accepted code SHA), the running code digest and report digest (64 hex each), its schema head, harness
 version and scenario, at least one target and one check, the reviewer and the review reference
 that accepted it, and one JSON object of sanitized evidence. Triggers refuse any update and any
 delete.

@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 from app import cli
 from app.config import AppConfig
 from app.container import Container
-from app.core.code_identity import code_digest, running_code_digest
+from app.core.code_identity import (
+    checkout_sha,
+    code_digest,
+    running_checkout_sha,
+    running_code_digest,
+)
 from app.core.errors import InputValidationError
 from app.db.migrate import head_revision
 from app.live import model as live_model
@@ -28,7 +33,7 @@ from app.live.visual import VisualAcceptanceService
 from app.main import create_app
 from tests.conftest import LOCAL
 from tests.gate1_support import OPERATOR
-from tests.visual_support import SHA, reseal, sealed
+from tests.visual_support import reseal, sealed
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +56,10 @@ def container(api: TestClient) -> Container:
 def current(container: Container, **overrides: Any) -> dict[str, Any]:
     head = head_revision()
     assert head is not None
+    sha = running_checkout_sha()
+    assert sha is not None, "the tests run from a git checkout"
     values: dict[str, Any] = {
+        "code_sha": sha,
         "code_digest": running_code_digest(container.config.ui_dir),
         "schema_head": head,
     }
@@ -61,7 +69,6 @@ def current(container: Container, **overrides: Any) -> dict[str, Any]:
 
 def record(container: Container, report: dict[str, Any], **overrides: Any) -> str:
     values: dict[str, Any] = {
-        "checkout_head": report.get("code_sha"),
         "approved_by": "architect",
         "authorization_ref": REVIEW,
         "actor": OPERATOR,
@@ -245,20 +252,30 @@ def test_only_a_reviewed_report_of_the_running_code_proves_visual_acceptance(
     assert container.visual_acceptance.recorded()
     with LiveAuthorityStore(container.db, container.clock, container.audit).reading() as unit:
         (recorded,) = unit.visual_acceptances()
-    assert recorded["code_sha"] == SHA and recorded["authorization_ref"] == REVIEW
-    # Other code — any change of executed or served code — is not proven by it.
-    other_code = VisualAcceptanceService(
-        store=LiveAuthorityStore(container.db, container.clock, container.audit),
-        code_identity=lambda: "b" * 64,
-        schema_head=head_revision,
-    )
-    assert not other_code.recorded()
-    other_head = VisualAcceptanceService(
-        store=LiveAuthorityStore(container.db, container.clock, container.audit),
-        code_identity=lambda: running_code_digest(container.config.ui_dir),
-        schema_head=lambda: "0031_other_head",
-    )
-    assert not other_head.recorded()
+    assert recorded["code_sha"] == running_checkout_sha()
+    assert recorded["authorization_ref"] == REVIEW
+
+    def service(**overrides: Any) -> VisualAcceptanceService:
+        values: dict[str, Any] = {
+            "code_sha": running_checkout_sha,
+            "code_identity": lambda: running_code_digest(container.config.ui_dir),
+            "schema_head": head_revision,
+        }
+        values.update(overrides)
+        return VisualAcceptanceService(
+            store=LiveAuthorityStore(container.db, container.clock, container.audit), **values
+        )
+
+    assert service().recorded()
+    # ADR-0018 §9: a new accepted code SHA — a documents-, tests- or harness-only commit included,
+    # which leaves the running code digest unchanged — is not proven by the older record.
+    assert not service(code_sha=lambda: "e" * 40).recorded()
+    # No readable commit: never recorded.
+    assert not service(code_sha=lambda: None).recorded()
+    # Other executed or served code at the same commit (a working-tree change) is not proven.
+    assert not service(code_identity=lambda: "b" * 64).recorded()
+    # Another schema head is not proven.
+    assert not service(schema_head=lambda: "0031_other_head").recorded()
     # The record is append-only.
     with sqlite3.connect(config.data_dir / "runtime" / "icbm.db") as raw:
         for statement in (
@@ -277,8 +294,7 @@ def test_only_a_reviewed_report_of_the_running_code_proves_visual_acceptance(
             {"report": {"schema_head": "0029_g3_restore_retention"}},
             live_model.VISUAL_SCHEMA_NOT_CURRENT,
         ),
-        ({"record": {"checkout_head": "c" * 40}}, live_model.VISUAL_COMMIT_NOT_CHECKED_OUT),
-        ({"record": {"checkout_head": None}}, live_model.VISUAL_COMMIT_NOT_CHECKED_OUT),
+        ({"report": {"code_sha": "c" * 40}}, live_model.VISUAL_COMMIT_NOT_CHECKED_OUT),
         ({"record": {"authorization_ref": "looks fine"}}, live_model.VISUAL_REVIEW_MISSING),
         ({"record": {"approved_by": ""}}, live_model.VISUAL_REVIEW_MISSING),
         ({"report": {"verdict": "FAILED"}}, live_model.VISUAL_REPORT_INVALID),
@@ -333,7 +349,9 @@ def test_the_command_records_a_verified_report_and_refuses_anything_else(
     head = head_revision()
     assert head is not None
     ui = AppConfig.from_env().ui_dir
-    report = sealed(code_digest=running_code_digest(ui), schema_head=head)
+    sha = running_checkout_sha()
+    assert sha is not None
+    report = sealed(code_sha=sha, code_digest=running_code_digest(ui), schema_head=head)
     path = tmp_path_factory.mktemp("visual-report") / "report.json"
     args = [
         "live",
@@ -352,13 +370,12 @@ def test_the_command_records_a_verified_report_and_refuses_anything_else(
         with sqlite3.connect(database) as raw:
             return int(raw.execute("SELECT COUNT(*) FROM visual_acceptances").fetchone()[0])
 
-    # At another commit than the report's: refused, nothing recorded.
-    monkeypatch.setattr(cli, "_checkout_head", lambda: "d" * 40)
-    path.write_text(json.dumps(report))
+    # A report taken at another commit than this checkout's: refused, nothing recorded.
+    other = sealed(code_sha="d" * 40, code_digest=running_code_digest(ui), schema_head=head)
+    path.write_text(json.dumps(other))
     assert cli.main(args) == 1 and count() == 0
     # A tampered report: refused, nothing recorded.
     path.write_text(json.dumps({**report, "failures": ["x"]}))
-    monkeypatch.setattr(cli, "_checkout_head", lambda: SHA)
     assert cli.main(args) == 1 and count() == 0
     # The verified report at its own commit: recorded once.
     path.write_text(json.dumps(report))
@@ -429,3 +446,82 @@ def test_evidence_retention_guards_the_visual_acceptance_record(
     assert checks.checks["no_delete_triggers"]["visual_acceptances"] is False
     assert not checks.passed and not retention.ready()
     assert verdict.value == "PASSED"
+
+
+def test_no_readable_commit_records_nothing(container: Container, config: AppConfig) -> None:
+    unreadable = VisualAcceptanceService(
+        store=LiveAuthorityStore(container.db, container.clock, container.audit),
+        code_sha=lambda: None,
+        code_identity=lambda: running_code_digest(container.config.ui_dir),
+        schema_head=head_revision,
+    )
+    with pytest.raises(InputValidationError) as refused:
+        unreadable.record(
+            current(container),
+            approved_by="architect",
+            authorization_ref=REVIEW,
+            actor=OPERATOR,
+            correlation_id=CID,
+        )
+    assert refused.value.code == live_model.VISUAL_COMMIT_NOT_CHECKED_OUT
+    assert rows(config) == 0
+
+
+def _git(root: Path, head: str, **files: str) -> Path:
+    git = root / ".git"
+    git.mkdir(parents=True)
+    (git / "HEAD").write_text(head)
+    for name, content in files.items():
+        path = git / name.replace("__", "/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    return git
+
+
+def test_the_commit_is_read_from_the_checkouts_own_git_metadata(tmp_path: Path) -> None:
+    a, b = "a" * 40, "b" * 40
+    # Detached HEAD.
+    assert checkout_sha(_git(tmp_path / "detached", f"{a}\n").parent) == a
+    # A loose branch ref, and a packed one.
+    loose = _git(tmp_path / "loose", "ref: refs/heads/main\n", refs__heads__main=f"{b}\n")
+    assert checkout_sha(loose.parent) == b
+    packed = _git(
+        tmp_path / "packed",
+        "ref: refs/heads/main\n",
+        **{"packed-refs": f"# pack-refs with: peeled\n{a} refs/heads/other\n{b} refs/heads/main\n"},
+    )
+    assert checkout_sha(packed.parent) == b
+    # A linked worktree: ``.git`` names its git dir, whose ``commondir`` holds the refs.
+    common = _git(tmp_path / "main", "ref: refs/heads/main\n", refs__heads__topic=f"{a}\n")
+    linked = common / "worktrees" / "wt"
+    linked.mkdir(parents=True)
+    (linked / "HEAD").write_text("ref: refs/heads/topic\n")
+    (linked / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {linked}\n")
+    assert checkout_sha(worktree) == a
+    # Unreadable, malformed or escaping: never guessed.
+    assert checkout_sha(tmp_path / "nowhere") is None
+    assert checkout_sha(_git(tmp_path / "bad", "ref: refs/heads/none\n").parent) is None
+    assert checkout_sha(_git(tmp_path / "junk", "not a ref\n").parent) is None
+    assert checkout_sha(_git(tmp_path / "up", "ref: refs/../../x\n").parent) is None
+    short = _git(tmp_path / "short", "ref: refs/heads/main\n", refs__heads__main="abc\n")
+    assert checkout_sha(short.parent) is None
+
+
+def test_the_running_commit_is_the_checkouts_head() -> None:
+    import shutil
+    import subprocess
+
+    from app.core.code_identity import REPOSITORY_ROOT
+
+    if shutil.which("git") is None:
+        pytest.skip("no git executable to compare with")
+    head = subprocess.run(
+        ["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert checkout_sha() == head
