@@ -38,6 +38,7 @@ from alembic import command
 import app.collect.adaptive_capture.runner as capture_runner
 import app.collect.adaptive_shadow.runner as shadow_runner
 import scripts.phasec.harness as harness_module
+from app.collect.adaptive.profiles import ExtractionProfileRevision, profile_digest
 from app.collect.adaptive.validation import ValidationRun, Verdict, freshness_tuple
 from app.collect.adaptive_capture.commands import PhaseCCommandStore
 from app.collect.adaptive_capture.store import CaptureStore
@@ -45,6 +46,7 @@ from app.collect.adaptive_shadow.compare import Comparison
 from app.collect.adaptive_shadow.evidence import RunVerdict
 from app.collect.adaptive_shadow.switch import bundle_key_of
 from app.collect.adaptive_store.gate import build_supplier_gate
+from app.collect.adaptive_store.store import AdaptiveProfileStore
 from app.collect.collection import pacing_key
 from app.collect.models import CollectionOutcome
 from app.config import AppConfig, database_path
@@ -63,6 +65,8 @@ from scripts.phasec.harness import (
     run,
 )
 from scripts.phasec.ledger import CampaignLedger, LedgerRefused, approval_phrase
+from scripts.phasec.roots import REPO_ROOT
+from tests.adaptive_support import epr, template
 from tests.conftest import make_config
 from tests.shadow_support import (
     INTERVAL,
@@ -76,7 +80,6 @@ from tests.shadow_support import (
     raw,
     registered,
     rows,
-    save_profile,
 )
 from tests.support import FakeClock
 
@@ -472,6 +475,24 @@ class Harness:
     def request(self) -> tuple[int, Any]:
         return self.act("request-capture", "--supplier", SUPPLIER_KEY, "--target-url", PRODUCT_URL)
 
+    def profile_files(self, key: str = "plain") -> tuple[Path, Path]:
+        """An operator-authored PTR and an EPR pinning it, outside the repository and data root."""
+        directory = self.campaign_root.parent / f"{self.campaign_id}-profiles"
+        directory.mkdir(exist_ok=True)
+        ptr = directory / f"{key}.ptr.json"
+        ptr.write_text(json.dumps(template(key, choice=False, supplier=SUPPLIER_KEY)), "utf-8")
+        code, digest = self("profile-digest", "--file", str(ptr))
+        assert code == EXIT_OK and digest["kind"] == "PAGE_TEMPLATE", digest
+        document = directory / f"{key}.epr.json"
+        document.write_text(json.dumps(epr([digest["digest"]], supplier=SUPPLIER_KEY)), "utf-8")
+        return ptr, document
+
+    def store_profile(self, key: str = "plain") -> str:
+        ptr, document = self.profile_files(key)
+        code, stored = self.act("store-profile", "--template", str(ptr), "--epr", str(document))
+        assert code == EXIT_OK, stored
+        return str(stored["epr"])
+
     def finalize(self, run_id: str) -> tuple[int, Any]:
         scope = self.campaign_root.parent / f"{self.campaign_id}-scope.json"
         scope.write_text(json.dumps({"product_boundary": "primary"}), "utf-8")
@@ -535,7 +556,7 @@ def drive_c1(h: Harness, config: AppConfig, clock: FakeClock, shop: FakeGateway)
     assert code == EXIT_OK and "://" not in json.dumps(requested), requested
     with container(config, clock, shop) as app:
         run_id = collect_once(app, clock, PRODUCT_URL)
-        epr = save_profile(app)
+    epr = h.store_profile()
     code, finalized = h.finalize(run_id)
     assert code == EXIT_OK, finalized
     code, validated = h.act("validate", "--epr", epr, "--sample", finalized["sample_digest"])
@@ -1046,6 +1067,8 @@ def test_a_campaign_never_acts_on_another_campaigns_evidence(
     assert code == EXIT_OK, finalized
     sample_b = finalized["sample_digest"]
     refused(b.act("validate", "--epr", ca.epr, "--sample", ca.sample), "finalized itself")
+    refused(b.act("validate", "--epr", ca.epr, "--sample", sample_b), "stored itself")
+    assert b.store_profile() == ca.epr, "the same documents are the same content-addressed EPR"
     code, validated = b.act("validate", "--epr", ca.epr, "--sample", sample_b)
     assert code == EXIT_OK and validated["verdict"] == "PASS"
     cb = C1(run_b, sample_b, ca.epr, validated["run_id"])
@@ -1152,3 +1175,129 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(live), "0026_g3_live_authority")
     assert rows(config, "SELECT COUNT(*) FROM adaptive_capture_requests") == [(1,)]
+
+
+# ================================================================ C1 PREP-1: profile persistence
+
+
+def c1_open(h: Harness) -> None:
+    code, result = h.authorize("C1", C1_AUTH, **c1_scope(h.target()))
+    assert code == EXIT_OK, result
+
+
+def test_store_profile_persists_the_operator_documents_with_stable_digests(
+    harness: Harness, config: AppConfig, clock: FakeClock, shop: FakeGateway
+) -> None:
+    # Issue #110 5843047094: the reviewed operator path for Phase C profile persistence.
+    c1_open(harness)
+    ptr, document = harness.profile_files()
+    offline = {
+        path: harness("profile-digest", "--file", str(path))[1]["digest"]
+        for path in (ptr, document)
+    }
+    before = (ptr.read_bytes(), document.read_bytes())
+    code, stored = harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+    assert code == EXIT_OK, stored
+    assert stored["templates"] == [offline[ptr]] and stored["epr"] == offline[document]
+    parsed = ExtractionProfileRevision.model_validate_json(document.read_text("utf-8"))
+    assert profile_digest(parsed) == stored["epr"], "the owner's digest is the document's own"
+    assert (ptr.read_bytes(), document.read_bytes()) == before, "the documents are only read"
+    answer = harness.ledger().events()[-1]
+    with container(config, clock, shop) as app:  # read back in a fresh process
+        record = app.adaptive_profiles.record(stored["epr"])
+        assert (record.created_by, record.correlation_id) == (OPERATOR, answer["correlation_id"])
+        assert record.kind == "EXTRACTION_PROFILE" and record.origin == "OPERATOR"
+        assert app.adaptive_profiles.state(stored["epr"]) == "DRAFT"
+        assert app.adaptive_profiles.record(stored["templates"][0]).kind == "PAGE_TEMPLATE"
+    code, again = harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+    assert code == EXIT_OK and again == stored, "the same bytes are the same revisions"
+    assert count(config, "adaptive_profile_revisions") == 2
+    assert count(config, "adaptive_profile_pins") == 1
+
+
+def _written(path: Path, value: object) -> Path:
+    path.write_text(value if isinstance(value, str) else json.dumps(value), "utf-8")
+    return path
+
+
+def test_store_profile_refuses_anything_but_clean_documents_before_any_write(
+    harness: Harness, config: AppConfig
+) -> None:
+    ptr, document = harness.profile_files()
+    folder = ptr.parent
+    refused(
+        harness.act("store-profile", "--template", str(ptr), "--epr", str(document)),
+        "current stage is C0",
+    )
+    c1_open(harness)
+    pinned = harness("profile-digest", "--file", str(ptr))[1]["digest"]
+    hooked = epr([pinned], supplier=SUPPLIER_KEY)
+    hooked["hooks"] = [
+        {
+            "hook_point": "identity_decode",
+            "target": "identity",
+            "format_class": "COMPOSITE_CODE",
+            "hook_name": "decode_code",
+            "hook_revision": "r1",
+        }
+    ]
+    other = _written(folder / "other.json", template("x", choice=False, supplier="other"))
+    cases: list[tuple[list[str], str]] = [
+        (["--epr", str(_written(folder / "bad.json", "{not json"))], "not a valid PTR or EPR"),
+        (["--epr", str(_written(folder / "nan.json", '{"kind": NaN}'))], "not a valid PTR or EPR"),
+        (["--epr", str(ptr)], "names an ExtractionProfileRevision"),
+        (["--template", str(document), "--epr", str(document)], "names a PageTemplateRevision"),
+        (["--template", str(other), "--epr", str(document)], "C1 grant's supplier"),
+        (["--template", str(ptr), "--epr", str(_written(folder / "hook.json", hooked))], "no hook"),
+        (["--epr", str(document)], "pins a template this campaign does not store"),
+        (["--epr", str(REPO_ROOT / "profiles" / "epr.json")], "outside the repository"),
+        (["--epr", str(harness.data_root / "epr.json")], "outside the repository"),
+        (["--epr", "relative/epr.json"], "absolute path"),
+    ]
+    for argv, why in cases:
+        refused(harness.act("store-profile", *argv), why)
+    assert count(config, "adaptive_profile_revisions") == 0
+    assert "STORE_PROFILE" not in [e["kind"] for e in harness.ledger().events()]
+
+
+def test_validate_takes_only_an_epr_this_campaign_stored(
+    harness: Harness, config: AppConfig, clock: FakeClock, shop: FakeGateway, passing: None
+) -> None:
+    c1_open(harness)
+    assert harness.request()[0] == EXIT_OK
+    with container(config, clock, shop) as app:
+        run_id = collect_once(app, clock, PRODUCT_URL)
+        stray_ptr = app.adaptive_profiles.save_template(
+            template("stray", choice=False, supplier=SUPPLIER_KEY),
+            created_by="someone",
+            correlation_id="c",
+        )
+        stray = app.adaptive_profiles.save_draft(  # stored by someone else, not this campaign
+            epr([stray_ptr], supplier=SUPPLIER_KEY), created_by="someone", correlation_id="c"
+        )
+    code, finalized = harness.finalize(run_id)
+    assert code == EXIT_OK, finalized
+    sample = finalized["sample_digest"]
+    refused(harness.act("validate", "--epr", stray, "--sample", sample), "stored itself")
+    mine = harness.store_profile()
+    code, validated = harness.act("validate", "--epr", mine, "--sample", sample)
+    assert code == EXIT_OK and validated["verdict"] == "PASS", validated
+
+
+def test_a_crashed_store_profile_is_reconciled_from_owner_truth(
+    harness: Harness, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c1_open(harness)
+    ptr, document = harness.profile_files()
+    with monkeypatch.context() as crash:
+        crash.setattr(
+            AdaptiveProfileStore, "save_draft", _crash_after(AdaptiveProfileStore, "save_draft")
+        )
+        with pytest.raises(Crash):
+            harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+    code, status = harness("status", "--supplier", SUPPLIER_KEY)
+    assert code == EXIT_OK and status["unfinished_actions"] == [] and status["hold"] == []
+    answer = harness.ledger().events()[-1]
+    assert answer["kind"] == "STORE_PROFILE" and answer["payload"]["recovered"] is True
+    digest = harness("profile-digest", "--file", str(document))[1]["digest"]
+    assert answer["payload"]["epr"] == digest
