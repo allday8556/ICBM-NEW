@@ -88,6 +88,7 @@ from scripts.phasec.ledger import (
     approval_phrase,
     now,
     parse_grant,
+    sha256,
 )
 from scripts.phasec.roots import REPO_ROOT, RootsRefused, campaign_root_problems, require_roots
 
@@ -195,6 +196,10 @@ def build_parser() -> argparse.ArgumentParser:
     store = sub.add_parser("store-profile")
     store.add_argument("--template", action="append", default=[], type=Path)
     store.add_argument("--epr", required=True, type=Path)
+    # The reviewed identity (review 5324679231 B1): the exact PTR and EPR digests GPT and Claude
+    # reviewed. The files must recompute to exactly these before anything is written.
+    store.add_argument("--expect-template", action="append", default=[])
+    store.add_argument("--expect-epr", required=True)
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--epr", required=True)
     validate_parser.add_argument("--sample", action="append", default=[], required=True)
@@ -247,6 +252,13 @@ def run(
                 args.grant_bytes = _read_grant(args.grant)
             _gate(campaign, args, spec)
             if args.command == "profile-digest":
+                if data_root is None:
+                    # Review 5324679231 B2: the intended data root is a path-policy input, so a
+                    # profile document inside it is refused here exactly as by store-profile.
+                    raise Refused(
+                        "profile-digest names the intended --data-root, so its path policy can"
+                        " exclude it; it is never opened"
+                    )
                 _emit(out, _profile_digest(args))
                 return EXIT_OK
             if not spec.data_root:
@@ -303,7 +315,21 @@ def phrase_for(campaign: Campaign, args: argparse.Namespace) -> str:
         grant = parse_grant(raw)
         stage = grant.get("stage") if isinstance(grant, dict) else None
         return approval_phrase(campaign, args.command, f"{stage} GRANT {grant_digest(raw)[:16]}")
+    if args.command == "store-profile":
+        return approval_phrase(campaign, args.command, f"PROFILE {reviewed_set_digest(args)[:16]}")
     return approval_phrase(campaign, args.command)
+
+
+def reviewed_set_digest(args: argparse.Namespace) -> str:
+    """The reviewed profile set's identity: the expected EPR and PTR digests the operator names.
+    The approval phrase, the intent and the outcome all carry it."""
+    return sha256(
+        {
+            "schema": "icbm-phase-c-profile-set/v1",
+            "epr": str(args.expect_epr),
+            "templates": sorted(str(d) for d in args.expect_template),
+        }
+    )
 
 
 def _gate(campaign: Campaign, args: argparse.Namespace, spec: Command) -> None:
@@ -568,7 +594,10 @@ def _probe_store_profile(
     for digest in intent["templates"]:
         app.adaptive_profiles.record(str(digest))
     return _applied(
-        templates=list(intent["templates"]), epr=intent["epr"], supplier_key=supplier_of(campaign)
+        templates=list(intent["templates"]),
+        epr=intent["epr"],
+        supplier_key=supplier_of(campaign),
+        reviewed_set=intent["reviewed_set"],
     )
 
 
@@ -965,6 +994,15 @@ def _store_profile(app: Container, ledger: CampaignLedger, campaign: Campaign, a
     pinned = set(epr.profile.templates)
     if not pinned <= {t.digest for t in templates} | _stored_templates(campaign):
         raise Refused("the EPR pins a template this campaign does not store")
+    # Review 5324679231 B1: the files must be exactly the reviewed documents, compared here,
+    # before any intent or write; a changed, missing or extra document refuses with nothing kept.
+    expected = sorted(str(d) for d in args.expect_template)
+    if epr.digest != args.expect_epr or sorted(t.digest for t in templates) != expected:
+        raise Refused(
+            "the profile documents are not exactly the reviewed ones: their digests differ from"
+            " --expect-epr / --expect-template; nothing is stored"
+        )
+    reviewed = reviewed_set_digest(args)
     correlation = new_correlation()
 
     def effect() -> dict[str, Any]:
@@ -979,7 +1017,12 @@ def _store_profile(app: Container, ledger: CampaignLedger, campaign: Campaign, a
         )
         if stored != [t.digest for t in templates] or stored_epr != epr.digest:
             raise Refused("the owner's digests differ from the documents' own digests")
-        return {"templates": stored, "epr": stored_epr, "supplier_key": supplier}
+        return {
+            "templates": stored,
+            "epr": stored_epr,
+            "supplier_key": supplier,
+            "reviewed_set": reviewed,
+        }
 
     return _act(
         app,
@@ -988,7 +1031,11 @@ def _store_profile(app: Container, ledger: CampaignLedger, campaign: Campaign, a
         args,
         correlation,
         effect,
-        intent={"templates": [t.digest for t in templates], "epr": epr.digest},
+        intent={
+            "templates": [t.digest for t in templates],
+            "epr": epr.digest,
+            "reviewed_set": reviewed,
+        },
     )
 
 

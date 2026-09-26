@@ -19,6 +19,7 @@ this proves:
 - migration 0027 is additive and its downgrade never destroys capture evidence.
 """
 
+import argparse
 import contextlib
 import hashlib
 import io
@@ -26,7 +27,7 @@ import json
 import shutil
 import socket
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -38,7 +39,11 @@ from alembic import command
 import app.collect.adaptive_capture.runner as capture_runner
 import app.collect.adaptive_shadow.runner as shadow_runner
 import scripts.phasec.harness as harness_module
-from app.collect.adaptive.profiles import ExtractionProfileRevision, profile_digest
+from app.collect.adaptive.profiles import (
+    ExtractionProfileRevision,
+    PageTemplateRevision,
+    profile_digest,
+)
 from app.collect.adaptive.validation import ValidationRun, Verdict, freshness_tuple
 from app.collect.adaptive_capture.commands import PhaseCCommandStore
 from app.collect.adaptive_capture.store import CaptureStore
@@ -487,9 +492,38 @@ class Harness:
         document.write_text(json.dumps(epr([digest["digest"]], supplier=SUPPLIER_KEY)), "utf-8")
         return ptr, document
 
+    def digest(self, path: Path) -> str:
+        code, result = self("profile-digest", "--file", str(path))
+        assert code == EXIT_OK, result
+        return str(result["digest"])
+
+    def store(
+        self,
+        templates: Sequence[Path],
+        document: Path | str,
+        *,
+        expect_epr: str,
+        expect_templates: Sequence[str],
+    ) -> tuple[int, Any]:
+        """``store-profile`` with the reviewed identity and its own approval phrase."""
+        argv = [a for t in templates for a in ("--template", str(t))]
+        argv += ["--epr", str(document), "--expect-epr", expect_epr]
+        argv += [a for d in expect_templates for a in ("--expect-template", d)]
+        reviewed = harness_module.reviewed_set_digest(
+            argparse.Namespace(expect_epr=expect_epr, expect_template=list(expect_templates))
+        )
+        subject = f"PROFILE {reviewed[:16]}"
+        phrase = approval_phrase(self.ledger().campaign(), "store-profile", subject)
+        return self("store-profile", *argv, approve=phrase)
+
     def store_profile(self, key: str = "plain") -> str:
         ptr, document = self.profile_files(key)
-        code, stored = self.act("store-profile", "--template", str(ptr), "--epr", str(document))
+        code, stored = self.store(
+            [ptr],
+            document,
+            expect_epr=self.digest(document),
+            expect_templates=[self.digest(ptr)],
+        )
         assert code == EXIT_OK, stored
         return str(stored["epr"])
 
@@ -1196,7 +1230,8 @@ def test_store_profile_persists_the_operator_documents_with_stable_digests(
         for path in (ptr, document)
     }
     before = (ptr.read_bytes(), document.read_bytes())
-    code, stored = harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+    reviewed: dict[str, Any] = {"expect_epr": offline[document], "expect_templates": [offline[ptr]]}
+    code, stored = harness.store([ptr], document, **reviewed)
     assert code == EXIT_OK, stored
     assert stored["templates"] == [offline[ptr]] and stored["epr"] == offline[document]
     parsed = ExtractionProfileRevision.model_validate_json(document.read_text("utf-8"))
@@ -1209,7 +1244,10 @@ def test_store_profile_persists_the_operator_documents_with_stable_digests(
         assert record.kind == "EXTRACTION_PROFILE" and record.origin == "OPERATOR"
         assert app.adaptive_profiles.state(stored["epr"]) == "DRAFT"
         assert app.adaptive_profiles.record(stored["templates"][0]).kind == "PAGE_TEMPLATE"
-    code, again = harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+    assert stored["reviewed_set"] == answer["payload"]["reviewed_set"]
+    intent = [e for e in harness.ledger().events() if e["kind"] == "INTENDED"][-1]
+    assert intent["payload"]["reviewed_set"] == stored["reviewed_set"], "one reviewed identity"
+    code, again = harness.store([ptr], document, **reviewed)
     assert code == EXIT_OK and again == stored, "the same bytes are the same revisions"
     assert count(config, "adaptive_profile_revisions") == 2
     assert count(config, "adaptive_profile_pins") == 1
@@ -1225,10 +1263,8 @@ def test_store_profile_refuses_anything_but_clean_documents_before_any_write(
 ) -> None:
     ptr, document = harness.profile_files()
     folder = ptr.parent
-    refused(
-        harness.act("store-profile", "--template", str(ptr), "--epr", str(document)),
-        "current stage is C0",
-    )
+    any_reviewed: dict[str, Any] = {"expect_epr": "0" * 64, "expect_templates": []}
+    refused(harness.store([ptr], document, **any_reviewed), "current stage is C0")
     c1_open(harness)
     pinned = harness("profile-digest", "--file", str(ptr))[1]["digest"]
     hooked = epr([pinned], supplier=SUPPLIER_KEY)
@@ -1242,20 +1278,20 @@ def test_store_profile_refuses_anything_but_clean_documents_before_any_write(
         }
     ]
     other = _written(folder / "other.json", template("x", choice=False, supplier="other"))
-    cases: list[tuple[list[str], str]] = [
-        (["--epr", str(_written(folder / "bad.json", "{not json"))], "not a valid PTR or EPR"),
-        (["--epr", str(_written(folder / "nan.json", '{"kind": NaN}'))], "not a valid PTR or EPR"),
-        (["--epr", str(ptr)], "names an ExtractionProfileRevision"),
-        (["--template", str(document), "--epr", str(document)], "names a PageTemplateRevision"),
-        (["--template", str(other), "--epr", str(document)], "C1 grant's supplier"),
-        (["--template", str(ptr), "--epr", str(_written(folder / "hook.json", hooked))], "no hook"),
-        (["--epr", str(document)], "pins a template this campaign does not store"),
-        (["--epr", str(REPO_ROOT / "profiles" / "epr.json")], "outside the repository"),
-        (["--epr", str(harness.data_root / "epr.json")], "outside the repository"),
-        (["--epr", "relative/epr.json"], "absolute path"),
+    cases: list[tuple[list[Path], Path | str, str]] = [
+        ([], _written(folder / "bad.json", "{not json"), "not a valid PTR or EPR"),
+        ([], _written(folder / "nan.json", '{"kind": NaN}'), "not a valid PTR or EPR"),
+        ([], ptr, "names an ExtractionProfileRevision"),
+        ([document], document, "names a PageTemplateRevision"),
+        ([other], document, "C1 grant's supplier"),
+        ([ptr], _written(folder / "hook.json", hooked), "no hook"),
+        ([], document, "pins a template this campaign does not store"),
+        ([], REPO_ROOT / "profiles" / "epr.json", "outside the repository"),
+        ([], harness.data_root / "epr.json", "outside the repository"),
+        ([], "relative/epr.json", "absolute path"),
     ]
-    for argv, why in cases:
-        refused(harness.act("store-profile", *argv), why)
+    for templates, target, why in cases:
+        refused(harness.store(templates, target, **any_reviewed), why)
     assert count(config, "adaptive_profile_revisions") == 0
     assert "STORE_PROFILE" not in [e["kind"] for e in harness.ledger().events()]
 
@@ -1289,15 +1325,95 @@ def test_a_crashed_store_profile_is_reconciled_from_owner_truth(
 ) -> None:
     c1_open(harness)
     ptr, document = harness.profile_files()
+    reviewed: dict[str, Any] = {
+        "expect_epr": harness.digest(document),
+        "expect_templates": [harness.digest(ptr)],
+    }
     with monkeypatch.context() as crash:
         crash.setattr(
             AdaptiveProfileStore, "save_draft", _crash_after(AdaptiveProfileStore, "save_draft")
         )
         with pytest.raises(Crash):
-            harness.act("store-profile", "--template", str(ptr), "--epr", str(document))
+            harness.store([ptr], document, **reviewed)
     code, status = harness("status", "--supplier", SUPPLIER_KEY)
     assert code == EXIT_OK and status["unfinished_actions"] == [] and status["hold"] == []
     answer = harness.ledger().events()[-1]
     assert answer["kind"] == "STORE_PROFILE" and answer["payload"]["recovered"] is True
     digest = harness("profile-digest", "--file", str(document))[1]["digest"]
     assert answer["payload"]["epr"] == digest
+
+
+def test_store_profile_persists_only_the_exact_reviewed_documents(
+    harness: Harness, config: AppConfig
+) -> None:
+    # Review 5324679231 B1: the reviewed PTR/EPR digests are bound to what is persisted.
+    c1_open(harness)
+    ptr, document = harness.profile_files()
+    reviewed: dict[str, Any] = {
+        "expect_epr": harness.digest(document),
+        "expect_templates": [harness.digest(ptr)],
+    }
+    # After the review the EPR file is replaced by another valid EPR (B), still pinning the PTR.
+    swapped = epr([reviewed["expect_templates"][0]], supplier=SUPPLIER_KEY)
+    swapped["vocabularies"]["price_labels"] = ["판매가"]
+    reviewed_bytes = document.read_bytes()
+    document.write_text(json.dumps(swapped), "utf-8")
+    assert harness.digest(document) != reviewed["expect_epr"], "B is a different valid EPR"
+    refused(harness.store([ptr], document, **reviewed), "not exactly the reviewed ones")
+    other = harness.profile_files("other")[0]
+    for wrong in (
+        {**reviewed, "expect_templates": []},  # a reviewed PTR missing
+        {**reviewed, "expect_templates": [*reviewed["expect_templates"], "f" * 64]},  # extra
+        {**reviewed, "expect_templates": [harness.digest(other)]},  # another PTR
+    ):
+        document.write_bytes(reviewed_bytes)
+        refused(harness.store([ptr], document, **wrong), "not exactly the reviewed ones")
+    assert count(config, "adaptive_profile_revisions") == 0
+    assert "STORE_PROFILE" not in [e["kind"] for e in harness.ledger().events()]
+    assert "INTENDED" not in [e["kind"] for e in harness.ledger().events()], "no intent at all"
+    # The approval phrase names the reviewed set: the generic phrase is refused.
+    generic: list[str] = [
+        "store-profile",
+        "--template",
+        str(ptr),
+        "--epr",
+        str(document),
+        "--expect-epr",
+        reviewed["expect_epr"],
+        "--expect-template",
+        reviewed["expect_templates"][0],
+    ]
+    refused(harness(*generic, approve=harness.phrase("store-profile")), "approval phrase")
+    code, stored = harness.store([ptr], document, **reviewed)
+    assert code == EXIT_OK and stored["epr"] == reviewed["expect_epr"], stored
+    assert count(config, "adaptive_profile_revisions") == 2
+
+
+def test_profile_digest_requires_the_intended_data_root_as_its_path_policy(
+    harness: Harness,
+) -> None:
+    # Review 5324679231 B2: the custom operating data root is always excluded.
+    ptr, _ = harness.profile_files()
+    out = io.StringIO()
+    code = run(
+        [
+            "--campaign-root",
+            str(harness.campaign_root),
+            "--actor",
+            OPERATOR,
+            "profile-digest",
+            "--file",
+            str(ptr),
+        ],
+        environ=harness.environ,
+        compose=harness.compose,
+        code_sha=lambda: CODE_SHA,
+        out=out,
+    )
+    assert code == EXIT_REFUSED and "names the intended --data-root" in out.getvalue()
+    inside = harness.data_root / "profiles" / "ptr.json"  # a custom, non-default data root
+    inside.parent.mkdir(parents=True, exist_ok=True)
+    inside.write_bytes(ptr.read_bytes())
+    refused(harness("profile-digest", "--file", str(inside)), "outside the repository")
+    parsed = PageTemplateRevision.model_validate_json(ptr.read_text("utf-8"))
+    assert harness.digest(ptr) == profile_digest(parsed), "outside every root it is read offline"
