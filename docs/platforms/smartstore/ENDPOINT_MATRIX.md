@@ -111,7 +111,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_PRODUCT_CREATE_V2` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; no durable upload owner |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); no ASSET sender wired |
 | `SMARTSTORE_CATEGORY_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories` | Category discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -141,8 +141,13 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 proves no CREATE idempotency or ambiguous-outcome replay safety, no `sellerManagementCode`
 uniqueness, and no read-after-write freshness that would make a zero-result lookup an authoritative
 absence — a seller-code search may return similar, partial or exact matches. Both rows therefore
-stay `NOT_ADOPTED` until new official evidence resolves those blockers, and no implementation may
-proceed on the assumption that a deterministic provider lookup exists.
+stay `NOT_ADOPTED`, and no implementation may proceed on the assumption that a deterministic
+provider lookup exists. The verdict stays `INSUFFICIENT` and is not overturned, and overturning it
+is not the adoption condition (ADR-0014 §17.2, §28; ADR-0018 §6.1): CREATE and the positive-only
+reconcile path each need their own separately authorized adoption slice — CREATE recording the
+provider's actual (absent) idempotency and bound to the §28 never-resend rule, SEARCH for
+positive-only reconcile only. An `UNKNOWN` CREATE is never resent, a zero-result lookup never proves
+absence, and the residual-risk acceptance stays a separate canary prerequisite.
 
 Adopted read-back contract, in the registry and pinned by tests:
 

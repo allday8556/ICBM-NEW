@@ -46,6 +46,8 @@ from app.register.model import (
     ExecutionScopeState,
     IntentState,
     Operation,
+    ResolutionEvidence,
+    ResolvedBy,
     ScopePauseReason,
     VerificationState,
 )
@@ -148,11 +150,13 @@ class FakeReadback:
 class FakeLookup:
     found: Mapping[str, Any] = field(default_factory=dict)
     is_available: bool = False
+    calls: int = 0
 
     def available(self) -> bool:
         return self.is_available
 
     def find(self, *, marketplace_account_id: str, listing_identity: str) -> Mapping[str, Any]:
+        self.calls += 1
         return dict(self.found)
 
 
@@ -724,40 +728,46 @@ def _unknown(
     return run
 
 
-def test_a_lookup_that_proves_the_listing_resolves_the_unknown_as_applied(
+@pytest.mark.parametrize(
+    "found",
+    [
+        {"marketplace_product_id": PRODUCT_NO, "evidence": "sanitized"},
+        {"absence_proven": True, "evidence": "sanitized"},
+        {"searched": True},
+    ],
+    ids=["a-match", "a-claimed-absence", "nothing"],
+)
+def test_no_lookup_result_ever_resolves_an_unknown(
     container: Container,
     sources: Collections,
     store: RegistrationStore,
     account: str,
     prep: Preparation,
+    found: Mapping[str, Any],
 ) -> None:
     ready = prepare(container, sources, store, account, prep)
     run = _unknown(container, store, prep, ready)
+    # ADR-0014 §17.2, §28: even an available lookup is never consulted. A match is not a presence
+    # proof (§28.2), and no lookup ever proves absence, so the Intent stays UNKNOWN.
     run.lookup.is_available = True
-    run.lookup.found = {"marketplace_product_id": PRODUCT_NO, "evidence": "sanitized"}
-    result = run.service.reconcile(ready.intent_id, correlation_id=CID)
-    # 13: provider evidence, not an assertion, settled it.
-    assert result.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    run.lookup.found = found
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_RECONCILE_UNAVAILABLE"
+    assert run.lookup.calls == 0
     intent = store.intent(ready.intent_id)
-    assert intent is not None and intent.marketplace_product_id == PRODUCT_NO
-    assert intent.state is IntentState.SENT
-
-
-def test_a_lookup_that_proves_absence_resolves_the_unknown_as_not_applied(
-    container: Container,
-    sources: Collections,
-    store: RegistrationStore,
-    account: str,
-    prep: Preparation,
-) -> None:
-    ready = prepare(container, sources, store, account, prep)
-    run = _unknown(container, store, prep, ready)
-    run.lookup.is_available = True
-    run.lookup.found = {"absence_proven": True, "evidence": "sanitized"}
-    result = run.service.reconcile(ready.intent_id, correlation_id=CID)
-    assert result.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
-    intent = store.intent(ready.intent_id)
-    assert intent is not None and intent.state is IntentState.FAILED
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+    assert intent.marketplace_product_id is None
+    # §28.3: nothing freed it, so no CREATE can be queued for it.
+    with pytest.raises(ExecutionRefused) as queued:
+        enqueue_create(
+            container.jobs,
+            container.registrations,
+            intent_id=ready.intent_id,
+            request=ready.request,
+            frozen=ready.final,
+        )
+    assert queued.value.code == "REGISTER_INTENT_NOT_SENDABLE"
 
 
 def test_without_an_adopted_lookup_the_unknown_stays_unresolved(
@@ -773,24 +783,6 @@ def test_without_an_adopted_lookup_the_unknown_stays_unresolved(
         run.service.reconcile(ready.intent_id, correlation_id=CID)
     # 14 + PR-D: nothing is fabricated, and the conflict scope is not freed.
     assert refused.value.code == "REGISTER_RECONCILE_UNAVAILABLE"
-    intent = store.intent(ready.intent_id)
-    assert intent is not None and intent.state is IntentState.UNKNOWN
-
-
-def test_a_lookup_that_proves_neither_leaves_the_unknown_unresolved(
-    container: Container,
-    sources: Collections,
-    store: RegistrationStore,
-    account: str,
-    prep: Preparation,
-) -> None:
-    ready = prepare(container, sources, store, account, prep)
-    run = _unknown(container, store, prep, ready)
-    run.lookup.is_available = True
-    run.lookup.found = {"searched": True}
-    with pytest.raises(ExecutionRefused) as refused:
-        run.service.reconcile(ready.intent_id, correlation_id=CID)
-    assert refused.value.code == "REGISTER_RECONCILE_INCONCLUSIVE"
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
 
@@ -832,8 +824,6 @@ def test_an_operator_assertion_alone_cannot_resolve_an_unknown(
     account: str,
     prep: Preparation,
 ) -> None:
-    from app.register.model import ResolutionEvidence, ResolvedBy
-
     ready = prepare(container, sources, store, account, prep)
     _unknown(container, store, prep, ready)
     # 14: the resolution vocabulary has no operator-assertion evidence, and USER is only an
@@ -1085,11 +1075,24 @@ def test_an_unknown_intent_can_never_be_queued_until_evidence_frees_it(
         )
     assert refused.value.code == "REGISTER_INTENT_NOT_SENDABLE"
     assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 0
-    # Provider evidence that proves the CREATE was not applied moves the Intent to FAILED, and
-    # only then may a job be queued again.
+    # A lookup never frees it (§17.2, §28): even an available lookup claiming absence is refused.
     run.lookup.is_available = True
     run.lookup.found = {"absence_proven": True, "evidence": "sanitized"}
-    run.service.reconcile(ready.intent_id, correlation_id=CID)
+    with pytest.raises(ExecutionRefused):
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert container.jobs.count(job_type_prefix=CREATE_JOB_TYPE) == 0
+    # Only machine proof of non-application moves the Intent to FAILED (§28.3, §10's table), and
+    # only then may a job be queued again.
+    with store.transaction() as unit:
+        unit.resolve_unknown(
+            ready.intent_id,
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            resolved_by=ResolvedBy.USER,
+            evidence_kind=ResolutionEvidence.TRANSMISSION_PRECLUDED,
+            sanitized_evidence={"phase": "before transmission"},
+            correlation_id=CID,
+            actor="operator",
+        )
     job_id = enqueue_create(
         container.jobs,
         container.registrations,
