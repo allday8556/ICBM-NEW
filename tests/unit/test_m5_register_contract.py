@@ -136,7 +136,9 @@ ADAPTIVE_P3 = "0025_adaptive_shadow_foundation"
 # of its tables is registration state: a grant references an Intent, it never is one.
 G3_AREA1 = "0026_g3_live_authority"
 # Adaptive Phase C C0 (Issue #110): the capture seam, never registration state.
-SCHEMA_HEAD = "0027_adaptive_capture_seam"
+ADAPTIVE_C0 = "0027_adaptive_capture_seam"
+# Adaptive Phase C C1 PREP-0 (Issue #110): the send accounting, never registration state.
+SCHEMA_HEAD = "0028_phase_c_read_accounting"
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -144,6 +146,7 @@ AFTER_M5 = (
     ADAPTIVE_P2,
     ADAPTIVE_P3,
     G3_AREA1,
+    ADAPTIVE_C0,
     SCHEMA_HEAD,
 )
 REGISTRATION_STATE = re.compile(

@@ -42,6 +42,7 @@ exercise them on synthetic data roots only.
 import argparse
 import json
 import os
+import re
 import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -69,6 +70,7 @@ from scripts.phasec.artifacts import (
     resolution_reference,
     write_resolution,
 )
+from scripts.phasec.ceilings import read_budget
 from scripts.phasec.grants import c0_grant, check_grant, grant_digest, supplier_of
 from scripts.phasec.ledger import (
     ACTION_REFUSED,
@@ -159,6 +161,9 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--authorization", required=True)
     authorize = sub.add_parser("authorize-stage")
     authorize.add_argument("--grant", required=True, type=Path)
+    # The SHA-256 the canonical Issue #110 authorization publishes for the grant artifact: the
+    # file is accepted only when its exact bytes hash to it (C1 PREP-0 item 4).
+    authorize.add_argument("--published-sha256", required=True)
     status = sub.add_parser("status")
     status.add_argument("--supplier", required=True)
     sub.add_parser("candidates")
@@ -322,6 +327,12 @@ def _authorize_stage(
 ) -> int:
     assert args.command == "authorize-stage"
     raw: bytes = args.grant_bytes
+    published = str(args.published_sha256).strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", published) or grant_digest(raw) != published:
+        raise Refused(
+            "the grant file's exact bytes do not hash to the SHA-256 its canonical authorization"
+            " published; nothing is recorded"
+        )
     grant = check_grant(campaign, raw)
     event = ledger.authorize(
         raw, actor=_actor(args), correlation_id=f"{campaign.campaign_id}:stage:{grant['stage']}"
@@ -755,6 +766,12 @@ def _status(app: Container, ledger: CampaignLedger, campaign: Campaign, args: An
         "reserved": {stage: ledger.counts(stage) for stage in campaign.grants},
         "refusals": len(ledger.refusals()),
         "hold": campaign.held(),
+        "phase_c_sends": {
+            stage: app.phase_c_reads.counts(campaign.campaign_id, stage)
+            for stage in campaign.grants
+            if stage in ("C1", "C3")
+        },
+        "phase_c_send_refusals": app.phase_c_reads.refusals(campaign.campaign_id),
         "unfinished_actions": campaign.unfinished(),
         "unresolved_commands": [
             {"campaign_id": c.campaign_id, "correlation_id": c.correlation_id, "command": c.command}
@@ -866,6 +883,10 @@ def _request_capture(app: Container, ledger: CampaignLedger, campaign: Campaign,
             lifetime=timedelta(hours=args.lifetime_hours),
             requested_by=_actor(args),
             correlation_id=correlation,
+            # The campaign's frozen C1 ceilings, registered in the data root with its first
+            # request, bound every send of the ordinary collection that consumes it (PREP-0).
+            read_budget=read_budget("C1"),
+            stage="C1",
         )
         return {"request_id": request_id, "target_digest": digest}
 

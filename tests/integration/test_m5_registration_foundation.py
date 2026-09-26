@@ -483,6 +483,9 @@ ADAPTIVE_TABLES = (
     "adaptive_capture_candidates",
     "adaptive_phase_c_commands",
     "adaptive_phase_c_command_results",
+    "adaptive_phase_c_read_budgets",
+    "adaptive_phase_c_reads",
+    "adaptive_phase_c_read_refusals",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

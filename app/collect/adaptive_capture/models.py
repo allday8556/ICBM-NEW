@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -10,6 +10,15 @@ from app.db.types import UTCDateTime
 
 CANDIDATE_STATUSES = ("CAPTURED", "REFUSED")
 COMMAND_OUTCOMES = ("APPLIED", "RECOVERED", "NOT_APPLIED")
+READ_CLASSES = (
+    "PRODUCT_READ",
+    "IMAGE_REQUEST",
+    "POLICY_READ",
+    "CONNECT_CONTROL_READ",
+    "CONNECT_PROTECTED_READ",
+    "CONNECT_AUTHENTICATE",
+)
+BUDGET_SCOPES = ("CAMPAIGN", "ATTEMPT")
 REQUEST_MAX_HOURS = 24
 
 
@@ -115,3 +124,70 @@ class PhaseCCommandResult(Base):
     )
     outcome: Mapped[str] = mapped_column(String(12))
     settled_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+_CLASS_CHECK = "request_class IN (" + ", ".join(f"'{c}'" for c in READ_CLASSES) + ")"
+
+
+class PhaseCReadBudget(Base):
+    """One frozen Phase C read ceiling of one campaign's stage and request class (C1 PREP-0).
+
+    Registered once, with the capture request that first names the campaign, and never changed:
+    ``CAMPAIGN`` bounds the campaign's whole stage, ``ATTEMPT`` bounds one collection attempt."""
+
+    __tablename__ = "adaptive_phase_c_read_budgets"
+    __table_args__ = (
+        CheckConstraint("campaign_id <> ''", name="campaign_present"),
+        CheckConstraint(_CLASS_CHECK, name="class_valid"),
+        CheckConstraint("scope IN ('CAMPAIGN', 'ATTEMPT')", name="scope_valid"),
+        CheckConstraint("ceiling >= 0", name="ceiling_valid"),
+    )
+
+    campaign_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    stage: Mapped[str] = mapped_column(String(4), primary_key=True)
+    request_class: Mapped[str] = mapped_column(String(24), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(8))
+    ceiling: Mapped[int] = mapped_column(Integer)
+    registered_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class PhaseCRead(Base):
+    """One actual Phase C send, durably reserved before it was transmitted (C1 PREP-0)."""
+
+    __tablename__ = "adaptive_phase_c_reads"
+    __table_args__ = (
+        Index("ix_adaptive_phase_c_reads_campaign_id", "campaign_id"),
+        CheckConstraint(_CLASS_CHECK, name="class_valid"),
+        CheckConstraint("attempt_no >= 1", name="attempt_valid"),
+        CheckConstraint(_hex64("subject_digest"), name="subject_hex"),
+    )
+
+    read_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(64))
+    stage: Mapped[str] = mapped_column(String(4))
+    request_class: Mapped[str] = mapped_column(String(24))
+    collection_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_runs.collection_run_id")
+    )
+    attempt_no: Mapped[int] = mapped_column(Integer)
+    subject_digest: Mapped[str] = mapped_column(String(64))
+    reserved_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class PhaseCReadRefusal(Base):
+    """One Phase C send refused before transmission, and why (C1 PREP-0)."""
+
+    __tablename__ = "adaptive_phase_c_read_refusals"
+    __table_args__ = (
+        Index("ix_adaptive_phase_c_read_refusals_campaign_id", "campaign_id"),
+        CheckConstraint("reason <> ''", name="reason_present"),
+    )
+
+    refusal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(64))
+    stage: Mapped[str] = mapped_column(String(4))
+    request_class: Mapped[str] = mapped_column(String(24))
+    collection_run_id: Mapped[str] = mapped_column(String(36))
+    attempt_no: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(64))
+    refused_at: Mapped[datetime] = mapped_column(UTCDateTime)

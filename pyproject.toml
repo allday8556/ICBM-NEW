@@ -63,7 +63,8 @@ known-first-party = ["app", "integrations", "tests"]
 python_version = "3.12"
 strict = true
 # The M2 acceptance harness (Issue #46 §2) and the M3 reconnaissance harness (Issue #52 §3,
-# ADR-0010 §5) are acceptance tooling, type-checked like production.
+# ADR-0010 §5) are acceptance tooling, type-checked like production; so is the Adaptive Phase C
+# campaign harness (Issue #110 C1 PREP-0 5841947773).
 packages = [
     "app",
     "integrations",
@@ -72,6 +73,7 @@ packages = [
     "scripts.m3collect",
     "scripts.m3accept",
     "scripts.m4accept",
+    "scripts.phasec",
 ]
 warn_unused_ignores = true
 
