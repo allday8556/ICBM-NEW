@@ -52,11 +52,18 @@ from app.live.model import (
     GrantState,
     MutationRefused,
     MutationStage,
+    ProofVerdict,
     ReplayKey,
     UploadAttemptState,
     is_hex64,
 )
-from app.live.models import AssetUploadAttempt, LiveGrant, ProtectedWriteBrake
+from app.live.models import (
+    AssetUploadAttempt,
+    LiveGrant,
+    ProtectedWriteBrake,
+    RestoreDrill,
+    RetentionProof,
+)
 from app.products.image_model import ImageAssetKind
 from app.register.sanitize import require_clean, safe_provider_reference
 
@@ -715,6 +722,155 @@ class LiveUnit:
             )
             settled.append(row.attempt_id)
         return tuple(settled)
+
+    # ------------------------------------------------------------------ restore drills (§7)
+
+    def record_drill(
+        self,
+        *,
+        stage: MutationStage,
+        unit_ref: str,
+        target_digest: str,
+        verdict: ProofVerdict,
+        failure_code: str | None,
+        schema_head: str,
+        integrity: str | None,
+        backup_digest: str | None,
+        restore_root_digest: str,
+        evidence: Mapping[str, Any],
+        element_count: int,
+        absent_count: int,
+        started_at: datetime,
+        actor: str,
+        correlation_id: str,
+    ) -> str:
+        """Record one drill and its sanitized evidence. The only writer of ``restore_drills``."""
+        require_clean(dict(evidence))
+        row = RestoreDrill(
+            drill_id=str(uuid.uuid4()),
+            stage=stage.value,
+            unit_ref=unit_ref,
+            target_digest=target_digest,
+            verdict=verdict.value,
+            failure_code=failure_code,
+            schema_head=schema_head,
+            integrity=integrity,
+            backup_digest=backup_digest,
+            restore_root_digest=restore_root_digest,
+            element_count=element_count,
+            absent_count=absent_count,
+            evidence_json=json.dumps(dict(evidence), sort_keys=True, default=str),
+            started_at=started_at,
+            finished_at=self._clock.now(),
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._event(
+            AuditEventType.RESTORE_DRILL_RECORDED,
+            "record_restore_drill",
+            actor,
+            correlation_id,
+            f"restore_drill:{row.drill_id}",
+            after={
+                "stage": row.stage,
+                "verdict": row.verdict,
+                "failure_code": failure_code,
+                "target_digest": target_digest,
+                "schema_head": schema_head,
+            },
+            details={"unit_ref": unit_ref},
+        )
+        return row.drill_id
+
+    def passed_drill(self, stage: MutationStage, target_digest: str, schema_head: str) -> bool:
+        """Whether a PASSED drill proves exactly this stage, target and schema head."""
+        found = self.session.scalar(
+            select(func.count())
+            .select_from(RestoreDrill)
+            .where(
+                RestoreDrill.stage == stage.value,
+                RestoreDrill.target_digest == target_digest,
+                RestoreDrill.schema_head == schema_head,
+                RestoreDrill.verdict == ProofVerdict.PASSED.value,
+            )
+        )
+        return bool(found)
+
+    def drill(self, drill_id: str) -> dict[str, Any] | None:
+        row = self.session.get(RestoreDrill, drill_id)
+        if row is None:
+            return None
+        return {
+            "drill_id": row.drill_id,
+            "stage": row.stage,
+            "unit_ref": row.unit_ref,
+            "target_digest": row.target_digest,
+            "verdict": row.verdict,
+            "failure_code": row.failure_code,
+            "schema_head": row.schema_head,
+            "integrity": row.integrity,
+            "backup_digest": row.backup_digest,
+            "element_count": row.element_count,
+            "absent_count": row.absent_count,
+            "evidence": json.loads(row.evidence_json),
+        }
+
+    # ------------------------------------------------------------------ retention proofs (§8)
+
+    def record_retention_proof(
+        self,
+        *,
+        verdict: ProofVerdict,
+        failure_code: str | None,
+        schema_head: str,
+        check_digest: str,
+        checks: Mapping[str, Any],
+        actor: str,
+        correlation_id: str,
+    ) -> str:
+        """Record one retention proof. The only writer of ``retention_proofs``."""
+        require_clean(dict(checks))
+        row = RetentionProof(
+            proof_id=str(uuid.uuid4()),
+            verdict=verdict.value,
+            failure_code=failure_code,
+            schema_head=schema_head,
+            check_digest=check_digest,
+            checks_json=json.dumps(dict(checks), sort_keys=True, default=str),
+            recorded_at=self._clock.now(),
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._event(
+            AuditEventType.RETENTION_PROOF_RECORDED,
+            "record_retention_proof",
+            actor,
+            correlation_id,
+            f"retention_proof:{row.proof_id}",
+            after={
+                "verdict": row.verdict,
+                "failure_code": failure_code,
+                "check_digest": check_digest,
+            },
+        )
+        return row.proof_id
+
+    def retention_proven(self, check_digest: str, schema_head: str) -> bool:
+        """Whether a PASSED retention proof holds for exactly these live checks and head."""
+        found = self.session.scalar(
+            select(func.count())
+            .select_from(RetentionProof)
+            .where(
+                RetentionProof.check_digest == check_digest,
+                RetentionProof.schema_head == schema_head,
+                RetentionProof.verdict == ProofVerdict.PASSED.value,
+            )
+        )
+        return bool(found)
 
     # ------------------------------------------------------------------ audit
 

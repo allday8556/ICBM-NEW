@@ -24,6 +24,10 @@ CODE_ROOTS = ("app", "integrations", "scripts")
 SECOND_PRODUCT_ROOTS = frozenset({"product", "products", "canonical_product", "canonical_products"})
 # ADR-0013 §4, Canonical v3.1 §9.4 and §12.1: never on the canonical product (group).
 FORBIDDEN_COLUMNS = frozenset({"primary_source_id", "allow_duplicate"})
+# Gate 3 area 2 (ADR-0018 §7, §8): the restore drill and the retention proof read owner tables to
+# compare and guard evidence. They never write them; `test_the_evidence_readers_only_read` in
+# tests/unit/test_repository_rules.py proves it.
+EVIDENCE_READERS = frozenset({"app/live/drill.py", "app/live/retention.py"})
 
 
 # ---------------------------------------------------------------- checkers
@@ -597,7 +601,7 @@ def image_selection_writer_problems(sources: Iterable[tuple[str, str]]) -> list[
     operator may only call the owner's operator entry point."""
     offenders = []
     for where, source in sources:
-        if where in SELECTION_OWNERS or "/migrations/" in where:
+        if where in SELECTION_OWNERS or where in EVIDENCE_READERS or "/migrations/" in where:
             continue
         names = SELECTION_NAMES - SELECTION_OPERATORS.get(where, frozenset())
         for node in ast.walk(ast.parse(source)):

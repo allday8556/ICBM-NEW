@@ -683,6 +683,8 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "adaptive_phase_c_read_budgets",
         "adaptive_phase_c_reads",
         "adaptive_phase_c_read_refusals",
+        "restore_drills",
+        "retention_proofs",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

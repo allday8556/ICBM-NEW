@@ -42,6 +42,7 @@ from app.live.model import (
     BRAKE_UNREADABLE,
     CANDIDATE_DRIFT,
     CANDIDATE_NOT_READY,
+    CREATE_STAGE_GATE_NOT_READY,
     ELIGIBILITY_UNPROVEN,
     ENDPOINT_NOT_ADOPTED,
     GRANT_MISSING,
@@ -167,6 +168,14 @@ class CandidateState:
 
 
 @dataclass(frozen=True)
+class StageGate:
+    """The CREATE stage's own gate as the REGISTER owners derived it (§10)."""
+
+    ready: bool
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AssetTarget:
     """What one upload would do, as the stack judges it."""
 
@@ -239,6 +248,7 @@ class SafetyStack:
         attempt_no: int,
         endpoint_adopted: bool,
         scope: ScopeRecord,
+        stage_gate: "StageGate",
     ) -> StageReadiness:
         with self._store.reading() as unit:
             grant = self._create_grant(unit, intent, attempt_no)
@@ -252,7 +262,44 @@ class SafetyStack:
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
         # §10: the §26 brake ACTIVE is its own requirement, whatever a restore proof says.
         layers.append(_scope_layer(scope))
+        # §10 "the stage's own gate" (area 1 carry-forward): the final preflight READY with the
+        # Snapshot's fingerprint, a sendable Intent, no unresolved conflict or UNKNOWN — derived
+        # by the REGISTER owners and handed in, never assumed.
+        layers.append(_layer(Layer.STAGE_GATE, stage_gate.ready, CREATE_STAGE_GATE_NOT_READY))
         return _readiness(MutationStage.CREATE, layers)
+
+    # ------------------------------------------------------------------ restore targets (§7)
+
+    def asset_restore_target(
+        self, grant_id: str, key: ReplayKey, candidate: CandidateState
+    ) -> str | None:
+        """The ASSET restore target a drill must bind to: exactly the digest admission computes.
+
+        ``None`` when the grant is not an ASSET grant or the attempt owner cannot be read — no
+        target, so no proof can ever be recorded for it.
+        """
+        with self._store.reading() as unit:
+            grant = unit.grant_record(grant_id)
+            if grant is None or grant.stage is not MutationStage.ASSET or not grant.artifacts:
+                return None
+            target = AssetTarget(
+                grant_id=grant_id,
+                key=key,
+                artifact=grant.artifacts[0],
+                candidate=candidate,
+                endpoint_adopted=True,
+                sender_wired=True,
+            )
+            try:
+                return _asset_digest(unit, target, grant)
+            except SQLAlchemyError:
+                return None
+
+    def create_restore_target(
+        self, intent: IntentRecord, *, attempt_no: int, scope: ScopeRecord
+    ) -> str:
+        """The CREATE restore target a drill must bind to: exactly the digest admission computes."""
+        return _create_digest(intent, attempt_no, scope)
 
     def _create_grant(
         self, unit: LiveUnit, intent: IntentRecord, attempt_no: int
@@ -632,6 +679,10 @@ def _asset_digest(unit: LiveUnit, target: "AssetTarget", grant: GrantRecord | No
     return _digest(
         {
             "preparation_revision_id": target.candidate.preparation_revision_id,
+            # Whether that revision is still the preparation's current one, and READY: a new
+            # revision stales the proof even when its inputs hash the same (§7 freshness).
+            "preparation_current": target.candidate.current,
+            "candidate_ready": target.candidate.ready,
             "candidate_fingerprint": target.candidate.fingerprint,
             "artifact_set_digest": None if grant is None else _artifacts_digest(grant),
             "asset_profile": None if grant is None else grant.asset_profile,
@@ -660,6 +711,7 @@ __all__ = [
     "LayerView",
     "ModeReader",
     "SafetyStack",
+    "StageGate",
     "StageProofs",
     "StageReadiness",
     "UnprovenStageProofs",
