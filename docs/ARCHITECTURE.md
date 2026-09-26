@@ -126,6 +126,47 @@ The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readb
 - An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 - **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
 
+#### Registration authoring and AI boundary
+
+Issue #127 records the sequencing clarification for the Registration Management redesign.
+
+The operator surface may have three depths — a list for batch-oriented work, a quick-review panel,
+and a full one-product editor — but **screen depth does not create new truth owners**. The full editor
+must read/write through the existing Product, image, Item/Pricing, readiness and REGISTER owners. It
+must not introduce a parallel "edited product" database that copies ProductFacts or marketplace
+state.
+
+The first-vertical authoring path is deterministic/manual and remains fully usable with every AI
+capability unavailable. Before that vertical is accepted, an AI control may reserve its final UI
+position or display a server-owned unavailable reason, but the UI must not manufacture a result,
+call an unadopted platform endpoint, or create an interim client-owned enrichment store merely to
+make the control active.
+
+When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
+Issue #30 contracts:
+- tasks remain independent (`recommended_name`, `recommended_tags`, category validation,
+  required-option mapping and fact review), with platform-specific name/tag projections where the
+  canonical contract already defines them;
+- runtime prompt composition remains persisted `ROLE + PlatformPolicy + PROMPT task`, through the
+  ADR-0012 provider-neutral AI port;
+- `AI_UNREVIEWED` stays visible but is not itself a registration blocker;
+- final user-approved values use the canonical `field × marketplace × account` lock boundary, and
+  optimistic-concurrency mismatches are skipped rather than overwritten;
+- the storage scope of an AI recommendation/cache is decided by its implementation contract and is
+  **not** inferred from the final-value lock scope;
+- Product-information notice AI may validate/normalize/flag supported facts but never invents a
+  missing legal/source fact;
+- a platform search/tag/metadata signal enters only through an adopted platform contract and the
+  appropriate adapter. SearchSignalAdapter is not a bypass around the endpoint registry;
+- efficacy/functionality/target expressions reach final tags only when the deterministic evidence
+  and platform-policy requirements of Canonical v3.1 §7.8 are satisfied. AI is not the final policy
+  owner.
+
+Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
+facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
+Bulk AI and bulk registration are later orchestration over accepted single-product paths, not a
+separate truth system.
+
 ### OPERATE
 Owns everything after publication.
 
