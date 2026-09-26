@@ -109,6 +109,43 @@ Owns canonical product identity and normalized accepted state.
 - pricing snapshots
 - registration readiness inputs
 
+### Registration authoring / AI boundary
+
+ADR-0019 fixes the implementation order between manual registration authoring and AI enrichment.
+
+The individual registration editor is a **workspace over canonical owners**, not a new product-truth owner. It must remain fully usable with no AI provider configured:
+
+```text
+ProductFactsRevision / Product / Item / image selection / Pricing
+        ↓
+manual registration authoring
+        ↓
+marketplace/account preparation + Draft
+        ↓
+preview / preflight / REGISTER
+```
+
+The editor may expose canonical AI affordances for name, tags/search, category and option mapping, but a capability that is not implemented or whose provider read contract is not adopted stays unavailable. UI code must not fabricate AI output, provider metadata or readiness.
+
+Product/MD AI attaches later:
+
+```text
+canonical facts + accepted operator values
++ ROLE revision
++ PlatformPolicy revision
++ task PromptTemplate revision
+→ AIProvider
+→ structured EnrichmentResult
+→ deterministic policy validation
+→ preview/apply
+```
+
+AI does not write ProductFacts. Legal/factual fields such as notice facts may be validated or normalized from evidence, but missing factual values are not generated.
+
+Marketplace-dependent enrichment can consume provider data only through reviewed/adopted provider-read contracts. A `NOT_ADOPTED` or unlisted endpoint is not made callable by placing an AI button in the UI.
+
+The first vertical does not require AI execution. After it closes, the implementation order is the one in ADR-0019: AI foundation, product-name enrichment, search-signal/tag enrichment, category enrichment, option enrichment, notice/factual validation, then multi-marketplace and bulk AI expansion.
+
 ### REGISTER
 Owns platform conversion and listing creation.
 
