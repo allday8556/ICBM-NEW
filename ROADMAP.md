@@ -410,6 +410,28 @@ AI may assist with:
 
 AI output never replaces unsupported factual source data.
 
+### Registration authoring / AI timing
+
+Issue #127 fixes the rollout boundary so the Registration Management redesign does not pull later AI,
+platform-metadata and bulk-automation work into the current first vertical.
+
+Before the first vertical closes:
+
+- the registration list / quick-review panel / full individual editor UX may be frozen and wired to
+  **existing server-owned** Product, image, Item, Pricing, readiness, Draft/Preparation and review state;
+- locations for the existing Canonical v3.1 enrichment tasks may be present, and an unavailable
+  capability may be shown with a server-owned reason;
+- the baseline authoring path must remain deterministic/manual and work with **no AI provider**.
+
+Do **not** implement an interim AI path merely to make those controls active. In particular, do not
+pull forward AI-provider execution, PromptTemplate runtime execution, SearchSignalAdapter, platform
+metadata endpoint adoption solely for AI, Coupang/11st AI authoring, multi-product AI orchestration,
+bulk registration or seasonal-keyword runtime. Those use the post-first-vertical sequence in §12.
+
+The individual editor is a workspace over canonical owners, not a second product database. A future
+manual-product entry uses the same editor only after manual provenance and its backend owner are
+contracted; it must never masquerade as collected ProductFacts.
+
 ## Registration readiness
 
 One readiness service validates:
@@ -646,15 +668,36 @@ M0 Foundation                                   ACCEPTED 2026-09-13
 → FIRST VERTICAL two consecutive passes in fresh sessions
 ```
 
-Only after the first vertical is accepted:
+Only after the first vertical is accepted does horizontal expansion begin.
+
+Supplier expansion keeps the §9 supplier order and its own gates; Issue #127 does not reorder that
+lane. For **registration authoring / marketplace AI**, use this dependency order so one temporary
+implementation is not replaced by another:
 
 ```text
-Add suppliers one by one
+AI authoring foundation
+  PromptTemplate / PlatformPolicy runtime
+  → AIProvider execution
+  → structured EnrichmentResult + provenance/fingerprint/staleness
+  → lock + optimistic concurrency
+
+→ SmartStore single-product authoring AI
+  recommended_name
+  → tag/search-signal adoption + SearchSignalAdapter + recommended_tags
+  → category/options/notice validation only when their authoritative metadata contracts exist
+
 → Add Coupang
 → Add 11st
-→ Bulk registration / automation
-→ AI insight / analytics expansion
+  each marketplace reuses the same enrichment foundation and supplies only its own policy/metadata
+
+→ Bulk authoring / registration
+  multi-product AI preview/apply only after the underlying single-product paths are accepted
+
+→ AI Shopping Insight / analytics expansion
 ```
+
+This is a dependency order for the registration/AI lane, not permission to start any of those
+slices before the first vertical is accepted.
 
 ---
 
@@ -726,6 +769,14 @@ Next, in order:
    - `STOCK` is never authoritative on COLLECT coverage alone while `operate.stock` has no producer.
 4. **Gate 3 — pre-LIVE safety and bounded LIVE authorization** (Issue #89 kickoff `5821078540`; contract `docs/adr/0018-gate3-pre-live-safety-and-bounded-live-authorization.md`). It exists only because M5 is still `PENDING`: the contract fixes the bounded, audited LIVE grant for each of the canary's two mutation stages (the ASSET upload before the freeze, the CREATE after it), a durable ASSET upload-attempt owner as a prerequisite of any upload, the server-owned protected-write brake, canary eligibility without a ComplianceGate (the first canary is non-regulated only; ComplianceGate stays a separate later owner), and three proven prerequisites — a backup and restore drill, end-to-end evidence retention and a populated visual/responsive acceptance. The provider-evidence verdict stays an independent hard blocker: while CREATE and SEARCH are `NOT_ADOPTED`, the canary stays `BLOCKED` whatever else is proven. G3-0 is contract only; each later slice needs its own authorization, one at a time. Area 1 implements the grant, the brake, the ASSET upload-attempt owner and the send-time stack provider-zero (migration `0026_g3_live_authority`); both stages stay `BLOCKED`, because `M0_DRY_RUN_ONLY` still refuses every mutation and no eligibility or visual proof and no ASSET sender exist. Area 2 adds the restore drill and the evidence-retention proof as durable owners (migration `0029_g3_restore_retention`); they are proofs, never permission. Area 3 adds the populated visual and responsive acceptance: a harness that drives the populated first-vertical scenario through every required screen at 1920×1080 and 1080×1920 in a real browser, and the reviewed `visual_acceptances` record (migration `0030_g3_visual_acceptance`), current only while the application runs at exactly the accepted commit and running code; it is recorded only by the `icbm live record-visual-acceptance` command, and it is a proof, never permission. M6 does not start before M5 acceptance.
 5. The rest of the first single-product vertical (M6 → M6.5, §12).
+
+**Registration authoring / AI sequencing note (Issue #127).** The list / quick panel / full individual
+editor product shape may be finalized while the first vertical is in progress, but that is a UX and
+owner-boundary decision only. It does not authorize AI calls, SearchSignalAdapter, new SmartStore
+metadata endpoints, Coupang/11st AI, bulk AI or bulk registration. The runtime implementation order
+is the post-first-vertical dependency chain in §12. Existing research outputs such as tag candidate
+files are fixtures/measurement evidence only until they pass through canonical enrichment, policy
+and final-value owners.
 
 **No legacy patch recovery work and no #86 functional transplant are part of this roadmap.**
 
