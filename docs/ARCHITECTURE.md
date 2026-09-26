@@ -84,8 +84,9 @@ Owns supplier and marketplace connectivity only. Supplier CONNECT is supplier-ge
 ### COLLECT
 Owns source evidence and source facts. Collection is supplier-generic (`docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md`):
 - a document arrives by one of two acquisition transports (`docs/adr/0019-extension-primary-collection-transport.md`):
-  - **`EXTENSION`** is primary. The operator's own Chrome, through a first-party MV3 extension, captures the current product page on a click, and later a list page's products through a bounded queue. The product scope is cut first under an independent `BrowserCapturePolicy`, and the page is sent to a paired loopback ingest.
-  - **`DIRECT_URL`** is the fallback, submitted from Collection Management.
+  - **Implementation status.** `EXTENSION`-primary is the accepted ADR-0019 **target contract**. The current implementation is **E0 only: contract, runtime zero** — no extension, pairing, loopback ingest or `EXTENSION` transport exists, and `SupplierTransport` has no `EXTENSION` member. `DIRECT_URL` is the **current runnable path**. E1 and every later slice (ADR-0019 §10) are separately authorized, one at a time.
+  - **`EXTENSION`** is primary in the target contract. The operator's own Chrome, through a first-party MV3 extension, captures the current product page on a click, and later a list page's products through a bounded queue. The product scope is cut first under an independent `BrowserCapturePolicy`, and the page is sent to a paired loopback ingest.
+  - **`DIRECT_URL`** is the fallback, submitted from Collection Management; it is the only transport that runs today.
 - both transports converge into one `DocumentView`, one collection-run lifecycle and one server-owned pipeline.
   - The extension is transport only.
   - The existing KM extractor stays the only revision writer, and Adaptive stays shadow.

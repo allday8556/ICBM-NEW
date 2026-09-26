@@ -189,18 +189,19 @@ replay-conflict key of §3.4, which no grant, preparation revision or candidate 
 
 #### 3.4 The durable ASSET upload-attempt owner — a prerequisite of any upload
 
-ADR-0014 §17.1 describes the **current, provider-zero `DRY_RUN` state**: the bounded image upload is
-adopted with **no durable upload owner, cache or ledger**, and a possibly transmitted failure is
-`UPLOAD_UNKNOWN`. A `PreparedAsset` is only an input to the final preflight, and a
-`RegistrationAttempt` belongs to an Intent that does not exist before the freeze. So today **nothing
-durably records that an upload may already have been transmitted**, and every fence of the ASSET
-stage — no blind re-upload, no unresolved `UPLOAD_UNKNOWN`, retained upload evidence — would rest on
-the absence of a record. **Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` at this main.**
+ADR-0014 §17.1 records the state its amendment left: the bounded image upload is adopted with **no
+durable upload owner, cache or ledger**, and a possibly transmitted failure is `UPLOAD_UNKNOWN`. A
+`PreparedAsset` is only an input to the final preflight, and a `RegistrationAttempt` belongs to an
+Intent that does not exist before the freeze. Without a durable owner, **nothing durably records that
+an upload may already have been transmitted**, and every fence of the ASSET stage — no blind
+re-upload, no unresolved `UPLOAD_UNKNOWN`, retained upload evidence — would rest on the absence of a
+record. **Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` whenever that owner is absent.**
 
-A later, separately authorized slice (§12) must create **one server-owned, durable ASSET
-upload-attempt owner** before `ASSET_MUTATION_READY` can ever be `READY`; if it needs ADR-0014 to be
-amended, it amends it then. This ADR freezes its semantics now; its tables and columns are that
-slice's:
+**One server-owned, durable ASSET upload-attempt owner** is required before `ASSET_MUTATION_READY`
+can ever be `READY`. The separately authorized Gate 3 area 1 slice (§12) created it, provider-zero
+(migration `0026_g3_live_authority`, `app/live/store.py`, `app/live/assets.py`). Its presence is not
+readiness and authorizes no upload (§10). This ADR freezes its semantics; its tables and columns are
+that slice's:
 - **Provenance.** One durable attempt identity is bound, for audit, to the exact ASSET grant, the
   marketplace and canonical account, the exact preparation revision, the candidate fingerprint, the
   local artifact tuple (the local source-or-derived artifact kind, SHA-256 and `derivation_id`),
@@ -525,9 +526,11 @@ at send time. Each requirement is proven from its own durable evidence, never as
 
 - **The ASSET stage never depends on a `PREPARED` Intent**, which cannot exist before its upload; and
   no requirement is circular.
-- **`ASSET_MUTATION_READY` is `BLOCKED` at this main**, because the durable upload-attempt owner of
-  §3.4 does not exist; it stays `BLOCKED` whenever that owner is absent, unreadable, stale or
-  unable to persist the required evidence.
+- **`ASSET_MUTATION_READY` is `BLOCKED` at this main.** The durable upload-attempt owner of §3.4
+  exists (area 1), so it is not what blocks: the execution policy is still `M0_DRY_RUN_ONLY`, no
+  ASSET sender is wired, and canary eligibility (§5) has no owner, each of which refuses on its own.
+  It also stays `BLOCKED` whenever the §3.4 owner is absent, unreadable, stale or unable to persist
+  the required evidence.
 - **The ASSET readiness queries the whole replay-conflict scope**, never only the attempts of the
   current candidate, preparation, grant or profile; a readiness that does is not
   `ASSET_MUTATION_READY`.
@@ -559,7 +562,7 @@ expected areas, none authorized by this ADR:
 | 1 | the bounded grant, the protected-write brake and the durable ASSET upload-attempt owner (§3.4) as durable owners, integrated deny-by-default into execution; still provider-zero |
 | 2 | the backup/restore drill and the evidence-retention proof |
 | 3 | the populated visual/responsive acceptance |
-| 4 | a provider-evidence re-review, and any endpoint adoption **only if** new official evidence resolves §6 |
+| 4 | a provider-evidence re-review; it closed confirming `INSUFFICIENT` (`5844770185`). Adoption is not part of it and never waits for the verdict to be overturned: CREATE and the positive-only reconcile path each need their own separately authorized adoption slice (§6.1, ADR-0014 §17.2, §28) |
 | 5 | one explicitly user-authorized, non-regulated SmartStore canary, only after every prerequisite is green |
 
 ### 13. What this ADR does not decide
@@ -614,11 +617,16 @@ G3-31  the registration read state and its status card and detail panel are surf
 
 ## Consequences
 
-- The LIVE-authorization gap (`ROADMAP.md` §14.1) and the §14.2 preconditions now have a contract,
-  but **no implementation**. The execution-mode owner still refuses LIVE.
+- The LIVE-authorization gap (`ROADMAP.md` §14.1) and the §14.2 preconditions now have a contract.
+  Areas 1–3 implemented its provider-zero owners — the grant, the protected-write brake, the ASSET
+  upload-attempt owner and the send-time stack (migration `0026`), the restore drill and the
+  evidence-retention proof (`0029`) and the visual acceptance (`0030`) — and none of them is
+  permission. The execution-mode owner still refuses LIVE.
 - The M5 canary gains two mutation stages, each with its own grant, restore proof and send-time
-  readiness (§3.1, §7, §10). None of them is implemented at this main, and CREATE/SEARCH adoption
-  stays missing independently, so the canary is `BLOCKED` for several independent reasons at once.
+  readiness (§3.1, §7, §10). Neither stage can be `READY` at this main: the execution policy is
+  `M0_DRY_RUN_ONLY`, no ASSET sender is wired, canary eligibility has no owner, and CREATE/SEARCH
+  adoption and the residual-risk acceptance (§6.1) are missing independently, so the canary is
+  `BLOCKED` for several independent reasons at once.
 - A later slice that implements a grant or the brake adds a migration under its own authorization.
 - **The ASSET replay key is deliberately over-conservative** (§3.4): an `APPLIED_PROVEN` upload of
   the same content to the same account and wire endpoint blocks every fresh upload of it. That is

@@ -442,6 +442,15 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0019" in _read(canonical) or TRANSPORT_ADR.name in _read(canonical), canonical
     collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
     assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
+    # Issue #89 5847528940: the architecture states that EXTENSION is the target contract only;
+    # E0 is contract-only and runtime-zero, and DIRECT_URL is the current runnable path.
+    for element in (
+        "`EXTENSION`-primary is the accepted ADR-0019 **target contract**",
+        "**E0 only: contract, runtime zero**",
+        "`DIRECT_URL` is the **current runnable path**",
+        "E1 and every later slice (ADR-0019 §10) are separately authorized",
+    ):
+        assert element in collect_section, element
     # ADR-0010 and ADR-0017 are amended by notes at exactly the named sections, text preserved.
     (collect_adr,) = (DOCS / "adr").glob("0010-supplier-generic-collect*.md")
     collect = _read(collect_adr)
@@ -547,6 +556,20 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "never a COMPLIANCE PASS" in invariants["G3-13"]
     assert "CREATE and SEARCH stay NOT_ADOPTED" in invariants["G3-14"]
     assert "zero-result search are never proof of remote absence" in invariants["G3-15"]
+    # Issue #89 5847528940: adoption never waits for the verdict to be overturned, in any
+    # canonical document; each endpoint needs its own separately authorized adoption slice.
+    matrix = _read(DOCS / "platforms" / "smartstore" / "ENDPOINT_MATRIX.md")
+    stale = re.compile(
+        r"(NOT_ADOPTED`?\s+until|adoption\s+\*\*only\s+if\*\*)\s+new\s+official\s+evidence", re.I
+    )
+    for canonical in (LIVE_ADR, DOCS / "adr" / "0014-smartstore-register-idempotency-readback.md"):
+        assert not stale.search(_read(canonical)), canonical.name
+    assert not stale.search(matrix)
+    assert "is not the adoption condition (ADR-0014 §17.2, §28; ADR-0018 §6.1)" in " ".join(
+        matrix.split()
+    )
+    assert "Adoption is not part of it and never waits for the verdict to be overturned" in adr
+    assert "no durable upload owner |" not in matrix
     # Architect decision 5845062336: the revised strategy keeps the verdict and adds a risk gate.
     assert (
         "stays INSUFFICIENT for idempotent replay and remote-absence proof" in invariants["G3-14"]
@@ -636,7 +659,10 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         assert element in invariants[key], (key, element)
     owner = _section(adr, r"^3\.4 The durable ASSET upload-attempt owner")
     for element in (
-        "**Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` at this main.**",
+        "**Therefore `ASSET_MUTATION_READY` is necessarily `BLOCKED` whenever that owner is"
+        " absent.**",
+        # Issue #89 5847528940: area 1 created the owner; the text no longer claims it is missing.
+        "The separately authorized Gate 3 area 1 slice (§12) created it, provider-zero",
         "If that commit fails, **nothing is transmitted**.",
         "**No record is not proof.**",
         "A restart never erases this fence.",
@@ -763,7 +789,11 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     stages = _section(adr, r"^10\. Mutation-stage readiness")
     assert "**it is a mandatory layer of the send-time" in stages
     assert "**The ASSET stage never depends on a `PREPARED` Intent**" in stages
-    assert "**`ASSET_MUTATION_READY` is `BLOCKED` at this main**" in stages
+    assert "**`ASSET_MUTATION_READY` is `BLOCKED` at this main.**" in stages
+    assert "exists (area 1), so it is not what blocks" in stages
+    assert "§3.4 does not exist" not in " ".join(stages.split())
+    assert "but **no implementation**" not in adr
+    assert "None of them is implemented at this main" not in adr
     assert "proven from that owner and never from row absence" in stages
     assert "**no started or unresolved `UPLOAD_UNKNOWN` attempt in the replay-conflict scope**" in (
         stages
