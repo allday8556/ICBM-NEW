@@ -117,6 +117,9 @@ else stays where ADR-0010 put it, unchanged:
 
 ### 2. What is authorized, phase by phase
 
+> **Amendment note (ADR-0019).** Extending the gateway or the acquisition transport is decided by
+> ADR-0019: `EXTENSION` primary and `DIRECT_URL` fallback. No phase here authorizes a transport.
+
 | phase | scope | contract / schema | real reads |
 | --- | --- | --- | --- |
 | **A** | the Proposal | none | 0 — done (PR #111) |
@@ -190,6 +193,11 @@ These names are fixed (Q1, and cross-audit item 6). `docs/GLOSSARY.md` records t
   fields, its `ABSENT` rule and its acceptance semantics are exactly as ADR-0010 §7 states them.
 
 ### 5. Extraction identity and comparability (amends ADR-0010 §6, §12 and ADR-0013 §3)
+
+> **Amendment note (ADR-0019 §4).**
+> - Transport is not an input to the semantic tuple, `comparability_key` or any fingerprint.
+> - A different transport is, by itself, never drift.
+> - Differences in observed evidence follow the existing `EVIDENCE_DRIFT` rules, unchanged.
 
 #### 5.1 Provenance of an Adaptive revision
 
@@ -459,6 +467,14 @@ promotion_group = (hook_point, target, format_class)    reported beside it; neve
 
 #### 7.3 `ValidationSample`: independent capture and its own retention
 
+> **Amendment note (ADR-0019 §5, §6).**
+> - **How the two owners relate.** The `BrowserCapturePolicy` cuts an `EXTENSION` capture to the
+>   product scope in the browser, **before** any sanitizer. The sample sanitizer below, with its
+>   `capture_revision`, then applies unchanged to what arrived, and so does the server's final
+>   scan.
+> - **Independence is unchanged.** Both are independent of the EPR and PTR being validated, so the
+>   independent-capture-owner principle holds, and so does AC-11.
+
 A `ValidationSample` is what V3, V3a and V4 replay: a sanitized, product-scoped **structured**
 snapshot (an element tree with its text, attributes, control state and image references), plus the
 operator-verified expected facts.
@@ -635,6 +651,13 @@ eligible `ProductFactsRevision`. An activation records none.
   under ADR-0012 and needs the user's approval.
 
 ### 10. One-fetch shadow comparison
+
+> **Amendment note (ADR-0019 §2, §4).** The shadow is **transport-neutral**.
+> - It compares over the one `DocumentView` the canonical extractor read, whether it came through
+>   `EXTENSION` or `DIRECT_URL`.
+> - **S1** (zero additional supplier requests) applies equally to the one `DocumentView` the
+>   extension brought.
+> - The **transport** is added to §10.3's "may differ (never a mismatch)" column.
 
 #### 10.1 Where the shadow runs, and the transaction boundary (cross-audit item 2)
 
@@ -1019,6 +1042,11 @@ prototype in place.
 | 6 | non-CORE terminology is `COVERAGE` | §4, including the explicit amendment of ADR-0010 §7's historical "Source coverage" label | — |
 
 ### 15. What this ADR does not decide
+
+> **Amendment note (ADR-0019).**
+> - Extending the gateway or the acquisition transport is decided by ADR-0019.
+> - The invariants AC-01 to AC-29 below are neither deleted nor renumbered. Any addition starts at
+>   AC-30.
 
 - the cutover to `ACTIVE`: the canonical write path, the canonical unmatched-template behaviour (Q3
   is recorded in §8.1 as its input), and when a code extractor is retired;
