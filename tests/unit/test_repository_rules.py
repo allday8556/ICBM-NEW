@@ -2520,3 +2520,20 @@ def test_only_the_collection_and_connect_send_points_reach_the_send_guard() -> N
         "app/connect/service.py": {"reserve_send"},
         "app/collect/shadow.py": set(),
     }, importers
+
+
+def test_only_the_phase_c_harness_persists_adaptive_profiles() -> None:
+    """C1 PREP-1 (Issue #110 5843047094): outside the Adaptive packages, the one reviewed operator
+    path that stores a PTR or an EPR is the Phase C harness, through the P2 owner's public API."""
+    adaptive = (ADAPTIVE_ROOT, ADAPTIVE_STORE_ROOT, ADAPTIVE_SHADOW_ROOT, ADAPTIVE_CAPTURE_ROOT)
+    callers: dict[str, set[str]] = {}
+    for path, tree in _phase_c_modules().items():
+        if path.startswith(adaptive):
+            continue
+        reached = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} & {
+            "save_template",
+            "save_draft",
+        }
+        if reached:
+            callers[path] = reached
+    assert callers == {f"{PHASE_C_HARNESS}harness.py": {"save_template", "save_draft"}}, callers

@@ -51,7 +51,13 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, TextIO
 
+from app.collect.adaptive.canonical import NonFiniteValue, parse_json
 from app.collect.adaptive.capture import OperatorExclusion, OperatorReason, OperatorScope
+from app.collect.adaptive.profiles import (
+    ExtractionProfileRevision,
+    PageTemplateRevision,
+    profile_digest,
+)
 from app.collect.adaptive.validation import freshness_tuple, validate
 from app.collect.adaptive_capture.controls import SYNTHETIC_NEGATIVES
 from app.collect.adaptive_capture.store import target_digest
@@ -82,8 +88,9 @@ from scripts.phasec.ledger import (
     approval_phrase,
     now,
     parse_grant,
+    sha256,
 )
-from scripts.phasec.roots import REPO_ROOT, RootsRefused, require_roots
+from scripts.phasec.roots import REPO_ROOT, RootsRefused, campaign_root_problems, require_roots
 
 EXIT_OK = 0
 EXIT_REFUSED = 2
@@ -136,8 +143,12 @@ COMMANDS: Mapping[str, Command] = {
     "candidates": Command(None, True, False),
     "export-candidate": Command(None, True, False),
     "target-digest": Command(None, True, False),
+    # C1 PREP-1 (5843047094): the offline digest of an operator-authored PTR/EPR file.
+    "profile-digest": Command(None, False, False),
     "request-capture": Command(_in("C1"), True, True),
     "finalize-sample": Command(_in("C1"), True, True),
+    # C1 PREP-1: the reviewed operator path for persisting the campaign's PTR/EPR documents.
+    "store-profile": Command(_in("C1"), True, True),
     "validate": Command(_in("C1"), True, True),
     "enable": Command(_in("C2"), True, True),
     # Turning the shadow off is the brake: it stays available in every later stage.
@@ -180,6 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("--run", required=True)
     finalize.add_argument("--scope", required=True, type=Path)
     finalize.add_argument("--expected", required=True, type=Path)
+    digest_parser = sub.add_parser("profile-digest")
+    digest_parser.add_argument("--file", required=True, type=Path)
+    store = sub.add_parser("store-profile")
+    store.add_argument("--template", action="append", default=[], type=Path)
+    store.add_argument("--epr", required=True, type=Path)
+    # The reviewed identity (review 5324679231 B1): the exact PTR and EPR digests GPT and Claude
+    # reviewed. The files must recompute to exactly these before anything is written.
+    store.add_argument("--expect-template", action="append", default=[])
+    store.add_argument("--expect-epr", required=True)
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--epr", required=True)
     validate_parser.add_argument("--sample", action="append", default=[], required=True)
@@ -215,6 +235,7 @@ def run(
     spec = COMMANDS[args.command]
     campaign_root: Path = args.campaign_root
     data_root: Path | None = args.data_root
+    args.environ = env
     try:
         if spec.data_root and data_root is None:
             raise Refused("this command acts on the live data root: --data-root is required")
@@ -230,6 +251,16 @@ def run(
                 # Read once: the phrase names, the check parses and the ledger records these bytes.
                 args.grant_bytes = _read_grant(args.grant)
             _gate(campaign, args, spec)
+            if args.command == "profile-digest":
+                if data_root is None:
+                    # Review 5324679231 B2: the intended data root is a path-policy input, so a
+                    # profile document inside it is refused here exactly as by store-profile.
+                    raise Refused(
+                        "profile-digest names the intended --data-root, so its path policy can"
+                        " exclude it; it is never opened"
+                    )
+                _emit(out, _profile_digest(args))
+                return EXIT_OK
             if not spec.data_root:
                 return _authorize_stage(ledger, campaign, args, out)
             assert data_root is not None
@@ -284,7 +315,21 @@ def phrase_for(campaign: Campaign, args: argparse.Namespace) -> str:
         grant = parse_grant(raw)
         stage = grant.get("stage") if isinstance(grant, dict) else None
         return approval_phrase(campaign, args.command, f"{stage} GRANT {grant_digest(raw)[:16]}")
+    if args.command == "store-profile":
+        return approval_phrase(campaign, args.command, f"PROFILE {reviewed_set_digest(args)[:16]}")
     return approval_phrase(campaign, args.command)
+
+
+def reviewed_set_digest(args: argparse.Namespace) -> str:
+    """The reviewed profile set's identity: the expected EPR and PTR digests the operator names.
+    The approval phrase, the intent and the outcome all carry it."""
+    return sha256(
+        {
+            "schema": "icbm-phase-c-profile-set/v1",
+            "epr": str(args.expect_epr),
+            "templates": sorted(str(d) for d in args.expect_template),
+        }
+    )
 
 
 def _gate(campaign: Campaign, args: argparse.Namespace, spec: Command) -> None:
@@ -537,8 +582,28 @@ def _probe_close(
     return _applied(window_id=window.window_id, verdict=window.closeout["verdict"])
 
 
+def _probe_store_profile(
+    app: Container, ledger: CampaignLedger, campaign: Campaign, intent: Mapping[str, Any], k: str
+) -> Proof:
+    # The command is applied when its EPR is stored: the owner saves the EPR last, and only after
+    # every template it pins. Profiles are content-addressed; a retry stores identical rows.
+    try:
+        app.adaptive_profiles.record(str(intent["epr"]))
+    except NotFoundError:
+        return PROVEN_NOT_APPLIED
+    for digest in intent["templates"]:
+        app.adaptive_profiles.record(str(digest))
+    return _applied(
+        templates=list(intent["templates"]),
+        epr=intent["epr"],
+        supplier_key=supplier_of(campaign),
+        reviewed_set=intent["reviewed_set"],
+    )
+
+
 PROBES: Mapping[str, Probe] = {
     "request-capture": _probe_request,
+    "store-profile": _probe_store_profile,
     "finalize-sample": _probe_finalize,
     "validate": _probe_validate,
     "enable": _switch_probe("ENABLE"),
@@ -857,6 +922,123 @@ def _target_digest(app: Container, ledger: CampaignLedger, campaign: Campaign, a
     return {"supplier_key": args.supplier, "target_digest": target_digest(args.supplier, target)}
 
 
+# ================================================================ C1 profiles (PREP-1)
+
+
+@dataclass(frozen=True)
+class ProfileFile:
+    """One operator-authored PTR or EPR document, read once from outside the repository and
+    every data root, and parsed by the same models the P2 owner stores."""
+
+    text: str
+    profile: PageTemplateRevision | ExtractionProfileRevision
+    digest: str
+
+
+def _profile_file(path: Path, args: argparse.Namespace) -> ProfileFile:
+    if not path.is_absolute():
+        raise Refused("a profile document is named by an absolute path")
+    if problems := campaign_root_problems(path, args.data_root, args.environ):
+        raise Refused(
+            "a profile document lives outside the repository and every ICBM data root: "
+            + "; ".join(p.replace("the campaign root", "it") for p in problems)
+        )
+    if not path.is_file():
+        raise Refused("a profile document is one existing file")
+    try:
+        text = path.read_bytes().decode("utf-8")
+        parsed = parse_json(text)  # non-finite numbers are refused before the model sees it
+        model: type[PageTemplateRevision] | type[ExtractionProfileRevision] = (
+            ExtractionProfileRevision
+            if isinstance(parsed, dict) and parsed.get("kind") == "EXTRACTION_PROFILE"
+            else PageTemplateRevision
+        )
+        profile = model.model_validate_json(text)
+    except (UnicodeDecodeError, NonFiniteValue, ValueError):
+        raise Refused(f"{path.name} is not a valid PTR or EPR document") from None
+    return ProfileFile(text, profile, profile_digest(profile))
+
+
+def _profile_digest(args: argparse.Namespace) -> dict[str, Any]:
+    """Offline and read-only: what an operator needs to author an EPR that pins its PTRs."""
+    document = _profile_file(args.file, args)
+    return {
+        "kind": document.profile.kind,
+        "supplier_key": document.profile.supplier_key,
+        "digest": document.digest,
+    }
+
+
+def _stored_templates(campaign: Campaign) -> set[str]:
+    return {d for p in campaign.outcomes("STORE_PROFILE") for d in p.get("templates", [])}
+
+
+def _store_profile(app: Container, ledger: CampaignLedger, campaign: Campaign, args: Any) -> Any:
+    """Persist the campaign's operator-authored PTRs and one EPR through the P2 owner.
+
+    Every document is read once, from outside the repository and every data root, and checked
+    before anything is written: its schema, the C1 grant's supplier, no hook binding (no hook slice
+    is authorized), and an EPR that pins only templates this campaign stores. The owner's own
+    digests must equal the ones computed from the same bytes."""
+    supplier = supplier_of(campaign)
+    templates = [_profile_file(path, args) for path in args.template]
+    epr = _profile_file(args.epr, args)
+    if not isinstance(epr.profile, ExtractionProfileRevision):
+        raise Refused("--epr names an ExtractionProfileRevision")
+    if any(not isinstance(t.profile, PageTemplateRevision) for t in templates):
+        raise Refused("--template names a PageTemplateRevision")
+    if any(d.profile.supplier_key != supplier for d in (*templates, epr)):
+        raise Refused("a campaign stores profiles only for its C1 grant's supplier")
+    if epr.profile.hooks:
+        raise Refused("a Phase C profile binds no hook: no hook slice is authorized")
+    pinned = set(epr.profile.templates)
+    if not pinned <= {t.digest for t in templates} | _stored_templates(campaign):
+        raise Refused("the EPR pins a template this campaign does not store")
+    # Review 5324679231 B1: the files must be exactly the reviewed documents, compared here,
+    # before any intent or write; a changed, missing or extra document refuses with nothing kept.
+    expected = sorted(str(d) for d in args.expect_template)
+    if epr.digest != args.expect_epr or sorted(t.digest for t in templates) != expected:
+        raise Refused(
+            "the profile documents are not exactly the reviewed ones: their digests differ from"
+            " --expect-epr / --expect-template; nothing is stored"
+        )
+    reviewed = reviewed_set_digest(args)
+    correlation = new_correlation()
+
+    def effect() -> dict[str, Any]:
+        stored = [
+            app.adaptive_profiles.save_template(
+                t.text, created_by=_actor(args), correlation_id=correlation
+            )
+            for t in templates
+        ]
+        stored_epr = app.adaptive_profiles.save_draft(
+            epr.text, created_by=_actor(args), correlation_id=correlation
+        )
+        if stored != [t.digest for t in templates] or stored_epr != epr.digest:
+            raise Refused("the owner's digests differ from the documents' own digests")
+        return {
+            "templates": stored,
+            "epr": stored_epr,
+            "supplier_key": supplier,
+            "reviewed_set": reviewed,
+        }
+
+    return _act(
+        app,
+        ledger,
+        campaign,
+        args,
+        correlation,
+        effect,
+        intent={
+            "templates": [t.digest for t in templates],
+            "epr": epr.digest,
+            "reviewed_set": reviewed,
+        },
+    )
+
+
 # ================================================================ C1
 
 
@@ -970,6 +1152,8 @@ def _validate(app: Container, ledger: CampaignLedger, campaign: Campaign, args: 
     digests = sorted(set(args.sample))
     if not digests or not set(digests) <= mine:
         raise Refused("a campaign validates only the samples it finalized itself")
+    if _one(campaign, "STORE_PROFILE", epr=args.epr) is None:
+        raise Refused("a campaign validates only an EPR it stored itself (store-profile)")
     record = app.adaptive_profiles.record(args.epr)
     if record.kind != "EXTRACTION_PROFILE" or record.supplier_key != supplier:
         raise Refused("a campaign validates only an EPR of its C1 grant's supplier")
@@ -1173,6 +1357,7 @@ HANDLERS: Mapping[str, Callable[[Container, CampaignLedger, Campaign, Any], Any]
     "export-candidate": _export_candidate,
     "target-digest": _target_digest,
     "request-capture": _request_capture,
+    "store-profile": _store_profile,
     "finalize-sample": _finalize_sample,
     "validate": _validate,
     "enable": _enable,

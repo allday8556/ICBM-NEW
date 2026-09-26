@@ -41,6 +41,7 @@
   - A missing binding, a target mismatch, an unreadable owner or a ceiling refuses before the send.
   - Ordinary collections are unchanged.
 - A stage grant is accepted only when its exact bytes hash to the SHA-256 its canonical authorization published (`--published-sha256`).
+- Profile persistence (C1 PREP-1, review `5843047094`): `store-profile` is the one reviewed operator path that stores the campaign's operator-authored PTR/EPR documents. It runs only in C1, under the stopped-app lease, through the P2 owner's `save_template` / `save_draft`, from files outside the repository and every data root. Each file is read once. A document is refused if it has another supplier, or any hook binding, or if its EPR pins a template the campaign does not store. The documents must recompute to exactly the PTR/EPR digests GPT and Claude reviewed (`--expect-template` / `--expect-epr`). That check runs before any intent or write, and the reviewed profile-set digest appears in the approval phrase, the intent and the outcome (review `5324679231`). The owner's digests must equal the documents' own. `validate` accepts only an EPR the campaign stored. `profile-digest` computes a document's digest offline. It requires the intended `--data-root` as a path-policy input and never opens it.
 
 ---
 
