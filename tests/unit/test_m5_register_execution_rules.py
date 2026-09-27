@@ -443,7 +443,11 @@ def test_the_codec_is_deterministic_for_the_same_inputs() -> None:
 
 
 def _canary_facts(**overrides: Any) -> UnitFacts:
-    """One unit with every non-read-back proof in hand, so only the seam under test can block."""
+    """One unit with every non-read-back proof in hand, so only the seam under test can block.
+
+    The CREATE stage readiness is granted here for the same reason: this group is about the
+    read-back seam, and ADR-0018 §10's stage summary has its own tests below.
+    """
     base: dict[str, Any] = {
         "account_bound": True,
         "auth_ready": True,
@@ -453,9 +457,14 @@ def _canary_facts(**overrides: Any) -> UnitFacts:
         "unresolved_conflicts": 0,
         "sends_allowed": True,
         "units_selected": 1,
+        "create_stage_ready": True,
     }
     base.update(overrides)
     return UnitFacts(**base)
+
+
+def _checks(result: Any) -> dict[CanaryRequirement, Any]:
+    return {check.requirement: check for check in result.requirements}
 
 
 def _canary(facts: UnitFacts) -> Any:
@@ -500,6 +509,70 @@ def test_the_two_readback_proofs_narrow_the_plan_without_making_it_unsatisfiable
     to reach READY, exactly as every other proof does."""
     proven = _canary_facts(readback_executable=True, published_state_provable=True)
     assert _canary(proven).verdict is CanaryVerdict.READY
+
+
+def test_the_canary_plan_is_blocked_while_either_mutation_stage_is_not_ready() -> None:
+    """Post-merge full audit of main ``cfb0aa4f3af1``: ADR-0018 §10 makes the canary readiness a
+    **summary** of ``ASSET_MUTATION_READY`` and ``CREATE_MUTATION_READY``, so a plan with every
+    other proof in hand is still ``BLOCKED`` while a stage is not ready. Both facts fail closed, so
+    a caller with no Gate 3 owner wired can never present ``READY`` over blocked Gate 3 layers —
+    the execution mode, the brake, the grant, eligibility, the restore proof, retention, the visual
+    acceptance, the sender or the stage's own gate."""
+    proven = {"readback_executable": True, "published_state_provable": True}
+    # The default is unproven: an unwired caller summarizes nothing and stays BLOCKED.
+    blank = UnitFacts(
+        account_bound=True,
+        auth_ready=True,
+        write_scope_proven=True,
+        intent_prepared=True,
+        requires_image_upload=False,
+        unresolved_conflicts=0,
+        sends_allowed=True,
+        units_selected=1,
+        **proven,
+    )
+    assert blank.create_stage_ready is False and blank.asset_stage_ready is False
+    stopped = _canary(blank)
+    assert stopped.verdict is CanaryVerdict.BLOCKED
+    assert set(stopped.missing) == {CanaryRequirement.CREATE_MUTATION_READY}
+    checks = {check.requirement: check for check in stopped.requirements}
+    create = checks[CanaryRequirement.CREATE_MUTATION_READY]
+    # The stage names itself, never the layers it already reported on its own.
+    assert create.reason_code == "CREATE_MUTATION_NOT_READY" and create.endpoint_id is None
+    # A unit that must publish a provider-hosted asset is summarized over both stages.
+    upload = _canary(_canary_facts(requires_image_upload=True, **proven))
+    assert upload.verdict is CanaryVerdict.BLOCKED
+    assert set(upload.missing) == {CanaryRequirement.ASSET_MUTATION_READY}
+    assert (
+        _checks(upload)[CanaryRequirement.ASSET_MUTATION_READY].reason_code
+        == "ASSET_MUTATION_NOT_READY"
+    )
+    # A unit with no ASSET stage is not asked for one: no requirement is invented for it.
+    assert CanaryRequirement.ASSET_MUTATION_READY not in checks
+    # And the summary is satisfiable: both stages ready leaves the plan able to reach READY.
+    assert (
+        _canary(_canary_facts(requires_image_upload=True, asset_stage_ready=True, **proven)).verdict
+        is CanaryVerdict.READY
+    )
+
+
+def test_the_canary_summary_reads_each_stage_from_the_owner_that_decides_it() -> None:
+    """The summary never re-derives a stage: :class:`CanaryStageReadiness` asks
+    :meth:`SafetyStack.create_readiness` and :meth:`AssetUploadService.readiness`, the same owners
+    the send-time stack uses, and the production container wires it into ``RegisterService``."""
+    import inspect
+
+    from app.live.gates import CanaryStageReadiness
+
+    source = inspect.getsource(CanaryStageReadiness)
+    assert "self._stack.create_readiness(" in source
+    assert "self._assets.readiness(grant.grant_id).verdict is Verdict.READY" in source
+    # Fail closed: an absent Intent, preparation or matching grant is never a ready stage.
+    assert "return False" in source
+    container = Path(__file__).resolve().parents[2] / "app" / "container.py"
+    wiring = container.read_text("utf-8")
+    assert "canary_stages = CanaryStageReadiness(" in wiring
+    assert "stages=canary_stages," in wiring
 
 
 def test_the_adopted_smartstore_readback_proves_no_published_state() -> None:

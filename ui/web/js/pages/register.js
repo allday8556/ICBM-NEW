@@ -120,6 +120,8 @@ const REASON_COPY = {
   UNRESOLVED_CONFLICT: '미해결 충돌이 남아 있습니다.',
   EXECUTION_SCOPE_STOPPED: '전송이 중단된 범위입니다.',
   MORE_THAN_ONE_UNIT_SELECTED: '카나리는 한 건만 대상으로 합니다.',
+  ASSET_MUTATION_NOT_READY: '이미지 업로드 단계 준비도가 READY가 아닙니다.',
+  CREATE_MUTATION_NOT_READY: '등록 전송 단계 준비도가 READY가 아닙니다.',
   RUNTIME_NOT_CLEAN: '실행 중인 코드가 정확한 커밋이 아닙니다.',
   LIVE_EXECUTION_MODE_NOT_LIVE: '실행 모드가 LIVE가 아닙니다.',
   LIVE_PROTECTED_WRITE_BRAKE_ENGAGED: '보호 쓰기 브레이크가 잠겨 있습니다.',

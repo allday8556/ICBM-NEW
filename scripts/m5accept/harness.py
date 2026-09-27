@@ -1022,6 +1022,11 @@ def canary(run: Run) -> dict[str, object]:
         # run has no committed session, and PR-D's adopted contract proves no published state.
         readback_executable=False,
         published_state_provable=smartstore_readback.proves_published_state(),
+        # The same reason for ADR-0018 §10's two stage readinesses: `M0_DRY_RUN_ONLY` refuses every
+        # mutation, no ASSET sender is wired, and no eligibility, restore, retention or visual proof
+        # exists, so neither stage is READY for a real canary. Declared, never assumed from silence.
+        asset_stage_ready=False,
+        create_stage_ready=False,
     )
     result = evaluate(
         facts,
