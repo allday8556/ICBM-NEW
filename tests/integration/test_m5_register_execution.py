@@ -196,6 +196,9 @@ class FakeComparator:
             normalized["published_state"] = self.published_state
         return FakeComparison(verdict=self.verdict, reasons=self.reasons, normalized=normalized)
 
+    def proves_published_state(self) -> bool:
+        return self.published_state is not None
+
 
 @dataclass
 class FakeProjection:

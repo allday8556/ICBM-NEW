@@ -220,3 +220,15 @@ def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) ->
         unexpected_option_codes=unexpected,
         normalized=listing.canonical(),
     )
+
+
+def proves_published_state() -> bool:
+    """Whether this normalizer's canonical form can carry a published state (ADR-0014 §11).
+
+    It cannot: :meth:`NormalizedListing.canonical` has a fixed key set, and no leaf of the adopted
+    origin-product read contract proves whether the listing is actually on sale. The execution
+    owner therefore refuses to confirm (``REGISTER_PUBLISHED_STATE_UNPROVEN``) rather than invent
+    the field, and the canary readiness names it as a proof that is still missing. This becomes
+    ``True`` only through an adoption slice that proves the field, never by declaring it.
+    """
+    return False

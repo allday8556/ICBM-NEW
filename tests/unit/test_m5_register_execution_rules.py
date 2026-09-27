@@ -14,6 +14,13 @@ import pytest
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.errors import AUTO_RETRYABLE, ErrorClass
 from app.products.image_model import ImageAssetKind
+from app.register.canary import ENDPOINTS as CANARY_ENDPOINTS
+from app.register.canary import (
+    CanaryRequirement,
+    CanaryVerdict,
+    UnitFacts,
+    evaluate,
+)
 from app.register.execution import (
     CREATE_ENDPOINT_GROUP,
     CREATE_JOB_TYPE,
@@ -430,3 +437,75 @@ def test_the_codec_is_deterministic_for_the_same_inputs() -> None:
         )
         == first
     )
+
+
+# ---------------------------------------------------------------- the canary readiness (PR-F §C)
+
+
+def _canary_facts(**overrides: Any) -> UnitFacts:
+    """One unit with every non-read-back proof in hand, so only the seam under test can block."""
+    base: dict[str, Any] = {
+        "account_bound": True,
+        "auth_ready": True,
+        "write_scope_proven": True,
+        "intent_prepared": True,
+        "requires_image_upload": False,
+        "unresolved_conflicts": 0,
+        "sends_allowed": True,
+        "units_selected": 1,
+    }
+    base.update(overrides)
+    return UnitFacts(**base)
+
+
+def _canary(facts: UnitFacts) -> Any:
+    return evaluate(
+        facts,
+        dict.fromkeys(CANARY_ENDPOINTS.values(), True),
+        execution_mode="DRY_RUN",
+        write_status="UNVERIFIED",
+        clean_runtime=True,
+    )
+
+
+def test_the_canary_plan_never_lets_readback_adoption_stand_for_the_proofs_it_does_not_give() -> (
+    None
+):
+    """Post-merge full audit of main ``a10e4b79dbd3``: ``READBACK_ADOPTED`` proves that the origin
+    read contract is adopted and nothing more. A real CREATE is confirmed only through a read-back
+    that can actually be executed and a comparison that carries the published state ADR-0014 §11
+    compares exactly, so each is its own requirement and an unproven one is named rather than
+    implied by adoption. Both default to unproven, so an unwired caller cannot claim either."""
+    defaults = _canary_facts()
+    assert defaults.readback_executable is False
+    assert defaults.published_state_provable is False
+    result = _canary(defaults)
+    assert result.verdict is CanaryVerdict.BLOCKED
+    checks = {check.requirement: check for check in result.requirements}
+    assert checks[CanaryRequirement.READBACK_ADOPTED].satisfied is True
+    executable = checks[CanaryRequirement.READBACK_EXECUTABLE]
+    published = checks[CanaryRequirement.PUBLISHED_STATE_PROVABLE]
+    assert executable.reason_code == "READBACK_SESSION_NOT_WIRED"
+    assert published.reason_code == "PUBLISHED_STATE_UNPROVEN"
+    # Neither is an endpoint gap: no adopted contract is blamed for a proof it never carried.
+    assert executable.endpoint_id is None and published.endpoint_id is None
+    assert set(result.missing) == {
+        CanaryRequirement.READBACK_EXECUTABLE,
+        CanaryRequirement.PUBLISHED_STATE_PROVABLE,
+    }
+
+
+def test_the_two_readback_proofs_narrow_the_plan_without_making_it_unsatisfiable() -> None:
+    """They are requirements, not a permanent stop: a seam that proves both leaves the plan able
+    to reach READY, exactly as every other proof does."""
+    proven = _canary_facts(readback_executable=True, published_state_provable=True)
+    assert _canary(proven).verdict is CanaryVerdict.READY
+
+
+def test_the_adopted_smartstore_readback_proves_no_published_state() -> None:
+    """The normalizer's canonical form has a fixed key set with no published state (PR-D), so the
+    adapter answers ``False`` and the execution owner refuses rather than inventing the field."""
+    from integrations.marketplaces.smartstore import readback as smartstore_readback
+
+    assert smartstore_readback.proves_published_state() is False
+    assert "published_state" not in smartstore_readback.normalize({}).canonical()

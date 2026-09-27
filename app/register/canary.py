@@ -12,6 +12,13 @@ point of this result is to name what is still unproven. The bounded image upload
 (`SMARTSTORE_PRODUCT_CREATE_V2`) and the deterministic product lookup
 (`SMARTSTORE_PRODUCT_SEARCH`) stay `NOT_ADOPTED`, so the verdict stays `BLOCKED`.
 
+**Adoption is not the whole proof of a seam**, and this result never lets one stand in for the
+other (post-merge audit of main `a10e4b79dbd3`). The origin-product read-back is adopted (PR-D),
+yet a real CREATE could still not be confirmed through it: production wires no committed session
+to read with, and the adopted contract proves no published state, which ADR-0014 §11 compares
+exactly and `app.register.execution` refuses to invent. Both are named as their own requirements,
+so the enumeration covers every proof the result claims to cover.
+
 Nothing here reaches a provider: the adoption facts arrive through a typed port that the adapter
 fills in (`app.register.provider`), and every reason is a code — no gap prose, no URL, no payload.
 """
@@ -41,6 +48,10 @@ class CanaryRequirement(StrEnum):
     IMAGE_UPLOAD_ADOPTED = "IMAGE_UPLOAD_ADOPTED"
     RECONCILE_PATH_ADOPTED = "RECONCILE_PATH_ADOPTED"
     READBACK_ADOPTED = "READBACK_ADOPTED"
+    # Adoption alone confirms nothing: the read-back must be executable and its comparison must
+    # carry the published state ADR-0014 §11 compares (execution refuses to invent either).
+    READBACK_EXECUTABLE = "READBACK_EXECUTABLE"
+    PUBLISHED_STATE_PROVABLE = "PUBLISHED_STATE_PROVABLE"
     NO_UNRESOLVED_CONFLICT = "NO_UNRESOLVED_CONFLICT"
     SCOPE_SENDS_ALLOWED = "SCOPE_SENDS_ALLOWED"
     SINGLE_UNIT = "SINGLE_UNIT"
@@ -53,6 +64,8 @@ ACCOUNT_UNBOUND = "ACCOUNT_NOT_BOUND"
 AUTH_NOT_READY = "AUTH_NOT_READY"
 WRITE_SCOPE_MISSING = "WRITE_SCOPE_NOT_PROVEN"
 UNIT_NOT_PREPARED = "NO_PREPARED_INTENT"
+READBACK_NOT_EXECUTABLE = "READBACK_SESSION_NOT_WIRED"
+PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
 CONFLICT_OPEN = "UNRESOLVED_CONFLICT"
 SCOPE_STOPPED = "EXECUTION_SCOPE_STOPPED"
 MORE_THAN_ONE_UNIT = "MORE_THAN_ONE_UNIT_SELECTED"
@@ -79,6 +92,10 @@ class UnitFacts:
     unresolved_conflicts: int
     sends_allowed: bool
     units_selected: int
+    # The read-back seam's two facts beside adoption: a session to read with, and a comparison
+    # that can carry a published state. Both fail closed, so an unwired caller proves neither.
+    readback_executable: bool = False
+    published_state_provable: bool = False
 
 
 class RequirementView(BaseModel):
@@ -142,6 +159,16 @@ def evaluate(
         _adoption(CanaryRequirement.CREATE_ADOPTED, adoption),
         _adoption(CanaryRequirement.RECONCILE_PATH_ADOPTED, adoption),
         _adoption(CanaryRequirement.READBACK_ADOPTED, adoption),
+        _requirement(
+            CanaryRequirement.READBACK_EXECUTABLE,
+            facts.readback_executable,
+            READBACK_NOT_EXECUTABLE,
+        ),
+        _requirement(
+            CanaryRequirement.PUBLISHED_STATE_PROVABLE,
+            facts.published_state_provable,
+            PUBLISHED_STATE_UNPROVEN,
+        ),
         _requirement(
             CanaryRequirement.NO_UNRESOLVED_CONFLICT,
             facts.unresolved_conflicts == 0,

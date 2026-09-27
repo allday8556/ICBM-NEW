@@ -171,6 +171,12 @@ class DeclaredComparator:
             self.inner.compare(snapshot_payload, retained), self.published_state
         )
 
+    def proves_published_state(self) -> bool:
+        """This seam declares the field, so within this run it is carried. It is a declaration,
+        never a proof about the adopted contract: `PUBLISHED_STATE` stays a declared seam and the
+        canary plan reads the production answer instead (`harness.canary`)."""
+        return True
+
 
 @dataclass
 class RecordingLookup:
