@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/:productOrderId/claim/return/request`; reason and collection method are documented. |
+| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/:productOrderId/claim/return/request`; reason and collection method are documented. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | Returns family includes list/single read, approval, receive confirmation and pickup waybill. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | Claim API covers return request, collection complete, hold, withdrawal, pickup invoice and approval/refund. |
