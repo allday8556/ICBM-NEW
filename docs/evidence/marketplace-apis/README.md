@@ -57,6 +57,10 @@ PRODUCT_CREATE
 - Kakao: Open API access requires integration review/permission and has no separate sandbox.
 - Gmarket/Auction: one ESM Trading API family covers both sites; site-specific product numbers must remain distinct from master `goodsNo`.
 
+## Independent review boundary
+
+The non-SmartStore endpoint paths and semantics in this catalog are **manual pre-research notes** and have not been independently cross-audited endpoint-by-endpoint. Re-check the cited current official source when a platform/capability is selected for actual ICBM adoption or implementation.
+
 ## Files
 
 Product: PRODUCT_CREATE, PRODUCT_READ, PRODUCT_SEARCH, PRODUCT_UPDATE, PRODUCT_DELETE, IMAGE_UPLOAD, CATEGORY, ATTRIBUTE, OPTION, NOTICE, PRICE, STOCK.
