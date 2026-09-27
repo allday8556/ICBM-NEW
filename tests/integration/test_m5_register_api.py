@@ -1217,6 +1217,12 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     assert missing["PUBLISHED_STATE_PROVABLE"]["reason_code"] == "PUBLISHED_STATE_UNPROVEN"
     assert missing["READBACK_EXECUTABLE"]["endpoint_id"] is None
     assert missing["PUBLISHED_STATE_PROVABLE"]["endpoint_id"] is None
+    # ADR-0018 §10 (post-merge audit of main `cfb0aa4f3af1`): the plan summarizes the two mutation
+    # stages, read from the Gate 3 owners the send-time stack uses. `M0_DRY_RUN_ONLY` alone refuses
+    # every mutation, so the CREATE stage is named here instead of being invisible to the plan.
+    assert missing["CREATE_MUTATION_READY"]["reason_code"] == "CREATE_MUTATION_NOT_READY"
+    assert missing["CREATE_MUTATION_READY"]["endpoint_id"] is None
+    assert "CREATE_MUTATION_READY" in canary["missing"]
 
 
 def test_a_reload_reconstructs_the_same_view_from_durable_rows(

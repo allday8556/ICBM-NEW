@@ -41,6 +41,7 @@ from app.register.authoring import (
 from app.register.canary import (
     AdoptionFacts,
     CanaryReadinessView,
+    StageReadinessFacts,
     UnitFacts,
     evaluate,
 )
@@ -156,6 +157,7 @@ class RegisterService:
         jobs: JobService | None = None,
         capability: CapabilityReader | None = None,
         adoption: AdoptionFacts | None = None,
+        stages: StageReadinessFacts | None = None,
         marketplace_key: str = _MARKETPLACE,
         execution_mode: str = DRY_RUN,
     ) -> None:
@@ -167,6 +169,7 @@ class RegisterService:
         self._jobs = jobs
         self._capability = capability
         self._adoption_source = adoption
+        self._stages = stages
         self._marketplace_key = marketplace_key
         self._execution_mode = execution_mode
 
@@ -207,6 +210,10 @@ class RegisterService:
         The read-back's own two facts — a session to read it with, and a comparison that can carry
         the published state ADR-0014 §11 compares — are read from the execution owner's seams,
         because endpoint adoption proves neither.
+
+        It also only **summarizes** the two Gate 3 mutation stages (ADR-0018 §10): each stage's
+        verdict is read from the owner that decides it, so every send-time layer of that stage
+        blocks here too. With no Gate 3 owner wired both stay unproven, never assumed.
         """
         units = self.overview().units
         if unit_ref is not None:
@@ -242,6 +249,24 @@ class RegisterService:
             ),
             published_state_provable=(
                 self._execution is not None and self._execution.readback_proves_published_state()
+            ),
+            # ADR-0018 §10: the two stage readinesses, from their own owners. An ASSET stage exists
+            # only for a unit that must publish an asset (§3.1), so it is asked for only then.
+            create_stage_ready=(
+                self._stages is not None
+                and unit is not None
+                and unit.intent is not None
+                and self._stages.create_ready(unit.intent.intent_id)
+            ),
+            asset_stage_ready=(
+                self._stages is not None
+                and unit is not None
+                and unit.authored is not None
+                and self._stages.asset_ready(
+                    unit.marketplace_key,
+                    unit.marketplace_account_id,
+                    unit.authored.preparation_id,
+                )
             ),
         )
         return evaluate(

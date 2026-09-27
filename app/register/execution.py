@@ -607,6 +607,11 @@ class RegistrationExecutionService:
         """
         return bool(self._readback.available())
 
+    def create_sender_available(self) -> bool:
+        """Whether the CREATE seam could transmit now — exactly the ``endpoint_adopted`` fact the
+        send-time stack is given (ADR-0018 §10). Read-only, so a readiness can report the layer."""
+        return bool(self._sender.available())
+
     def readback_proves_published_state(self) -> bool:
         """Whether the read-back comparison can carry a published state at all (§11).
 

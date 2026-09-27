@@ -64,6 +64,7 @@ from app.jobs.worker import JobWorker
 from app.live.assets import AssetUploadService, PreparationCandidateGate, UnwiredAssetSender
 from app.live.authority import LiveAuthorityService
 from app.live.drill import DrillPaths, RestoreDrillService
+from app.live.gates import CanaryStageReadiness
 from app.live.model import WireHostPolicy
 from app.live.proofs import DurableStageProofs
 from app.live.retention import RetentionProofService
@@ -88,6 +89,7 @@ from app.register.category_metadata import (
 )
 from app.register.drafting import DraftCommandService
 from app.register.execution import (
+    CREATE_ENDPOINT_GROUP,
     CREATE_POLICY,
     RegistrationExecutionService,
     create_job_definition,
@@ -590,6 +592,17 @@ def build_container(
     # M5 PR-F (ADR-0014 §22, §24): the Registration Management read model and its operator
     # actions. It owns no truth of its own — it reads the owners above and hands each action to
     # the owner of that action — and its canary readiness is derived and read-only.
+    # ADR-0018 §10: the canary readiness only summarizes the two mutation stages, so it reads each
+    # stage's verdict from the owners the send-time stack uses — never from its own weaker copy.
+    canary_stages = CanaryStageReadiness(
+        stack=safety_stack,
+        assets=asset_uploads,
+        live=live_store,
+        registrations=registrations,
+        preparations=registration_preparations,
+        create_sender_available=registration_execution.create_sender_available,
+        endpoint_group=CREATE_ENDPOINT_GROUP,
+    )
     register_service = RegisterService(
         registrations=registrations,
         execution=registration_execution,
@@ -599,6 +612,7 @@ def build_container(
         jobs=jobs,
         capability=marketplace_capability,
         adoption=SmartStoreAdoption(),
+        stages=canary_stages,
         execution_mode=execution_mode.state().mode.value,
     )
     screens = ScreenService(

@@ -19,6 +19,17 @@ to read with, and the adopted contract proves no published state, which ADR-0014
 exactly and `app.register.execution` refuses to invent. Both are named as their own requirements,
 so the enumeration covers every proof the result claims to cover.
 
+**It summarizes the two Gate 3 mutation stages** (ADR-0018 §10), and it can never be `READY` while
+one of them is not: `CREATE_MUTATION_READY` always, and `ASSET_MUTATION_READY` for a unit that must
+publish a provider-hosted asset. Both are read from the same Gate 3 owners the send-time safety
+stack itself uses (`app.live.gates.CanaryStageReadiness`) and both fail closed, so the execution
+mode and policy, the protected-write brake, the stage's grant, canary eligibility, the current
+restore proof, evidence retention, the recorded visual acceptance, the ASSET sender, the durable
+upload-attempt owner and each stage's own gate all reach this result instead of being invisible to
+it. `write_status` stays reported context and is never a requirement: a real canary is what would
+verify `product_registration.write`, so requiring it first would be the circularity ADR-0018 §10
+forbids.
+
 Nothing here reaches a provider: the adoption facts arrive through a typed port that the adapter
 fills in (`app.register.provider`), and every reason is a code — no gap prose, no URL, no payload.
 """
@@ -55,6 +66,10 @@ class CanaryRequirement(StrEnum):
     NO_UNRESOLVED_CONFLICT = "NO_UNRESOLVED_CONFLICT"
     SCOPE_SENDS_ALLOWED = "SCOPE_SENDS_ALLOWED"
     SINGLE_UNIT = "SINGLE_UNIT"
+    # The two ADR-0018 §10 mutation-stage readinesses this result only summarizes. Each carries
+    # its own whole stack of layers, so neither is ever re-derived here.
+    ASSET_MUTATION_READY = "ASSET_MUTATION_READY"
+    CREATE_MUTATION_READY = "CREATE_MUTATION_READY"
 
 
 # Why a requirement is not satisfied. Codes only: a gap is named, never quoted.
@@ -70,6 +85,23 @@ CONFLICT_OPEN = "UNRESOLVED_CONFLICT"
 SCOPE_STOPPED = "EXECUTION_SCOPE_STOPPED"
 MORE_THAN_ONE_UNIT = "MORE_THAN_ONE_UNIT_SELECTED"
 NO_UNIT = "NO_UNIT_SELECTED"
+# A stage readiness that is not READY. Its own layers name why; this result never restates them.
+ASSET_STAGE_BLOCKED = "ASSET_MUTATION_NOT_READY"
+CREATE_STAGE_BLOCKED = "CREATE_MUTATION_NOT_READY"
+
+
+class StageReadinessFacts(Protocol):
+    """The two ADR-0018 §10 mutation-stage readinesses of one unit, from the Gate 3 owners.
+
+    Implemented by :class:`app.live.gates.CanaryStageReadiness`. Read-only in both directions: a
+    verdict is asked for, nothing is consumed, and `READY` is never permission to write.
+    """
+
+    def create_ready(self, intent_id: str) -> bool: ...
+
+    def asset_ready(
+        self, marketplace_key: str, marketplace_account_id: str, preparation_id: str
+    ) -> bool: ...
 
 
 class AdoptionFacts(Protocol):
@@ -96,6 +128,10 @@ class UnitFacts:
     # that can carry a published state. Both fail closed, so an unwired caller proves neither.
     readback_executable: bool = False
     published_state_provable: bool = False
+    # The two ADR-0018 §10 stage readinesses as their owners derived them. Both fail closed, so a
+    # caller with no Gate 3 owner wired proves neither and the summary stays BLOCKED.
+    asset_stage_ready: bool = False
+    create_stage_ready: bool = False
 
 
 class RequirementView(BaseModel):
@@ -181,10 +217,24 @@ def evaluate(
             facts.units_selected == 1,
             MORE_THAN_ONE_UNIT if facts.units_selected > 1 else NO_UNIT,
         ),
+        # §10: this result only summarizes the stages, so a stage that is not READY blocks it.
+        _requirement(
+            CanaryRequirement.CREATE_MUTATION_READY,
+            facts.create_stage_ready,
+            CREATE_STAGE_BLOCKED,
+        ),
     ]
     if facts.requires_image_upload:
-        # Only a unit that must publish a provider-hosted asset waits for the upload contract.
+        # Only a unit that must publish a provider-hosted asset waits for the upload contract —
+        # and only such a unit has an ASSET stage at all (§3.1), so only it is summarized here.
         checks.insert(6, _adoption(CanaryRequirement.IMAGE_UPLOAD_ADOPTED, adoption))
+        checks.append(
+            _requirement(
+                CanaryRequirement.ASSET_MUTATION_READY,
+                facts.asset_stage_ready,
+                ASSET_STAGE_BLOCKED,
+            )
+        )
     missing = tuple(check.requirement for check in checks if not check.satisfied)
     return CanaryReadinessView(
         verdict=CanaryVerdict.BLOCKED if missing else CanaryVerdict.READY,

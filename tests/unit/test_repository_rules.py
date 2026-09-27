@@ -818,22 +818,26 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 
 
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
-    """ADR-0020 §4 (post-merge audits of main ``a523c55add2b`` and ``a10e4b79dbd3``): the standing
-    authorization selects the next slice from this order, so the order may never omit a mandatory
-    ADR-0018 §10 prerequisite. Three are still missing at this main — a production ASSET sender,
-    the durable canary-eligibility owner and the ADR-0014 §27 authoring-revision owners, without
-    which neither stage's own preflight gate can ever be met — and none is authorized by
-    ADR-0020."""
+    """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
+    ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
+    order may never omit a mandatory pre-canary prerequisite. Five are still missing at this main —
+    a production ASSET sender, the durable canary-eligibility owner, the ADR-0014 §27
+    authoring-revision owners without which neither stage's own preflight gate can ever be met, an
+    executable committed-session read-back and a comparison that proves published state, the two
+    halves of ADR-0014 §11's success proof — and none is authorized by ADR-0020."""
     from app.live.assets import UnwiredAssetSender
     from app.live.proofs import DurableStageProofs
     from app.register.preparation import AUTHORING_REVISIONS_UNOWNED
     from app.register.target_policy import UNOWNED_AUTHORING_REVISIONS
+    from integrations.marketplaces.smartstore import readback as smartstore_readback
 
     adr = _read(STANDING_ADR)
     order = _section(adr, r"^4\. The current order under this ADR")
     flat = " ".join(order.split())
     for element in (
-        "mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
+        "mandatory pre-canary prerequisites that no slice has closed",
+        "the mutation-stage prerequisites of ADR-0018 §10 and the read-back success proof of"
+        " ADR-0014 §11",
         "This ADR authorizes none of them, and none may be skipped",
         "the **production ASSET sender**",
         "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
@@ -846,11 +850,17 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "no Snapshot and no Intent can exist",
         'ADR-0014 §27 records real owners for both revisions as "a later, separately authorized'
         ' decision"',
-        "ADR-0018 §10 fixes no order among them",
+        "the **executable committed-session read-back** (ADR-0014 §11)",
+        "`SmartStoreReadback.available()` is `False` and `verify` refuses",
+        "a **read-back comparison that proves published state** (ADR-0014 §11)",
+        "`proves_published_state()` is `False`",
+        "a CREATE that cannot be read back is never `CONFIRMED`",
+        "Neither contract fixes an order among them",
         "all of them precede any canary",
         "Nothing here shortens that remaining work",
         "**Correction note (post-merge full audit of main `a523c55add2b`).**",
         "**Correction note (post-merge full audit of main `a10e4b79dbd3`).**",
+        "**Correction note (post-merge full audit of main `cfb0aa4f3af1`).**",
         "This correction grants nothing",
     ):
         assert element in flat, element
@@ -858,20 +868,23 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| the \*\*", order, re.M)) == 3
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 5
     # The remaining user-decision steps are still listed, and now after those prerequisites.
     assert flat.index("production ASSET sender") < flat.index("the residual-risk acceptance, the")
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(SA-\d\d)\s+(.*\S)\s*$", block, re.M))
     assert list(invariants) == [f"SA-{n:02d}" for n in range(1, 11)]
     for element in (
-        "never omits a mandatory ADR-0018 §10 prerequisite",
+        "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
         "the ADR-0014 §27 authoring-revision owners",
+        "the executable committed-session read-back",
+        "a read-back comparison that proves published state",
         "are still missing, are not authorized here",
-        "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 is green",
+        "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11"
+        " success proof is green",
     ):
         assert element in invariants["SA-10"], element
-    # The roadmap order the standing authorization reads carries the same two prerequisites,
+    # The roadmap order the standing authorization reads carries the same prerequisites,
     # before the user-decision steps, and §14.2 keeps them as LIVE preconditions.
     roadmap = _read(ROADMAP_MD)
     ordering = " ".join(
@@ -888,6 +901,11 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "not provider-zero",
         "ADR-0018 §13 leaves its data model undecided",
         "ADR-0014 §27 records real owners for both as a later, separately authorized decision",
+        "**executable committed-session read-back**",
+        "**read-back comparison that proves published state**",
+        "`READBACK_EXECUTABLE` stays unproven",
+        "`PUBLISHED_STATE_PROVABLE` stays unproven",
+        "ADR-0014 §11's own success proof",
     ):
         assert element in ordering, element
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
@@ -901,6 +919,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**owners for the category-mapping and detail-composition authoring revisions**",
         "no unit is ever `READY` and neither stage's own gate",
         "none is authorized by the ADR-0020 standing authorization",
+        "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
+        "an **executable committed-session read-back**",
+        "a **comparison that proves published state**",
+        "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
     # The runtime facts that make them prerequisites still hold: no sender, no eligibility owner,
@@ -919,6 +941,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "category_mapping_revision",
         "detail_composition_revision",
     )
+    # And ADR-0014 §11's two halves: production wires no session to read back with, and the
+    # adopted comparison proves no published state.
+    assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
+    assert smartstore_readback.proves_published_state() is False
 
 
 # ---------------------------------------------------------------- Gate 3 area 1 (ADR-0018 §12)
