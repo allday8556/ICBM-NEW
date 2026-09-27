@@ -836,12 +836,18 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the **durable canary-eligibility owner** (ADR-0018 §5)",
         "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
         "the eligibility record's data model is explicitly undecided (ADR-0018 §13)",
+        "ADR-0018 §10 fixes no order between the two",
         "both precede any canary",
         "Nothing here shortens that remaining work",
         "**Correction note (post-merge full audit of main `a523c55add2b`).**",
         "This correction grants nothing",
     ):
         assert element in flat, element
+    # The two prerequisites carry no numbered position, so the order above never contradicts the
+    # user decision that fixes their order relative to each other.
+    assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
+    assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
+    assert len(re.findall(r"^\| the \*\*", order, re.M)) == 2
     # The remaining user-decision steps are still listed, and now after those prerequisites.
     assert flat.index("production ASSET sender") < flat.index("the residual-risk acceptance, the")
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]

@@ -91,12 +91,14 @@ item 1 (M5) are, in order and each as its own PR:
 | 2 | **SEARCH positive-only reconcile adoption** — `SMARTSTORE_PRODUCT_SEARCH` | limited to the positive reconcile of ADR-0014 §28.2–§28.4 and its exact request, response and pagination contract; a separate slice after CREATE | any SmartStore call; LIVE; canary; residual-risk acceptance; zero-result absence inference |
 
 After these two, the **mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has
-closed** stay ahead of any canary. This ADR authorizes neither of them, and neither may be skipped:
+closed** stay ahead of any canary. This ADR authorizes neither of them, and neither may be skipped.
+ADR-0018 §10 fixes no order between the two — each refuses on its own — so they take no numbered
+position in the order above:
 
-| order | still-missing prerequisite | why it is mandatory | why this ADR does not authorize it |
-| --- | --- | --- | --- |
-| 3 | the **production ASSET sender** — `app/container.py` wires `UnwiredAssetSender`, which declares the adopted wire endpoint and refuses every send (`LIVE_SENDER_NOT_WIRED`) | `ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19) and stays `BLOCKED` while no ASSET sender is wired (ADR-0018 §10, Consequences) | a sender that transmits to the provider is not provider-zero and no canonical contract decides its boundary, so §2.3 is not met and §3 stops it for the user |
-| 4 | the **durable canary-eligibility owner** (ADR-0018 §5) — `CANARY_NON_REGULATED`; `app/live/proofs.py` has no owner and answers unproven | both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it | the eligibility record's data model is explicitly undecided (ADR-0018 §13), so §2.5 is not met and §3 stops it for the user |
+| still-missing prerequisite | why it is mandatory | why this ADR does not authorize it |
+| --- | --- | --- |
+| the **production ASSET sender** — `app/container.py` wires `UnwiredAssetSender`, which declares the adopted wire endpoint and refuses every send (`LIVE_SENDER_NOT_WIRED`) | `ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19) and stays `BLOCKED` while no ASSET sender is wired (ADR-0018 §10, Consequences) | a sender that transmits to the provider is not provider-zero and no canonical contract decides its boundary, so §2.3 is not met and §3 stops it for the user |
+| the **durable canary-eligibility owner** (ADR-0018 §5) — `CANARY_NON_REGULATED`; `app/live/proofs.py` has no owner and answers unproven | both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it | the eligibility record's data model is explicitly undecided (ADR-0018 §13), so §2.5 is not met and §3 stops it for the user |
 
 Their order relative to each other is part of the user's decision on each; both precede any canary.
 
