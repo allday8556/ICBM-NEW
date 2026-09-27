@@ -23,7 +23,9 @@ so the enumeration covers every proof the result claims to cover.
 one of them is not: `CREATE_MUTATION_READY` always, and `ASSET_MUTATION_READY` for a unit that must
 publish a provider-hosted asset. Both are read from the same Gate 3 owners the send-time safety
 stack itself uses (`app.live.gates.CanaryStageReadiness`) and both fail closed, so the execution
-mode and policy, the protected-write brake, the stage's grant, canary eligibility, the current
+mode and policy, the protected-write brake, the stage's grant, the whole endpoint-adoption row of
+that stage — for CREATE the sender's contract **and** the positive-only reconcile path (ADR-0014
+§28) — the recorded residual-risk acceptance of ADR-0018 §6.1, canary eligibility, the current
 restore proof, evidence retention, the recorded visual acceptance, the ASSET sender, the durable
 upload-attempt owner and each stage's own gate all reach this result instead of being invisible to
 it. `write_status` stays reported context and is never a requirement: a real canary is what would

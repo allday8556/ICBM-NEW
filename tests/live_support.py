@@ -5,7 +5,8 @@
   stack's refusals are exercised by ``tests/integration/test_g3a_live_authority.py``.
 - :class:`PermittedMode` and :class:`ProvenProofs` let a test reach the deeper layers of the real
   :class:`~app.live.stack.SafetyStack` (grant, attempt owner, replay fence). Production wires the
-  execution-mode owner (``M0_DRY_RUN_ONLY``) and :class:`~app.live.stack.UnprovenStageProofs`.
+  execution-mode owner (``M0_DRY_RUN_ONLY``) and :class:`~app.live.proofs.DurableStageProofs`, whose
+  canary-eligibility and residual-risk answers are unproven, so no production stack reaches them.
 - :class:`ScriptedSender` is a provider-zero ASSET sender that records every call.
 """
 
@@ -35,6 +36,7 @@ class AdmittingAuthority:
         intent: Any,
         attempt_no: int,
         endpoint_adopted: bool,
+        reconcile_path_adopted: bool,
         scope: Any,
         truth_fence: int,
         actor: str,
@@ -79,6 +81,9 @@ class ProvenProofs:
 
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
         return "eligibility" not in self.missing
+
+    def residual_risk_accepted(self) -> bool:
+        return "residual_risk" not in self.missing
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:
         self.restore_targets.append(target_digest)

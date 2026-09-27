@@ -9,6 +9,9 @@
   stale.
 - **canary eligibility** (§5): no owner exists yet — a later eligibility record — so it stays
   unproven here, whatever else is recorded.
+- **residual-risk acceptance** (§6.1, G3-30): an explicit user and architect acceptance recorded in
+  GitHub. It has no durable owner and none is authorized here, so it is never proven in process and
+  stays unproven, whatever grant, brake, drill, retention or visual record exists.
 """
 
 from collections.abc import Callable
@@ -34,6 +37,11 @@ class DurableStageProofs:
         self._head = schema_head
 
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
+        return False
+
+    def residual_risk_accepted(self) -> bool:
+        # §6.1: recorded in GitHub, with no durable owner. Nothing in process may answer True, so
+        # the §10 layer refuses every mutation of both stages at this main.
         return False
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:

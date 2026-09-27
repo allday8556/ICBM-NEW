@@ -3,7 +3,9 @@
 The official 2.89.0 contract and Issue #89 amendments 5765557497/5765663972 adopt only
 ``POST /v1/product-images/upload`` with one immutable artifact in one ``imageFiles`` part. The
 adapter calls once and never retries. A transport/response ambiguity is represented only as
-``UPLOAD_UNKNOWN`` here; it never enters ``RegistrationIntent.UNKNOWN`` and has no durable owner.
+``UPLOAD_UNKNOWN`` here; it never enters ``RegistrationIntent.UNKNOWN``, and the durable owner that
+records and terminalizes it is the ASSET upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``,
+Gate 3 area 1) — never this adapter, which owns no state.
 
 * one reference per exactly one M4 artifact, bound to the READY candidate fingerprint it was
   uploaded under, and to the asset profile the target policy names;

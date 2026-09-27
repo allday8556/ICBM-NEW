@@ -248,6 +248,9 @@ def test_the_production_upload_path_refuses_every_upload_at_this_main(
         live_model.RESTORE_PROOF_ABSENT,
         live_model.RETENTION_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
+        # §10's residual-risk row (§6.1, G3-30): recorded in GitHub, no durable owner, so the
+        # production proof source never answers True and the ASSET stage refuses on it too.
+        live_model.RESIDUAL_RISK_UNACCEPTED,
     } <= reasons
     # Nothing started, nothing spent, and the refusal is audited.
     assert count(container.config, "asset_upload_attempts") == 0
@@ -411,6 +414,8 @@ def test_an_engaged_brake_and_every_unproven_prerequisite_refuse_before_transmis
     release(container)
     for missing, code in (
         ("eligibility", live_model.ELIGIBILITY_UNPROVEN),
+        # §10's residual-risk row is a mandatory layer of this stage too, and it refuses alone.
+        ("residual_risk", live_model.RESIDUAL_RISK_UNACCEPTED),
         ("restore", live_model.RESTORE_PROOF_ABSENT),
         ("retention", live_model.RETENTION_UNPROVEN),
         ("visual", live_model.VISUAL_UNRECORDED),

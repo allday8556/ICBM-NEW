@@ -70,6 +70,7 @@ class HarnessAuthority:
         intent: Any,
         attempt_no: int,
         endpoint_adopted: bool,
+        reconcile_path_adopted: bool,
         scope: Any,
         truth_fence: int,
         actor: str,

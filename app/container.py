@@ -601,6 +601,7 @@ def build_container(
         registrations=registrations,
         preparations=registration_preparations,
         create_sender_available=registration_execution.create_sender_available,
+        reconcile_path_adopted=registration_execution.reconcile_path_adopted,
         endpoint_group=CREATE_ENDPOINT_GROUP,
     )
     register_service = RegisterService(
