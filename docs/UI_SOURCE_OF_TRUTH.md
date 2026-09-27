@@ -109,17 +109,26 @@ For M0 these controls are visual shell only and cause **zero external writes**.
 
 **Scope correction — post-merge full-audit architect resolution (Issue #89 `5851284598`, R1).** The M5
 requirement below was over-broad as originally written: read literally it made a production
-ComplianceGate owner and a `COMPLIANCE` review count M5 requirements, which `docs/ARCHITECTURE.md` §7
+ComplianceGate owner, a `COMPLIANCE` review count, a registration list/filter screen and a
+review-queue view of these states M5 requirements. The ComplianceGate part `docs/ARCHITECTURE.md` §7
 ("**No production ComplianceGate owner exists yet** … Gate 3 implements no ComplianceGate"),
 `ROADMAP.md` §14.1 and ADR-0018 §5 assign to a **separate later owner** under its own contract and
-authorization. That ownership boundary wins; the requirement is restated accordingly.
+authorization; the list/filter and review-queue part no authorized M5 slice owns at all. That
+ownership boundary wins; the requirement is restated accordingly and narrowed to the surfaces that
+M5 actually authorized.
 
 By M5, the **currently implemented server-owned registration safety/readiness `BLOCKED` states** must
-be discoverable without opening raw logs, through the surfaces that own those states:
+be discoverable without opening raw logs, through the only surfaces that own those states:
 
-- registration preflight/readiness, and the derived canary readiness verdict with its reason codes
-- registration list/filter or review queue
-- dashboard/review count **only where a corresponding authoritative producer exists**
+- registration preflight/readiness
+- the derived canary readiness verdict with its per-requirement reason codes (`app/register/canary.py`)
+
+That is the whole requirement. M5 requires **no** further BLOCKED-visibility surface: no registration
+list/filter screen, no review-queue view of these states, and no dashboard or review count of them.
+The Gate 2 review path is not such a surface and this requirement adds nothing to it — it indexes
+only its own producers' owner-derived conditions and their coverage (ADR-0016, `docs/ARCHITECTURE.md`
+§9). Any later list/filter, queue or count over these states needs its own contract and
+authorization.
 
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
