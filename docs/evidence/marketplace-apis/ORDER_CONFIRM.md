@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/confirm`; max 30 product orders per request. |
+| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/confirm`; max 30 product orders per request. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | `PATCH /v2/providers/openapi/apis/api/v4/vendors/{vendorId}/ordersheets/acknowledgement` changes status to Product in Preparation. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | PARTIAL_OFFICIAL_CAPTURED | Order-processing family exists; exact seller acknowledgement endpoint not captured in this pass. |
