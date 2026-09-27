@@ -13,6 +13,7 @@
 | SSG.COM | PARTIAL_OFFICIAL_CAPTURED | Official New online product create/read/update family launched 2025-04-16. Old online product create/read/update APIs were scheduled to stop after 2026-03-31. Exact New create path is not frozen in this research record. |
 
 Official sources:
+- SmartStore upstream: https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product
 - SmartStore strict evidence: `docs/platforms/smartstore/ENDPOINT_MATRIX.md`, `docs/platforms/smartstore/SOURCES.md`
 - Coupang: https://developers.coupang.com/en/api/products/product-creation
 - Kakao: https://shopping-developers.kakao.com/hc/ko/articles/4578940635791-상품-등록-및-수정
