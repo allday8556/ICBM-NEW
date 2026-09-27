@@ -91,16 +91,18 @@ item 1 (M5) are, in order and each as its own PR:
 | 2 | **SEARCH positive-only reconcile adoption** — `SMARTSTORE_PRODUCT_SEARCH` | limited to the positive reconcile of ADR-0014 §28.2–§28.4 and its exact request, response and pagination contract; a separate slice after CREATE | any SmartStore call; LIVE; canary; residual-risk acceptance; zero-result absence inference |
 
 After these two, the **mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has
-closed** stay ahead of any canary. This ADR authorizes neither of them, and neither may be skipped.
-ADR-0018 §10 fixes no order between the two — each refuses on its own — so they take no numbered
+closed** stay ahead of any canary. This ADR authorizes none of them, and none may be skipped.
+ADR-0018 §10 fixes no order among them — each refuses on its own — so they take no numbered
 position in the order above:
 
 | still-missing prerequisite | why it is mandatory | why this ADR does not authorize it |
 | --- | --- | --- |
 | the **production ASSET sender** — `app/container.py` wires `UnwiredAssetSender`, which declares the adopted wire endpoint and refuses every send (`LIVE_SENDER_NOT_WIRED`) | `ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19) and stays `BLOCKED` while no ASSET sender is wired (ADR-0018 §10, Consequences) | a sender that transmits to the provider is not provider-zero and no canonical contract decides its boundary, so §2.3 is not met and §3 stops it for the user |
 | the **durable canary-eligibility owner** (ADR-0018 §5) — `CANARY_NON_REGULATED`; `app/live/proofs.py` has no owner and answers unproven | both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it | the eligibility record's data model is explicitly undecided (ADR-0018 §13), so §2.5 is not met and §3 stops it for the user |
+| the **authoring-revision owners** for the category mapping and the detail composition (ADR-0014 §27) — the durable target policy holds both as `null` (ADR-0015 §2), so the candidate preflight answers `AUTHORING_REVISIONS_UNOWNED` (`app/register/preparation.py`) | each stage's own gate is a mandatory requirement (ADR-0018 §10): the ASSET stage needs a candidate preflight `READY`, the CREATE stage a final preflight `READY` and a `PREPARED` Intent. While either revision is unowned no unit is ever `READY`, freezing stays fail-closed, and no Snapshot and no Intent can exist — so both stages stay `BLOCKED` on this alone | ADR-0014 §27 records real owners for both revisions as "a later, separately authorized decision" and no canonical contract decides their data model, so §2.3 and §2.5 are not met and §3 stops it for the user |
 
-Their order relative to each other is part of the user's decision on each; both precede any canary.
+Their order relative to each other is part of the user's decision on each; all of them precede any
+canary.
 
 Only then do the steps that remain before M5 acceptance — the residual-risk acceptance, the bounded
 LIVE grant use, the real canary (ADR-0018 §12 area 5, permitted "only after every prerequisite is
@@ -115,6 +117,13 @@ and leaving `M0_DRY_RUN_ONLY` — keeps its own condition and its own decision.
 > LIVE grant use, the real canary and the M5 acceptance run, and so omitted two mandatory ADR-0018
 > §10 prerequisites. This correction grants nothing: both prerequisites are recorded as still
 > missing and as user decisions (§3, SA-10), and no invariant of ADR-0014 or ADR-0018 is changed.
+>
+> **Correction note (post-merge full audit of main `a10e4b79dbd3`).** The second table's third row
+> — the **authoring-revision owners** of ADR-0014 §27 — was added because the table listed only two
+> prerequisites while a third, each stage's own preflight gate (ADR-0018 §10), cannot be met at all
+> while the category-mapping and detail-composition revisions have no owner. This correction grants
+> nothing either: the row records a prerequisite that is still missing and is a user decision (§3,
+> SA-10), it closes no gap, and it changes no invariant of ADR-0014, ADR-0015 or ADR-0018.
 
 An adoption slice updates the adoption status of **its own endpoint only** — in
 `docs/platforms/smartstore/ENDPOINT_MATRIX.md`, `docs/acceptance/M5.md` and the invariant text and
@@ -135,7 +144,7 @@ SA-06  schema or migration is authorized here only where a canonical contract al
 SA-07  LIVE, a real canary, the residual-risk acceptance, new architecture or policy, conflicting canon, unclear scope, undecided data model and scope expansion always stop for the user
 SA-08  each slice passes CI, the GPT exact-head audit and the independent Claude cross-audit, merges only under the exact-HEAD/main guard, and the new main is audited before the next selection
 SA-09  CREATE adoption and SEARCH positive-only reconcile adoption are two separate slices, CREATE first
-SA-10  §4's remaining-work order never omits a mandatory ADR-0018 §10 prerequisite; the production ASSET sender and the durable canary-eligibility owner are still missing, are not authorized here, and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 is green
+SA-10  §4's remaining-work order never omits a mandatory ADR-0018 §10 prerequisite; the production ASSET sender, the durable canary-eligibility owner and the ADR-0014 §27 authoring-revision owners are still missing, are not authorized here, and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 is green
 ```
 
 ## Consequences
@@ -152,6 +161,7 @@ SA-10  §4's remaining-work order never omits a mandatory ADR-0018 §10 prerequi
 
 - `ROADMAP.md` §12, §14, §14.1, §14.2
 - `CLAUDE.md` §1, §7.2, §11
-- ADR-0014 §17.2, §28 (amendment note at §28.8)
+- ADR-0014 §17.2, §27, §28 (amendment note at §28.8)
+- ADR-0015 §2 (the target policy holds both authoring revisions as `null`)
 - ADR-0018 §6, §6.1, §10, §12 (amendment note at §12)
 - `docs/platforms/smartstore/ENDPOINT_MATRIX.md`, `docs/acceptance/M5.md` §9

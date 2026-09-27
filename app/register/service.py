@@ -204,6 +204,9 @@ class RegisterService:
         It authorizes nothing and writes nothing. Every missing proof is reported as missing —
         an unadopted endpoint as **not adopted**, never as absent or unnecessary — and a running
         application cannot prove its own checkout, so that requirement stays unproven here.
+        The read-back's own two facts — a session to read it with, and a comparison that can carry
+        the published state ADR-0014 §11 compares — are read from the execution owner's seams,
+        because endpoint adoption proves neither.
         """
         units = self.overview().units
         if unit_ref is not None:
@@ -232,6 +235,14 @@ class RegisterService:
             unresolved_conflicts=0 if unit is None else len(unit.conflicting_intents),
             sends_allowed=unit is not None and unit.scope.sends_allowed,
             units_selected=len(selected),
+            # Read from the execution owner's own seams, never assumed from endpoint adoption:
+            # without an execution owner neither is proven here.
+            readback_executable=(
+                self._execution is not None and self._execution.readback_available()
+            ),
+            published_state_provable=(
+                self._execution is not None and self._execution.readback_proves_published_state()
+            ),
         )
         return evaluate(
             facts,

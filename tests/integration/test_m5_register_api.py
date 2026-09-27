@@ -1208,6 +1208,15 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     # A running application cannot prove its own checkout, so it says so rather than assuming.
     assert missing["CLEAN_RUNTIME"]["reason_code"] == "PROOF_NOT_AVAILABLE_IN_PROCESS"
     assert "CREATE_ADOPTED" in canary["missing"]
+    # The read-back is adopted, and adoption is all that proves: production wires no session to
+    # read with, and the adopted comparison carries no published state, so each is named on its
+    # own rather than covered by `READBACK_ADOPTED` (post-merge audit of main `a10e4b79dbd3`).
+    satisfied = {item["requirement"] for item in canary["requirements"] if item["satisfied"]}
+    assert "READBACK_ADOPTED" in satisfied
+    assert missing["READBACK_EXECUTABLE"]["reason_code"] == "READBACK_SESSION_NOT_WIRED"
+    assert missing["PUBLISHED_STATE_PROVABLE"]["reason_code"] == "PUBLISHED_STATE_UNPROVEN"
+    assert missing["READBACK_EXECUTABLE"]["endpoint_id"] is None
+    assert missing["PUBLISHED_STATE_PROVABLE"]["endpoint_id"] is None
 
 
 def test_a_reload_reconstructs_the_same_view_from_durable_rows(

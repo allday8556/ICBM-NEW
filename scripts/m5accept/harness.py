@@ -52,6 +52,7 @@ from app.register.preparation import (
 )
 from app.register.sanitize import PayloadSanitationError
 from integrations.marketplaces.smartstore import product as smartstore_product
+from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from scripts.m4accept import evidence
 from scripts.m4accept.checkout import CheckoutRefused, probe_checkout
@@ -1016,6 +1017,11 @@ def canary(run: Run) -> dict[str, object]:
         sends_allowed=unit is not None and unit.scope.sends_allowed,
         # One named unit is one unit, however many this run holds.
         units_selected=1 if unit is not None else len(units),
+        # The plan is about a **real** canary, so the read-back's two facts are the production
+        # ones, never this run's declared seams (`READ_BACK`, `PUBLISHED_STATE`): a provider-zero
+        # run has no committed session, and PR-D's adopted contract proves no published state.
+        readback_executable=False,
+        published_state_provable=smartstore_readback.proves_published_state(),
     )
     result = evaluate(
         facts,

@@ -596,6 +596,25 @@ class RegistrationExecutionService:
         self._policy = policy or ExecutionPolicy()
         self._actor = actor
 
+    # ------------------------------------------------------------------ read-back capability
+
+    def readback_available(self) -> bool:
+        """Whether the adopted read-back could actually be executed now (§11).
+
+        Adoption is not execution: production wires no committed session, so the seam answers
+        ``False`` and ``verify`` refuses. Read-only, so a readiness can report the gap instead of
+        reading endpoint adoption as if it covered it.
+        """
+        return bool(self._readback.available())
+
+    def readback_proves_published_state(self) -> bool:
+        """Whether the read-back comparison can carry a published state at all (§11).
+
+        Fail-closed: a comparator that does not answer this proves nothing, so it is ``False``.
+        """
+        prove = getattr(self._compare, "proves_published_state", None)
+        return bool(prove()) if callable(prove) else False
+
     # ------------------------------------------------------------------ the job entry point
 
     def run(self, context: JobContext) -> ExecutionResult:

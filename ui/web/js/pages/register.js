@@ -115,6 +115,8 @@ const REASON_COPY = {
   AUTH_NOT_READY: '마켓 인증이 준비되지 않았습니다.',
   WRITE_SCOPE_NOT_PROVEN: '쓰기 권한 범위가 증명되지 않았습니다.',
   NO_PREPARED_INTENT: '전송 준비된 등록 요청이 없습니다.',
+  READBACK_SESSION_NOT_WIRED: '등록 결과를 되읽을 수 있는 마켓 세션이 연결되어 있지 않습니다.',
+  PUBLISHED_STATE_UNPROVEN: '되읽기 계약이 판매 상태를 증명하지 못해 등록 성공을 확정할 수 없습니다.',
   UNRESOLVED_CONFLICT: '미해결 충돌이 남아 있습니다.',
   EXECUTION_SCOPE_STOPPED: '전송이 중단된 범위입니다.',
   MORE_THAN_ONE_UNIT_SELECTED: '카나리는 한 건만 대상으로 합니다.',
