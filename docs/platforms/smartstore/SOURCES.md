@@ -263,6 +263,59 @@ Packet scope, and what it deliberately does **not** license:
 `AUTH_MODE` stays `SELF`: the packet's Commerce Solution `SELLER` guidance is solution-specific and
 is not applicable evidence for ICBM's own-store application (§11.4 — unknown beats invention).
 
+> For CREATE only, two of the items above — the request media type and the success response
+> envelope — were later established by the architect's official evidence reviews recorded in §5.2.
+> Every other item in the "not proven" list above stays unproven.
+
+### 5.2 M5 CREATE wire-contract evidence (`2.89.0`)
+
+Two later architect official-evidence reviews on Issue #89 read the current `(v2) 상품 등록`
+reference of release **2.89.0 (2026-09-15)**: comments **5768199984** and **5768247290**. They were
+written for the CREATE and reconcile evidence review that closed `INSUFFICIENT` for idempotent
+replay and remote-absence proof (§5.1 packet; ADR-0014 §17.2). This section records only the CREATE
+wire facts those reviews state; the verdict itself is unchanged.
+
+| Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE request media type, success status, success response identifiers and stored product data | `ENDPOINT_MATRIX.md` §4.2; the future CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+
+Observations preserved, limited to what the reviews state:
+
+- `POST /v2/products` is the `(v2) 상품 등록` endpoint (packet 5746489554);
+- the request is JSON: Commerce API messages use JSON by default except file upload and download,
+  so this request body is `application/json` (review 5768199984);
+- the request body is the documented `originProduct` + channel-product structure, the
+  `원상품 정보 구조체` of packet 5746489554 (review 5768199984);
+- the documented success status is HTTP `200` (reviews 5768199984, 5768247290);
+- since API docs `v2.68.0` a successful create response carries the provider-issued identifiers
+  `originProductNo`, `smartstoreChannelProductNo` and `windowChannelProductNo` (review 5768199984);
+- the success response additionally returns `originProduct`, which NAVER states is the product data
+  successfully stored by SmartStore (review 5768199984);
+- the reference documents the endpoint's normal error surface, and it contains no idempotency key,
+  request-correlation key, replay rule or duplicate-prevention guarantee (review 5768247290).
+
+Still not proven by these reviews, so fail-closed:
+
+- the exact value and parameters of the success response `Content-Type` header — the reviews
+  establish a JSON body, not the header's charset;
+- a per-endpoint enumeration of the CREATE error statuses at `2.89.0`. The product-API error
+  contract ICBM relies on stays `ERRORS.md` §10 (`NAVER-P0-PRODUCT-CREATE`, `2.88.0`): `BAD_REQUEST`
+  classified from `invalidInputs` together with `message`, because the product documentation warns
+  that `invalidInputs` can be absent or insufficient (§10.1); `UNAUTHORIZED`, `FORBIDDEN`,
+  `NOT_FOUND` and `INTERNAL_SERVER_ERROR` (§10.2–§10.5); and `308/PERMANENT_REDIRECT`, never followed
+  for a mutation (§10.6, §17);
+- any CREATE idempotency or ambiguous-outcome replay safety. A timeout, a connection loss, a
+  response loss or a `5xx` never proves non-application (reviews 5768199984, 5768247290;
+  `ERRORS.md` §14.3, §15.2), so such a CREATE is `UNKNOWN` and is never resent (ADR-0014 §28);
+- that a `500` or a zero-result lookup proves the product was not registered. Neither does
+  (ADR-0014 §17.2, §28.2).
+
+This evidence adopts nothing and authorizes no call. `SMARTSTORE_PRODUCT_CREATE_V2` stays
+`NOT_ADOPTED` until its own adoption slice (ADR-0020 §4) freezes the success predicate, timeout,
+redirect and error classification against these facts. Until then the code-side gap text
+(`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS`, `product.py`) still records the
+pre-review gap; it changes with that slice, not with this evidence record.
+
 ---
 
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)

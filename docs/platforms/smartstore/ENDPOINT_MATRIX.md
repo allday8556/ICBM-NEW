@@ -24,6 +24,7 @@ Primary upstream documentation:
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers
 - https://apicenter.commerce.naver.com/docs/restful-api
+- https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product (release 2.89.0, read through the Issue #89 official evidence reviews 5768199984 and 5768247290; `SOURCES.md` §5.2)
 - https://www.rfc-editor.org/rfc/rfc6749
 - https://www.rfc-editor.org/rfc/rfc6750
 
@@ -131,7 +132,7 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | the packet proves method, path, group and the request/response product structure, but neither the request media type nor the response envelope |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | the packet proves method, path, group and the request/response product structure; the later official evidence reviews add the JSON request media type and the HTTP 200 success response with its identifiers (§4.2, `SOURCES.md` §5.2). No adoption slice has yet frozen the success predicate, timeout, redirect and error classification against them, and no provider idempotency exists (below) |
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
@@ -168,6 +169,46 @@ failure is `UPLOAD_UNKNOWN`, distinct from `RegistrationIntent.UNKNOWN`.
 
 `endpoint_mapping_revision = m5-image-upload-r1`, bound to the registry fingerprint, which also
 covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15).
+
+### 4.2 CREATE wire-contract evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
+
+The architect's official evidence reviews on Issue #89 (`5768199984`, `5768247290`) establish the
+following for `SMARTSTORE_PRODUCT_CREATE_V2`. **This section adopts nothing:** the row stays
+`NOT_ADOPTED`, fails locally before any network I/O (§2), and gains no LIVE authority. Its own
+adoption slice (ADR-0020 §4) freezes the adopted contract from these facts.
+
+| Field | Evidence | Source |
+| --- | --- | --- |
+| Method / path | `POST /v2/products` (`(v2) 상품 등록`) | packet 5746489554 |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, API group `상품` | packet 5746489554 |
+| Request media type | JSON — Commerce API messages are JSON except file upload and download, so the body is `application/json` | review 5768199984 |
+| Request body | the documented `originProduct` + channel-product structure (`원상품 정보 구조체`) | packet 5746489554, review 5768199984 |
+| Documented success | HTTP `200` | reviews 5768199984, 5768247290 |
+| Success identifiers | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo` (since API docs `v2.68.0`) | review 5768199984 |
+| Success product data | `originProduct`, the product data SmartStore successfully stored | review 5768199984 |
+| Error contract | not re-enumerated per endpoint at `2.89.0`; the product-API mappings of `ERRORS.md` §10 apply — `BAD_REQUEST` read from `invalidInputs` **and** `message` (the documentation warns `invalidInputs` can be absent or insufficient), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `INTERNAL_SERVER_ERROR`, and `308/PERMANENT_REDIRECT` never followed for a mutation (§11; `ERRORS.md` §17) | `ERRORS.md` §10 (`NAVER-P0-PRODUCT-CREATE`, `2.88.0`) |
+| Idempotency | none: no idempotency key, request-correlation key, replay rule or duplicate-prevention guarantee | review 5768247290 |
+
+Not proven, so fail-closed until an adoption slice or new evidence settles it:
+
+- the exact success response `Content-Type` header value and its charset (a JSON body is proven, the
+  header parameters are not);
+- a per-endpoint enumeration of the CREATE error statuses at `2.89.0` (the `ERRORS.md` §10 mappings
+  are the contract in the meantime).
+
+Outcome rules that no evidence here changes:
+
+- a timeout, a connection loss, a response loss or a `5xx` after transport handoff is `UNKNOWN`
+  (`ERRORS.md` §14.3, §15.2) and **a CREATE in `UNKNOWN` is never resent** (ADR-0014 §28; ADR-0018
+  §6.1, G3-07);
+- **neither a `500` nor a zero-result lookup proves that a product was not registered** (ADR-0014
+  §17.2, §28.2; ADR-0018 G3-15);
+- the provider-evidence verdict stays `INSUFFICIENT` for idempotent replay and remote-absence proof,
+  the canary stays `BLOCKED`, and execution stays `DRY_RUN`.
+
+The code-side gap text for this row (`integrations/marketplaces/smartstore/registry.py`
+`ADOPTION_GAPS`, `product.py`) still records the pre-review gap. It changes with the CREATE adoption
+slice, together with the adopted contract, not with this evidence record.
 
 ---
 
