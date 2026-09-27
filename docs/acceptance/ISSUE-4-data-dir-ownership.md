@@ -1,6 +1,7 @@
 # Issue #4 — Single data-directory process ownership: evidence
 
-- Status: **SUBMITTED — awaiting architect review.** This change is not accepted yet. Merging to `main` needs Architect PASS and the user's explicit approval (architect comments 5653170835 and 5653330407).
+- Status: **ACCEPTED — merged.** Corrected 2026-09-27 under the post-merge full-audit architect resolution (Issue #89 `5851284598`, R2), which found this line the stale side of a reversed status. Evidence already in the repository and on GitHub: [ADR-0006](../adr/0006-single-data-directory-process-ownership.md), the decision this document supports, is **ACCEPTED** (date accepted 2026-09-13) and the runtime implements it; PR #6 (branch `fix/infra-data-dir-single-owner`) was merged into `main` on 2026-09-13 as `b3bf59afb9ad238f599902d82d4030431049bdd5`; `README.md` records the same. **No new acceptance run was made** — this is a correction of a status line only, and everything below is the original submission's evidence, unchanged.
+- Submission history: this document was authored as a submission, when merging to `main` still needed Architect PASS and the user's explicit approval (architect comments 5653170835 and 5653330407). The merge above superseded that state.
 - Issue: #4. Architect requirements are in the issue body and in comments 5653140744, 5653161585 and 5653170835.
 - Revision: this is a revised submission. It addresses PR #6 review 5190681666 and architect comment 5653330407, which introduced the mutation-target invariant.
 - Decision record: [`docs/adr/0006-single-data-directory-process-ownership.md`](../adr/0006-single-data-directory-process-ownership.md)

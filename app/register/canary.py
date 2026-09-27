@@ -7,8 +7,10 @@ write remains a separate, explicitly authorized bounded campaign.
 
 A requirement is satisfied only by a proof that exists now. A missing endpoint contract is
 reported as **not adopted**, never as "not needed" and never as "absent capability": the whole
-point of this result is to name what is still unproven. With CREATE, the deterministic product
-lookup and the image upload unadopted, the verdict is `BLOCKED`.
+point of this result is to name what is still unproven. The bounded image upload
+(`SMARTSTORE_PRODUCT_IMAGE_UPLOAD`) is `ADOPTED` since the #96 amendment; CREATE
+(`SMARTSTORE_PRODUCT_CREATE_V2`) and the deterministic product lookup
+(`SMARTSTORE_PRODUCT_SEARCH`) stay `NOT_ADOPTED`, so the verdict stays `BLOCKED`.
 
 Nothing here reaches a provider: the adoption facts arrive through a typed port that the adapter
 fills in (`app.register.provider`), and every reason is a code — no gap prose, no URL, no payload.
