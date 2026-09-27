@@ -13,6 +13,7 @@
 Do not interpret an empty search response as remote absence unless exact provider completeness/freshness semantics are documented.
 
 Sources:
+- SmartStore upstream: https://apicenter.commerce.naver.com/docs/commerce-api/current/search-product
 - SmartStore strict evidence: `docs/platforms/smartstore/ENDPOINT_MATRIX.md`
 - Coupang: https://developers.coupang.com/en/api
 - Kakao: https://shopping-developers.kakao.com/hc/ko/articles/4578918482447-상품-조회
