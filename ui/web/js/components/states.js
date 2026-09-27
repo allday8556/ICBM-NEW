@@ -17,7 +17,8 @@ export function emptyState({ title, copy, action }) {
   );
 }
 
-// M0 renders EMPTY contracts only. Any other state is surfaced honestly instead of guessed at.
+// A screen renders only the contract states it has a renderer for. Any other state the server
+// reports is surfaced honestly, with the contract state named, instead of being guessed at.
 export function unsupportedState(meta) {
   return h(
     'div',
@@ -27,7 +28,7 @@ export function unsupportedState(meta) {
       {},
       h('div', { class: 'empty-icon', 'aria-hidden': 'true' }, '!'),
       h('h3', {}, '이 상태의 화면은 아직 구현되지 않았습니다'),
-      h('div', { class: 'mini' }, `M0 UI는 빈 상태만 표시합니다. 계약 상태: ${meta?.state ?? '알 수 없음'}`),
+      h('div', { class: 'mini' }, `이 화면에는 해당 상태의 렌더러가 없습니다. 계약 상태: ${meta?.state ?? '알 수 없음'}`),
     ),
   );
 }

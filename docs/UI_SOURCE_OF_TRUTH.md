@@ -107,11 +107,26 @@ For M0 these controls are visual shell only and cause **zero external writes**.
 
 `BLOCKED` remains a first-class ComplianceGate state. A sixth registration KPI is **not required for M0**.
 
-By M5, BLOCKED must be discoverable without opening raw logs through:
+**Scope correction — post-merge full-audit architect resolution (Issue #89 `5851284598`, R1).** The M5
+requirement below was over-broad as originally written: read literally it made a production
+ComplianceGate owner and a `COMPLIANCE` review count M5 requirements, which `docs/ARCHITECTURE.md` §7
+("**No production ComplianceGate owner exists yet** … Gate 3 implements no ComplianceGate"),
+`ROADMAP.md` §14.1 and ADR-0018 §5 assign to a **separate later owner** under its own contract and
+authorization. That ownership boundary wins; the requirement is restated accordingly.
 
-- registration preflight/readiness
+By M5, the **currently implemented server-owned registration safety/readiness `BLOCKED` states** must
+be discoverable without opening raw logs, through the surfaces that own those states:
+
+- registration preflight/readiness, and the derived canary readiness verdict with its reason codes
 - registration list/filter or review queue
-- dashboard/review count where applicable
+- dashboard/review count **only where a corresponding authoritative producer exists**
+
+M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
+`COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
+separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `ROADMAP.md`
+§14.1). Regulated-category automation stays forbidden, and the first bounded canary stays restricted
+to a product whose reviewed category metadata proves it outside every regulated category: eligibility
+evidence for that canary alone, never a `COMPLIANCE PASS` verdict.
 
 It must never be folded into a generic successful/failed state in the domain model.
 
