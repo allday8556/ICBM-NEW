@@ -565,6 +565,14 @@ expected areas, none authorized by this ADR:
 | 4 | a provider-evidence re-review; it closed confirming `INSUFFICIENT` (`5844770185`). Adoption is not part of it and never waits for the verdict to be overturned: CREATE and the positive-only reconcile path each need their own separately authorized adoption slice (§6.1, ADR-0014 §17.2, §28) |
 | 5 | one explicitly user-authorized, non-regulated SmartStore canary, only after every prerequisite is green |
 
+> **Amendment note (ADR-0020 §2, §4).** The separately authorized adoption slices of §6.1 — CREATE
+> first, then the positive-only reconcile SEARCH, each as its own PR — are authorized by the ROADMAP
+> standing authorization of ADR-0020 when they meet all of its conditions: provider-zero, adoption in
+> code only as §6.1 defines it, no LIVE, no canary. Area 5, every LIVE grant use and the residual-risk
+> acceptance of §6.1 stay explicit user decisions (ADR-0020 §3). This note changes no invariant: the
+> evidence verdict stays `INSUFFICIENT` and the canary stays `BLOCKED` until every condition of §6
+> and §10 holds.
+
 ### 13. What this ADR does not decide
 
 - table names, columns, enum spellings, route paths, payload shapes and screen layout for the grant,
