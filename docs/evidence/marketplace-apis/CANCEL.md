@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/:productOrderId/claim/cancel/request`. |
+| SmartStore | OFFICIAL_CAPTURED | `POST /v1/pay-order/seller/product-orders/:productOrderId/claim/cancel/request`. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | Official order/return families expose order cancel and return/cancel request lists. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | Claim API documents seller/buyer cancellation flows; some successful actions are status-only responses. |
