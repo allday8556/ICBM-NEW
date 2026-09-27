@@ -399,9 +399,15 @@ now       never resend while the outcome is unknown
 > resent and keeps its conflict scope closed (G3-07), and no grant is issued for it. SEARCH's
 > positive-only reconcile path stays `NOT_ADOPTED` and is its own later slice, the residual-risk
 > acceptance of §6.1 stays unrecorded, `M0_DRY_RUN_ONLY` still refuses every mutation, and **the
-> canary stays `BLOCKED`**. Adoption is not a session: production wires the CREATE seam with no
-> committed bearer, so the send-time stack's endpoint-adoption layer is not satisfied by adoption
-> alone, and every other layer of §10 keeps its own condition.
+> canary stays `BLOCKED`**.
+>
+> **Adoption is not a session, and bearer readiness is a separate blocker — not a reason this
+> adoption is unmet.** §6's endpoint-adoption condition for CREATE is now satisfied. Two other
+> things still refuse on their own, and each is its own line, never this one: production wires the
+> CREATE seam with no committed bearer, so `SmartStoreCreateSender.available()` is false and the
+> CREATE stage's sender layer refuses; and `SMARTSTORE_PRODUCT_SEARCH` is still `NOT_ADOPTED`, so
+> the §10 endpoint-adoption row of that stage is still incomplete. Every other layer of §10 keeps
+> its own condition.
 
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 

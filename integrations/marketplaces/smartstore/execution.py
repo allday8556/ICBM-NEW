@@ -189,9 +189,9 @@ class SmartStoreCreateSender:
                 ),
             )
         assert isinstance(result, ProductCreateResult)
-        # A 200 that carries the documented identifier proves the mutation happened - and nothing
-        # more. ADR-0014 §11: the domain owner now reads the product back and compares it with the
-        # immutable Snapshot; only that comparison confirms a registration.
+        # A 200 carrying the whole documented success document proves the mutation happened - and
+        # nothing more. ADR-0014 §11: the domain owner now reads the product back and compares it
+        # with the immutable Snapshot; only that comparison confirms a registration.
         return CreateHandoff(
             remote_outcome=RemoteOutcome.APPLIED_PROVEN,
             sanitized_request=document.canonical(),

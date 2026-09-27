@@ -471,9 +471,10 @@ seller-side code, grant, proof or approval ever becomes remote-absence evidence 
 > **Amendment note (CREATE adoption slice, ADR-0020 §4 slice 1).** `SMARTSTORE_PRODUCT_CREATE_V2`
 > is now **`ADOPTED`**, under the contract frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md`
 > §4.3: the official method, path, bearer, `상품` group and JSON request media type; an ICBM
-> timeout and `NO_FOLLOW` policy; a success predicate of HTTP 200 plus the documented
-> `originProductNo`; a deny-by-default retention profile; and an outcome classification that
-> separates a definitive provider rejection from an ambiguous outcome. The provider's **absent**
+> timeout and `NO_FOLLOW` policy; a success predicate of HTTP 200 plus the whole documented success
+> document — `originProductNo`, a channel-product number and the stored `originProduct` data; a
+> deny-by-default retention profile; and an outcome classification that separates a definitive
+> provider rejection, positively attributed to the API-server layer, from an ambiguous outcome. The provider's **absent**
 > idempotency is recorded (`NONE_DOCUMENTED`, automatic retry budget `0`) exactly as the paragraph
 > above requires, never assumed.
 >

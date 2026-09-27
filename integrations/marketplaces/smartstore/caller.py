@@ -35,6 +35,7 @@ from integrations.marketplaces.smartstore.classify import Classification
 from integrations.marketplaces.smartstore.product import CreateDocument
 from integrations.marketplaces.smartstore.registry import (
     BASE_URL,
+    CHANNEL_PRODUCT_NO_FIELDS,
     PROVIDER_HOST,
     EndpointContract,
     EndpointId,
@@ -73,10 +74,6 @@ _PRODUCT_READS = frozenset(
 )
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
-# The CREATE identifiers the reviews name, in the order a result reports them: the origin-product
-# number is the identity the adopted read-back is performed by, the channel numbers travel with it
-# so neither provider identity is lost (ADR-0014 §28.2).
-_CHANNEL_NO_FIELDS = ("smartstoreChannelProductNo", "windowChannelProductNo")
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -401,13 +398,13 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
         return ImageUploadResponse(retained=retain(contract, fields), http_status=status)
     if contract.endpoint_id is _PRODUCT_CREATE:
         assert isinstance(request, ProductCreateRequest)
-        # The predicate already proved the origin-product number; the channel numbers are kept
-        # when the response named them and are never invented when it did not.
+        # The predicate already proved the origin-product number and at least one channel number;
+        # a channel the response did not name is never invented for it (ADR-0014 §28.2).
         origin = provider_product_no(fields.get("originProductNo"))
         assert origin is not None
         channels = tuple(
             number
-            for name in _CHANNEL_NO_FIELDS
+            for name in CHANNEL_PRODUCT_NO_FIELDS
             if (number := provider_product_no(fields.get(name))) is not None
         )
         return ProductCreateResult(

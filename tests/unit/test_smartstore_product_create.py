@@ -90,6 +90,13 @@ SUCCESS_BODY: dict[str, Any] = {
     "originProduct": {"name": "테스트 상품", "salePrice": 19900, "stockQuantity": 7},
 }
 
+
+def documented(**changes: Any) -> dict[str, Any]:
+    """The documented success document with one member changed; ``None`` removes it."""
+    body = {**SUCCESS_BODY, **changes}
+    return {key: value for key, value in body.items() if value is not None}
+
+
 # A well-formed frozen-Snapshot payload whose unit is nevertheless unsendable, because the CREATE
 # body still has unproven parts. It is the shape `project` reads, nothing more.
 UNSENDABLE_PAYLOAD: dict[str, Any] = {
@@ -231,22 +238,32 @@ def test_the_absent_provider_idempotency_is_recorded_not_assumed() -> None:
 @pytest.mark.parametrize(
     ("status", "body", "expected"),
     [
-        (200, {"originProductNo": ORIGIN_NO}, True),
-        (200, {"originProductNo": "3005432100"}, True),
-        # The documented identifier is the whole predicate: without a usable one there is no
-        # provider identity to read back by, so the 200 fails closed (EM §9).
-        (200, {"smartstoreChannelProductNo": CHANNEL_NO}, False),
-        (200, {"originProductNo": None}, False),
-        (200, {"originProductNo": ""}, False),
-        (200, {"originProductNo": 0}, False),
-        (200, {"originProductNo": True}, False),
+        (200, SUCCESS_BODY, True),
+        (200, documented(originProductNo="3005432100"), True),
+        # The channel numbers are a family: 쇼핑윈도 is not every seller's, so either documented
+        # number satisfies the predicate, and a false UNKNOWN is never manufactured from its
+        # absence (EM §4.3).
+        (200, documented(smartstoreChannelProductNo=None, windowChannelProductNo=5005432102), True),
+        # Anything short of the whole documented success document fails closed (EM §4.3, §9):
+        # without a usable origin number there is no identity to read back by, without a channel
+        # number the documented response was not returned, and without the stored originProduct
+        # there is no result data for the ADR-0014 §11 comparison.
+        (200, documented(originProductNo=None), False),
+        (200, documented(originProductNo=""), False),
+        (200, documented(originProductNo=0), False),
+        (200, documented(originProductNo=True), False),
+        (200, documented(smartstoreChannelProductNo=None), False),
+        (200, documented(smartstoreChannelProductNo=0), False),
+        (200, documented(originProduct=None), False),
+        (200, documented(originProduct={}), False),
+        (200, documented(originProduct="stored"), False),
         (200, [], False),
         (200, None, False),
-        (201, {"originProductNo": ORIGIN_NO}, False),
-        (202, {"originProductNo": ORIGIN_NO}, False),
+        (201, SUCCESS_BODY, False),
+        (202, SUCCESS_BODY, False),
     ],
 )
-def test_the_success_predicate_is_the_documented_identifier_contract(
+def test_the_success_predicate_is_the_whole_documented_success_document(
     status: int, body: object, expected: bool
 ) -> None:
     assert product_create_succeeded(status, body) is expected
@@ -325,13 +342,15 @@ def test_a_success_returns_the_identifiers_and_only_the_retained_fields() -> Non
 
 
 def test_a_channel_number_is_kept_when_named_and_never_invented() -> None:
-    only_origin = Provider(httpx.Response(200, json={"originProductNo": ORIGIN_NO}))
-    assert call(only_origin).channel_product_nos == ()
-    both = {
-        "originProductNo": ORIGIN_NO,
-        "smartstoreChannelProductNo": CHANNEL_NO,
-        "windowChannelProductNo": 5005432102,
-    }
+    # The predicate proves at least one documented channel number; the other is reported only
+    # when the response itself named it, and 쇼핑윈도 is never invented for a seller without one.
+    one = Provider(httpx.Response(200, json=SUCCESS_BODY))
+    assert call(one).channel_product_nos == (str(CHANNEL_NO),)
+    window_only = documented(smartstoreChannelProductNo=None, windowChannelProductNo=5005432102)
+    assert call(Provider(httpx.Response(200, json=window_only))).channel_product_nos == (
+        "5005432102",
+    )
+    both = documented(windowChannelProductNo=5005432102)
     assert call(Provider(httpx.Response(200, json=both))).channel_product_nos == (
         str(CHANNEL_NO),
         "5005432102",
@@ -353,8 +372,13 @@ def test_a_definitive_provider_rejection_proves_non_application(status: int) -> 
 @pytest.mark.parametrize(
     ("status", "body"),
     [
-        # A 2xx that fails the success predicate: schema drift, application not excluded.
+        # A 2xx that fails the success predicate: schema drift, application not excluded. The
+        # documented success document is the whole predicate, so a 200 missing the identifier,
+        # the channel numbers or the stored originProduct is ambiguous, never a reported success.
         (200, {"message": "accepted"}),
+        (200, documented(originProductNo=None)),
+        (200, documented(smartstoreChannelProductNo=None)),
+        (200, documented(originProduct=None)),
         # Never followed for a mutation; a 308 would replay the body (ERRORS.md §10.6).
         (308, {}),
         (301, {}),
@@ -388,7 +412,21 @@ def test_a_gateway_attributed_rejection_is_never_a_definitive_rejection() -> Non
     error = failure(Provider(httpx.Response(403, json={"code": "GW.IP_NOT_ALLOWED"})))
     assert error.remote_outcome is RemoteOutcome.UNKNOWN
     assert classify.definitive_rejection(CREATE_ENDPOINT, 403, "GW.IP_NOT_ALLOWED") is False
-    assert classify.definitive_rejection(CREATE_ENDPOINT, 403, None) is True
+
+
+@pytest.mark.parametrize("status", sorted(classify.DEFINITIVE_REJECTION_STATUSES))
+def test_an_unattributed_rejection_is_never_a_definitive_rejection(status: int) -> None:
+    # ERRORS.md §5.2 identifies the gateway layer by a `GW.` code and §5.3 the API-server layer by
+    # the provider's own error shape, so a response carrying neither identifies no layer: a
+    # code-less 403 is as consistent with a pre-service gateway refusal as with an API-server one.
+    # §8 Step 5 forbids promoting that, so the outcome stays UNKNOWN and the CREATE is not resent.
+    assert classify.definitive_rejection(CREATE_ENDPOINT, status, None) is False
+    assert failure(Provider(httpx.Response(status, json={}))).remote_outcome is (
+        RemoteOutcome.UNKNOWN
+    )
+    # A body that did not parse at all carries no code either, so it is the same refusal.
+    unparseable = Provider(httpx.Response(status, content=b'{"code":'))
+    assert failure(unparseable).remote_outcome is RemoteOutcome.UNKNOWN
 
 
 def test_the_reviewed_rejection_set_is_endpoint_specific() -> None:
@@ -397,7 +435,7 @@ def test_the_reviewed_rejection_set_is_endpoint_specific() -> None:
     assert set(classify.DEFINITIVE_REJECTION_ENDPOINTS) == {CREATE_ENDPOINT}
     for endpoint in ADOPTED:
         if endpoint is not CREATE_ENDPOINT:
-            assert classify.definitive_rejection(endpoint, 400, None) is False
+            assert classify.definitive_rejection(endpoint, 400, "BAD_REQUEST") is False
 
 
 @pytest.mark.parametrize(

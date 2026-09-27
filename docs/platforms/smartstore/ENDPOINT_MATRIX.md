@@ -235,16 +235,24 @@ contract in code — a request type, a response type, an error and outcome class
 | Safe query keys | **none** (deny-by-default) | ICBM policy |
 | Timeouts | connect `5s`, read `30s` | ICBM policy (§10) |
 | Redirect | `NO_FOLLOW`; a 3xx is never followed for a mutation and is recorded as ambiguous | ICBM policy (§11); `ERRORS.md` §10.6, §17 |
-| Success predicate | HTTP `200` **AND** the body parses as a JSON object **AND** it carries a usable `originProductNo` (`m5-product-create-r1`) | review 5768199984 (documented success and identifiers) |
+| Success predicate | HTTP `200` **AND** the body parses as a JSON object **AND** it carries a usable `originProductNo` **AND** at least one usable channel-product number (`smartstoreChannelProductNo` / `windowChannelProductNo`) **AND** a non-empty `originProduct` stored-result object (`m5-product-create-r1`) | review 5768199984 (documented success, identifiers and stored product data) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the product profile `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` | review 5768199984; ADR-0014 §15 |
 | Provider idempotency | **none** — recorded as `NONE_DOCUMENTED`, never assumed | review 5768247290 |
 | Automatic retry budget | `0`: the adapter has no retry loop at all | ADR-0014 §9, §28.3 |
 | Read-back identity | `originProductNo`, the identity `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` is performed by; the channel numbers are retained with it so neither provider identity is lost | ADR-0014 §11, §28.2 |
 
-**`originProductNo` is why the predicate is stricter than the read-backs'.** A CREATE whose 200
-carries no usable identifier leaves ICBM with no provider identity to read back by, so it fails the
-predicate and is classified as an ambiguous outcome (§9) rather than reported as a success with a
-missing identity.
+**The predicate is the whole documented success document, and that is why it is stricter than
+the read-backs'.** The reviews document what a successful CREATE answers with: the origin-product
+number, the channel-product numbers and the `originProduct` data SmartStore stored. A 200 that
+carries less is not that response — ICBM would have no provider identity to read back by, or no
+stored result to compare — so it fails the predicate and is classified as an ambiguous outcome
+(§9) rather than reported as a success with a missing part.
+
+One qualification is stated rather than guessed: **the channel-product numbers are required as a
+family, not individually.** Which channels a seller has is not a fact any review proves — a seller
+without 쇼핑윈도 has no `windowChannelProductNo` — so at least one of the two must be usable.
+Demanding both would turn a documented success into a false `UNKNOWN`, and an `UNKNOWN` CREATE is
+never resent and is not resolvable by absence (ADR-0014 §28).
 
 **Passing the predicate is not registration success.** ADR-0014 §11 confirms a registration only
 through read-back and an exact comparison against the immutable Snapshot. A successful CREATE
@@ -258,12 +266,13 @@ replay safe.
 | --- | --- |
 | a local pre-submit refusal before transport handoff — an unprojectable Snapshot, a request-contract violation, an unusable bearer | `NOT_APPLIED_PROVEN` (`ERRORS.md` §15.1 item 1) |
 | transmission-precluded transport evidence — ICBM's own egress refusal, or a DNS / TCP-connect / TLS-handshake failure on a connection this request opened | `NOT_APPLIED_PROVEN` (`ERRORS.md` §15.1) |
-| a **definitive provider rejection**: a complete API-server response with status `400`, `401`, `403`, `404`, `405`, `409` or `415` and no gateway-attributed (`GW.`) code | `NOT_APPLIED_PROVEN` — the reviewed provider proof ADR-0014 §10's table and §28.3 admit; it is recorded on its own Attempt and **never passes through `UNKNOWN`** |
+| a **definitive provider rejection**: a complete response with status `400`, `401`, `403`, `404`, `405`, `409` or `415` that carries a provider code attributing it to the API-server layer (`ERRORS.md` §5.3) and not to the gateway | `NOT_APPLIED_PROVEN` — the reviewed provider proof ADR-0014 §10's table and §28.3 admit; it is recorded on its own Attempt and **never passes through `UNKNOWN`** |
 | any gateway-attributed code, whatever the status | `UNKNOWN` — `ERRORS.md` §25 Q2 is open, so a pre-service gateway rejection is not proven non-application |
+| an **unattributed** response of one of those statuses: the body did not parse, or it carries no provider code | `UNKNOWN` — no layer is identified (`ERRORS.md` §5.1, §5.2, §8 Step 5), and a code-less `403` is as consistent with a pre-service gateway refusal as with an API-server one, so application cannot be excluded |
 | a read/write timeout, a lost or reset connection, an uncertain transmission, a pooled-connection failure, an unobserved phase | `UNKNOWN` (`ERRORS.md` §15.2) |
 | any `5xx`, `408`, `425` or `429` | `UNKNOWN` |
 | a `3xx` (never followed) | `UNKNOWN` |
-| a `2xx` that fails the success predicate, including a malformed or truncated body | `UNKNOWN` |
+| a `2xx` that fails the success predicate — a missing identifier, a missing channel number, a missing stored `originProduct`, a malformed or truncated body | `UNKNOWN` |
 
 **What an `UNKNOWN` CREATE may never do** (ADR-0014 §28.3, M5-08, M5-33; ADR-0018 G3-07). It is
 never resent. It cannot open a CREATE Attempt, no grant is issued for it, its conflict scope stays

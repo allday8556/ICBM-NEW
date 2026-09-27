@@ -29,9 +29,12 @@ returned ``images[].url`` identity.
 **CREATE adoption (ADR-0020 §4 slice 1).** ``SMARTSTORE_PRODUCT_CREATE_V2`` is now ADOPTED from the
 official wire-contract evidence recorded in ENDPOINT_MATRIX.md §4.2 (Issue #89 reviews 5768199984
 and 5768247290, release 2.89.0): the method, the path, the bearer, the ``상품`` group, the JSON
-request media type, and HTTP 200 with the documented identifiers. The timeouts, the redirect policy
-and the success predicate are ICBM policy over those facts, never provider facts. The provider's
-**absent** idempotency is recorded below rather than assumed, and the endpoint is bound to the
+request media type, and HTTP 200 answered with the documented identifiers and the stored
+``originProduct`` data. The timeouts, the redirect policy and the success predicate are ICBM policy
+over those facts, never provider facts; the predicate requires that whole documented success
+document, so a 200 carrying less stays an ambiguous outcome rather than a reported success.
+
+The provider's **absent** idempotency is recorded below rather than assumed, and it is bound to the
 never-resend rule of ADR-0014 §28: an ``UNKNOWN`` CREATE is never resent, and this registry grants
 no retry budget for it. ``SMARTSTORE_PRODUCT_SEARCH`` stays NOT_ADOPTED — the positive-only
 reconcile path is its own later slice — and the provider-evidence verdict stays ``INSUFFICIENT``.
@@ -136,6 +139,14 @@ def product_read_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+# The CREATE success response's own documented members (review 5768199984, API docs v2.68.0), in
+# the order a result reports them. The channel numbers travel with the origin-product number so
+# neither provider identity is lost (ADR-0014 §28.2); ``originProduct`` is the product data
+# SmartStore says it stored.
+CHANNEL_PRODUCT_NO_FIELDS = ("smartstoreChannelProductNo", "windowChannelProductNo")
+FIELD_ORIGIN_PRODUCT_RESULT = "originProduct"
+
+
 def provider_product_no(value: object) -> str | None:
     """One documented provider product number as a usable identifier string, or ``None``.
 
@@ -153,14 +164,23 @@ def provider_product_no(value: object) -> str | None:
 
 
 def product_create_succeeded(status: int, body: object) -> bool:
-    """EM §4.2: HTTP 200 AND a JSON object carrying the documented CREATE identifier.
+    """EM §4.3: HTTP 200 AND the whole documented CREATE success document.
 
     Review 5768199984 proves the documented success status (``200``) and that a successful CREATE
-    answers with ``originProductNo`` plus the channel-product numbers and the stored
-    ``originProduct`` data. ``originProductNo`` is the identity the adopted origin read-back is
-    performed by, so a 200 without a usable one proves no provider product identity and fails the
-    predicate (EM §9). The channel numbers are retained when present but are not asserted here:
-    which channels a store has is not a fact any review proves.
+    answers with ``originProductNo``, the channel-product numbers **and** the ``originProduct``
+    data SmartStore stored. The predicate requires that whole documented shape, because a 200 that
+    carries less is not the documented success response: application cannot be read off it, so it
+    fails the predicate and becomes an ambiguous outcome (EM §4.3, §9), never a reported success
+    with a missing identity or a missing stored result.
+
+    - ``originProductNo`` is the identity the adopted origin read-back is performed by.
+    - The channel-product numbers are required as a **family**, not individually: which channels a
+      store has is not a fact any review proves — a seller without 쇼핑윈도 has no
+      ``windowChannelProductNo`` — so at least one documented channel number must be usable.
+      Demanding both would turn a documented success into a false ``UNKNOWN``, and an ``UNKNOWN``
+      CREATE is never resent and is not resolvable by absence (ADR-0014 §28).
+    - ``originProduct`` must be a non-empty JSON object: that is the stored result data the
+      read-back comparison of ADR-0014 §11 is set against, and an absent or empty one carries none.
 
     Passing this predicate is **not** registration success. ADR-0014 §11 confirms a registration
     only through read-back and Snapshot comparison; this predicate only establishes that a typed
@@ -168,7 +188,12 @@ def product_create_succeeded(status: int, body: object) -> bool:
     """
     if status != 200 or not isinstance(body, dict):
         return False
-    return provider_product_no(body.get("originProductNo")) is not None
+    if provider_product_no(body.get("originProductNo")) is None:
+        return False
+    if not any(provider_product_no(body.get(name)) for name in CHANNEL_PRODUCT_NO_FIELDS):
+        return False
+    stored = body.get(FIELD_ORIGIN_PRODUCT_RESULT)
+    return isinstance(stored, dict) and bool(stored)
 
 
 def image_upload_succeeded(status: int, body: object) -> bool:
@@ -226,9 +251,7 @@ _IMAGE_UPLOAD_FIELDS = frozenset({"url"})
 # The CREATE success response: the documented identifiers (review 5768199984, API docs v2.68.0) and
 # the product data SmartStore says it stored, kept under the same deny-by-default product profile
 # as a read-back so a CREATE response can be compared with one without a second retention rule.
-_CREATE_IDENTIFIER_FIELDS = frozenset(
-    {"originProductNo", "smartstoreChannelProductNo", "windowChannelProductNo"}
-)
+_CREATE_IDENTIFIER_FIELDS = frozenset({"originProductNo", *CHANNEL_PRODUCT_NO_FIELDS})
 _CREATE_RESULT_FIELDS = _CREATE_IDENTIFIER_FIELDS | _PRODUCT_READ_FIELDS
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.

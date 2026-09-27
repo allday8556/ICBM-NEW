@@ -976,13 +976,19 @@ For `SMARTSTORE_PRODUCT_CREATE_V2`, and for that endpoint only, a response suppo
 - a complete provider response was received and read;
 - its status is one of `400`, `401`, `403`, `404`, `405`, `409`, `415` — exactly the API-server
   request-rejection outcomes §10.1–§10.4, §10.7 and §10.8 map for the product API;
-- **no gateway-attributed provider code is present.** Any `GW.` code keeps the outcome `UNKNOWN`,
-  because §25 Q2 — whether a pre-service gateway rejection guarantees that no mutation reached the
-  target service — is still `DO_NOT_ASSUME`.
+- **the response is positively attributed to the API-server layer**: it carries a provider code,
+  and that code is not gateway-attributed. A `GW.` code keeps the outcome `UNKNOWN`, because §25
+  Q2 — whether a pre-service gateway rejection guarantees that no mutation reached the target
+  service — is still `DO_NOT_ASSUME`. **A response carrying no provider code at all also keeps the
+  outcome `UNKNOWN`**: §5.2 identifies the gateway layer by a `GW.` code and §5.3 the API-server
+  layer by the provider's own normal endpoint error shape, so an unattributed response identifies
+  no layer, and a code-less `403` is exactly as consistent with a pre-service gateway refusal as
+  with an API-server one. §8 Step 5 forbids promoting that weak evidence, and §15 is whitelist-only:
+  what is not positively proven is not proven.
 
 Everything else keeps the ambiguity of §15.2, including a `2xx` that fails the success predicate, a
-malformed or truncated body, any `3xx` (never followed for a mutation, §10.6), `408`, `425`, `429`
-and every `5xx`.
+malformed or truncated body (which carries no attributable code either), any `3xx` (never followed
+for a mutation, §10.6), `408`, `425`, `429` and every `5xx`.
 
 This extension changes **no other endpoint**. `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` keeps the ambiguity
 contract of ADR-0014 §17.1: a possibly transmitted upload failure stays `UPLOAD_UNKNOWN`.
@@ -1597,8 +1603,8 @@ Current status:
 `DO_NOT_ASSUME`
 
 Write replay therefore continues to use the remote-outcome/idempotency/read-back contract, and the
-adopted CREATE contract keeps every gateway-attributed rejection `UNKNOWN` for exactly this reason
-(§15.1.1).
+adopted CREATE contract keeps every gateway-attributed **and every unattributed** rejection
+`UNKNOWN` for exactly this reason (§15.1.1).
 
 ### Q3. Exact redirect behavior for adopted M2 product endpoints
 
@@ -1704,7 +1710,7 @@ For SmartStore:
 
 `NOT_APPLIED_PROVEN = whitelist-only or positive endpoint reconciliation proof`
 
-`a definitive provider rejection of the adopted product CREATE is a reviewed whitelist entry (15.1.1); a gateway-attributed one is not`
+`a definitive provider rejection of the adopted product CREATE is a reviewed whitelist entry (15.1.1); a gateway-attributed or unattributed one is not`
 
 `an UNKNOWN CREATE is never resent, whatever its cause was`
 

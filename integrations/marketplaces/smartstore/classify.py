@@ -200,19 +200,34 @@ DEFINITIVE_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 415})
 # The review is endpoint-specific, as §15 requires. Only the adopted CREATE contract carries it;
 # IMAGE_UPLOAD keeps the ambiguity contract of ADR-0014 §17.1 unchanged.
 DEFINITIVE_REJECTION_ENDPOINTS = frozenset({EndpointId.SMARTSTORE_PRODUCT_CREATE_V2})
+# ERRORS §5.2 identifies the gateway layer by a `GW.` code, and §5.3 the API-server layer by the
+# provider's own normal endpoint error shape. A response that carries neither is attributed to no
+# layer at all, so it can never be the API server's own proof of refusal.
+GATEWAY_CODE_PREFIX = "GW."
 
 
 def definitive_rejection(endpoint_id: EndpointId, status: int, provider_code: str | None) -> bool:
-    """Whether one complete provider response proves this request applied nothing.
+    """Whether one complete, attributable provider response proves this request applied nothing.
 
-    Everything outside the reviewed set stays ambiguous, because application cannot be excluded:
-    a 2xx that fails the success predicate, a malformed or truncated body, a 3xx (never followed
-    for a mutation, ERRORS §10.6), a 408/425/429 and every 5xx (§14.3, §15.2). So does **any**
-    gateway-attributed code: ERRORS §25 Q2 — whether a pre-service gateway rejection guarantees no
-    mutation reached the target service — is still open, so a `GW.` code proves nothing here.
+    All of it is required, because the proof is the **API server's own** statement that it refused
+    the request — never an inference from a bare status:
+
+    - the endpoint carries the reviewed whitelist (ERRORS §15.1.1);
+    - the status is one of the reviewed request-rejection outcomes;
+    - the response carries a provider code that attributes it to the API-server layer — present,
+      and not gateway-attributed.
+
+    Everything else stays ambiguous, because application cannot be excluded: a 2xx that fails the
+    success predicate, a 3xx (never followed for a mutation, ERRORS §10.6), a 408/425/429 and
+    every 5xx (§14.3, §15.2). So does **any** gateway-attributed code: ERRORS §25 Q2 — whether a
+    pre-service gateway rejection guarantees no mutation reached the target service — is still
+    open, so a `GW.` code proves nothing here. **So does an unattributed or malformed response**:
+    a body that did not parse, or one carrying no provider code, leaves the failing layer
+    unidentified (ERRORS §5.1, §5.2, §8 Step 5), and a code-less 403 is exactly as consistent with
+    a pre-service gateway refusal as with an API-server one. Weak evidence is never promoted.
     """
     if endpoint_id not in DEFINITIVE_REJECTION_ENDPOINTS:
         return False
-    if provider_code is not None and provider_code.startswith("GW."):
+    if provider_code is None or provider_code.startswith(GATEWAY_CODE_PREFIX):
         return False
     return status in DEFINITIVE_REJECTION_STATUSES
