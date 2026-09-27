@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | Conditional product-order read: `GET /v1/pay-order/seller/product-orders`; detailed order-read family is documented. |
+| SmartStore | OFFICIAL_CAPTURED | Conditional product-order read: `GET /v1/pay-order/seller/product-orders`; detailed order-read family is documented. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | Shipments & Orders family includes daily/minute order lists and single-order lookup; `GET .../vendors/{vendorId}/ordersheets` is indexed. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Current seller order endpoint detail not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | `GET /v1/shopping/order?order_id={order_id}`; bulk order read also exists. |
