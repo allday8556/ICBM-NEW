@@ -37,6 +37,7 @@ ADAPTIVE_ADR = DOCS / "adr" / "0017-adaptive-collector-profile-extraction-and-sh
 ADAPTIVE_PROPOSAL = DOCS / "review" / "ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md"
 LIVE_ADR = DOCS / "adr" / "0018-gate3-pre-live-safety-and-bounded-live-authorization.md"
 TRANSPORT_ADR = DOCS / "adr" / "0019-extension-primary-collection-transport.md"
+STANDING_ADR = DOCS / "adr" / "0020-roadmap-standing-authorization.md"
 M5_ACCEPTANCE = DOCS / "acceptance" / "M5.md"
 GLOSSARY_MD = DOCS / "GLOSSARY.md"
 ARCHITECTURE_MD = DOCS / "ARCHITECTURE.md"
@@ -814,6 +815,81 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
     assert "Status: **PENDING**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
     assert "authorizes nothing to run" in adr.split("\n---", 1)[0]
+
+
+def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
+    """ADR-0020 §4 (post-merge audit of main ``a523c55add2b``): the standing authorization selects
+    the next slice from this order, so the order may never omit a mandatory ADR-0018 §10
+    prerequisite. Two are still missing at this main — a production ASSET sender and the durable
+    canary-eligibility owner — and neither is authorized by ADR-0020."""
+    from app.live.assets import UnwiredAssetSender
+    from app.live.proofs import DurableStageProofs
+
+    adr = _read(STANDING_ADR)
+    order = _section(adr, r"^4\. The current order under this ADR")
+    flat = " ".join(order.split())
+    for element in (
+        "mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
+        "This ADR authorizes neither of them, and neither may be skipped",
+        "the **production ASSET sender**",
+        "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
+        "the **durable canary-eligibility owner** (ADR-0018 §5)",
+        "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
+        "the eligibility record's data model is explicitly undecided (ADR-0018 §13)",
+        "both precede any canary",
+        "Nothing here shortens that remaining work",
+        "**Correction note (post-merge full audit of main `a523c55add2b`).**",
+        "This correction grants nothing",
+    ):
+        assert element in flat, element
+    # The remaining user-decision steps are still listed, and now after those prerequisites.
+    assert flat.index("production ASSET sender") < flat.index("the residual-risk acceptance, the")
+    block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
+    invariants = dict(re.findall(r"^(SA-\d\d)\s+(.*\S)\s*$", block, re.M))
+    assert list(invariants) == [f"SA-{n:02d}" for n in range(1, 11)]
+    for element in (
+        "never omits a mandatory ADR-0018 §10 prerequisite",
+        "are still missing, are not authorized here",
+        "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 is green",
+    ):
+        assert element in invariants["SA-10"], element
+    # The roadmap order the standing authorization reads carries the same two prerequisites,
+    # before the user-decision steps, and §14.2 keeps them as LIVE preconditions.
+    roadmap = _read(ROADMAP_MD)
+    ordering = " ".join(
+        roadmap.split("**Standing authorization (ADR-0020", 1)[1]
+        .split("\n\n**Registration", 1)[0]
+        .split()
+    )
+    for element in (
+        "the standing authorization does **not** cover either of them",
+        "production ASSET sender",
+        "**durable canary-eligibility owner** of ADR-0018 §5",
+        "not provider-zero",
+        "ADR-0018 §13 leaves its data model undecided",
+    ):
+        assert element in ordering, element
+    later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
+    assert later in ordering
+    assert ordering.index("ASSET sender") < ordering.index(later)
+    preconditions = " ".join(_section(roadmap, r"^14\.2 Preconditions").split())
+    for element in (
+        "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
+        "`UnwiredAssetSender` declares the adopted wire endpoint and refuses every send",
+        "proving `CANARY_NON_REGULATED`",
+        "neither is authorized by the ADR-0020 standing authorization",
+    ):
+        assert element in preconditions, element
+    # The runtime facts that make them prerequisites still hold: no sender, no eligibility owner.
+    sender = UnwiredAssetSender(
+        marketplace_key="smartstore",
+        wire=("POST", "host", "/path"),
+        contract_label="x",
+        adopted=True,
+    )
+    assert sender.available() is False
+    assert "return False" in inspect.getsource(DurableStageProofs.canary_non_regulated)
+    assert "UnwiredAssetSender(" in _read(REPO_ROOT / "app" / "container.py")
 
 
 # ---------------------------------------------------------------- Gate 3 area 1 (ADR-0018 §12)

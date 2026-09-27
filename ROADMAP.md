@@ -792,7 +792,7 @@ Next, in order:
 1. **CREATE adoption** of `SMARTSTORE_PRODUCT_CREATE_V2`, provider-zero: the official CREATE request/response contract, the error classification that separates a definitive rejection from an ambiguous outcome (ADR-0018 §6.1), `UNKNOWN` never resent (ADR-0014 §28), and its runtime, tests and docs. No SmartStore call, no LIVE, no canary; it is not the residual-risk acceptance.
 2. **SEARCH positive-only reconcile adoption** of `SMARTSTORE_PRODUCT_SEARCH`, a separate later slice limited to ADR-0014 §28.2–§28.4.
 
-The residual-risk acceptance, the bounded LIVE grant use, the real canary and the M5 acceptance run remain explicit user decisions.
+After those two, the mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has closed come before any canary, and the standing authorization does **not** cover either of them: the **production ASSET sender** (`app/container.py` wires `UnwiredAssetSender`, which refuses every send with `LIVE_SENDER_NOT_WIRED`, so `ASSET_MUTATION_READY` stays `BLOCKED`) and the **durable canary-eligibility owner** of ADR-0018 §5 (`CANARY_NON_REGULATED` has no owner in `app/live/proofs.py`, so both stages stay `BLOCKED`). Each needs the user's own authorization — the sender because it is not provider-zero, the eligibility record because ADR-0018 §13 leaves its data model undecided — and that decision also fixes their order relative to each other. Only then do the residual-risk acceptance, the bounded LIVE grant use, the real canary (ADR-0018 §12 area 5, only after every prerequisite is green) and the M5 acceptance run follow; all four remain explicit user decisions.
 
 **Registration authoring / AI sequencing note (Issue #127).** The list / quick panel / full individual
 editor product shape may be finalized while the first vertical is in progress, but that is a UX and
@@ -838,6 +838,7 @@ Before any real marketplace write, and independently of endpoint adoption:
 - a **ComplianceGate owner**, or a canary product proven outside every regulated category (ADR-0018 §5);
 - a proven **backup and restore drill** of the canonical data root (ADR-0018 §7);
 - a **complete evidence-retention policy**, end to end, over sanitized provider evidence (ADR-0018 §8);
+- the two **mutation-stage prerequisites of ADR-0018 §10 that no slice has closed**: a **production ASSET sender** for the ASSET stage (`UnwiredAssetSender` declares the adopted wire endpoint and refuses every send with `LIVE_SENDER_NOT_WIRED`) and a **durable canary-eligibility owner** (ADR-0018 §5) proving `CANARY_NON_REGULATED`; while either is missing, that stage's send-time readiness stays `BLOCKED` on its own, and neither is authorized by the ADR-0020 standing authorization;
 - a **visual and responsive acceptance gate over populated UI state** (ADR-0018 §9). Gate 3 area 3 implements the gate — the populated harness, its contract and the reviewed record (`docs/acceptance/G3-VISUAL.md`) — but no accepted exact-main run is recorded yet.
 
 ## 14.3 Before any horizontal supplier expansion
