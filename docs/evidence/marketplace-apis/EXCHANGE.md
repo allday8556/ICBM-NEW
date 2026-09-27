@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | Exchange family covers collection completion, redelivery, hold/release and rejection/withdrawal. |
+| SmartStore | OFFICIAL_CAPTURED | Exchange family covers collection completion, redelivery, hold/release and rejection/withdrawal. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | Exchange family exposes request list, receipt confirmation, rejection and waybill upload. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | Claim API covers exchange request, collection, hold/withdrawal and redelivery waybill flow. |
