@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | `POST /v1/product-images/upload`; multipart/form-data; max 10 JPG/GIF/PNG/BMP; returns image URLs. SmartStore strict ledger remains authoritative. |
+| SmartStore | OFFICIAL_CAPTURED | `POST /v1/product-images/upload`; multipart/form-data; max 10 JPG/GIF/PNG/BMP; returns image URLs. Research-only catalog summary; strict SmartStore ledger remains authoritative for adoption/runtime status. |
 | Coupang | PARTIAL_OFFICIAL_CAPTURED | Product create schema contains image fields; no standalone upload endpoint captured. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | PARTIAL_OFFICIAL_CAPTURED | Product docs require image-upload API while preparing create data; exact upload endpoint not captured here. |
