@@ -104,6 +104,9 @@ class Layer(StrEnum):
     GRANT = "GRANT"
     ENDPOINT_ADOPTED = "ENDPOINT_ADOPTED"
     SENDER_WIRED = "SENDER_WIRED"
+    # §10 'residual-risk acceptance (§6.1)': a mandatory row of both stage columns, so it is a
+    # layer of the stack itself and never only a line of the canary summary.
+    RESIDUAL_RISK_ACCEPTED = "RESIDUAL_RISK_ACCEPTED"
     CANARY_NON_REGULATED = "CANARY_NON_REGULATED"
     RESTORE_PROOF = "RESTORE_PROOF"
     EVIDENCE_RETENTION = "EVIDENCE_RETENTION"
@@ -123,7 +126,14 @@ BRAKE_ENGAGED: Final = "LIVE_PROTECTED_WRITE_BRAKE_ENGAGED"
 BRAKE_UNREADABLE: Final = "LIVE_PROTECTED_WRITE_BRAKE_UNREADABLE"
 GRANT_MISSING: Final = "LIVE_GRANT_NO_MATCHING_ACTIVE_GRANT"
 ENDPOINT_NOT_ADOPTED: Final = "LIVE_ENDPOINT_NOT_ADOPTED"
+# §10: the CREATE endpoint-adoption row is CREATE **and** the positive-only reconcile path
+# (ADR-0014 §28); the missing one is named on its own, never folded into the CREATE sender's.
+RECONCILE_PATH_NOT_ADOPTED: Final = "LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED"
 SENDER_NOT_WIRED: Final = "LIVE_SENDER_NOT_WIRED"
+# §6.1 / G3-30: the explicit user and architect acceptance of the residual risk. It is **not
+# recorded** (§10); the decision is recorded in GitHub, never in the application, so it has no
+# durable owner here, is never proven in process and this layer always refuses.
+RESIDUAL_RISK_UNACCEPTED: Final = "LIVE_RESIDUAL_RISK_NOT_ACCEPTED"
 ELIGIBILITY_UNPROVEN: Final = "LIVE_CANARY_ELIGIBILITY_UNPROVEN"
 RESTORE_PROOF_ABSENT: Final = "LIVE_RESTORE_PROOF_ABSENT"
 RETENTION_UNPROVEN: Final = "LIVE_EVIDENCE_RETENTION_UNPROVEN"

@@ -528,6 +528,7 @@ def test_create_readiness_carries_the_stage_gate_the_owners_derive(
         intent,
         attempt_no=1,
         endpoint_adopted=True,
+        reconcile_path_adopted=True,
         scope=scope,
         stage_gate=StageGate(ready=False, reasons=("REGISTER_SEND_PREFLIGHT_NOT_READY",)),
     )

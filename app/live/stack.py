@@ -11,14 +11,20 @@ The layers (§4.3, §10), in order:
    policy is ``M0_DRY_RUN_ONLY``, so this layer refuses every mutation, whatever else is recorded;
 2. the protected-write brake is ``RELEASED`` (absent or unreadable is ``ENGAGED``);
 3. an ``ACTIVE`` grant of the mutation's stage matches its exact unit, in its window, with budget;
-4. the endpoint is adopted and, for an upload, a sender is wired;
-5. canary eligibility, a current restore proof, evidence retention and visual acceptance are
-   proven — no slice that proves them exists yet, so the production :class:`UnprovenStageProofs`
-   refuses each of them;
-6. for an upload: the ASSET attempt owner is readable and the replay-conflict scope of the exact
+4. the endpoint is adopted — for a CREATE that is both ``SMARTSTORE_PRODUCT_CREATE_V2`` and the
+   positive-only reconcile path (§10, ADR-0014 §28), each named on its own — and, for an upload, a
+   sender is wired;
+5. the residual-risk acceptance of §6.1 is recorded — at this main it is **not** recorded (§10),
+   and the decision is recorded in GitHub rather than in the application, so it has no durable owner
+   here and is never proven in process; this layer refuses every mutation at this main (G3-30);
+6. canary eligibility, a current restore proof, evidence retention and visual acceptance are
+   proven — production wires :class:`~app.live.proofs.DurableStageProofs`, whose restore, retention
+   and visual answers come from the area 2 and area 3 owners while canary eligibility (§5) still
+   has no owner and therefore refuses on its own;
+7. for an upload: the ASSET attempt owner is readable and the replay-conflict scope of the exact
    key is open (§3.4); for a CREATE, ADR-0014 §26's execution-scope brake stays the CREATE-only
    owner it is and is checked by the REGISTER execution owner before this stack runs;
-7. the stage's own gate: the current candidate preflight is ``READY`` with the grant's fingerprint.
+8. the stage's own gate: the current candidate preflight is ``READY`` with the grant's fingerprint.
 
 Readiness is **derived and read-only**: it reports the same layers without consuming anything, and
 even ``READY`` is never permission to write.
@@ -47,9 +53,11 @@ from app.live.model import (
     ENDPOINT_NOT_ADOPTED,
     GRANT_MISSING,
     MODE_NOT_LIVE,
+    RECONCILE_PATH_NOT_ADOPTED,
     REPLAY_APPLIED_REUSE_NOT_ADOPTED,
     REPLAY_KEY_UNDETERMINABLE,
     REPLAY_UNRESOLVED,
+    RESIDUAL_RISK_UNACCEPTED,
     RESTORE_PROOF_ABSENT,
     RETENTION_UNPROVEN,
     SCOPE_NOT_ACTIVE,
@@ -129,9 +137,11 @@ class ModeReader(Protocol):
 
 
 class StageProofs(Protocol):
-    """The proven prerequisites of §5, §7, §8 and §9: each a later, separately authorized slice."""
+    """The proven prerequisites of §5, §6.1, §7, §8 and §9 that the stack reads, never decides."""
 
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool: ...
+
+    def residual_risk_accepted(self) -> bool: ...
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool: ...
 
@@ -141,9 +151,19 @@ class StageProofs(Protocol):
 
 
 class UnprovenStageProofs:
-    """Production at this main: no eligibility, restore, retention or visual slice exists."""
+    """The fail-closed fallback: every §5-§9 prerequisite unproven, whatever is recorded.
+
+    **Production does not wire this class.** ``app.container`` wires
+    :class:`~app.live.proofs.DurableStageProofs`, which reads the area 2 restore and retention
+    owners and the area 3 visual acceptance owner; only canary eligibility (§5) and the
+    residual-risk acceptance (§6.1) have no owner there and refuse for that reason. This class
+    exists for a caller that wires no proof owner at all, so an absent owner is never read as proof.
+    """
 
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
+        return False
+
+    def residual_risk_accepted(self) -> bool:
         return False
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:
@@ -210,6 +230,7 @@ class SafetyStack:
         intent: IntentRecord,
         attempt_no: int,
         endpoint_adopted: bool,
+        reconcile_path_adopted: bool,
         scope: ScopeRecord,
         truth_fence: int,
         actor: str,
@@ -221,6 +242,11 @@ class SafetyStack:
         after a ``NOT_APPLIED_PROVEN`` attempt the next attempt needs a new grant (G3-27). ``scope``
         is ADR-0014 §26's execution-scope brake as its owner reads it in this same unit: its state
         and generation are part of the restore target a CREATE proof must match (§7).
+
+        The CREATE endpoint-adoption requirement of §10 is **both** endpoints: the CREATE contract
+        (``endpoint_adopted``) and the positive-only reconcile path (``reconcile_path_adopted``,
+        ADR-0014 §28). Each is its own layer, so the missing one is named and neither stands in for
+        the other.
         """
         unit = self._store.unit(session)
         # First, before this unit writes anything: no owner wrote since the final preflight was
@@ -235,6 +261,7 @@ class SafetyStack:
             endpoint_adopted=endpoint_adopted,
         )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        layers.append(_reconcile_layer(reconcile_path_adopted))
         layers.append(_scope_layer(scope))
         layers.append(_layer(Layer.SEND_TIME_TRUTH, truth_held, TRUTH_MOVED))
         _refuse_unless_all(layers)
@@ -247,6 +274,7 @@ class SafetyStack:
         *,
         attempt_no: int,
         endpoint_adopted: bool,
+        reconcile_path_adopted: bool,
         scope: ScopeRecord,
         stage_gate: "StageGate",
     ) -> StageReadiness:
@@ -260,6 +288,8 @@ class SafetyStack:
                 endpoint_adopted=endpoint_adopted,
             )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        # §10: the CREATE endpoint-adoption row is CREATE **and** the positive-only reconcile path.
+        layers.append(_reconcile_layer(reconcile_path_adopted))
         # §10: the §26 brake ACTIVE is its own requirement, whatever a restore proof says.
         layers.append(_scope_layer(scope))
         # §10 "the stage's own gate" (area 1 carry-forward): the final preflight READY with the
@@ -531,6 +561,15 @@ class SafetyStack:
             _layer(Layer.EXECUTION_MODE, live, MODE_NOT_LIVE),
             brake_layer,
             _layer(Layer.ENDPOINT_ADOPTED, endpoint_adopted, ENDPOINT_NOT_ADOPTED),
+            # §10 'residual-risk acceptance (§6.1)': a mandatory row of both stage columns, proven
+            # from its own evidence and never asserted. At this main it is not recorded, and the
+            # decision is recorded in GitHub rather than in the application, so it has no durable
+            # owner here, no production proof source answers True and this layer refuses (G3-30).
+            _layer(
+                Layer.RESIDUAL_RISK_ACCEPTED,
+                proofs.residual_risk_accepted(),
+                RESIDUAL_RISK_UNACCEPTED,
+            ),
             _layer(
                 Layer.CANARY_NON_REGULATED,
                 proofs.canary_non_regulated(stage, unit_ref),
@@ -581,6 +620,11 @@ class SafetyStack:
 
 def _layer(layer: Layer, satisfied: bool, reason: str | None) -> LayerView:
     return LayerView(layer=layer, satisfied=satisfied, reason_code=None if satisfied else reason)
+
+
+def _reconcile_layer(adopted: bool) -> LayerView:
+    """§10: the CREATE stage also waits for the positive-only reconcile path (ADR-0014 §28)."""
+    return _layer(Layer.ENDPOINT_ADOPTED, adopted, RECONCILE_PATH_NOT_ADOPTED)
 
 
 def _scope_layer(scope: ScopeRecord) -> LayerView:

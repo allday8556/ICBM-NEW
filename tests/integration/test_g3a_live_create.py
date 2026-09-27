@@ -19,7 +19,7 @@ from app.core.errors import AppError, ErrorClass, InputValidationError
 from app.live import model as live_model
 from app.live.authority import LiveAuthorityService
 from app.live.model import GrantState, MutationRefused, MutationStage
-from app.live.stack import SafetyStack, StageGate
+from app.live.stack import SafetyStack, StageGate, Verdict
 from app.live.store import ArtifactRef, LiveAuthorityStore
 from app.products.model import ReadinessStatus
 from app.register.authoring import AuthoredInputs, decode_inputs, encode_inputs
@@ -27,6 +27,7 @@ from app.register.execution import ExecutionRefused
 from app.register.model import IntentState
 from app.register.store import RegistrationStore
 from tests.integration.test_m5_register_execution import (
+    FakeLookup,
     FakeSender,
     _pause,
     context,
@@ -81,6 +82,18 @@ def permitted(container: Container, **proofs: frozenset[str]) -> SafetyStack:
     )
 
 
+def sendable(container: Container, prep: Preparation, **overrides: Any) -> Any:
+    """``execution`` with the §10 CREATE endpoint-adoption row satisfied.
+
+    ADR-0018 §10 makes that row **both** the CREATE contract and the positive-only reconcile path
+    (ADR-0014 §28), and production adopts neither. A test that must reach the layers behind it
+    declares the reconcile path adopted, exactly as :class:`ProvenProofs` declares §5-§9 proven.
+    Nothing is sent either way: the sender stays :class:`FakeSender`.
+    """
+    overrides.setdefault("lookup", FakeLookup(is_available=True))
+    return execution(container, prep, **overrides)
+
+
 def create_grant(container: Container, intent_id: str) -> str:
     now = container.clock.now()
     return container.live_authority.issue_create_grant(
@@ -118,6 +131,12 @@ def test_the_production_stack_refuses_every_create_at_this_main(
     assert refused.value.code == live_model.MODE_NOT_LIVE
     reasons = {layer["reason"] for layer in refused.value.details["layers"]}
     assert live_model.RESTORE_PROOF_ABSENT in reasons
+    # §10's own rows, each refusing on its own: the CREATE endpoint-adoption row is CREATE **and**
+    # the positive-only reconcile path (ADR-0014 §28), and the residual-risk acceptance of §6.1 is
+    # not recorded — that decision is recorded in GitHub, with no durable owner here, so nothing in
+    # process can answer it (G3-30).
+    assert live_model.RECONCILE_PATH_NOT_ADOPTED in reasons
+    assert live_model.RESIDUAL_RISK_UNACCEPTED in reasons
     # The unit rolled back: no Attempt, the Intent unmoved, nothing sent, nothing spent.
     assert store.attempts(ready.intent_id) == ()
     intent = store.intent(ready.intent_id)
@@ -139,7 +158,7 @@ def test_a_permitted_stack_spends_exactly_the_grant_of_this_attempt(
     ready = prepare(container, sources, store, account, prep)
     release(container)
     stack = permitted(container)
-    run = execution(container, prep, authority=stack)
+    run = sendable(container, prep, authority=stack)
     # No grant: refused before any attempt, whatever else is proven.
     with pytest.raises(ExecutionRefused) as refused:
         run.service.run(context(ready))
@@ -168,7 +187,7 @@ def test_a_retry_after_a_proven_non_application_needs_a_new_grant(
         error_class=ErrorClass.TRANSIENT,
         error_code="SMARTSTORE_5XX",
     )
-    run = execution(container, prep, authority=permitted(container), sender=sender)
+    run = sendable(container, prep, authority=permitted(container), sender=sender)
     create_grant(container, ready.intent_id)
     with pytest.raises(AppError):
         run.service.run(context(ready))
@@ -217,7 +236,7 @@ def test_a_create_grant_names_a_sendable_intent_and_its_next_attempt(
     prep: Preparation,
 ) -> None:
     ready = prepare(container, sources, store, account, prep)
-    run = execution(container, prep, authority=permitted(container))
+    run = sendable(container, prep, authority=permitted(container))
     release(container)
     create_grant(container, ready.intent_id)
     run.service.run(context(ready))
@@ -244,7 +263,7 @@ def test_an_unspent_grant_for_an_earlier_attempt_never_admits_the_retry(
         error_class=ErrorClass.TRANSIENT,
         error_code="SMARTSTORE_5XX",
     )
-    run = execution(container, prep, authority=permitted(container), sender=sender)
+    run = sendable(container, prep, authority=permitted(container), sender=sender)
     both = (create_grant(container, ready.intent_id), create_grant(container, ready.intent_id))
     with pytest.raises(AppError):
         run.service.run(context(ready))
@@ -284,6 +303,97 @@ def test_an_expired_or_revoked_create_grant_never_matches(
         run.service.run(context(ready))
     assert refused.value.code == live_model.GRANT_MISSING
     assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+
+
+def test_the_unadopted_reconcile_path_alone_refuses_the_create_and_spends_nothing(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    """Post-merge full audit of main ``6c6a39784f55``: ADR-0018 §10 makes the CREATE stage's
+    endpoint-adoption requirement `CREATE_ADOPTED` **and** `RECONCILE_PATH_ADOPTED` — the latter
+    positive-only (ADR-0014 §28) — and every requirement of that table is a mandatory layer of the
+    send-time stack. So a CREATE with every other layer satisfied, including a spendable grant and
+    an available CREATE sender, is still refused before transmission while
+    `SMARTSTORE_PRODUCT_SEARCH` is `NOT_ADOPTED`, and it spends nothing."""
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    grant_id = create_grant(container, ready.intent_id)
+    # The default lookup is unavailable, exactly as the production seam is (§17.2).
+    run = execution(container, prep, authority=permitted(container))
+    assert run.lookup.available() is False
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    assert refused.value.code == live_model.RECONCILE_PATH_NOT_ADOPTED
+    # The unit rolled back: no Attempt, the Intent unmoved, nothing sent, no budget spent.
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.PREPARED
+    grant = container.live_authority.grant_record(grant_id)
+    assert grant is not None and (grant.budget_used, grant.state) == (0, GrantState.ACTIVE)
+    assert "LIVE_MUTATION_REFUSED" in [e.event_type for e in container.audit.list_events(limit=200)]
+    # The readiness names the same layer, and adopting it is what clears it — nothing else does.
+    from app.register.execution import CREATE_ENDPOINT_GROUP
+
+    scope = store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP)
+    blocked = _permitted_stack(container).create_readiness(
+        intent,
+        attempt_no=1,
+        endpoint_adopted=True,
+        reconcile_path_adopted=False,
+        scope=scope,
+        stage_gate=StageGate(ready=True),
+    )
+    assert blocked.missing == (live_model.RECONCILE_PATH_NOT_ADOPTED,)
+    opened = _permitted_stack(container).create_readiness(
+        intent,
+        attempt_no=1,
+        endpoint_adopted=True,
+        reconcile_path_adopted=True,
+        scope=scope,
+        stage_gate=StageGate(ready=True),
+    )
+    assert opened.verdict is Verdict.READY
+
+
+def test_the_unaccepted_residual_risk_alone_refuses_the_create_and_spends_nothing(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    """Post-merge full audit of main ``6c6a39784f55``: the residual-risk acceptance of ADR-0018 §6.1
+    is a mandatory row of both §10 stage columns (G3-30), so it is a layer of the send-time stack
+    and not only a line of the canary summary. With every other layer satisfied the CREATE is still
+    refused before transmission, and the production proof source can never satisfy it: the
+    acceptance is not recorded, and that decision is recorded in GitHub with no durable owner
+    here."""
+    from app.live.proofs import DurableStageProofs
+
+    ready = prepare(container, sources, store, account, prep)
+    release(container)
+    grant_id = create_grant(container, ready.intent_id)
+    unaccepted = permitted(container, missing=frozenset({"residual_risk"}))
+    run = sendable(container, prep, authority=unaccepted)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    assert refused.value.code == live_model.RESIDUAL_RISK_UNACCEPTED
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    grant = container.live_authority.grant_record(grant_id)
+    assert grant is not None and (grant.budget_used, grant.state) == (0, GrantState.ACTIVE)
+    # No proof source production wires answers it, whatever drill, retention or visual exists.
+    assert (
+        DurableStageProofs(
+            store=LiveAuthorityStore(container.db, container.clock, container.audit),
+            retention=container.retention,
+            visual=container.visual_acceptance,
+            schema_head=lambda: "head",
+        ).residual_risk_accepted()
+        is False
+    )
 
 
 # ---------------------------------------------------------------- the ASSET grant unit (B1)
@@ -478,6 +588,7 @@ def test_a_section_26_scope_change_stales_the_create_restore_target(
             intent,
             attempt_no=1,
             endpoint_adopted=True,
+            reconcile_path_adopted=True,
             scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
             stage_gate=StageGate(ready=True),
         )
@@ -503,7 +614,7 @@ def test_a_section_26_scope_change_stales_the_create_restore_target(
         proofs=ProvenProofs(accept={before}),
         clock=container.clock,
     )
-    run = execution(container, prep, authority=stale)
+    run = sendable(container, prep, authority=stale)
     with pytest.raises(ExecutionRefused) as refused:
         run.service.run(context(ready))
     assert refused.value.code == live_model.RESTORE_PROOF_ABSENT
@@ -514,7 +625,7 @@ def test_a_section_26_scope_change_stales_the_create_restore_target(
         proofs=ProvenProofs(accept={after}),
         clock=container.clock,
     )
-    result = execution(container, prep, authority=fresh).service.run(context(ready))
+    result = sendable(container, prep, authority=fresh).service.run(context(ready))
     assert result.intent_state is IntentState.CONFIRMED
 
 
@@ -550,6 +661,7 @@ def test_a_paused_section_26_scope_blocks_create_readiness_whatever_the_proofs(
         intent,
         attempt_no=1,
         endpoint_adopted=True,
+        reconcile_path_adopted=True,
         scope=store.execution_scope(MARKET, account, CREATE_ENDPOINT_GROUP),
         stage_gate=StageGate(ready=True),
     )
@@ -599,7 +711,7 @@ def test_a_dependency_written_after_the_send_gate_refuses_the_create(
     release(container)
     grant_id = create_grant(container, ready.intent_id)
     other = ready_item(container, sources, "9876")
-    run = execution(container, prep, authority=_permitted_stack(container))
+    run = sendable(container, prep, authority=_permitted_stack(container))
     gate = run.service._gate
 
     def gate_then_move(*args: Any, **kwargs: Any) -> Any:

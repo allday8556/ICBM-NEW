@@ -1,7 +1,8 @@
 """The SmartStore side of registration execution (M5 PR-E).
 
 CREATE and product search remain NOT_ADOPTED. IMAGE UPLOAD is separately adopted, but is not wired
-to this registration execution module: it has its own one-call adapter and no durable owner.
+to this registration execution module: it has its own one-call adapter, and its durable owner is the
+ASSET upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``, Gate 3 area 1), not anything here.
 The production seams here are shaped by those boundaries:
 
 * :class:`SmartStoreCreateSender` reports unavailable and, if called anyway, raises before any

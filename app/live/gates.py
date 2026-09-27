@@ -68,8 +68,10 @@ class CanaryStageReadiness:
     mode and policy, the protected-write brake, the stage's exact grant, endpoint adoption and the
     sender, canary eligibility, the current restore proof, evidence retention, the recorded visual
     acceptance, the durable upload-attempt owner, the ADR-0014 §26 scope brake and the stage's own
-    gate) reaches the canary summary. Fail closed: an absent Intent, preparation or grant is not
-    ``READY``.
+    gate) reaches the canary summary. The endpoint-adoption layers are the whole §10 row — for
+    CREATE the sender's contract **and** the positive-only reconcile path — and the residual-risk
+    acceptance of §6.1 is a layer of each stage, so neither reaches the summary as a separate,
+    weaker line. Fail closed: an absent Intent, preparation or grant is not ``READY``.
     """
 
     def __init__(
@@ -81,6 +83,7 @@ class CanaryStageReadiness:
         registrations: RegistrationStore,
         preparations: ExecutionCopySource,
         create_sender_available: Callable[[], bool],
+        reconcile_path_adopted: Callable[[], bool],
         endpoint_group: str,
     ) -> None:
         self._stack = stack
@@ -89,6 +92,7 @@ class CanaryStageReadiness:
         self._registrations = registrations
         self._preparations = preparations
         self._create_sender_available = create_sender_available
+        self._reconcile_path_adopted = reconcile_path_adopted
         self._endpoint_group = endpoint_group
 
     def create_ready(self, intent_id: str) -> bool:
@@ -103,6 +107,7 @@ class CanaryStageReadiness:
             # next send would actually open — never on a past one.
             attempt_no=max((attempt.attempt_no for attempt in attempts), default=0) + 1,
             endpoint_adopted=self._create_sender_available(),
+            reconcile_path_adopted=self._reconcile_path_adopted(),
             scope=self._registrations.execution_scope(
                 intent.marketplace_key, intent.marketplace_account_id, self._endpoint_group
             ),

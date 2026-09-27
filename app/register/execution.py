@@ -145,6 +145,7 @@ class CreateAuthority(Protocol):
         intent: IntentRecord,
         attempt_no: int,
         endpoint_adopted: bool,
+        reconcile_path_adopted: bool,
         scope: ScopeRecord,
         truth_fence: int,
         actor: str,
@@ -612,6 +613,15 @@ class RegistrationExecutionService:
         send-time stack is given (ADR-0018 §10). Read-only, so a readiness can report the layer."""
         return bool(self._sender.available())
 
+    def reconcile_path_adopted(self) -> bool:
+        """Whether the positive-only reconcile path is adopted (ADR-0014 §28, ADR-0018 §10).
+
+        The CREATE stage's endpoint-adoption requirement is CREATE **and** this path, so the stack
+        is given both. Fail-closed: the seam answers ``False`` while `SMARTSTORE_PRODUCT_SEARCH` is
+        `NOT_ADOPTED`, and no zero-result or absence meaning is ever read into it (§17.2).
+        """
+        return bool(self._lookup.available())
+
     def readback_proves_published_state(self) -> bool:
         """Whether the read-back comparison can carry a published state at all (§11).
 
@@ -697,6 +707,7 @@ class RegistrationExecutionService:
                     intent=intent,
                     attempt_no=next_attempt + 1,
                     endpoint_adopted=self._sender.available(),
+                    reconcile_path_adopted=self._lookup.available(),
                     scope=unit.execution_scope(
                         intent.marketplace_key,
                         intent.marketplace_account_id,

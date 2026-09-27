@@ -506,7 +506,13 @@ def test_the_canary_plan_never_lets_readback_adoption_stand_for_the_proofs_it_do
 
 def test_the_two_readback_proofs_narrow_the_plan_without_making_it_unsatisfiable() -> None:
     """They are requirements, not a permanent stop: a seam that proves both leaves the plan able
-    to reach READY, exactly as every other proof does."""
+    to reach READY, exactly as every other proof does.
+
+    ``create_stage_ready`` is a fact the stage's own owner decides, and ADR-0018 §10 makes every row
+    of its table — the whole endpoint-adoption row and the residual-risk acceptance of §6.1
+    included — a layer of that stage rather than a second, weaker line here. A stage verdict handed
+    in therefore already carries them; ``test_g3a_live_create`` proves the stack refuses on each.
+    """
     proven = _canary_facts(readback_executable=True, published_state_provable=True)
     assert _canary(proven).verdict is CanaryVerdict.READY
 
@@ -567,12 +573,16 @@ def test_the_canary_summary_reads_each_stage_from_the_owner_that_decides_it() ->
     source = inspect.getsource(CanaryStageReadiness)
     assert "self._stack.create_readiness(" in source
     assert "self._assets.readiness(grant.grant_id).verdict is Verdict.READY" in source
+    # §10's CREATE endpoint-adoption row is both endpoints, so the summary hands the stack both
+    # facts instead of reading the CREATE sender as if it covered the reconcile path (ADR-0014 §28).
+    assert "reconcile_path_adopted=self._reconcile_path_adopted()," in source
     # Fail closed: an absent Intent, preparation or matching grant is never a ready stage.
     assert "return False" in source
     container = Path(__file__).resolve().parents[2] / "app" / "container.py"
     wiring = container.read_text("utf-8")
     assert "canary_stages = CanaryStageReadiness(" in wiring
     assert "stages=canary_stages," in wiring
+    assert "reconcile_path_adopted=registration_execution.reconcile_path_adopted," in wiring
 
 
 def test_the_adopted_smartstore_readback_proves_no_published_state() -> None:
