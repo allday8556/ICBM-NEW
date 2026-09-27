@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | `GET /v1/contents/qnas` lists product inquiries; official family includes answer create/update. |
+| SmartStore | OFFICIAL_CAPTURED | `GET /v1/contents/qnas` lists product inquiries; official family includes answer create/update. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | Customer Service family exposes product inquiry reads/replies and call-center inquiry APIs. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | `GET /v1/store/qna` lists product Q&A by qnaId/productId/answer state. |
