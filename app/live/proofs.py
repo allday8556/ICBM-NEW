@@ -40,8 +40,9 @@ class DurableStageProofs:
         return False
 
     def residual_risk_accepted(self) -> bool:
-        # §6.1: recorded in GitHub, with no durable owner. Nothing in process may answer True, so
-        # the §10 layer refuses every mutation of both stages at this main.
+        # §6.1: not recorded (§10), and the decision is recorded in GitHub rather than in the
+        # application, so it has no durable owner here. Nothing in process may answer True, so the
+        # §10 layer refuses every mutation of both stages at this main.
         return False
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:

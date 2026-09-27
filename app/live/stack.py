@@ -14,8 +14,9 @@ The layers (§4.3, §10), in order:
 4. the endpoint is adopted — for a CREATE that is both ``SMARTSTORE_PRODUCT_CREATE_V2`` and the
    positive-only reconcile path (§10, ADR-0014 §28), each named on its own — and, for an upload, a
    sender is wired;
-5. the residual-risk acceptance of §6.1 is recorded — it lives in GitHub, has no durable owner and
-   is therefore never proven in process, so this layer refuses every mutation at this main (G3-30);
+5. the residual-risk acceptance of §6.1 is recorded — at this main it is **not** recorded (§10),
+   and the decision is recorded in GitHub rather than in the application, so it has no durable owner
+   here and is never proven in process; this layer refuses every mutation at this main (G3-30);
 6. canary eligibility, a current restore proof, evidence retention and visual acceptance are
    proven — production wires :class:`~app.live.proofs.DurableStageProofs`, whose restore, retention
    and visual answers come from the area 2 and area 3 owners while canary eligibility (§5) still
@@ -561,8 +562,9 @@ class SafetyStack:
             brake_layer,
             _layer(Layer.ENDPOINT_ADOPTED, endpoint_adopted, ENDPOINT_NOT_ADOPTED),
             # §10 'residual-risk acceptance (§6.1)': a mandatory row of both stage columns, proven
-            # from its own evidence and never asserted. It is recorded in GitHub and has no durable
-            # owner, so no production proof source answers True and this layer refuses (G3-30).
+            # from its own evidence and never asserted. At this main it is not recorded, and the
+            # decision is recorded in GitHub rather than in the application, so it has no durable
+            # owner here, no production proof source answers True and this layer refuses (G3-30).
             _layer(
                 Layer.RESIDUAL_RISK_ACCEPTED,
                 proofs.residual_risk_accepted(),

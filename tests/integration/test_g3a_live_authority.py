@@ -248,8 +248,9 @@ def test_the_production_upload_path_refuses_every_upload_at_this_main(
         live_model.RESTORE_PROOF_ABSENT,
         live_model.RETENTION_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
-        # §10's residual-risk row (§6.1, G3-30): recorded in GitHub, no durable owner, so the
-        # production proof source never answers True and the ASSET stage refuses on it too.
+        # §10's residual-risk row (§6.1, G3-30): not recorded, and the decision is recorded in
+        # GitHub with no durable owner here, so the production proof source never answers True and
+        # the ASSET stage refuses on it too.
         live_model.RESIDUAL_RISK_UNACCEPTED,
     } <= reasons
     # Nothing started, nothing spent, and the refusal is audited.

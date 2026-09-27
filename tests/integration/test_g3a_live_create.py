@@ -133,7 +133,8 @@ def test_the_production_stack_refuses_every_create_at_this_main(
     assert live_model.RESTORE_PROOF_ABSENT in reasons
     # §10's own rows, each refusing on its own: the CREATE endpoint-adoption row is CREATE **and**
     # the positive-only reconcile path (ADR-0014 §28), and the residual-risk acceptance of §6.1 is
-    # recorded in GitHub with no durable owner, so nothing in process can answer it (G3-30).
+    # not recorded — that decision is recorded in GitHub, with no durable owner here, so nothing in
+    # process can answer it (G3-30).
     assert live_model.RECONCILE_PATH_NOT_ADOPTED in reasons
     assert live_model.RESIDUAL_RISK_UNACCEPTED in reasons
     # The unit rolled back: no Attempt, the Intent unmoved, nothing sent, nothing spent.
@@ -368,7 +369,8 @@ def test_the_unaccepted_residual_risk_alone_refuses_the_create_and_spends_nothin
     is a mandatory row of both §10 stage columns (G3-30), so it is a layer of the send-time stack
     and not only a line of the canary summary. With every other layer satisfied the CREATE is still
     refused before transmission, and the production proof source can never satisfy it: the
-    acceptance is recorded in GitHub and has no durable owner."""
+    acceptance is not recorded, and that decision is recorded in GitHub with no durable owner
+    here."""
     from app.live.proofs import DurableStageProofs
 
     ready = prepare(container, sources, store, account, prep)
