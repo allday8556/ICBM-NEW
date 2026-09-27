@@ -2,7 +2,7 @@
 
 | Platform | Status | Captured official fact |
 | --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | Official 발주/발송 family supports dispatch processing; exact dispatch path should be re-read before adoption. |
+| SmartStore | PARTIAL_OFFICIAL_CAPTURED | Official 발주/발송 family supports dispatch processing; exact dispatch path should be re-read before adoption. Research-only source note; not registered/adopted in the strict SmartStore ledger. |
 | Coupang | OFFICIAL_CAPTURED | `POST /v2/providers/openapi/apis/api/v4/vendors/{vendorId}/orders/invoices` uploads waybills. |
 | 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
 | Kakao Shopping | OFFICIAL_CAPTURED | `POST /v1/shopping/orders/deliveries/invoices`; max 100 waybills; processing is asynchronous and docs advise read-back delay. |
