@@ -23,7 +23,7 @@ PRODUCT_CREATE
 
 ## Validation level
 
-- SmartStore: current connected marketplace; strict evidence/adoption/runtime rules remain.
+- SmartStore: current connected marketplace; strict evidence/adoption/runtime rules remain. SmartStore rows that are **not yet present in the strict platform ledger** are research-only source notes, not adopted contracts, and must be promoted through the normal SmartStore evidence/adoption path before implementation.
 - Other marketplaces: manual pre-research only. Check official source, freshness/date, copied facts, and explicit unknowns.
 - Strong GPT+Claude implementation review is deferred until a platform/capability is actually proposed for ICBM adoption.
 
@@ -59,7 +59,7 @@ PRODUCT_CREATE
 
 ## Independent review boundary
 
-The non-SmartStore endpoint paths and semantics in this catalog are **manual pre-research notes** and have not been independently cross-audited endpoint-by-endpoint. Re-check the cited current official source when a platform/capability is selected for actual ICBM adoption or implementation.
+Endpoint paths and semantics in this catalog that are not already registered in a platform's canonical ledger are **manual pre-research notes** and have not been independently cross-audited endpoint-by-endpoint. This includes SmartStore rows outside `docs/platforms/smartstore/SOURCES.md` / `ENDPOINT_MATRIX.md`. Re-check the cited current official source and promote it into the strict ledger before actual ICBM adoption or implementation.
 
 ## Files
 
