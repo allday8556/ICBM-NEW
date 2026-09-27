@@ -90,9 +90,31 @@ item 1 (M5) are, in order and each as its own PR:
 | 1 | **CREATE adoption** — `SMARTSTORE_PRODUCT_CREATE_V2` | the official CREATE request/response contract; the error classification that separates a definitive rejection from an ambiguous outcome (ADR-0018 §6.1); `UNKNOWN` is never resent (ADR-0014 §28, G3-07); the runtime, tests and docs of that adoption, including the endpoint's adoption status | any SmartStore call; LIVE; canary; residual-risk acceptance; SEARCH; M6 |
 | 2 | **SEARCH positive-only reconcile adoption** — `SMARTSTORE_PRODUCT_SEARCH` | limited to the positive reconcile of ADR-0014 §28.2–§28.4 and its exact request, response and pagination contract; a separate slice after CREATE | any SmartStore call; LIVE; canary; residual-risk acceptance; zero-result absence inference |
 
-After these, the steps that remain before M5 acceptance — the residual-risk acceptance, the bounded
-LIVE grant use, the real canary and the M5 acceptance run — are all outside this standing
-authorization (§3).
+After these two, the **mandatory mutation-stage prerequisites of ADR-0018 §10 that no slice has
+closed** stay ahead of any canary. This ADR authorizes neither of them, and neither may be skipped.
+ADR-0018 §10 fixes no order between the two — each refuses on its own — so they take no numbered
+position in the order above:
+
+| still-missing prerequisite | why it is mandatory | why this ADR does not authorize it |
+| --- | --- | --- |
+| the **production ASSET sender** — `app/container.py` wires `UnwiredAssetSender`, which declares the adopted wire endpoint and refuses every send (`LIVE_SENDER_NOT_WIRED`) | `ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19) and stays `BLOCKED` while no ASSET sender is wired (ADR-0018 §10, Consequences) | a sender that transmits to the provider is not provider-zero and no canonical contract decides its boundary, so §2.3 is not met and §3 stops it for the user |
+| the **durable canary-eligibility owner** (ADR-0018 §5) — `CANARY_NON_REGULATED`; `app/live/proofs.py` has no owner and answers unproven | both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it | the eligibility record's data model is explicitly undecided (ADR-0018 §13), so §2.5 is not met and §3 stops it for the user |
+
+Their order relative to each other is part of the user's decision on each; both precede any canary.
+
+Only then do the steps that remain before M5 acceptance — the residual-risk acceptance, the bounded
+LIVE grant use, the real canary (ADR-0018 §12 area 5, permitted "only after every prerequisite is
+green") and the M5 acceptance run — follow, and they are all outside this standing authorization
+(§3). Nothing here shortens that remaining work: every other requirement of ADR-0018 §10 — the
+stage's grant, the released protected-write brake, a current restore proof, evidence-retention
+readiness, a recorded visual acceptance at the accepted SHA, the durable ASSET upload-attempt owner
+and leaving `M0_DRY_RUN_ONLY` — keeps its own condition and its own decision.
+
+> **Correction note (post-merge full audit of main `a523c55add2b`).** The paragraph and the second
+> table above replace an earlier sequence that named only the residual-risk acceptance, the bounded
+> LIVE grant use, the real canary and the M5 acceptance run, and so omitted two mandatory ADR-0018
+> §10 prerequisites. This correction grants nothing: both prerequisites are recorded as still
+> missing and as user decisions (§3, SA-10), and no invariant of ADR-0014 or ADR-0018 is changed.
 
 An adoption slice updates the adoption status of **its own endpoint only** — in
 `docs/platforms/smartstore/ENDPOINT_MATRIX.md`, `docs/acceptance/M5.md` and the invariant text and
@@ -113,6 +135,7 @@ SA-06  schema or migration is authorized here only where a canonical contract al
 SA-07  LIVE, a real canary, the residual-risk acceptance, new architecture or policy, conflicting canon, unclear scope, undecided data model and scope expansion always stop for the user
 SA-08  each slice passes CI, the GPT exact-head audit and the independent Claude cross-audit, merges only under the exact-HEAD/main guard, and the new main is audited before the next selection
 SA-09  CREATE adoption and SEARCH positive-only reconcile adoption are two separate slices, CREATE first
+SA-10  §4's remaining-work order never omits a mandatory ADR-0018 §10 prerequisite; the production ASSET sender and the durable canary-eligibility owner are still missing, are not authorized here, and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 is green
 ```
 
 ## Consequences
@@ -121,6 +144,8 @@ SA-09  CREATE adoption and SEARCH positive-only reconcile adoption are two separ
   §3 still stops for the user.
 - The audits of each slice judge it against its canonical scope; a scope violation or a weakened
   safety rule is a blocker as before.
+- §4's remaining-work order is read against ADR-0018 §10, never instead of it. A prerequisite found
+  missing from §4 is corrected in §4 before the next slice is selected, never worked around.
 - Reverting to per-slice user decisions needs a superseding ADR.
 
 ## References
