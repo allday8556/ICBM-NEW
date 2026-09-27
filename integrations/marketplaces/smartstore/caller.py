@@ -32,12 +32,14 @@ from app.core.errors import AppError
 from app.core.safe_payload import safe_payload
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
+from integrations.marketplaces.smartstore.product import CreateDocument
 from integrations.marketplaces.smartstore.registry import (
     BASE_URL,
     PROVIDER_HOST,
     EndpointContract,
     EndpointId,
     EndpointNotAdoptedError,
+    provider_product_no,
     resolve,
 )
 from integrations.marketplaces.smartstore.retention import retain
@@ -70,6 +72,11 @@ _PRODUCT_READS = frozenset(
     {EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2, EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2}
 )
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
+_PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
+# The CREATE identifiers the reviews name, in the order a result reports them: the origin-product
+# number is the identity the adopted read-back is performed by, the channel numbers travel with it
+# so neither provider identity is lost (ADR-0014 §28.2).
+_CHANNEL_NO_FIELDS = ("smartstoreChannelProductNo", "windowChannelProductNo")
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -146,6 +153,21 @@ class ImageUploadRequest:
 
 
 @dataclass(frozen=True)
+class ProductCreateRequest:
+    """One CREATE of one frozen provider-listing unit (ADR-0020 §4 slice 1).
+
+    The body is not a free mapping: it is the :class:`CreateDocument` the wire projection built
+    from the immutable ``RegistrationSnapshot``, and that document exists only when every part of
+    the CREATE contract is proven. Nothing else can reach ``POST /v2/products``.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    document: CreateDocument
+
+
+@dataclass(frozen=True)
 class ProductReadback:
     """A read-back response reduced to the endpoint's retained-field allow-list.
 
@@ -165,6 +187,30 @@ class ImageUploadResponse:
 
     retained: Mapping[str, object]
     http_status: int
+
+
+@dataclass(frozen=True)
+class ProductCreateResult:
+    """A CREATE response reduced to the endpoint's retained-field allow-list.
+
+    ``origin_product_no`` is the documented identity the adopted origin read-back is performed by;
+    ``channel_product_nos`` carries the channel identities the same response named, so neither
+    provider identity is lost (ADR-0014 §28.2). A result exists only for a response that passed the
+    success predicate, and it is **never** a registration success by itself: ADR-0014 §11 confirms
+    a registration only through read-back and Snapshot comparison.
+    """
+
+    retained: Mapping[str, object]
+    origin_product_no: str
+    channel_product_nos: tuple[str, ...]
+    http_status: int
+
+
+# Every typed result the registry-gated caller can return. The caller hands back one of these,
+# never the client, the composed URL or the provider response.
+CallResult = (
+    TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse | ProductCreateResult
+)
 
 
 class SmartStoreCallError(AppError):
@@ -216,7 +262,9 @@ def _endpoint_name(endpoint_id: object) -> str:
 def _generations(request: object) -> tuple[int | None, int | None]:
     if isinstance(request, TokenRequest):
         return request.credentials.credential_generation, None
-    if isinstance(request, AccountRequest | ProductReadRequest | ImageUploadRequest):
+    if isinstance(
+        request, AccountRequest | ProductReadRequest | ImageUploadRequest | ProductCreateRequest
+    ):
         return request.credential_generation, request.session_generation
     return None, None
 
@@ -229,6 +277,8 @@ class _Wire:
     headers: dict[str, str]
     form: dict[str, str]
     files: tuple[tuple[str, tuple[str, bytes, str]], ...] = ()
+    # The JSON request body of an adopted endpoint whose media type is application/json.
+    json_body: Mapping[str, object] | None = None
 
 
 def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
@@ -286,6 +336,20 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
+    if contract.endpoint_id is _PRODUCT_CREATE:
+        if not isinstance(request, ProductCreateRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        document = request.document
+        if not isinstance(document, CreateDocument) or not document.body:
+            raise _Preflight("SMARTSTORE_CREATE_DOCUMENT_UNUSABLE")
+        # EM §4.2 (review 5768199984): Commerce API messages are JSON except file upload and
+        # download, so the CREATE body is application/json, from the contract, never guessed.
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        return _Wire(contract.path, headers, {}, json_body=dict(document.body))
     if contract.endpoint_id is _IMAGE_UPLOAD:
         if not isinstance(request, ImageUploadRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -320,9 +384,7 @@ def _marker(value: object) -> str | None:
     return value if isinstance(value, str) and _PROVIDER_MARKER.fullmatch(value) else None
 
 
-def _result(
-    contract: EndpointContract, request: object, body: object, status: int
-) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
+def _result(contract: EndpointContract, request: object, body: object, status: int) -> CallResult:
     """The typed result of a response that passed the endpoint's success predicate."""
     fields = cast(dict[str, object], body)
     if contract.endpoint_id in _PRODUCT_READS:
@@ -337,6 +399,23 @@ def _result(
     if contract.endpoint_id is _IMAGE_UPLOAD:
         assert isinstance(request, ImageUploadRequest)
         return ImageUploadResponse(retained=retain(contract, fields), http_status=status)
+    if contract.endpoint_id is _PRODUCT_CREATE:
+        assert isinstance(request, ProductCreateRequest)
+        # The predicate already proved the origin-product number; the channel numbers are kept
+        # when the response named them and are never invented when it did not.
+        origin = provider_product_no(fields.get("originProductNo"))
+        assert origin is not None
+        channels = tuple(
+            number
+            for name in _CHANNEL_NO_FIELDS
+            if (number := provider_product_no(fields.get(name))) is not None
+        )
+        return ProductCreateResult(
+            retained=retain(contract, fields),
+            origin_product_no=origin,
+            channel_product_nos=channels,
+            http_status=status,
+        )
     if contract.endpoint_id is EndpointId.SMARTSTORE_AUTH_TOKEN:
         assert isinstance(request, TokenRequest)
         return TokenGrant(
@@ -390,19 +469,22 @@ class SmartStoreEndpointCaller:
 
     @overload
     def call(
-        self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse: ...
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_CREATE_V2],
+        request: ProductCreateRequest,
+    ) -> ProductCreateResult: ...
 
-    def call(
-        self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
+    @overload
+    def call(self, endpoint_id: object, request: object) -> CallResult: ...
+
+    def call(self, endpoint_id: object, request: object) -> CallResult:
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
         contract: EndpointContract | None = None
         status: int | None = None
         trace_id: str | None = None
-        result: TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse | None = None
+        result: CallResult | None = None
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
@@ -435,11 +517,23 @@ class SmartStoreEndpointCaller:
                 if contract.success_predicate(status, body):
                     result = _result(contract, request, body, status)
                 else:
+                    provider_code = _marker(fields.get("code"))
+                    # The cause and the mutation outcome are independent axes (ERRORS §2). The
+                    # outcome stays UNKNOWN unless this endpoint's own reviewed whitelist admits
+                    # the response as a definitive provider rejection (ERRORS §15; ADR-0014
+                    # §28.3); a transient or rate-limited cause never makes a replay safe (§14).
+                    outcome = (
+                        RemoteOutcome.NOT_APPLIED_PROVEN
+                        if classify.definitive_rejection(
+                            contract.endpoint_id, status, provider_code
+                        )
+                        else remote_outcome(Phase.RESPONSE_RECEIVED)
+                    )
                     error = SmartStoreCallError(
                         endpoint,
-                        classify.response(status, _marker(fields.get("code"))),
+                        classify.response(status, provider_code),
                         Phase.RESPONSE_RECEIVED,
-                        remote_outcome(Phase.RESPONSE_RECEIVED),
+                        outcome,
                         http_status=status,
                     )
         credential_generation, session_generation = _generations(request)
@@ -513,6 +607,7 @@ class SmartStoreEndpointCaller:
                 headers=wire.headers,
                 data=wire.form or None,
                 files=wire.files or None,
+                json=wire.json_body,
                 extensions={"trace": recorder},
             )
             return client.send(request, follow_redirects=False)

@@ -58,17 +58,18 @@ def _code() -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- endpoints (ADR-0014 §17)
 
 M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
-# M5 PR-D adopts these two reads (packet 5746489554); nothing else, and nothing mutating.
+# M5 PR-D adopts the two reads (packet 5746489554), the IMAGE UPLOAD amendment the one-artifact
+# upload, and the ADR-0020 §4 slice 1 the product CREATE. Nothing else.
 M5_ADOPTED = frozenset(
     {
         "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
         "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+        "SMARTSTORE_PRODUCT_CREATE_V2",
     }
 )
 M5_UNPROVEN = frozenset(
     {
-        "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
@@ -79,15 +80,15 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-image-upload-r1"
+M5_MAPPING_REVISION = "m5-product-create-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
-    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the M5 PR-D read-backs."""
+    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the M5 adoptions."""
     return sorted(set(adopted) - M2_ENDPOINTS - M5_ADOPTED)
 
 
-def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
+def test_only_the_named_m5_contracts_are_adopted_and_the_rest_fail_locally() -> None:
     from integrations.marketplaces.smartstore import registry
 
     assert adoption_problems(e.value for e in registry.ADOPTED) == []
@@ -100,18 +101,20 @@ def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_only_image_upload_is_an_adopted_mutating_contract() -> None:
+def test_the_adopted_mutating_contracts_are_exactly_the_two_authorized_ones() -> None:
     from integrations.marketplaces.smartstore import registry
 
-    assert [c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating] == [
-        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    assert "SMARTSTORE_PRODUCT_CREATE_V2" in {e.value for e in registry.NOT_ADOPTED}
+    # The positive-only reconcile path is its own later slice (ADR-0020 SA-09).
+    assert "SMARTSTORE_PRODUCT_SEARCH" in {e.value for e in registry.NOT_ADOPTED}
 
 
 def test_the_adoption_detector_fires() -> None:
-    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_CREATE_V2"]
-    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_CREATE_V2"]
+    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_SEARCH"]
+    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_SEARCH"]
 
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
@@ -1255,12 +1258,22 @@ RULES["S28.2 a search candidate is not presence until its read-back carries the 
     ),
 )
 
+# The CREATE adoption slice (ADR-0020 §4 slice 1) updated this pin together with the §17.2 text it
+# pins, as ADR-0020 §4 requires of an adoption slice - by amendment note, never by silent rewrite.
+# The verdict clauses are unchanged; the first phrase now names the one endpoint still NOT_ADOPTED,
+# and the amendment note's own guarantees are pinned beside them.
 RULES["S17.2 the verdict stands; adoption never waits for it to be overturned"] = Rule(
     (
-        "therefore stay `NOT_ADOPTED`, and `product_registration.write` stays `UNVERIFIED`",
+        "therefore stays `NOT_ADOPTED`, and `product_registration.write` stays `UNVERIFIED`",
         "New official evidence overturning this verdict is **not** the adoption condition",
         "each endpoint is adopted only in its own separately authorized adoption slice",
         "CREATE bound to §28's never-resend rule, SEARCH for positive-only reconcile only",
+        # The amendment note: what the CREATE adoption did, and everything it left untouched.
+        "is now **`ADOPTED`**, under the contract frozen in",
+        "idempotency is recorded (`NONE_DOCUMENTED`, automatic retry budget `0`)",
+        "**This amendment note changes nothing else.** The verdict stays `INSUFFICIENT`.",
+        "never resent and keeps its conflict scope closed",
+        "Adoption is neither a session nor LIVE authority",
     ),
     (
         r"NOT_ADOPTED`? until (new )?official evidence (resolves|overturns|removes)",

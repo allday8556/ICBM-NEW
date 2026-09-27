@@ -15,10 +15,17 @@ category-specific, with conditional fields omitted rather than filled.
 
 **What it does not prove, and therefore what this module refuses to assemble**: the container
 shape of ``images``, the option-combination container and its option-name/value field names, and
-the request media type of ``POST /v2/products``. A complete CREATE document cannot be built from
-proven names alone, so :func:`project` returns the proven projection and the named gaps, and
+the channel-product structure the CREATE body pairs with ``originProduct``. A complete CREATE
+document cannot be built from proven names alone, so :func:`project` returns the proven projection
+and the named gaps, :func:`create_document` refuses while any gap remains, and
 :func:`seller_codes` fixes the identities the projection and the read-back comparison share.
-Nothing here is sent: ``SMARTSTORE_PRODUCT_CREATE_V2`` stays NOT_ADOPTED (``registry.py``).
+
+**CREATE adoption (ADR-0020 §4 slice 1).** ``SMARTSTORE_PRODUCT_CREATE_V2`` is now ADOPTED
+(``registry.py``), and the request media type of ``POST /v2/products`` is proven to be
+``application/json`` (ENDPOINT_MATRIX.md §4.2, review 5768199984), so that is no longer a gap: the
+registry freezes it. Adoption changes nothing else here. This module still assembles only what the
+evidence proves, the remaining gaps still make every unit unsendable, and nothing is sent from
+here — execution stays ``DRY_RUN`` and the canary stays ``BLOCKED``.
 
 Seller-controlled identities are deterministic and stable: the listing's management code is the
 listing identity, and an option unit's code is its ``registration_item_key``. Both are already
@@ -51,6 +58,18 @@ FIELD_SELLER_CODE_INFO: Final = "sellerCodeInfo"
 FIELD_SELLER_MANAGEMENT_CODE: Final = "sellerManagementCode"
 FIELD_OPTION_SELLER_CODE: Final = "sellerManagerCode"
 FIELD_NOTICE: Final = "productInfoProvidedNotice"
+# The CREATE body's own container for the 원상품 정보 구조체 (packet 5746489554, review 5768199984).
+FIELD_ORIGIN_PRODUCT: Final = "originProduct"
+
+# The gap that keeps every unit unsendable even when nothing else is missing: the reviews prove
+# the CREATE body pairs ``originProduct`` with a channel-product structure, and name neither that
+# structure's field nor its shape. It is removed only by the slice that proves and emits it, in
+# the same change — never on its own, because :func:`create_document` builds the body only when
+# the gap list is empty.
+CHANNEL_PRODUCT_GAP: Final = (
+    "channel-product structure: the CREATE body pairs originProduct with a channel-product"
+    " structure whose field name and shape no reviewed evidence names"
+)
 
 
 class WireContractError(ValueError):
@@ -229,7 +248,9 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     gaps: list[str] = [
         # The image URLs are known and sanitized; the container they sit in is not proven.
         f"{FIELD_IMAGES}: the packet proves images.*.url but not the container shape",
-        "request media type of POST /v2/products is not proven",
+        # The request media type is no longer a gap: the CREATE adoption froze application/json
+        # from review 5768199984, and the registry — not this module — owns it.
+        CHANNEL_PRODUCT_GAP,
     ]
     if len(items) > 1:
         _option_dimensions(items)
@@ -244,4 +265,49 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         proven=proven,
         image_references=references,
         gaps=tuple(gaps),
+    )
+
+
+@dataclass(frozen=True)
+class CreateDocument:
+    """The complete ``POST /v2/products`` request body of one frozen provider-listing unit.
+
+    It exists only when :func:`project` reports **no** gap, so a body can never be assembled from
+    partially proven provider facts, and the only thing that can become one is the immutable
+    Snapshot's own projection (ADR-0014 §6, §11).
+
+    ``body`` is JSON-safe and holds no credential: the bearer is a header the caller adds, never
+    part of this document and never part of a durable digest (ADR-0014 §15, M5-24).
+    """
+
+    encoding_version: str
+    listing_identity: str
+    body: Mapping[str, Any]
+
+    def canonical(self) -> dict[str, Any]:
+        """The sanitized canonical representation a durable request digest is taken over."""
+        return {
+            "encoding_version": self.encoding_version,
+            "listing_identity": self.listing_identity,
+            "body": dict(self.body),
+        }
+
+
+def create_document(payload: Mapping[str, Any]) -> CreateDocument:
+    """The CREATE body of one frozen Snapshot payload, or a refusal.
+
+    Raises :class:`WireContractError` with ``WIRE_CONTRACT_UNPROVEN`` while :func:`project` names
+    any gap. That is the fail-closed boundary of the CREATE adoption: the adopted endpoint is
+    never handed a body assembled from unproven provider facts (CLAUDE.md §5.4, §7.3), and at the
+    current evidence :data:`CHANNEL_PRODUCT_GAP` alone keeps every unit unsendable.
+    """
+    projection = project(payload)
+    if projection.gaps:
+        raise WireContractError("WIRE_CONTRACT_UNPROVEN", "; ".join(projection.gaps))
+    # Unreachable while any gap stands. It is written out so that the slice which proves the
+    # remaining containers adds them here, in the same change that removes their gap.
+    return CreateDocument(
+        encoding_version=projection.encoding_version,
+        listing_identity=projection.codes.seller_management_code,
+        body={FIELD_ORIGIN_PRODUCT: dict(projection.proven)},
     )

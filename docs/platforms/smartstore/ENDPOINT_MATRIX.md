@@ -5,12 +5,12 @@
 | Field | Value |
 | --- | --- |
 | Provider | NAVER SmartStore / Commerce API |
-| Contract status | `M5_READBACK_AND_IMAGE_UPLOAD_ADOPTED_FROZEN_FOR_REVIEW` |
+| Contract status | `M5_READBACK_IMAGE_UPLOAD_AND_CREATE_ADOPTED_FROZEN_FOR_REVIEW` |
 | M2 integration mode | `OWN_STORE_SELF` |
-| Adopted endpoint count | `5` (2 M2 CONNECT + 2 M5 read-backs + 1 M5 image upload) |
-| M5 endpoints | `3 ADOPTED (2 read-back, 1 image upload), 9 NOT_ADOPTED with recorded gaps` |
+| Adopted endpoint count | `6` (2 M2 CONNECT + 2 M5 read-backs + 1 M5 image upload + 1 M5 product CREATE) |
+| M5 endpoints | `4 ADOPTED (2 read-back, 1 image upload, 1 product CREATE), 8 NOT_ADOPTED with recorded gaps` |
 | Runtime verification | `PENDING` |
-| Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554; M5 image upload, Issue #89 decisions 5765557497 and 5765663972) |
+| Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554; M5 image upload, Issue #89 decisions 5765557497 and 5765663972; M5 product CREATE, reviews 5768199984 and 5768247290 under ADR-0020 §4) |
 | Retrieved at | `2026-09-14` |
 | Verified at | `null` |
 | Review due | `2026-10-14` |
@@ -109,7 +109,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE (`application/json`) | `OWN_STORE_SELF` | `상품` | Yes; no provider idempotency, no automatic retry, never resent on `UNKNOWN` (§4.3) |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); no ASSET sender wired |
@@ -127,12 +127,14 @@ The remaining M5 rows are planning metadata only. Presence does not imply eventu
 ### 4.1 M5 PR-D adoption and its recorded gaps (packet 5746489554, release 2.89.0)
 
 PR-D adopted the two product read-backs. Issue #89 decisions `5765557497` and `5765663972`
-subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provider-zero,
-`product_registration.write` stays `UNVERIFIED`, and no application route invokes the upload.
+subsequently adopted IMAGE UPLOAD, and the CREATE adoption slice (ADR-0020 §4 slice 1) adopted
+product CREATE under the contract of §4.3. The application remains `DRY_RUN`/provider-zero,
+`product_registration.write` stays `UNVERIFIED`, and no application route invokes the upload or the
+CREATE caller.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | the packet proves method, path, group and the request/response product structure; the later official evidence reviews add the JSON request media type and the HTTP 200 success response with its identifiers (§4.2, `SOURCES.md` §5.2). No adoption slice has yet frozen the success predicate, timeout, redirect and error classification against them, and no provider idempotency exists (below) |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | **Closed by the CREATE adoption slice (§4.3, ADR-0020 §4).** The row is now `ADOPTED`: the success predicate, the timeouts, the redirect policy, the retention profile and the outcome classification are frozen in §4.3, and the provider's **absent** idempotency is recorded rather than assumed. The verdict below is unchanged |
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
@@ -141,13 +143,13 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 `5768312853` → `5768347233`; ADR-0014 §17.2). Beyond the packet gaps above, the official contract
 proves no CREATE idempotency or ambiguous-outcome replay safety, no `sellerManagementCode`
 uniqueness, and no read-after-write freshness that would make a zero-result lookup an authoritative
-absence — a seller-code search may return similar, partial or exact matches. Both rows therefore
-stay `NOT_ADOPTED`, and no implementation may proceed on the assumption that a deterministic
-provider lookup exists. The verdict stays `INSUFFICIENT` and is not overturned, and overturning it
-is not the adoption condition (ADR-0014 §17.2, §28; ADR-0018 §6.1): CREATE and the positive-only
-reconcile path each need their own separately authorized adoption slice — CREATE recording the
-provider's actual (absent) idempotency and bound to the §28 never-resend rule, SEARCH for
-positive-only reconcile only. An `UNKNOWN` CREATE is never resent, a zero-result lookup never proves
+absence — a seller-code search may return similar, partial or exact matches. No implementation may
+proceed on the assumption that a deterministic provider lookup exists. The verdict stays
+`INSUFFICIENT` and is not overturned, and overturning it is not the adoption condition (ADR-0014
+§17.2, §28; ADR-0018 §6.1): CREATE and the positive-only reconcile path each need their own
+separately authorized adoption slice — CREATE recording the provider's actual (absent) idempotency
+and bound to the §28 never-resend rule (its slice landed, §4.3), SEARCH for positive-only reconcile
+only (still to come). An `UNKNOWN` CREATE is never resent, a zero-result lookup never proves
 absence, and the residual-risk acceptance stays a separate canary prerequisite.
 
 Adopted read-back contract, in the registry and pinned by tests:
@@ -167,15 +169,17 @@ Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; on
 ICBM policy is no redirect, connect `5s`, read `30s`, no automatic retry. Any possibly transmitted
 failure is `UPLOAD_UNKNOWN`, distinct from `RegistrationIntent.UNKNOWN`.
 
-`endpoint_mapping_revision = m5-image-upload-r1`, bound to the registry fingerprint, which also
-covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15).
+`endpoint_mapping_revision = m5-product-create-r1`, bound to the registry fingerprint, which also
+covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15). The superseded
+revisions `m2-connect-r1`, `m5-register-r1` and `m5-image-upload-r1` stay resolvable, so stored
+evidence still names a known mapping.
 
-### 4.2 CREATE wire-contract evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
+### 4.2 CREATE wire-contract evidence — the evidence record the adopted contract of §4.3 is frozen from (`SOURCES.md` §5.2, release 2.89.0)
 
 The architect's official evidence reviews on Issue #89 (`5768199984`, `5768247290`) establish the
-following for `SMARTSTORE_PRODUCT_CREATE_V2`. **This section adopts nothing:** the row stays
-`NOT_ADOPTED`, fails locally before any network I/O (§2), and gains no LIVE authority. Its own
-adoption slice (ADR-0020 §4) freezes the adopted contract from these facts.
+following for `SMARTSTORE_PRODUCT_CREATE_V2`. **This section is the evidence record only.** The
+contract frozen from it is §4.3, added by the CREATE adoption slice (ADR-0020 §4). Nothing here
+grants LIVE authority.
 
 | Field | Evidence | Source |
 | --- | --- | --- |
@@ -206,9 +210,79 @@ Outcome rules that no evidence here changes:
 - the provider-evidence verdict stays `INSUFFICIENT` for idempotent replay and remote-absence proof,
   the canary stays `BLOCKED`, and execution stays `DRY_RUN`.
 
-The code-side gap text for this row (`integrations/marketplaces/smartstore/registry.py`
-`ADOPTION_GAPS`, `product.py`) still records the pre-review gap. It changes with the CREATE adoption
-slice, together with the adopted contract, not with this evidence record.
+The code-side gap text for this row was carried by
+`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS` until the CREATE adoption slice.
+That entry is now gone, because the row is `ADOPTED` and a gap list records only unadopted
+endpoints; the frozen contract is §4.3. The **body** gaps `product.py` records are a different
+thing and stay (§4.3, "What is still unproven").
+
+### 4.3 The adopted CREATE contract (ADR-0020 §4 slice 1)
+
+`SMARTSTORE_PRODUCT_CREATE_V2` is `ADOPTED` from the evidence of §4.2. Adoption is an endpoint
+contract in code — a request type, a response type, an error and outcome classification — and
+**nothing else**. It is not a session, not a LIVE grant and not a canary: execution stays
+`DRY_RUN`, `product_registration.write` stays `UNVERIFIED`, the provider-evidence verdict stays
+`INSUFFICIENT` (§4.1), `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, and the canary stays
+`BLOCKED` on every other condition of ADR-0018 §6 and §10.
+
+| Field | Adopted value | Source |
+| --- | --- | --- |
+| Method / path | `POST /v2/products`, relative to `base_url` (§3) | packet 5746489554 |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, API group `상품` | packet 5746489554 |
+| App mode | `OWN_STORE_SELF` | packet 5746489554 |
+| Request media type | `application/json` | review 5768199984 |
+| Request body | only the frozen `RegistrationSnapshot`'s own projection: the documented `originProduct` structure plus the channel-product structure (see "What is still unproven") | packet 5746489554, review 5768199984 |
+| Safe query keys | **none** (deny-by-default) | ICBM policy |
+| Timeouts | connect `5s`, read `30s` | ICBM policy (§10) |
+| Redirect | `NO_FOLLOW`; a 3xx is never followed for a mutation and is recorded as ambiguous | ICBM policy (§11); `ERRORS.md` §10.6, §17 |
+| Success predicate | HTTP `200` **AND** the body parses as a JSON object **AND** it carries a usable `originProductNo` (`m5-product-create-r1`) | review 5768199984 (documented success and identifiers) |
+| Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the product profile `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` | review 5768199984; ADR-0014 §15 |
+| Provider idempotency | **none** — recorded as `NONE_DOCUMENTED`, never assumed | review 5768247290 |
+| Automatic retry budget | `0`: the adapter has no retry loop at all | ADR-0014 §9, §28.3 |
+| Read-back identity | `originProductNo`, the identity `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` is performed by; the channel numbers are retained with it so neither provider identity is lost | ADR-0014 §11, §28.2 |
+
+**`originProductNo` is why the predicate is stricter than the read-backs'.** A CREATE whose 200
+carries no usable identifier leaves ICBM with no provider identity to read back by, so it fails the
+predicate and is classified as an ambiguous outcome (§9) rather than reported as a success with a
+missing identity.
+
+**Passing the predicate is not registration success.** ADR-0014 §11 confirms a registration only
+through read-back and an exact comparison against the immutable Snapshot. A successful CREATE
+proves `remote_outcome = APPLIED_PROVEN` and nothing more.
+
+**Outcome classification** (`ERRORS.md` §2, §14, §15; ADR-0014 §28.3; ADR-0018 §6.1). The cause and
+the mutation outcome are independent axes, and a transient or rate-limited cause never makes a
+replay safe.
+
+| CREATE evidence | `remote_outcome` |
+| --- | --- |
+| a local pre-submit refusal before transport handoff — an unprojectable Snapshot, a request-contract violation, an unusable bearer | `NOT_APPLIED_PROVEN` (`ERRORS.md` §15.1 item 1) |
+| transmission-precluded transport evidence — ICBM's own egress refusal, or a DNS / TCP-connect / TLS-handshake failure on a connection this request opened | `NOT_APPLIED_PROVEN` (`ERRORS.md` §15.1) |
+| a **definitive provider rejection**: a complete API-server response with status `400`, `401`, `403`, `404`, `405`, `409` or `415` and no gateway-attributed (`GW.`) code | `NOT_APPLIED_PROVEN` — the reviewed provider proof ADR-0014 §10's table and §28.3 admit; it is recorded on its own Attempt and **never passes through `UNKNOWN`** |
+| any gateway-attributed code, whatever the status | `UNKNOWN` — `ERRORS.md` §25 Q2 is open, so a pre-service gateway rejection is not proven non-application |
+| a read/write timeout, a lost or reset connection, an uncertain transmission, a pooled-connection failure, an unobserved phase | `UNKNOWN` (`ERRORS.md` §15.2) |
+| any `5xx`, `408`, `425` or `429` | `UNKNOWN` |
+| a `3xx` (never followed) | `UNKNOWN` |
+| a `2xx` that fails the success predicate, including a malformed or truncated body | `UNKNOWN` |
+
+**What an `UNKNOWN` CREATE may never do** (ADR-0014 §28.3, M5-08, M5-33; ADR-0018 G3-07). It is
+never resent. It cannot open a CREATE Attempt, no grant is issued for it, its conflict scope stays
+closed, and it ends only on the positive-only reconcile of ADR-0014 §28.2 — a separate, later
+adoption slice — a read-back by an already known provider identity, or later machine proof of
+non-application. **No lookup result, seller-side code, grant, proof or approval ever becomes
+remote-absence evidence** (§4.1).
+
+**What is still unproven, and therefore still refused.** Adopting the endpoint does not make any
+unit sendable. The CREATE **body** still has parts no reviewed evidence names, and the wire
+projection refuses to assemble a document while any of them stands:
+
+- the container shape of `images` (only `images.*.url` is proven);
+- the option-combination container and its option-name/value field names;
+- the channel-product structure the body pairs with `originProduct` — neither its field name nor
+  its shape is named.
+
+Each is removed only by the slice that proves and emits it, in the same change. Until then every
+provider-listing unit is unsendable, and that refusal is local, before any network I/O.
 
 ---
 
@@ -569,6 +643,15 @@ M2 baseline:
 | `SMARTSTORE_AUTH_TOKEN` | `5s` | `30s` | Favor avoiding avoidable token-issuance uncertainty. |
 | `SMARTSTORE_SELLER_ACCOUNT` | `5s` | `10s` | Read-only operation with bounded retry/re-auth paths. |
 
+M5 adopted rows:
+
+| Endpoint ID | Connect timeout | Read timeout | Reason |
+| --- | ---: | ---: | --- |
+| `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `5s` | `15s` | Read-only product read-back. |
+| `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `5s` | `15s` | Read-only product read-back. |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `5s` | `30s` | One artifact upload; no automatic retry. |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | `5s` | `30s` | A mutation with no provider idempotency: cutting the read short manufactures the very ambiguity ADR-0014 §28 can never resolve by absence. Still bounded, and an expiry is `UNKNOWN`, never a rejection. |
+
 Rules:
 
 - timeout expiry is classified under `ERRORS.md`/`AUTH.md`; it is not proof of provider rejection;
@@ -582,9 +665,14 @@ Rules:
 
 Generic automatic redirect following is forbidden for SmartStore integration clients unless an adopted endpoint explicitly permits it.
 
-Both M2 endpoints are:
+Every adopted endpoint, M2 and M5 alike, is:
 
 `NO_FOLLOW`
+
+For `SMARTSTORE_PRODUCT_CREATE_V2` this is load-bearing rather than conservative: HTTP 308 preserves
+the method and body, so an automatically followed redirect would retransmit the CREATE body
+(`ERRORS.md` §10.6). The adopted contract follows none, and records a 3xx as an ambiguous outcome
+(§4.3).
 
 Future redirect adoption must freeze:
 
@@ -615,7 +703,9 @@ M5 candidate rows do not freeze:
 - retry budget;
 - cleanup behavior.
 
-Those values are filled only when M5 actually adopts the endpoint.
+Those values are filled only when M5 actually adopts the endpoint. `SMARTSTORE_PRODUCT_CREATE_V2`
+is no longer such a row: its values are frozen in §4.3. `SMARTSTORE_PRODUCT_SEARCH` and the metadata
+rows still are.
 
 No code may substitute guessed defaults for `TBD_AT_ADOPTION`.
 
@@ -822,7 +912,9 @@ Upstream changes do not silently rewrite this matrix.
 | Real runtime behavior and latency of both M2 adopted endpoints | `PENDING M2 ACCEPTANCE` |
 | Whether M2 timeout values need adjustment after measured latency | `MEASURE, THEN REVIEW` |
 | Token remote-success/local-commit-unknown behavior | `OWNED BY AUTH.md / MEASUREMENT REQUIRED` |
-| Exact M5 registration endpoint set | `NOT_ADOPTED / M5 DESIGN REQUIRED` |
+| Exact M5 registration endpoint set | `PARTIALLY ADOPTED`: the two read-backs, the image upload and the product CREATE (§4.3) are `ADOPTED`; `SMARTSTORE_PRODUCT_SEARCH` and the metadata rows stay `NOT_ADOPTED` |
+| The CREATE body's image container, option-combination container and channel-product structure | `NOT PROVEN`: every unit stays unsendable and the projection refuses (§4.3) |
+| Whether the CREATE read timeout needs adjustment after measured latency | `MEASURE, THEN REVIEW` |
 | Exact M5 required API-group union | `NOT FROZEN` |
 
 ---

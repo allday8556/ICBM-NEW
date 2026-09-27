@@ -109,7 +109,10 @@ PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
 M0_REFUSES_LIVE = "M0_EXECUTION_POLICY_REFUSES_LIVE"
 
 DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
-    "CREATE_HANDOFF": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_CREATE_V2"),
+    # The CREATE contract **is** adopted (ADR-0020 §4 slice 1). The declaration remains because a
+    # provider-zero run has no provider to answer it - and because production wires the adopted
+    # sender with no committed session, so it could not transmit even outside this run.
+    "CREATE_HANDOFF": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_CREATE_V2"),
     "RECONCILE_LOOKUP": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_SEARCH"),
     "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
     "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
@@ -928,8 +931,10 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
-    # PR-D's real wire projection is not sendable while the CREATE contract is unproven: the
-    # scenarios above declared one so the state machine could be exercised at all.
+    # The real wire projection is still not sendable: the CREATE endpoint contract is adopted, but
+    # the CREATE **body** is not fully proven (the channel-product structure, the images container
+    # and the option-combination container), so no unit can be projected onto a sendable document.
+    # The scenarios above declared one so the state machine could be exercised at all.
     unsent = smartstore_product.project(_any_payload(owners))
     checks.check(
         "boundary.real_wire_projection_refuses",
@@ -937,8 +942,12 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()
+    # The CREATE contract is adopted and still unreachable from this run: adoption is a contract,
+    # never a session and never LIVE authority (ADR-0020 §2.4). The measured outbound marketplace
+    # mutation count below stays 0, and the canary phase reports every prerequisite that is not.
     checks.check(
-        "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
+        "boundary.create_adopted_but_unreachable",
+        adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is True,
     )
     checks.check(
         "boundary.upload_adopted_but_unreachable",

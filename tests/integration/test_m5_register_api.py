@@ -426,7 +426,7 @@ def test_a_multi_unit_draft_never_passes_the_single_canary_unit_gate(
     named = _get(api, f"{CANARY}?unit_ref={frozen[0].snapshot_id}")
     assert named["verdict"] == "BLOCKED"
     assert "SINGLE_UNIT" not in named["missing"]
-    assert "CREATE_ADOPTED" in named["missing"]
+    assert "RECONCILE_PATH_ADOPTED" in named["missing"]
     # A unit that does not exist is refused, never quietly answered for another one.
     assert api.get(f"{CANARY}?unit_ref=not-a-unit", headers=CLIENT).status_code >= 400
 
@@ -1201,13 +1201,14 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     missing = {
         item["requirement"]: item for item in canary["requirements"] if not item["satisfied"]
     }
-    # The unadopted contracts are named as unadopted, never as absent or unnecessary.
-    assert missing["CREATE_ADOPTED"]["reason_code"] == "ENDPOINT_NOT_ADOPTED"
-    assert missing["CREATE_ADOPTED"]["endpoint_id"] == "SMARTSTORE_PRODUCT_CREATE_V2"
+    # The unadopted contracts are named as unadopted, never as absent or unnecessary. CREATE is
+    # adopted now (ADR-0020 §4 slice 1), so it is no longer among them; SEARCH still is.
+    assert "CREATE_ADOPTED" not in missing
+    assert missing["RECONCILE_PATH_ADOPTED"]["reason_code"] == "ENDPOINT_NOT_ADOPTED"
     assert missing["RECONCILE_PATH_ADOPTED"]["endpoint_id"] == "SMARTSTORE_PRODUCT_SEARCH"
     # A running application cannot prove its own checkout, so it says so rather than assuming.
     assert missing["CLEAN_RUNTIME"]["reason_code"] == "PROOF_NOT_AVAILABLE_IN_PROCESS"
-    assert "CREATE_ADOPTED" in canary["missing"]
+    assert "RECONCILE_PATH_ADOPTED" in canary["missing"]
     # The read-back is adopted, and adoption is all that proves: production wires no session to
     # read with, and the adopted comparison carries no published state, so each is named on its
     # own rather than covered by `READBACK_ADOPTED` (post-merge audit of main `a10e4b79dbd3`).

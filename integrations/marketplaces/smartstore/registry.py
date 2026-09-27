@@ -24,9 +24,21 @@ the JSON-object response convention ENDPOINT_MATRIX.md already accepts, never pr
 
 PR-D adopted the two product read-backs. The later IMAGE UPLOAD amendment (Issue #89 comments
 5765557497 and 5765663972) adopts only the official one-artifact ``imageFiles`` request and its
-returned ``images[].url`` identity. Product CREATE and search remain NOT_ADOPTED. Adoption is not
-LIVE authority: the application remains DRY_RUN/provider-zero and no application route invokes the
-upload caller.
+returned ``images[].url`` identity.
+
+**CREATE adoption (ADR-0020 §4 slice 1).** ``SMARTSTORE_PRODUCT_CREATE_V2`` is now ADOPTED from the
+official wire-contract evidence recorded in ENDPOINT_MATRIX.md §4.2 (Issue #89 reviews 5768199984
+and 5768247290, release 2.89.0): the method, the path, the bearer, the ``상품`` group, the JSON
+request media type, and HTTP 200 with the documented identifiers. The timeouts, the redirect policy
+and the success predicate are ICBM policy over those facts, never provider facts. The provider's
+**absent** idempotency is recorded below rather than assumed, and the endpoint is bound to the
+never-resend rule of ADR-0014 §28: an ``UNKNOWN`` CREATE is never resent, and this registry grants
+no retry budget for it. ``SMARTSTORE_PRODUCT_SEARCH`` stays NOT_ADOPTED — the positive-only
+reconcile path is its own later slice — and the provider-evidence verdict stays ``INSUFFICIENT``.
+
+Adoption is not LIVE authority and not a session: the application remains DRY_RUN/provider-zero,
+``product_registration.write`` stays ``UNVERIFIED``, the real canary stays ``BLOCKED``, and no
+application route invokes the upload or the CREATE caller.
 """
 
 import hashlib
@@ -54,8 +66,9 @@ class EndpointId(StrEnum):
     # ADOPTED for M5 PR-D: the two product read-backs.
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
-    # CREATE/search and metadata reads remain NOT_ADOPTED (see ADOPTION_GAPS). IMAGE UPLOAD was
-    # adopted by the later, bounded M5 amendment; adoption does not grant LIVE authority.
+    # ADOPTED by the bounded M5 IMAGE UPLOAD amendment and by the ADR-0020 §4 CREATE adoption
+    # slice. Neither adoption grants LIVE authority. Search and the metadata reads remain
+    # NOT_ADOPTED (see ADOPTION_GAPS).
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
@@ -123,6 +136,41 @@ def product_read_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+def provider_product_no(value: object) -> str | None:
+    """One documented provider product number as a usable identifier string, or ``None``.
+
+    The reviews prove the identifier names, never their JSON type, so both a number and a string
+    are accepted and normalized to the string form the adopted read-back path takes. Nothing else
+    — a bool, a float, an empty or blank string, a non-positive number — is an identifier.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value) if value > 0 else None
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def product_create_succeeded(status: int, body: object) -> bool:
+    """EM §4.2: HTTP 200 AND a JSON object carrying the documented CREATE identifier.
+
+    Review 5768199984 proves the documented success status (``200``) and that a successful CREATE
+    answers with ``originProductNo`` plus the channel-product numbers and the stored
+    ``originProduct`` data. ``originProductNo`` is the identity the adopted origin read-back is
+    performed by, so a 200 without a usable one proves no provider product identity and fails the
+    predicate (EM §9). The channel numbers are retained when present but are not asserted here:
+    which channels a store has is not a fact any review proves.
+
+    Passing this predicate is **not** registration success. ADR-0014 §11 confirms a registration
+    only through read-back and Snapshot comparison; this predicate only establishes that a typed
+    result can be formed.
+    """
+    if status != 200 or not isinstance(body, dict):
+        return False
+    return provider_product_no(body.get("originProductNo")) is not None
+
+
 def image_upload_succeeded(status: int, body: object) -> bool:
     """HTTP 200 plus the documented ``images[].url`` response shape.
 
@@ -175,6 +223,13 @@ _PRODUCT_READ_FIELDS = frozenset(
     {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
 )
 _IMAGE_UPLOAD_FIELDS = frozenset({"url"})
+# The CREATE success response: the documented identifiers (review 5768199984, API docs v2.68.0) and
+# the product data SmartStore says it stored, kept under the same deny-by-default product profile
+# as a read-back so a CREATE response can be compared with one without a second retention rule.
+_CREATE_IDENTIFIER_FIELDS = frozenset(
+    {"originProductNo", "smartstoreChannelProductNo", "windowChannelProductNo"}
+)
+_CREATE_RESULT_FIELDS = _CREATE_IDENTIFIER_FIELDS | _PRODUCT_READ_FIELDS
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
@@ -239,6 +294,30 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5d-channel-read-r1",
         retained_response_fields=_PRODUCT_READ_FIELDS,
     ),
+    # ---- M5 CREATE adoption slice (ADR-0020 §4; EM §4.2, reviews 5768199984 / 5768247290).
+    # Provider facts: POST /v2/products, bearer with AUTH_MODE=SELF, API group 상품, an
+    # application/json request body, HTTP 200 with the documented identifiers. ICBM policy: the
+    # timeouts, NO_FOLLOW (a 308 would replay a mutation body, ERRORS.md §10.6), the success
+    # predicate and the deny-by-default retention profile. No query key is safe: the CREATE
+    # carries none.
+    EndpointId.SMARTSTORE_PRODUCT_CREATE_V2: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
+        method=Method.POST,
+        path="/v2/products",
+        content_type="application/json",
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        # A mutation's read bound is generous on purpose: cutting a CREATE short manufactures the
+        # very ambiguity ADR-0014 §28 can never resolve by absence. It is still bounded, and an
+        # expiry is UNKNOWN, never a rejection (ERRORS.md §14.3, §15.2).
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=True,
+        success_predicate=product_create_succeeded,
+        predicate_revision="m5-product-create-r1",
+        retained_response_fields=_CREATE_RESULT_FIELDS,
+    ),
     # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
     EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
@@ -268,11 +347,6 @@ _NO_RESPONSE_CONTRACT = (
 )
 
 ADOPTION_GAPS: Mapping[EndpointId, str] = {
-    EndpointId.SMARTSTORE_PRODUCT_CREATE_V2: (
-        "the packet proves the method, the path, the 상품 group and the request/response product"
-        " structure, but neither the request media type nor the response envelope; the wire"
-        " document is encoded and pinned by product.py and stays unsent"
-    ),
     EndpointId.SMARTSTORE_PRODUCT_SEARCH: (
         "existence only: the packet does not prove the request schema, so no strong duplicate key"
         " (sellerManagementCode, barcode/GTIN) and no normalized-name filter is proven; duplicate"
@@ -297,6 +371,17 @@ ADOPTION_GAPS: Mapping[EndpointId, str] = {
     EndpointId.SMARTSTORE_NOTICE_TYPES: _NO_RESPONSE_CONTRACT,
     EndpointId.SMARTSTORE_NOTICE_TYPE_READ: _NO_RESPONSE_CONTRACT,
 }
+
+
+# ---------------------------------------------------------------- mutation replay facts
+
+# ADR-0014 §17.2 and §28, ADR-0018 §6.1: the CREATE adoption records the provider's **actual**
+# idempotency instead of assuming one. Review 5768247290 proves there is none — no idempotency
+# key, no request-correlation key, no replay rule and no duplicate-prevention guarantee — so the
+# endpoint is bound to the never-resend rule: this registry grants it no automatic retry, and an
+# ``UNKNOWN`` outcome is reconciled by positive evidence only, never resent (M5-08, M5-33).
+CREATE_PROVIDER_IDEMPOTENCY = "NONE_DOCUMENTED"
+CREATE_AUTOMATIC_RETRY_BUDGET = 0
 
 
 class EndpointNotAdoptedError(LookupError):
@@ -335,7 +420,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-image-upload-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-product-create-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -350,6 +435,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m5-register-r1": "fbf07a8784557b45c5e282464a20d2b41534642a34076e1827b656fba8710648",
     # Filled from ``mapping_fingerprint()`` in the same reviewed change.
     "m5-image-upload-r1": "4717169646fe3b53725a4c31ff93e15d657dc6a85b29295a8d955969f090d02b",
+    # The ADR-0020 §4 CREATE adoption slice: SMARTSTORE_PRODUCT_CREATE_V2 moves to ADOPTED with
+    # its own method, path, media type, groups, mutability and retention profile.
+    "m5-product-create-r1": "635b1d1c281e2a05f9467a5362ff2f6395318d77c8c969b370a84c8384b1bfea",
 }
 
 

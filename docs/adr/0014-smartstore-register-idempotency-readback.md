@@ -35,7 +35,7 @@ Related:
 
 M4 is accepted (`docs/acceptance/M4.md`): the canonical Product (the v3.1 `ProductGroup`), its Items, current source bindings, context-scoped `PricingSnapshot`s, derived image lineage with operator selection and exact-binary QA, and layered readiness exist and are proven offline. SmartStore CONNECT is accepted (M2). **When this ADR was written** every SmartStore product, image, category, attribute, option and notice endpoint was `NOT_ADOPTED` planning metadata (`ENDPOINT_MATRIX.md` §4), and `product_registration.write` was `UNVERIFIED`.
 
-That starting state has since moved only where an amendment moved it: PR-D adopted the two product read-backs, §17.1 adopted the bounded image upload, and everything else — product CREATE, the duplicate-lookup search, the category, attribute, option and notice reads — remains `NOT_ADOPTED`. `product_registration.write` is still `UNVERIFIED`. The current adoption facts are `ENDPOINT_MATRIX.md` §4 and the adapter registry, never this paragraph.
+That starting state has since moved only where an amendment moved it: PR-D adopted the two product read-backs, §17.1 adopted the bounded image upload, the ADR-0020 §4 slice 1 adopted product CREATE (§17.2 amendment note), and everything else — the duplicate-lookup search, the category, attribute, option and notice reads — remains `NOT_ADOPTED`. `product_registration.write` is still `UNVERIFIED`. The current adoption facts are `ENDPOINT_MATRIX.md` §4 and the adapter registry, never this paragraph.
 
 M5 registers one canonical product to SmartStore and proves, by read-back, that the marketplace recorded exactly what ICBM sent. The dangerous failure is not a failed registration but a **second listing**: a replay, a restart, a retry after an ambiguous result, a changed Snapshot or a partial option set can each create one. This ADR freezes, before any schema, the contract that makes those impossible.
 
@@ -453,8 +453,8 @@ transmission-precluded evidence and another explicitly reviewed machine or provi
 possibly transmitted CREATE whose ambiguity no admissible evidence resolves stays `UNKNOWN` with its
 conflict scope closed, and is never blindly replayed.
 
-`SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED`, and
-`product_registration.write` stays `UNVERIFIED` (§16). New official evidence overturning this verdict
+`SMARTSTORE_PRODUCT_SEARCH` therefore stays `NOT_ADOPTED`, and `product_registration.write` stays
+`UNVERIFIED` (§16). New official evidence overturning this verdict
 is **not** the adoption condition: each endpoint is adopted only in its own separately authorized
 adoption slice under §28 and ADR-0018 §6.1 — CREATE bound to §28's never-resend rule, SEARCH for
 positive-only reconcile only. This subsection records a verdict. It relaxes no rule of §7, §10 or
@@ -467,6 +467,26 @@ it adopts a strategy that never needs remote absence. The verdict itself stands 
 seller-side code, grant, proof or approval ever becomes remote-absence evidence for SmartStore.** For CREATE,
 §17's "idempotency and read-back behaviour" adoption requirement is met by recording the provider's actual
 (absent) idempotency and binding the endpoint to §28's never-resend rule — never by assuming idempotency.
+
+> **Amendment note (CREATE adoption slice, ADR-0020 §4 slice 1).** `SMARTSTORE_PRODUCT_CREATE_V2`
+> is now **`ADOPTED`**, under the contract frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md`
+> §4.3: the official method, path, bearer, `상품` group and JSON request media type; an ICBM
+> timeout and `NO_FOLLOW` policy; a success predicate of HTTP 200 plus the documented
+> `originProductNo`; a deny-by-default retention profile; and an outcome classification that
+> separates a definitive provider rejection from an ambiguous outcome. The provider's **absent**
+> idempotency is recorded (`NONE_DOCUMENTED`, automatic retry budget `0`) exactly as the paragraph
+> above requires, never assumed.
+>
+> **This amendment note changes nothing else.** The verdict stays `INSUFFICIENT`. No lookup result,
+> seller-side code, grant, proof or approval becomes remote-absence evidence. An `UNKNOWN` CREATE is
+> never resent and keeps its conflict scope closed (§28.3, M5-08, M5-09, M5-33). `SMARTSTORE_PRODUCT_SEARCH`
+> stays `NOT_ADOPTED` and the positive-only reconcile path is its own later slice (ADR-0020 SA-09).
+> Adoption is neither a session nor LIVE authority: production wires the CREATE seam with no
+> committed bearer, execution stays `DRY_RUN`, `product_registration.write` stays `UNVERIFIED`, the
+> residual-risk acceptance of §28.7 is unrecorded, and the canary stays `BLOCKED` on every other
+> condition of ADR-0018 §6 and §10. The CREATE **body** is still not fully proven — the images
+> container, the option-combination container and the channel-product structure — so the wire
+> projection refuses to assemble a document and every provider-listing unit stays unsendable.
 
 ### 18. AI is optional
 
@@ -565,7 +585,7 @@ Snapshot provenance                which exact revision, and which fingerprint, 
 - **Revisions are append-only and auditable.** Editing appends the next revision; an authored revision that has already frozen a Snapshot is never edited in place, so the Snapshot's provenance keeps its meaning.
 - **A Snapshot proves which exact preparation revision and fingerprint produced it.** The link is its own row, so `registration_snapshots` stays immutable with its triggers intact and a Snapshot frozen before this owner existed stays valid with no provenance row. Authoring truth is never reconstructed by inverting `payload_json`.
 - **The job payload stays an execution copy.** A `register.create` job may carry a frozen copy for crash-safe send-time revalidation, and it pins the same unit identity the Snapshot and Intent hold; it is never the authoring source. **No job is required to display or evaluate a preparation**, and changing a preparation later mutates no earlier Snapshot and no earlier job.
-- **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). IMAGE UPLOAD adoption adds no operator route or LIVE authority; CREATE and product search remain `NOT_ADOPTED` (§17, §24).
+- **The operator surface owns no rule.** It creates, updates and reads a preparation, asks the preflight owner for the candidate evaluation with every reason code, and freezes a Snapshot and opens its Intent only through the owners that already decide READY and freshness (§3, §6, §8). IMAGE UPLOAD adoption adds no operator route or LIVE authority; neither does the later CREATE adoption (§17.2 amendment note), and product search remains `NOT_ADOPTED` (§17, §24).
 - **Unowned authoring revisions (architect decision `5800619183`).** No owner exists yet for the category-mapping and detail-composition revisions, so the durable target policy holds both as `null` (ADR-0015 §2) and refuses a client-supplied value. Authoring still proceeds: the authoring metadata of a reviewed category is served with both revisions `null`, and a preparation stores them as `null` exactly — no default, sentinel or stand-in revision is ever created, and the `null` is part of the inputs fingerprint. **The revisions are server-owned** (review `5801915996`): a preparation create or update whose submitted revisions are not **exactly** the account's current target-policy values (`null` included) is refused whole as `REGISTER_AUTHORING_REVISION_NOT_OWNED` (422) and writes nothing. A revision is owner-held only when the target holds one and the authored one equals it exactly; otherwise the candidate preflight reports `AUTHORING_REVISIONS_UNOWNED` (`REVIEW_REQUIRED`), not a missing policy or missing metadata, and evaluates every other rule as before; it is never `READY` while either revision is unowned. **Freezing stays fail-closed**: a Snapshot is refused before anything is persisted, the Snapshot builder refuses a null or unequal revision even if handed a READY result, and the `registration_snapshots` constraints are unchanged, so no Snapshot, batch, Intent or Attempt exists for such a unit. Real owners for both revisions are a later, separately authorized decision.
 
 ### 28. Positive-only reconcile, recovered provider identity and the registration read state (architect decision `5845062336`)
@@ -701,7 +721,7 @@ The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 co
   - the automatic schedule and quota values;
   - the verification deadline value;
   - the routes and the card's implementation.
-- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile.
+- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. This amendment adopted nothing; `SMARTSTORE_PRODUCT_CREATE_V2` was adopted afterwards by its own separately authorized slice under ADR-0020 §4, and `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile.
 
 > **Amendment note (ADR-0020 §2, §4).** This amendment still authorizes nothing by itself. The CREATE adoption slice and, after it, the positive-only reconcile SEARCH adoption slice are each authorized by the ROADMAP standing authorization of ADR-0020, as separate PRs, when they meet all of its conditions — provider-zero, adoption in code only, and any schema of §28.4 only where a canonical contract has concretely decided it. No provider call, LIVE change, area-5 opening, canary or residual-risk acceptance (§28.7) is authorized by it.
 

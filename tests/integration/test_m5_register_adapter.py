@@ -146,17 +146,15 @@ def _read(body: dict[str, Any]) -> Any:
 
 
 def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-image-upload-r1"
+    # The CREATE adoption slice bumped the revision with the contract, in the same change.
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-product-create-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
-    assert [c.endpoint_id.value for c in ADOPTED.values() if c.mutating] == [
-        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    assert sorted(c.endpoint_id.value for c in ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    for endpoint in (
-        EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
-        EndpointId.SMARTSTORE_PRODUCT_SEARCH,
-    ):
-        with pytest.raises(EndpointNotAdoptedError):
-            resolve(endpoint)
+    with pytest.raises(EndpointNotAdoptedError):
+        resolve(EndpointId.SMARTSTORE_PRODUCT_SEARCH)
 
 
 def test_the_capability_stays_unverified_for_product_write(container: Container) -> None:

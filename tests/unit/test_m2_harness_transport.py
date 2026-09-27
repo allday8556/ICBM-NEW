@@ -131,27 +131,30 @@ def test_a_passed_preflight_without_approval_sends_nothing(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("method", "url"),
+    ("method", "url", "target"),
     [
-        ("POST", TOKEN_URL.replace("https://", "http://")),
-        ("POST", TOKEN_URL.replace(HOST, "example.invalid")),
-        ("POST", TOKEN_URL.replace(HOST, f"{HOST}:8443")),
-        ("POST", TOKEN_URL.replace("https://", "https://user:password@")),
-        ("POST", f"{TOKEN_URL}?grant_type=client_credentials"),
-        ("GET", TOKEN_URL),
-        ("POST", ACCOUNT_URL),
-        ("POST", f"{BASE_URL}/v2/products"),
-        ("GET", f"{ACCOUNT_URL}/../../oauth2/token"),
+        ("POST", TOKEN_URL.replace("https://", "http://"), UNRECOGNIZED),
+        ("POST", TOKEN_URL.replace(HOST, "example.invalid"), UNRECOGNIZED),
+        ("POST", TOKEN_URL.replace(HOST, f"{HOST}:8443"), UNRECOGNIZED),
+        ("POST", TOKEN_URL.replace("https://", "https://user:password@"), UNRECOGNIZED),
+        ("POST", f"{TOKEN_URL}?grant_type=client_credentials", UNRECOGNIZED),
+        ("GET", TOKEN_URL, UNRECOGNIZED),
+        ("POST", ACCOUNT_URL, UNRECOGNIZED),
+        # The M5 CREATE contract is adopted (ADR-0020 §4 slice 1), so the harness recognizes the
+        # target - and the M2 campaign ledger still budgets nothing for it, so it is forbidden
+        # here exactly as before. Adoption never widens an M2 campaign's allow-list.
+        ("POST", f"{BASE_URL}/v2/products", "SMARTSTORE_PRODUCT_CREATE_V2"),
+        ("GET", f"{ACCOUNT_URL}/../../oauth2/token", UNRECOGNIZED),
     ],
 )
 def test_a_forbidden_target_never_reaches_a_transport(
-    tmp_path: Path, method: str, url: str
+    tmp_path: Path, method: str, url: str, target: str
 ) -> None:
     ledger = _ledger(tmp_path)
     ledger.open_phase(Phase.BASELINE_CONNECT)
     spy = Spy(ledger)
     gate = BudgetedTransport(ledger, phases=ALL, inner=lambda label: spy)
-    assert resolve_target(httpx.Request(method, url)) == UNRECOGNIZED
+    assert resolve_target(httpx.Request(method, url)) == target
     with pytest.raises(BudgetGateRefused) as caught:
         gate.handle_request(httpx.Request(method, url))
     assert caught.value.reason == "FORBIDDEN_TARGET"

@@ -277,7 +277,7 @@ wire facts those reviews state; the verdict itself is unchanged.
 
 | Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
-| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE request media type, success status, success response identifiers and stored product data | `ENDPOINT_MATRIX.md` §4.2; the future CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE request media type, success status, success response identifiers and stored product data | `ENDPOINT_MATRIX.md` §4.2 and the adopted contract §4.3 (CREATE adoption slice, ADR-0020 §4); `integrations/marketplaces/smartstore/{registry,caller,execution}.py` | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 
 Observations preserved, limited to what the reviews state:
 
@@ -310,11 +310,15 @@ Still not proven by these reviews, so fail-closed:
 - that a `500` or a zero-result lookup proves the product was not registered. Neither does
   (ADR-0014 §17.2, §28.2).
 
-This evidence adopts nothing and authorizes no call. `SMARTSTORE_PRODUCT_CREATE_V2` stays
-`NOT_ADOPTED` until its own adoption slice (ADR-0020 §4) freezes the success predicate, timeout,
-redirect and error classification against these facts. Until then the code-side gap text
-(`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS`, `product.py`) still records the
-pre-review gap; it changes with that slice, not with this evidence record.
+This evidence adopts nothing and authorizes no call. Its own adoption slice (ADR-0020 §4 slice 1)
+has since frozen the success predicate, the timeouts, the redirect policy, the retention profile and
+the outcome classification against these facts, so `SMARTSTORE_PRODUCT_CREATE_V2` is `ADOPTED`; the
+adopted contract is `ENDPOINT_MATRIX.md` §4.3 and the registry, never this record. That slice also
+removed the code-side gap entry (`integrations/marketplaces/smartstore/registry.py`
+`ADOPTION_GAPS`), because a gap list records only unadopted endpoints. **Nothing above changes with
+it:** none of these facts was proven by the adoption, the CREATE body's remaining unproven parts
+still make every unit unsendable (`product.py`), an `UNKNOWN` CREATE is still never resent, and
+adoption is neither a session, a call nor LIVE authority.
 
 ---
 

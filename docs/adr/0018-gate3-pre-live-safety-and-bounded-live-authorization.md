@@ -335,7 +335,10 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 
 ### 6. Provider evidence is an independent hard blocker (D3)
 
-- `SMARTSTORE_PRODUCT_CREATE_V2` stays **`NOT_ADOPTED`**.
+- ~~`SMARTSTORE_PRODUCT_CREATE_V2` stays **`NOT_ADOPTED`**.~~ **Superseded by the CREATE adoption
+  slice (ADR-0020 §4 slice 1)**: the endpoint is now `ADOPTED`. The original line is kept, struck,
+  rather than rewritten; the amendment note at the end of §6.1 states exactly what it did and did
+  not change. Nothing else in §6 or §6.1 changes.
 - `SMARTSTORE_PRODUCT_SEARCH` stays **`NOT_ADOPTED`**.
 - The official-evidence verdict stays **`INSUFFICIENT`** (Issue #89 `5768312853` / `5768347233`;
   `docs/acceptance/M5.md` §9.1).
@@ -383,6 +386,22 @@ now       never resend while the outcome is unknown
   acceptance of this residual risk**, recorded in GitHub, in addition to every other Gate-3
   prerequisite. The acceptance authorizes nothing by itself. It is one more precondition, and no
   grant, proof or readiness implies it.
+
+> **Amendment note (CREATE adoption slice, ADR-0020 §4 slice 1).** The first bullet of §6.1's
+> "what the endpoints still need" is done: `SMARTSTORE_PRODUCT_CREATE_V2` is **`ADOPTED`** under the
+> official wire contract, with the error classification that separates a definitive rejection from
+> an ambiguous outcome, frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.3 and
+> `ERRORS.md` §15.1.1.
+>
+> **This closes exactly one of §6's conditions and nothing else.** The official-evidence verdict
+> stays `INSUFFICIENT` and is neither overturned nor re-decided. An ICBM seller-side code and a
+> zero-result search remain insufficient proof of remote absence (G3-15). An `UNKNOWN` is never
+> resent and keeps its conflict scope closed (G3-07), and no grant is issued for it. SEARCH's
+> positive-only reconcile path stays `NOT_ADOPTED` and is its own later slice, the residual-risk
+> acceptance of §6.1 stays unrecorded, `M0_DRY_RUN_ONLY` still refuses every mutation, and **the
+> canary stays `BLOCKED`**. Adoption is not a session: production wires the CREATE seam with no
+> committed bearer, so the send-time stack's endpoint-adoption layer is not satisfied by adoption
+> alone, and every other layer of §10 keeps its own condition.
 
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 
@@ -536,14 +555,18 @@ at send time. Each requirement is proven from its own durable evidence, never as
   `ASSET_MUTATION_READY`.
 - The overall canary readiness (`docs/acceptance/M5.md` §6) only **summarizes** the two stages. It is
   derived, read-only and authorizes nothing: even `READY` is not permission. A real write stays a
-  separate, explicitly user-authorized, single-product canary (ADR-0014 §24), and while CREATE and
-  SEARCH are `NOT_ADOPTED` the CREATE stage — and so the canary — stays `BLOCKED`.
+  separate, explicitly user-authorized, single-product canary (ADR-0014 §24), and while the CREATE
+  stage's endpoint-adoption row is incomplete the CREATE stage — and so the canary — stays
+  `BLOCKED`. CREATE is adopted (§6 amendment note); `SMARTSTORE_PRODUCT_SEARCH` is not, so that row
+  is still incomplete and the stage still refuses on it alone.
 
 ### 11. Unchanged
 
 - M5 stays **`PENDING`**; `docs/acceptance/M5.md` records no acceptance run.
-- `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay **`NOT_ADOPTED`**; no
-  category, attribute, standard-option or notice endpoint is adopted.
+- ~~`SMARTSTORE_PRODUCT_CREATE_V2` and~~ `SMARTSTORE_PRODUCT_SEARCH` stay **`NOT_ADOPTED`**; no
+  category, attribute, standard-option or notice endpoint is adopted. *(CREATE was adopted
+  afterwards by its own separately authorized slice — §6.1 amendment note. Every other line of this
+  section is unchanged.)*
 - `product_registration.write` stays **`UNVERIFIED`**.
 - Execution stays **`DRY_RUN` / `M0_DRY_RUN_ONLY`**; LIVE stays forbidden.
 - The canary stays **`BLOCKED`**; marketplace mutations stay **0**.
@@ -622,6 +645,15 @@ G3-29  a started or unresolved UPLOAD_UNKNOWN anywhere in a replay-conflict scop
 G3-30  the canary's CREATE safety strategy is never resend while the outcome is unknown, positive-only reconcile and durable ambiguity isolation (ADR-0014 §28); opening any real canary also requires a recorded explicit user and architect acceptance of the residual risk that a listing may be live while its provider identity is unrecovered
 G3-31  the registration read state and its status card and detail panel are surfaces of the visual acceptance contract when implemented; a merged commit is a new accepted code SHA and never inherits an earlier visual acceptance
 ```
+
+> **Invariant amendment note (CREATE adoption slice, ADR-0020 §4 slice 1).** The invariant block
+> above is not rewritten or renumbered. **G3-14's first clause is partly met:**
+> `SMARTSTORE_PRODUCT_CREATE_V2` was adopted by exactly the "separately authorized adoption slice"
+> G3-14 requires, under ADR-0014 §28 and §6.1 of this ADR. `SMARTSTORE_PRODUCT_SEARCH` still stays
+> `NOT_ADOPTED` until its own slice. **The rest of G3-14 is untouched:** the provider-evidence
+> verdict stays `INSUFFICIENT` for idempotent replay and remote-absence proof, and no grant, brake,
+> backup, retention, visual acceptance or approval overrides it or turns it into such a proof.
+> G3-07, G3-15 and G3-19 are unchanged, and the canary stays `BLOCKED`.
 
 ## Consequences
 

@@ -61,7 +61,7 @@ from app.register.provider import CreateHandoff
 from app.register.store import RegistrationStore, RegistrationUnit, ScopeRecord
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.execution import (
-    CreateNotAdoptedError,
+    CreateSessionUnavailableError,
     ReconcileLookupNotAdoptedError,
     SmartStoreCreateSender,
     SmartStoreReconcileLookup,
@@ -2022,11 +2022,13 @@ def test_no_durable_hash_carries_forbidden_material(
 def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
     container: Container,
 ) -> None:
-    # 4 + 25: the container's own CREATE seam is the SmartStore one, and it is unavailable; the
-    # reconcile lookup likewise. Neither can be made to send by any caller.
+    # 4 + 25: the container's own CREATE seam is the SmartStore one, and it cannot transmit. The
+    # CREATE **contract** is adopted (ADR-0020 §4 slice 1), but adoption is not a session: the
+    # production seam is wired with no caller and no committed bearer, so it stays unavailable and
+    # refuses locally. The reconcile lookup is unadopted outright. Neither can be made to send.
     sender = SmartStoreCreateSender()
     assert not sender.available()
-    with pytest.raises(CreateNotAdoptedError):
+    with pytest.raises(CreateSessionUnavailableError):
         sender.send(payload={}, idempotency_key="k", listing_identity="icbm-x")
     lookup = SmartStoreReconcileLookup()
     assert not lookup.available()

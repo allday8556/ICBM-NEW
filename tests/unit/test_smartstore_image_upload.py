@@ -127,8 +127,14 @@ def test_transport_ambiguity_is_upload_unknown_and_is_not_retried() -> None:
     assert len(provider.requests) == 1
 
 
-def test_create_and_search_remain_unadopted() -> None:
-    from integrations.marketplaces.smartstore.registry import NOT_ADOPTED
+def test_search_remains_unadopted_and_create_adoption_changes_no_upload_rule() -> None:
+    from integrations.marketplaces.smartstore.registry import ADOPTED, NOT_ADOPTED
 
-    assert EndpointId.SMARTSTORE_PRODUCT_CREATE_V2 in NOT_ADOPTED
     assert EndpointId.SMARTSTORE_PRODUCT_SEARCH in NOT_ADOPTED
+    # The CREATE adoption slice adopts CREATE only. The upload keeps its own ambiguity contract
+    # (ADR-0014 §17.1): a possibly transmitted failure is UPLOAD_UNKNOWN, never a rejection.
+    assert EndpointId.SMARTSTORE_PRODUCT_CREATE_V2 in ADOPTED
+    # The CREATE slice's reviewed definitive-rejection whitelist is endpoint-specific, so a 400 on
+    # the upload is still an ambiguous outcome and still becomes UPLOAD_UNKNOWN, not a rejection.
+    outcome = upload(Provider(httpx.Response(400, json={"code": "BAD_REQUEST"})))
+    assert (outcome.asset, outcome.ambiguous_reason) == (None, "UPLOAD_UNKNOWN")

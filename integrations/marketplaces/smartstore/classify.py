@@ -10,12 +10,18 @@ table (§8, Issue #39 §6).
   (§8 Step 5, §18).
 - A class never authorizes a replay (§14). PR-A retries nothing: retry budgets are policy-pending
   (§25 Q6).
+
+**The mutation outcome is a separate axis** (ERRORS §2.1 vs §2.2). :func:`definitive_rejection`
+answers only "did this response prove the mutation did not happen?", and never selects a cause.
+It is the reviewed, endpoint-specific extension of the `NOT_APPLIED_PROVEN` whitelist that the
+CREATE adoption slice needs (ERRORS §15; ADR-0014 §10, §28.3; ADR-0018 §6.1).
 """
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from app.core.errors import ErrorClass
+from integrations.marketplaces.smartstore.registry import EndpointId
 from integrations.marketplaces.smartstore.transmission import Phase
 
 
@@ -176,3 +182,37 @@ def _gateway(provider_code: str) -> Classification:
         "SMARTSTORE_GATEWAY_REJECTED",
         provider_code,
     )
+
+
+# ---------------------------------------------------------------- definitive provider rejection
+
+# ERRORS §15 admits `NOT_APPLIED_PROVEN` only through an explicitly reviewed whitelist, and §15.1's
+# baseline covers pre-transmission evidence only. ADR-0014 §10's resolution table also admits
+# "another explicitly reviewed machine or provider proof", and §28.3 names one for CREATE: an
+# ordinary **definitive provider rejection**, recorded `NOT_APPLIED_PROVEN` on its own Attempt and
+# never passing through `UNKNOWN`. This is that review, and it is deliberately narrow.
+#
+# The reviewed statuses are exactly the API-server request-rejection outcomes ERRORS.md §10
+# enumerates for the product API — `BAD_REQUEST` (§10.1), `UNAUTHORIZED` (§10.2), `FORBIDDEN`
+# (§10.3), `NOT_FOUND` (§10.4), the 405/415 request-contract failures (§10.7) and 409 (§10.8). In
+# each the provider's own complete response says it refused the request, so no product was created.
+DEFINITIVE_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 415})
+# The review is endpoint-specific, as §15 requires. Only the adopted CREATE contract carries it;
+# IMAGE_UPLOAD keeps the ambiguity contract of ADR-0014 §17.1 unchanged.
+DEFINITIVE_REJECTION_ENDPOINTS = frozenset({EndpointId.SMARTSTORE_PRODUCT_CREATE_V2})
+
+
+def definitive_rejection(endpoint_id: EndpointId, status: int, provider_code: str | None) -> bool:
+    """Whether one complete provider response proves this request applied nothing.
+
+    Everything outside the reviewed set stays ambiguous, because application cannot be excluded:
+    a 2xx that fails the success predicate, a malformed or truncated body, a 3xx (never followed
+    for a mutation, ERRORS §10.6), a 408/425/429 and every 5xx (§14.3, §15.2). So does **any**
+    gateway-attributed code: ERRORS §25 Q2 — whether a pre-service gateway rejection guarantees no
+    mutation reached the target service — is still open, so a `GW.` code proves nothing here.
+    """
+    if endpoint_id not in DEFINITIVE_REJECTION_ENDPOINTS:
+        return False
+    if provider_code is not None and provider_code.startswith("GW."):
+        return False
+    return status in DEFINITIVE_REJECTION_STATUSES

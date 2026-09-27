@@ -126,11 +126,13 @@ def test_the_projection_states_only_proven_fields_and_names_its_gaps() -> None:
         "productInfoProvidedNotice": {"material": "면 100%"},
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
-    # The document is not sendable: the packet proves neither the image container nor the media
-    # type of POST /v2/products, and the endpoint stays NOT_ADOPTED.
+    # The document is not sendable. The endpoint contract is adopted now and the request media
+    # type is proven, so that gap is gone; the image container and the channel-product structure
+    # the CREATE body pairs with originProduct are still unproven, and either alone refuses.
     assert not projected.sendable
     assert any("images" in gap for gap in projected.gaps)
-    assert any("media type" in gap for gap in projected.gaps)
+    assert product.CHANNEL_PRODUCT_GAP in projected.gaps
+    assert not any("media type" in gap for gap in projected.gaps)
 
 
 def test_the_projection_is_deterministic_for_the_same_snapshot() -> None:

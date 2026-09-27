@@ -7,7 +7,7 @@
 - M2 integration mode: `OWN_STORE_SELF`
 - Canonical error classes: the ADR-0008 aligned taxonomy only (no SmartStore-specific classes)
 - Runtime verification: `PENDING`
-- Endpoint-specific domain mapping: `PARTIAL / PENDING ENDPOINT_MATRIX`
+- Endpoint-specific domain mapping: `PARTIAL / PENDING ENDPOINT_MATRIX` (the adopted product CREATE has a frozen outcome classification: §15.1.1, `ENDPOINT_MATRIX.md` §4.3)
 - Mutation outcome model: `APPLIED_PROVEN / NOT_APPLIED_PROVEN / UNKNOWN`
 
 ## Provenance
@@ -957,6 +957,40 @@ The following may support `NOT_APPLIED_PROVEN` when the stated boundary is posit
 
 A proxy/tunnel topology requires equivalent evidence about the provider-bound application request, not merely a generic client exception name.
 
+### 15.1.1 Reviewed endpoint extension: a definitive provider rejection of `SMARTSTORE_PRODUCT_CREATE_V2`
+
+§15 admits `NOT_APPLIED_PROVEN` "only through an explicitly reviewed whitelist". **This subsection
+is such a review**, added by the CREATE adoption slice (ADR-0020 §4), and it is deliberately narrow.
+
+**It widens §15's framing, and says so.** §15.1's baseline is pre-transmission evidence — the
+request could not have reached the provider application layer — and a definitive rejection is the
+opposite: the request reached that layer and the layer refused it. ADR-0014 §10's resolution table
+admits "another explicitly reviewed machine or provider proof", and ADR-0014 §28.3 names exactly
+this one for CREATE: **an ordinary definitive provider rejection is recorded `NOT_APPLIED_PROVEN` on
+its own Attempt and never passes through `UNKNOWN`.** The proof is the provider's own complete
+response saying it rejected the request, not an inference about transport.
+
+For `SMARTSTORE_PRODUCT_CREATE_V2`, and for that endpoint only, a response supports
+`NOT_APPLIED_PROVEN` when **all** hold:
+
+- a complete provider response was received and read;
+- its status is one of `400`, `401`, `403`, `404`, `405`, `409`, `415` — exactly the API-server
+  request-rejection outcomes §10.1–§10.4, §10.7 and §10.8 map for the product API;
+- **no gateway-attributed provider code is present.** Any `GW.` code keeps the outcome `UNKNOWN`,
+  because §25 Q2 — whether a pre-service gateway rejection guarantees that no mutation reached the
+  target service — is still `DO_NOT_ASSUME`.
+
+Everything else keeps the ambiguity of §15.2, including a `2xx` that fails the success predicate, a
+malformed or truncated body, any `3xx` (never followed for a mutation, §10.6), `408`, `425`, `429`
+and every `5xx`.
+
+This extension changes **no other endpoint**. `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` keeps the ambiguity
+contract of ADR-0014 §17.1: a possibly transmitted upload failure stays `UPLOAD_UNKNOWN`.
+
+It also authorizes no replay. `NOT_APPLIED_PROVEN` is an outcome, never a retry permission (§14.2),
+and the adopted CREATE contract has no provider idempotency and an automatic retry budget of `0`
+(`ENDPOINT_MATRIX.md` §4.3).
+
 ### 15.2 Explicit non-whitelist / UNKNOWN cases
 
 The following default to:
@@ -1562,7 +1596,9 @@ Current status:
 
 `DO_NOT_ASSUME`
 
-Write replay therefore continues to use the remote-outcome/idempotency/read-back contract.
+Write replay therefore continues to use the remote-outcome/idempotency/read-back contract, and the
+adopted CREATE contract keeps every gateway-attributed rejection `UNKNOWN` for exactly this reason
+(§15.1.1).
 
 ### Q3. Exact redirect behavior for adopted M2 product endpoints
 
@@ -1667,6 +1703,10 @@ For SmartStore:
 `TRANSIENT write failure + remote_outcome UNKNOWN != safe retry`
 
 `NOT_APPLIED_PROVEN = whitelist-only or positive endpoint reconciliation proof`
+
+`a definitive provider rejection of the adopted product CREATE is a reviewed whitelist entry (15.1.1); a gateway-attributed one is not`
+
+`an UNKNOWN CREATE is never resent, whatever its cause was`
 
 `pooled/reused connection failure != NOT_APPLIED_PROVEN by exception name`
 

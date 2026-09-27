@@ -122,7 +122,7 @@ REQUIRED_CHECKS = {
         "boundary.declarations_name_their_own_gap",
         "boundary.provider_transport_unloadable",
         "boundary.real_wire_projection_refuses",
-        "boundary.create_not_adopted",
+        "boundary.create_adopted_but_unreachable",
         "boundary.upload_adopted_but_unreachable",
         "boundary.search_not_adopted",
         "boundary.product_registration_write_unverified",
@@ -220,12 +220,19 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "endpoint_id": None,
         "endpoint_adopted": None,
     }
+    # The CREATE contract **is** adopted (ADR-0020 §4 slice 1), so the seam is declared for the
+    # same reason the read-back is: a provider-zero run has no provider to answer it. Adoption is
+    # never reported as unadoption, and SEARCH is still genuinely unadopted.
     assert declared["CREATE_HANDOFF"] == {
-        "reason": "ENDPOINT_NOT_ADOPTED",
+        "reason": "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE",
         "endpoint_id": "SMARTSTORE_PRODUCT_CREATE_V2",
+        "endpoint_adopted": True,
+    }
+    assert declared["RECONCILE_LOOKUP"] == {
+        "reason": "ENDPOINT_NOT_ADOPTED",
+        "endpoint_id": "SMARTSTORE_PRODUCT_SEARCH",
         "endpoint_adopted": False,
     }
-    assert declared["RECONCILE_LOOKUP"]["reason"] == "ENDPOINT_NOT_ADOPTED"
     # The read-back contract **is** adopted: it is declared because an offline run has no provider
     # to answer it, and it is never reported as unadopted.
     assert declared["READ_BACK"] == {
@@ -243,7 +250,7 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
     assert declared["ACCOUNT_BINDING"]["reason"] == "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
     assert report["account_scope"]["synthetic_connect_binding"] is True
     adoption = report["endpoint_adoption"]
-    assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is False
+    assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is True
     assert adoption["SMARTSTORE_PRODUCT_IMAGE_UPLOAD"] is True
     assert adoption["SMARTSTORE_PRODUCT_SEARCH"] is False
     assert adoption["SMARTSTORE_ORIGIN_PRODUCT_READ_V2"] is True
@@ -255,11 +262,11 @@ def test_the_canary_plan_is_blocked_and_names_its_missing_contracts(accepted: Ac
     canary = accepted.report["canary_readiness"]
     assert canary["verdict"] == "BLOCKED"
     assert canary["write_status"] == "UNVERIFIED" and canary["execution_mode"] == "DRY_RUN"
-    assert "CREATE_ADOPTED" in canary["missing"]
-    assert set(canary["unadopted_endpoints"]) >= {
-        "SMARTSTORE_PRODUCT_CREATE_V2",
-        "SMARTSTORE_PRODUCT_SEARCH",
-    }
+    # CREATE adoption closes exactly one requirement and nothing else: the positive-only reconcile
+    # path is still unadopted and the canary is still BLOCKED (ADR-0018 §6, ADR-0020 §4).
+    assert "CREATE_ADOPTED" not in canary["missing"]
+    assert "RECONCILE_PATH_ADOPTED" in canary["missing"]
+    assert set(canary["unadopted_endpoints"]) == {"SMARTSTORE_PRODUCT_SEARCH"}
 
 
 def test_the_hard_zero_counters_are_measured_zero(accepted: Accepted) -> None:
