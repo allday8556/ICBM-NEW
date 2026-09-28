@@ -1,8 +1,9 @@
 # Agent Host Audit and Merge Protocol
 
-Status: **V2 — canonical candidate (PR #147).** It is runtime-authoritative for the Agent Host from the
-main commit that contains this file. Until then, the #146 trial instruction (`5870526033`) cites
-the pre-refresh text at `9cc4939a` as its protocol source.
+Status: **V2 — canonical candidate (PR #147).** It becomes the Agent Host's canonical protocol from
+the main commit that contains this file, under the bootstrap transition of §0.1. Until then, the
+#146 trial instruction (`5870526033`) cites the pre-refresh text at `9cc4939a` as its protocol
+source.
 Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`
 Scope: ICBM-NEW Agent Host audit, CI, merge, and post-merge verification workflow.
 
@@ -53,7 +54,53 @@ by this protocol. The protocol never authorizes:
 - any action `CLAUDE.md` §7.2 reserves for the user, such as a force-push, a branch deletion or a
   destructive operation.
 
-## 1. Flow
+### 0.1 Bootstrap transition
+
+This protocol's packet-dependent steps need the packet generator that PR-A delivers (§9). They are
+therefore bounded as follows.
+
+- **#147 is contract-only.** Merging it records the contract. It does not make the generated Audit
+  Packet or automated authority discovery available.
+- **Until the bootstrap ends, packet-dependent automation is not claimed as available.** No Host
+  step may claim any of the following:
+  - a generated packet, an `audit_packet_digest` or packet completeness;
+  - automated discovery;
+  - a packet-based MERGE_GUARD.
+
+  Packet-dependent work waits for the end of the bootstrap. This includes the #146 trial of §10.
+- **Bootstrap audit identity, for #147 and PR-A only:**
+
+  ```text
+  (exact HEAD, audited base SHA, bootstrap_manifest_digest)
+  ```
+
+  The bootstrap manifest is an **explicit, content-bound evidence manifest** that lists every source
+  the audit relies on:
+  - git sources by commit or blob SHA;
+  - mutable GitHub sources by locator and canonical body digest (§4);
+  - the classification record of §3.
+
+  It is published in a durable GitHub review record for that HEAD. `bootstrap_manifest_digest` is
+  the SHA-256 of its canonical listing.
+- **What else applies unchanged during the bootstrap:**
+  - GPT and Claude audit the same identity;
+  - each `evidence_seen` covers the bootstrap manifest by content-bound identity;
+  - the marker grammar and the classification authority of §3 apply, and designated streams are
+    re-scanned in full, by the operator where no generator exists;
+  - PASS-only caching;
+  - DUAL PASS before READY;
+  - FULL CI after READY.
+- **MERGE_GUARD during the bootstrap** is §7 with the bootstrap manifest in place of the packet:
+  - Immediately before the merge, every listed source is re-read and the designated streams are
+    re-scanned. The manifest must be unchanged, and every marked source must be classified.
+    Otherwise the rules of §7.1 apply (HOLD or re-audit).
+  - Conditions 1 and 5–8 are unchanged, and the merge uses `expected_head_sha`.
+  - POST_MERGE_VERIFY applies unchanged.
+- **The bootstrap ends automatically** when PR-A is merged, its POST_MERGE_VERIFY passes and its
+  bootstrap acceptance is recorded in a durable user or architect source. From that main commit on,
+  every slice uses the packet flow of §1–§8. **No slice other than #147 and PR-A may use this
+  exception**, including PR-B and PR-C.
+
 
 ```text
 DRAFT implementation
@@ -108,6 +155,43 @@ Only marked sources participate in automatic authoritative-source discovery. Unm
 discussion, implementation summaries, audit results, and status comments do not become authority
 merely because the repository owner posted them.
 
+**Recognition grammar.** Recognition is deterministic.
+
+A source **carries a marker** only when **the first non-empty line of its body, with surrounding
+whitespace and a trailing CR removed, equals exactly one of the three tokens above**. The match is
+case-sensitive, and nothing else may be on that line.
+
+Marker text anywhere else is **not** a marker. It is ordinary text:
+- on a later line;
+- inside prose;
+- in a quote (`> [ARCHITECT-INSTRUCTION]`);
+- in inline code;
+- in a code block, where the first line is the fence;
+- after other text on the first line (`[ARCHITECT-INSTRUCTION] see below`);
+- in another case (`[architect-instruction]`).
+
+An audit or status comment that merely mentions a token stays unmarked. For example, the existing
+#146 instruction `5870526033`, whose first line is exactly `[ARCHITECT-INSTRUCTION]`, is marked.
+
+**Classification authority.** The Host never classifies a source on its own judgement. It cannot
+clear its own HOLD.
+
+A classification says whether a marked source is `required`, excluded with a reason, or
+evidence-only. It is supplied only by a **durable, content-bound classification record under user
+or architect authority**, which is one of:
+- a marked `[ARCHITECT-INSTRUCTION]` or `[OWNER-AMENDMENT]` source in a designated stream that
+  states the mapping;
+- a canonical slice specification (a git blob) that the user or architect explicitly authorized to
+  carry it.
+
+A marked record is authority by its own marker and needs no further classification of itself.
+
+The mapping names each source by its content-bound identity (locator and body digest). The Host only
+applies that exact declared mapping. It never invents, infers or reinterprets one. A marked source
+with no matching authorized classification stays **HOLD**, and so does a source whose body digest no
+longer matches its mapping. The classification record is itself a content-bound, required source of
+the manifest and of `evidence_seen`.
+
 **Discovery is a full re-scan and is edit-aware.** The manifest names the **designated authoritative
 streams** of the slice, for example:
 - the comments of a named issue;
@@ -115,8 +199,9 @@ streams** of the slice, for example:
 - a named issue or PR body.
 
 Every packet generation, including the pre-merge regeneration of §7.1, reads **every source in
-every designated stream in full** (all pages) at its **current** body. It then classifies each
-source that currently carries a recognized marker, whenever that source was created or edited.
+every designated stream in full** (all pages) at its **current** body. It then checks each source
+that currently carries a recognized marker against the authorized classification (above), whenever
+that source was created or edited.
 
 The scan never skips a source because of its creation order, its locator or an earlier scan. A
 source created before an earlier scan and edited in place to add a marker is therefore found like a
@@ -125,8 +210,8 @@ new one.
 The **source watermark** is recorded as scan provenance only (what was scanned, and when). It is
 never a boundary below which sources are skipped.
 
-A source that currently carries a recognized marker and is not classified in the manifest prevents
-a clean packet from being issued until it is classified. Such a source is **HOLD**, whether it is
+A source that currently carries a recognized marker and has no matching authorized classification
+prevents a clean packet from being issued until an authorized classification record covers it. Such a source is **HOLD**, whether it is
 new or an old source edited in place, for example a formerly unmarked comment that now carries
 `[ARCHITECT-INSTRUCTION]`. The generator does not guess whether it should be ignored.
 
@@ -178,7 +263,7 @@ Hard completeness checks:
 - every source declared `required` by the manifest is present in the packet;
 - every source in every designated stream is re-scanned in full at its current body (§3). Every
   source that currently carries a recognized marker, including an older source edited in place to
-  add one, is classified before the packet is accepted. A stream that cannot be read completely is
+  add one, is covered by an authorized classification (§3) before the packet is accepted. A stream that cannot be read completely is
   HOLD;
 - every source is re-read at generation time. A git source resolves to its exact object. A
   mutable GitHub source must be readable, and its current canonical body digest is what the packet
@@ -311,8 +396,25 @@ Merge is allowed only when all of the following are true:
 5. FULL CI is GREEN for the exact HEAD.
 6. No HOLD is active.
 7. `audited_base_sha == current_base_sha`.
+8. The PR HEAD contains the current base: `merge_base(PR_HEAD, current_base_sha) ==
+   current_base_sha`. Equivalently, the HEAD is `behind_by == 0` against the current base. This is
+   checked **before** the merge, in addition to condition 7. A divergent or behind HEAD is never left
+   for POST_MERGE_VERIFY to discover.
 
 Merge must use `expected_head_sha` so a moved PR HEAD cannot be merged accidentally.
+
+**Residual: the final-check window.** A small TOCTOU window remains between the final authority
+re-scan and base check and GitHub's merge mutation. `expected_head_sha` binds the head atomically,
+but not the base or a GitHub authority source edited in that window.
+
+Mitigations in this protocol:
+- conditions 7 and 8 and §7.1 are re-evaluated **immediately before** the merge call;
+- POST_MERGE_VERIFY's tree equality detects a base that moved in the window (HOLD).
+
+**Cut-off:** an authority source edited after that final re-scan is outside this merge's audited
+input and binds the next audit, not this merge.
+
+A stronger atomic mitigation is assigned to PR-C (§9).
 
 ### 7.1 Pre-merge packet regeneration and authority re-scan
 
@@ -322,8 +424,8 @@ watermark skipping (§3), and re-reads every content-bound source (§4).
 
 - **Unchanged:** the regenerated canonical bytes, `audit_packet_digest` and manifest equal the
   audited packet. Only then may MERGE_GUARD proceed.
-- **Unclassified marker:** a source that currently carries a recognized marker and is not
-  classified in the manifest is **HOLD** (§3). It may be new, or an older, previously unmarked
+- **Unclassified marker:** a source that currently carries a recognized marker and has no
+  matching authorized classification is **HOLD** (§3). It may be new, or an older, previously unmarked
   source edited in place after the DUAL PASS. An incompletely read stream is HOLD too.
 - **Any other difference** invalidates the DUAL PASS. The Host returns to audit under the new
   audit identity. Examples:
@@ -388,6 +490,14 @@ Required discovery tests (PR-A):
 - a new marked source that is not classified → HOLD;
 - a stream page that cannot be read, or a truncated listing → HOLD, never a partial scan;
 - an edited body of a classified source → its body digest and the packet digest change (§4, §7.1).
+- marker grammar (§3), positive: a body whose first non-empty line is exactly one token (with
+  surrounding whitespace or a trailing CR) is marked, for example the form of `5870526033`;
+- marker grammar, negative: an audit or status comment that merely mentions the tokens in prose
+  stays **unmarked**, as does a token on a later line, in a quote, in inline code or a code block,
+  followed by other text on the first line, or in another case;
+- classification authority (§3): a marked source with no matching classification from an authorized
+  record → HOLD; the Host cannot clear it by itself; a classified source whose body digest changed
+  no longer matches → HOLD.
 
 ### PR-B — Audit result/control-flow cleanup
 
@@ -403,8 +513,11 @@ Required discovery tests (PR-A):
 - skipped/duplicate/retry handling;
 - pre-merge packet regeneration and authority re-scan (§7.1);
 - MERGE_GUARD;
+- base containment before merge (§7 condition 8);
 - expected_head_sha merge;
-- post-merge tree verification.
+- post-merge tree verification;
+- the stronger atomic mitigation of the final-check window (§7 residual): binding the base and the
+  audited authority snapshot to the merge mutation, or re-verifying them atomically with it.
 
 ## 10. PR #146 trial
 
