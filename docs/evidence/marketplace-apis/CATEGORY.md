@@ -19,7 +19,7 @@
 - **Locators:** `전체 카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-list-product ; `카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-product — `OFFICIAL_API_DOC`, NAVER Commerce API 2.89.0 (2026-09-15), `NAVER-P0-PACKET-289` (Issue #89 comment 5746489554).
 - **Method / path:** `GET /v1/categories` (all categories); `GET /v1/categories/{categoryId}` (one category).
 - **Auth / group:** `Authorization: Bearer {token}`; the AI-use guide groups category reads under API group `상품`.
-- **In the product body:** `originProduct.leafCategoryId` is present in the 2.89.0 schema but **not** marked required by the provider (`NAVER-P0-REQUIRED-CREATE-289`, Issue #89 comment 5861933729; [PRODUCT_CREATE](PRODUCT_CREATE.md#request-structure)). ICBM may require a category as its own preflight policy; that is ICBM-side, never a NAVER fact.
+- **In the product body:** `originProduct.leafCategoryId` is **required on product registration** (`NAVER-P0-REGISTRATION-CREATE-289`, Issue #89 comment 5862400626; [PRODUCT_CREATE](PRODUCT_CREATE.md#request-structure)).
 - **Missing:** every response field of both reads (none is proven, `SOURCES.md` §5.1), query keys, errors, rate limit; the `leafCategoryId` value format.
 - **ICBM:** `SMARTSTORE_CATEGORY_LIST` / `SMARTSTORE_CATEGORY_READ` are `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4, §4.1: with no proven response field a deny-by-default retention profile would keep nothing; the registry records app mode and group as `TBD_AT_ADOPTION`). Runtime `UNVERIFIED`.
 

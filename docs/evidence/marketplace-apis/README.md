@@ -69,7 +69,7 @@ A field that is not listed for a platform was not captured. `Not captured` in a 
 ## Provenance conventions
 
 - SmartStore source IDs (`NAVER-P0-*`, `NAVER-P1-*`) resolve through `docs/platforms/smartstore/SOURCES.md` §5–§6 to the official NAVER URL, authority class and version.
-- `NAVER-P0-PACKET-289` = Issue #89 comment 5746489554; `NAVER-P0-REVIEW-CREATE-289` = Issue #89 comments 5768199984 and 5768247290; `NAVER-P0-FIELDS-CREATE-289` = Issue #89 comment 5861477977; `NAVER-P0-REQUIRED-CREATE-289` = Issue #89 comment 5861933729. All are architect-reviewed extracts of NAVER Commerce API **2.89.0 (2026-09-15)**.
+- `NAVER-P0-PACKET-289` = Issue #89 comment 5746489554; `NAVER-P0-REVIEW-CREATE-289` = Issue #89 comments 5768199984 and 5768247290; `NAVER-P0-FIELDS-CREATE-289` = Issue #89 comment 5861477977; `NAVER-P0-REQUIRED-CREATE-289` = Issue #89 comment 5861933729; `NAVER-P0-REGISTRATION-CREATE-289` = Issue #89 comment 5862400626, which supersedes 5861933729 for the registration requirement of `leafCategoryId` and top-level `stockQuantity`. All are architect-reviewed extracts of NAVER Commerce API **2.89.0 (2026-09-15)**.
 - Non-SmartStore facts come from Issue #140 research packet 1 (comment 5857814524, 2026-09-28) and the initial catalog pass of the same date (PR #141); each fact carries its official URL.
 - ICBM-side decisions (adoption, outcome rules, projections) are labelled as such and cite the ICBM canonical document or architect ruling; they are never provider facts.
 
