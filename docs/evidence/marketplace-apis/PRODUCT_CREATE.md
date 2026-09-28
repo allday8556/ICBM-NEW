@@ -6,7 +6,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` (fail-closed) — for the M5 SmartStore-only scope the wire facts, nested request field names, globally required fields, M5-relevant conditional rules, limits/defaults and success-identifier names are captured; the enumerated values / value types of several fields (**including required ones**), some nesting, the `productInfoProvidedNotice` type children and the response-body nesting are not. Coverage lists them exactly | `NOT_ADOPTED` | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` (fail-closed) — for the M5 SmartStore-only scope the wire facts, nested request field names, the fields required on registration and their accepted values, M5-relevant conditional rules, limits/defaults and success-identifier names are captured; some nesting, the `productInfoProvidedNotice` type children and the response-body nesting are not. Coverage lists them exactly | `NOT_ADOPTED` | `UNVERIFIED` |
 | Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -25,10 +25,10 @@ This section is the single current field-level representation of the SmartStore 
 | Official locators | `(v2) 상품 등록`: https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product ; `원상품 정보 구조체` schema: https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4 ; `스마트스토어 채널상품 정보 구조체` schema: https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4-%EC%B1%84%EB%84%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4 ; image upload: https://apicenter.commerce.naver.com/docs/commerce-api/current/upload-product |
 | Supporting official support | https://github.com/commerce-api-naver/commerce-api/discussions/3170 (product identities, `sellerManagementCode` ownership); https://github.com/commerce-api-naver/commerce-api/discussions/3467 (upload URL used directly) |
 | Authority | `OFFICIAL_API_DOC` (NAVER `P0`) for the wire, structure, status and identifier facts; `OFFICIAL_SUPPORT` (NAVER `P1`) where a line says so |
-| Version / observed | NAVER Commerce API **2.89.0 (2026-09-15)**; field-level and required/conditional extracts retrieved 2026-09-28 |
-| Source IDs | `NAVER-P0-PACKET-289` (5746489554), `NAVER-P0-REVIEW-CREATE-289` (5768199984, 5768247290), `NAVER-P0-FIELDS-CREATE-289` (5861477977), `NAVER-P0-REQUIRED-CREATE-289` (5861933729) — `SOURCES.md` §5.1–§5.2 |
+| Version / observed | NAVER Commerce API **2.89.0 (2026-09-15)**; field-level, required/conditional and registration-requirement/value-level extracts retrieved 2026-09-28 |
+| Source IDs | `NAVER-P0-PACKET-289` (5746489554), `NAVER-P0-REVIEW-CREATE-289` (5768199984, 5768247290), `NAVER-P0-FIELDS-CREATE-289` (5861477977), `NAVER-P0-REQUIRED-CREATE-289` (5861933729), `NAVER-P0-REGISTRATION-CREATE-289` (5862400626) — `SOURCES.md` §5.1–§5.2 |
 
-Below, `PACKET` = 5746489554, `REVIEW` = 5768199984 / 5768247290, `FIELDS` = 5861477977, `REQ` = 5861933729.
+Below, `PACKET` = 5746489554, `REVIEW` = 5768199984 / 5768247290, `FIELDS` = 5861477977, `REQ` = 5861933729, `REG` = 5862400626. Where `REG` states a registration requirement or a value, it governs: it supersedes `REQ` for the registration requirement of `leafCategoryId` and top-level `stockQuantity`.
 
 ### Wire
 
@@ -41,14 +41,14 @@ Below, `PACKET` = 5746489554, `REVIEW` = 5768199984 / 5768247290, `FIELDS` = 586
 
 ### Request structure
 
-The `원상품 정보 구조체` schema states it is used for request and response in product registration, read and update (PACKET). In the Required column, **required** means the 2.89.0 schema explicitly marks the field required (REQ); **not required** means the field is present but not marked required; **conditional** gives the documented condition; **not stated** means the captured sources say nothing either way. A structure that is not required is sent only when the RegistrationSnapshot owns its data and the product's conditions call for it; the schema containing a structure is never a reason to send it (REQ).
+The `원상품 정보 구조체` schema states it is used for request and response in product registration, read and update (PACKET). In the Required column, **required** means the 2.89.0 schema marks the field required (REQ) or the endpoint's own registration rule requires it (REG); an endpoint-specific registration rule overrides a conclusion drawn only from a generic schema badge (REG §1). **not required** means the field is present and neither the schema nor a registration rule requires it; **conditional** gives the documented condition; **not stated** means the captured sources say nothing either way. A structure that is not required is sent only when the RegistrationSnapshot owns its data and the product's conditions call for it; the schema containing a structure is never a reason to send it (REQ).
 
 **`originProduct` and images**
 
 | Path | Required | Limits / default / rule | Source |
 | --- | --- | --- | --- |
 | `originProduct` | required object | — | FIELDS |
-| `originProduct.statusType` | required | — | REQ |
+| `originProduct.statusType` | required string | on registration only `SALE` may be entered; `SUSPENSION` supplied on registration is registered as `SALE`; a stock of 0 registers the product `OUTOFSTOCK` regardless of the requested status. Schema values: `WAIT`, `SALE`, `OUTOFSTOCK`, `UNADMISSION`, `REJECTION`, `SUSPENSION`, `CLOSE`, `PROHIBITION`, `DELETE` | REQ, REG |
 | `originProduct.name` | required | — | PACKET, REQ |
 | `originProduct.detailContent` | required | — | PACKET, REQ |
 | `originProduct.images` | required object | — | PACKET, FIELDS, REQ |
@@ -58,17 +58,23 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `originProduct.images.optionalImages[].url` | required in each entry | URL returned by the product-image upload API | FIELDS, REQ |
 | `originProduct.salePrice` | required | at most 999,999,990 | PACKET, REQ |
 | `originProduct.detailAttribute` | required object | substructures below | REQ |
-| `originProduct.leafCategoryId` | **not required** by the provider schema | present in the schema; see the ICBM-side category note below | REQ |
-| `originProduct.stockQuantity` | not required | at most 99,999,999 | PACKET, REQ |
+| `originProduct.leafCategoryId` | **required on registration** | the official origin-product reference states 상품 등록 시 필수 | REG |
+| `originProduct.stockQuantity` | **required on registration** | registration stock is at least 1; at most 99,999,999 | PACKET, REG |
 | `originProduct.customerBenefit` and other feature-specific structures | not global CREATE requirements | keep their own feature conditions | REQ |
 
-**`originProduct.deliveryInfo`** — not required globally: omitting it registers a no-delivery product; rental and certain quick-delivery products require it (REQ).
+**`originProduct.deliveryInfo`** — not required globally: omitting it registers a no-delivery product; rental and certain quick-delivery products require it (REQ). The values below are provider facts only: ICBM sends only a delivery shape its canonical preparation/template data owns and never invents a delivery policy (REG §3).
 
 | Path (when `deliveryInfo` is sent) | Required | Rule | Source |
 | --- | --- | --- | --- |
-| `deliveryInfo.deliveryType` | required | — | REQ |
-| `deliveryInfo.deliveryAttributeType` | required | — | REQ |
-| `deliveryInfo.deliveryFee` | required | — | REQ |
+| `deliveryInfo.deliveryType` | required | `DELIVERY` or `DIRECT` | REQ, REG |
+| `deliveryInfo.deliveryAttributeType` | required | `NORMAL`, `TODAY`, `OPTION_TODAY`, `HOPE`, `TODAY_ARRIVAL`, `DAWN_ARRIVAL`, `ARRIVAL_GUARANTEE`, `SELLER_GUARANTEE`, `HOPE_SELLER_GUARANTEE`, `QUICK`, `PICKUP`, `QUICK_PICKUP` | REQ, REG |
+| `deliveryInfo.deliveryFee` | required object | its fields below | REQ, REG |
+| `…deliveryFee.deliveryFeeType` | not required | omitted → `FREE`; `FREE`, `CONDITIONAL_FREE`, `PAID`, `UNIT_QUANTITY_PAID`, `RANGE_QUANTITY_PAID` | REG |
+| `…deliveryFee.baseFee` | not required | at most 100,000 | REG |
+| `…deliveryFee.freeConditionalAmount` | conditional: required in the conditional-free case | — | REG |
+| `…deliveryFee.repeatQuantity`, `secondBaseQuantity`, `secondExtraFee`, `thirdBaseQuantity`, `thirdExtraFee` | conditional on the fee mode | — | REG |
+| `…deliveryFee.deliveryFeePayType` | not stated | `COLLECT`, `PREPAID`, `COLLECT_OR_PREPAID` | REG |
+| `…deliveryFee.deliveryFeeByArea` | conditional: when used | has its own required/conditional subfields (not captured; see Coverage) | REG |
 | `deliveryInfo.claimDeliveryInfo` | required object | — | REQ |
 | `…claimDeliveryInfo.returnDeliveryFee` | required | — | REQ |
 | `…claimDeliveryInfo.exchangeDeliveryFee` | required | — | REQ |
@@ -83,7 +89,7 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `…sellerCodeInfo.sellerBarcode` | not required | — | FIELDS, REQ |
 | `…sellerCodeInfo.sellerCustomCode1`, `…sellerCustomCode2` | not required | — | FIELDS, REQ |
 | `…detailAttribute.optionInfo` | not required | if options are used, at least one supported option form is required; simple and combination forms cannot be mixed; the schema also documents custom and standard option structures | FIELDS, REQ |
-| `…optionInfo.optionCombinationSortType` | not stated | combination form | FIELDS |
+| `…optionInfo.optionCombinationSortType` | not required (string) | combination form; omitted → `CREATE`; `CREATE`, `ABC`, `LOW_PRICE`, `HIGH_PRICE`; rental products allow only `CREATE` or `ABC` | FIELDS, REG |
 | `…optionInfo.optionCombinationGroupNames.optionGroupName1` | conditional: required when the combination structure is used | — | FIELDS, REQ |
 | `…optionCombinationGroupNames.optionGroupName2`, `…optionGroupName3` | not stated | ordinary combination options expose up to three option-name dimensions | PACKET, FIELDS |
 | `…optionCombinationGroupNames.optionGroupName4` | not stated | branch/location-specific form only (fourth dimension) | PACKET, FIELDS |
@@ -95,7 +101,7 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `…optionCombinations[].price` | not required | default 0; at most 999,999,990 | PACKET, FIELDS, REQ |
 | `…optionCombinations[].usable` | not required | default `true` | FIELDS, REQ |
 | `…optionCombinations[].sellerManagerCode` | not required | — | PACKET, FIELDS, REQ |
-| `…optionCombinations[].skuYn` | not stated | — | FIELDS |
+| `…optionCombinations[].skuYn` | not required (boolean) | SKU-generation flag; omitted on registration → NAVER records N; for option products the option-level value applies; ignored for an account without the documented fulfillment permission | FIELDS, REG |
 | `…detailAttribute.productInfoProvidedNotice` | required for product registration | may be omitted on **update** only when a notice is already stored | PACKET, FIELDS, REQ |
 | `…productInfoProvidedNotice.productInfoProvidedNoticeType` | required | discriminator selecting exactly the one matching type-specific child object | FIELDS, REQ |
 | `…productInfoProvidedNotice.<type child>` | the one child matching the type | **Not captured (see Coverage below); fail-closed.** Child names include `wear`, `shoes`, `food`, `generalFood`, `dietFood` (examples, not the full list); each type has its own required/conditional field rules; some values are documented "미입력 시 상품상세 참조" and conditional fields are omitted when not applicable, so there is **no blanket fill-every-field rule** | PACKET, FIELDS, REQ |
@@ -109,8 +115,8 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | Path | Required | Limits / default / rule | Source |
 | --- | --- | --- | --- |
 | `smartstoreChannelProduct` | required object | — | FIELDS |
-| `smartstoreChannelProduct.naverShoppingRegistration` | required | — | FIELDS, REQ |
-| `smartstoreChannelProduct.channelProductDisplayStatusType` | required | `ON` or `SUSPENSION` for writes | FIELDS, REQ |
+| `smartstoreChannelProduct.naverShoppingRegistration` | required boolean | stored as `false` for a non-advertiser account | FIELDS, REQ, REG |
+| `smartstoreChannelProduct.channelProductDisplayStatusType` | required | schema values `WAIT`, `ON`, `SUSPENSION`; writes accept only `ON` or `SUSPENSION` | FIELDS, REQ, REG |
 | `smartstoreChannelProduct.channelProductName` | not required | omitted → the origin product name is used | FIELDS, REQ |
 | `smartstoreChannelProduct.bbsSeq` | not required | — | FIELDS, REQ |
 | `smartstoreChannelProduct.storeKeepExclusiveProduct` | not required | omitted → stored as `false` | FIELDS, REQ |
@@ -152,11 +158,10 @@ No CREATE-specific limit captured; the general gateway rate/quota model applies 
 
 ### Coverage and remaining gaps (exact)
 
-**Coverage:** `PARTIAL`, fail-closed. **Captured** for the M5 SmartStore-only CREATE scope (`originProduct` + `smartstoreChannelProduct`, combination-form options): the wire facts, the nested request field names, the provider's globally required fields, the M5-relevant conditional rules, the documented limits/defaults, and the names of the success identifiers (PACKET, REVIEW, FIELDS, REQ). **Not captured**, so no item below may be invented and any projection that needs one stays fail-closed / `REVIEW_REQUIRED` until the adoption slice records it from the cited schema:
+**Coverage:** `PARTIAL`, fail-closed. **Captured** for the M5 SmartStore-only CREATE scope (`originProduct` + `smartstoreChannelProduct`, combination-form options): the wire facts, the nested request field names, the fields required on registration and their accepted values (including `statusType`, the delivery values and the `deliveryFee` structure, `optionCombinationSortType`, `skuYn`, `naverShoppingRegistration` and the channel display-status write values), the M5-relevant conditional rules, the documented limits/defaults, and the names of the success identifiers (PACKET, REVIEW, FIELDS, REQ, REG). **Not captured**, so no item below may be invented and any projection that needs one stays fail-closed / `REVIEW_REQUIRED` until the adoption slice records it from the cited schema:
 
 - **`productInfoProvidedNotice` type-specific children.** No type child's field set or per-field required/conditional rule is captured, for any type, including the named examples `wear`, `shoes`, `food`, `generalFood`, `dietFood`. The complete list of `productInfoProvidedNoticeType` values is not captured either (the notice-type lookups are `NOT_ADOPTED` with no proven response field, [NOTICE](NOTICE.md#smartstore)). Until captured, ICBM sends no notice child value it cannot source-back; where NAVER explicitly allows the detail-page-reference/default behaviour, only that documented behaviour is used (REQ §D).
-- **Enumerated values and value types — including those of required fields.** Not captured: `statusType` (required); the value type of `naverShoppingRegistration` (required); `deliveryType`, `deliveryAttributeType` and the inner structure of `deliveryFee` (required when `deliveryInfo` is sent); `optionCombinationSortType`; `skuYn`. A required field whose accepted values this record does not carry cannot be projected from this record alone, which is why the entry as a whole stays `PARTIAL` rather than complete.
-- The full delivery-mode conditional list beyond the documented examples (`deliveryCompany`, `outboundLocationId`), and the exact nesting of the unit-price fields inside `detailAttribute`.
+- The full delivery-mode conditional list beyond the documented examples (`deliveryCompany`, `outboundLocationId`), the subfields of `deliveryFee.deliveryFeeByArea`, and the exact nesting of the unit-price fields inside `detailAttribute`.
 - The keys of the simple, custom and standard option structures (outside the combination form).
 - The JSON nesting of the success identifiers inside the response body beyond their names.
 - CREATE-specific domain error codes (`ERRORS.md` Q4) and the target/meaning of a `308` for this endpoint.
@@ -172,7 +177,6 @@ Two further items are recorded, but are not capture gaps in this scope:
 - **Runtime:** `UNVERIFIED`. `product_registration.write` is `UNVERIFIED`; execution is `DRY_RUN`; a real canary is `BLOCKED`; M5 is `PENDING`. The provider-evidence verdict stays `INSUFFICIENT` for idempotent replay and remote-absence proof (ADR-0014 §17.2).
 - **Outcome rules:** a timeout, connection loss, response loss or `5xx` after transport handoff is `UNKNOWN` and a CREATE in `UNKNOWN` is never resent (`ERRORS.md` §14.3, §15.2; ADR-0014 §28). Neither a `500` nor a zero-result lookup proves the product was not registered (ADR-0014 §17.2, §28.2). An ordinary provider `4xx` received after transport handoff is **not** proof of non-application: the diagnostic class may be `AUTH` / `POLICY_BLOCKED` / `VALIDATION` / `TRANSIENT` where evidence supports it, but `remote_outcome` stays `UNKNOWN`, and `NOT_APPLIED_PROVEN` remains whitelist-only (`ERRORS.md` §15; architect ruling R2, Issue #89 comment 5861607665). `308` is never followed for a mutation (`ERRORS.md` §10.6, §17).
 - **Projection boundary:** construct only fields owned by the immutable RegistrationSnapshot/preparation and required by the selected product/channel conditions; do not send an optional structure merely because the schema contains it; unsupported category/feature conditions stay fail-closed / `REVIEW_REQUIRED`. Only an option shape the canonical ICBM contracts already allow may be projected; no value of a type-specific notice child that ICBM does not own may be invented (FIELDS §C, §F; REQ).
-- **Category (ICBM-side, not a NAVER fact):** ICBM may require a category as its own authoring/preflight policy; that requirement must never be cited as provider-required, because the 2.89.0 schema does not mark `leafCategoryId` required (REQ).
 - **`sellerManagementCode` projection (architect ruling R1, Issue #89 comment 5861607665 — an ICBM decision, not a NAVER fact):** the internal `listing_identity/v1` (`icbm-` + 32 hex, 37 characters) and ADR-0014 §7 are unchanged. The SmartStore `sellerManagementCode` is the provider projection `smartstore-seller-management-code/v1` = the first **30 lowercase hexadecimal characters** of `SHA-256("smartstore-seller-management-code/v1\0" + listing_identity)`: deterministic, versioned, stable for the listing identity, frozen into the RegistrationSnapshot outbound values and compared exactly on read-back / positive reconcile. It never replaces `listing_identity` locally. An exact match is only a positive candidate: zero results never prove absence, multiple exact candidates stay `REVIEW_REQUIRED`, and a single exact candidate still needs provider-ID read-back. The code/ADR changes for R1 and R2 belong to the CREATE implementation slice.
 
 ## Coupang

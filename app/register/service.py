@@ -83,6 +83,7 @@ from app.register.execution import (
     enqueue_create as enqueue_first_create,
 )
 from app.register.model import (
+    CREATE_ENDPOINT_GROUP,
     OPERATOR_RESUMABLE,
     IntentState,
     ScopePauseReason,
@@ -138,7 +139,6 @@ PREPARATION_SOURCE = "PREPARATION"
 
 # The execution scope this surface acts in, the one marketplace M5 registers to, and the default
 # external-write mode (ADR-0014 §24). None of them is a decision this owner makes.
-_CREATE_GROUP = "product_registration"
 _MARKETPLACE = "smartstore"
 DRY_RUN = "DRY_RUN"
 
@@ -1080,7 +1080,7 @@ class RegisterService:
         if self._execution is not None:
             return self._execution.scope(marketplace_key, marketplace_account_id)
         store = self._require_store()
-        return store.execution_scope(marketplace_key, marketplace_account_id, _CREATE_GROUP)
+        return store.execution_scope(marketplace_key, marketplace_account_id, CREATE_ENDPOINT_GROUP)
 
     def _budget(self, intent: IntentRecord) -> BudgetState:
         return self._budget_of(

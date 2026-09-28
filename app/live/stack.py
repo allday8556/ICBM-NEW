@@ -5,15 +5,16 @@ the one write unit that starts its attempt. Every layer is evaluated and every r
 never only the first — and a refusal happens before any transmission and is audited after the
 unit rolled back, so no half-started attempt and no spent budget survive it.
 
-The layers (§4.3, §10), in order:
+The layers (§4.3, §10), in the order they are evaluated and reported. A refusal lists every
+failing layer, and its code is the first failing one, so this order decides the code:
 
 1. the execution mode is ``LIVE`` and the execution policy permits live writes — at this main the
    policy is ``M0_DRY_RUN_ONLY``, so this layer refuses every mutation, whatever else is recorded;
 2. the protected-write brake is ``RELEASED`` (absent or unreadable is ``ENGAGED``);
-3. an ``ACTIVE`` grant of the mutation's stage matches its exact unit, in its window, with budget;
-4. the endpoint is adopted — for a CREATE that is both ``SMARTSTORE_PRODUCT_CREATE_V2`` and the
-   positive-only reconcile path (§10, ADR-0014 §28), each named on its own — and, for an upload, a
-   sender is wired;
+3. an ``ACTIVE`` grant of the mutation's stage matches its exact unit, in its window, with budget
+   (for an upload also: the artifact, and at admission its provenance, is the granted one);
+4. the stage's endpoint is adopted — ``SMARTSTORE_PRODUCT_CREATE_V2`` for a CREATE, the image
+   upload for an upload;
 5. the residual-risk acceptance of §6.1 is recorded — at this main it is **not** recorded (§10),
    and the decision is recorded in GitHub rather than in the application, so it has no durable owner
    here and is never proven in process; this layer refuses every mutation at this main (G3-30);
@@ -21,10 +22,15 @@ The layers (§4.3, §10), in order:
    proven — production wires :class:`~app.live.proofs.DurableStageProofs`, whose restore, retention
    and visual answers come from the area 2 and area 3 owners while canary eligibility (§5) still
    has no owner and therefore refuses on its own;
-7. for an upload: the ASSET attempt owner is readable and the replay-conflict scope of the exact
-   key is open (§3.4); for a CREATE, ADR-0014 §26's execution-scope brake stays the CREATE-only
-   owner it is and is checked by the REGISTER execution owner before this stack runs;
-8. the stage's own gate: the current candidate preflight is ``READY`` with the grant's fingerprint.
+7. for a CREATE: the positive-only reconcile path is adopted (§10, ADR-0014 §28) — the second half
+   of the CREATE endpoint-adoption row, named on its own — and ADR-0014 §26's CREATE-only
+   execution-scope brake is ``ACTIVE``, read in this same unit (the REGISTER execution owner also
+   checks it before this stack runs); for an upload: a sender is wired, the ASSET attempt owner is
+   readable and the replay-conflict scope of the exact key is open (§3.4);
+8. the stage's own gate: the current candidate preflight is ``READY`` with the grant's fingerprint
+   — for an upload a layer here; for a CREATE a layer of its readiness, while at send time the
+   REGISTER execution owner's own gate judges it before this stack runs;
+9. at admission only: the send-time truth fence — no owner wrote since the candidate was evaluated.
 
 Readiness is **derived and read-only**: it reports the same layers without consuming anything, and
 even ``READY`` is never permission to write.
@@ -148,32 +154,6 @@ class StageProofs(Protocol):
     def evidence_retention_ready(self) -> bool: ...
 
     def visual_acceptance_recorded(self) -> bool: ...
-
-
-class UnprovenStageProofs:
-    """The fail-closed fallback: every §5-§9 prerequisite unproven, whatever is recorded.
-
-    **Production does not wire this class.** ``app.container`` wires
-    :class:`~app.live.proofs.DurableStageProofs`, which reads the area 2 restore and retention
-    owners and the area 3 visual acceptance owner; only canary eligibility (§5) and the
-    residual-risk acceptance (§6.1) have no owner there and refuse for that reason. This class
-    exists for a caller that wires no proof owner at all, so an absent owner is never read as proof.
-    """
-
-    def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
-        return False
-
-    def residual_risk_accepted(self) -> bool:
-        return False
-
-    def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:
-        return False
-
-    def evidence_retention_ready(self) -> bool:
-        return False
-
-    def visual_acceptance_recorded(self) -> bool:
-        return False
 
 
 @dataclass(frozen=True)
@@ -758,6 +738,5 @@ __all__ = [
     "StageGate",
     "StageProofs",
     "StageReadiness",
-    "UnprovenStageProofs",
     "Verdict",
 ]

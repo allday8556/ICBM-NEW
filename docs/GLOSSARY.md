@@ -45,10 +45,13 @@ canonical account identifier the implementation spells `marketplace_account_id`.
 
 **None of these is a provider uniqueness proof.** A deterministic code is the key ICBM asks with;
 it does not make a lookup deterministic, and a lookup that returns nothing proves no remote absence
-(ADR-0014 §17.2). What may settle an ambiguous outcome is fixed by ADR-0014 §10, not by this file:
-a provider read-back or a provider lookup under an adopted contract, transmission-precluded
-evidence, or another explicitly reviewed machine or provider proof — never a seller code alone and
-never an operator's word.
+(ADR-0014 §17.2). How an ambiguous outcome may end is fixed by ADR-0014 §10 and §28, not by this
+file. It ends on presence: a read-back by an already known provider identity, or a positive
+reconcile — exactly one exact candidate whose read-back by its provider number carries the same
+code, which proves presence only, while success still needs the Snapshot comparison (§28.2). Or it
+ends on later machine proof of non-application: transmission-precluded evidence or another
+explicitly reviewed machine proof (§28.3). A lookup is positive evidence only; zero, several or
+failed results never prove absence. It never ends on a seller code alone or an operator's word.
 
 ## 3. Not-knowing: `UNKNOWN`, `REVIEW_REQUIRED`, `FAILED`
 

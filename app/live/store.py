@@ -40,7 +40,6 @@ from app.db.database import Database
 from app.live.model import (
     ASSET_ENDPOINT_GROUP,
     CREATE_BUDGET,
-    CREATE_ENDPOINT_GROUP,
     FENCING_UPLOAD_STATES,
     MAX_ASSET_BUDGET,
     MAX_GRANT_WINDOW_S,
@@ -66,6 +65,7 @@ from app.live.models import (
     VisualAcceptance,
 )
 from app.products.image_model import ImageAssetKind
+from app.register.model import CREATE_ENDPOINT_GROUP
 from app.register.sanitize import require_clean, safe_provider_reference
 
 GLOBAL_BRAKE = "GLOBAL"
