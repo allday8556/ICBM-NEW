@@ -1,10 +1,28 @@
 name: CI
 
+# CI scheduling policy (Issue #143). The full suite runs once per merge-candidate exact HEAD,
+# never on work-in-progress:
+# - push to main and workflow_dispatch: always the full suite;
+# - a ready (non-draft) PR: the full suite on every new HEAD, since a new commit makes any earlier
+#   green run stale (check runs belong to one exact commit and are never inherited);
+# - a draft PR (WIP preservation): lint/format/type only, and no "CI gate" result at all;
+# - a ready PR that touches only Markdown in the upstream research/evidence catalog
+#   (docs/evidence/): lint/format/type plus the unit suite (which holds the doc-contract tests),
+#   not the Windows/Ubuntu runtime and acceptance suites. That allowlist is the whole exemption;
+#   every other path, Markdown included, takes the full suite.
+# Branch pushes without a PR run nothing. "CI gate" is the single merge-readiness result.
+#
+# Exact-HEAD invariant: on a pull_request event actions/checkout defaults to the ephemeral
+# refs/pull/N/merge commit, which is base + head and is not the stated commit. Every job therefore
+# pins ref to github.event.pull_request.head.sha (github.sha on push/dispatch), so a green "CI gate"
+# means that exact HEAD passed, with nothing from the base branch mixed in.
+
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -18,11 +36,63 @@ env:
   PYTHONIOENCODING: utf-8
 
 jobs:
+  scope:
+    name: CI scope
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - id: scope
+        name: Classify this run (full | docs | wip)
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            mode=full
+          elif [ "$DRAFT" = "true" ]; then
+            mode=wip
+          else
+            # The checkout is pinned to the exact head SHA, not to the merge ref that used to carry
+            # the base commit as a parent, so make both endpoints present before comparing them.
+            git fetch --no-tags --quiet origin "$BASE_SHA" "$HEAD_SHA"
+            files="$(git diff --name-only --no-renames "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA")"
+            mode=docs
+            if [ -z "$files" ]; then
+              mode=full
+            fi
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              # Allowlist, not a denylist: only the upstream research/evidence catalog under
+              # docs/evidence/ is light, and only its Markdown. Everything else takes the full
+              # gate - canonical policy, contracts, acceptance evidence, prose anywhere else,
+              # code, data, CI itself - including any Markdown path added later, which is
+              # unlisted here by default and therefore never bypasses the gate.
+              case "$f" in
+                docs/evidence/*.md) ;;
+                *) mode=full ;;
+              esac
+            done <<< "$files"
+            printf '%s\n' "$files"
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "CI scope: $mode"
+
   quality:
     name: Lint, format, type check
+    needs: [scope]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -31,8 +101,26 @@ jobs:
       - run: ruff format --check .
       - run: mypy
 
+  docs-validation:
+    name: Docs validation (unit and doc-contract tests)
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c constraints.txt -e ".[dev]"
+      # The unit suite pins the canonical documents (ARCHITECTURE, ADRs, ERRORS.md, ROADMAP ...).
+      - run: pytest tests/unit -q
+
   tests:
     name: Tests (${{ matrix.os }})
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +128,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -48,9 +138,13 @@ jobs:
 
   migrations:
     name: Migration check
+    needs: [scope]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -68,10 +162,13 @@ jobs:
 
   m5-offline-acceptance:
     name: M5 offline acceptance (provider-zero, clean checkout)
-    needs: [quality, tests, migrations]
+    needs: [scope, quality, tests, migrations]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -105,10 +202,13 @@ jobs:
 
   acceptance:
     name: M0 acceptance (Windows, clean checkout)
-    needs: [quality, tests, migrations]
+    needs: [scope, quality, tests, migrations]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -124,10 +224,13 @@ jobs:
 
   g3-visual-acceptance:
     name: Gate 3 populated visual acceptance (Windows, clean checkout)
-    needs: [quality, tests, migrations]
+    needs: [scope, quality, tests, migrations]
+    if: needs.scope.outputs.mode == 'full'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -148,3 +251,45 @@ jobs:
             ${{ runner.temp }}/g3-visual/g3-visual-report.json
             ${{ runner.temp }}/g3-visual/screens
           if-no-files-found: error
+
+  ci-gate:
+    name: CI gate
+    needs:
+      - scope
+      - quality
+      - docs-validation
+      - tests
+      - migrations
+      - m5-offline-acceptance
+      - acceptance
+      - g3-visual-acceptance
+    # A draft PR is not a merge candidate, so it gets no gate result at all.
+    if: always() && needs.scope.outputs.mode != 'wip'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job this scope requires succeeded on this exact HEAD
+        env:
+          MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE: ${{ needs.scope.result }}
+          QUALITY: ${{ needs.quality.result }}
+          DOCS: ${{ needs.docs-validation.result }}
+          TESTS: ${{ needs.tests.result }}
+          MIGRATIONS: ${{ needs.migrations.result }}
+          M5: ${{ needs.m5-offline-acceptance.result }}
+          M0: ${{ needs.acceptance.result }}
+          G3: ${{ needs.g3-visual-acceptance.result }}
+        run: |
+          set -u
+          case "$MODE" in
+            full) required="SCOPE QUALITY TESTS MIGRATIONS M5 M0 G3" ;;
+            docs) required="SCOPE QUALITY DOCS" ;;
+            *) echo "unknown CI scope '$MODE'"; exit 1 ;;
+          esac
+          fail=0
+          for name in $required; do
+            result="${!name}"
+            echo "$name=$result"
+            if [ "$result" != "success" ]; then fail=1; fi
+          done
+          echo "CI scope $MODE: $([ $fail -eq 0 ] && echo PASS || echo FAIL)"
+          exit $fail
