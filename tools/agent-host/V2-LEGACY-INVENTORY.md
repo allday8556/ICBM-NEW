@@ -95,9 +95,9 @@ resume-orchestrator-v1.3.ps1   5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9
 └─ orchestrator-v1.3.ps1       34443ac2bb1e67f4f3bcfe084d62756f378aa5ff68f32783ec1c19773360263d  control plane
    ├─ . agent-host-authority-v2.ps1  e48a5cf7dfa51e19167f6ff11cc5f1ab4cf0345469185d1329ecceaf4c92c42c  grammar + write guard
    ├─ & orchestrator-v1.2.ps1  1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c  DISPLAY/STATE HELPER ONLY (pinned)
-   ├─ Invoke-HostScript run-audit-v1.1.ps1  9c8a2a412eddfaf816dff3965cbd6a8c7a69a9a10bd534d1474cb6c3bf544531  packet + audits
+   ├─ Invoke-HostScript run-audit-v1.1.ps1  2f75793fd520ccf4d743c7439de203dce72c32c8e7f2f90cdeeff29f22020598  packet + audits
    │  └─ . agent-host-authority-v2.ps1
-   ├─ Invoke-HostScript run-repair-v1.1.ps1  70256f2d14fb9b0866f9aa3802bd0014de6e9b92ffdafed7c8f9b00917ff586f  fixer / auto-next / remediation
+   ├─ Invoke-HostScript run-repair-v1.1.ps1  589a689e68a6143a17cdb4c3a7e57c1bb1edb6dc3f4e5edc9eef5319772097b6  fixer / auto-next / remediation
    │  └─ . agent-host-authority-v2.ps1  (reads run-audit-v1.1.ps1 text only for the policy string)
    ├─ Invoke-HostScript run-full-audit-v1.ps1  8f709f67482f6b610537ff5dcd3743191028566339db445acecc53135229e3f5  post-merge (ACTIVE-LEGACY, PR-C)
    │  └─ & run-full-audit-v1.ps1 (self, -ForceFull escalation)
