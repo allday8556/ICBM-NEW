@@ -59,6 +59,7 @@ from app.live.model import MutationRefused, MutationStage
 from app.products.image_model import ImageAssetKind
 from app.products.model import ReadinessStatus
 from app.register.model import (
+    CREATE_ENDPOINT_GROUP,
     OPERATOR_RESUMABLE,
     IntentState,
     ResolutionEvidence,
@@ -114,9 +115,6 @@ CREATE_JOB_TYPE: Final = "register.create"
 CREATE_POLICY: Final = RetryPolicy(max_attempts=3, base_delay_s=60.0, factor=2.0, max_delay_s=900.0)
 SEND_REQUEST_VERSION: Final = "registration-send-request/v1"
 EXECUTION_POLICY_VERSION: Final = "registration-execution-policy/v1"
-# One API group is involved in a registration CREATE and its read-back, so the failure-budget
-# scope of ADR-0014 §9 / v3.1 §11.2-§11.4 is this constant per marketplace and canonical account.
-CREATE_ENDPOINT_GROUP: Final = "product_registration"
 # The job states in which a CREATE job is still the queued work of its Intent (ADR-0005).
 ACTIVE_JOB_STATES: Final = (
     JobState.QUEUED.value,
@@ -587,7 +585,8 @@ class RegistrationExecutionService:
         self._sender = sender
         self._readback = readback
         # The seam of the separately authorized positive-only reconcile slice (ADR-0014 §28.2).
-        # Nothing in this service consults it while product search is NOT_ADOPTED.
+        # This service reads only its adoption fact (reconcile_path_adopted), never a lookup
+        # result: reconcile() does not consult it, and no result is ever absence (§17.2).
         self._lookup = lookup
         self._capability = capability
         self._compare = compare
@@ -706,8 +705,8 @@ class RegistrationExecutionService:
                     unit.session,
                     intent=intent,
                     attempt_no=next_attempt + 1,
-                    endpoint_adopted=self._sender.available(),
-                    reconcile_path_adopted=self._lookup.available(),
+                    endpoint_adopted=self.create_sender_available(),
+                    reconcile_path_adopted=self.reconcile_path_adopted(),
                     scope=unit.execution_scope(
                         intent.marketplace_key,
                         intent.marketplace_account_id,

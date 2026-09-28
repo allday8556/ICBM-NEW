@@ -51,6 +51,12 @@ class IntentState(StrEnum):
     FAILED = "FAILED"
 
 
+# One API group is involved in a registration CREATE and its read-back, so the failure-budget
+# scope of ADR-0014 §9 / v3.1 §11.2-§11.4 and the §26 execution scope are this group per
+# marketplace and canonical account. The one definition every owner imports.
+CREATE_ENDPOINT_GROUP: Final = "product_registration"
+
+
 # Every state change an Intent may make. SENT -> SENT records an applied outcome or a verification
 # under review without a state change. CONFIRMED is terminal. UNKNOWN leaves only with a resolution
 # backed by machine or provider evidence (ADR-0014 §10, B3).
@@ -97,7 +103,11 @@ class ResolvedBy(StrEnum):
 
 
 class ResolutionEvidence(StrEnum):
-    """ADR-0014 §10 (B3): the proof that may settle an UNKNOWN outcome.
+    """ADR-0014 §10 (B3), §28: the proof that may settle an UNKNOWN outcome.
+
+    ``PROVIDER_LOOKUP`` is positive evidence only (§28.2): it may settle an UNKNOWN as applied,
+    never as not applied — a lookup never proves remote absence (§17.2), so
+    :meth:`RegistrationUnit.resolve_unknown` refuses it for ``NOT_APPLIED_PROVEN``.
 
     There is deliberately no operator-assertion member: an operator may record or accept one of
     these, but their word alone never establishes an outcome.

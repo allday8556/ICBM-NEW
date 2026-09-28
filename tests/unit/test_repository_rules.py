@@ -1216,13 +1216,15 @@ def test_the_truth_the_register_preflight_reads_has_one_reviewed_writer_each() -
 def test_every_reviewed_writer_of_preflight_truth_appends_to_the_audit_log() -> None:
     """Each pinned writer module (or the owner that drives it) appends owner audit events."""
     drivers = {
-        "app/products/store.py": ("app/products/materializer.py", "app/products/service.py"),
+        "app/products/store.py": ("app/products/materialization.py", "app/products/service.py"),
         "app/products/pricing_store.py": ("app/products/pricing.py",),
         "app/products/image_store.py": ("app/products/images.py",),
         "app/collect/revisions.py": ("app/collect/revisions.py", "app/collect/collection.py"),
         "app/collect/assets.py": ("app/collect/assets.py", "app/collect/collection.py"),
     }
     modules = _production_modules()
+    # A driver that names no production module would be skipped silently, so each must exist.
+    assert {owner for owners in drivers.values() for owner in owners} <= set(modules)
     for writer in sorted(set(PREFLIGHT_TRUTH_WRITERS.values())):
         owners = drivers.get(writer, (writer,))
         audited = any(
