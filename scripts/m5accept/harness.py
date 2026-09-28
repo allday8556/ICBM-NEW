@@ -936,14 +936,28 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
-    # The adopted CREATE request still refuses this unit: the official evidence leaves required
-    # values uncaptured (statusType, naverShoppingRegistration, the notice type child), and none is
-    # ever invented. The scenarios above declared a sendable projection so the state machine could
-    # be exercised at all; the real one is asked here and still names its gaps.
+    # The adopted CREATE request still refuses this unit: required values stay uncaptured or
+    # unowned (the naverShoppingRegistration value source, the channel display status, the notice
+    # type child), and none is ever invented. The scenarios above declared a sendable projection so
+    # the state machine could be exercised at all; the real one is asked here and still names its
+    # gaps.
     unsent = smartstore_product.project(_any_payload(owners))
     checks.check(
         "boundary.real_wire_projection_refuses",
         not unsent.sendable and bool(unsent.gaps),
+        gaps=len(unsent.gaps),
+    )
+    # The value-level evidence packet (Issue #89 `5868542027`, E1-E3) does not by itself make the
+    # request sendable: it projects statusType SALE (E2) and closes only the *type* of
+    # naverShoppingRegistration (E1), whose value still has no ICBM-owned source — so that gap
+    # stands, no boolean is guessed onto the wire, and the projection stays unsendable.
+    projected_origin = unsent.document.mapping().get("originProduct", {})
+    checks.check(
+        "boundary.value_packet_alone_leaves_create_unsendable",
+        not unsent.sendable
+        and smartstore_product.GAP_SHOPPING_REGISTRATION in unsent.gaps
+        and projected_origin.get("statusType") == smartstore_product.CREATE_STATUS_TYPE
+        and "naverShoppingRegistration" not in unsent.document.canonical_json,
         gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()

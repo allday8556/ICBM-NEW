@@ -65,6 +65,8 @@ class Provider:
 
 
 ORIGIN: dict[str, Any] = {
+    # E2 (Issue #89 `5868542027`): on registration the CREATE endpoint accepts only SALE.
+    "statusType": "SALE",
     "name": "테스트 상품",
     "detailContent": "본문",
     "images": {"representativeImage": {"url": REF_MAIN}},
@@ -211,13 +213,26 @@ def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport(
     ("body", "code"),
     [
         # Deny-by-default: a path the captured official evidence does not record cannot be sent,
-        # whatever built the mapping — including a required field whose values are a named gap.
-        (_origin(statusType="SALE"), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        # whatever built the mapping — including a required field whose value no ICBM owner decides.
         (_origin(stockQuantity=3), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
         (
             {**deepcopy(DOCUMENT), "smartstoreChannelProduct": {"naverShoppingRegistration": True}},
             "WIRE_DOCUMENT_FIELD_UNKNOWN",
         ),
+        (
+            {
+                **deepcopy(DOCUMENT),
+                "smartstoreChannelProduct": {"naverShoppingRegistration": False},
+            },
+            "WIRE_DOCUMENT_FIELD_UNKNOWN",
+        ),
+        # E2: on registration only SALE may be entered — the broader shared-schema values, and
+        # SUSPENSION (an update input), are never a CREATE input.
+        (_origin(statusType="WAIT"), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(statusType="SUSPENSION"), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(statusType="sale"), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(statusType=True), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(statusType=None), "WIRE_DOCUMENT_FIELD_MISSING"),
         ({**deepcopy(DOCUMENT), "windowChannelProduct": {}}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
         # A field the provider requires, missing.
         (_origin(salePrice=None), "WIRE_DOCUMENT_FIELD_MISSING"),
@@ -315,7 +330,7 @@ def test_an_unsendable_projection_never_reaches_the_transport() -> None:
     class NotSendable:
         sendable = False
         document = FROZEN
-        gaps = (product.GAP_STATUS_TYPE,)
+        gaps = (product.GAP_SHOPPING_REGISTRATION,)
 
     sender = SmartStoreCreateSender(
         caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: NotSendable()
@@ -338,66 +353,207 @@ def test_a_payload_that_is_not_a_registration_payload_never_reaches_the_transpor
 # ---------------------------------------------------------------- the response contract
 
 
-def test_the_response_contract_reads_no_identity_and_names_the_gap() -> None:
-    reading = create.read({"originProductNo": 9900112233})
+ORIGIN_NO = 9900112233
+CHANNEL_NO = 55
+INT64_MAX = 2**63 - 1
+INT64_MIN = -(2**63)
+
+
+def test_the_documented_top_level_identifiers_are_read() -> None:
+    # E3 (Issue #89 `5868542027`): originProductNo and smartstoreChannelProductNo are direct
+    # top-level members of the success object, each an integer<int64>.
+    reading = create.read(
+        {
+            "originProductNo": ORIGIN_NO,
+            "smartstoreChannelProductNo": CHANNEL_NO,
+            "windowChannelProductNo": 77,
+        }
+    )
+    assert reading.readable is True
+    assert (reading.origin_product_no, reading.smartstore_channel_product_no) == (
+        ORIGIN_NO,
+        CHANNEL_NO,
+    )
+    assert reading.window_channel_product_no == 77
+    assert reading.problems == ()
+    # The read-back identity is originProductNo: the adopted origin read-back is addressed by it.
+    assert reading.marketplace_product_id == str(ORIGIN_NO)
+    canonical = reading.canonical()
+    assert canonical["identifier_read"] == "READ"
+    assert canonical["response_contract_version"] == "smartstore-create-response/v2"
+    assert canonical["identifiers"] == {
+        "originProductNo": ORIGIN_NO,
+        "smartstoreChannelProductNo": CHANNEL_NO,
+        "windowChannelProductNo": 77,
+    }
+
+
+def test_a_missing_window_channel_identifier_alone_keeps_the_success_readable() -> None:
+    # windowChannelProductNo belongs to the Shopping Window channel ICBM never emits; its absence
+    # alone never makes the documented SmartStore success unreadable.
+    reading = create.read({"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": CHANNEL_NO})
+    assert reading.readable is True
+    assert reading.window_channel_product_no is None
+    assert reading.marketplace_product_id == str(ORIGIN_NO)
+
+
+@pytest.mark.parametrize("value", [0, 1, INT64_MAX, INT64_MIN])
+def test_the_whole_signed_int64_range_is_an_identifier(value: int) -> None:
+    reading = create.read({"originProductNo": value, "smartstoreChannelProductNo": value})
+    assert reading.readable is True
+    assert reading.origin_product_no == value
+
+
+@pytest.mark.parametrize(
+    ("body", "problem"),
+    [
+        ({}, "originProductNo: MISSING"),
+        ({"smartstoreChannelProductNo": CHANNEL_NO}, "originProductNo: MISSING"),
+        ({"originProductNo": ORIGIN_NO}, "smartstoreChannelProductNo: MISSING"),
+        # A bool is a Python int, and is refused explicitly.
+        (
+            {"originProductNo": True, "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        (
+            {"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": False},
+            "smartstoreChannelProductNo: NOT_INT64",
+        ),
+        # A numeric string is not the documented representation.
+        (
+            {"originProductNo": "9900112233", "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        (
+            {"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": "55"},
+            "smartstoreChannelProductNo: NOT_INT64",
+        ),
+        # Neither is a float, however integral.
+        (
+            {"originProductNo": 9900112233.0, "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        # Outside the signed 64-bit range.
+        (
+            {"originProductNo": INT64_MAX + 1, "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        (
+            {"originProductNo": INT64_MIN - 1, "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        (
+            {"originProductNo": None, "smartstoreChannelProductNo": CHANNEL_NO},
+            "originProductNo: NOT_INT64",
+        ),
+        # A present Shopping Window identifier that is not an integer<int64> is a response the
+        # evidence does not describe.
+        (
+            {
+                "originProductNo": ORIGIN_NO,
+                "smartstoreChannelProductNo": CHANNEL_NO,
+                "windowChannelProductNo": "77",
+            },
+            "windowChannelProductNo: NOT_INT64",
+        ),
+        # Top level only: nothing nested is ever searched.
+        (
+            {"result": {"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": CHANNEL_NO}},
+            "originProductNo: MISSING",
+        ),
+        (
+            {
+                "originProduct": {"originProductNo": ORIGIN_NO},
+                "smartstoreChannelProductNo": CHANNEL_NO,
+            },
+            "originProductNo: MISSING",
+        ),
+        (
+            {"list": [{"originProductNo": 1, "smartstoreChannelProductNo": 2}]},
+            "originProductNo: MISSING",
+        ),
+    ],
+)
+def test_an_identifier_outside_the_documented_shape_is_never_read(
+    body: dict[str, Any], problem: str
+) -> None:
+    reading = create.read(body)
     assert reading.readable is False
-    assert reading.gaps == (create.GAP_RESPONSE_IDENTIFIER_SHAPE,)
-    # The gap names the exact uncaptured facts, so a later slice knows what closing it requires.
-    assert "nesting" in reading.gaps[0] and "value type" in reading.gaps[0]
-    assert reading.canonical()["identifier_read"] == "NOT_PROJECTABLE"
+    assert reading.marketplace_product_id is None
+    assert problem in reading.problems
+    assert reading.canonical()["identifier_read"] == "UNREADABLE"
+
+
+def test_a_readable_success_is_applied_proven_and_hands_on_the_read_back_identity() -> None:
+    # F5: readable documented identifiers are provider-side application evidence. They name the
+    # identity a read-back is made by — and nothing more: confirmation stays read-back plus
+    # Snapshot comparison (ADR-0014 §11), which is the execution owner's, not this seam's.
+    body = {"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": CHANNEL_NO}
+    handoff = _send(Provider(httpx.Response(200, json=body)))
+    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    assert handoff.marketplace_product_id == str(ORIGIN_NO)
+    assert handoff.response_status == 200
+    assert handoff.error_class is None and handoff.error_code is None
+    contract = handoff.sanitized_response["response_contract"]
+    assert contract["identifier_read"] == "READ"
+    assert contract["response_contract_version"] == "smartstore-create-response/v2"
+    assert contract["problems"] == []
+    assert handoff.sanitized_response["retained"] == body
 
 
 @pytest.mark.parametrize(
     "body",
     [
         {},
-        {"originProductNo": 9900112233},
-        {"originProductNo": "9900112233"},
-        {"result": {"originProductNo": "9900112233", "smartstoreChannelProductNo": 55}},
-        {"originProductNo": 1, "originProduct": {"originProductNo": 1, "name": "테스트 상품"}},
+        {"originProductNo": ORIGIN_NO},
+        {"originProductNo": "9900112233", "smartstoreChannelProductNo": CHANNEL_NO},
+        {"originProductNo": True, "smartstoreChannelProductNo": CHANNEL_NO},
+        {"originProductNo": INT64_MAX + 1, "smartstoreChannelProductNo": CHANNEL_NO},
+        {"result": {"originProductNo": ORIGIN_NO, "smartstoreChannelProductNo": CHANNEL_NO}},
+        {
+            "originProduct": {"originProductNo": 1, "name": "테스트 상품"},
+            "smartstoreChannelProductNo": 55,
+        },
         {"list": [{"originProductNo": 1}, {"originProductNo": 2}]},
-        {"smartstoreChannelProductNo": 55},
+        {"smartstoreChannelProductNo": CHANNEL_NO},
     ],
 )
-def test_no_success_body_ever_yields_a_provider_identity(body: dict[str, Any]) -> None:
-    # The official evidence captures the identifier *names* only — neither their JSON nesting inside
-    # the body nor their value type. Reading an identity out of such a body, by asserting one
-    # nesting, by searching every nesting, or by accepting more than one value type, would invent a
-    # response semantic, so the contract reads none at all (ADR-0014 §17.3; EM §4.1.1).
+def test_an_unreadable_success_is_unknown_and_never_a_proven_absence(body: dict[str, Any]) -> None:
+    # F4: a missing or wrong-type identifier proves nothing either way — the product may exist.
+    # That is why it is UNKNOWN, never NOT_APPLIED_PROVEN, never a failure and never a resend
+    # (ADR-0014 §28.3, M5-08, G3-07).
     handoff = _send(Provider(httpx.Response(200, json=body)))
     assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
     assert handoff.marketplace_product_id is None
     assert handoff.error_code == "SMARTSTORE_CREATE_RESPONSE_UNREADABLE"
     assert handoff.error_class is ErrorClass.UNKNOWN
     contract = handoff.sanitized_response["response_contract"]
-    assert contract["identifier_read"] == "NOT_PROJECTABLE"
-    assert contract["gaps"] == [create.GAP_RESPONSE_IDENTIFIER_SHAPE]
-    assert contract["response_contract_version"] == "smartstore-create-response/v1"
+    assert contract["identifier_read"] == "UNREADABLE"
+    assert contract["problems"]
+    assert contract["response_contract_version"] == "smartstore-create-response/v2"
 
 
-def test_an_unreadable_success_is_unknown_and_never_a_proven_absence() -> None:
-    # It proves nothing either way: the product may exist. That is why it is neither a failure nor
-    # a resend, and why NOT_APPLIED_PROVEN stays whitelist-only (ADR-0014 §28.3, M5-08, G3-07).
-    handoff = _send(Provider(httpx.Response(200, json={"originProductNo": 9900112233})))
-    assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
-    assert handoff.error_class is not ErrorClass.FATAL
-
-
-def test_no_applied_proven_outcome_exists_while_the_identifier_read_is_a_gap() -> None:
-    # Structural, so an edit cannot quietly reintroduce an invented identity read: the seam names
-    # no APPLIED_PROVEN and sets no marketplace product id from a response.
+def test_applied_proven_is_reached_only_through_a_readable_response() -> None:
+    # Structural, so an edit cannot quietly reintroduce an identity read beside the contract: the
+    # seam names APPLIED_PROVEN once, and sets a marketplace product id only from the reading.
     tree = ast.parse(Path(inspect.getsourcefile(execution) or "").read_text("utf-8"))
     (sender,) = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.ClassDef) and node.name == "SmartStoreCreateSender"
     ]
-    assert "APPLIED_PROVEN" not in {
-        node.attr for node in ast.walk(sender) if isinstance(node, ast.Attribute)
-    }
-    assert "marketplace_product_id" not in {
-        node.arg for node in ast.walk(sender) if isinstance(node, ast.keyword) and node.arg
-    }
+    applied = [
+        node
+        for node in ast.walk(sender)
+        if isinstance(node, ast.Attribute) and node.attr == "APPLIED_PROVEN"
+    ]
+    assert len(applied) == 1
+    product_ids = [
+        node.value
+        for node in ast.walk(sender)
+        if isinstance(node, ast.keyword) and node.arg == "marketplace_product_id"
+    ]
+    assert [ast.unparse(value) for value in product_ids] == ["reading.marketplace_product_id"]
 
 
 def test_only_the_retention_allow_list_crosses_the_response_boundary() -> None:
@@ -419,9 +575,10 @@ def test_only_the_retention_allow_list_crosses_the_response_boundary() -> None:
     for dropped in ("detailContent", "본문", "sellerBarcode", "880123", "traceId", "accessToken"):
         assert dropped not in text
     assert "Bearer" not in text
-    # The retained body is still kept as evidence of what came back; it is simply never read for
-    # an identity while the response shape is uncaptured.
+    # The retained body is kept as evidence of what came back; only its top-level identifiers
+    # were read.
     assert handoff.sanitized_response["retained"]["originProduct"]["salePrice"] == 19900
+    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
 
 
 def test_the_retained_fields_are_exactly_the_endpoint_profile() -> None:

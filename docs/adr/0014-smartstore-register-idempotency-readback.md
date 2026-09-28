@@ -439,7 +439,8 @@ official Commerce API 2.89.0 contract recorded field by field in
 `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore. The adopted transport, success
 predicate, retention profile, request projection and outcome classification are frozen in
 `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.1.1, with the endpoint-mapping revision
-`m5-create-r1` and its fingerprint in the same change.
+`m5-create-r1` and its fingerprint in the same change. Its reconciliation to the value-level
+evidence packet (Issue #89 `5868542027`, E1–E3) moved the revision to `m5-create-r2`.
 
 This amendment **relaxes nothing**:
 
@@ -452,14 +453,15 @@ This amendment **relaxes nothing**:
 - `NOT_APPLIED_PROVEN` stays whitelist-only. An ordinary post-handoff `4xx`, a `5xx`, a timeout, a
   lost response, an unsafe redirect and a malformed success are all `UNKNOWN` (architect ruling
   R2, Issue #89 `5861607665`).
-- The response-body nesting and the identifier value type stay uncaptured, and an uncaptured item
-  is never invented, so the adopted contract reads **no** provider identity out of a CREATE
-  response: asserting one nesting, searching every nesting or accepting more than one value type
-  would each invent a response semantic. Every success is therefore `UNKNOWN`, never
-  `APPLIED_PROVEN`, and nothing from a response body ever becomes the identity a read-back is made
-  by (§11; `ENDPOINT_MATRIX.md` §4.1.1). This costs nothing and softens nothing: the adopted
-  request is not sendable either while the evidence leaves required values uncaptured, and the
-  read is written by the later slice that captures the shape from the cited schema.
+- A CREATE response is read exactly as E3 of `5868542027` documents it and no wider: the
+  top-level `originProductNo` and `smartstoreChannelProductNo` (and `windowChannelProductNo` when
+  present), each a JSON integer in the signed 64-bit range. Nothing nested is searched, and a
+  boolean, a numeric string or any other type is refused. A readable success is `APPLIED_PROVEN`
+  and hands `originProductNo` on as the read-back identity; a success whose identifiers are missing
+  or malformed is `UNKNOWN`, never `NOT_APPLIED_PROVEN` (§11; `ENDPOINT_MATRIX.md` §4.1.1). This
+  softens nothing: the adopted request is still not sendable, because the ICBM-owned value of
+  `naverShoppingRegistration` (whose boolean type E1 closes), the channel display status and the
+  notice type child remain gaps.
 - The request is the immutable Snapshot's typed projection and only that: it is validated against
   the adopted request contract as a whole — deny-by-default over every path, the documented bounds,
   and the `sellerManagementCode` that must be this listing identity's projection — and then frozen
@@ -472,8 +474,9 @@ This amendment **relaxes nothing**:
   30 lowercase hex characters of `SHA-256("smartstore-seller-management-code/v1\0" + listing_identity)`
   — which is deterministic and compared exactly on read-back, and is **not** a provider uniqueness
   proof.
-- Read-back stays the success proof (§11): even a 200 that did carry a readable provider identity
-  would be `APPLIED_PROVEN`, never a confirmation.
+- Read-back stays the success proof (§11): a 200 that carries a readable provider identity is
+  `APPLIED_PROVEN` — provider-side application evidence — and never a confirmation; read-back and
+  Snapshot comparison remain separate.
 
 It **authorizes nothing else**: no real upload or CREATE, no LIVE change, no area-5 opening, no
 canary and no residual-risk acceptance (§28.7). Execution remains `DRY_RUN` / `M0_DRY_RUN_ONLY`

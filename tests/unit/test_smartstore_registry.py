@@ -194,8 +194,9 @@ def test_the_create_contract_is_exactly_the_captured_official_evidence() -> None
     ("status", "body", "accepted"),
     [
         (200, {"originProductNo": 1234}, True),
-        # The JSON nesting of the identifiers is not captured, so the predicate asserts no shape;
-        # whether a usable identifier came back is the response contract's decision (create.py).
+        # The predicate asserts no identifier shape: whether the documented top-level int64
+        # identifiers came back is the response contract's decision (create.py), and a missing one
+        # is UNKNOWN there — never a failed predicate that could read as a non-application.
         (200, {}, True),
         (200, None, False),
         (200, [{"originProductNo": 1234}], False),
@@ -337,15 +338,19 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r2"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
         "m5-register-r1",
         "m5-image-upload-r1",
         "m5-create-r1",
+        "m5-create-r2",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
+    # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2
+    # binds the same fingerprint m5-create-r1 does; the revision records the changed read/send.
+    assert MAPPING_FINGERPRINTS["m5-create-r2"] == MAPPING_FINGERPRINTS["m5-create-r1"]
     assert RegistryMappingRevision().current_revision() == SMARTSTORE_ENDPOINT_MAPPING_REVISION
 
 

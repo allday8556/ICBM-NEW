@@ -109,7 +109,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, an `UNKNOWN` is never resent, and the adopted request is not sendable while the evidence leaves required values uncaptured (§4.1.1) |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, an `UNKNOWN` is never resent, and the adopted request is not sendable while required values stay uncaptured or without an ICBM-owned value (§4.1.1) |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); no ASSET sender wired |
@@ -171,16 +171,22 @@ Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; on
 ICBM policy is no redirect, connect `5s`, read `30s`, no automatic retry. Any possibly transmitted
 failure is `UPLOAD_UNKNOWN`, distinct from `RegistrationIntent.UNKNOWN`.
 
-`endpoint_mapping_revision = m5-create-r1`, bound to the registry fingerprint, which also
+`endpoint_mapping_revision = m5-create-r2`, bound to the registry fingerprint, which also
 covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15). The superseded
-revisions `m2-connect-r1`, `m5-register-r1` and `m5-image-upload-r1` stay resolvable, so stored
-evidence still names a known mapping.
+revisions `m2-connect-r1`, `m5-register-r1`, `m5-image-upload-r1` and `m5-create-r1` stay
+resolvable, so stored evidence still names a known mapping. `m5-create-r2` binds the same
+fingerprint as `m5-create-r1`: its reconciliation (below) changed no permission-relevant registry
+content, only what the CREATE request sends and what its response contract reads.
 
 ### 4.1.1 CREATE adoption amendment (ADR-0020 §4 order 1)
 
 **Amendment note, not a rewrite.** The `SMARTSTORE_PRODUCT_CREATE_V2` row of §4 moves from
 `NOT_ADOPTED` to `ADOPTED`, its §4.1 gap row is removed because the slice closed it, and the
-mapping revision is bumped to `m5-create-r1` with its own fingerprint in the same change. Nothing
+mapping revision is bumped to `m5-create-r1` with its own fingerprint in the same change. The
+slice's reconciliation to the value-level packet `NAVER-P0-VALUES-CREATE-289` (Issue #89
+`5868542027`, E1–E3; `SOURCES.md` §5.2) bumps it to `m5-create-r2` and the response contract to
+`smartstore-create-response/v2`; it changes only the request projection (`statusType`), the
+request-completeness gaps, the response reading and the outcome classification below. Nothing
 else in this file changes, and the adoption slice touched **its own endpoint only**
 (ADR-0020 §4): `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, and the positive-only reconcile
 path is its own later slice (ADR-0014 §28.2–§28.4, ADR-0018 §6.1, SA-09).
@@ -195,12 +201,12 @@ Adopted CREATE contract, in the registry and pinned by tests:
 | Timeouts | connect `5s`, read `30s` (ICBM policy; no endpoint-specific timeout is documented) |
 | Redirect | `NO_FOLLOW` — a `308` is never followed for a mutation (§11; `ERRORS.md` §10.6, §17) |
 | Mutation | Yes |
-| Success predicate | HTTP 200 AND the body parses as a JSON object (`m5-create-r1`). The JSON **nesting** of the success identifiers and their **value type** are not captured, so the predicate asserts no shape and the response contract fails closed |
-| Response reading | **None at this adoption.** The evidence captures the identifier *names* only; their nesting and value type are listed as not captured (`PRODUCT_CREATE.md` § SmartStore, Coverage), and an uncaptured item is never invented. Asserting one nesting, searching every nesting, or accepting more than one value type would each invent a response semantic, so no provider identity is read from a CREATE response. The read is a named gap, the retained body is kept as evidence only, and a later slice writes the read against the captured shape |
+| Success predicate | HTTP 200 AND the body parses as a JSON object (predicate revision `m5-create-r1`, unchanged by the reconciliation). The predicate asserts no identifier shape; the response contract below reads the identifiers |
+| Response reading | `smartstore-create-response/v2`, from E3 (`5868542027`): `originProductNo`, `smartstoreChannelProductNo` and `windowChannelProductNo` are read from the **top level only** — nested objects are never searched — and each must be a JSON integer (a Python `int`, **never** a `bool`) in the signed 64-bit range; a numeric string, a float or any other type is refused. `originProductNo` and `smartstoreChannelProductNo` are required for a readable response; the absence of `windowChannelProductNo` alone never makes the documented SmartStore success unreadable, but a present one of another type does. A readable response yields `originProductNo` as the read-back identity; an unreadable one yields none, and its retained body is kept as evidence only |
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the safe product leaves `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 | Idempotency | **none is invented**: no idempotency key, request-correlation key or replay header is sent, because the provider documents none |
-| Request completeness | **Incomplete at this adoption, and that is the frozen state.** The provider requires `originProduct` **and** `smartstoreChannelProduct`. The captured evidence gives no accepted value for the required `originProduct.statusType`, no value type for the required `smartstoreChannelProduct.naverShoppingRegistration` and no type-specific child for `productInfoProvidedNotice`, and no Snapshot owns the publication decision behind `channelProductDisplayStatusType`. None of them is ever invented, so `smartstoreChannelProduct` is **not emitted at all** rather than half-built, the frozen request schema admits only the projectable `originProduct` structure, and **no** Snapshot is sendable: every projection carries those named gaps and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`. Adoption froze the contract and the refusal; it did not make a request sendable. The later slice that captures the missing values from the cited schema is what completes the request |
+| Request completeness | **Incomplete at this adoption, and that is the frozen state.** The provider requires `originProduct` **and** `smartstoreChannelProduct`. `originProduct.statusType` is projected as `SALE`, the only CREATE input (E2). The required `smartstoreChannelProduct.naverShoppingRegistration` is a captured JSON boolean (E1), but no ICBM-owned value source decides which boolean ICBM publishes with; no Snapshot owns the publication decision behind `channelProductDisplayStatusType`; and no type-specific child for `productInfoProvidedNotice` is captured. None of them is ever invented — neither `true` nor `false` is guessed — so `smartstoreChannelProduct` is **not emitted at all** rather than half-built, the frozen request schema admits only the projectable `originProduct` structure, and **no** Snapshot is sendable: every projection carries those named gaps and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`. The value-level packet alone does not make a request sendable; the later decision that gives those values an ICBM-owned source is what completes the request |
 
 Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10, §28; `ERRORS.md`
 §15):
@@ -210,33 +216,34 @@ Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10,
   was written;
 - **everything else is `UNKNOWN`**: a timeout, a lost connection or response, a `5xx` after a
   possible handoff, an ordinary post-handoff `4xx` (architect ruling R2, Issue #89 `5861607665`),
-  an unsafe redirect, and **every** `200`, because no identity may be read from one (response
-  reading, above). An unreadable success is not a failure: the product may exist, which is exactly
+  an unsafe redirect, and a `200` whose documented identifiers are unreadable — missing, nested,
+  a numeric string, a boolean or outside the int64 range (response reading, above). An unreadable
+  success is not a failure and never `NOT_APPLIED_PROVEN`: the product may exist, which is exactly
   why it is `UNKNOWN` and never resent;
-- `APPLIED_PROVEN` needs a 200 **and** a readable `originProductNo`, so it is unreachable while the
-  response read is a gap — the conservative direction, and symmetric with the request, which is not
-  sendable either. Even once both close, a 2xx is not a registration success: read-back and
-  Snapshot comparison decide that (ADR-0014 §11);
+- `APPLIED_PROVEN` is a 200 **and** readable documented identifiers; it hands `originProductNo` on
+  as the read-back identity. It is provider-side application evidence only, never a registration
+  success: read-back and Snapshot comparison stay separate and alone decide that (ADR-0014 §11);
 - an `UNKNOWN` is **never** resent, its conflict scope stays closed, and no lookup, code, grant or
   approval ever becomes remote-absence evidence (ADR-0014 §17.2, §28; ADR-0018 G3-07, G3-15).
 
-Request projection, from the immutable `RegistrationSnapshot` only: `originProduct` with `name`,
+Request projection, from the immutable `RegistrationSnapshot` only: `originProduct` with
+`statusType` = `SALE` (E2), `name`,
 `detailContent`, `images.representativeImage.url` plus at most nine `optionalImages[].url`,
 `salePrice`, `detailAttribute.sellerCodeInfo.sellerManagementCode`, the combination-form
 `optionInfo` for an option listing, and the ICBM-owned `leafCategoryId` (never cited as
 provider-required — the 2.89.0 schema does not mark it required). The provider-required
-`smartstoreChannelProduct` is **not** emitted at this adoption: neither of its required fields is
-captured or owned, and a half-built required structure would be an invented request, so it stays a
-named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
+`smartstoreChannelProduct` is **not** emitted at this adoption: neither of its required fields has
+an ICBM-owned value, and a half-built required structure would be an invented request, so it stays
+a named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
 never emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
 document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
 outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
 `sellerManagementCode` that is not this listing identity's projection is refused, never trimmed
-into shape. Every value the official evidence does not carry stays **fail-closed** as a named gap, so
-the request is not sendable and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`: the accepted
-values of the required `originProduct.statusType`; the value type of the required
-`smartstoreChannelProduct.naverShoppingRegistration`; the publication decision behind
-`channelProductDisplayStatusType`; the type-specific child of `productInfoProvidedNotice`; and,
+into shape — including a `statusType` other than `SALE`. Every value the official evidence does
+not carry, or that no ICBM owner decides, stays **fail-closed** as a named gap, so the request is
+not sendable and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`: the ICBM-owned value source of
+the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision
+behind `channelProductDisplayStatusType`; the type-specific child of `productInfoProvidedNotice`; and,
 for an option listing, whether a combination price is absolute or a difference.
 
 `sellerManagementCode` is the ICBM projection `smartstore-seller-management-code/v1` (architect

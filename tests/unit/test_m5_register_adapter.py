@@ -139,6 +139,8 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
     assert projected.encoding_version == "smartstore-register-wire/v2"
     assert projected.document.mapping() == {
         "originProduct": {
+            # E2 (Issue #89 `5868542027`): on registration the CREATE endpoint accepts only SALE.
+            "statusType": "SALE",
             "name": "테스트 상품",
             "detailContent": "본문",
             "images": {
@@ -157,22 +159,45 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
     # child is captured, so nothing of it may be placed on the wire.
     assert projected.notice_type == "Wear2023"
     assert projected.notice_fields == {"material": "면 100%"}
-    # The request is not sendable: the official evidence captures neither the accepted values of
-    # the required statusType, nor the value type of naverShoppingRegistration, nor a notice child,
-    # and no Snapshot owns a channel display status. None of them is ever invented.
+    # The request is not sendable: no ICBM owner decides the naverShoppingRegistration boolean or
+    # the channel display status, and the official evidence captures no notice child. None of them
+    # is ever invented.
     assert not projected.sendable
     assert set(projected.gaps) == {
-        product.GAP_STATUS_TYPE,
         product.GAP_NOTICE_TYPE_CHILD,
         product.GAP_SHOPPING_REGISTRATION,
         product.GAP_CHANNEL_DISPLAY_STATUS,
     }
 
 
+def test_the_value_packet_alone_does_not_make_the_request_sendable() -> None:
+    # F1/F2 (Issue #89 `5868542027`, `5868656082`): E1 closes the *type* of
+    # naverShoppingRegistration (a required JSON boolean) and nothing else. Which boolean ICBM
+    # publishes with has no ICBM-owned source, so the closed type gap is replaced by a value-source
+    # gap — and the projection stays unsendable, with neither boolean guessed onto the wire.
+    projected = product.project(payload())
+    assert projected.sendable is False
+    assert product.GAP_SHOPPING_REGISTRATION in projected.gaps
+    assert "boolean" in product.GAP_SHOPPING_REGISTRATION
+    assert "value source" in product.GAP_SHOPPING_REGISTRATION
+    assert "value type is not captured" not in product.GAP_SHOPPING_REGISTRATION
+    assert product.NAVER_SHOPPING_REGISTRATION_VALUES == (True, False)
+    # E2 closes the statusType gap: it is projected, and no gap names it any more.
+    assert projected.document.mapping()["originProduct"]["statusType"] == "SALE"
+    assert not any("statusType" in gap for gap in projected.gaps)
+    assert not hasattr(product, "GAP_STATUS_TYPE")
+    # The unrelated gaps are unchanged by the packet (F3).
+    assert product.GAP_CHANNEL_DISPLAY_STATUS in projected.gaps
+    assert product.GAP_NOTICE_TYPE_CHILD in projected.gaps
+    items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
+    options = product.project(payload(items=items))
+    assert product.GAP_OPTION_PRICE_SEMANTICS in options.gaps
+    assert options.sendable is False
+
+
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
     text = product.project(payload()).document.canonical_json
     for never in (
-        "statusType",
         "naverShoppingRegistration",
         "channelProductDisplayStatusType",
         "smartstoreChannelProduct",

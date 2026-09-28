@@ -8,14 +8,15 @@ option, and never consults the current Draft (ADR-0014 §6, §11; kickoff §3).
 **The adopted request contract.** ``docs/evidence/marketplace-apis/PRODUCT_CREATE.md`` § SmartStore
 records the official 2.89.0 CREATE contract field by field (packet ``5746489554``, reviews
 ``5768199984`` / ``5768247290``, field packet ``5861477977``, required/conditional packet
-``5861933729``). The CREATE adoption slice freezes it here. The provider's request top level is
-``originProduct`` plus the required ``smartstoreChannelProduct``, and of those this projection emits
-``originProduct`` only: neither required field of ``smartstoreChannelProduct`` is captured by the
-evidence or owned by a Snapshot, so the structure stays a named *gap* rather than a half-built
-required object — which means **no** Snapshot is sendable at this adoption, by design and not by
-omission. Adoption froze the contract and this refusal; the slice that captures the missing values
-is what makes a request sendable. ``windowChannelProduct`` is a separate Shopping Window channel
-structure, out of scope, and is **never emitted**.
+``5861933729``, value-level packet ``5868542027``). The CREATE adoption slice freezes it here. The
+provider's request top level is ``originProduct`` plus the required ``smartstoreChannelProduct``,
+and of those this projection emits ``originProduct`` only: no Snapshot or ICBM policy owns the value
+of either required field of ``smartstoreChannelProduct``, so the structure stays a named *gap*
+rather than a half-built required object — which means **no** Snapshot is sendable at this
+adoption, by design and not by omission. Adoption froze the contract and this refusal; the slice
+that gives those values an ICBM-owned source is what makes a request sendable.
+``windowChannelProduct`` is a separate Shopping Window channel structure, out of scope, and is
+**never emitted**.
 
 **What this module may spell** is exactly what that record captures — the nested request field
 names, the provider's globally required fields, the M5-relevant conditional rules and the documented
@@ -24,7 +25,8 @@ limits and defaults. Two rules bound every projection:
 * a structure that is *not required* is emitted only when the immutable Snapshot owns its values and
   the documented condition applies; the schema containing a structure is never a reason to send it;
 * a value the official evidence does not carry — an enumeration, a value type, a notice type
-  child — is **never invented**. It is recorded as a named *gap*, the projection is not
+  child — is **never invented**, and neither is a value whose type the evidence does carry but
+  which no ICBM owner decides. It is recorded as a named *gap*, the projection is not
   ``sendable``, and the execution owner refuses with ``REGISTER_WIRE_NOT_SENDABLE`` before any
   transport exists.
 
@@ -36,9 +38,14 @@ canonical JSON in an immutable :class:`CreateDocument`. Nothing can be added to 
 changed in one, between the projection and the wire, and the endpoint caller accepts that frozen
 document and nothing else.
 
-The gaps that hold at this adoption are the ones the evidence record lists as not captured: the
-accepted values of the required ``originProduct.statusType``; the value type of the required
-``smartstoreChannelProduct.naverShoppingRegistration``; the publication decision behind the required
+The value-level packet ``5868542027`` (``NAVER-P0-VALUES-CREATE-289``) closes two request facts and
+no more: CREATE accepts only ``SALE`` as ``originProduct.statusType`` (E2), which is therefore
+projected; and ``smartstoreChannelProduct.naverShoppingRegistration`` is a required JSON boolean
+(E1) — which closes its *type* only. Which boolean ICBM publishes with is an ICBM decision no
+Snapshot, policy or owner yet makes, so it is never guessed as ``false`` or ``true``.
+
+The gaps that hold at this adoption: the ICBM-owned value source of the required
+``naverShoppingRegistration``; the publication decision behind the required
 ``channelProductDisplayStatusType`` (its two write values *are* captured, but no Snapshot owns which
 one ICBM publishes with); the type-specific child of ``productInfoProvidedNotice``, whose field set
 is captured for no notice type at all; and, for an option listing, whether an option combination's
@@ -103,26 +110,27 @@ FIELD_OPTION_COMBINATIONS: Final = "optionCombinations"
 FIELD_OPTION_SELLER_CODE: Final = "sellerManagerCode"
 FIELD_NOTICE: Final = "productInfoProvidedNotice"
 FIELD_NOTICE_TYPE: Final = "productInfoProvidedNoticeType"
-# The channel structure's own required fields; only the display status' write values are captured.
+# The channel structure's own required fields. Their wire values are captured — a JSON boolean
+# (E1) and the two display-status write values — but no Snapshot owns which one ICBM publishes with.
 FIELD_NAVER_SHOPPING_REGISTRATION: Final = "naverShoppingRegistration"
+NAVER_SHOPPING_REGISTRATION_VALUES: Final = (True, False)
 FIELD_CHANNEL_DISPLAY_STATUS: Final = "channelProductDisplayStatusType"
 CHANNEL_DISPLAY_STATUS_WRITE_VALUES: Final = ("ON", "SUSPENSION")
-# Required, but the accepted values are not captured, so it is never emitted.
+# Required. On registration the CREATE endpoint accepts only SALE (E2, packet 5868542027): the
+# broader shared-schema values are update or read states, never a CREATE input.
 FIELD_STATUS_TYPE: Final = "statusType"
+CREATE_STATUS_TYPE: Final = "SALE"
 
 # The numbered option-name keys of the combination form.
 _GROUP_NAME_KEYS: Final = ("optionGroupName1", "optionGroupName2", "optionGroupName3")
 _OPTION_NAME_KEYS: Final = ("optionName1", "optionName2", "optionName3")
 
-# The gaps the captured official evidence leaves open. Each names the exact path it blocks; none is
-# ever filled with a default, a guess or an ICBM preference.
-GAP_STATUS_TYPE: Final = (
-    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_STATUS_TYPE}: required, but its accepted values are not"
-    " captured by the official evidence and the Snapshot owns none"
-)
+# The gaps the captured official evidence, or the absence of an ICBM-owned value, leaves open. Each
+# names the exact path it blocks; none is ever filled with a default, a guess or an ICBM preference.
 GAP_SHOPPING_REGISTRATION: Final = (
-    f"{FIELD_CHANNEL_PRODUCT}.{FIELD_NAVER_SHOPPING_REGISTRATION}: required, but its value type is"
-    " not captured by the official evidence"
+    f"{FIELD_CHANNEL_PRODUCT}.{FIELD_NAVER_SHOPPING_REGISTRATION}: a required JSON boolean, but no"
+    " ICBM-owned value source or policy decides which one ICBM publishes with, so neither true nor"
+    " false may be sent"
 )
 GAP_CHANNEL_DISPLAY_STATUS: Final = (
     f"{FIELD_CHANNEL_PRODUCT}.{FIELD_CHANNEL_DISPLAY_STATUS}: required; ON and SUSPENSION are the"
@@ -193,14 +201,16 @@ class SellerCodes:
 # trust that what it encodes is this projection's output over an immutable Snapshot and nothing
 # else.
 #
-# ``smartstoreChannelProduct`` is deliberately absent: both of its required fields are gaps at this
-# adoption, so the structure is not emitted and may not appear. It is the provider's second required
-# top-level object, so no document this schema admits is a complete provider request and none is
-# ever ``sendable`` — the honest state of the adopted contract, never a body sent half-built.
+# ``smartstoreChannelProduct`` is deliberately absent: no ICBM owner decides the value of either of
+# its required fields at this adoption, so the structure is not emitted and may not appear. It is
+# the provider's second required top-level object, so no document this schema admits is a complete
+# provider request and none is ever ``sendable`` — the honest state of the adopted contract, never
+# a body sent half-built.
 # ``windowChannelProduct`` is out of scope and never appears.
 _DOCUMENT_KEYS: Final = frozenset({FIELD_ORIGIN_PRODUCT})
 _ORIGIN_KEYS: Final = frozenset(
     {
+        FIELD_STATUS_TYPE,
         FIELD_NAME,
         FIELD_DETAIL,
         FIELD_IMAGES,
@@ -317,6 +327,12 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     _required(document, "document", (FIELD_ORIGIN_PRODUCT,))
     origin = _object(document[FIELD_ORIGIN_PRODUCT], FIELD_ORIGIN_PRODUCT, _ORIGIN_KEYS)
     _required(origin, FIELD_ORIGIN_PRODUCT, sorted(_ORIGIN_KEYS))
+    if origin[FIELD_STATUS_TYPE] != CREATE_STATUS_TYPE:
+        # E2: on registration only SALE may be entered; any other value is not a CREATE input.
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{FIELD_ORIGIN_PRODUCT}.{FIELD_STATUS_TYPE} is not {CREATE_STATUS_TYPE}",
+        )
     _string(origin[FIELD_NAME], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_NAME}")
     _string(origin[FIELD_DETAIL], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL}")
     _string(origin[FIELD_LEAF_CATEGORY_ID], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_LEAF_CATEGORY_ID}")
@@ -394,8 +410,8 @@ class WireProjection:
 
     ``document`` is the validated, frozen :class:`CreateDocument` holding exactly the structures the
     captured official evidence supports and the Snapshot owns; ``gaps`` names every part the
-    evidence does not carry. ``gaps`` is empty only when the whole required request is projectable,
-    and only then is the document ``sendable``.
+    evidence does not carry or no ICBM owner decides. ``gaps`` is empty only when the whole required
+    request is projectable, and only then is the document ``sendable``.
     """
 
     encoding_version: str
@@ -643,7 +659,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     codes = seller_codes(payload)
     references = _image_references(items)
     notice_type, notice_fields = _notice(payload)
-    gaps: list[str] = [GAP_STATUS_TYPE, GAP_NOTICE_TYPE_CHILD]
+    gaps: list[str] = [GAP_NOTICE_TYPE_CHILD]
 
     detail_attribute: dict[str, Any] = {
         FIELD_SELLER_CODE_INFO: {FIELD_SELLER_MANAGEMENT_CODE: codes.seller_management_code},
@@ -653,6 +669,8 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         detail_attribute[FIELD_OPTION_INFO] = _option_info(items, codes.option_codes, dimensions)
         gaps.append(GAP_OPTION_PRICE_SEMANTICS)
     origin_product: dict[str, Any] = {
+        # E2: the only status the CREATE endpoint accepts on registration.
+        FIELD_STATUS_TYPE: CREATE_STATUS_TYPE,
         FIELD_NAME: _text(payload["name"], "name"),
         FIELD_DETAIL: _detail_content(payload),
         FIELD_IMAGES: _images(references),
@@ -660,10 +678,11 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_LEAF_CATEGORY_ID: _leaf_category_id(payload),
         FIELD_DETAIL_ATTRIBUTE: detail_attribute,
     }
-    # smartstoreChannelProduct owns no projectable field at this adoption: both of its required
-    # fields are gaps, and every optional one (channelProductName, bbsSeq,
-    # storeKeepExclusiveProduct) is unowned, so the structure is not emitted at all rather than
-    # sent half-built. Because the provider requires it, these two gaps alone keep every projection
+    # smartstoreChannelProduct owns no projectable field at this adoption: naverShoppingRegistration
+    # is a captured boolean (E1) but no ICBM owner decides its value, the display status is likewise
+    # unowned, and every optional field (channelProductName, bbsSeq, storeKeepExclusiveProduct) is
+    # unowned, so the structure is not emitted at all rather than sent half-built or with a guessed
+    # boolean. Because the provider requires it, these two gaps alone keep every projection
     # unsendable. windowChannelProduct is out of scope and is never emitted.
     gaps.extend((GAP_SHOPPING_REGISTRATION, GAP_CHANNEL_DISPLAY_STATUS))
     # Validated and frozen here, at the one place a request document is ever built: what leaves

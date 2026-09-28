@@ -15,8 +15,8 @@ upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``, Gate 3 area 1), not
 **Adoption is not permission.** Nothing here decides retry, state or evidence: that is the domain
 owner's (``app.register.execution``), and the ADR-0018 §4.3 send-time safety stack stands in front
 of it. Production stays ``DRY_RUN`` / ``M0_DRY_RUN_ONLY``, so every CREATE is refused before a
-handoff can happen, and the wire projection is not sendable while the official evidence leaves a
-required value uncaptured (``product.py``).
+handoff can happen, and the wire projection is not sendable while a required value stays
+uncaptured by the official evidence or unowned by ICBM (``product.py``).
 
 **The outcome rules this seam must never soften** (ADR-0014 §9–§10, §28; ADR-0018 §6.1):
 
@@ -25,9 +25,12 @@ required value uncaptured (``product.py``).
 * ``NOT_APPLIED_PROVEN`` is whitelist-only — a local pre-handoff refusal or transmission-precluded
   evidence of this one request (``transmission.TRANSMISSION_PRECLUDED``);
 * a timeout, a lost connection or response, a ``5xx`` after a possible handoff, an ordinary
-  post-handoff ``4xx`` and an unsafe redirect are all ``UNKNOWN`` — and so is every success, because
-  the adopted response contract reads no provider identity out of one while the identifier nesting
-  and value type stay uncaptured (``create.py``);
+  post-handoff ``4xx`` and an unsafe redirect are all ``UNKNOWN`` — and so is a success whose
+  documented top-level ``integer<int64>`` identifiers cannot be read (``create.py``);
+* ``APPLIED_PROVEN`` is a success whose documented identifiers *are* readable. It is provider-side
+  application evidence and hands on ``originProductNo`` as the read-back identity; it is never a
+  registration success — read-back and Snapshot comparison stay the execution owner's separate
+  proof (ADR-0014 §11);
 * an ``UNKNOWN`` is **never** resent from here: this seam retries nothing and reopens nothing.
 """
 
@@ -138,20 +141,33 @@ class SmartStoreCreateSender:
                 },
             )
         reading = create.read(response.retained)
-        # The response passed the endpoint success predicate, and the adopted response contract
-        # still reads no provider identity out of it: the identifier nesting and value type are
-        # uncaptured, so locating one would invent a response semantic (create.py). That proves
-        # nothing either way — the product may exist — so it is UNKNOWN, never a failure and never
-        # a resend (ADR-0014 §28.3). APPLIED_PROVEN needs a readable identity, so it stays
-        # unreachable until a later slice captures the response shape from the cited schema.
+        sanitized_response = {
+            "retained": dict(response.retained),
+            "response_contract": reading.canonical(),
+        }
+        if reading.readable:
+            # The response passed the endpoint success predicate and carries the documented
+            # top-level integer<int64> identifiers (E3, create.py): the mutation was applied, and
+            # originProductNo is the identity the read-back is made by. This is provider-side
+            # application evidence only — never a registration success. The execution owner
+            # continues to read-back and Snapshot comparison, which alone confirm (ADR-0014 §11).
+            return CreateHandoff(
+                remote_outcome=RemoteOutcome.APPLIED_PROVEN,
+                sanitized_request=sanitized_request,
+                marketplace_product_id=reading.marketplace_product_id,
+                response_status=response.http_status,
+                sanitized_response=sanitized_response,
+                details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},
+            )
+        # A success whose documented identifiers cannot be read — missing, nested, a numeric string,
+        # a bool, out of the int64 range. That proves nothing either way — the product may exist —
+        # so it is UNKNOWN, never NOT_APPLIED_PROVEN, never a failure and never a resend
+        # (ADR-0014 §28.3).
         return CreateHandoff(
             remote_outcome=RemoteOutcome.UNKNOWN,
             sanitized_request=sanitized_request,
             response_status=response.http_status,
-            sanitized_response={
-                "retained": dict(response.retained),
-                "response_contract": reading.canonical(),
-            },
+            sanitized_response=sanitized_response,
             error_class=ErrorClass.UNKNOWN,
             error_code=create.RESPONSE_UNREADABLE,
             details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},

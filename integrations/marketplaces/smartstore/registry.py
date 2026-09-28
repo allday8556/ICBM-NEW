@@ -138,12 +138,11 @@ def product_read_succeeded(status: int, body: object) -> bool:
 def product_create_succeeded(status: int, body: object) -> bool:
     """HTTP 200 AND the body parses as a JSON object.
 
-    The official evidence proves the documented success status, the response media type and the
-    *names* of the success identifiers, but **not their JSON nesting inside the body** and not
-    their value type, so the predicate asserts nothing about the shape — exactly like the adopted
-    read-backs. What a passing response yields is decided by the response contract, and while both
-    of those facts stay uncaptured it yields no provider identity at all (``create.py``): a 200
-    that passes here is never by itself an applied mutation, and a 2xx is never a registration
+    The predicate asserts nothing about the identifiers. Their documented position and type — the
+    top-level ``integer<int64>`` members of the value-level packet 5868542027 (E3) — are read by
+    the response contract (``create.py``), which decides between an applied mutation and an
+    ``UNKNOWN``: a 200 that passes here is never by itself an applied mutation, a missing or
+    malformed identifier is never a proven non-application, and a 2xx is never a registration
     confirmation (ADR-0014 §11).
     """
     return status == 200 and isinstance(body, dict)
@@ -388,7 +387,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-create-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-create-r2"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -404,6 +403,11 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # Filled from ``mapping_fingerprint()`` in the same reviewed change.
     "m5-image-upload-r1": "4717169646fe3b53725a4c31ff93e15d657dc6a85b29295a8d955969f090d02b",
     "m5-create-r1": "635b1d1c281e2a05f9467a5362ff2f6395318d77c8c969b370a84c8384b1bfea",
+    # The CREATE reconciliation to the value-level packet 5868542027 (E1-E3): statusType SALE is
+    # projected and the top-level int64 success identifiers are read. None of that is
+    # permission-relevant registry content, so the fingerprint is the one m5-create-r1 names; the
+    # revision still moves, because the mapping it names now reads and sends differently.
+    "m5-create-r2": "635b1d1c281e2a05f9467a5362ff2f6395318d77c8c969b370a84c8384b1bfea",
 }
 
 
