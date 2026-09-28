@@ -187,6 +187,27 @@ or architect authority**, which is one of:
 
 A marked record is authority by its own marker and needs no further classification of itself.
 
+**Authority write guard.** A marker only means authority if no automation can write one. So:
+
+1. **No automated actor creates or edits a marker-first body.** An automated actor is the Agent
+   Host, Claude Code, GPT or any other one. A marker-first body is a GitHub body whose first
+   non-empty line, under the grammar above, is a recognized marker token. The ban covers comments,
+   reviews, review comments, and issue or PR bodies, and applies to creation and to any edit
+   alike.
+2. **Marked authority sources are posted and edited only by the user or the architect**, as an
+   explicit human authority action. Automation may prepare a **draft** of such a body. It never
+   publishes or edits the marked body itself.
+3. **Authorship is not machine-provable here.** The user, the Host, Claude Code and GPT can all
+   write under the same GitHub account. The protocol therefore **never claims that GitHub account
+   identity proves authorship**.
+
+   The boundary is an operating discipline together with a **Host-enforced write guard**: every
+   Host GitHub write is checked before it is sent, and a marker-first body is refused before the
+   write. An automated actor that bypasses the guard breaks the discipline. The marked body it
+   produced is not a valid authority source.
+4. This does not invalidate authority records that the user or architect posted directly, such as
+   the #147 bootstrap classification record `5876525801`. Their content-bound identity stands.
+
 The mapping names each source by its content-bound identity (locator and body digest). The Host only
 applies that exact declared mapping. It never invents, infers or reinterprets one. A marked source
 with no matching authorized classification stays **HOLD**, and so does a source whose body digest no
@@ -498,7 +519,12 @@ Required discovery tests (PR-A):
   followed by other text on the first line, or in another case;
 - classification authority (§3): a marked source with no matching classification from an authorized
   record → HOLD; the Host cannot clear it by itself; a classified source whose body digest changed
-  no longer matches → HOLD.
+  no longer matches → HOLD;
+- authority write guard (§3): an automated create or edit of any GitHub body (comment, review,
+  review comment, issue or PR body) whose first non-empty line is a recognized marker is
+  **refused before the GitHub write**. This covers a new body and an edit that turns an unmarked
+  body into a marked one. No write request is sent. A draft of the same text written to a local file
+  is not refused.
 
 ### PR-B — Audit result/control-flow cleanup
 
