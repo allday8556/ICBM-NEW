@@ -1,14 +1,14 @@
 # Adaptive Collector Phase C — KM통상 shadow evidence
 
-- Status: **PENDING — NOT ACCEPTED.** This is an evidence scaffold only. No real bundle, switch
-  entry, evidence window, supplier read, sample or verdict is recorded here, and none has happened.
-  It records evidence only after stage C4 is authorized and executed; a green PR, a green CI or a
+- Status: **NOT ACCEPTED — C1 INCOMPLETE / STOPPED, no Adaptive validation verdict** (§4). No
+  bundle, switch entry, evidence window, sample or verdict is recorded. The only supplier reads
+  were C1's accounted reads and its one authorized CONNECT (§4). A green PR, a green CI or a
   synthetic harness run never accepts anything.
 - Issue: #110. Contract: `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md`
   §7, §10, §11 (AC-01 to AC-29).
 - Plan: `docs/review/ADAPTIVE-PHASE-C-OPENING-BY-CLAUDE.md` (PR #119). Q1–Q7 decisions: review
   `5312911203`. ADR-0006 stopped-app supplement: review `5313045448`. Opening closeout: `5826469328`.
-- Stage authorizations: C0 `5826469852` (closed `5841947278`); C1 PREP-0 hardening `5841947773`. C1, C2, C3 and C4 are **not authorized**.
+- Stage authorizations: C0 `5826469852` (closed `5841947278`); C1 PREP-0 hardening `5841947773`; C1 `5843012999`, republished as `5844038834` with the one-time CONNECT `5844040618`; C1 stopped `5844538783`. C2, C3 and C4 are **not authorized**, and the old-transport C2–C4 plan is superseded for execution by ADR-0019 (§4).
 - Tooling: the Phase C harness `scripts/phase_c.py` / `scripts/phasec/` (C0). It is the only caller
   of the Phase C operator actions, and it runs only with the ICBM application stopped. After
   review `5313663701`:

@@ -132,7 +132,7 @@ Owns platform conversion and listing creation.
 The M5 REGISTER contract is `docs/adr/0014-smartstore-register-idempotency-readback.md` (Issue #89):
 - M4 keeps every product-side owner. Marketplace-sized binaries stay M4 derived artifacts; M5 owns the upload and the provider asset identity.
 - Each provider-listing unit has one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`. Read-back is compared to that Snapshot, never to current state.
-- An unresolved `UNKNOWN` CREATE is reconciled before any resend — by evidence ADR-0014 §10 admits, never by a seller-side code alone or a zero-result lookup (§7) — and blocks every new CREATE Intent in its marketplace × account × group conflict scope.
+- An unresolved `UNKNOWN` CREATE is never resent. It ends only on positive reconcile (an exact candidate read back by its provider number carrying the same code, then the Snapshot comparison), on a read-back by an already known provider identity, or on later machine proof of non-application (ADR-0014 §28.2–§28.3) — never on a seller-side code alone or a zero-result lookup (§7, §17.2). Until then it blocks every new CREATE Intent in its marketplace × account × group conflict scope.
 - **The adopted provider surface is still narrow.** At this main only the two SmartStore product read-backs and the bounded image upload are `ADOPTED`; product CREATE and the duplicate-lookup search are `NOT_ADOPTED`, `product_registration.write` is `UNVERIFIED`, and execution is `DRY_RUN`, so no listing has been created. The state and what still blocks a bounded canary are recorded in `docs/acceptance/M5.md` §9 and `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.
 
 #### Registration authoring and AI boundary
