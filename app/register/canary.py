@@ -69,7 +69,10 @@ class CanaryRequirement(StrEnum):
     SCOPE_SENDS_ALLOWED = "SCOPE_SENDS_ALLOWED"
     SINGLE_UNIT = "SINGLE_UNIT"
     # The two ADR-0018 §10 mutation-stage readinesses this result only summarizes. Each carries
-    # its own whole stack of layers, so neither is ever re-derived here.
+    # its own whole stack of layers and is read from the stage's owner, never re-derived here.
+    # Some lines above check a fact a stage layer also checks (a prepared unit, conflicts, the §26
+    # scope, endpoint adoption); they are this summary's own requirements and never stand in for
+    # a stage verdict.
     ASSET_MUTATION_READY = "ASSET_MUTATION_READY"
     CREATE_MUTATION_READY = "CREATE_MUTATION_READY"
 

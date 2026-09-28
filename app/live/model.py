@@ -35,10 +35,10 @@ from app.core.errors import AppError, ErrorClass, InputValidationError
 
 REPLAY_KEY_VERSION: Final = "asset-replay-key/v1"
 
-# The endpoint group of each mutation stage (§3.2). The CREATE group is the REGISTER execution
-# owner's (ADR-0014 §26); the ASSET group has no §26 scope row and never pretends one exists.
+# The endpoint group of each mutation stage (§3.2). The CREATE group is the REGISTER owner's
+# (``app.register.model.CREATE_ENDPOINT_GROUP``, ADR-0014 §26); the ASSET group has no §26 scope
+# row and never pretends one exists.
 ASSET_ENDPOINT_GROUP: Final = "product_image_upload"
-CREATE_ENDPOINT_GROUP: Final = "product_registration"
 
 # Server-owned bounds the implementing slice fixes (ADR-0018 §13). A grant is short-lived and
 # small: a canary is one unit, and a CREATE grant authorizes exactly one attempt (G3-27).

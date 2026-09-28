@@ -58,11 +58,10 @@ from app.live.model import (
 from app.live.stack import SafetyStack
 from app.live.store import GLOBAL_BRAKE, LiveAuthorityStore
 from app.products.image_model import ImageAssetKind
-from app.register.model import IntentState
+from app.register.model import CREATE_ENDPOINT_GROUP, IntentState
 from app.register.store import RegistrationStore
 
 DRILL_VERSION: Final = "restore-drill/v2"
-CREATE_ENDPOINT_GROUP: Final = "product_registration"
 _SENDABLE = (IntentState.PREPARED, IntentState.FAILED)
 
 

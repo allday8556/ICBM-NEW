@@ -70,8 +70,10 @@ class CanaryStageReadiness:
     acceptance, the durable upload-attempt owner, the ADR-0014 §26 scope brake and the stage's own
     gate) reaches the canary summary. The endpoint-adoption layers are the whole §10 row — for
     CREATE the sender's contract **and** the positive-only reconcile path — and the residual-risk
-    acceptance of §6.1 is a layer of each stage, so neither reaches the summary as a separate,
-    weaker line. Fail closed: an absent Intent, preparation or grant is not ``READY``.
+    acceptance of §6.1 is a layer of each stage. The residual-risk acceptance reaches the summary
+    only through these stage verdicts; the summary's own ``CREATE_ADOPTED`` and
+    ``RECONCILE_PATH_ADOPTED`` lines read the adapter's adoption map and never stand in for a stage
+    layer. Fail closed: an absent Intent, preparation or grant is not ``READY``.
     """
 
     def __init__(
