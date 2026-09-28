@@ -93,6 +93,21 @@ Instead, M0 creates a small design-token layer (`tokens.css` or equivalent) for 
 
 This ruling is also recorded in `docs/adr/0003-ui-reproduction-strategy.md`.
 
+## Approved deviations of the runtime UI from v29
+
+These are intentional differences between the running application and the canonical prototype. The prototype file and its fingerprint above are unchanged; only the runtime UI differs.
+
+| # | Surface | v29 (canonical) | Runtime UI | Approval / record |
+| --- | --- | --- | --- | --- |
+| UI-D1 | Platform marks (`platformTag`, `.pf-logo`) | Horizontal wordmark logos from the embedded `PLATFORM` registry, in a 72×18 box (chip 62×15, legend 76×17, settings tab 66×16) | The user-supplied 64×64 square app icons, served unmodified from `ui/web/assets/marketplaces/`, in an 18×18 box (`components.css`) | User request, Issue #53 |
+| UI-D2 | Settings screen: platform tabs and `플랫폼 연동 현황` rows | Wordmark logo | The platform's typed name: **SmartStore / Coupang / 11ST / Gmarket / Auction**. It comes from `MarketplaceIdentity.wordmark` through the shell contract and is never embedded in the UI (`platformWordmark`) | User request, Issue #53 |
+
+Notes:
+
+- As of UI-D2, no runtime screen renders a mark. `platformTag` and the square `.pf-logo` box are kept for the screens that will list platforms later.
+- Token candidate, not done yet: the mark box was defined twice, as `components.css` `.pf-logo` and `settings.css` `.tabs .pf-logo`. UI-D2 removed the settings rule. When marks return to more than one surface, the size should become one design token.
+- These deviations do not move any v29 visual-check geometry: sidebar, topbar, title box and font, empty-state box, navigation count, help icon and horizontal scroll. The evidence is in [`docs/acceptance/ui-deviations/issue-53/`](acceptance/ui-deviations/issue-53/): the full `visual-report.json` of the run, plus the settings screenshots of v29 and the runtime UI at both viewports. The other 40 screenshots of the run are not committed.
+
 ## Architect ruling — registration automation controls
 
 The three prototype toggles do not grant unrestricted runtime authority.

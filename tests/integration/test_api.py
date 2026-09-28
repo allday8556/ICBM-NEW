@@ -125,6 +125,8 @@ def test_shell_contract_serves_marketplace_identity_assets(client: TestClient) -
     assert shell["execution_mode"] == "DRY_RUN"
     keys = [m["key"] for m in shell["marketplaces"]]
     assert keys == ["smartstore", "coupang", "st11", "gmarket", "auction"]
+    wordmarks = [m["wordmark"] for m in shell["marketplaces"]]
+    assert wordmarks == ["SmartStore", "Coupang", "11ST", "Gmarket", "Auction"]
     for marketplace in shell["marketplaces"]:
         logo = client.get(marketplace["logo_url"])
         assert logo.status_code == 200

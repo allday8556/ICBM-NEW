@@ -29,3 +29,9 @@ export function platformTag(key, { name = false } = {}) {
   }
   return h('span', { class: 'pf' }, mark, name ? h('span', { class: 'pf-name' }, marketplace.label) : null);
 }
+
+// The platform named in text instead of a mark (the settings screen).
+export function platformWordmark(key) {
+  const marketplace = catalog.get(key);
+  return h('span', { class: 'pf-name' }, marketplace ? marketplace.wordmark : key);
+}
