@@ -108,9 +108,32 @@ Only marked sources participate in automatic authoritative-source discovery. Unm
 discussion, implementation summaries, audit results, and status comments do not become authority
 merely because the repository owner posted them.
 
-A marked authoritative source discovered after the previous source watermark and not classified in
-the manifest prevents a clean packet from being issued until it is classified. The generator does
-not guess whether it should be ignored.
+**Discovery is a full re-scan and is edit-aware.** The manifest names the **designated authoritative
+streams** of the slice, for example:
+- the comments of a named issue;
+- a PR's conversation comments, reviews and review comments;
+- a named issue or PR body.
+
+Every packet generation, including the pre-merge regeneration of §7.1, reads **every source in
+every designated stream in full** (all pages) at its **current** body. It then classifies each
+source that currently carries a recognized marker, whenever that source was created or edited.
+
+The scan never skips a source because of its creation order, its locator or an earlier scan. A
+source created before an earlier scan and edited in place to add a marker is therefore found like a
+new one.
+
+The **source watermark** is recorded as scan provenance only (what was scanned, and when). It is
+never a boundary below which sources are skipped.
+
+A source that currently carries a recognized marker and is not classified in the manifest prevents
+a clean packet from being issued until it is classified. Such a source is **HOLD**, whether it is
+new or an old source edited in place, for example a formerly unmarked comment that now carries
+`[ARCHITECT-INSTRUCTION]`. The generator does not guess whether it should be ignored.
+
+A stream that cannot be read completely is **HOLD**, never a partial scan. Examples:
+- a failed page;
+- a permission refusal;
+- a truncated listing.
 
 ## 4. Audit Packet
 
@@ -126,7 +149,8 @@ Its inputs are **content-bound source identities**:
 - evidence packets;
 - scope allow-list source;
 - binding prior decisions required by the slice;
-- authoritative-source manifest and source watermark.
+- authoritative-source manifest (designated streams and classifications) and source watermark
+  (scan provenance only, outside the canonical packet bytes, §3, §4.2).
 
 The last five inputs are each identified as below.
 
@@ -152,8 +176,10 @@ used to build it.
 Hard completeness checks:
 
 - every source declared `required` by the manifest is present in the packet;
-- every recognized authoritative marker discovered since the source watermark is classified before
-  the packet is accepted;
+- every source in every designated stream is re-scanned in full at its current body (§3). Every
+  source that currently carries a recognized marker, including an older source edited in place to
+  add one, is classified before the packet is accepted. A stream that cannot be read completely is
+  HOLD;
 - every source is re-read at generation time. A git source resolves to its exact object. A
   mutable GitHub source must be readable, and its current canonical body digest is what the packet
   records. A source that cannot be read is HOLD;
@@ -291,13 +317,14 @@ Merge must use `expected_head_sha` so a moved PR HEAD cannot be merged accidenta
 ### 7.1 Pre-merge packet regeneration and authority re-scan
 
 Immediately before MERGE_GUARD is evaluated, the Host regenerates the Audit Packet for the same HEAD
-and base. It re-scans the authoritative sources from the source watermark and re-reads every
-content-bound source (§4).
+and base. It **fully re-scans every designated authoritative stream** at current bodies, with no
+watermark skipping (§3), and re-reads every content-bound source (§4).
 
 - **Unchanged:** the regenerated canonical bytes, `audit_packet_digest` and manifest equal the
   audited packet. Only then may MERGE_GUARD proceed.
-- **Unclassified marker:** a marked source discovered after the watermark and not classified in
-  the manifest is **HOLD** (§3).
+- **Unclassified marker:** a source that currently carries a recognized marker and is not
+  classified in the manifest is **HOLD** (§3). It may be new, or an older, previously unmarked
+  source edited in place after the DUAL PASS. An incompletely read stream is HOLD too.
 - **Any other difference** invalidates the DUAL PASS. The Host returns to audit under the new
   audit identity. Examples:
   - a changed body digest;
@@ -344,13 +371,23 @@ Must land as one safe unit:
 - generated packet over content-bound source identities (git objects; mutable GitHub sources by
   locator + canonical body digest);
 - authoritative-source markers;
-- source manifest and watermark;
+- source manifest (designated streams, classifications) and watermark as scan provenance only;
+- full, edit-aware re-scan of every designated stream on every generation (§3);
 - hard completeness detection;
 - deterministic canonical serialization and reproducible digest;
 - audit identity `(HEAD, packet_digest)`;
 - evidence_seen recording and coverage checks by content-bound identity.
 
 Do not deploy packet unification without completeness and reproducibility in the same slice.
+
+Required discovery tests (PR-A):
+- an existing **unmarked old comment**, created before the previous scan and not in the manifest,
+  is **edited in place to add a recognized marker** → the next generation, and the pre-merge
+  regeneration of §7.1 after a DUAL PASS, report it as an **unclassified marker → HOLD**; no clean
+  packet is issued;
+- a new marked source that is not classified → HOLD;
+- a stream page that cannot be read, or a truncated listing → HOLD, never a partial scan;
+- an edited body of a classified source → its body digest and the packet digest change (§4, §7.1).
 
 ### PR-B — Audit result/control-flow cleanup
 
