@@ -65,6 +65,7 @@ DRAFT implementation
 → READY
 → FULL CI
 → GREEN
+→ pre-merge packet regeneration and authority re-scan (§7.1)
 → MERGE_GUARD
 → merge with expected_head_sha
 → POST_MERGE_VERIFY
@@ -115,19 +116,36 @@ not guess whether it should be ignored.
 
 The Audit Packet is a **generated artifact, never a hand-edited audit record**.
 
-Its inputs are immutable source identities:
+Its inputs are **content-bound source identities**:
 
 - exact HEAD SHA;
 - audited base SHA;
 - slice specification path and blob SHA;
-- owner amendments and their immutable source identities;
-- architect instructions and GitHub comment IDs;
-- evidence packets and GitHub comment IDs;
-- scope allow-list source identity;
+- owner amendments;
+- architect instructions;
+- evidence packets;
+- scope allow-list source;
 - binding prior decisions required by the slice;
 - authoritative-source manifest and source watermark.
 
-The packet contains a manifest of every required source and the exact identities used to build it.
+The last five inputs are each identified as below.
+
+**Content-bound identity.** A git object (a commit SHA, or a path with its blob SHA) already names
+its content. A GitHub comment ID, review ID or issue/PR number does not. It is a stable locator
+whose body can be edited in place, so it never identifies content alone.
+
+Every mutable GitHub source therefore enters the manifest as:
+- its kind and locator (for example the comment ID);
+- its **canonical body digest**: SHA-256 of the body exactly as the GitHub API returns it, UTF-8,
+  with line endings normalized to LF;
+- its `updated_at`, recorded as provenance only, never as identity. It sits outside the canonical
+  packet bytes, so it never affects `audit_packet_digest` (§4.2).
+
+The packet embeds the body digest, so an edited body changes the packet bytes and the
+`audit_packet_digest`.
+
+The packet contains a manifest of every required source and the exact content-bound identities
+used to build it.
 
 ### 4.1 Completeness
 
@@ -136,7 +154,9 @@ Hard completeness checks:
 - every source declared `required` by the manifest is present in the packet;
 - every recognized authoritative marker discovered since the source watermark is classified before
   the packet is accepted;
-- source identities resolve to the exact referenced immutable source;
+- every source is re-read at generation time. A git source resolves to its exact object. A
+  mutable GitHub source must be readable, and its current canonical body digest is what the packet
+  records. A source that cannot be read is HOLD;
 - packet HEAD and base match the candidate being audited.
 
 Failure of a hard completeness check is **HOLD**, not a code BLOCKER.
@@ -146,10 +166,13 @@ Failure of a hard completeness check is **HOLD**, not a code BLOCKER.
 Packet generation must be deterministic.
 
 ```text
-same immutable source set + same HEAD + same base
+same content-bound source set + same HEAD + same base
 → byte-identical canonical packet
 → same audit_packet_digest
 ```
+
+Conversely, any change to a source body changes that source's body digest, and with it the packet
+bytes and `audit_packet_digest`, even when HEAD, base and every locator are unchanged.
 
 Timestamps, random IDs, map iteration order, platform-specific line endings, or other
 non-deterministic values must not affect the digest.
@@ -169,7 +192,8 @@ Every audit result records:
 - exact HEAD;
 - audit_packet_digest;
 - verdict;
-- evidence_seen: the immutable source identities the auditor consumed;
+- evidence_seen: the content-bound source identities the auditor consumed (for a mutable GitHub
+  source, its locator **and** body digest, never the ID alone);
 - blocker/hold reason when not PASS.
 
 Before DUAL PASS is accepted:
@@ -178,6 +202,9 @@ Before DUAL PASS is accepted:
 GPT.evidence_seen    ⊇ packet.manifest.required
 Claude.evidence_seen ⊇ packet.manifest.required
 ```
+
+Coverage compares content-bound identities. An entry whose body digest differs from the manifest's
+does not cover that source.
 
 ### 5.1 Verdicts
 
@@ -250,14 +277,38 @@ rerun loop.
 Merge is allowed only when all of the following are true:
 
 1. PR HEAD == GPT HEAD == Claude HEAD == FULL CI HEAD.
-2. GPT packet digest == Claude packet digest == current packet digest.
-3. Packet completeness/reproducibility checks PASS.
-4. GPT and Claude `evidence_seen` each cover `packet.manifest.required`.
+2. GPT packet digest == Claude packet digest == the digest of the packet **regenerated at merge
+   time** (§7.1). A previously generated packet is never treated as current.
+3. Packet completeness/reproducibility checks PASS on the regenerated packet.
+4. GPT and Claude `evidence_seen` each cover the regenerated `packet.manifest.required`, by
+   content-bound identity (§4).
 5. FULL CI is GREEN for the exact HEAD.
 6. No HOLD is active.
 7. `audited_base_sha == current_base_sha`.
 
 Merge must use `expected_head_sha` so a moved PR HEAD cannot be merged accidentally.
+
+### 7.1 Pre-merge packet regeneration and authority re-scan
+
+Immediately before MERGE_GUARD is evaluated, the Host regenerates the Audit Packet for the same HEAD
+and base. It re-scans the authoritative sources from the source watermark and re-reads every
+content-bound source (§4).
+
+- **Unchanged:** the regenerated canonical bytes, `audit_packet_digest` and manifest equal the
+  audited packet. Only then may MERGE_GUARD proceed.
+- **Unclassified marker:** a marked source discovered after the watermark and not classified in
+  the manifest is **HOLD** (§3).
+- **Any other difference** invalidates the DUAL PASS. The Host returns to audit under the new
+  audit identity. Examples:
+  - a changed body digest;
+  - a new classified source;
+  - a changed manifest, bytes or digest.
+
+  The same-HEAD FULL CI stays valid (§2).
+- **A source that cannot be re-read** is HOLD, for example one that was deleted or is
+  inaccessible.
+
+MERGE_GUARD does not proceed on the packet generated before the audit.
 
 Scope violations are expected to be caught during audit and packet completeness rather than
 duplicated as a separate merge-time interpretation rule.
@@ -290,13 +341,14 @@ The protocol is implemented in three slices:
 
 Must land as one safe unit:
 
-- generated immutable packet;
+- generated packet over content-bound source identities (git objects; mutable GitHub sources by
+  locator + canonical body digest);
 - authoritative-source markers;
 - source manifest and watermark;
 - hard completeness detection;
 - deterministic canonical serialization and reproducible digest;
 - audit identity `(HEAD, packet_digest)`;
-- evidence_seen recording and coverage checks.
+- evidence_seen recording and coverage checks by content-bound identity.
 
 Do not deploy packet unification without completeness and reproducibility in the same slice.
 
@@ -312,6 +364,7 @@ Do not deploy packet unification without completeness and reproducibility in the
 
 - exact-HEAD CI state;
 - skipped/duplicate/retry handling;
+- pre-merge packet regeneration and authority re-scan (§7.1);
 - MERGE_GUARD;
 - expected_head_sha merge;
 - post-merge tree verification.
@@ -343,7 +396,8 @@ For a new #146 HEAD:
 4. require same HEAD + same packet digest + required evidence coverage;
 5. mark READY only after DUAL PASS;
 6. run FULL CI once for that new HEAD;
-7. pass MERGE_GUARD;
+7. regenerate the packet and re-scan authority immediately before merge (§7.1), then pass
+   MERGE_GUARD;
 8. merge with expected_head_sha;
 9. verify merged main tree equals the audited HEAD tree.
 
