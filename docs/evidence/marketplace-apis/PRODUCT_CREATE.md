@@ -6,7 +6,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `IMPLEMENTATION_EVIDENCE_COMPLETE` for the M5 SmartStore-only scope, **except** `productInfoProvidedNotice` type-specific child fields → `PARTIAL` (fail-closed) | `NOT_ADOPTED` | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` (fail-closed) — for the M5 SmartStore-only scope the wire facts, nested request field names, globally required fields, M5-relevant conditional rules, limits/defaults and success-identifier names are captured; the enumerated values / value types of several fields (**including required ones**), some nesting, the `productInfoProvidedNotice` type children and the response-body nesting are not. Coverage lists them exactly | `NOT_ADOPTED` | `UNVERIFIED` |
 | Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -98,7 +98,7 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `…optionCombinations[].skuYn` | not stated | — | FIELDS |
 | `…detailAttribute.productInfoProvidedNotice` | required for product registration | may be omitted on **update** only when a notice is already stored | PACKET, FIELDS, REQ |
 | `…productInfoProvidedNotice.productInfoProvidedNoticeType` | required | discriminator selecting exactly the one matching type-specific child object | FIELDS, REQ |
-| `…productInfoProvidedNotice.<type child>` | the one child matching the type | **`PARTIAL` sub-scope (see Coverage below).** Child names include `wear`, `shoes`, `food`, `generalFood`, `dietFood` (examples, not the full list); each type has its own required/conditional field rules; some values are documented "미입력 시 상품상세 참조" and conditional fields are omitted when not applicable, so there is **no blanket fill-every-field rule** | PACKET, FIELDS, REQ |
+| `…productInfoProvidedNotice.<type child>` | the one child matching the type | **Not captured (see Coverage below); fail-closed.** Child names include `wear`, `shoes`, `food`, `generalFood`, `dietFood` (examples, not the full list); each type has its own required/conditional field rules; some values are documented "미입력 시 상품상세 참조" and conditional fields are omitted when not applicable, so there is **no blanket fill-every-field rule** | PACKET, FIELDS, REQ |
 | `…detailAttribute.afterServiceInfo` | not required | if used, `afterServiceTelephoneNumber` and `afterServiceGuideContent` are required | REQ |
 | `…detailAttribute.originAreaInfo` | not required | if used, `originAreaCode` is required; `importer` is required for an imported origin; `content` is required for a direct-input origin | REQ |
 | `…detailAttribute` unit-price fields | conditional: required for categories subject to mandatory unit-price display | when `unitPriceYn=true`, `totalCapacityValue`, `unitCapacity` and `indicationUnit` are all required | REQ |
@@ -152,18 +152,18 @@ No CREATE-specific limit captured; the general gateway rate/quota model applies 
 
 ### Coverage and remaining gaps (exact)
 
-**Coverage:** `IMPLEMENTATION_EVIDENCE_COMPLETE` for the M5 SmartStore-only CREATE scope (`originProduct` + `smartstoreChannelProduct`, combination-form options): the provider's globally required fields and the M5-relevant conditional rules are captured above (REQ). One sub-scope is excepted:
+**Coverage:** `PARTIAL`, fail-closed. **Captured** for the M5 SmartStore-only CREATE scope (`originProduct` + `smartstoreChannelProduct`, combination-form options): the wire facts, the nested request field names, the provider's globally required fields, the M5-relevant conditional rules, the documented limits/defaults, and the names of the success identifiers (PACKET, REVIEW, FIELDS, REQ). **Not captured**, so no item below may be invented and any projection that needs one stays fail-closed / `REVIEW_REQUIRED` until the adoption slice records it from the cited schema:
 
-- **`PARTIAL` sub-scope — `productInfoProvidedNotice` type-specific children (fail-closed).** No type child's field set or per-field required/conditional rule is captured, for any type, including the named examples `wear`, `shoes`, `food`, `generalFood`, `dietFood`. The complete list of `productInfoProvidedNoticeType` values is not captured either (the notice-type lookups are `NOT_ADOPTED` with no proven response field, [NOTICE](NOTICE.md#smartstore)). Until captured, ICBM sends no notice child value it cannot source-back; where NAVER explicitly allows the detail-page-reference/default behaviour, only that documented behaviour is used (REQ §D).
-
-Recorded value-level and out-of-scope items (none of them is a missing required-field list):
-
-- Enumerated values not captured, so none may be invented: `statusType`; `deliveryType`, `deliveryAttributeType`; `optionCombinationSortType`; the value types of `naverShoppingRegistration` and `skuYn`; the inner structure of `deliveryFee`. A projection that needs one of these stays fail-closed / `REVIEW_REQUIRED` until the adoption slice records it from the cited schema.
+- **`productInfoProvidedNotice` type-specific children.** No type child's field set or per-field required/conditional rule is captured, for any type, including the named examples `wear`, `shoes`, `food`, `generalFood`, `dietFood`. The complete list of `productInfoProvidedNoticeType` values is not captured either (the notice-type lookups are `NOT_ADOPTED` with no proven response field, [NOTICE](NOTICE.md#smartstore)). Until captured, ICBM sends no notice child value it cannot source-back; where NAVER explicitly allows the detail-page-reference/default behaviour, only that documented behaviour is used (REQ §D).
+- **Enumerated values and value types — including those of required fields.** Not captured: `statusType` (required); the value type of `naverShoppingRegistration` (required); `deliveryType`, `deliveryAttributeType` and the inner structure of `deliveryFee` (required when `deliveryInfo` is sent); `optionCombinationSortType`; `skuYn`. A required field whose accepted values this record does not carry cannot be projected from this record alone, which is why the entry as a whole stays `PARTIAL` rather than complete.
 - The full delivery-mode conditional list beyond the documented examples (`deliveryCompany`, `outboundLocationId`), and the exact nesting of the unit-price fields inside `detailAttribute`.
 - The keys of the simple, custom and standard option structures (outside the combination form).
-- `windowChannelProduct` fields: out of scope (above).
 - The JSON nesting of the success identifiers inside the response body beyond their names.
 - CREATE-specific domain error codes (`ERRORS.md` Q4) and the target/meaning of a `308` for this endpoint.
+
+Two further items are recorded, but are not capture gaps in this scope:
+
+- `windowChannelProduct` fields: out of scope (above).
 - CREATE idempotency or ambiguous-outcome replay safety: documented as absent (above).
 
 ### ICBM adoption and runtime state — ICBM-side, not provider facts

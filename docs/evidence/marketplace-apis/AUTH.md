@@ -71,8 +71,8 @@
 
 ## 11st
 
-- **Captured:** the official portal https://openapi.11st.co.kr/ confirms Open API key issuance (2026-09-28).
-- **Missing:** the endpoint-level auth header contract.
+- **Locator:** https://openapi.11st.co.kr/ — official Open API portal, observed 2026-09-28. A portal/key-issuance landing page is a page locator, not an endpoint-level auth source, and the public fetch returned no endpoint reference content; source authority therefore stays `UNAVAILABLE` and coverage `NOT_CAPTURED` (README status model).
+- **Missing:** every endpoint-level auth fact — header name/format, key or signature composition, timestamp rules, auth error responses.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## Kakao Shopping

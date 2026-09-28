@@ -55,8 +55,8 @@
 
 ## 11st
 
-- **Captured:** the seller registers/uses an 11ST Open API key (portal https://openapi.11st.co.kr/, 2026-09-28).
-- **Missing:** the endpoint permission matrix.
+- **Locator:** https://openapi.11st.co.kr/ — official Open API portal, observed 2026-09-28. A portal page is a page locator, not an endpoint-level permission source, and no permission unit is recorded; source authority therefore stays `UNAVAILABLE` and coverage `NOT_CAPTURED` (README status model).
+- **Missing:** every endpoint-level permission fact — the permission units, how they are granted, and the endpoint permission matrix.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## Kakao Shopping
