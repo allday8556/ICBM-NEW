@@ -101,6 +101,7 @@ therefore bounded as follows.
   every slice uses the packet flow of §1–§8. **No slice other than #147 and PR-A may use this
   exception**, including PR-B and PR-C.
 
+## 1. Flow
 
 ```text
 DRAFT implementation
