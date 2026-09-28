@@ -256,65 +256,78 @@ Packet scope, and what it deliberately does **not** license:
   `sellerCodeInfo.sellerManagementCode`, option `sellerManagerCode`, `productInfoProvidedNotice`;
   the bounds 999,999,990 / 99,999,999 / ≤3 option dimensions / 1 representative + ≤9 optional
   images; and that notice fields are category-specific with conditional fields omitted;
-- **not proven, so fail-closed**: the CREATE request media type and response envelope, the image
-  upload part name, the product-search request schema (no strong duplicate key), the category
-  query keys of the attribute/option reads, and any response field of the category/notice reads.
+- **not proven by this packet, so fail-closed**: the image upload part name, the product-search
+  request schema (no strong duplicate key), the category query keys of the attribute/option reads,
+  and any response field of the category/notice reads. The CREATE request and response contract is
+  recorded field by field in `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; its
+  sources are in §5.2.
 
 `AUTH_MODE` stays `SELF`: the packet's Commerce Solution `SELLER` guidance is solution-specific and
 is not applicable evidence for ICBM's own-store application (§11.4 — unknown beats invention).
 
-> For CREATE only, two of the items above — the request media type and the success response
-> envelope — were later established by the architect's official evidence reviews recorded in §5.2.
-> Every other item in the "not proven" list above stays unproven.
+### 5.2 M5 CREATE request/response evidence (`2.89.0`)
 
-### 5.2 M5 CREATE wire-contract evidence (`2.89.0`)
-
-Two later architect official-evidence reviews on Issue #89 read the current `(v2) 상품 등록`
-reference of release **2.89.0 (2026-09-15)**: comments **5768199984** and **5768247290**. They were
-written for the CREATE and reconcile evidence review that closed `INSUFFICIENT` for idempotent
-replay and remote-absence proof (§5.1 packet; ADR-0014 §17.2). This section records only the CREATE
-wire facts those reviews state; the verdict itself is unchanged.
+This is the single ledger entry for the sources of the `POST /v2/products` contract evidence. It
+combines the architect's official evidence reviews **5768199984** and **5768247290**, the
+field-level packet **5861477977** and the required/conditional-field packet **5861933729** (both
+retrieved 2026-09-28) with packet 5746489554 (§5.1), all read against the current `(v2) 상품 등록`
+reference and the `원상품 정보 구조체` and `스마트스토어 채널상품 정보 구조체` schemas of release **2.89.0
+(2026-09-15)**. The reviews closed `INSUFFICIENT` for idempotent replay and remote-absence proof
+(ADR-0014 §17.2); that verdict is unchanged.
 
 | Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
-| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE request media type, success status, success response identifiers and stored product data | `ENDPOINT_MATRIX.md` §4.2; the future CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE media type, success status, success identifiers and stored product data, absence of idempotency | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-FIELDS-CREATE-289` | Issue #89 comment 5861477977 (architect-reviewed field-level extract of the 2.89.0 CREATE reference and the `원상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | CREATE top-level objects, nested request keys, success `Content-Type`, documented statuses | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-REQUIRED-CREATE-289` | Issue #89 comment 5861933729 (architect-reviewed required/optional/conditional-field extract of the 2.89.0 CREATE reference, the `원상품 정보 구조체` schema and the `스마트스토어 채널상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4-%EC%B1%84%EB%84%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | globally required `originProduct` fields, M5-relevant conditional rules (options, notice, delivery, after-service, origin area, unit price), channel-product required fields, `windowChannelProduct` scope | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 
-Observations preserved, limited to what the reviews state:
+Summary, limited to what these sources state: `POST /v2/products` takes an `application/json` body
+whose required top-level objects are `originProduct` and `smartstoreChannelProduct`; the
+globally required `originProduct` fields are `statusType`, `name`, `detailContent`, `images`,
+`salePrice` and `detailAttribute` (`leafCategoryId`, `stockQuantity`, `sellerCodeInfo` and
+`optionInfo` are not provider-required), `productInfoProvidedNotice` is required for registration,
+and further structures carry documented conditional rules; `windowChannelProduct` is a separate
+Shopping Window channel structure outside the SmartStore-only scope. Success is HTTP `200`,
+`application/json;charset=UTF-8`, returning `originProductNo`, `smartstoreChannelProductNo`,
+`windowChannelProductNo` (which may be absent for a SmartStore-only CREATE) and the stored
+`originProduct`; the documented statuses are `200`, `308`,
+`400`, `401`, `403`, `404` and `500`; the reference contains no idempotency key,
+request-correlation key, replay rule or duplicate-prevention guarantee. The field-by-field contract
+(nested keys, required/optional/conditional rules, limits, defaults) is recorded once, in
+`docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore, with a per-field source column;
+this ledger does not repeat it.
 
-- `POST /v2/products` is the `(v2) 상품 등록` endpoint (packet 5746489554);
-- the request is JSON: Commerce API messages use JSON by default except file upload and download,
-  so this request body is `application/json` (review 5768199984);
-- the request body is the documented `originProduct` + channel-product structure, the
-  `원상품 정보 구조체` of packet 5746489554 (review 5768199984);
-- the documented success status is HTTP `200` (reviews 5768199984, 5768247290);
-- since API docs `v2.68.0` a successful create response carries the provider-issued identifiers
-  `originProductNo`, `smartstoreChannelProductNo` and `windowChannelProductNo` (review 5768199984);
-- the success response additionally returns `originProduct`, which NAVER states is the product data
-  successfully stored by SmartStore (review 5768199984);
-- the reference documents the endpoint's normal error surface, and it contains no idempotency key,
-  request-correlation key, replay rule or duplicate-prevention guarantee (review 5768247290).
+Not proven, so fail-closed:
 
-Still not proven by these reviews, so fail-closed:
-
-- the exact value and parameters of the success response `Content-Type` header — the reviews
-  establish a JSON body, not the header's charset;
-- a per-endpoint enumeration of the CREATE error statuses at `2.89.0`. The product-API error
-  contract ICBM relies on stays `ERRORS.md` §10 (`NAVER-P0-PRODUCT-CREATE`, `2.88.0`): `BAD_REQUEST`
-  classified from `invalidInputs` together with `message`, because the product documentation warns
-  that `invalidInputs` can be absent or insufficient (§10.1); `UNAUTHORIZED`, `FORBIDDEN`,
-  `NOT_FOUND` and `INTERNAL_SERVER_ERROR` (§10.2–§10.5); and `308/PERMANENT_REDIRECT`, never followed
-  for a mutation (§10.6, §17);
 - any CREATE idempotency or ambiguous-outcome replay safety. A timeout, a connection loss, a
-  response loss or a `5xx` never proves non-application (reviews 5768199984, 5768247290;
-  `ERRORS.md` §14.3, §15.2), so such a CREATE is `UNKNOWN` and is never resent (ADR-0014 §28);
+  response loss or a `5xx` never proves non-application (5768199984, 5768247290; `ERRORS.md` §14.3,
+  §15.2), so such a CREATE is `UNKNOWN` and is never resent (ADR-0014 §28);
 - that a `500` or a zero-result lookup proves the product was not registered. Neither does
-  (ADR-0014 §17.2, §28.2).
+  (ADR-0014 §17.2, §28.2);
+- sending a structure merely because the schema contains it. Only fields owned by the immutable
+  RegistrationSnapshot/preparation and required by the selected product/channel conditions may be
+  sent; an unsupported category/feature condition stays fail-closed / `REVIEW_REQUIRED` (5861477977
+  §F, 5861933729);
+- an enumerated value these sources do not list (for example the `statusType` or delivery-type
+  values); none may be invented;
+- an ICBM projection for the simple, custom or standard option structures. The evidence selects no
+  new option policy: only an option shape the canonical ICBM contracts already allow may be
+  projected (5861477977 §C);
+- the field set of any type-specific `productInfoProvidedNotice` child. This sub-scope is not
+  captured; no value that ICBM does not own may be invented (5861933729 §D).
+- a provider requirement for `leafCategoryId`: the schema does not mark it required, so a category
+  requirement is ICBM preflight policy only (5861933729 §A).
+
+The per-status meaning stays the product-API error contract of `ERRORS.md` §10: `BAD_REQUEST` is read
+from `invalidInputs` together with `message` (§10.1), then `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`
+and `INTERNAL_SERVER_ERROR` (§10.2–§10.5), and `308/PERMANENT_REDIRECT` is never followed for a
+mutation (§10.6, §17).
 
 This evidence adopts nothing and authorizes no call. `SMARTSTORE_PRODUCT_CREATE_V2` stays
 `NOT_ADOPTED` until its own adoption slice (ADR-0020 §4) freezes the success predicate, timeout,
-redirect and error classification against these facts. Until then the code-side gap text
-(`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS`, `product.py`) still records the
-pre-review gap; it changes with that slice, not with this evidence record.
+redirect, error classification and the typed request projection against these facts. The code-side
+gap text (`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS`, `product.py`) changes
+with that slice, not with this evidence record.
 
 ---
 

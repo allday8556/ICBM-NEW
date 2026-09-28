@@ -1,15 +1,45 @@
 # Buyer Review
 
-No marketplace in this research pass has a seller review-management contract captured strongly enough to record as an implementation candidate.
+> Evidence catalog; status model and provenance conventions in [README](README.md). Nothing here adopts an endpoint.
+>
+> No marketplace in the 2026-09-28 pass has a seller review-management contract captured. Do not substitute storefront/public review APIs for seller-operation APIs.
 
-| Platform | Status | Note |
-| --- | --- | --- |
-| SmartStore | UNVERIFIED | No seller review-management contract captured here. |
-| Coupang | UNVERIFIED | No seller review-management endpoint captured from the 2026 seller API index. |
-| 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Current seller endpoint detail not captured. |
-| Kakao Shopping | UNVERIFIED | No review-management endpoint captured from current Shopping Open API docs. |
-| Gmarket / Auction | UNVERIFIED | No review-management endpoint captured from ESM Trading API research. |
-| LotteON | UNVERIFIED | No review-management endpoint captured. |
-| SSG.COM | UNVERIFIED | No buyer-review management endpoint captured. |
+## Status matrix
 
-Do not substitute storefront/public review APIs for seller-operation APIs.
+| Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
+| --- | --- | --- | --- | --- |
+| SmartStore | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Kakao Shopping | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Gmarket / Auction | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| LotteON | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SSG.COM | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+
+## SmartStore
+
+- **Missing:** no seller review-management contract captured. **ICBM:** `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Coupang
+
+- **Missing:** no seller review-management endpoint captured from the 2026 seller API index. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## 11st
+
+- **Missing:** no endpoint reference captured. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Kakao Shopping
+
+- **Missing:** no review-management endpoint captured from the current Shopping Open API docs. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Gmarket / Auction
+
+- **Missing:** no review-management endpoint captured from the ESM Trading API research. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## LotteON
+
+- **Missing:** no review-management endpoint captured. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## SSG.COM
+
+- **Missing:** no buyer-review management endpoint captured. **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.

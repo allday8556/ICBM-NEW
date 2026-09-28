@@ -1,16 +1,53 @@
 # Product Delete
 
-> Research-only. A documented delete endpoint is not adopted by ICBM.
+> Evidence catalog; status model and provenance conventions in [README](README.md). A documented delete endpoint is not adopted by ICBM; any destructive marketplace action needs user approval (CLAUDE.md §7.2).
 
-| Platform | Status | Captured official fact |
-| --- | --- | --- |
-| SmartStore | REFER_TO_PLATFORM_LEDGER | Current Commerce API includes product lifecycle/delete surfaces; exact contract must be re-read from the SmartStore ledger before implementation. |
-| Coupang | OFFICIAL_CAPTURED | `DELETE /v2/providers/seller_api/apis/api/v1/marketplace/seller-products/{sellerProductId}`. |
-| 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Current seller endpoint detail not captured. |
-| Kakao Shopping | UNVERIFIED | No delete endpoint captured in this pass. |
-| Gmarket / Auction | UNVERIFIED | Whole-product delete endpoint not captured in this pass. |
-| LotteON | UNVERIFIED | No product-delete endpoint captured. |
-| SSG.COM | UNVERIFIED | No product-delete endpoint captured. |
+## Status matrix
 
-Official source:
-- Coupang API index: https://developers.coupang.com/en/api
+| Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
+| --- | --- | --- | --- | --- |
+| SmartStore | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+| 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Kakao Shopping | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Gmarket / Auction | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| LotteON | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SSG.COM | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+
+## SmartStore
+
+- **Captured (NAVER Commerce API 2.89.0, `NAVER-P0-PACKET-289` / Issue #89 comment 5746489554):** the AI-use guide places product deletion in API group `상품`.
+- **Missing:** the delete method/path, request, success/response, errors, idempotency/replay and timeout semantics.
+- **ICBM:** not registered in `ENDPOINT_MATRIX.md` §4 → `NOT_ADOPTED`; runtime `UNVERIFIED`.
+
+## Coupang
+
+- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
+- **Captured:** `DELETE /v2/providers/seller_api/apis/api/v1/marketplace/seller-products/{sellerProductId}`.
+- **Missing:** preconditions, success/response, errors, idempotency.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## 11st
+
+- **Missing:** every endpoint-level fact (no endpoint reference captured, 2026-09-28).
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Kakao Shopping
+
+- **Missing:** no delete endpoint captured in the 2026-09-28 pass.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Gmarket / Auction
+
+- **Missing:** no whole-product delete endpoint captured in the 2026-09-28 pass.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## LotteON
+
+- **Missing:** no product-delete endpoint captured (2026-09-28).
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## SSG.COM
+
+- **Missing:** no product-delete endpoint captured (2026-09-28).
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
