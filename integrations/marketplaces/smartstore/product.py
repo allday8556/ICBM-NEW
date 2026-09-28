@@ -8,9 +8,14 @@ option, and never consults the current Draft (ADR-0014 §6, §11; kickoff §3).
 **The adopted request contract.** ``docs/evidence/marketplace-apis/PRODUCT_CREATE.md`` § SmartStore
 records the official 2.89.0 CREATE contract field by field (packet ``5746489554``, reviews
 ``5768199984`` / ``5768247290``, field packet ``5861477977``, required/conditional packet
-``5861933729``). The CREATE adoption slice freezes it here: the request top level is
-``originProduct`` plus ``smartstoreChannelProduct``; ``windowChannelProduct`` is a separate Shopping
-Window channel structure and is **never emitted**.
+``5861933729``). The CREATE adoption slice freezes it here. The provider's request top level is
+``originProduct`` plus the required ``smartstoreChannelProduct``, and of those this projection emits
+``originProduct`` only: neither required field of ``smartstoreChannelProduct`` is captured by the
+evidence or owned by a Snapshot, so the structure stays a named *gap* rather than a half-built
+required object — which means **no** Snapshot is sendable at this adoption, by design and not by
+omission. Adoption froze the contract and this refusal; the slice that captures the missing values
+is what makes a request sendable. ``windowChannelProduct`` is a separate Shopping Window channel
+structure, out of scope, and is **never emitted**.
 
 **What this module may spell** is exactly what that record captures — the nested request field
 names, the provider's globally required fields, the M5-relevant conditional rules and the documented
@@ -189,8 +194,10 @@ class SellerCodes:
 # else.
 #
 # ``smartstoreChannelProduct`` is deliberately absent: both of its required fields are gaps at this
-# adoption, so the structure is not emitted and may not appear. ``windowChannelProduct`` is out of
-# scope and never appears.
+# adoption, so the structure is not emitted and may not appear. It is the provider's second required
+# top-level object, so no document this schema admits is a complete provider request and none is
+# ever ``sendable`` — the honest state of the adopted contract, never a body sent half-built.
+# ``windowChannelProduct`` is out of scope and never appears.
 _DOCUMENT_KEYS: Final = frozenset({FIELD_ORIGIN_PRODUCT})
 _ORIGIN_KEYS: Final = frozenset(
     {
@@ -656,7 +663,8 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     # smartstoreChannelProduct owns no projectable field at this adoption: both of its required
     # fields are gaps, and every optional one (channelProductName, bbsSeq,
     # storeKeepExclusiveProduct) is unowned, so the structure is not emitted at all rather than
-    # sent half-built. windowChannelProduct is out of scope and is never emitted.
+    # sent half-built. Because the provider requires it, these two gaps alone keep every projection
+    # unsendable. windowChannelProduct is out of scope and is never emitted.
     gaps.extend((GAP_SHOPPING_REGISTRATION, GAP_CHANNEL_DISPLAY_STATUS))
     # Validated and frozen here, at the one place a request document is ever built: what leaves
     # this function is already checked against the adopted contract and can no longer change.

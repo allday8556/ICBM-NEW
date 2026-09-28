@@ -109,7 +109,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, and an `UNKNOWN` is never resent |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, an `UNKNOWN` is never resent, and the adopted request is not sendable while the evidence leaves required values uncaptured (§4.1.1) |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); no ASSET sender wired |
@@ -127,8 +127,11 @@ The remaining M5 rows are planning metadata only. Presence does not imply eventu
 ### 4.1 M5 PR-D adoption and its recorded gaps (packet 5746489554, release 2.89.0)
 
 PR-D adopted the two product read-backs. Issue #89 decisions `5765557497` and `5765663972`
-subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provider-zero,
-`product_registration.write` stays `UNVERIFIED`, and no application route invokes the upload.
+subsequently adopted IMAGE UPLOAD, and the separately authorized CREATE adoption slice
+(ADR-0020 §4 order 1) later adopted `SMARTSTORE_PRODUCT_CREATE_V2`, whose frozen contract is
+§4.1.1. Every other M5 row of §4 stays `NOT_ADOPTED`. Each of those adoptions is a contract and
+never a call: the application remains `DRY_RUN`/provider-zero, `product_registration.write` stays
+`UNVERIFIED`, and no application route invokes the upload caller or the CREATE caller.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
@@ -140,14 +143,16 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 `5768312853` → `5768347233`; ADR-0014 §17.2). Beyond the packet gaps above, the official contract
 proves no CREATE idempotency or ambiguous-outcome replay safety, no `sellerManagementCode`
 uniqueness, and no read-after-write freshness that would make a zero-result lookup an authoritative
-absence — a seller-code search may return similar, partial or exact matches. Both rows therefore
-stay `NOT_ADOPTED`, and no implementation may proceed on the assumption that a deterministic
-provider lookup exists. The verdict stays `INSUFFICIENT` and is not overturned, and overturning it
+absence — a seller-code search may return similar, partial or exact matches. Both rows stayed
+`NOT_ADOPTED` under that review, `SMARTSTORE_PRODUCT_SEARCH` still does, and no implementation may
+proceed on the assumption that a deterministic provider lookup exists. The verdict stays
+`INSUFFICIENT` and is not overturned, and overturning it
 is not the adoption condition (ADR-0014 §17.2, §28; ADR-0018 §6.1): CREATE and the positive-only
-reconcile path each need their own separately authorized adoption slice — CREATE recording the
-provider's actual (absent) idempotency and bound to the §28 never-resend rule, SEARCH for
-positive-only reconcile only. An `UNKNOWN` CREATE is never resent, a zero-result lookup never proves
-absence, and the residual-risk acceptance stays a separate canary prerequisite.
+reconcile path each need their own separately authorized adoption slice — CREATE took its own
+(§4.1.1), recording the provider's actual (absent) idempotency and bound to the §28 never-resend
+rule; SEARCH's, for positive-only reconcile only, is not taken. An `UNKNOWN` CREATE is never
+resent, a zero-result lookup never proves absence, and the residual-risk acceptance stays a
+separate canary prerequisite.
 
 Adopted read-back contract, in the registry and pinned by tests:
 
@@ -195,6 +200,7 @@ Adopted CREATE contract, in the registry and pinned by tests:
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the safe product leaves `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 | Idempotency | **none is invented**: no idempotency key, request-correlation key or replay header is sent, because the provider documents none |
+| Request completeness | **Incomplete at this adoption, and that is the frozen state.** The provider requires `originProduct` **and** `smartstoreChannelProduct`. The captured evidence gives no accepted value for the required `originProduct.statusType`, no value type for the required `smartstoreChannelProduct.naverShoppingRegistration` and no type-specific child for `productInfoProvidedNotice`, and no Snapshot owns the publication decision behind `channelProductDisplayStatusType`. None of them is ever invented, so `smartstoreChannelProduct` is **not emitted at all** rather than half-built, the frozen request schema admits only the projectable `originProduct` structure, and **no** Snapshot is sendable: every projection carries those named gaps and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`. Adoption froze the contract and the refusal; it did not make a request sendable. The later slice that captures the missing values from the cited schema is what completes the request |
 
 Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10, §28; `ERRORS.md`
 §15):
@@ -218,8 +224,11 @@ Request projection, from the immutable `RegistrationSnapshot` only: `originProdu
 `detailContent`, `images.representativeImage.url` plus at most nine `optionalImages[].url`,
 `salePrice`, `detailAttribute.sellerCodeInfo.sellerManagementCode`, the combination-form
 `optionInfo` for an option listing, and the ICBM-owned `leafCategoryId` (never cited as
-provider-required — the 2.89.0 schema does not mark it required). `windowChannelProduct` is never
-emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
+provider-required — the 2.89.0 schema does not mark it required). The provider-required
+`smartstoreChannelProduct` is **not** emitted at this adoption: neither of its required fields is
+captured or owned, and a half-built required structure would be an invented request, so it stays a
+named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
+never emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
 document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
 outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
 `sellerManagementCode` that is not this listing identity's projection is refused, never trimmed
