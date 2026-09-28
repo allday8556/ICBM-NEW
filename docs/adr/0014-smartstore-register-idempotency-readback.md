@@ -452,6 +452,11 @@ This amendment **relaxes nothing**:
 - `NOT_APPLIED_PROVEN` stays whitelist-only. An ordinary post-handoff `4xx`, a `5xx`, a timeout, a
   lost response, an unsafe redirect and a malformed success are all `UNKNOWN` (architect ruling
   R2, Issue #89 `5861607665`).
+- The response-body nesting stays uncaptured, so the adopted reading resolves an identifier only
+  where the whole retained body yields exactly one usable value for that name. A success whose
+  `originProductNo` is absent, unusable **or ambiguous** is `UNKNOWN`, never `APPLIED_PROVEN`:
+  no occurrence is preferred over another, so no arbitrary reading can support an applied
+  mutation or become the identity a read-back is made by (§11; `ENDPOINT_MATRIX.md` §4.1.1).
 - An `UNKNOWN` is never resent, keeps its conflict scope closed and is never `등록실패`
   (§10, §28, M5-08, M5-09, M5-33, M5-36).
 - The seller-side listing identity stays ICBM's own correlation identity (§7). The provider

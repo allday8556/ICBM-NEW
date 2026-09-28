@@ -15,6 +15,14 @@ this module recognizes them the way the adopted read-back normalizer recognizes 
 name, wherever the endpoint's deny-by-default retention profile left them — and fails closed when
 the origin number is absent or unusable. No identity is ever invented, and no nesting is asserted.
 
+Because the nesting is uncaptured, the recognizer never *chooses* a reading of the body either. An
+identifier name is recognized only when the whole retained response resolves it **unambiguously**:
+every occurrence of that name normalizes to one and the same usable value. A name that occurs twice
+with different values, or that occurs anywhere with a value this contract does not understand, is
+not recognized at all — no occurrence is preferred over another, and no first hit wins. For
+``originProductNo`` that is the ``UNKNOWN`` of ``RESPONSE_UNREADABLE``: an ambiguous body is never
+evidence of an applied mutation, and never the identity a read-back is then made by.
+
 **The outcome.** SmartStore documents no idempotency key, no request-correlation key, no replay
 rule and no duplicate-prevention guarantee, and it states nowhere that a timeout, a lost response
 or a ``5xx`` proves the mutation was not applied (ADR-0014 §17.2, re-confirmed by Gate 3 area 4).
@@ -77,6 +85,9 @@ class CreateIdentifiers:
     origin_product_no: str | None
     smartstore_channel_product_no: str | None
     window_channel_product_no: str | None
+    # Identifier names the response did carry but this contract refused to resolve: an unusable
+    # value, or two occurrences that disagree. Evidence of why a name is ``None``, never a value.
+    unresolved: tuple[str, ...] = ()
 
     @property
     def readable(self) -> bool:
@@ -90,6 +101,7 @@ class CreateIdentifiers:
             FIELD_ORIGIN_PRODUCT_NO: self.origin_product_no,
             FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO: self.smartstore_channel_product_no,
             FIELD_WINDOW_CHANNEL_PRODUCT_NO: self.window_channel_product_no,
+            "unresolved_identifiers": list(self.unresolved),
         }
 
 
@@ -121,23 +133,49 @@ def _nodes(value: Any) -> list[Mapping[str, Any]]:
     return found
 
 
+def _resolve(nodes: Sequence[Mapping[str, Any]], name: str) -> tuple[str | None, bool]:
+    """The one value ``name`` unambiguously has in the retained response, and whether it occurred.
+
+    Fail-closed, because the nesting is uncaptured: the name is looked for everywhere, but nothing
+    is ever selected. Every occurrence must normalize to the same usable value; one unusable
+    occurrence, or one disagreement, and the name is not recognized at all.
+    """
+    occurred = False
+    values: set[str] = set()
+    for node in nodes:
+        if name not in node:
+            continue
+        occurred = True
+        value = _identifier(node[name])
+        if value is None:
+            return None, True
+        values.add(value)
+    if len(values) != 1:
+        return None, occurred
+    return values.pop(), True
+
+
 def identifiers(retained: Mapping[str, Any]) -> CreateIdentifiers:
     """Recognize the provider identities in one retained CREATE response.
 
     The retained mapping has already passed the endpoint's deny-by-default retention profile, so
-    only allow-listed leaves can be here at all. The first usable value of each identifier name
-    wins; a name that is present but unusable is treated as not recognized, never coerced.
+    only allow-listed leaves can be here at all. Each identifier name must resolve to exactly one
+    usable value across the whole body; a name that is unusable or contradicted anywhere is not
+    recognized, never coerced and never chosen between.
     """
     nodes = _nodes(retained)
-    found: dict[str, str | None] = dict.fromkeys(IDENTIFIER_FIELDS)
-    for node in nodes:
-        for name in IDENTIFIER_FIELDS:
-            if found[name] is None:
-                found[name] = _identifier(node.get(name))
+    found: dict[str, str | None] = {}
+    unresolved: list[str] = []
+    for name in IDENTIFIER_FIELDS:
+        value, occurred = _resolve(nodes, name)
+        found[name] = value
+        if value is None and occurred:
+            unresolved.append(name)
     return CreateIdentifiers(
         origin_product_no=found[FIELD_ORIGIN_PRODUCT_NO],
         smartstore_channel_product_no=found[FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO],
         window_channel_product_no=found[FIELD_WINDOW_CHANNEL_PRODUCT_NO],
+        unresolved=tuple(unresolved),
     )
 
 

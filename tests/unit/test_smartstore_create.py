@@ -169,7 +169,9 @@ def test_a_request_the_caller_cannot_encode_never_reaches_the_transport() -> Non
 
 
 def test_the_success_response_yields_the_provider_identities_wherever_they_sit() -> None:
-    # The JSON nesting of the identifiers is not captured, so they are recognized by name.
+    # The JSON nesting of the identifiers is not captured, so they are recognized by name — but
+    # only where the whole body resolves the name to exactly one usable value (no shape asserted,
+    # and no reading chosen).
     nested = {
         "result": {"originProductNo": "9900112233", "smartstoreChannelProductNo": 55},
         "originProduct": {"name": "테스트 상품"},
@@ -183,6 +185,7 @@ def test_the_success_response_yields_the_provider_identities_wherever_they_sit()
     assert identifiers["originProductNo"] == "9900112233"
     assert identifiers["smartstoreChannelProductNo"] == "55"
     assert identifiers["windowChannelProductNo"] is None
+    assert identifiers["unresolved_identifiers"] == []
     assert identifiers["response_contract_version"] == "smartstore-create-response/v1"
 
 
@@ -240,10 +243,72 @@ def test_the_retained_fields_are_exactly_the_endpoint_profile() -> None:
 
 
 def test_the_identifier_recognizer_never_coerces_a_non_identifier() -> None:
+    # A value this contract does not understand is never coerced, and a usable value elsewhere in
+    # the body never rescues it: the name stays unrecognized, recorded as unresolved.
     found = create.identifiers({"originProductNo": ["9900112233"], "x": {"originProductNo": 42}})
-    # The list is not an identifier; the nested usable one is, and the search continues into it.
-    assert found.origin_product_no == "42"
-    assert create.identifiers({}).readable is False
+    assert found.origin_product_no is None
+    assert found.readable is False
+    assert found.unresolved == ("originProductNo",)
+    absent = create.identifiers({})
+    assert absent.readable is False
+    # Absent is not unresolved: nothing was there to resolve.
+    assert absent.unresolved == ()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Two nestings disagree: neither is preferred, so nothing is recognized.
+        {"originProductNo": 9900112233, "result": {"originProductNo": 42}},
+        {"a": {"originProductNo": 42}, "b": {"originProductNo": 43}},
+        # Present but unusable at one nesting, usable at another: still not recognized.
+        {"originProductNo": "", "result": {"originProductNo": 9900112233}},
+        {"result": {"originProductNo": 9900112233}, "echo": {"originProductNo": "9900-112233"}},
+        {"list": [{"originProductNo": 1}, {"originProductNo": 2}]},
+    ],
+)
+def test_an_ambiguous_origin_number_is_unknown_never_an_applied_mutation(
+    body: dict[str, Any],
+) -> None:
+    # The response-body nesting is uncaptured, so a body that offers more than one reading of the
+    # identity is not evidence of an applied mutation: it fails closed to UNKNOWN, which is never
+    # resent (ADR-0014 §17.2, §28).
+    handoff = _send(Provider(httpx.Response(200, json=body)))
+    assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
+    assert handoff.marketplace_product_id is None
+    assert handoff.error_code == "SMARTSTORE_CREATE_RESPONSE_UNREADABLE"
+    assert handoff.error_class is ErrorClass.UNKNOWN
+    identifiers = handoff.sanitized_response["identifiers"]
+    assert identifiers["originProductNo"] is None
+    assert identifiers["unresolved_identifiers"] == ["originProductNo"]
+
+
+def test_the_same_identity_repeated_at_several_nestings_is_not_ambiguous() -> None:
+    # The response echoes the stored ``originProduct``, so the same number may legitimately appear
+    # more than once. Agreeing occurrences are one reading, not a choice between two.
+    body = {
+        "originProductNo": 9900112233,
+        "originProduct": {"originProductNo": "9900112233", "name": "테스트 상품"},
+    }
+    handoff = _send(Provider(httpx.Response(200, json=body)))
+    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    assert handoff.marketplace_product_id == "9900112233"
+    assert handoff.sanitized_response["identifiers"]["unresolved_identifiers"] == []
+
+
+def test_an_ambiguous_channel_number_never_becomes_a_value_and_never_blocks_the_origin() -> None:
+    # Only the origin number decides readability (ADR-0014 §11); an ambiguous channel identity is
+    # dropped and recorded, never guessed and never lost silently (§28.2).
+    body = {
+        "originProductNo": 9900112233,
+        "a": {"smartstoreChannelProductNo": 55},
+        "b": {"smartstoreChannelProductNo": 56},
+    }
+    handoff = _send(Provider(httpx.Response(200, json=body)))
+    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    identifiers = handoff.sanitized_response["identifiers"]
+    assert identifiers["smartstoreChannelProductNo"] is None
+    assert identifiers["unresolved_identifiers"] == ["smartstoreChannelProductNo"]
 
 
 # ---------------------------------------------------------------- outcome classification

@@ -191,6 +191,7 @@ Adopted CREATE contract, in the registry and pinned by tests:
 | Redirect | `NO_FOLLOW` — a `308` is never followed for a mutation (§11; `ERRORS.md` §10.6, §17) |
 | Mutation | Yes |
 | Success predicate | HTTP 200 AND the body parses as a JSON object (`m5-create-r1`). The JSON **nesting** of the success identifiers is not captured, so the predicate asserts no shape; the response contract recognizes them by name and fails closed |
+| Response reading | Uncaptured nesting is never resolved by choice: an identifier name is accepted only where the whole retained body yields **exactly one usable value** for it. Occurrences that disagree, or a name carrying a value the contract does not understand, leave the name unrecognized and recorded as unresolved — no occurrence is preferred, and no first hit wins |
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the safe product leaves `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 | Idempotency | **none is invented**: no idempotency key, request-correlation key or replay header is sent, because the provider documents none |
@@ -203,7 +204,9 @@ Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10,
   was written;
 - **everything else is `UNKNOWN`**: a timeout, a lost connection or response, a `5xx` after a
   possible handoff, an ordinary post-handoff `4xx` (architect ruling R2, Issue #89 `5861607665`),
-  an unsafe redirect, and a `200` whose body carries no usable `originProductNo`;
+  an unsafe redirect, and a `200` whose body carries no usable `originProductNo` — including an
+  ambiguous one, where the identifier does not resolve to exactly one usable value (response
+  reading, above);
 - `APPLIED_PROVEN` needs a 200 **and** a usable `originProductNo`, and even then a 2xx is not a
   registration success: read-back and Snapshot comparison decide that (ADR-0014 §11);
 - an `UNKNOWN` is **never** resent, its conflict scope stays closed, and no lookup, code, grant or
