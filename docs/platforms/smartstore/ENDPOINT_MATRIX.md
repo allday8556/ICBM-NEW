@@ -186,12 +186,12 @@ Adopted CREATE contract, in the registry and pinned by tests:
 | --- | --- |
 | Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, group `상품` |
 | Method / path | `POST /v2/products` |
-| Request media type | `application/json`; the body is the typed request document, canonically encoded (sorted keys, UTF-8) |
+| Request media type | `application/json`; the body is the typed request document, validated against the request contract below and frozen as canonical JSON (sorted keys, UTF-8) by the wire projection. The caller accepts only that frozen document, so no arbitrary or post-projection-mutated mapping can be sent |
 | Timeouts | connect `5s`, read `30s` (ICBM policy; no endpoint-specific timeout is documented) |
 | Redirect | `NO_FOLLOW` — a `308` is never followed for a mutation (§11; `ERRORS.md` §10.6, §17) |
 | Mutation | Yes |
-| Success predicate | HTTP 200 AND the body parses as a JSON object (`m5-create-r1`). The JSON **nesting** of the success identifiers is not captured, so the predicate asserts no shape; the response contract recognizes them by name and fails closed |
-| Response reading | Uncaptured nesting is never resolved by choice: an identifier name is accepted only where the whole retained body yields **exactly one usable value** for it. Occurrences that disagree, or a name carrying a value the contract does not understand, leave the name unrecognized and recorded as unresolved — no occurrence is preferred, and no first hit wins |
+| Success predicate | HTTP 200 AND the body parses as a JSON object (`m5-create-r1`). The JSON **nesting** of the success identifiers and their **value type** are not captured, so the predicate asserts no shape and the response contract fails closed |
+| Response reading | **None at this adoption.** The evidence captures the identifier *names* only; their nesting and value type are listed as not captured (`PRODUCT_CREATE.md` § SmartStore, Coverage), and an uncaptured item is never invented. Asserting one nesting, searching every nesting, or accepting more than one value type would each invent a response semantic, so no provider identity is read from a CREATE response. The read is a named gap, the retained body is kept as evidence only, and a later slice writes the read against the captured shape |
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the safe product leaves `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 | Idempotency | **none is invented**: no idempotency key, request-correlation key or replay header is sent, because the provider documents none |
@@ -204,11 +204,13 @@ Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10,
   was written;
 - **everything else is `UNKNOWN`**: a timeout, a lost connection or response, a `5xx` after a
   possible handoff, an ordinary post-handoff `4xx` (architect ruling R2, Issue #89 `5861607665`),
-  an unsafe redirect, and a `200` whose body carries no usable `originProductNo` — including an
-  ambiguous one, where the identifier does not resolve to exactly one usable value (response
-  reading, above);
-- `APPLIED_PROVEN` needs a 200 **and** a usable `originProductNo`, and even then a 2xx is not a
-  registration success: read-back and Snapshot comparison decide that (ADR-0014 §11);
+  an unsafe redirect, and **every** `200`, because no identity may be read from one (response
+  reading, above). An unreadable success is not a failure: the product may exist, which is exactly
+  why it is `UNKNOWN` and never resent;
+- `APPLIED_PROVEN` needs a 200 **and** a readable `originProductNo`, so it is unreachable while the
+  response read is a gap — the conservative direction, and symmetric with the request, which is not
+  sendable either. Even once both close, a 2xx is not a registration success: read-back and
+  Snapshot comparison decide that (ADR-0014 §11);
 - an `UNKNOWN` is **never** resent, its conflict scope stays closed, and no lookup, code, grant or
   approval ever becomes remote-absence evidence (ADR-0014 §17.2, §28; ADR-0018 G3-07, G3-15).
 
@@ -217,7 +219,11 @@ Request projection, from the immutable `RegistrationSnapshot` only: `originProdu
 `salePrice`, `detailAttribute.sellerCodeInfo.sellerManagementCode`, the combination-form
 `optionInfo` for an option listing, and the ICBM-owned `leafCategoryId` (never cited as
 provider-required — the 2.89.0 schema does not mark it required). `windowChannelProduct` is never
-emitted. Every value the official evidence does not carry stays **fail-closed** as a named gap, so
+emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
+document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
+outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
+`sellerManagementCode` that is not this listing identity's projection is refused, never trimmed
+into shape. Every value the official evidence does not carry stays **fail-closed** as a named gap, so
 the request is not sendable and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`: the accepted
 values of the required `originProduct.statusType`; the value type of the required
 `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision behind
@@ -242,7 +248,8 @@ The architect's official evidence on Issue #89 (packet `5746489554`, reviews `57
 establishes the following for
 `SMARTSTORE_PRODUCT_CREATE_V2`. **This section adopted nothing:** it is the evidence the later
 adoption slice read. The adopted contract itself is §4.1.1, which froze the success predicate,
-timeout, redirect, error classification, retention profile and typed request projection from these
+timeout, redirect, error classification, retention profile, validated typed request projection and
+fail-closed response contract from these
 facts — and gained no LIVE authority by doing so (ADR-0020 §2.4, SA-05).
 
 Compact wire summary. The nested request keys, required/optional/conditional rules, limits and

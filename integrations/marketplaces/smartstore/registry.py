@@ -139,11 +139,12 @@ def product_create_succeeded(status: int, body: object) -> bool:
     """HTTP 200 AND the body parses as a JSON object.
 
     The official evidence proves the documented success status, the response media type and the
-    *names* of the success identifiers, but **not their JSON nesting inside the body**, so the
-    predicate asserts nothing about the shape — exactly like the adopted read-backs. Whether a
-    usable ``originProductNo`` actually came back is decided by the response contract, which fails
-    closed (``create.py``); a 200 that passes here is never by itself an applied mutation, and a
-    2xx is never a registration confirmation (ADR-0014 §11).
+    *names* of the success identifiers, but **not their JSON nesting inside the body** and not
+    their value type, so the predicate asserts nothing about the shape — exactly like the adopted
+    read-backs. What a passing response yields is decided by the response contract, and while both
+    of those facts stay uncaptured it yields no provider identity at all (``create.py``): a 200
+    that passes here is never by itself an applied mutation, and a 2xx is never a registration
+    confirmation (ADR-0014 §11).
     """
     return status == 200 and isinstance(body, dict)
 

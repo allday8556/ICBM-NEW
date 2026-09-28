@@ -137,7 +137,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
     assert projected.encoding_version == "smartstore-register-wire/v2"
-    assert projected.document == {
+    assert projected.document.mapping() == {
         "originProduct": {
             "name": "테스트 상품",
             "detailContent": "본문",
@@ -170,7 +170,7 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
 
 
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
-    text = json.dumps(product.project(payload()).document, ensure_ascii=False)
+    text = product.project(payload()).document.canonical_json
     for never in (
         "statusType",
         "naverShoppingRegistration",
@@ -190,7 +190,7 @@ def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> Non
 
 def test_the_projection_is_deterministic_for_the_same_snapshot() -> None:
     first, second = product.project(payload()), product.project(deepcopy(payload()))
-    assert json.dumps(first.document, sort_keys=True) == json.dumps(second.document, sort_keys=True)
+    assert first.document.canonical_json == second.document.canonical_json
     assert (first.codes, first.image_references) == (second.codes, second.image_references)
 
 
@@ -268,7 +268,8 @@ def test_a_single_listing_with_options_keeps_every_item_and_bounds_its_dimension
     assert projected.codes.option_codes == (KEY_A, KEY_B)
     # The combination form's own keys are captured, so the structure is projected; the identity of
     # each row is its seller code, never a display label.
-    option_info = projected.document["originProduct"]["detailAttribute"]["optionInfo"]
+    document = projected.document.mapping()
+    option_info = document["originProduct"]["detailAttribute"]["optionInfo"]
     assert option_info == {
         "optionCombinationGroupNames": {"optionGroupName1": "색상"},
         "optionCombinations": [

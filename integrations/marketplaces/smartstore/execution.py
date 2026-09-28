@@ -25,7 +25,9 @@ required value uncaptured (``product.py``).
 * ``NOT_APPLIED_PROVEN`` is whitelist-only — a local pre-handoff refusal or transmission-precluded
   evidence of this one request (``transmission.TRANSMISSION_PRECLUDED``);
 * a timeout, a lost connection or response, a ``5xx`` after a possible handoff, an ordinary
-  post-handoff ``4xx``, an unsafe redirect and a malformed success are all ``UNKNOWN``;
+  post-handoff ``4xx`` and an unsafe redirect are all ``UNKNOWN`` — and so is every success, because
+  the adopted response contract reads no provider identity out of one while the identifier nesting
+  and value type stay uncaptured (``create.py``);
 * an ``UNKNOWN`` is **never** resent from here: this seam retries nothing and reopens nothing.
 """
 
@@ -100,14 +102,14 @@ class SmartStoreCreateSender:
         if refusal is not None:
             return refusal
         assert document is not None
+        sanitized_request = document.mapping()
         bearer = self._bearer()
         if bearer is None:
             return _local_refusal(
                 "SMARTSTORE_SESSION_UNAVAILABLE",
-                document,
+                sanitized_request,
                 reason="no committed SmartStore session can register a product",
             )
-        sanitized_request = dict(document)
         try:
             response = self._caller.call(
                 EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
@@ -135,36 +137,29 @@ class SmartStoreCreateSender:
                     "provider_code": failure.classification.provider_code,
                 },
             )
-        identities = create.identifiers(response.retained)
-        sanitized_response = {
-            "retained": dict(response.retained),
-            "identifiers": identities.canonical(),
-        }
-        if not identities.readable:
-            # A 200 that carries no usable originProductNo proves nothing either way: the product
-            # may exist. It is UNKNOWN, never a failure and never a resend (ADR-0014 §28.3).
-            return CreateHandoff(
-                remote_outcome=RemoteOutcome.UNKNOWN,
-                sanitized_request=sanitized_request,
-                response_status=response.http_status,
-                sanitized_response=sanitized_response,
-                error_class=ErrorClass.UNKNOWN,
-                error_code=create.RESPONSE_UNREADABLE,
-                details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},
-            )
+        reading = create.read(response.retained)
+        # The response passed the endpoint success predicate, and the adopted response contract
+        # still reads no provider identity out of it: the identifier nesting and value type are
+        # uncaptured, so locating one would invent a response semantic (create.py). That proves
+        # nothing either way — the product may exist — so it is UNKNOWN, never a failure and never
+        # a resend (ADR-0014 §28.3). APPLIED_PROVEN needs a readable identity, so it stays
+        # unreachable until a later slice captures the response shape from the cited schema.
         return CreateHandoff(
-            remote_outcome=RemoteOutcome.APPLIED_PROVEN,
+            remote_outcome=RemoteOutcome.UNKNOWN,
             sanitized_request=sanitized_request,
-            # The origin product number is the identity a read-back is made by (ADR-0014 §11);
-            # the channel number travels with it as evidence and is never lost (§28.2).
-            marketplace_product_id=identities.origin_product_no,
             response_status=response.http_status,
-            sanitized_response=sanitized_response,
+            sanitized_response={
+                "retained": dict(response.retained),
+                "response_contract": reading.canonical(),
+            },
+            error_class=ErrorClass.UNKNOWN,
+            error_code=create.RESPONSE_UNREADABLE,
+            details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},
         )
 
     def _document(
         self, payload: Mapping[str, Any]
-    ) -> tuple[CreateHandoff | None, dict[str, Any] | None]:
+    ) -> tuple[CreateHandoff | None, product.CreateDocument | None]:
         """The typed CREATE request of this Snapshot, or the local refusal that replaces it."""
         try:
             projection = self._project(payload)
@@ -189,8 +184,19 @@ class SmartStoreCreateSender:
                 ),
                 None,
             )
-        document = dict(projection.document)
-        secrets = [where for code, where in problems(document) if code == SECRET_MATERIAL]
+        document = projection.document
+        if not isinstance(document, product.CreateDocument):
+            # Only the wire projection may build a request, and only through the validated, frozen
+            # document type. Anything else is a broken projector, not a half-checked request.
+            return (
+                _local_refusal(
+                    "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION",
+                    {},
+                    reason="the projection produced no frozen CREATE document",
+                ),
+                None,
+            )
+        secrets = [where for code, where in problems(document.mapping()) if code == SECRET_MATERIAL]
         if secrets:
             # The payload builder already refuses secret-bearing values; this is the last fence
             # before wire bytes exist, because the same mapping is the durable digest source

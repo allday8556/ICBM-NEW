@@ -60,6 +60,7 @@ from app.register.preparation import (
 )
 from app.register.provider import CreateHandoff
 from app.register.store import RegistrationStore, RegistrationUnit, ScopeRecord
+from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.execution import (
@@ -727,18 +728,42 @@ class _Bearer:
     session_generation = 7
 
 
-class _Sendable:
-    """A declared-sendable projection of the real document the adopted contract builds.
+_WIRE_IDENTITY = "icbm-" + "0" * 32
+_WIRE_DOCUMENT = smartstore_product.create_document(
+    _WIRE_IDENTITY,
+    {
+        "originProduct": {
+            "name": "테스트",
+            "detailContent": "본문",
+            "images": {"representativeImage": {"url": "https://shop-phinf.example/a/main.jpg"}},
+            "salePrice": 19900,
+            "leafCategoryId": "cat-1",
+            "detailAttribute": {
+                "sellerCodeInfo": {
+                    "sellerManagementCode": smartstore_product.seller_management_code(
+                        _WIRE_IDENTITY
+                    )
+                }
+            },
+        }
+    },
+)
 
-    The real projection refuses every unit at this adoption — the official evidence leaves
-    required values uncaptured and none of them is ever invented (`smartstore.product`) — and that
-    refusal is pinned in the adapter suites. Declaring it here is what lets the **domain owner's**
-    behaviour be exercised against the real sender and the real registry-gated caller.
+
+class _Sendable:
+    """A declared-sendable projection of a real, validated document the adopted contract builds.
+
+    The document is a genuine :class:`CreateDocument`: the caller accepts nothing else, so even a
+    test cannot hand the wire an unchecked mapping. The real projection refuses every unit at this
+    adoption — the official evidence leaves required values uncaptured and none of them is ever
+    invented (`smartstore.product`) — and that refusal is pinned in the adapter suites. Declaring
+    it sendable here is what lets the **domain owner's** behaviour be exercised against the real
+    sender and the real registry-gated caller.
     """
 
     sendable = True
     gaps: tuple[str, ...] = ()
-    document: ClassVar[dict[str, Any]] = {"originProduct": {"name": "테스트", "salePrice": 19900}}
+    document: ClassVar[smartstore_product.CreateDocument] = _WIRE_DOCUMENT
 
 
 def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx.Request]]:
@@ -758,26 +783,30 @@ def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx
     return sender, seen
 
 
-def test_the_adopted_create_seam_confirms_only_through_the_read_back(
+def test_the_adopted_create_seam_never_confirms_from_a_response_body(
     container: Container,
     sources: Collections,
     store: RegistrationStore,
     account: str,
     prep: Preparation,
 ) -> None:
-    # 11: a 200 with a provider identity is APPLIED_PROVEN, never a confirmation on its own — the
-    # same run continues into the read-back, and only its comparison confirms.
+    # 11: a 2xx is never a confirmation, and at this adoption it is not even an identity. The
+    # official evidence captures neither the nesting of the success identifiers nor their value
+    # type, so the response contract reads none of them and the outcome is UNKNOWN — never a
+    # confirmed registration, never a resend (ADR-0014 §17.3, §28.3).
     ready = prepare(container, sources, store, account, prep)
     sender, seen = _adopted_sender(
         httpx.Response(200, json={"originProductNo": 9900112233, "smartstoreChannelProductNo": 55})
     )
     run = execution(container, prep, sender=sender)
-    run.service.run(context(ready))
+    with pytest.raises(AttemptFailed) as failed:
+        run.service.run(context(ready))
+    assert failed.value.code == "REGISTER_OUTCOME_UNKNOWN"
     assert len(seen) == 1 and str(seen[0].url).endswith("/v2/products")
     intent = store.intent(ready.intent_id)
     assert intent is not None
-    assert intent.marketplace_product_id == "9900112233"
-    assert intent.state is IntentState.CONFIRMED
+    assert intent.marketplace_product_id is None
+    assert intent.state is IntentState.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -787,9 +816,10 @@ def test_the_adopted_create_seam_confirms_only_through_the_read_back(
         httpx.Response(400, json={"code": "BAD_REQUEST", "message": "no"}),
         httpx.Response(308, headers={"location": "https://elsewhere.invalid"}),
         httpx.Response(200, json={}),
+        httpx.Response(200, json={"originProductNo": 9900112233}),
         httpx.ReadTimeout("no response"),
     ],
-    ids=["5xx", "ordinary-4xx", "redirect", "malformed-success", "timeout"],
+    ids=["5xx", "ordinary-4xx", "redirect", "empty-success", "unreadable-success", "timeout"],
 )
 def test_the_adopted_create_seam_never_resends_an_unknown(
     container: Container,
@@ -840,7 +870,9 @@ def test_the_adopted_create_seam_keeps_its_evidence_sanitized(
         )
     )
     run = execution(container, prep, sender=sender)
-    run.service.run(context(ready))
+    with pytest.raises(AttemptFailed):
+        # Unreadable, so UNKNOWN — and the evidence of that attempt is still durable and sanitized.
+        run.service.run(context(ready))
     # The bearer is on the wire and nowhere else.
     assert seen[0].headers["authorization"] == f"Bearer {_Bearer.access_token}"
     with contextlib.closing(raw(config)) as connection:

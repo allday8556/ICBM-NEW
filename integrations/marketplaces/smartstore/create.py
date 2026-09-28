@@ -3,25 +3,24 @@
 
 Two things live here, and they are deliberately independent axes (ADR-0014 §9):
 
-* **the response contract** — which provider identifiers a successful CREATE may yield, and how a
-  success that carries none is refused rather than guessed;
+* **the response contract** — what a successful CREATE response yields ICBM;
 * **the outcome classification** — whether the marketplace mutation happened.
 
 **The response.** The official evidence (``docs/evidence/marketplace-apis/PRODUCT_CREATE.md``
-§ SmartStore) proves HTTP ``200`` with ``application/json;charset=UTF-8`` and the identifier
-*names* ``originProductNo``, ``smartstoreChannelProductNo`` and ``windowChannelProductNo``. It does
-**not** capture their JSON nesting inside the body, and it does not capture their value type. So
-this module recognizes them the way the adopted read-back normalizer recognizes a product — by
-name, wherever the endpoint's deny-by-default retention profile left them — and fails closed when
-the origin number is absent or unusable. No identity is ever invented, and no nesting is asserted.
+§ SmartStore) proves HTTP ``200``, ``application/json;charset=UTF-8`` and the identifier *names*
+``originProductNo``, ``smartstoreChannelProductNo`` and ``windowChannelProductNo``. It captures
+neither their JSON nesting inside the body nor their value type, and that record's Coverage section
+lists both as **not captured**, under a rule this slice does not get to bend: an item that is not
+captured is never invented, and anything that would need it stays fail-closed until a later slice
+records it from the cited schema.
 
-Because the nesting is uncaptured, the recognizer never *chooses* a reading of the body either. An
-identifier name is recognized only when the whole retained response resolves it **unambiguously**:
-every occurrence of that name normalizes to one and the same usable value. A name that occurs twice
-with different values, or that occurs anywhere with a value this contract does not understand, is
-not recognized at all — no occurrence is preferred over another, and no first hit wins. For
-``originProductNo`` that is the ``UNKNOWN`` of ``RESPONSE_UNREADABLE``: an ambiguous body is never
-evidence of an applied mutation, and never the identity a read-back is then made by.
+Reading an identity out of such a body would be exactly that invention — whether by asserting one
+nesting, by searching every nesting, or by accepting more than one value type for the same field.
+So the adopted contract reads **no** identity out of a CREATE response. The identifier read is a
+named gap (:data:`GAP_RESPONSE_IDENTIFIER_SHAPE`): a response that passed the endpoint success
+predicate is ``RESPONSE_UNREADABLE``, its retained body is kept as evidence, and nothing further is
+claimed about it. The day a slice captures the nesting and the value type from the cited schema,
+the gap closes and the read is written then — against the captured shape, never against a guess.
 
 **The outcome.** SmartStore documents no idempotency key, no request-correlation key, no replay
 rule and no duplicate-prevention guarantee, and it states nowhere that a timeout, a lost response
@@ -38,18 +37,21 @@ The classification therefore separates exactly two things:
     everything else, with no exception: a read timeout, a lost connection or response, a ``5xx``
     after a possible handoff, an ordinary post-handoff ``4xx`` (architect ruling R2, Issue #89
     comment ``5861607665`` — a definitive-looking rejection received after handoff is **not** proof
-    of non-application), an unsafe redirect, and a ``200`` whose body carries no usable identifier.
+    of non-application), an unsafe redirect, and **every** ``200``, because no identity may be read
+    from one. An unreadable success is not a failure: the product may well exist.
 
-``APPLIED_PROVEN`` is reached only through a response that passed the endpoint success predicate
-*and* yielded a usable ``originProductNo``. Even then it is not registration success: ADR-0014 §11
-confirms a registration only after read-back and Snapshot comparison.
+``APPLIED_PROVEN`` needs a readable provider identity, so it is unreachable while the identifier
+read is a gap. That is the conservative direction, and it costs nothing here: the adopted request
+is not sendable either while the evidence leaves required values uncaptured (``product.py``). Even
+once both close, an applied mutation is still not registration success: ADR-0014 §11 confirms a
+registration only after read-back and Snapshot comparison.
 
 An ``UNKNOWN`` is never resent (ADR-0014 §28, M5-08, G3-07). Nothing in this module retries,
 schedules or reopens anything: it classifies one handoff and hands the verdict to the REGISTER
 execution owner, which keeps the Intent ``UNKNOWN`` with its conflict scope closed.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -59,124 +61,67 @@ FIELD_ORIGIN_PRODUCT_NO: Final = "originProductNo"
 FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO: Final = "smartstoreChannelProductNo"
 FIELD_WINDOW_CHANNEL_PRODUCT_NO: Final = "windowChannelProductNo"
 
-# Every provider identifier the success response may carry. ``windowChannelProductNo`` is kept
-# although ICBM never emits ``windowChannelProduct``: a provider identity that did come back is
-# never dropped (ADR-0014 §28.2), and a number is safe evidence.
+# Every provider identifier name the official evidence records for the success response. The names
+# are captured; where they sit and what type they carry are not, which is the gap below.
 IDENTIFIER_FIELDS: Final[tuple[str, ...]] = (
     FIELD_ORIGIN_PRODUCT_NO,
     FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO,
     FIELD_WINDOW_CHANNEL_PRODUCT_NO,
 )
 
-# A provider product number as ICBM will address it again: decimal digits only, bounded. The value
-# type is not captured, so both a JSON number and a digit string are accepted and normalized to
-# one canonical text; anything else is not an identifier this contract understands.
-_MAX_IDENTIFIER_DIGITS: Final = 32
+# The gap the captured official evidence leaves in the response, named the way product.py names the
+# request gaps. It is never filled with a default, a preferred nesting or a coerced value type.
+GAP_RESPONSE_IDENTIFIER_SHAPE: Final = (
+    "the success body's JSON nesting of originProductNo, smartstoreChannelProductNo and"
+    " windowChannelProductNo, and their value type, are not captured by the official evidence"
+    " (PRODUCT_CREATE.md § SmartStore, Coverage), so no provider identity may be read from a"
+    " CREATE response"
+)
 
-# The refusal an otherwise-successful response earns when it carries no usable origin number.
+# The refusal every otherwise-successful response earns while that gap stands.
 RESPONSE_UNREADABLE: Final = "SMARTSTORE_CREATE_RESPONSE_UNREADABLE"
 
 
 @dataclass(frozen=True)
-class CreateIdentifiers:
-    """The provider identities one CREATE response yielded. ``None`` means "not recognized", never
-    "absent at the provider"."""
+class CreateResponse:
+    """The adopted reading of one CREATE success: the gaps that keep it unreadable as an identity.
 
-    origin_product_no: str | None
-    smartstore_channel_product_no: str | None
-    window_channel_product_no: str | None
-    # Identifier names the response did carry but this contract refused to resolve: an unusable
-    # value, or two occurrences that disagree. Evidence of why a name is ``None``, never a value.
-    unresolved: tuple[str, ...] = ()
+    ``readable`` is ``False`` while any gap stands. It is an invariant of the contract, not of one
+    response: no body shape can make it true, because nothing about the shape is captured.
+    """
+
+    gaps: tuple[str, ...]
 
     @property
     def readable(self) -> bool:
-        """Whether the origin product number — the identity a read-back is made by — came back."""
-        return self.origin_product_no is not None
+        """Whether a provider identity may be read from this response at all.
+
+        ``False`` never means "absent at the provider": the mutation may have been applied. That is
+        why an unreadable success is ``UNKNOWN`` and never a failure or a resend.
+        """
+        return not self.gaps
 
     def canonical(self) -> dict[str, Any]:
-        """The sanitized canonical evidence representation of the recognized identities."""
+        """The sanitized canonical evidence of what the contract did, and did not, read."""
         return {
             "response_contract_version": CREATE_RESPONSE_CONTRACT_VERSION,
-            FIELD_ORIGIN_PRODUCT_NO: self.origin_product_no,
-            FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO: self.smartstore_channel_product_no,
-            FIELD_WINDOW_CHANNEL_PRODUCT_NO: self.window_channel_product_no,
-            "unresolved_identifiers": list(self.unresolved),
+            "identifier_fields": list(IDENTIFIER_FIELDS),
+            "identifier_read": "NOT_PROJECTABLE",
+            "gaps": list(self.gaps),
         }
 
 
-def _identifier(value: Any) -> str | None:
-    """One provider product number, normalized, or ``None`` when the value is not one."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        text = str(value)
-    elif isinstance(value, str):
-        text = value.strip()
-    else:
-        return None
-    if not text.isdigit() or len(text) > _MAX_IDENTIFIER_DIGITS:
-        return None
-    return text
+def read(retained: Mapping[str, Any]) -> CreateResponse:
+    """The adopted reading of one retained CREATE success response.
 
-
-def _nodes(value: Any) -> list[Mapping[str, Any]]:
-    """Every mapping inside a retained response, outermost first."""
-    found: list[Mapping[str, Any]] = []
-    if isinstance(value, Mapping):
-        found.append(value)
-        for child in value.values():
-            found.extend(_nodes(child))
-    elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        for item in value:
-            found.extend(_nodes(item))
-    return found
-
-
-def _resolve(nodes: Sequence[Mapping[str, Any]], name: str) -> tuple[str | None, bool]:
-    """The one value ``name`` unambiguously has in the retained response, and whether it occurred.
-
-    Fail-closed, because the nesting is uncaptured: the name is looked for everywhere, but nothing
-    is ever selected. Every occurrence must normalize to the same usable value; one unusable
-    occurrence, or one disagreement, and the name is not recognized at all.
+    ``retained`` has already passed the endpoint's deny-by-default retention profile, so it is safe
+    to keep as durable evidence — and it is kept, by the execution seam. It is deliberately **not**
+    inspected for an identity here: every way of locating one inside a body whose nesting and value
+    type the official evidence does not carry would invent a response semantic (ADR-0014 §17.3;
+    ``ENDPOINT_MATRIX.md`` §4.1.1).
     """
-    occurred = False
-    values: set[str] = set()
-    for node in nodes:
-        if name not in node:
-            continue
-        occurred = True
-        value = _identifier(node[name])
-        if value is None:
-            return None, True
-        values.add(value)
-    if len(values) != 1:
-        return None, occurred
-    return values.pop(), True
-
-
-def identifiers(retained: Mapping[str, Any]) -> CreateIdentifiers:
-    """Recognize the provider identities in one retained CREATE response.
-
-    The retained mapping has already passed the endpoint's deny-by-default retention profile, so
-    only allow-listed leaves can be here at all. Each identifier name must resolve to exactly one
-    usable value across the whole body; a name that is unusable or contradicted anywhere is not
-    recognized, never coerced and never chosen between.
-    """
-    nodes = _nodes(retained)
-    found: dict[str, str | None] = {}
-    unresolved: list[str] = []
-    for name in IDENTIFIER_FIELDS:
-        value, occurred = _resolve(nodes, name)
-        found[name] = value
-        if value is None and occurred:
-            unresolved.append(name)
-    return CreateIdentifiers(
-        origin_product_no=found[FIELD_ORIGIN_PRODUCT_NO],
-        smartstore_channel_product_no=found[FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO],
-        window_channel_product_no=found[FIELD_WINDOW_CHANNEL_PRODUCT_NO],
-        unresolved=tuple(unresolved),
-    )
+    del retained  # nothing may be read from it while GAP_RESPONSE_IDENTIFIER_SHAPE stands
+    return CreateResponse(gaps=(GAP_RESPONSE_IDENTIFIER_SHAPE,))
 
 
 __all__ = [
@@ -184,8 +129,9 @@ __all__ = [
     "FIELD_ORIGIN_PRODUCT_NO",
     "FIELD_SMARTSTORE_CHANNEL_PRODUCT_NO",
     "FIELD_WINDOW_CHANNEL_PRODUCT_NO",
+    "GAP_RESPONSE_IDENTIFIER_SHAPE",
     "IDENTIFIER_FIELDS",
     "RESPONSE_UNREADABLE",
-    "CreateIdentifiers",
-    "identifiers",
+    "CreateResponse",
+    "read",
 ]

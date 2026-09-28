@@ -2,15 +2,17 @@
 ADR-0018 §6.1).
 
 Everything here uses a **fake transport only**: no provider, no network, no LIVE. It pins the
-registry-gated JSON transport, the frozen response contract, the conservative outcome
-classification, the sanitized handoff evidence, the deterministic ``sellerManagementCode``
-projection, and the one rule that never bends — an ``UNKNOWN`` is never resent.
+registry-gated JSON transport, the validated and frozen request document, the fail-closed response
+contract, the conservative outcome classification, the sanitized handoff evidence, the
+deterministic ``sellerManagementCode`` projection, and the one rule that never bends — an
+``UNKNOWN`` is never resent.
 """
 
 import ast
 import hashlib
 import inspect
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -36,6 +38,7 @@ CREATE_URL = f"{BASE}/v2/products"
 IDENTITY = "icbm-0123456789abcdef0123456789abcdef"
 KEY_A = "rik1-" + "a" * 32
 REF_MAIN = "https://shop-phinf.example/a/main.jpg"
+REF_DETAIL = "https://shop-phinf.example/a/detail.jpg"
 SELLER_CODE = hashlib.sha256(
     b"smartstore-seller-management-code/v1\0" + IDENTITY.encode("utf-8")
 ).hexdigest()[:30]
@@ -61,16 +64,24 @@ class Provider:
         return self.answer
 
 
-DOCUMENT: dict[str, Any] = {
-    "originProduct": {
-        "name": "테스트 상품",
-        "detailContent": "본문",
-        "images": {"representativeImage": {"url": REF_MAIN}},
-        "salePrice": 19900,
-        "leafCategoryId": "cat-1",
-        "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
-    }
+ORIGIN: dict[str, Any] = {
+    "name": "테스트 상품",
+    "detailContent": "본문",
+    "images": {"representativeImage": {"url": REF_MAIN}},
+    "salePrice": 19900,
+    "leafCategoryId": "cat-1",
+    "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
 }
+DOCUMENT: dict[str, Any] = {"originProduct": ORIGIN}
+# The only form a request may reach the caller in: checked against the adopted request contract and
+# frozen with its provenance by the wire projection.
+FROZEN = product.create_document(IDENTITY, DOCUMENT)
+
+
+def _origin(**changes: Any) -> dict[str, Any]:
+    """One request body with the named origin-product fields replaced or removed."""
+    origin = {**deepcopy(ORIGIN), **changes}
+    return {"originProduct": {key: value for key, value in origin.items() if value is not None}}
 
 
 def _caller(provider: Provider) -> SmartStoreEndpointCaller:
@@ -86,7 +97,7 @@ def _sender(provider: Provider, *, bearer: object = Bearer()) -> SmartStoreCreat
 
     class Sendable:
         sendable = True
-        document = DOCUMENT
+        document = FROZEN
         gaps: tuple[str, ...] = ()
 
     return SmartStoreCreateSender(
@@ -112,7 +123,8 @@ def test_the_create_goes_out_as_the_registry_contract_says_and_nothing_else() ->
     assert sent.headers["content-type"] == "application/json"
     # Deny-by-default: the CREATE sends no query key at all.
     assert sent.url.query == b""
-    # The body is exactly the typed document, canonically encoded; nothing is added to it.
+    # The body is exactly the frozen document's own bytes; nothing is added to it on the way out.
+    assert sent.content == FROZEN.encoded()
     assert json.loads(sent.content.decode("utf-8")) == DOCUMENT
     assert sent.content == json.dumps(
         DOCUMENT, sort_keys=True, ensure_ascii=False, separators=(",", ":")
@@ -152,66 +164,240 @@ def test_an_unusable_bearer_never_reaches_the_transport(token: str) -> None:
     assert handoff.error_class is ErrorClass.FATAL
 
 
-def test_a_request_the_caller_cannot_encode_never_reaches_the_transport() -> None:
+# ---------------------------------------------- the request is the validated typed projection
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        # A plain mapping, however well shaped, carries neither the projection's provenance nor its
+        # validation, so the caller refuses it before any wire bytes exist.
+        DOCUMENT,
+        {},
+        {"originProduct": {"at": ImageAssetKind}},
+        FROZEN.canonical_json,
+    ],
+)
+def test_only_the_frozen_projection_document_can_become_a_request(document: object) -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
-    caller = _caller(provider)
     with pytest.raises(SmartStoreCallError) as refused:
-        caller.call(
+        _caller(provider).call(
             EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
-            ProductCreateRequest(BEARER, 3, 7, {"originProduct": {"at": ImageAssetKind}}),
+            ProductCreateRequest(BEARER, 3, 7, document),  # type: ignore[arg-type]
         )
     assert refused.value.code == "SMARTSTORE_REQUEST_CONTRACT_VIOLATION"
     assert refused.value.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
     assert provider.requests == []
 
 
+def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport() -> None:
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+
+    class Raw:
+        sendable = True
+        document: ClassVar[dict[str, Any]] = DOCUMENT
+        gaps: tuple[str, ...] = ()
+
+    sender = SmartStoreCreateSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Raw()
+    )
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        # Deny-by-default: a path the captured official evidence does not record cannot be sent,
+        # whatever built the mapping — including a required field whose values are a named gap.
+        (_origin(statusType="SALE"), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        (_origin(stockQuantity=3), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        (
+            {**deepcopy(DOCUMENT), "smartstoreChannelProduct": {"naverShoppingRegistration": True}},
+            "WIRE_DOCUMENT_FIELD_UNKNOWN",
+        ),
+        ({**deepcopy(DOCUMENT), "windowChannelProduct": {}}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        # A field the provider requires, missing.
+        (_origin(salePrice=None), "WIRE_DOCUMENT_FIELD_MISSING"),
+        (_origin(leafCategoryId=None), "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        # A value outside its documented bound, or of a type this contract does not encode.
+        (_origin(salePrice=999_999_991), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(salePrice="19900"), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(salePrice=True), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(name=""), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(detailContent=123), "WIRE_DOCUMENT_VALUE_INVALID"),
+        # At most nine optional images beside the representative one.
+        (
+            _origin(
+                images={
+                    "representativeImage": {"url": REF_MAIN},
+                    "optionalImages": [{"url": f"{REF_DETAIL}?{n}"} for n in range(10)],
+                }
+            ),
+            "WIRE_DOCUMENT_VALUE_INVALID",
+        ),
+        # Every URL must still be a prepared, sanitized provider reference.
+        (
+            _origin(images={"representativeImage": {"url": "http://supplier.example/a.jpg"}}),
+            "WIRE_IMAGE_REFERENCE_UNSAFE",
+        ),
+        (_origin(images={"representativeImage": {}}), "WIRE_DOCUMENT_FIELD_MISSING"),
+        (_origin(images={"optionalImages": [{"url": REF_DETAIL}]}), "WIRE_DOCUMENT_FIELD_MISSING"),
+    ],
+)
+def test_a_document_outside_the_adopted_request_contract_is_refused(
+    body: dict[str, Any], code: str
+) -> None:
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == code
+
+
+def test_a_document_that_is_not_this_listings_projection_is_refused() -> None:
+    # The provenance the wire boundary must be able to trust: the management code has to be the
+    # projection of the listing identity the document claims (architect ruling R1).
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document("icbm-" + "f" * 32, DOCUMENT)
+    assert refused.value.code == "WIRE_DOCUMENT_NOT_THIS_SNAPSHOT"
+    with pytest.raises(product.WireContractError) as forged:
+        product.create_document(
+            IDENTITY,
+            _origin(detailAttribute={"sellerCodeInfo": {"sellerManagementCode": "f" * 30}}),
+        )
+    assert forged.value.code == "WIRE_DOCUMENT_NOT_THIS_SNAPSHOT"
+
+
+def test_a_frozen_document_cannot_change_after_the_snapshot_was_projected() -> None:
+    # The same document is the wire body, the sanitized evidence and the durable digest source
+    # (ADR-0014 §15, B4), so nothing may be added to it or changed in it after the projection.
+    source = deepcopy(DOCUMENT)
+    frozen = product.create_document(IDENTITY, source)
+    source["originProduct"]["name"] = "무단 변경"
+    source["originProduct"]["stockQuantity"] = 1
+    handed = frozen.mapping()
+    handed["originProduct"]["name"] = "무단 변경"
+    assert frozen.mapping() == DOCUMENT
+    assert json.loads(frozen.encoded().decode("utf-8")) == DOCUMENT
+    assert frozen.listing_identity == IDENTITY
+
+
+def test_the_sanitized_request_is_the_document_and_carries_no_credential() -> None:
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    handoff = _send(provider)
+    assert handoff.sanitized_request == DOCUMENT
+    text = json.dumps(handoff.sanitized_request, ensure_ascii=False)
+    assert BEARER not in text and "Bearer" not in text and "authorization" not in text.lower()
+
+
+def test_a_request_carrying_secret_material_never_reaches_the_transport() -> None:
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+
+    class Leaky:
+        sendable = True
+        document = product.create_document(IDENTITY, _origin(name="Bearer abcdefghijklmnop"))
+        gaps: tuple[str, ...] = ()
+
+    sender = SmartStoreCreateSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Leaky()
+    )
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert handoff.error_code == "SMARTSTORE_CREATE_REQUEST_UNSANITIZED"
+
+
+def test_an_unsendable_projection_never_reaches_the_transport() -> None:
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+
+    class NotSendable:
+        sendable = False
+        document = FROZEN
+        gaps = (product.GAP_STATUS_TYPE,)
+
+    sender = SmartStoreCreateSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: NotSendable()
+    )
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
+def test_a_payload_that_is_not_a_registration_payload_never_reaches_the_transport() -> None:
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    sender = SmartStoreCreateSender(caller=_caller(provider), bearer=lambda: Bearer())
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_PAYLOAD_MALFORMED"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
 # ---------------------------------------------------------------- the response contract
 
 
-def test_the_success_response_yields_the_provider_identities_wherever_they_sit() -> None:
-    # The JSON nesting of the identifiers is not captured, so they are recognized by name — but
-    # only where the whole body resolves the name to exactly one usable value (no shape asserted,
-    # and no reading chosen).
-    nested = {
-        "result": {"originProductNo": "9900112233", "smartstoreChannelProductNo": 55},
-        "originProduct": {"name": "테스트 상품"},
-    }
-    provider = Provider(httpx.Response(200, json=nested))
-    handoff = _send(provider)
-    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
-    assert handoff.marketplace_product_id == "9900112233"
-    identifiers = handoff.sanitized_response["identifiers"]
-    # Both provider identities are kept; neither is ever lost (ADR-0014 §28.2).
-    assert identifiers["originProductNo"] == "9900112233"
-    assert identifiers["smartstoreChannelProductNo"] == "55"
-    assert identifiers["windowChannelProductNo"] is None
-    assert identifiers["unresolved_identifiers"] == []
-    assert identifiers["response_contract_version"] == "smartstore-create-response/v1"
+def test_the_response_contract_reads_no_identity_and_names_the_gap() -> None:
+    reading = create.read({"originProductNo": 9900112233})
+    assert reading.readable is False
+    assert reading.gaps == (create.GAP_RESPONSE_IDENTIFIER_SHAPE,)
+    # The gap names the exact uncaptured facts, so a later slice knows what closing it requires.
+    assert "nesting" in reading.gaps[0] and "value type" in reading.gaps[0]
+    assert reading.canonical()["identifier_read"] == "NOT_PROJECTABLE"
 
 
 @pytest.mark.parametrize(
     "body",
     [
         {},
-        {"originProductNo": None},
-        {"originProductNo": ""},
-        {"originProductNo": "9900-112233"},
-        {"originProductNo": True},
-        {"originProductNo": 1.5},
-        {"originProductNo": "9" * 33},
+        {"originProductNo": 9900112233},
+        {"originProductNo": "9900112233"},
+        {"result": {"originProductNo": "9900112233", "smartstoreChannelProductNo": 55}},
+        {"originProductNo": 1, "originProduct": {"originProductNo": 1, "name": "테스트 상품"}},
+        {"list": [{"originProductNo": 1}, {"originProductNo": 2}]},
         {"smartstoreChannelProductNo": 55},
     ],
 )
-def test_a_success_without_a_usable_origin_number_is_unknown_not_a_failure(
-    body: dict[str, Any],
-) -> None:
-    # A 200 that carries no usable identity proves nothing either way: the product may exist.
-    provider = Provider(httpx.Response(200, json=body))
-    handoff = _send(provider)
+def test_no_success_body_ever_yields_a_provider_identity(body: dict[str, Any]) -> None:
+    # The official evidence captures the identifier *names* only — neither their JSON nesting inside
+    # the body nor their value type. Reading an identity out of such a body, by asserting one
+    # nesting, by searching every nesting, or by accepting more than one value type, would invent a
+    # response semantic, so the contract reads none at all (ADR-0014 §17.3; EM §4.1.1).
+    handoff = _send(Provider(httpx.Response(200, json=body)))
     assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
     assert handoff.marketplace_product_id is None
     assert handoff.error_code == "SMARTSTORE_CREATE_RESPONSE_UNREADABLE"
     assert handoff.error_class is ErrorClass.UNKNOWN
+    contract = handoff.sanitized_response["response_contract"]
+    assert contract["identifier_read"] == "NOT_PROJECTABLE"
+    assert contract["gaps"] == [create.GAP_RESPONSE_IDENTIFIER_SHAPE]
+    assert contract["response_contract_version"] == "smartstore-create-response/v1"
+
+
+def test_an_unreadable_success_is_unknown_and_never_a_proven_absence() -> None:
+    # It proves nothing either way: the product may exist. That is why it is neither a failure nor
+    # a resend, and why NOT_APPLIED_PROVEN stays whitelist-only (ADR-0014 §28.3, M5-08, G3-07).
+    handoff = _send(Provider(httpx.Response(200, json={"originProductNo": 9900112233})))
+    assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
+    assert handoff.error_class is not ErrorClass.FATAL
+
+
+def test_no_applied_proven_outcome_exists_while_the_identifier_read_is_a_gap() -> None:
+    # Structural, so an edit cannot quietly reintroduce an invented identity read: the seam names
+    # no APPLIED_PROVEN and sets no marketplace product id from a response.
+    tree = ast.parse(Path(inspect.getsourcefile(execution) or "").read_text("utf-8"))
+    (sender,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "SmartStoreCreateSender"
+    ]
+    assert "APPLIED_PROVEN" not in {
+        node.attr for node in ast.walk(sender) if isinstance(node, ast.Attribute)
+    }
+    assert "marketplace_product_id" not in {
+        node.arg for node in ast.walk(sender) if isinstance(node, ast.keyword) and node.arg
+    }
 
 
 def test_only_the_retention_allow_list_crosses_the_response_boundary() -> None:
@@ -233,6 +419,8 @@ def test_only_the_retention_allow_list_crosses_the_response_boundary() -> None:
     for dropped in ("detailContent", "본문", "sellerBarcode", "880123", "traceId", "accessToken"):
         assert dropped not in text
     assert "Bearer" not in text
+    # The retained body is still kept as evidence of what came back; it is simply never read for
+    # an identity while the response shape is uncaptured.
     assert handoff.sanitized_response["retained"]["originProduct"]["salePrice"] == 19900
 
 
@@ -240,75 +428,6 @@ def test_the_retained_fields_are_exactly_the_endpoint_profile() -> None:
     contract = resolve(EndpointId.SMARTSTORE_PRODUCT_CREATE_V2)
     kept = retain(contract, {"a": {"originProductNo": 1, "nope": 2, "sellerManagerCode": "x"}})
     assert kept == {"a": {"originProductNo": 1, "sellerManagerCode": "x"}}
-
-
-def test_the_identifier_recognizer_never_coerces_a_non_identifier() -> None:
-    # A value this contract does not understand is never coerced, and a usable value elsewhere in
-    # the body never rescues it: the name stays unrecognized, recorded as unresolved.
-    found = create.identifiers({"originProductNo": ["9900112233"], "x": {"originProductNo": 42}})
-    assert found.origin_product_no is None
-    assert found.readable is False
-    assert found.unresolved == ("originProductNo",)
-    absent = create.identifiers({})
-    assert absent.readable is False
-    # Absent is not unresolved: nothing was there to resolve.
-    assert absent.unresolved == ()
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        # Two nestings disagree: neither is preferred, so nothing is recognized.
-        {"originProductNo": 9900112233, "result": {"originProductNo": 42}},
-        {"a": {"originProductNo": 42}, "b": {"originProductNo": 43}},
-        # Present but unusable at one nesting, usable at another: still not recognized.
-        {"originProductNo": "", "result": {"originProductNo": 9900112233}},
-        {"result": {"originProductNo": 9900112233}, "echo": {"originProductNo": "9900-112233"}},
-        {"list": [{"originProductNo": 1}, {"originProductNo": 2}]},
-    ],
-)
-def test_an_ambiguous_origin_number_is_unknown_never_an_applied_mutation(
-    body: dict[str, Any],
-) -> None:
-    # The response-body nesting is uncaptured, so a body that offers more than one reading of the
-    # identity is not evidence of an applied mutation: it fails closed to UNKNOWN, which is never
-    # resent (ADR-0014 §17.2, §28).
-    handoff = _send(Provider(httpx.Response(200, json=body)))
-    assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
-    assert handoff.marketplace_product_id is None
-    assert handoff.error_code == "SMARTSTORE_CREATE_RESPONSE_UNREADABLE"
-    assert handoff.error_class is ErrorClass.UNKNOWN
-    identifiers = handoff.sanitized_response["identifiers"]
-    assert identifiers["originProductNo"] is None
-    assert identifiers["unresolved_identifiers"] == ["originProductNo"]
-
-
-def test_the_same_identity_repeated_at_several_nestings_is_not_ambiguous() -> None:
-    # The response echoes the stored ``originProduct``, so the same number may legitimately appear
-    # more than once. Agreeing occurrences are one reading, not a choice between two.
-    body = {
-        "originProductNo": 9900112233,
-        "originProduct": {"originProductNo": "9900112233", "name": "테스트 상품"},
-    }
-    handoff = _send(Provider(httpx.Response(200, json=body)))
-    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
-    assert handoff.marketplace_product_id == "9900112233"
-    assert handoff.sanitized_response["identifiers"]["unresolved_identifiers"] == []
-
-
-def test_an_ambiguous_channel_number_never_becomes_a_value_and_never_blocks_the_origin() -> None:
-    # Only the origin number decides readability (ADR-0014 §11); an ambiguous channel identity is
-    # dropped and recorded, never guessed and never lost silently (§28.2).
-    body = {
-        "originProductNo": 9900112233,
-        "a": {"smartstoreChannelProductNo": 55},
-        "b": {"smartstoreChannelProductNo": 56},
-    }
-    handoff = _send(Provider(httpx.Response(200, json=body)))
-    assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
-    identifiers = handoff.sanitized_response["identifiers"]
-    assert identifiers["smartstoreChannelProductNo"] is None
-    assert identifiers["unresolved_identifiers"] == ["smartstoreChannelProductNo"]
 
 
 # ---------------------------------------------------------------- outcome classification
@@ -370,62 +489,6 @@ def test_the_cause_and_the_remote_outcome_stay_independent_axes() -> None:
     handoff = _send(provider)
     assert handoff.error_class is ErrorClass.RATE_LIMITED
     assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
-
-
-# ---------------------------------------------------------------- the request is Snapshot-only
-
-
-def test_the_sanitized_request_is_the_document_and_carries_no_credential() -> None:
-    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
-    handoff = _send(provider)
-    assert handoff.sanitized_request == DOCUMENT
-    text = json.dumps(handoff.sanitized_request, ensure_ascii=False)
-    assert BEARER not in text and "Bearer" not in text and "authorization" not in text.lower()
-
-
-def test_a_request_carrying_secret_material_never_reaches_the_transport() -> None:
-    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
-
-    class Leaky:
-        sendable = True
-        document: ClassVar[dict[str, Any]] = {
-            "originProduct": {"accessToken": "Bearer abcdefghijklmnop"}
-        }
-        gaps: tuple[str, ...] = ()
-
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Leaky()
-    )
-    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
-    assert provider.requests == []
-    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
-    assert handoff.error_code == "SMARTSTORE_CREATE_REQUEST_UNSANITIZED"
-
-
-def test_an_unsendable_projection_never_reaches_the_transport() -> None:
-    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
-
-    class NotSendable:
-        sendable = False
-        document: ClassVar[dict[str, Any]] = {}
-        gaps = (product.GAP_STATUS_TYPE,)
-
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: NotSendable()
-    )
-    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
-    assert provider.requests == []
-    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE"
-    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
-
-
-def test_a_payload_that_is_not_a_registration_payload_never_reaches_the_transport() -> None:
-    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
-    sender = SmartStoreCreateSender(caller=_caller(provider), bearer=lambda: Bearer())
-    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
-    assert provider.requests == []
-    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_PAYLOAD_MALFORMED"
-    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
 
 
 def test_the_seam_holds_no_resend_path_of_its_own() -> None:

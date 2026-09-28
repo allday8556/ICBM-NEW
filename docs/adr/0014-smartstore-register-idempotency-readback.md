@@ -452,11 +452,19 @@ This amendment **relaxes nothing**:
 - `NOT_APPLIED_PROVEN` stays whitelist-only. An ordinary post-handoff `4xx`, a `5xx`, a timeout, a
   lost response, an unsafe redirect and a malformed success are all `UNKNOWN` (architect ruling
   R2, Issue #89 `5861607665`).
-- The response-body nesting stays uncaptured, so the adopted reading resolves an identifier only
-  where the whole retained body yields exactly one usable value for that name. A success whose
-  `originProductNo` is absent, unusable **or ambiguous** is `UNKNOWN`, never `APPLIED_PROVEN`:
-  no occurrence is preferred over another, so no arbitrary reading can support an applied
-  mutation or become the identity a read-back is made by (§11; `ENDPOINT_MATRIX.md` §4.1.1).
+- The response-body nesting and the identifier value type stay uncaptured, and an uncaptured item
+  is never invented, so the adopted contract reads **no** provider identity out of a CREATE
+  response: asserting one nesting, searching every nesting or accepting more than one value type
+  would each invent a response semantic. Every success is therefore `UNKNOWN`, never
+  `APPLIED_PROVEN`, and nothing from a response body ever becomes the identity a read-back is made
+  by (§11; `ENDPOINT_MATRIX.md` §4.1.1). This costs nothing and softens nothing: the adopted
+  request is not sendable either while the evidence leaves required values uncaptured, and the
+  read is written by the later slice that captures the shape from the cited schema.
+- The request is the immutable Snapshot's typed projection and only that: it is validated against
+  the adopted request contract as a whole — deny-by-default over every path, the documented bounds,
+  and the `sellerManagementCode` that must be this listing identity's projection — and then frozen
+  as canonical JSON, which is what the caller accepts. No unchecked mapping, and no mapping changed
+  after the Snapshot was projected, can reach the wire or the durable digest (§15, B4).
 - An `UNKNOWN` is never resent, keeps its conflict scope closed and is never `등록실패`
   (§10, §28, M5-08, M5-09, M5-33, M5-36).
 - The seller-side listing identity stays ICBM's own correlation identity (§7). The provider
@@ -464,8 +472,8 @@ This amendment **relaxes nothing**:
   30 lowercase hex characters of `SHA-256("smartstore-seller-management-code/v1\0" + listing_identity)`
   — which is deterministic and compared exactly on read-back, and is **not** a provider uniqueness
   proof.
-- Read-back stays the success proof (§11): a 200 with a provider identity is `APPLIED_PROVEN`,
-  never a confirmation.
+- Read-back stays the success proof (§11): even a 200 that did carry a readable provider identity
+  would be `APPLIED_PROVEN`, never a confirmation.
 
 It **authorizes nothing else**: no real upload or CREATE, no LIVE change, no area-5 opening, no
 canary and no residual-risk acceptance (§28.7). Execution remains `DRY_RUN` / `M0_DRY_RUN_ONLY`

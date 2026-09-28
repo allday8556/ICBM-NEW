@@ -32,6 +32,7 @@ from app.core.errors import AppError
 from app.core.safe_payload import safe_payload
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
+from integrations.marketplaces.smartstore.product import CreateDocument
 from integrations.marketplaces.smartstore.registry import (
     BASE_URL,
     PROVIDER_HOST,
@@ -134,17 +135,21 @@ class ProductReadRequest:
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
-    ``document`` is the typed CREATE request the wire projection built from the **immutable**
-    RegistrationSnapshot and nothing else. It carries business values only — no credential, no
-    session and no tokenized material — so the same mapping is the sanitized canonical
-    representation a durable digest is taken over (ADR-0014 §15, B4). The bearer is the wire
-    secret: it exists only for this call and is never part of the request object's repr.
+    ``document`` is the frozen :class:`~integrations.marketplaces.smartstore.product.CreateDocument`
+    the wire projection built from the **immutable** RegistrationSnapshot and nothing else. A plain
+    mapping is not accepted here: only that type carries the projection's provenance and its
+    validation against the adopted request contract, and its body is already canonical JSON, so an
+    unchecked document — or one changed after the Snapshot was projected — cannot become a request.
+    It carries business values only — no credential, no session and no tokenized material — so the
+    same document is the sanitized canonical representation a durable digest is taken over
+    (ADR-0014 §15, B4). The bearer is the wire secret: it exists only for this call and is never
+    part of the request object's repr.
     """
 
     access_token: str = field(repr=False)
     credential_generation: int
     session_generation: int
-    document: Mapping[str, object] = field(repr=False)
+    document: CreateDocument = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -325,7 +330,11 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
     if contract.endpoint_id is _PRODUCT_CREATE:
-        if not isinstance(request, ProductCreateRequest):
+        # The document type is the provenance gate: only the wire projection produces one, and it
+        # produces one only after validating the whole request against the adopted contract.
+        if not isinstance(request, ProductCreateRequest) or not isinstance(
+            request.document, CreateDocument
+        ):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
         _bearer(
             headers, request.access_token, request.credential_generation, request.session_generation
@@ -356,27 +365,18 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
     raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
 
 
-def _json_body(document: Mapping[str, object]) -> bytes:
-    """The canonical JSON bytes of one typed request document.
+def _json_body(document: CreateDocument) -> bytes:
+    """The canonical JSON bytes of one frozen request document.
 
-    Encoded here, deterministically (sorted keys, no insignificant space, UTF-8), so the wire body
-    is a function of the document alone and the endpoint contract's media type is the one actually
-    sent. A document that is not JSON-encodable is a local contract violation: it never reaches the
-    transport, so nothing can have been applied.
+    The projection encoded them deterministically (sorted keys, no insignificant space, UTF-8) when
+    it validated and froze the document, so the wire body is a function of that checked document
+    alone and nothing can have changed since. An empty body would be a local contract violation: it
+    never reaches the transport, so nothing can have been applied.
     """
-    if not isinstance(document, Mapping) or not document:
+    body = document.encoded()
+    if not body or body == b"{}":
         raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
-    try:
-        text = json.dumps(
-            dict(document),
-            sort_keys=True,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
-    return text.encode("utf-8")
+    return body
 
 
 def _json(content: bytes) -> object:

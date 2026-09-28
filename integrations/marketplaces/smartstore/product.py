@@ -23,6 +23,14 @@ limits and defaults. Two rules bound every projection:
   ``sendable``, and the execution owner refuses with ``REGISTER_WIRE_NOT_SENDABLE`` before any
   transport exists.
 
+Both rules would be worth little if an arbitrary mapping could still be handed to the wire, so the
+request is checked as a whole and then frozen: :func:`create_document` refuses any path the
+captured evidence does not record, any value outside a documented bound, and any body whose
+``sellerManagementCode`` is not this listing identity's projection — and keeps what survives as
+canonical JSON in an immutable :class:`CreateDocument`. Nothing can be added to a request, or
+changed in one, between the projection and the wire, and the endpoint caller accepts that frozen
+document and nothing else.
+
 The gaps that hold at this adoption are the ones the evidence record lists as not captured: the
 accepted values of the required ``originProduct.statusType``; the value type of the required
 ``smartstoreChannelProduct.naverShoppingRegistration``; the publication decision behind the required
@@ -44,6 +52,7 @@ exactly on read-back and on a later positive reconcile. An option unit's code st
 """
 
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -170,19 +179,222 @@ class SellerCodes:
         }
 
 
+# ----------------------------------------------------- the adopted CREATE request schema
+#
+# The request-side twin of the endpoint's retained-response profile (ADR-0014 §15), and equally
+# deny-by-default: only the paths the captured official evidence records may exist in a request
+# document, each with the value type and the bound that evidence gives it. A document carrying
+# anything else is refused here, never trimmed into shape — the wire boundary has to be able to
+# trust that what it encodes is this projection's output over an immutable Snapshot and nothing
+# else.
+#
+# ``smartstoreChannelProduct`` is deliberately absent: both of its required fields are gaps at this
+# adoption, so the structure is not emitted and may not appear. ``windowChannelProduct`` is out of
+# scope and never appears.
+_DOCUMENT_KEYS: Final = frozenset({FIELD_ORIGIN_PRODUCT})
+_ORIGIN_KEYS: Final = frozenset(
+    {
+        FIELD_NAME,
+        FIELD_DETAIL,
+        FIELD_IMAGES,
+        FIELD_SALE_PRICE,
+        FIELD_LEAF_CATEGORY_ID,
+        FIELD_DETAIL_ATTRIBUTE,
+    }
+)
+_IMAGES_KEYS: Final = frozenset({FIELD_REPRESENTATIVE_IMAGE, FIELD_OPTIONAL_IMAGES})
+_IMAGE_KEYS: Final = frozenset({FIELD_URL})
+_DETAIL_ATTRIBUTE_KEYS: Final = frozenset({FIELD_SELLER_CODE_INFO, FIELD_OPTION_INFO})
+_SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
+_OPTION_INFO_KEYS: Final = frozenset({FIELD_OPTION_GROUP_NAMES, FIELD_OPTION_COMBINATIONS})
+
+
+def _object(value: Any, path: str, allowed: frozenset[str]) -> Mapping[str, Any]:
+    """One request object whose every key is on this path's allow-list."""
+    if not isinstance(value, Mapping):
+        raise WireContractError("WIRE_DOCUMENT_MALFORMED", f"{path} is not an object")
+    unknown = sorted(str(key) for key in value if str(key) not in allowed)
+    if unknown:
+        raise WireContractError("WIRE_DOCUMENT_FIELD_UNKNOWN", f"{path}.{unknown[0]}")
+    return value
+
+
+def _required(node: Mapping[str, Any], path: str, names: Sequence[str]) -> None:
+    missing = [name for name in names if name not in node]
+    if missing:
+        raise WireContractError("WIRE_DOCUMENT_FIELD_MISSING", f"{path}.{missing[0]}")
+
+
+def _string(value: Any, path: str, *, limit: int | None = None) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not text")
+    if limit is not None and len(value) > limit:
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} exceeds {limit}")
+    return value
+
+
+def _bounded_int(value: Any, path: str, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not within {maximum}")
+    return value
+
+
+def _array(value: Any, path: str, *, maximum: int | None = None) -> Sequence[Any]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes) or not value:
+        raise WireContractError("WIRE_DOCUMENT_MALFORMED", f"{path} is not a non-empty array")
+    if maximum is not None and len(value) > maximum:
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} exceeds {maximum} entries")
+    return value
+
+
+def _validate_image(value: Any, path: str) -> None:
+    image = _object(value, path, _IMAGE_KEYS)
+    _required(image, path, (FIELD_URL,))
+    reference = _string(image[FIELD_URL], f"{path}.{FIELD_URL}")
+    # The same rule the Snapshot was frozen under: an image the provider does not already hold, or
+    # a reference carrying signed material, is never encodable (ADR-0014 §3 B2).
+    if not safe_provider_reference(reference):
+        raise WireContractError("WIRE_IMAGE_REFERENCE_UNSAFE", f"{path}.{FIELD_URL}")
+
+
+def _validate_images(value: Any, path: str) -> None:
+    images = _object(value, path, _IMAGES_KEYS)
+    _required(images, path, (FIELD_REPRESENTATIVE_IMAGE,))
+    _validate_image(images[FIELD_REPRESENTATIVE_IMAGE], f"{path}.{FIELD_REPRESENTATIVE_IMAGE}")
+    if FIELD_OPTIONAL_IMAGES in images:
+        optional_path = f"{path}.{FIELD_OPTIONAL_IMAGES}"
+        entries = _array(images[FIELD_OPTIONAL_IMAGES], optional_path, maximum=MAX_OPTIONAL_IMAGES)
+        for index, entry in enumerate(entries):
+            _validate_image(entry, f"{optional_path}[{index}]")
+
+
+def _validate_option_info(value: Any, path: str) -> None:
+    """The combination form, and only it: the evidence gives the keys of no other option form.
+
+    The option-name dimensions are the numbered keys ``optionGroupName1..n``, from 1 and without a
+    hole, at most the three an ordinary combination option allows; every combination row carries
+    exactly those same numbered ``optionName`` keys plus its own seller code.
+    """
+    info = _object(value, path, _OPTION_INFO_KEYS)
+    _required(info, path, (FIELD_OPTION_GROUP_NAMES, FIELD_OPTION_COMBINATIONS))
+    group_path = f"{path}.{FIELD_OPTION_GROUP_NAMES}"
+    groups = _object(info[FIELD_OPTION_GROUP_NAMES], group_path, frozenset(_GROUP_NAME_KEYS))
+    dimensions = len(groups)
+    if set(groups) != set(_GROUP_NAME_KEYS[:dimensions]):
+        raise WireContractError("WIRE_DOCUMENT_MALFORMED", f"{group_path} is not numbered from 1")
+    for key in _GROUP_NAME_KEYS[:dimensions]:
+        _string(groups[key], f"{group_path}.{key}")
+    names = frozenset(_OPTION_NAME_KEYS[:dimensions])
+    row_path = f"{path}.{FIELD_OPTION_COMBINATIONS}"
+    codes: list[str] = []
+    for index, entry in enumerate(_array(info[FIELD_OPTION_COMBINATIONS], row_path)):
+        where = f"{row_path}[{index}]"
+        row = _object(entry, where, names | {FIELD_OPTION_SELLER_CODE})
+        _required(row, where, (*sorted(names), FIELD_OPTION_SELLER_CODE))
+        for key in names:
+            _string(row[key], f"{where}.{key}")
+        codes.append(_string(row[FIELD_OPTION_SELLER_CODE], f"{where}.{FIELD_OPTION_SELLER_CODE}"))
+    if len(set(codes)) != len(codes):
+        raise WireContractError("WIRE_ITEM_CODES_NOT_DISTINCT", f"{row_path}: a code repeats")
+
+
+def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
+    """Check one projected request body against the adopted CREATE request contract.
+
+    Deny-by-default over the whole document, plus the provenance the wire boundary must be able to
+    trust: the body's ``sellerManagementCode`` has to be the
+    ``smartstore-seller-management-code/v1`` projection of the listing identity the document claims,
+    so a body that did not come from this Snapshot's projection cannot be handed on as if it had.
+    """
+    document = _object(body, "document", _DOCUMENT_KEYS)
+    _required(document, "document", (FIELD_ORIGIN_PRODUCT,))
+    origin = _object(document[FIELD_ORIGIN_PRODUCT], FIELD_ORIGIN_PRODUCT, _ORIGIN_KEYS)
+    _required(origin, FIELD_ORIGIN_PRODUCT, sorted(_ORIGIN_KEYS))
+    _string(origin[FIELD_NAME], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_NAME}")
+    _string(origin[FIELD_DETAIL], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL}")
+    _string(origin[FIELD_LEAF_CATEGORY_ID], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_LEAF_CATEGORY_ID}")
+    _bounded_int(
+        origin[FIELD_SALE_PRICE], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_SALE_PRICE}", MAX_SALE_PRICE
+    )
+    _validate_images(origin[FIELD_IMAGES], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_IMAGES}")
+    attribute_path = f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}"
+    attribute = _object(origin[FIELD_DETAIL_ATTRIBUTE], attribute_path, _DETAIL_ATTRIBUTE_KEYS)
+    _required(attribute, attribute_path, (FIELD_SELLER_CODE_INFO,))
+    seller_path = f"{attribute_path}.{FIELD_SELLER_CODE_INFO}"
+    seller = _object(attribute[FIELD_SELLER_CODE_INFO], seller_path, _SELLER_CODE_KEYS)
+    _required(seller, seller_path, (FIELD_SELLER_MANAGEMENT_CODE,))
+    code = _string(
+        seller[FIELD_SELLER_MANAGEMENT_CODE],
+        f"{seller_path}.{FIELD_SELLER_MANAGEMENT_CODE}",
+        limit=SELLER_MANAGEMENT_CODE_LENGTH,
+    )
+    if code != seller_management_code(listing_identity):
+        raise WireContractError(
+            "WIRE_DOCUMENT_NOT_THIS_SNAPSHOT",
+            "the request does not carry this listing identity's management code",
+        )
+    if FIELD_OPTION_INFO in attribute:
+        _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
+
+
+@dataclass(frozen=True)
+class CreateDocument:
+    """One CREATE request body, validated against the adopted contract and frozen with its
+    provenance.
+
+    It exists only as the output of :func:`project` over an immutable Snapshot payload, and it
+    holds that body as its canonical JSON text — so there is nothing left to mutate between the
+    projection and the send, and the durable digest, the evidence and the wire bytes are all the
+    same document (ADR-0014 §15, B4). :meth:`mapping` hands out a fresh copy every time;
+    :meth:`encoded` is the exact request body. The caller accepts this type and nothing else, so an
+    unvalidated mapping, or one changed after the Snapshot was projected, can never be sent.
+    """
+
+    encoding_version: str
+    listing_identity: str
+    canonical_json: str
+
+    def mapping(self) -> dict[str, Any]:
+        """A fresh plain copy of the request body; mutating it cannot reach the wire."""
+        return dict(json.loads(self.canonical_json))
+
+    def encoded(self) -> bytes:
+        """The exact request bytes: canonical UTF-8 JSON, a function of this document alone."""
+        return self.canonical_json.encode("utf-8")
+
+
+def create_document(listing_identity: str, body: Mapping[str, Any]) -> CreateDocument:
+    """Validate one projected request body against the adopted contract and freeze it."""
+    _validate_document(body, listing_identity)
+    try:
+        canonical = json.dumps(
+            dict(body), sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
+    except (TypeError, ValueError) as exc:
+        raise WireContractError(
+            "WIRE_DOCUMENT_MALFORMED", "the request is not JSON-encodable"
+        ) from exc
+    return CreateDocument(
+        encoding_version=WIRE_ENCODING_VERSION,
+        listing_identity=listing_identity,
+        canonical_json=canonical,
+    )
+
+
 @dataclass(frozen=True)
 class WireProjection:
     """The adopted CREATE request of one frozen Snapshot, plus every gap that keeps it unsendable.
 
-    ``document`` holds exactly the structures the captured official evidence supports and the
-    Snapshot owns; ``gaps`` names every part the evidence does not carry. ``gaps`` is empty only
-    when the whole required request is projectable, and only then is the document ``sendable``.
+    ``document`` is the validated, frozen :class:`CreateDocument` holding exactly the structures the
+    captured official evidence supports and the Snapshot owns; ``gaps`` names every part the
+    evidence does not carry. ``gaps`` is empty only when the whole required request is projectable,
+    and only then is the document ``sendable``.
     """
 
     encoding_version: str
     listing_shape: ListingShape
     codes: SellerCodes
-    document: dict[str, Any]
+    document: CreateDocument
     image_references: tuple[str, ...]
     gaps: tuple[str, ...]
     # The reviewed notice the Snapshot owns, kept as evidence of what a projectable notice child
@@ -446,7 +658,9 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     # storeKeepExclusiveProduct) is unowned, so the structure is not emitted at all rather than
     # sent half-built. windowChannelProduct is out of scope and is never emitted.
     gaps.extend((GAP_SHOPPING_REGISTRATION, GAP_CHANNEL_DISPLAY_STATUS))
-    document: dict[str, Any] = {FIELD_ORIGIN_PRODUCT: origin_product}
+    # Validated and frozen here, at the one place a request document is ever built: what leaves
+    # this function is already checked against the adopted contract and can no longer change.
+    document = create_document(codes.listing_identity, {FIELD_ORIGIN_PRODUCT: origin_product})
     return WireProjection(
         encoding_version=WIRE_ENCODING_VERSION,
         listing_shape=shape,
