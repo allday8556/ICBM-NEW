@@ -432,6 +432,43 @@ transmitted failure is `UPLOAD_UNKNOWN`, which is not `RegistrationIntent.UNKNOW
 SEARCH remain `NOT_ADOPTED`; `product_registration.write` remains `UNVERIFIED`; LIVE, real canary
 and M5 acceptance remain forbidden.
 
+#### 17.3 CREATE adoption amendment (ADR-0020 §4 order 1)
+
+**Amendment note, not a rewrite.** `SMARTSTORE_PRODUCT_CREATE_V2` alone is `ADOPTED`, from the
+official Commerce API 2.89.0 contract recorded field by field in
+`docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore. The adopted transport, success
+predicate, retention profile, request projection and outcome classification are frozen in
+`docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.1.1, with the endpoint-mapping revision
+`m5-create-r1` and its fingerprint in the same change.
+
+This amendment **relaxes nothing**:
+
+- §17's "idempotency and read-back behaviour" requirement is met the way §17.2 says it must be —
+  by recording the provider's actual (absent) idempotency and binding the endpoint to §28's
+  never-resend rule, never by assuming idempotency. No idempotency, correlation or replay header
+  is invented or sent.
+- The evidence verdict of §17.2 stays `INSUFFICIENT` and is not overturned; overturning it was
+  never the adoption condition.
+- `NOT_APPLIED_PROVEN` stays whitelist-only. An ordinary post-handoff `4xx`, a `5xx`, a timeout, a
+  lost response, an unsafe redirect and a malformed success are all `UNKNOWN` (architect ruling
+  R2, Issue #89 `5861607665`).
+- An `UNKNOWN` is never resent, keeps its conflict scope closed and is never `등록실패`
+  (§10, §28, M5-08, M5-09, M5-33, M5-36).
+- The seller-side listing identity stays ICBM's own correlation identity (§7). The provider
+  `sellerManagementCode` is its `smartstore-seller-management-code/v1` projection (ruling R1) —
+  30 lowercase hex characters of `SHA-256("smartstore-seller-management-code/v1\0" + listing_identity)`
+  — which is deterministic and compared exactly on read-back, and is **not** a provider uniqueness
+  proof.
+- Read-back stays the success proof (§11): a 200 with a provider identity is `APPLIED_PROVEN`,
+  never a confirmation.
+
+It **authorizes nothing else**: no real upload or CREATE, no LIVE change, no area-5 opening, no
+canary and no residual-risk acceptance (§28.7). Execution remains `DRY_RUN` / `M0_DRY_RUN_ONLY`
+and provider-zero, no application route sends a CREATE, `SMARTSTORE_PRODUCT_SEARCH` remains
+`NOT_ADOPTED` (its positive-only reconcile adoption is a separate later slice, ADR-0020 SA-09),
+`product_registration.write` remains `UNVERIFIED`, the canary remains `BLOCKED`, and M5 remains
+`PENDING`.
+
 #### 17.2 CREATE and deterministic reconcile: the recorded evidence verdict
 
 The architect's review of the official provider contract for the two remaining M5 endpoints closed
@@ -454,7 +491,10 @@ possibly transmitted CREATE whose ambiguity no admissible evidence resolves stay
 conflict scope closed, and is never blindly replayed.
 
 `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED`, and
-`product_registration.write` stays `UNVERIFIED` (§16). New official evidence overturning this verdict
+`product_registration.write` stays `UNVERIFIED` (§16). *(Amendment note: `SMARTSTORE_PRODUCT_CREATE_V2`
+is `ADOPTED` since the CREATE adoption slice — see §17.3. The verdict this subsection records is
+unchanged, `SMARTSTORE_PRODUCT_SEARCH` is unchanged, and `product_registration.write` stays
+`UNVERIFIED`.)* New official evidence overturning this verdict
 is **not** the adoption condition: each endpoint is adopted only in its own separately authorized
 adoption slice under §28 and ADR-0018 §6.1 — CREATE bound to §28's never-resend rule, SEARCH for
 positive-only reconcile only. This subsection records a verdict. It relaxes no rule of §7, §10 or
@@ -701,7 +741,7 @@ The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 co
   - the automatic schedule and quota values;
   - the verification deadline value;
   - the routes and the card's implementation.
-- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile.
+- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile. *(Amendment note: CREATE was later adopted by its own separately authorized slice under ADR-0020 §4 — see §17.3. This amendment still authorizes nothing by itself, SEARCH is still `NOT_ADOPTED`, and every rule of §28 is unchanged.)*
 
 > **Amendment note (ADR-0020 §2, §4).** This amendment still authorizes nothing by itself. The CREATE adoption slice and, after it, the positive-only reconcile SEARCH adoption slice are each authorized by the ROADMAP standing authorization of ADR-0020, as separate PRs, when they meet all of its conditions — provider-zero, adoption in code only, and any schema of §28.4 only where a canonical contract has concretely decided it. No provider call, LIVE change, area-5 opening, canary or residual-risk acceptance (§28.7) is authorized by it.
 

@@ -109,7 +109,10 @@ PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
 M0_REFUSES_LIVE = "M0_EXECUTION_POLICY_REFUSES_LIVE"
 
 DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
-    "CREATE_HANDOFF": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_CREATE_V2"),
+    # The CREATE contract is adopted (ADR-0020 §4 order 1), so this seam is declared for the only
+    # reason left: a provider-zero run has no provider to answer it, and the production sender
+    # holds the transport-owning caller this run may not even load.
+    "CREATE_HANDOFF": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_CREATE_V2"),
     "RECONCILE_LOOKUP": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_SEARCH"),
     "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
     "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
@@ -367,7 +370,12 @@ def _retained(unit: Unit, payload: Mapping[str, Any], *, reverse: bool = False) 
             "name": payload["name"]["value"],
             "salePrice": items[0]["sale_price_krw"],
             "stockQuantity": len(items),
-            "sellerManagementCode": unit.listing_identity,
+            # What the provider would carry back: the projected provider code of this unit's
+            # listing identity (architect ruling R1), which is exactly what the CREATE would have
+            # sent and what the read-back comparison checks.
+            "sellerManagementCode": smartstore_product.seller_management_code(
+                unit.listing_identity
+            ),
             "detailAttribute": {"optionInfo": {"optionCombinations": options}},
         },
         "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
@@ -928,8 +936,10 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
-    # PR-D's real wire projection is not sendable while the CREATE contract is unproven: the
-    # scenarios above declared one so the state machine could be exercised at all.
+    # The adopted CREATE request still refuses this unit: the official evidence leaves required
+    # values uncaptured (statusType, naverShoppingRegistration, the notice type child), and none is
+    # ever invented. The scenarios above declared a sendable projection so the state machine could
+    # be exercised at all; the real one is asked here and still names its gaps.
     unsent = smartstore_product.project(_any_payload(owners))
     checks.check(
         "boundary.real_wire_projection_refuses",
@@ -937,8 +947,10 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()
+    # Adoption is a contract, never a call: this run's measured marketplace mutation count is 0.
     checks.check(
-        "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
+        "boundary.create_adopted_but_unreachable",
+        adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is True,
     )
     checks.check(
         "boundary.upload_adopted_but_unreachable",

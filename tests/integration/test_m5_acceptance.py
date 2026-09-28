@@ -122,7 +122,7 @@ REQUIRED_CHECKS = {
         "boundary.declarations_name_their_own_gap",
         "boundary.provider_transport_unloadable",
         "boundary.real_wire_projection_refuses",
-        "boundary.create_not_adopted",
+        "boundary.create_adopted_but_unreachable",
         "boundary.upload_adopted_but_unreachable",
         "boundary.search_not_adopted",
         "boundary.product_registration_write_unverified",
@@ -220,12 +220,19 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "endpoint_id": None,
         "endpoint_adopted": None,
     }
+    # The CREATE contract **is** adopted: like the read-back, it is declared because an offline
+    # run has no provider to answer it, and it is never reported as unadopted.
     assert declared["CREATE_HANDOFF"] == {
-        "reason": "ENDPOINT_NOT_ADOPTED",
+        "reason": "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE",
         "endpoint_id": "SMARTSTORE_PRODUCT_CREATE_V2",
+        "endpoint_adopted": True,
+    }
+    # The positive-only reconcile path is the separate later slice, so it really is unadopted.
+    assert declared["RECONCILE_LOOKUP"] == {
+        "reason": "ENDPOINT_NOT_ADOPTED",
+        "endpoint_id": "SMARTSTORE_PRODUCT_SEARCH",
         "endpoint_adopted": False,
     }
-    assert declared["RECONCILE_LOOKUP"]["reason"] == "ENDPOINT_NOT_ADOPTED"
     # The read-back contract **is** adopted: it is declared because an offline run has no provider
     # to answer it, and it is never reported as unadopted.
     assert declared["READ_BACK"] == {
@@ -243,10 +250,13 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
     assert declared["ACCOUNT_BINDING"]["reason"] == "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
     assert report["account_scope"]["synthetic_connect_binding"] is True
     adoption = report["endpoint_adoption"]
-    assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is False
+    assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is True
     assert adoption["SMARTSTORE_PRODUCT_IMAGE_UPLOAD"] is True
     assert adoption["SMARTSTORE_PRODUCT_SEARCH"] is False
     assert adoption["SMARTSTORE_ORIGIN_PRODUCT_READ_V2"] is True
+    # Adoption is a contract, never a call: the measured mutation count stays 0, and the real
+    # wire projection still refuses because the official evidence leaves required values
+    # uncaptured and none of them is ever invented.
     assert report["boundary"]["marketplace_mutations"] == 0
     assert report["boundary"]["real_wire_projection_sendable"] is False
 
@@ -255,11 +265,11 @@ def test_the_canary_plan_is_blocked_and_names_its_missing_contracts(accepted: Ac
     canary = accepted.report["canary_readiness"]
     assert canary["verdict"] == "BLOCKED"
     assert canary["write_status"] == "UNVERIFIED" and canary["execution_mode"] == "DRY_RUN"
-    assert "CREATE_ADOPTED" in canary["missing"]
-    assert set(canary["unadopted_endpoints"]) >= {
-        "SMARTSTORE_PRODUCT_CREATE_V2",
-        "SMARTSTORE_PRODUCT_SEARCH",
-    }
+    # CREATE adoption satisfies its own requirement and nothing else: the canary is still BLOCKED,
+    # and the positive-only reconcile path is still named as unadopted.
+    assert "CREATE_ADOPTED" not in canary["missing"]
+    assert "RECONCILE_PATH_ADOPTED" in canary["missing"]
+    assert set(canary["unadopted_endpoints"]) == {"SMARTSTORE_PRODUCT_SEARCH"}
 
 
 def test_the_hard_zero_counters_are_measured_zero(accepted: Accepted) -> None:

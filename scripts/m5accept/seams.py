@@ -1,13 +1,14 @@
 """The local provider seams one M5 acceptance run drives (Issue #89 PR-F §A).
 
-They exist because the contracts they stand for are **NOT_ADOPTED**: there is no adopted CREATE,
-no adopted product search and no committed session for a read-back, so a run that must exercise
-applied, unproven and mismatched outcomes has to say what the provider did. Each fake answers
-exactly what the scenario states and counts every call, so the report can show that a *real*
-marketplace mutation count stayed zero while the state machine was exercised end to end.
+They exist because a provider-zero run has no provider: there is no adopted product search, no
+committed session for a CREATE or a read-back, and no marketplace to answer one, so a run that must
+exercise applied, unproven and mismatched outcomes has to say what the provider did. Each fake
+answers exactly what the scenario states and counts every call, so the report can show that a
+*real* marketplace mutation count stayed zero while the state machine was exercised end to end.
 
-Nothing here reaches a network: they hold no transport and no client. The production seams are
-built alongside them and asked what they allow — which is nothing (`owners.production_seams`).
+Nothing here reaches a network: they hold no transport and no client. The production CREATE and
+read-back seams are not built alongside them either, because both hold the transport-owning
+registry caller a run may not load (`guards.py`).
 """
 
 from collections.abc import Mapping

@@ -335,7 +335,11 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 
 ### 6. Provider evidence is an independent hard blocker (D3)
 
-- `SMARTSTORE_PRODUCT_CREATE_V2` stays **`NOT_ADOPTED`**.
+- `SMARTSTORE_PRODUCT_CREATE_V2` stays **`NOT_ADOPTED`**. *(Amendment note: it was adopted by its
+  own separately authorized slice under ADR-0020 §4 and §6.1's "each in its own separately
+  authorized adoption slice" — see the amendment at §12. Adoption changed no rule of this section:
+  the verdict is still `INSUFFICIENT`, the canary is still `BLOCKED`, and the bullets below still
+  hold as written.)*
 - `SMARTSTORE_PRODUCT_SEARCH` stays **`NOT_ADOPTED`**.
 - The official-evidence verdict stays **`INSUFFICIENT`** (Issue #89 `5768312853` / `5768347233`;
   `docs/acceptance/M5.md` §9.1).
@@ -572,6 +576,19 @@ expected areas, none authorized by this ADR:
 > acceptance of §6.1 stay explicit user decisions (ADR-0020 §3). This note changes no invariant: the
 > evidence verdict stays `INSUFFICIENT` and the canary stays `BLOCKED` until every condition of §6
 > and §10 holds.
+>
+> **Amendment note (CREATE adoption slice, ADR-0020 §4 order 1).** The first of those two slices has
+> landed: `SMARTSTORE_PRODUCT_CREATE_V2` is `ADOPTED` (`ENDPOINT_MATRIX.md` §4.1.1, ADR-0014 §17.3)
+> — the official wire contract of §6.1's first bullet, with the error classification that separates
+> a definitive rejection (the transmission-precluded whitelist, `NOT_APPLIED_PROVEN`) from an
+> ambiguous outcome (everything after a possible handoff, `UNKNOWN`). It weakens no refusal: no
+> `UNKNOWN` is ever resent (G3-07), no lookup, code, grant, proof or approval becomes
+> remote-absence evidence (G3-15), the verdict stays `INSUFFICIENT`, `M0_DRY_RUN_ONLY` still refuses
+> every mutation (G3-01), no ASSET sender is wired, no eligibility, restore, retention or visual
+> proof exists, the residual-risk acceptance of §6.1 is still unrecorded, and both stage readinesses
+> and the canary stay **`BLOCKED`**. `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, so the CREATE
+> stage still refuses on its own endpoint-adoption layer (§10,
+> `LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED`).
 
 ### 13. What this ADR does not decide
 

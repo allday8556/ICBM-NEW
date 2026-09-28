@@ -24,9 +24,20 @@ the JSON-object response convention ENDPOINT_MATRIX.md already accepts, never pr
 
 PR-D adopted the two product read-backs. The later IMAGE UPLOAD amendment (Issue #89 comments
 5765557497 and 5765663972) adopts only the official one-artifact ``imageFiles`` request and its
-returned ``images[].url`` identity. Product CREATE and search remain NOT_ADOPTED. Adoption is not
-LIVE authority: the application remains DRY_RUN/provider-zero and no application route invokes the
-upload caller.
+returned ``images[].url`` identity.
+
+**The CREATE adoption slice** (ADR-0020 §4 order 1) adds ``SMARTSTORE_PRODUCT_CREATE_V2`` from
+the same 2.89.0 contract, recorded field by field in
+``docs/evidence/marketplace-apis/PRODUCT_CREATE.md`` § SmartStore: bearer-authenticated
+``POST /v2/products``, ``application/json``, the ``상품`` group, bounded ICBM timeouts, no
+redirect, a mutation, and a deny-by-default retention profile of the provider identifiers plus the
+safe product leaves. ``SMARTSTORE_PRODUCT_SEARCH`` stays NOT_ADOPTED: the positive-only reconcile
+path is its own later slice.
+
+Adoption is never LIVE authority and never a call. The application remains DRY_RUN/provider-zero,
+the ADR-0018 send-time safety stack refuses every mutation, no real canary is authorized, and an
+``UNKNOWN`` CREATE outcome is never resent (ADR-0014 §28; ADR-0018 §6, §6.1). The
+provider-evidence verdict stays ``INSUFFICIENT`` and is neither overturned nor re-decided here.
 """
 
 import hashlib
@@ -54,8 +65,9 @@ class EndpointId(StrEnum):
     # ADOPTED for M5 PR-D: the two product read-backs.
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
-    # CREATE/search and metadata reads remain NOT_ADOPTED (see ADOPTION_GAPS). IMAGE UPLOAD was
-    # adopted by the later, bounded M5 amendment; adoption does not grant LIVE authority.
+    # ADOPTED by the CREATE adoption slice. IMAGE UPLOAD was adopted by the earlier bounded M5
+    # amendment. Search and the metadata reads remain NOT_ADOPTED (see ADOPTION_GAPS); adoption
+    # does not grant LIVE authority to any of them.
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
@@ -123,6 +135,19 @@ def product_read_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+def product_create_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND the body parses as a JSON object.
+
+    The official evidence proves the documented success status, the response media type and the
+    *names* of the success identifiers, but **not their JSON nesting inside the body**, so the
+    predicate asserts nothing about the shape — exactly like the adopted read-backs. Whether a
+    usable ``originProductNo`` actually came back is decided by the response contract, which fails
+    closed (``create.py``); a 200 that passes here is never by itself an applied mutation, and a
+    2xx is never a registration confirmation (ADR-0014 §11).
+    """
+    return status == 200 and isinstance(body, dict)
+
+
 def image_upload_succeeded(status: int, body: object) -> bool:
     """HTTP 200 plus the documented ``images[].url`` response shape.
 
@@ -175,6 +200,16 @@ _PRODUCT_READ_FIELDS = frozenset(
     {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
 )
 _IMAGE_UPLOAD_FIELDS = frozenset({"url"})
+# The CREATE success response: the provider identifiers the official evidence names, plus the same
+# safe product leaves a read-back may keep — the response echoes ``originProduct``, the product
+# data SmartStore stored. ``windowChannelProductNo`` is retained although ICBM never emits
+# ``windowChannelProduct``: a provider identity that did come back is never dropped
+# (ADR-0014 §28.2). Everything else is removed before anything is hashed, stored or logged.
+_PRODUCT_CREATE_FIELDS = _PRODUCT_READ_FIELDS | {
+    "originProductNo",
+    "smartstoreChannelProductNo",
+    "windowChannelProductNo",
+}
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
@@ -239,6 +274,28 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5d-channel-read-r1",
         retained_response_fields=_PRODUCT_READ_FIELDS,
     ),
+    # ---- M5 CREATE adoption slice (official Commerce API 2.89.0; the field-level record in
+    # docs/evidence/marketplace-apis/PRODUCT_CREATE.md § SmartStore). Adoption is not a call and
+    # not LIVE authority: execution stays DRY_RUN, the send-time safety stack refuses every
+    # mutation, and an UNKNOWN outcome is never resent (ADR-0014 §28; ADR-0018 §6.1).
+    EndpointId.SMARTSTORE_PRODUCT_CREATE_V2: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
+        method=Method.POST,
+        path="/v2/products",
+        content_type="application/json",
+        requires_bearer=True,
+        # ICBM policy, never a provider fact: no endpoint-specific timeout is documented. The
+        # same bounds the other adopted mutation uses; a read timeout is UNKNOWN, never a failure.
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        # EM §11 / ERRORS.md §10.6, §17: a 308 is never followed for a mutation.
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=True,
+        success_predicate=product_create_succeeded,
+        predicate_revision="m5-create-r1",
+        retained_response_fields=frozenset(_PRODUCT_CREATE_FIELDS),
+    ),
     # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
     EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
@@ -268,11 +325,6 @@ _NO_RESPONSE_CONTRACT = (
 )
 
 ADOPTION_GAPS: Mapping[EndpointId, str] = {
-    EndpointId.SMARTSTORE_PRODUCT_CREATE_V2: (
-        "the packet proves the method, the path, the 상품 group and the request/response product"
-        " structure, but neither the request media type nor the response envelope; the wire"
-        " document is encoded and pinned by product.py and stays unsent"
-    ),
     EndpointId.SMARTSTORE_PRODUCT_SEARCH: (
         "existence only: the packet does not prove the request schema, so no strong duplicate key"
         " (sellerManagementCode, barcode/GTIN) and no normalized-name filter is proven; duplicate"
@@ -335,7 +387,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-image-upload-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-create-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -350,6 +402,7 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m5-register-r1": "fbf07a8784557b45c5e282464a20d2b41534642a34076e1827b656fba8710648",
     # Filled from ``mapping_fingerprint()`` in the same reviewed change.
     "m5-image-upload-r1": "4717169646fe3b53725a4c31ff93e15d657dc6a85b29295a8d955969f090d02b",
+    "m5-create-r1": "635b1d1c281e2a05f9467a5362ff2f6395318d77c8c969b370a84c8384b1bfea",
 }
 
 

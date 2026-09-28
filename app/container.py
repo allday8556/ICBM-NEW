@@ -503,7 +503,15 @@ def build_container(
     registration_execution = RegistrationExecutionService(
         registrations=registrations,
         preflight=registration_preflight,
-        sender=SmartStoreCreateSender(),
+        # The CREATE contract is adopted, but production wires no committed session to send or
+        # read with (ADR-0020 §4: a committed provider session is not provider-zero). Every
+        # mutation is refused earlier anyway: M0_DRY_RUN_ONLY, the brake and the grant refuse in
+        # the send-time stack, and the wire projection is not sendable while the official evidence
+        # leaves a required value uncaptured.
+        sender=SmartStoreCreateSender(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=lambda: None,
+        ),
         readback=SmartStoreReadback(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
             bearer=lambda: None,

@@ -146,17 +146,17 @@ def _read(body: dict[str, Any]) -> Any:
 
 
 def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-image-upload-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
-    assert [c.endpoint_id.value for c in ADOPTED.values() if c.mutating] == [
-        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    # The CREATE adoption slice adds the second adopted mutation and no third. Adoption is never
+    # LIVE authority: execution stays DRY_RUN and the send-time stack refuses every mutation.
+    assert sorted(c.endpoint_id.value for c in ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    for endpoint in (
-        EndpointId.SMARTSTORE_PRODUCT_CREATE_V2,
-        EndpointId.SMARTSTORE_PRODUCT_SEARCH,
-    ):
-        with pytest.raises(EndpointNotAdoptedError):
-            resolve(endpoint)
+    # The duplicate-lookup search is the separate later slice and still fails locally.
+    with pytest.raises(EndpointNotAdoptedError):
+        resolve(EndpointId.SMARTSTORE_PRODUCT_SEARCH)
 
 
 def test_the_capability_stays_unverified_for_product_write(container: Container) -> None:
@@ -181,11 +181,18 @@ def test_a_real_snapshot_projects_and_reads_back_as_a_match(
 ) -> None:
     payload, _final = _frozen(container, sources, store, account)
     projected = product.project(payload)
-    # The seller-controlled identities are the Snapshot's own stable identities.
-    assert projected.codes.seller_management_code == payload["listing_identity"]
+    # The seller-controlled identities come from the Snapshot's own stable identities: the
+    # provider code is the deterministic projection of the listing identity (R1), the option
+    # codes are the registration_item_keys verbatim.
+    identity = payload["listing_identity"]
+    assert projected.codes.listing_identity == identity
+    assert projected.codes.seller_management_code == product.seller_management_code(identity)
     assert projected.codes.option_codes == tuple(
         item["registration_item_key"] for item in payload["items"]
     )
+    # The adopted request still refuses this unit, because the official evidence leaves required
+    # values uncaptured and none is ever invented.
+    assert not projected.sendable and projected.gaps
     comparison = readback.compare(payload, _read(_readback_body(payload)))
     assert comparison.verdict is readback.ReadbackVerdict.MATCH
     assert comparison.reasons == ()
@@ -196,7 +203,8 @@ def test_the_same_snapshot_projects_identically_every_time(
 ) -> None:
     payload, _final = _frozen(container, sources, store, account)
     first, second = product.project(payload), product.project(dict(payload))
-    assert first.proven == second.proven
+    assert first.document == second.document
+    assert first.gaps == second.gaps
     assert first.codes == second.codes
 
 

@@ -58,17 +58,19 @@ def _code() -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- endpoints (ADR-0014 §17)
 
 M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
-# M5 PR-D adopts these two reads (packet 5746489554); nothing else, and nothing mutating.
+# M5 PR-D adopts the two product reads (packet 5746489554), the IMAGE UPLOAD amendment the
+# one-artifact upload, and the CREATE adoption slice (ADR-0020 §4 order 1) POST /v2/products.
+# Nothing else, and no third mutation.
 M5_ADOPTED = frozenset(
     {
         "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
         "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+        "SMARTSTORE_PRODUCT_CREATE_V2",
     }
 )
 M5_UNPROVEN = frozenset(
     {
-        "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
@@ -79,15 +81,15 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-image-upload-r1"
+M5_MAPPING_REVISION = "m5-create-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
-    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the M5 PR-D read-backs."""
+    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the adopted M5 contracts."""
     return sorted(set(adopted) - M2_ENDPOINTS - M5_ADOPTED)
 
 
-def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
+def test_only_the_adopted_m5_contracts_resolve_and_the_rest_fail_locally() -> None:
     from integrations.marketplaces.smartstore import registry
 
     assert adoption_problems(e.value for e in registry.ADOPTED) == []
@@ -100,18 +102,35 @@ def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_only_image_upload_is_an_adopted_mutating_contract() -> None:
+def test_the_image_upload_and_the_create_are_the_only_adopted_mutating_contracts() -> None:
     from integrations.marketplaces.smartstore import registry
 
-    assert [c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating] == [
-        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    assert "SMARTSTORE_PRODUCT_CREATE_V2" in {e.value for e in registry.NOT_ADOPTED}
+    # SEARCH is the separate later slice (ADR-0020 §4 order 2, ADR-0014 §28.2-§28.4).
+    assert "SMARTSTORE_PRODUCT_SEARCH" in {e.value for e in registry.NOT_ADOPTED}
+
+
+def test_adopting_create_never_adopts_the_reconcile_lookup_with_it() -> None:
+    # ADR-0020 SA-09: CREATE and the positive-only reconcile are two separate slices, CREATE
+    # first. The CREATE seam is real; the lookup seam still refuses locally, so an UNKNOWN stays
+    # unresolved rather than being fabricated into an absence (ADR-0014 §10, §28.2).
+    from integrations.marketplaces.smartstore.execution import (
+        ReconcileLookupNotAdoptedError,
+        SmartStoreReconcileLookup,
+    )
+
+    lookup = SmartStoreReconcileLookup()
+    assert lookup.available() is False
+    with pytest.raises(ReconcileLookupNotAdoptedError):
+        lookup.find(marketplace_account_id="mpa-1", listing_identity="icbm-x")
 
 
 def test_the_adoption_detector_fires() -> None:
-    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_CREATE_V2"]
-    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_CREATE_V2"]
+    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_SEARCH"]
+    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_SEARCH"]
 
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)

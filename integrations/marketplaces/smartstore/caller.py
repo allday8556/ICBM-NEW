@@ -4,8 +4,8 @@ This is the only code that owns an HTTP client for SmartStore. Every provider ca
 ``SmartStoreEndpointCaller.call(endpoint_id, request)``, which:
 
 * resolves only an ADOPTED endpoint; anything else fails here, before any network I/O;
-* builds the request from the endpoint contract: the canonical SELF token form or the committed
-  bearer, validated locally first;
+* builds the request from the endpoint contract: the canonical SELF token form, the committed
+  bearer, a multipart artifact or a canonically encoded JSON document, validated locally first;
 * composes ``BASE_URL + path`` exactly once;
 * applies the endpoint's own connect/read timeouts and never follows a redirect;
 * opens the egress grant for the provider host only, for this one call;
@@ -69,6 +69,7 @@ _PATH_VALUE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PRODUCT_READS = frozenset(
     {EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2, EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2}
 )
+_PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -130,6 +131,23 @@ class ProductReadRequest:
 
 
 @dataclass(frozen=True)
+class ProductCreateRequest:
+    """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
+
+    ``document`` is the typed CREATE request the wire projection built from the **immutable**
+    RegistrationSnapshot and nothing else. It carries business values only — no credential, no
+    session and no tokenized material — so the same mapping is the sanitized canonical
+    representation a durable digest is taken over (ADR-0014 §15, B4). The bearer is the wire
+    secret: it exists only for this call and is never part of the request object's repr.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    document: Mapping[str, object] = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ImageUploadRequest:
     """Upload exactly one immutable artifact in exactly one ``imageFiles`` part.
 
@@ -155,6 +173,21 @@ class ProductReadback:
 
     endpoint_id: EndpointId
     product_no: str
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class ProductCreateResponse:
+    """A CREATE response reduced to the endpoint's retained-field allow-list.
+
+    Only the approved provider identifiers and the safe product leaves survive this boundary; the
+    caller never hands a raw provider body to REGISTER (ADR-0011 §3, ADR-0014 §15). Reaching this
+    type means the endpoint success predicate passed — it does **not** mean a product exists: the
+    response contract still has to recognize a usable ``originProductNo`` (``create.py``), and a
+    2xx is never a registration confirmation (ADR-0014 §11).
+    """
+
     retained: Mapping[str, object]
     http_status: int
 
@@ -216,19 +249,24 @@ def _endpoint_name(endpoint_id: object) -> str:
 def _generations(request: object) -> tuple[int | None, int | None]:
     if isinstance(request, TokenRequest):
         return request.credentials.credential_generation, None
-    if isinstance(request, AccountRequest | ProductReadRequest | ImageUploadRequest):
+    if isinstance(
+        request, AccountRequest | ProductReadRequest | ProductCreateRequest | ImageUploadRequest
+    ):
         return request.credential_generation, request.session_generation
     return None, None
 
 
 @dataclass(frozen=True)
 class _Wire:
-    """One composed request: the path this call uses, its headers and its form body."""
+    """One composed request: the path this call uses, its headers and its body."""
 
     path: str
     headers: dict[str, str]
     form: dict[str, str]
     files: tuple[tuple[str, tuple[str, bytes, str]], ...] = ()
+    # A pre-encoded body, used by the JSON endpoints: the bytes are produced here, from the typed
+    # document, so the media type of the wire is the endpoint contract's and nothing else.
+    content: bytes | None = None
 
 
 def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
@@ -286,6 +324,15 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
+    if contract.endpoint_id is _PRODUCT_CREATE:
+        if not isinstance(request, ProductCreateRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        return _Wire(contract.path, headers, {}, content=_json_body(request.document))
     if contract.endpoint_id is _IMAGE_UPLOAD:
         if not isinstance(request, ImageUploadRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -309,6 +356,29 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
     raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
 
 
+def _json_body(document: Mapping[str, object]) -> bytes:
+    """The canonical JSON bytes of one typed request document.
+
+    Encoded here, deterministically (sorted keys, no insignificant space, UTF-8), so the wire body
+    is a function of the document alone and the endpoint contract's media type is the one actually
+    sent. A document that is not JSON-encodable is a local contract violation: it never reaches the
+    transport, so nothing can have been applied.
+    """
+    if not isinstance(document, Mapping) or not document:
+        raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+    try:
+        text = json.dumps(
+            dict(document),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+    return text.encode("utf-8")
+
+
 def _json(content: bytes) -> object:
     try:
         return json.loads(content)
@@ -320,11 +390,16 @@ def _marker(value: object) -> str | None:
     return value if isinstance(value, str) and _PROVIDER_MARKER.fullmatch(value) else None
 
 
-def _result(
-    contract: EndpointContract, request: object, body: object, status: int
-) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
+_Result = TokenGrant | SellerAccount | ProductReadback | ProductCreateResponse | ImageUploadResponse
+
+
+def _result(contract: EndpointContract, request: object, body: object, status: int) -> _Result:
     """The typed result of a response that passed the endpoint's success predicate."""
     fields = cast(dict[str, object], body)
+    if contract.endpoint_id is _PRODUCT_CREATE:
+        assert isinstance(request, ProductCreateRequest)
+        # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
+        return ProductCreateResponse(retained=retain(contract, fields), http_status=status)
     if contract.endpoint_id in _PRODUCT_READS:
         assert isinstance(request, ProductReadRequest)
         # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
@@ -384,25 +459,28 @@ class SmartStoreEndpointCaller:
     @overload
     def call(
         self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_CREATE_V2],
+        request: ProductCreateRequest,
+    ) -> ProductCreateResponse: ...
+
+    @overload
+    def call(
+        self,
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD],
         request: ImageUploadRequest,
     ) -> ImageUploadResponse: ...
 
     @overload
-    def call(
-        self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse: ...
+    def call(self, endpoint_id: object, request: object) -> _Result: ...
 
-    def call(
-        self, endpoint_id: object, request: object
-    ) -> TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse:
+    def call(self, endpoint_id: object, request: object) -> _Result:
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
         contract: EndpointContract | None = None
         status: int | None = None
         trace_id: str | None = None
-        result: TokenGrant | SellerAccount | ProductReadback | ImageUploadResponse | None = None
+        result: _Result | None = None
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
@@ -511,6 +589,7 @@ class SmartStoreEndpointCaller:
                 contract.method.value,
                 BASE_URL + wire.path,
                 headers=wire.headers,
+                content=wire.content,
                 data=wire.form or None,
                 files=wire.files or None,
                 extensions={"trace": recorder},
