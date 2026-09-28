@@ -1,6 +1,11 @@
 # Adaptive Collector — Phase C opening proposal (KM통상 shadow)
 
-- Status: **PROPOSAL** (awaiting architect review)
+- Status: **ACCEPTED, then SUPERSEDED FOR EXECUTION.** Architect PASS / Q1–Q7 review `5312911203`;
+  merged by PR #119 (closeout `5826469328`). Its old server-transport C1–C4 plan stopped at C1
+  (Issue #110 `5844538783`) and is superseded for execution by ADR-0019
+  (`docs/adr/0019-extension-primary-collection-transport.md`, Issue #126 `5844537419`). An
+  extension-transport Phase C is a new, separately authorized campaign. Current state:
+  `docs/acceptance/ADAPTIVE-PHASE-C.md` §4.
 - Author: Claude Code
 - Issue: #110 (after P3 closeout `5825907707`; canonical main `cf37a1c81172c42faa2c1728f1185aa5f28d037e`)
 - Contract: `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` §2, §7, §10, §11

@@ -1,9 +1,10 @@
 # Gate 3 area 3 — populated visual and responsive acceptance
 
-**Status: `PENDING`.** The owner, the harness and their contract exist (Issue #89, authorization
-`5843380581`, ADR-0018 §9 and §12). **No exact-main run has been accepted or recorded.** A PR-head
-run — a local development run or a CI artifact of a pull request — is evidence of that head only.
-It is never an exact-main proof.
+**Status: area 3 `CLOSED` (Issue #89 `5844596009`); no visual acceptance is current at this
+main.** The owner, the harness and their contract exist (Issue #89, authorization `5843380581`,
+ADR-0018 §9 and §12). One exact-main run was accepted and recorded, and it is `STALE` (§5). A
+PR-head run — a local development run or a CI artifact of a pull request — is evidence of that head
+only. It is never an exact-main proof.
 
 ## 1. What is proven, and by what
 
@@ -145,4 +146,11 @@ owners and routes into a fresh dedicated root:
 
 ## 5. Recorded runs
 
-None.
+| acceptance | code SHA | code digest | schema head | report digest | record / close | current |
+| --- | --- | --- | --- | --- | --- | --- |
+| `4e6310fb-5549-40f9-984c-ba695979e720` | `4ba99fbeec01553fb3d046953e40a87706d8e40b` | `7d0788bc6f33383e050f4239926c78232b807364c8e0b230dae043e3d29aed72` | `0030_g3_visual_acceptance` | `43c5dbe3a50a6a902c1f70e18f038c8a78d5c2afc2c2a320eb7b898e501375f9` | authorization `5844533868`; record and read-back `5844583329`; closeout `5844596009` | **`STALE`** since PR #128 merged as `cb70298a` (`5845710026`, G3-31) |
+
+The record lives in the append-only `visual_acceptances` owner of the canonical data root, not in
+this file. It proved that one SHA only: 7 surfaces at both viewports, 14 screenshots, 140 checks,
+0 external requests, 0 server egress. No later main has a recorded run; a gate that relies on visual
+acceptance needs a new exact-main run, reviewed and recorded at the commit it gates (§4).

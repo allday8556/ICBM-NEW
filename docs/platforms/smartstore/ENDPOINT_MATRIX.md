@@ -24,7 +24,7 @@ Primary upstream documentation:
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/exchange-sellers-auth
 - https://apicenter.commerce.naver.com/docs/commerce-api/current/get-account-info-by-account-no-sellers
 - https://apicenter.commerce.naver.com/docs/restful-api
-- https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product and its `원상품 정보 구조체` schema (release 2.89.0, read through the Issue #89 official evidence reviews 5768199984 and 5768247290 and the field-level packet 5861477977; `SOURCES.md` §5.2)
+- https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product and its `원상품 정보 구조체` schema (release 2.89.0, read through the Issue #89 official evidence reviews 5768199984 and 5768247290, the field-level packet 5861477977, the required/conditional-field packet 5861933729 and the registration-requirement and value-level packet 5862400626; `SOURCES.md` §5.2)
 - https://www.rfc-editor.org/rfc/rfc6749
 - https://www.rfc-editor.org/rfc/rfc6750
 
@@ -173,8 +173,8 @@ covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15)
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 
 The architect's official evidence on Issue #89 (packet `5746489554`, reviews `5768199984` and
-`5768247290`, field-level packet `5861477977`, required/conditional-field packet `5861933729`)
-establishes the following for
+`5768247290`, field-level packet `5861477977`, required/conditional-field packet `5861933729`,
+registration-requirement and value-level packet `5862400626`) establishes the following for
 `SMARTSTORE_PRODUCT_CREATE_V2`. **This section adopts nothing:** the row stays `NOT_ADOPTED`, fails
 locally before any network I/O (§2), and gains no LIVE authority. Its own adoption slice
 (ADR-0020 §4) freezes the adopted contract from these facts.
@@ -189,7 +189,7 @@ defaults are recorded once, field by field with sources, in
 | Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, API group `상품` | 5746489554 |
 | Request media type | `application/json` | 5768199984, 5861477977 |
 | Request top level | `originProduct` (required object), `smartstoreChannelProduct` (required object); `windowChannelProduct` is a separate Shopping Window channel structure, out of the SmartStore-only scope | 5861477977, 5861933729 |
-| Required fields | `originProduct`: `statusType`, `name`, `detailContent`, `images`, `salePrice`, `detailAttribute`; `productInfoProvidedNotice` for registration; `smartstoreChannelProduct`: `naverShoppingRegistration`, `channelProductDisplayStatusType`. `leafCategoryId` is not provider-required. Conditional rules: capability record | 5861933729 |
+| Required on registration | `originProduct`: `statusType` (registration value `SALE`), `leafCategoryId`, `name`, `detailContent`, `images`, `salePrice`, `stockQuantity` (at least 1), `detailAttribute`; `productInfoProvidedNotice` for registration; `smartstoreChannelProduct`: `naverShoppingRegistration` (boolean), `channelProductDisplayStatusType` (`ON` or `SUSPENSION` for writes). Accepted values and conditional rules: capability record | 5861933729, 5862400626 |
 | Documented success | HTTP `200`, `Content-Type: application/json;charset=UTF-8` | 5768199984, 5861477977 |
 | Success identifiers | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo` (since API docs `v2.68.0`; may be absent for a SmartStore-only CREATE), plus `originProduct`, the product data SmartStore successfully stored | 5768199984, 5861477977, 5861933729 |
 | Documented statuses | `200`, `308`, `400`, `401`, `403`, `404`, `500`; their meaning is the product-API error contract of `ERRORS.md` §10 — `BAD_REQUEST` read from `invalidInputs` **and** `message`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `INTERNAL_SERVER_ERROR`, and `308/PERMANENT_REDIRECT` never followed for a mutation (§11; `ERRORS.md` §17) | 5861477977; `ERRORS.md` §10 |
