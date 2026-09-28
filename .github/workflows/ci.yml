@@ -9,6 +9,11 @@ name: CI
 # - a ready PR that touches only research/evidence Markdown: lint/format/type plus the unit suite
 #   (which holds the doc-contract tests), not the Windows/Ubuntu runtime and acceptance suites.
 # Branch pushes without a PR run nothing. "CI gate" is the single merge-readiness result.
+#
+# Exact-HEAD invariant: on a pull_request event actions/checkout defaults to the ephemeral
+# refs/pull/N/merge commit, which is base + head and is not the stated commit. Every job therefore
+# pins ref to github.event.pull_request.head.sha (github.sha on push/dispatch), so a green "CI gate"
+# means that exact HEAD passed, with nothing from the base branch mixed in.
 
 on:
   push:
@@ -37,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - id: scope
         name: Classify this run (full | docs | wip)
@@ -52,6 +58,9 @@ jobs:
           elif [ "$DRAFT" = "true" ]; then
             mode=wip
           else
+            # The checkout is pinned to the exact head SHA, not to the merge ref that used to carry
+            # the base commit as a parent, so make both endpoints present before comparing them.
+            git fetch --no-tags --quiet origin "$BASE_SHA" "$HEAD_SHA"
             files="$(git diff --name-only --no-renames "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA")"
             mode=docs
             if [ -z "$files" ]; then
@@ -81,6 +90,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -96,6 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -114,6 +127,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -127,6 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -149,6 +166,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -187,6 +206,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -207,6 +228,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
