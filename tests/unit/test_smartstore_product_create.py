@@ -9,7 +9,8 @@ What this file pins:
 * the frozen endpoint contract — method, path, media type, bearer, group, timeouts, NO_FOLLOW, the
   success predicate and the deny-by-default retention profile (ENDPOINT_MATRIX.md §4.2, §10, §11);
 * that only a `CreateDocument` derived from a frozen Snapshot projection can become a request, and
-  that no document can be built while the CREATE body has an unproven part;
+  that the adoption leaves the CREATE **body** unadopted, so no document can be built at all and no
+  partial body is ever composed;
 * the outcome axis (ERRORS.md §14, §15; ADR-0014 §28.3): a definitive provider rejection is
   `NOT_APPLIED_PROVEN`, everything ambiguous stays `UNKNOWN`, and a transient cause never turns
   into a safe replay;
@@ -28,7 +29,7 @@ import pytest
 from app.connect.marketplace.capability import RemoteOutcome
 from app.core.egress import EGRESS
 from app.core.errors import ErrorClass
-from integrations.marketplaces.smartstore import classify
+from integrations.marketplaces.smartstore import classify, product
 from integrations.marketplaces.smartstore import execution as adapter
 from integrations.marketplaces.smartstore.caller import (
     ProductCreateRequest,
@@ -162,10 +163,10 @@ def no_transport(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def frozen_document(monkeypatch: pytest.MonkeyPatch) -> CreateDocument:
     """The sender under a Snapshot whose CREATE body is fully proven.
 
-    No unit is sendable at this main — :data:`CHANNEL_PRODUCT_GAP` alone sees to that, and
-    :func:`test_no_create_document_can_be_built_while_the_body_has_an_unproven_part` pins it. This
-    fixture substitutes the document builder so the *transport* behaviour of the adopted contract
-    can be proven now, which is exactly what this slice adopts.
+    No unit is sendable at this main: the body is not adopted, so ``create_document`` refuses every
+    payload, and the document-boundary tests below pin that. This fixture substitutes the document
+    builder so the *transport* behaviour of the adopted contract can be proven now, which is
+    exactly what this slice adopts.
     """
     monkeypatch.setattr(adapter, "create_document", lambda payload: DOCUMENT)
     return DOCUMENT
@@ -471,7 +472,7 @@ def test_a_rate_limited_cause_does_not_make_a_replay_safe() -> None:
 # ---------------------------------------------------------------- the document boundary
 
 
-def test_no_create_document_can_be_built_while_the_body_has_an_unproven_part() -> None:
+def test_no_create_document_is_ever_built_while_the_body_is_not_adopted() -> None:
     projection = project(UNSENDABLE_PAYLOAD)
     assert projection.sendable is False
     assert CHANNEL_PRODUCT_GAP in projection.gaps
@@ -479,6 +480,25 @@ def test_no_create_document_can_be_built_while_the_body_has_an_unproven_part() -
     assert not [gap for gap in projection.gaps if "media type" in gap]
     with pytest.raises(WireContractError) as refused:
         create_document(UNSENDABLE_PAYLOAD)
+    assert refused.value.code == "WIRE_CONTRACT_UNPROVEN"
+    assert CHANNEL_PRODUCT_GAP in refused.value.detail
+
+
+def test_the_body_refusal_is_unconditional_and_composes_no_partial_document() -> None:
+    # The endpoint is adopted; its body is not (EM §4.3). So the builder never returns a document,
+    # and emptying the gap list cannot open a send: a body that omits the channel-product structure
+    # would be a request the provider contract does not describe.
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(
+            product,
+            "project",
+            lambda payload: dataclasses.replace(project(payload), gaps=()),
+        )
+        with pytest.raises(WireContractError) as refused:
+            create_document(UNSENDABLE_PAYLOAD)
+    finally:
+        monkey.undo()
     assert refused.value.code == "WIRE_CONTRACT_UNPROVEN"
     assert CHANNEL_PRODUCT_GAP in refused.value.detail
 

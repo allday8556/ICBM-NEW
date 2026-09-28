@@ -17,15 +17,16 @@ category-specific, with conditional fields omitted rather than filled.
 shape of ``images``, the option-combination container and its option-name/value field names, and
 the channel-product structure the CREATE body pairs with ``originProduct``. A complete CREATE
 document cannot be built from proven names alone, so :func:`project` returns the proven projection
-and the named gaps, :func:`create_document` refuses while any gap remains, and
+and the named gaps, :func:`create_document` refuses every payload at this evidence, and
 :func:`seller_codes` fixes the identities the projection and the read-back comparison share.
 
 **CREATE adoption (ADR-0020 §4 slice 1).** ``SMARTSTORE_PRODUCT_CREATE_V2`` is now ADOPTED
 (``registry.py``), and the request media type of ``POST /v2/products`` is proven to be
 ``application/json`` (ENDPOINT_MATRIX.md §4.2, review 5768199984), so that is no longer a gap: the
-registry freezes it. Adoption changes nothing else here. This module still assembles only what the
-evidence proves, the remaining gaps still make every unit unsendable, and nothing is sent from
-here — execution stays ``DRY_RUN`` and the canary stays ``BLOCKED``.
+registry freezes it. **The adoption stops there and does not reach the CREATE body's structure**,
+which stays unproven: the body is not adopted, no document is assembled, and every provider-listing
+unit is unsendable before any network I/O (ENDPOINT_MATRIX.md §4.3). Nothing is sent from here —
+execution stays ``DRY_RUN`` and the canary stays ``BLOCKED``.
 
 Seller-controlled identities are deterministic and stable: the listing's management code is the
 listing identity, and an option unit's code is its ``registration_item_key``. Both are already
@@ -58,14 +59,12 @@ FIELD_SELLER_CODE_INFO: Final = "sellerCodeInfo"
 FIELD_SELLER_MANAGEMENT_CODE: Final = "sellerManagementCode"
 FIELD_OPTION_SELLER_CODE: Final = "sellerManagerCode"
 FIELD_NOTICE: Final = "productInfoProvidedNotice"
-# The CREATE body's own container for the 원상품 정보 구조체 (packet 5746489554, review 5768199984).
-FIELD_ORIGIN_PRODUCT: Final = "originProduct"
 
 # The gap that keeps every unit unsendable even when nothing else is missing: the reviews prove
 # the CREATE body pairs ``originProduct`` with a channel-product structure, and name neither that
-# structure's field nor its shape. It is removed only by the slice that proves and emits it, in
-# the same change — never on its own, because :func:`create_document` builds the body only when
-# the gap list is empty.
+# structure's field nor its shape. The proven fields above are the 원상품 정보 구조체 only; the
+# container that carries them and the structure beside it are not proven, so this module spells
+# neither. It is removed only by the slice that proves and emits the body, in the same change.
 CHANNEL_PRODUCT_GAP: Final = (
     "channel-product structure: the CREATE body pairs originProduct with a channel-product"
     " structure whose field name and shape no reviewed evidence names"
@@ -272,9 +271,11 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
 class CreateDocument:
     """The complete ``POST /v2/products`` request body of one frozen provider-listing unit.
 
-    It exists only when :func:`project` reports **no** gap, so a body can never be assembled from
-    partially proven provider facts, and the only thing that can become one is the immutable
-    Snapshot's own projection (ADR-0014 §6, §11).
+    It is the adopted endpoint's request type (ENDPOINT_MATRIX.md §4.3), and the only thing that
+    may ever become one is the immutable Snapshot's own projection (ADR-0014 §6, §11). At the
+    current evidence **nothing derives one**: the body's structure is not adopted, so
+    :func:`create_document` refuses every payload and a body is never assembled from partially
+    proven provider facts. The slice that proves the body builds it, in the same change.
 
     ``body`` is JSON-safe and holds no credential: the bearer is a header the caller adds, never
     part of this document and never part of a durable digest (ADR-0014 §15, M5-24).
@@ -294,20 +295,23 @@ class CreateDocument:
 
 
 def create_document(payload: Mapping[str, Any]) -> CreateDocument:
-    """The CREATE body of one frozen Snapshot payload, or a refusal.
+    """The refusal that stands in for a CREATE body while the body is not adopted.
 
-    Raises :class:`WireContractError` with ``WIRE_CONTRACT_UNPROVEN`` while :func:`project` names
-    any gap. That is the fail-closed boundary of the CREATE adoption: the adopted endpoint is
-    never handed a body assembled from unproven provider facts (CLAUDE.md §5.4, §7.3), and at the
-    current evidence :data:`CHANNEL_PRODUCT_GAP` alone keeps every unit unsendable.
+    Always raises :class:`WireContractError` with ``WIRE_CONTRACT_UNPROVEN``, naming the structures
+    :func:`project` found unproven. The CREATE **endpoint** is adopted; its **body** is not
+    (ENDPOINT_MATRIX.md §4.3), so there is nothing to assemble and no partial body is composed
+    here — not even an unreachable one. The proven projection is not a CREATE body: it is the
+    원상품 정보 구조체's proven fields without the container that carries them and without the
+    channel-product structure beside it, and emitting it would send a document the provider
+    contract does not describe (CLAUDE.md §5.4, §7.3).
+
+    The refusal is deliberately unconditional rather than gap-driven: deleting a gap string can
+    never open a send. The slice that proves the body puts the assembly here, in the same change
+    that removes the gaps.
     """
+    # :func:`project` still runs, and is not an optimisable detour: it validates the Snapshot
+    # payload — a malformed one raises its own error the sender reports separately — and it names
+    # the unproven structures this refusal carries.
     projection = project(payload)
-    if projection.gaps:
-        raise WireContractError("WIRE_CONTRACT_UNPROVEN", "; ".join(projection.gaps))
-    # Unreachable while any gap stands. It is written out so that the slice which proves the
-    # remaining containers adds them here, in the same change that removes their gap.
-    return CreateDocument(
-        encoding_version=projection.encoding_version,
-        listing_identity=projection.codes.seller_management_code,
-        body={FIELD_ORIGIN_PRODUCT: dict(projection.proven)},
-    )
+    gaps = projection.gaps or (CHANNEL_PRODUCT_GAP,)
+    raise WireContractError("WIRE_CONTRACT_UNPROVEN", "; ".join(gaps))

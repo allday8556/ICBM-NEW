@@ -6,10 +6,12 @@ upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``, Gate 3 area 1), not
 production seams here are shaped by those boundaries:
 
 * :class:`SmartStoreCreateSender` is the adopted CREATE contract over the registry-gated caller.
-  **Adoption is not a session and not LIVE authority.** Production wires neither a caller nor a
-  committed bearer (``app/container.py``), so it reports unavailable there and the REGISTER send
-  gate refuses before anything is built; even with both, every send still passes the ADR-0018
-  send-time safety stack, which refuses while ``M0_DRY_RUN_ONLY`` holds;
+  **Adoption is not a session, not a sendable body and not LIVE authority.** Production wires
+  neither a caller nor a committed bearer (``app/container.py``), so it reports unavailable there
+  and the REGISTER send gate refuses before anything is built; even with both, the CREATE body is
+  not adopted (ENDPOINT_MATRIX.md §4.3), so ``product.create_document`` refuses every payload
+  locally before transport, and every send would in any case pass the ADR-0018 send-time safety
+  stack, which refuses while ``M0_DRY_RUN_ONLY`` holds;
 * :class:`SmartStoreReadback` is real: it calls the adopted origin read-back through the registry
   caller and returns only the retained, sanitized response (PR-D's profile);
 * :class:`SmartStoreReconcileLookup` reports unavailable, because no product-search contract is
@@ -137,6 +139,10 @@ class SmartStoreCreateSender:
         self, *, payload: Mapping[str, Any], idempotency_key: str, listing_identity: str
     ) -> CreateHandoff:
         """One CREATE of one frozen Snapshot payload.
+
+        At the current evidence this never reaches transport: the body is not adopted, so
+        :func:`~integrations.marketplaces.smartstore.product.create_document` refuses and the
+        handoff is the local ``NOT_APPLIED_PROVEN`` refusal below.
 
         ``idempotency_key`` is ICBM's own durable Intent identity (ADR-0014 §8). It is **not** put
         on the wire: review 5768247290 proves the provider offers no idempotency key, no

@@ -388,24 +388,34 @@ now       never resend while the outcome is unknown
   grant, proof or readiness implies it.
 
 > **Amendment note (CREATE adoption slice, ADR-0020 §4 slice 1).** The first bullet of §6.1's
-> "what the endpoints still need" is done: `SMARTSTORE_PRODUCT_CREATE_V2` is **`ADOPTED`** under the
-> official wire contract, with the error classification that separates a definitive rejection from
-> an ambiguous outcome, frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.3 and
-> `ERRORS.md` §15.1.1.
+> "what the endpoints still need" is **closed in part, not done**. `SMARTSTORE_PRODUCT_CREATE_V2` is
+> **`ADOPTED`**: its endpoint contract (method, path, `application/json` media type, bearer, `상품`
+> group, timeouts, `NO_FOLLOW`), its response contract and success predicate, and the error
+> classification that separates a definitive rejection from an ambiguous outcome are frozen in
+> `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.3 and `ERRORS.md` §15.1.1.
 >
-> **This closes exactly one of §6's conditions and nothing else.** The official-evidence verdict
-> stays `INSUFFICIENT` and is neither overturned nor re-decided. An ICBM seller-side code and a
-> zero-result search remain insufficient proof of remote absence (G3-15). An `UNKNOWN` is never
+> **What the same bullet requires and this slice did not close: the request body's structure.** No
+> reviewed evidence names the `images` container, the option-combination container or the
+> channel-product structure the body pairs with `originProduct`, so the body is not adopted, the
+> wire projection refuses every payload before any transport, and **no provider-listing unit can be
+> sent at all**. That part of the bullet stays open and is a further separately authorized slice;
+> the CREATE stage is blocked on it as well as on every layer of §10.
+>
+> **To that extent it closes one of §6's conditions, and nothing else.** The official-evidence
+> verdict stays `INSUFFICIENT` and is neither overturned nor re-decided. An ICBM seller-side code
+> and a zero-result search remain insufficient proof of remote absence (G3-15). An `UNKNOWN` is never
 > resent and keeps its conflict scope closed (G3-07), and no grant is issued for it. SEARCH's
 > positive-only reconcile path stays `NOT_ADOPTED` and is its own later slice, the residual-risk
 > acceptance of §6.1 stays unrecorded, `M0_DRY_RUN_ONLY` still refuses every mutation, and **the
 > canary stays `BLOCKED`**.
 >
 > **Adoption is not a session, and bearer readiness is a separate blocker — not a reason this
-> adoption is unmet.** §6's endpoint-adoption condition for CREATE is now satisfied. Two other
-> things still refuse on their own, and each is its own line, never this one: production wires the
-> CREATE seam with no committed bearer, so `SmartStoreCreateSender.available()` is false and the
-> CREATE stage's sender layer refuses; and `SMARTSTORE_PRODUCT_SEARCH` is still `NOT_ADOPTED`, so
+> adoption is unmet.** The §10 endpoint-adoption row's `CREATE_ADOPTED` fact is now satisfied — that
+> row reads the registry's adoption status, never the body's provability, which is the open part
+> above. Two other things still refuse on their own, and each is its own line, never this one:
+> production wires the CREATE seam with no committed bearer, so
+> `SmartStoreCreateSender.available()` is false and the CREATE stage's sender layer refuses; and
+> `SMARTSTORE_PRODUCT_SEARCH` is still `NOT_ADOPTED`, so
 > the §10 endpoint-adoption row of that stage is still incomplete. Every other layer of §10 keeps
 > its own condition.
 

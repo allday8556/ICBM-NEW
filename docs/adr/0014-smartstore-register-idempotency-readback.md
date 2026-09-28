@@ -476,7 +476,9 @@ seller-side code, grant, proof or approval ever becomes remote-absence evidence 
 > deny-by-default retention profile; and an outcome classification that separates a definitive
 > provider rejection, positively attributed to the API-server layer, from an ambiguous outcome. The provider's **absent**
 > idempotency is recorded (`NONE_DOCUMENTED`, automatic retry budget `0`) exactly as the paragraph
-> above requires, never assumed.
+> above requires, never assumed. **The request body's structure is not part of that freeze** — it is
+> unproven, so it is not adopted (`ENDPOINT_MATRIX.md` §4.3) and the endpoint is adopted and
+> unsendable.
 >
 > **This amendment note changes nothing else.** The verdict stays `INSUFFICIENT`. No lookup result,
 > seller-side code, grant, proof or approval becomes remote-absence evidence. An `UNKNOWN` CREATE is

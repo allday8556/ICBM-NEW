@@ -34,6 +34,12 @@ request media type, and HTTP 200 answered with the documented identifiers and th
 over those facts, never provider facts; the predicate requires that whole documented success
 document, so a 200 carrying less stays an ambiguous outcome rather than a reported success.
 
+**What this adoption does not freeze: the CREATE body's structure.** The reviews name the
+``originProduct`` structure and a channel-product structure beside it, and prove neither container's
+shape (ENDPOINT_MATRIX.md §4.3, §17). So the body is **not** adopted, ``product.create_document``
+refuses every payload before transport, and the endpoint is adopted **and unsendable** — a contract
+a later, separately authorized body slice would send under, never a claim that a CREATE can be sent.
+
 The provider's **absent** idempotency is recorded below rather than assumed, and it is bound to the
 never-resend rule of ADR-0014 §28: an ``UNKNOWN`` CREATE is never resent, and this registry grants
 no retry budget for it. ``SMARTSTORE_PRODUCT_SEARCH`` stays NOT_ADOPTED — the positive-only

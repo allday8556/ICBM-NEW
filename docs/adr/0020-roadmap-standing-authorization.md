@@ -90,14 +90,24 @@ item 1 (M5) are, in order and each as its own PR:
 | 1 | **CREATE adoption** — `SMARTSTORE_PRODUCT_CREATE_V2` — **LANDED** (see the record note below) | the official CREATE request/response contract; the error classification that separates a definitive rejection from an ambiguous outcome (ADR-0018 §6.1); `UNKNOWN` is never resent (ADR-0014 §28, G3-07); the runtime, tests and docs of that adoption, including the endpoint's adoption status | any SmartStore call; LIVE; canary; residual-risk acceptance; SEARCH; M6 |
 | 2 | **SEARCH positive-only reconcile adoption** — `SMARTSTORE_PRODUCT_SEARCH` | limited to the positive reconcile of ADR-0014 §28.2–§28.4 and its exact request, response and pagination contract; a separate slice after CREATE | any SmartStore call; LIVE; canary; residual-risk acceptance; zero-result absence inference |
 
-> **Record note — slice 1 landed.** The CREATE adoption slice was implemented under this standing
-> authorization, provider-zero, as its own PR. `SMARTSTORE_PRODUCT_CREATE_V2` is `ADOPTED` under the
-> contract frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.3, its outcome classification
-> in `ERRORS.md` §15.1.1, and the amendment notes in ADR-0014 §17.2 and ADR-0018 §6.1. It made no
-> provider call, changed no schema, and closed no other condition: the verdict stays `INSUFFICIENT`,
-> execution stays `DRY_RUN`, `product_registration.write` stays `UNVERIFIED`, `docs/acceptance/M5.md`
-> stays `PENDING`, and the canary stays `BLOCKED`. **Slice 2, the SEARCH positive-only reconcile
-> adoption, is the next step in this order** and is still its own separately authorized PR (SA-09).
+> **Record note — slice 1 landed, and exactly how far.** The CREATE adoption slice was implemented
+> under this standing authorization, provider-zero, as its own PR. `SMARTSTORE_PRODUCT_CREATE_V2` is
+> `ADOPTED` under the contract frozen in `docs/platforms/smartstore/ENDPOINT_MATRIX.md` §4.3, its
+> outcome classification in `ERRORS.md` §15.1.1, and the amendment notes in ADR-0014 §17.2 and
+> ADR-0018 §6.1. It made no provider call, changed no schema, and closed no other condition: the
+> verdict stays `INSUFFICIENT`, execution stays `DRY_RUN`, `product_registration.write` stays
+> `UNVERIFIED`, `docs/acceptance/M5.md` stays `PENDING`, and the canary stays `BLOCKED`.
+>
+> **What it did not adopt: the CREATE body's structure.** The reviewed evidence names neither the
+> `images` container, nor the option-combination container, nor the channel-product structure the
+> body pairs with `originProduct`, so the body is not frozen, the wire projection refuses every
+> payload before transport, and no provider-listing unit is sendable. ADR-0018 §6.1's CREATE bullet
+> is therefore closed only for the endpoint contract, the response and the error classification;
+> **proving and emitting the body is a further slice of its own**, and it needs new official evidence
+> before §2.2 and §2.4 could be met for it. Nothing here fixes its position relative to slice 2.
+>
+> **Slice 2, the SEARCH positive-only reconcile adoption, is the next step in this order** and is
+> still its own separately authorized PR (SA-09).
 
 After these two, the **mandatory pre-canary prerequisites that no slice has closed** stay ahead of
 any canary: the mutation-stage prerequisites of ADR-0018 §10 and the read-back success proof of

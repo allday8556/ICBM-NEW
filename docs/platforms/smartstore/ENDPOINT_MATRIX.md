@@ -134,7 +134,7 @@ CREATE caller.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | **Closed by the CREATE adoption slice (§4.3, ADR-0020 §4).** The row is now `ADOPTED`: the success predicate, the timeouts, the redirect policy, the retention profile and the outcome classification are frozen in §4.3, and the provider's **absent** idempotency is recorded rather than assumed. The verdict below is unchanged |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | **Closed for the endpoint contract by the CREATE adoption slice (§4.3, ADR-0020 §4).** The row is now `ADOPTED`: the success predicate, the timeouts, the redirect policy, the retention profile and the outcome classification are frozen in §4.3, and the provider's **absent** idempotency is recorded rather than assumed. The CREATE **body**'s structure is not part of that freeze and stays unproven, so no unit is sendable (§4.3, §17). The verdict below is unchanged |
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
@@ -225,13 +225,27 @@ contract in code — a request type, a response type, an error and outcome class
 `INSUFFICIENT` (§4.1), `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, and the canary stays
 `BLOCKED` on every other condition of ADR-0018 §6 and §10.
 
+**What this adoption freezes, and what it explicitly does not.** It freezes the operational contract
+fields §2 and §16 require before a `NOT_ADOPTED → ADOPTED` change: the method and path, the app
+mode, the required group, the request media type, the timeout policy, the redirect policy, the
+machine-checkable success predicate, the error and outcome classification, the deny-by-default
+retention profile and, for this write, the provider's recorded **absent** idempotency together with
+the read-back identity and the never-resend rule that stands where a reconcile path does not yet
+exist. It does **not** freeze the CREATE body's internal structure: no reviewed evidence proves it
+(see "What is still unproven" and §17), so the body is **not adopted**, the wire projection
+assembles no document, and this endpoint is adopted **and unsendable** — every unit refuses locally,
+before any network I/O. Adoption is therefore the contract a later, separately authorized body slice
+would send under, never a statement that a CREATE can be sent. ADR-0018 §6.1's first bullet is
+closed for the response and the error classification and for this request contract; the part of it
+that is the body's structure stays open (ADR-0018 §6.1 amendment note).
+
 | Field | Adopted value | Source |
 | --- | --- | --- |
 | Method / path | `POST /v2/products`, relative to `base_url` (§3) | packet 5746489554 |
 | Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, API group `상품` | packet 5746489554 |
 | App mode | `OWN_STORE_SELF` | packet 5746489554 |
 | Request media type | `application/json` | review 5768199984 |
-| Request body | only the frozen `RegistrationSnapshot`'s own projection: the documented `originProduct` structure plus the channel-product structure (see "What is still unproven") | packet 5746489554, review 5768199984 |
+| Request body | **not frozen, not adopted** — a body may only ever come from the frozen `RegistrationSnapshot`'s own projection, and that projection refuses to assemble one while the documented `originProduct` container and the channel-product structure beside it are unproven (see "What is still unproven"); the shape named in §4.2 is the evidence record, never a frozen request schema | packet 5746489554, review 5768199984 |
 | Safe query keys | **none** (deny-by-default) | ICBM policy |
 | Timeouts | connect `5s`, read `30s` | ICBM policy (§10) |
 | Redirect | `NO_FOLLOW`; a 3xx is never followed for a mutation and is recorded as ambiguous | ICBM policy (§11); `ERRORS.md` §10.6, §17 |
@@ -922,7 +936,7 @@ Upstream changes do not silently rewrite this matrix.
 | Whether M2 timeout values need adjustment after measured latency | `MEASURE, THEN REVIEW` |
 | Token remote-success/local-commit-unknown behavior | `OWNED BY AUTH.md / MEASUREMENT REQUIRED` |
 | Exact M5 registration endpoint set | `PARTIALLY ADOPTED`: the two read-backs, the image upload and the product CREATE (§4.3) are `ADOPTED`; `SMARTSTORE_PRODUCT_SEARCH` and the metadata rows stay `NOT_ADOPTED` |
-| The CREATE body's image container, option-combination container and channel-product structure | `NOT PROVEN`: every unit stays unsendable and the projection refuses (§4.3) |
+| The CREATE body's image container, option-combination container and channel-product structure | `NOT PROVEN`: outside the adopted freeze, so the body is not adopted, every unit stays unsendable and the projection refuses every payload (§4.3). A CREATE can be sent only after a separately authorized slice proves and emits it |
 | Whether the CREATE read timeout needs adjustment after measured latency | `MEASURE, THEN REVIEW` |
 | Exact M5 required API-group union | `NOT FROZEN` |
 
