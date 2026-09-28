@@ -6,8 +6,10 @@ name: CI
 # - a ready (non-draft) PR: the full suite on every new HEAD, since a new commit makes any earlier
 #   green run stale (check runs belong to one exact commit and are never inherited);
 # - a draft PR (WIP preservation): lint/format/type only, and no "CI gate" result at all;
-# - a ready PR that touches only research/evidence Markdown: lint/format/type plus the unit suite
-#   (which holds the doc-contract tests), not the Windows/Ubuntu runtime and acceptance suites.
+# - a ready PR that touches only Markdown in the upstream research/evidence catalog
+#   (docs/evidence/): lint/format/type plus the unit suite (which holds the doc-contract tests),
+#   not the Windows/Ubuntu runtime and acceptance suites. That allowlist is the whole exemption;
+#   every other path, Markdown included, takes the full suite.
 # Branch pushes without a PR run nothing. "CI gate" is the single merge-readiness result.
 #
 # Exact-HEAD invariant: on a pull_request event actions/checkout defaults to the ephemeral
@@ -68,14 +70,13 @@ jobs:
             fi
             while IFS= read -r f; do
               [ -z "$f" ] && continue
+              # Allowlist, not a denylist: only the upstream research/evidence catalog under
+              # docs/evidence/ is light, and only its Markdown. Everything else takes the full
+              # gate - canonical policy, contracts, acceptance evidence, prose anywhere else,
+              # code, data, CI itself - including any Markdown path added later, which is
+              # unlisted here by default and therefore never bypasses the gate.
               case "$f" in
-                # Canonical policy, contracts, acceptance and CI itself always take the full gate.
-                .github/*|ROADMAP.md|CLAUDE.md|docs/ARCHITECTURE.md|docs/UI_SOURCE_OF_TRUTH.md) mode=full ;;
-                docs/adr/*|docs/acceptance/*|docs/architecture/*|docs/GLOSSARY.md) mode=full ;;
-                # Marketplace adoption and error contracts are canonical runtime policy, not research.
-                docs/platforms/*/ENDPOINT_MATRIX.md|docs/platforms/*/ERRORS.md) mode=full ;;
-                # Only Markdown prose is light; data, schemas and evidence files are not.
-                *.md) ;;
+                docs/evidence/*.md) ;;
                 *) mode=full ;;
               esac
             done <<< "$files"
