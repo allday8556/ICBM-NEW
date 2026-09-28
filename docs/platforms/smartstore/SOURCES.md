@@ -259,63 +259,43 @@ Packet scope, and what it deliberately does **not** license:
 - **not proven by this packet, so fail-closed**: the image upload part name, the product-search
   request schema (no strong duplicate key), the category query keys of the attribute/option reads,
   and any response field of the category/notice reads. The CREATE request and response contract is
-  recorded in one place, §5.2.
+  recorded field by field in `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; its
+  sources are in §5.2.
 
 `AUTH_MODE` stays `SELF`: the packet's Commerce Solution `SELLER` guidance is solution-specific and
 is not applicable evidence for ICBM's own-store application (§11.4 — unknown beats invention).
 
 ### 5.2 M5 CREATE request/response evidence (`2.89.0`)
 
-This is the single ledger entry for the `POST /v2/products` contract evidence. It combines the
-architect's official evidence reviews **5768199984** and **5768247290** and the field-level packet
-**5861477977** (retrieved 2026-09-28) with packet 5746489554 (§5.1), all read against the current
-`(v2) 상품 등록` reference and `원상품 정보 구조체` schema of release **2.89.0 (2026-09-15)**. The
-reviews closed `INSUFFICIENT` for idempotent replay and remote-absence proof (ADR-0014 §17.2); that
-verdict is unchanged.
+This is the single ledger entry for the sources of the `POST /v2/products` contract evidence. It
+combines the architect's official evidence reviews **5768199984** and **5768247290**, the
+field-level packet **5861477977** and the required/conditional-field packet **5861933729** (both
+retrieved 2026-09-28) with packet 5746489554 (§5.1), all read against the current `(v2) 상품 등록`
+reference and the `원상품 정보 구조체` and `스마트스토어 채널상품 정보 구조체` schemas of release **2.89.0
+(2026-09-15)**. The reviews closed `INSUFFICIENT` for idempotent replay and remote-absence proof
+(ADR-0014 §17.2); that verdict is unchanged.
 
 | Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
-| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE media type, success status, success identifiers and stored product data, absence of idempotency | `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
-| `NAVER-P0-FIELDS-CREATE-289` | Issue #89 comment 5861477977 (architect-reviewed field-level extract of the 2.89.0 CREATE reference and the `원상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | CREATE top-level objects, nested request keys, success `Content-Type`, documented statuses | `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-REVIEW-CREATE-289` | Issue #89 comments 5768199984 and 5768247290 (architect-reviewed official evidence reviews of https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, release 2.89.0) | CREATE media type, success status, success identifiers and stored product data, absence of idempotency | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-FIELDS-CREATE-289` | Issue #89 comment 5861477977 (architect-reviewed field-level extract of the 2.89.0 CREATE reference and the `원상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | CREATE top-level objects, nested request keys, success `Content-Type`, documented statuses | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-REQUIRED-CREATE-289` | Issue #89 comment 5861933729 (architect-reviewed required/optional/conditional-field extract of the 2.89.0 CREATE reference, the `원상품 정보 구조체` schema and the `스마트스토어 채널상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4-%EC%B1%84%EB%84%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | globally required `originProduct` fields, M5-relevant conditional rules (options, notice, delivery, after-service, origin area, unit price), channel-product required fields, `windowChannelProduct` scope | `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 
-Proven, limited to what these sources state:
-
-- **wire:** `POST /v2/products`, the `(v2) 상품 등록` endpoint (5746489554); request media type
-  `application/json` (5768199984, 5861477977); success is HTTP `200` with `Content-Type:
-  application/json;charset=UTF-8` (5768199984, 5861477977); the documented statuses are `200`, `308`,
-  `400`, `401`, `403`, `404` and `500` (5861477977);
-- **top level:** `originProduct` and `smartstoreChannelProduct` are required objects;
-  `windowChannelProduct` is a separate sibling channel object when applicable (5861477977);
-- **`originProduct`:** `name`, `detailContent` and `images` are required; `salePrice` is required,
-  at most 999,999,990; `stockQuantity` is at most 99,999,999 (5746489554);
-- **`originProduct.images`:** `representativeImage` is a required object whose `url` is a required
-  string; `optionalImages` is an optional array of at most 9 entries, each with a required `url`;
-  every URL is one returned by the product-image upload API (5746489554, 5861477977);
-- **`originProduct.detailAttribute.sellerCodeInfo`:** `sellerManagementCode`, `sellerBarcode`,
-  `sellerCustomCode1`, `sellerCustomCode2` (5861477977). `sellerManagementCode` is seller-authored
-  origin-product data of at most 30 characters with no uniqueness guarantee (5768199984,
-  5768247290, from NAVER official support);
-- **`originProduct.detailAttribute.optionInfo`**, combination form: `optionCombinationSortType`;
-  `optionCombinationGroupNames.optionGroupName1` (required when this structure is used), plus
-  `optionGroupName2`/`3` and the branch/location-only `optionGroupName4`; `optionCombinations[]`
-  with `id`, `stockQuantity` (default 0, at most 99,999,999), `price` (default 0, at most
-  999,999,990), `usable`, `optionName1`..`4`, `sellerManagerCode` and `skuYn` (5746489554,
-  5861477977). The schema also documents simple, custom and standard option structures;
-- **`originProduct.detailAttribute.productInfoProvidedNotice`:** required for registration;
-  `productInfoProvidedNoticeType` is required and selects one type-specific child object (for example
-  `wear`, `shoes`, `food`, `generalFood`, `dietFood`); some values are documented as "미입력 시
-  상품상세 참조" and conditional fields are omitted when not applicable, so there is no blanket
-  fill-every-field rule (5746489554, 5861477977);
-- **`smartstoreChannelProduct`:** `naverShoppingRegistration` required;
-  `channelProductDisplayStatusType` required, `ON` or `SUSPENSION` for writes; `channelProductName`
-  optional (omitted, the origin product name is used); `bbsSeq` optional; `storeKeepExclusiveProduct`
-  optional (omitted, stored as false) (5861477977);
-- **success response:** the provider-issued identifiers `originProductNo`,
-  `smartstoreChannelProductNo` and `windowChannelProductNo` (since API docs `v2.68.0`), plus
-  `originProduct`, which NAVER states is the product data SmartStore successfully stored
-  (5768199984, 5861477977);
-- the reference contains no idempotency key, request-correlation key, replay rule or
-  duplicate-prevention guarantee (5768247290, 5861477977).
+Summary, limited to what these sources state: `POST /v2/products` takes an `application/json` body
+whose required top-level objects are `originProduct` and `smartstoreChannelProduct`; the
+globally required `originProduct` fields are `statusType`, `name`, `detailContent`, `images`,
+`salePrice` and `detailAttribute` (`leafCategoryId`, `stockQuantity`, `sellerCodeInfo` and
+`optionInfo` are not provider-required), `productInfoProvidedNotice` is required for registration,
+and further structures carry documented conditional rules; `windowChannelProduct` is a separate
+Shopping Window channel structure outside the SmartStore-only scope. Success is HTTP `200`,
+`application/json;charset=UTF-8`, returning `originProductNo`, `smartstoreChannelProductNo`,
+`windowChannelProductNo` (which may be absent for a SmartStore-only CREATE) and the stored
+`originProduct`; the documented statuses are `200`, `308`,
+`400`, `401`, `403`, `404` and `500`; the reference contains no idempotency key,
+request-correlation key, replay rule or duplicate-prevention guarantee. The field-by-field contract
+(nested keys, required/optional/conditional rules, limits, defaults) is recorded once, in
+`docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore, with a per-field source column;
+this ledger does not repeat it.
 
 Not proven, so fail-closed:
 
@@ -324,14 +304,19 @@ Not proven, so fail-closed:
   §15.2), so such a CREATE is `UNKNOWN` and is never resent (ADR-0014 §28);
 - that a `500` or a zero-result lookup proves the product was not registered. Neither does
   (ADR-0014 §17.2, §28.2);
-- any field of the origin-product schema that these sources do not name. The schema is large and
-  category/feature dependent: only the fields above plus those the existing RegistrationSnapshot and
-  preflight contract already own may be sent, and anything else stays fail-closed /
-  `REVIEW_REQUIRED` (5861477977 §F);
+- sending a structure merely because the schema contains it. Only fields owned by the immutable
+  RegistrationSnapshot/preparation and required by the selected product/channel conditions may be
+  sent; an unsupported category/feature condition stays fail-closed / `REVIEW_REQUIRED` (5861477977
+  §F, 5861933729);
+- an enumerated value these sources do not list (for example the `statusType` or delivery-type
+  values); none may be invented;
 - an ICBM projection for the simple, custom or standard option structures. The evidence selects no
   new option policy: only an option shape the canonical ICBM contracts already allow may be
   projected (5861477977 §C);
-- any value of a type-specific notice child object that ICBM does not own; none may be invented.
+- the field set of any type-specific `productInfoProvidedNotice` child. This sub-scope is not
+  captured; no value that ICBM does not own may be invented (5861933729 §D).
+- a provider requirement for `leafCategoryId`: the schema does not mark it required, so a category
+  requirement is ICBM preflight policy only (5861933729 §A).
 
 The per-status meaning stays the product-API error contract of `ERRORS.md` §10: `BAD_REQUEST` is read
 from `invalidInputs` together with `message` (§10.1), then `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`

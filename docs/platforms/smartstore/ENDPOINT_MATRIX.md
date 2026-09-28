@@ -132,7 +132,7 @@ subsequently adopted IMAGE UPLOAD only. The application remains `DRY_RUN`/provid
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
-| `SMARTSTORE_PRODUCT_CREATE_V2` | the request/response contract evidence is recorded in §4.2 (`SOURCES.md` §5.2). No adoption slice has yet frozen the success predicate, timeout, redirect, error classification and typed request projection against it, and no provider idempotency exists (below) |
+| `SMARTSTORE_PRODUCT_CREATE_V2` | the request/response contract evidence is summarized in §4.2 (`SOURCES.md` §5.2) and recorded field by field in `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore. No adoption slice has yet frozen the success predicate, timeout, redirect, error classification and typed request projection against it, and no provider idempotency exists (below) |
 | `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
@@ -173,37 +173,38 @@ covers the safe-retention profile `smartstore-safe-retention/v1` (ADR-0014 §15)
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 
 The architect's official evidence on Issue #89 (packet `5746489554`, reviews `5768199984` and
-`5768247290`, field-level packet `5861477977`) establishes the following for
+`5768247290`, field-level packet `5861477977`, required/conditional-field packet `5861933729`)
+establishes the following for
 `SMARTSTORE_PRODUCT_CREATE_V2`. **This section adopts nothing:** the row stays `NOT_ADOPTED`, fails
 locally before any network I/O (§2), and gains no LIVE authority. Its own adoption slice
 (ADR-0020 §4) freezes the adopted contract from these facts.
+
+Compact wire summary. The nested request keys, required/optional/conditional rules, limits and
+defaults are recorded once, field by field with sources, in
+`docs/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; this matrix does not repeat them.
 
 | Field | Evidence | Source |
 | --- | --- | --- |
 | Method / path | `POST /v2/products` (`(v2) 상품 등록`) | 5746489554 |
 | Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, API group `상품` | 5746489554 |
 | Request media type | `application/json` | 5768199984, 5861477977 |
-| Request top level | `originProduct` (required object), `smartstoreChannelProduct` (required object); `windowChannelProduct` is a separate sibling channel object when applicable | 5861477977 |
-| `originProduct` | `name`, `detailContent`, `images` required; `salePrice` required, ≤ 999,999,990; `stockQuantity` ≤ 99,999,999 | 5746489554 |
-| `originProduct.images` | `representativeImage` required object with required string `url`; `optionalImages` optional array of ≤ 9, each with required `url`; every URL comes from the product-image upload API | 5746489554, 5861477977 |
-| `originProduct.detailAttribute.sellerCodeInfo` | `sellerManagementCode` (seller-authored, ≤ 30 characters, not unique), `sellerBarcode`, `sellerCustomCode1`, `sellerCustomCode2` | 5861477977; 5768199984, 5768247290 |
-| `originProduct.detailAttribute.optionInfo` (combination form) | `optionCombinationSortType`; `optionCombinationGroupNames.optionGroupName1` (required when used), `optionGroupName2`/`3`, branch/location-only `optionGroupName4`; `optionCombinations[]` with `id`, `stockQuantity` (default 0, ≤ 99,999,999), `price` (default 0, ≤ 999,999,990), `usable`, `optionName1`..`4`, `sellerManagerCode`, `skuYn` | 5746489554, 5861477977 |
-| `originProduct.detailAttribute.productInfoProvidedNotice` | required for registration; `productInfoProvidedNoticeType` required and selects one type-specific child object; conditional fields are omitted when not applicable, with no blanket fill-every-field rule | 5746489554, 5861477977 |
-| `smartstoreChannelProduct` | `naverShoppingRegistration` required; `channelProductDisplayStatusType` required, `ON` or `SUSPENSION` for writes; `channelProductName`, `bbsSeq`, `storeKeepExclusiveProduct` optional | 5861477977 |
+| Request top level | `originProduct` (required object), `smartstoreChannelProduct` (required object); `windowChannelProduct` is a separate Shopping Window channel structure, out of the SmartStore-only scope | 5861477977, 5861933729 |
+| Required fields | `originProduct`: `statusType`, `name`, `detailContent`, `images`, `salePrice`, `detailAttribute`; `productInfoProvidedNotice` for registration; `smartstoreChannelProduct`: `naverShoppingRegistration`, `channelProductDisplayStatusType`. `leafCategoryId` is not provider-required. Conditional rules: capability record | 5861933729 |
 | Documented success | HTTP `200`, `Content-Type: application/json;charset=UTF-8` | 5768199984, 5861477977 |
-| Success identifiers | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo` (since API docs `v2.68.0`) | 5768199984, 5861477977 |
-| Success product data | `originProduct`, the product data SmartStore successfully stored | 5768199984 |
+| Success identifiers | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo` (since API docs `v2.68.0`; may be absent for a SmartStore-only CREATE), plus `originProduct`, the product data SmartStore successfully stored | 5768199984, 5861477977, 5861933729 |
 | Documented statuses | `200`, `308`, `400`, `401`, `403`, `404`, `500`; their meaning is the product-API error contract of `ERRORS.md` §10 — `BAD_REQUEST` read from `invalidInputs` **and** `message`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `INTERNAL_SERVER_ERROR`, and `308/PERMANENT_REDIRECT` never followed for a mutation (§11; `ERRORS.md` §17) | 5861477977; `ERRORS.md` §10 |
 | Idempotency | none: no idempotency key, request-correlation key, replay rule or duplicate-prevention guarantee | 5768247290, 5861477977 |
 
 Not proven, so fail-closed until an adoption slice or new evidence settles it:
 
-- any origin-product schema field these sources do not name. Only the fields above plus those the
-  existing RegistrationSnapshot and preflight contract already own may be projected; anything else
-  stays fail-closed / `REVIEW_REQUIRED`;
+- sending a structure merely because the schema contains it: only fields owned by the immutable
+  RegistrationSnapshot/preparation and required by the selected product/channel conditions may be
+  projected; an unsupported category/feature condition or an enumerated value the evidence does not
+  list stays fail-closed / `REVIEW_REQUIRED`;
 - a projection for the simple, custom or standard option structures: only an option shape the
   canonical ICBM contracts already allow may be projected;
-- any value of a type-specific notice child object that ICBM does not own.
+- the field set of a type-specific notice child (not captured) and any value of it that ICBM does
+  not own.
 
 Outcome rules that no evidence here changes:
 

@@ -1,17 +1,58 @@
 # Exchange
 
-| Platform | Status | Captured official fact |
-| --- | --- | --- |
-| SmartStore | OFFICIAL_CAPTURED | Exchange family covers collection completion, redelivery, hold/release and rejection/withdrawal. Research-only source capture; not registered/adopted in the strict SmartStore ledger. |
-| Coupang | OFFICIAL_CAPTURED | Exchange family exposes request list, receipt confirmation, rejection and waybill upload. |
-| 11st | OFFICIAL_ENDPOINT_SOURCE_NOT_CAPTURED | Not captured. |
-| Kakao Shopping | OFFICIAL_CAPTURED | Claim API covers exchange request, collection, hold/withdrawal and redelivery waybill flow. |
-| Gmarket / Auction | PARTIAL_OFFICIAL_CAPTURED | Claim family exists; exact exchange endpoint not captured. |
-| LotteON | PARTIAL_OFFICIAL_CAPTURED | Claim APIs exist; exact general-seller exchange endpoint not captured. |
-| SSG.COM | OFFICIAL_CAPTURED | Return/exchange recollection API captured at `/api/pd/{version}/listExchangeTarget.ssg`. |
+> Evidence catalog; status model and provenance conventions in [README](README.md). Nothing here adopts an endpoint.
 
-Sources:
-- SmartStore: https://apicenter.commerce.naver.com/docs/commerce-api/current/교환
-- Coupang API index: https://developers.coupang.com/en/api
-- Kakao: https://shopping-developers.kakao.com/hc/ko/articles/4578928106639-클레임-API-명세
-- SSG: https://eapi.ssgadm.com/info/shpp/listExchangeTarget.ssg
+## Status matrix
+
+| Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
+| --- | --- | --- | --- | --- |
+| SmartStore | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| LotteON | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SSG.COM | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+
+## SmartStore
+
+- **Locator:** https://apicenter.commerce.naver.com/docs/commerce-api/current/교환 — `OFFICIAL_API_DOC`, observed 2026-09-28 (PR #141 pass).
+- **Captured:** the exchange family covers collection completion, redelivery, hold/release and rejection/withdrawal. No method/path or field was captured.
+- **Missing:** every endpoint-level fact.
+- **ICBM:** not registered in `ENDPOINT_MATRIX.md` §4 → `NOT_ADOPTED`; runtime `UNVERIFIED`.
+
+## Coupang
+
+- **Captured (https://developers.coupang.com/en/api, 2026-09-28):** the Exchanges family exposes request list, receipt confirmation, rejection and waybill upload.
+- **Missing:** method/paths and fields.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## 11st
+
+- **Missing:** every endpoint-level fact (no endpoint reference captured, 2026-09-28).
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Kakao Shopping
+
+- **Captured (https://shopping-developers.kakao.com/hc/ko/articles/4578928106639-, 2026-09-28):** the Claim API covers exchange request, collection, hold/withdrawal and the redelivery waybill flow.
+- **Missing:** method/paths and fields.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## Gmarket / Auction
+
+- **Captured (2026-09-28):** a claim family exists; no exchange endpoint captured.
+- **Missing:** every endpoint-level fact.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## LotteON
+
+- **Captured (2026-09-28):** claim APIs exist; no general-seller exchange endpoint captured.
+- **Missing:** every endpoint-level fact.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+
+## SSG.COM
+
+- **Locator:** https://eapi.ssgadm.com/info/shpp/listExchangeTarget.ssg — `OFFICIAL_API_DOC`, observed 2026-09-28 (PR #141 pass).
+- **Captured:** the return/exchange recollection read `POST /api/pd/{version}/listExchangeTarget.ssg` ([RETURN](RETURN.md#ssgcom)).
+- **Missing:** host, request/response fields, and any exchange-processing (write) endpoint.
+- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
