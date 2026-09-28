@@ -1,12 +1,57 @@
 # Agent Host Audit and Merge Protocol
 
-Status: **ACCEPTED**
-Date: 2026-09-28
+Status: **V2 — canonical candidate (PR #147).** It is runtime-authoritative for the Agent Host from the
+main commit that contains this file. Until then, the #146 trial instruction (`5870526033`) cites
+the pre-refresh text at `9cc4939a` as its protocol source.
+Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`
 Scope: ICBM-NEW Agent Host audit, CI, merge, and post-merge verification workflow.
 
 This document records the operating protocol agreed after PR #146 exposed three distinct failure
 classes: stale audit input/spec conflict, CI environment/timing failure, and a real code blocker.
 The protocol preserves fail-closed behavior while reducing duplicate rules and duplicate work.
+
+## 0. V2 boundary
+
+This protocol is the Agent Host's **control plane**: audit input, audit results, CI state, merge
+and post-merge verification. Two hard boundaries hold.
+
+**Pre-V2 Host control-plane rules are authoritative only where this document re-adopts them.**
+A rule, convention or behavior of an earlier Host version is not runtime-authoritative merely
+because it exists. This covers:
+- orchestrator, audit, repair or lookahead scripts before V2 (`v1.x`);
+- their state files and registries;
+- earlier process comments.
+
+Explicitly re-adopted:
+- the audit-before-FULL-CI order of Issue #143 `5868192403` (§1, §6);
+- the CI scope policy of `.github/workflows/ci.yml` (Issue #143, PR #144): draft runs are
+  lightweight and a ready PR runs the full suite (§6).
+
+Any other pre-V2 Host behavior must conform to this document, or it is not used. Examples:
+- work selection;
+- remediation or auto-next PR creation;
+- the open-PR duplicate guard;
+- cached state.
+
+**Product, domain and safety contracts are not changed by this protocol.** It does not amend,
+supersede or relax:
+- any ADR;
+- `CLAUDE.md`, `ROADMAP.md` or `docs/ARCHITECTURE.md`;
+- any marketplace safety contract, among them:
+  - ADR-0014, including the never-resend and positive-only reconcile rules of §28;
+  - ADR-0018, including G3-30 and G3-31;
+  - ADR-0020;
+  - the execution-safety rules of `CLAUDE.md` §7.
+
+Those stay binding until their own ADR or canonical process supersedes them.
+
+A DUAL PASS, a GREEN FULL CI and a passed MERGE_GUARD authorize a merge only. Whether a slice may
+adopt an endpoint in code or change a schema is decided by the canonical contracts (ADR-0020), not
+by this protocol. The protocol never authorizes:
+- a provider call, LIVE or a canary;
+- the residual-risk acceptance;
+- any action `CLAUDE.md` §7.2 reserves for the user, such as a force-push, a branch deletion or a
+  destructive operation.
 
 ## 1. Flow
 
@@ -163,6 +208,13 @@ DRAFT runs only the lightweight path required by `.github/workflows/ci.yml`.
 
 FULL CI is requested only after DUAL PASS and READY for the current audit identity.
 
+The PR stays draft until then. Under `.github/workflows/ci.yml`, marking it ready for review is the
+FULL CI request for that exact HEAD. A draft run has no `CI gate` result at all.
+
+For a ready PR that touches only Markdown under `docs/evidence/`, the workflow runs its lighter docs
+scope, and that run's `CI gate` is judged by the same GREEN rule below. This protocol does not widen
+or narrow the workflow's scope classification.
+
 A FULL CI result is GREEN only when:
 
 ```text
@@ -225,6 +277,11 @@ placed on main is the tree that was audited, regardless of merge/squash commit m
 
 Tree mismatch is HOLD and requires investigation; it is not silently accepted.
 
+**A merge moves main, so it changes the accepted code SHA.** Every exact-main proof bound to the
+previous main is stale for the new one, among them the Gate 3 visual acceptance (ADR-0018 G3-31).
+POST_MERGE_VERIFY never reports such a proof as current for the merged main. It is re-established
+only through its own reviewed path.
+
 ## 9. Rollout order
 
 The protocol is implemented in three slices:
@@ -265,6 +322,18 @@ PR #146 is the first trial candidate for this protocol.
 
 The trial must not change PR #146 merely to install this process. Apply the process around its
 current candidate HEAD.
+
+The main cleanup changed #146's inputs. Its head `e75daab6` is based on `65d64035`, and main is now
+`b1b5175774159989bcf2ea2ef0caed45a018641b`. Its base is therefore stale (§7), and its audit packet
+must be rebuilt. The next #146 HEAD is a refresh on current main that meets its recorded refresh
+requirements:
+- the CREATE contract correction `5862400626`, now on main;
+- the ARCHITECTURE CREATE-state wording and the adoption boundary transferred from #142
+  (`5874873776`);
+- an ICBM-owned registration `stockQuantity` ≥ 1, or a named fail-closed gap;
+- ADR-0014 §28.2/M5-31 and §28.3/M5-33 replaced in place.
+
+Those requirements are authority inputs of its packet. This protocol does not decide them.
 
 For a new #146 HEAD:
 
