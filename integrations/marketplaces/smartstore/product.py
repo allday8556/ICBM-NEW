@@ -297,6 +297,11 @@ def _validate_option_info(value: Any, path: str) -> None:
     group_path = f"{path}.{FIELD_OPTION_GROUP_NAMES}"
     groups = _object(info[FIELD_OPTION_GROUP_NAMES], group_path, frozenset(_GROUP_NAME_KEYS))
     dimensions = len(groups)
+    if dimensions == 0:
+        # A combination form with no option-name dimension is no supported option form: fail closed.
+        raise WireContractError(
+            "WIRE_OPTION_DIMENSIONS_MISSING", f"{group_path} names no option dimension"
+        )
     if set(groups) != set(_GROUP_NAME_KEYS[:dimensions]):
         raise WireContractError("WIRE_DOCUMENT_MALFORMED", f"{group_path} is not numbered from 1")
     for key in _GROUP_NAME_KEYS[:dimensions]:

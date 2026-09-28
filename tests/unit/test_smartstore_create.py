@@ -261,6 +261,19 @@ def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport(
         ),
         (_origin(images={"representativeImage": {}}), "WIRE_DOCUMENT_FIELD_MISSING"),
         (_origin(images={"optionalImages": [{"url": REF_DETAIL}]}), "WIRE_DOCUMENT_FIELD_MISSING"),
+        # A zero-dimensional combination form is no supported option form, so it fails closed.
+        (
+            _origin(
+                detailAttribute={
+                    "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE},
+                    "optionInfo": {
+                        "optionCombinationGroupNames": {},
+                        "optionCombinations": [{"sellerManagerCode": "item-1"}],
+                    },
+                }
+            ),
+            "WIRE_OPTION_DIMENSIONS_MISSING",
+        ),
     ],
 )
 def test_a_document_outside_the_adopted_request_contract_is_refused(
