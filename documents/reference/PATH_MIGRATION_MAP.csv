@@ -361,7 +361,7 @@ docs/implementation/M2_SMARTSTORE_CONNECT_IMPLEMENTATION_INSTRUCTIONS.md,documen
 docs/platforms/smartstore/ACCOUNT_IDENTITY.md,documents/contracts/platforms/smartstore/ACCOUNT_IDENTITY.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/AUTH.md,documents/contracts/platforms/smartstore/AUTH.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/CAPABILITY_MAPPING.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
-docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md,MERGE,"§17 ownership registry; moved unchanged by PR #153, then folded verbatim into CAPABILITY_MAPPING.md Appendix A by the reconciliation PR (ADR-0021 §7)"
+docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md,MERGE,"§17 ownership registry; moved unchanged by PR #153, then folded verbatim into CAPABILITY_MAPPING.md Appendix A by reconciliation PR #156 (ADR-0021 §7)"
 docs/platforms/smartstore/ENDPOINT_MATRIX.md,documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/ERRORS.md,documents/contracts/platforms/smartstore/ERRORS.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/PERMISSIONS_SCOPES.md,documents/contracts/platforms/smartstore/PERMISSIONS_SCOPES.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
@@ -375,7 +375,7 @@ docs/review/ROADMAP-PATCH-BY-CLAUDE.md,documents/archive/reviews/ROADMAP-PATCH-B
 docs/review/V29-CHANGES-BY-CLAUDE.md,documents/archive/reviews/V29-CHANGES-BY-CLAUDE.md,ARCHIVE,accepted or superseded Claude proposal; binding content lives in ADR/canonical docs
 integrations/__init__.py,integrations/__init__.py,KEEP,adapter layer already reads integrations / suppliers|marketplaces / provider / detail
 integrations/marketplaces/__init__.py,integrations/marketplaces/__init__.py,KEEP,adapter layer already reads integrations / suppliers|marketplaces / provider / detail
-integrations/marketplaces/base.py,,REMOVE,"MarketplaceAdapter Protocol, 0 imports, superseded by the ADR-0014 ports; kept unchanged by PR #153, removed by the reconciliation PR (ADR-0021 §7)"
+integrations/marketplaces/base.py,,REMOVE,"MarketplaceAdapter Protocol, 0 imports, superseded by the ADR-0014 ports; kept unchanged by PR #153, removed by reconciliation PR #157 after the registry fold of PR #156 (ADR-0021 §7)"
 integrations/marketplaces/identity.py,integrations/marketplaces/identity.py,KEEP,adapter layer already reads integrations / suppliers|marketplaces / provider / detail
 integrations/marketplaces/smartstore/__init__.py,integrations/marketplaces/smartstore/__init__.py,KEEP,adapter layer already reads integrations / suppliers|marketplaces / provider / detail
 integrations/marketplaces/smartstore/adoption.py,integrations/marketplaces/smartstore/adoption.py,KEEP,adapter layer already reads integrations / suppliers|marketplaces / provider / detail
@@ -641,7 +641,7 @@ tests/unit/test_safe_payload.py,tests/unit/platform/core/test_safe_payload.py,MO
 tests/unit/test_schema_contract.py,tests/unit/platform/db/test_schema_contract.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_secret_scan.py,tests/unit/platform/system/test_secret_scan.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_secrets.py,tests/unit/platform/core/test_secrets.py,MOVE,unit test grouped by runtime owner
-tests/unit/test_smartstore_binding.py,tests/unit/connect/test_marketplace_capability.py,MERGE,"first-binding tests; moved by PR #153 to tests/unit/connect/test_smartstore_binding.py, then folded into the capability test module, every test kept, by the reconciliation PR (ADR-0021 §7)"
+tests/unit/test_smartstore_binding.py,tests/unit/connect/test_marketplace_capability.py,MERGE,"first-binding tests; moved by PR #153 to tests/unit/connect/test_smartstore_binding.py, then folded into the capability test module, every test kept, by reconciliation PR #157 after the registry fold of PR #156 (ADR-0021 §7)"
 tests/unit/test_smartstore_caller.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_caller.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_smartstore_classify.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_classify.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_smartstore_image_upload.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_image_upload.py,MOVE,unit test grouped by runtime owner
