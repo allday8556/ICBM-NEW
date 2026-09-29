@@ -6,3 +6,7 @@
 # Approved UI prototypes are fingerprinted byte-for-byte (docs/UI_SOURCE_OF_TRUTH.md).
 # Never convert their line endings on checkout.
 ui/prototypes/*.html -text
+
+# Agent Host scripts are pinned byte-for-byte by sha256 (docs/AGENT_HOST_AUDIT_PROTOCOL.md; tools/agent-host/README.md).
+# Never convert their line endings or strip their BOM.
+tools/agent-host/** -text
