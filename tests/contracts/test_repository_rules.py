@@ -324,6 +324,32 @@ def test_the_agent_host_protocol_states_its_merged_status() -> None:
     assert "canonical candidate" not in protocol.split("## 0.", 1)[0]
 
 
+def test_the_repository_map_counts_match_the_tree() -> None:
+    """Issue #151: every files count in REPOSITORY_MAP.md is the number of tracked files under that
+    path, so the map cannot drift from the tree unnoticed."""
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.splitlines()
+    rows = re.findall(
+        r"^\| `([^`]+)` \| (\d+) \|",
+        _read(REPO_ROOT / "documents" / "reference" / "REPOSITORY_MAP.md"),
+        re.M,
+    )
+    assert rows
+    wrong = {
+        path: (int(count), sum(1 for f in tracked if f.startswith(path)))
+        for path, count in rows
+        if int(count) != sum(1 for f in tracked if f.startswith(path))
+    }
+    assert wrong == {}
+
+
 def test_claude_md_auto_loads_every_rule_body() -> None:
     """ADR-0021 §3 (Issue #151 §2): the root CLAUDE.md is the bootstrap index.
 

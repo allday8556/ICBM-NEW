@@ -4,6 +4,8 @@ Where each role lives after the repository restructure (Issue #151, ADR-0021 §2
 middle area → detailed purpose. Old paths resolve through `documents/reference/PATH_MIGRATION_MAP.md`.
 The root keeps only files that tools require there: `README.md`, `CLAUDE.md` (auto-loaded
 bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignore`, `.gitattributes`.
+The files column counts the tracked files under each path; `tests/contracts/test_repository_rules.py`
+(`test_the_repository_map_counts_match_the_tree`) checks every count against `git ls-files`.
 
 | path | files | role |
 | --- | --- | --- |
