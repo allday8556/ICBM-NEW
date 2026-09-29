@@ -6,7 +6,7 @@ A past issue, PR, review, comment, acceptance record or evidence file that names
 **not** rewritten (ADR-0021 §5); it is traced to the current location through this map.
 The same table is in `PATH_MIGRATION_MAP.csv` for tools.
 
-Dispositions: KEEP 100, MOVE 603, MERGE 1, ARCHIVE 12, REMOVE 0.
+Dispositions: KEEP 99, MOVE 602, MERGE 2, ARCHIVE 12, REMOVE 1.
 
 - `KEEP`: the path is unchanged (its content may still carry path-only edits).
 - `MOVE`: a structural move; path-only edits only (ADR-0021 §4).
@@ -493,7 +493,7 @@ Job types, review producer names, table names and Alembic revision ids are uncha
 | `tests.unit.test_schema_contract` | `tests.unit.platform.db.test_schema_contract` |
 | `tests.unit.test_secret_scan` | `tests.unit.platform.system.test_secret_scan` |
 | `tests.unit.test_secrets` | `tests.unit.platform.core.test_secrets` |
-| `tests.unit.test_smartstore_binding` | `tests.unit.connect.test_smartstore_binding` |
+| `tests.unit.test_smartstore_binding` | `tests.unit.connect.test_marketplace_capability` |
 | `tests.unit.test_smartstore_caller` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_caller` |
 | `tests.unit.test_smartstore_classify` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_classify` |
 | `tests.unit.test_smartstore_image_upload` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_image_upload` |
@@ -587,7 +587,7 @@ The directory-level moves it contains are:
 | `tests/unit/` | `tests/harness/m3/` | 4 |
 | `tests/unit/` | `tests/harness/m4/` | 1 |
 | `tests/unit/` | `tests/unit/collect/` | 7 |
-| `tests/unit/` | `tests/unit/connect/` | 8 |
+| `tests/unit/` | `tests/unit/connect/` | 7 |
 | `tests/unit/` | `tests/unit/integrations/marketplaces/smartstore/` | 8 |
 | `tests/unit/` | `tests/unit/integrations/suppliers/` | 1 |
 | `tests/unit/` | `tests/unit/integrations/suppliers/kmretail/` | 2 |
@@ -613,9 +613,11 @@ Individual moves that do not follow a directory prefix:
 | --- | --- | --- |
 | `docs/acceptance/evidence/README.md` | `automation/acceptance/m2/RUNBOOK.md` | MOVE |
 | `docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` | `documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md` | MERGE |
+| `integrations/marketplaces/base.py` | — | REMOVE |
 | `tests/live_support.py` | `tests/support/live_safety_support.py` | MOVE |
 | `tests/suppliers.py` | `tests/support/fake_suppliers.py` | MOVE |
 | `tests/support.py` | `tests/support/jobs_support.py` | MOVE |
+| `tests/unit/test_smartstore_binding.py` | `tests/unit/connect/test_marketplace_capability.py` | MERGE |
 
 ## 5. Files added by the migration
 
