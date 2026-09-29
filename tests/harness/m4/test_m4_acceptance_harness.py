@@ -24,7 +24,8 @@ from automation.acceptance.m3.campaign.prep import HARD_ZERO_MODULES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS = [
-    *sorted((REPO_ROOT / "scripts" / "m4accept").glob("*.py")),
+    *sorted((REPO_ROOT / "automation" / "acceptance" / "common").glob("*.py")),
+    *sorted((REPO_ROOT / "automation" / "acceptance" / "m4").glob("*.py")),
     REPO_ROOT / "automation" / "acceptance" / "m4" / "m4_acceptance.py",
 ]
 # ORM-bearing packages the schema aggregate loads. Their provider-facing modules are forbidden one

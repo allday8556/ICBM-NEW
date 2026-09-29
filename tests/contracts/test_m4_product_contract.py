@@ -16,7 +16,7 @@ ADR_0013 = REPO_ROOT / "documents" / "decisions" / "adr" / "0013-m4-canonical-pr
 DOMAIN_RULES_MD = REPO_ROOT / "documents" / "rules" / "06-immutable-domain-rules.md"
 ARCHITECTURE_MD = REPO_ROOT / "documents" / "architecture" / "ARCHITECTURE.md"
 ROADMAP_MD = REPO_ROOT / "documents" / "roadmap" / "ROADMAP.md"
-CODE_ROOTS = ("app", "integrations", "scripts")
+CODE_ROOTS = ("app", "integrations", "automation")
 
 # ADR-0013 §1: the canonical Product is the v3.1 ProductGroup. A table for a second product root
 # beside it would be the "two competing canonical identities" Issue #80 §4 forbids.

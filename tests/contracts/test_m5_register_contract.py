@@ -41,7 +41,7 @@ ARCHITECTURE_MD = REPO_ROOT / "documents" / "architecture" / "ARCHITECTURE.md"
 ROADMAP_MD = REPO_ROOT / "documents" / "roadmap" / "ROADMAP.md"
 MIGRATIONS = REPO_ROOT / "app" / "platform" / "db" / "migrations" / "versions"
 REGISTER_SERVICE = "app/stages/register/service.py"
-CODE_ROOTS = ("app", "integrations", "scripts")
+CODE_ROOTS = ("app", "integrations", "automation")
 # Gate 3 area 2 (ADR-0018 §7, §8): the restore drill and the retention proof read owner tables to
 # compare and guard evidence. They never write them; `test_the_evidence_readers_only_read` in
 # tests/contracts/test_repository_rules.py proves it.

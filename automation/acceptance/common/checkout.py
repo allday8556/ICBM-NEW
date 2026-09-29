@@ -9,8 +9,8 @@ run is refused before its root is claimed unless every one of these holds:
   source can extend or shadow the commit.
 - **No ignored source.** No ignored Python source, sourceless bytecode, path file or extension
   module is in the working tree outside the running interpreter's own environment.
-- **Loaded from the checkout.** Every loaded ``app``, ``integrations`` and ``scripts`` module comes
-  from this checkout.
+- **Loaded from the checkout.** Every loaded ``app``, ``integrations`` and ``automation``
+  module comes from this checkout.
 
 A count that cannot be measured is unknown (``None``), and unknown refuses the run like any other
 problem. The acceptance root lies outside the repository, so the run itself never dirties the tree.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from automation.acceptance.common.root import REPO_ROOT
 
-CODE_PACKAGES = ("app", "integrations", "scripts")
+CODE_PACKAGES = ("app", "integrations", "automation")
 SOURCE_SUFFIXES = (".py", ".pyw", ".pyc", ".pyo", ".pth", ".pyd", ".so")
 
 
@@ -114,7 +114,7 @@ def _ignored_source(name: str, environments: list[str]) -> bool:
 
 
 def code_outside(repo: Path) -> int:
-    """Loaded ``app``, ``integrations`` and ``scripts`` modules whose file is not in ``repo``."""
+    """Loaded ``app``, ``integrations`` and ``automation`` modules whose file is not in ``repo``."""
     root = repo.resolve()
     outside = 0
     for name, module in list(sys.modules.items()):

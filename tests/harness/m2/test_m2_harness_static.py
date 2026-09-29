@@ -142,7 +142,7 @@ def test_production_code_never_imports_the_harness() -> None:
         for root in PRODUCTION_ROOTS
         for path in root.rglob("*.py")
         if any(
-            name == "scripts" or name.startswith("scripts.")
+            name == "automation" or name.startswith("automation.")
             for name in _imports(ast.parse(path.read_text("utf-8")))
         )
     ]

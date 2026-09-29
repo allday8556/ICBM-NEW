@@ -19,4 +19,8 @@ EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/profiles.py",
     "app/stages/collect/adaptive/engine/validation.py",
 )
+# Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): the hashed inputs moved from
+# app/collect/adaptive/ to app/stages/collect/adaptive/engine/. EXTRACTOR_REVISION is unchanged
+# and the engine goldens pass unchanged. tests/unit/collect/adaptive/engine/test_identity.py
+# recomputes this digest from EXTRACTOR_INPUTS on every CI run.
 EXTRACTOR_FINGERPRINT = "c44f0007a990062141b69272895a91560c85d69bb2538ee5fdd73ed88cf544ed"
