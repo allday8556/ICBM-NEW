@@ -7,7 +7,7 @@ name: CI
 #   green run stale (check runs belong to one exact commit and are never inherited);
 # - a draft PR (WIP preservation): lint/format/type only, and no "CI gate" result at all;
 # - a ready PR that touches only Markdown in the upstream research/evidence catalog
-#   (docs/evidence/): lint/format/type plus the unit suite (which holds the doc-contract tests),
+#   (documents/evidence/): lint/format/type plus the unit and doc-contract suites,
 #   not the Windows/Ubuntu runtime and acceptance suites. That allowlist is the whole exemption;
 #   every other path, Markdown included, takes the full suite.
 # Branch pushes without a PR run nothing. "CI gate" is the single merge-readiness result.
@@ -71,12 +71,12 @@ jobs:
             while IFS= read -r f; do
               [ -z "$f" ] && continue
               # Allowlist, not a denylist: only the upstream research/evidence catalog under
-              # docs/evidence/ is light, and only its Markdown. Everything else takes the full
+              # documents/evidence/ is light, and only its Markdown. Everything else takes the full
               # gate - canonical policy, contracts, acceptance evidence, prose anywhere else,
               # code, data, CI itself - including any Markdown path added later, which is
               # unlisted here by default and therefore never bypasses the gate.
               case "$f" in
-                docs/evidence/*.md) ;;
+                documents/evidence/*.md) ;;
                 *) mode=full ;;
               esac
             done <<< "$files"
@@ -114,8 +114,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -c constraints.txt -e ".[dev]"
-      # The unit suite pins the canonical documents (ARCHITECTURE, ADRs, ERRORS.md, ROADMAP ...).
-      - run: pytest tests/unit -q
+      # The unit, doc-contract and harness-unit suites pin the canonical documents (ARCHITECTURE,
+      # ADRs, ERRORS.md, ROADMAP ...). Issue #151 moved the doc-contract tests to tests/contracts and
+      # the harness unit tests to tests/harness; "not integration" keeps exactly the set that
+      # tests/unit held before the move (the moved integration harness tests carry that marker).
+      - run: pytest tests/unit tests/contracts tests/harness -m "not integration" -q
 
   tests:
     name: Tests (${{ matrix.os }})
@@ -176,10 +179,10 @@ jobs:
       # A fresh dedicated root outside the checkout and every data directory. The run refuses a
       # dirty checkout itself, and its report states the measured provider counters.
       - name: Run the M5 offline acceptance harness
-        run: python scripts/m5_acceptance.py --root "${{ runner.temp }}/m5-acceptance"
+        run: python automation/acceptance/m5/m5_acceptance.py --root "${{ runner.temp }}/m5-acceptance"
       - name: Verify the report digest
         run: >-
-          python scripts/m5_acceptance.py --verify
+          python automation/acceptance/m5/m5_acceptance.py --verify
           "${{ runner.temp }}/m5-acceptance/m5-acceptance-report.json"
       - name: Prove the run reached no marketplace and mutated nothing
         run: >-
@@ -214,7 +217,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -c constraints.txt -e ".[dev]"
       - name: Run the M0 acceptance flow (real processes, restarts, visual check)
-        run: python scripts/m0_acceptance.py --visual --out "${{ runner.temp }}/m0-acceptance"
+        run: python automation/acceptance/m0/m0_acceptance.py --visual --out "${{ runner.temp }}/m0-acceptance"
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -240,9 +243,9 @@ jobs:
       # of this exact commit only; nothing here records a visual acceptance (only the reviewed
       # `icbm live record-visual-acceptance` command does, at the report's own commit).
       - name: Run the populated visual acceptance harness
-        run: python scripts/g3_visual_acceptance.py run --root "${{ runner.temp }}/g3-visual"
+        run: python automation/acceptance/gate3_visual/g3_visual_acceptance.py run --root "${{ runner.temp }}/g3-visual"
       - name: Verify the report against the contract
-        run: python scripts/g3_visual_acceptance.py verify "${{ runner.temp }}/g3-visual/g3-visual-report.json"
+        run: python automation/acceptance/gate3_visual/g3_visual_acceptance.py verify "${{ runner.temp }}/g3-visual/g3-visual-report.json"
       - uses: actions/upload-artifact@v5
         if: always()
         with:
