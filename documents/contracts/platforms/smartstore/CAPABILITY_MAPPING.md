@@ -1115,7 +1115,12 @@ No layer may be made greener by borrowing proof from another layer.
 
 ## Appendix A. §17 implementation ownership registry
 
-> Merged verbatim from `CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` by the Issue #151 reconciliation (ADR-0021 §7; see `documents/reference/PATH_MIGRATION_MAP.md`). Its original title was "SmartStore CAPABILITY_MAPPING §17 — Implementation Ownership Registry". Headings are one level deeper; "this file" and "this registry" mean this appendix. `tests/contracts/test_repository_rules.py` (`test_the_s17_ownership_registry_matches_s17`) checks the exact-set rule of its §4 follow-up.
+> Merged verbatim from `CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` by the Issue #151 reconciliation (ADR-0021 §7; see `documents/reference/PATH_MIGRATION_MAP.md`). Its original title was "SmartStore CAPABILITY_MAPPING §17 — Implementation Ownership Registry". Headings are one level deeper; "this file" and "this registry" mean this appendix.
+
+> **Amendment note (Issue #151).** The registry text is kept verbatim. Its status line ("CI enforcement is not
+> implemented yet … manually") and its §4 "Recommended future" invariant predate this merge: CI now enforces
+> the exact-set, owner and no-duplicate checks in `tests/contracts/test_repository_rules.py`
+> (`test_the_s17_ownership_registry_matches_s17`), so no manual comparison is required.
 
 - Status: **NORMATIVE IMPLEMENTATION OWNERSHIP METADATA**
 - Owning contract: `CAPABILITY_MAPPING.md §17`
