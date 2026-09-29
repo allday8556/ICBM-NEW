@@ -1504,9 +1504,16 @@ function New-SegmentText {
     ) -join "`r`n")
 }
 
-$manifestBlock = $authorizationBlock + @"
-CHANGED FILE MANIFEST (GitHub PR files API, $($prFiles.Count) files; every file below is included in this audit):
-$changedFilesText
+# The full changed-file manifest is placed ONCE in the canonical packet (section 6b). A segmented audit call
+# carries only its content-bound reference (count + sha256 of the LF-normalized list) and lists its own files
+# under FILES: in each segment. Repeating the full list in every call let the common part alone exceed
+# $auditCallCharLimit on a large PR, so every call failed CALL_OVER_LIMIT although each segment was within limits.
+# Coverage stays host-verified: section 7 reassembles every changed file from the calls, byte for byte.
+$changedFilesCanonical = ConvertTo-CanonicalText $changedFilesText
+$changedFilesDigest = Get-Sha256Hex $changedFilesCanonical
+$changedFilesSection = "=== CHANGED FILE MANIFEST ($($prFiles.Count) files, sha256=$changedFilesDigest) ===`n$changedFilesCanonical`n=== END CHANGED FILE MANIFEST ==="
+$callManifestBlock = $authorizationBlock + @"
+CHANGED FILE MANIFEST (GitHub PR files API, $($prFiles.Count) files, sha256=$changedFilesDigest of the LF-normalized list): the full list is in the canonical audit packet, and the host has verified that the audit calls together contain every file completely. The files of this call are listed under FILES: in its segments.
 "@
 
 # audit calls: 각 call = packet text + 포함 piece 목록
@@ -1565,7 +1572,7 @@ else {
 
     $groups = New-Object System.Collections.Generic.List[object]
     $group = New-Object System.Collections.Generic.List[object]
-    $groupChars = $manifestBlock.Length
+    $groupChars = $callManifestBlock.Length
 
     foreach ($st in $segTexts) {
         $nextChars = $groupChars + $separator.Length + $st.Text.Length
@@ -1577,7 +1584,7 @@ else {
         if ($group.Count -gt 0 -and $nextChars -gt $auditCallCharLimit -and -not $keepTogether) {
             $groups.Add(@($group.ToArray()))
             $group = New-Object System.Collections.Generic.List[object]
-            $groupChars = $manifestBlock.Length
+            $groupChars = $callManifestBlock.Length
         }
 
         $group.Add($st)
@@ -1590,7 +1597,7 @@ else {
 
     for ($g = 0; $g -lt $groups.Count; $g++) {
         # AUDIT_CALL=i/n 은 call preamble (packet digest 와 함께) 에 둔다
-        $callText = $manifestBlock + $separator + (($groups[$g] | ForEach-Object { $_.Text }) -join $separator)
+        $callText = $callManifestBlock + $separator + (($groups[$g] | ForEach-Object { $_.Text }) -join $separator)
 
         $callPieces = @(
             foreach ($st in $groups[$g]) {
@@ -1663,6 +1670,10 @@ $packetHeader = (@(
 $canonicalParts = New-Object System.Collections.Generic.List[string]
 $canonicalParts.Add("ICBM CANONICAL AUDIT PACKET`n$packetHeader`n`n$sourceBlock`n")
 
+if ($useSegmentedAudit) {
+    $canonicalParts.Add("`n$changedFilesSection`n")
+}
+
 foreach ($call in $auditCalls) {
     $canonicalParts.Add("`n=== AUDIT CALL BODY $($call.Index)/$($auditCalls.Count) ===`n$($call.Body)`n")
 }
@@ -1686,6 +1697,10 @@ foreach ($call in $auditCalls) {
 # --- source completeness (host, fail-closed, before AI): 모든 call 에 모든 source 가 정확히 1회, 내용 sha 일치 ---
 if (-not $canonicalPacket.Contains($sourceBlock)) {
     Add-PacketHold "PACKET_DERIVATION_FAILED:SOURCE_BLOCK"
+}
+
+if ($useSegmentedAudit -and -not $canonicalPacket.Contains("`n$changedFilesSection`n")) {
+    Add-PacketHold "PACKET_DERIVATION_FAILED:CHANGED_FILE_MANIFEST"
 }
 
 foreach ($call in $auditCalls) {
@@ -1843,6 +1858,16 @@ foreach ($call in $auditCalls) {
 }
 
 $includedFiles = 0
+
+if ($useSegmentedAudit) {
+    $callFileSet = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
+    foreach ($call in $auditCalls) { foreach ($p in $call.Pieces) { [void]$callFileSet.Add($p.File) } }
+    foreach ($f in $prFiles) {
+        if (-not $callFileSet.Contains($f.File)) {
+            $incompleteReasons.Add("MANIFEST_FILE_NOT_IN_ANY_CALL:$($f.File)")
+        }
+    }
+}
 
 foreach ($fd in $fileDiffs) {
     if (-not $reassembled.ContainsKey($fd.File)) {
@@ -2176,7 +2201,7 @@ function Publish-AuditResult {
 }
 
 $multiCallNote = @"
-- The CHANGED FILE MANIFEST lists every changed file of this PR.
+- The CHANGED FILE MANIFEST identifies every changed file of this PR. A single-packet audit lists them all; a multi-call audit gives their count and sha256 here, keeps the full list in the canonical packet, and lists the files of this call under FILES: in its segments. The host has verified that the calls together contain every changed file completely.
 - If this packet says AUDIT_CALL=i/n with n > 1, the other calls contain the remaining files of the same PR and are audited separately with the same rules. Judge the files contained in this call. If a blocker cannot be decided without content that is only in another call, return INSUFFICIENT.
 - A file marked [PART k/n] is split across parts without truncation.
 - Every file's diff ends with an explicit "--- END OF FILE DIFF: <path> (complete) ---" marker. Hunk line counts include context lines, and trailing context lines are often blank; a hunk that ends in blank context lines before that marker is complete, not truncated.

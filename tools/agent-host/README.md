@@ -63,13 +63,13 @@ fails on `@($cancelled)` in this PowerShell build.
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, MERGE_GUARD | `34443ac2bb1e67f4f3bcfe084d62756f378aa5ff68f32783ec1c19773360263d` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard | `e48a5cf7dfa51e19167f6ff11cc5f1ab4cf0345469185d1329ecceaf4c92c42c` |
-| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `2f75793fd520ccf4d743c7439de203dce72c32c8e7f2f90cdeeff29f22020598` |
+| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `30d4ae5b67a7ebc939bf1dd018328323149f02bb81c6e3731aa893043e122547` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `589a689e68a6143a17cdb4c3a7e57c1bb1edb6dc3f4e5edc9eef5319772097b6` |
 | `run-full-audit-v1.ps1` | post-merge main audit (legacy, PR-C) | `8f709f67482f6b610537ff5dcd3743191028566339db445acecc53135229e3f5` |
 | `run-lookahead-main-v1.ps1` | next-slice selector | `b5df030a58ddb7d0de875ee7463603038124532062fd7c17010c9058932dcba7` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `546c67306348203c3b57f019997a9db11114aff2a5fc59d94d1881d287ae39bf` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `b2feaa8c8819a14f68f875dbce34844b1a3e4033757533f49cb076014f90b636` |
 | `tests/fx-run-all.ps1` | fixture runner | `315a8ac9ebe46ed351aae9f7b27789cbca0e21c255fbddd4fe12ff91daab580e` |
 
 `V2-LEGACY-INVENTORY.md` classifies every host script and state family as ACTIVE, SUPERSEDED,
@@ -92,3 +92,4 @@ Scenarios cover:
 - I2, including the #142→#146 regression;
 - cache and evidence rules;
 - the legacy scenarios.
+- `packet-many-files`: a PR whose changed-file manifest alone exceeds the 42K call limit. The full manifest is placed once in the canonical packet; every segmented call carries its count and sha256 plus its own FILES, stays within the limit, and the host still reassembles every file (the pre-fix bytes fail it with `CALL_OVER_LIMIT` on every call).
