@@ -32,8 +32,8 @@ bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignor
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 13 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 36 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 16 |  |
+| `integrations/` | 35 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 15 |  |
 | `integrations/suppliers/` | 19 |  |
 | `tests/` | 214 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
