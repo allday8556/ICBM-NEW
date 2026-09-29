@@ -173,7 +173,15 @@ switch ($Scenario) {
         [void](Add-FxPr "feat/two")
     }
     { $_ -like "packet-*" -and $_ -ne "packet-big" } {
-        New-PrBranch "feat/packet" { W "docs/contract.md" "# Contract`nrule: never resend CREATE`npacket clarified`n" }
+        New-PrBranch "feat/packet" {
+            W "docs/contract.md" "# Contract`nrule: never resend CREATE`npacket clarified`n"
+            if ($Scenario -eq "packet-many-files") {
+                # a large PR whose changed-file manifest alone is longer than the 42K audit call limit
+                for ($i = 1; $i -le 700; $i++) {
+                    W ("docs/many/a-deliberately-long-directory-name-for-the-changed-file-manifest/file-{0:D4}-with-a-long-descriptive-name.md" -f $i) "row $i`n"
+                }
+            }
+        }
         $n = Add-FxPr "feat/packet"
         if ($Scenario -eq "packet-guard-digest") { $global:FxPrs["$n"].isDraft = $true }
     }
@@ -760,6 +768,49 @@ try {
         $global:FxChecks.manifest_json_required_count = @($pm.required).Count
         $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
     }
+    if ($Scenario -eq "packet-many-files") {
+        # Segmented packet: the full manifest sits once in the canonical packet; every audit call stays within the
+        # call limit and carries only the manifest's count + sha256 and its own FILES; coverage is host-verified.
+        $skipOrch = $true
+        $r1 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $d1 = Fx-Line $r1 "PACKET_DIGEST"
+        $global:FxChecks.complete = Fx-Line $r1 "PACKET_COMPLETE"
+        $global:FxChecks.incomplete_reasons = (@($r1 | Where-Object { $_ -match '^PACKET_INCOMPLETE_REASON=' }) -join ';')
+        $calls = @(Get-ChildItem (Join-Path $hostDir "logs") -Filter "pr-1-packet-call*-*.txt")
+        $global:FxChecks.calls = $calls.Count
+        $callTexts = @($calls | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) })
+        # A call body is the diff material the host limits (auditCallCharLimit = 42000): the call manifest reference plus
+        # its segments, without the call preamble and the source block that every call carries.
+        $bodies = @($callTexts | ForEach-Object { $_.Substring($_.IndexOf('CHANGED FILE MANIFEST (GitHub')) })
+        $global:FxChecks.max_call_body_chars = (@($bodies | ForEach-Object { $_.Length }) | Measure-Object -Maximum).Maximum
+        $global:FxChecks.every_call_body_within_42000 = (@($bodies | Where-Object { $_.Length -gt 42000 }).Count -eq 0)
+        $global:FxChecks.every_call_names_manifest_digest = (@($callTexts | Where-Object { $_ -notmatch 'CHANGED FILE MANIFEST \(GitHub PR files API, 701 files, sha256=[0-9a-f]{64} ' }).Count -eq 0)
+        $manyInCalls = @($callTexts | ForEach-Object { [regex]::Matches($_, '(?m)^docs/many/\S+\.md\r?$').Count } | Measure-Object -Sum).Sum
+        $global:FxChecks.each_file_listed_once_across_calls = ($manyInCalls -eq 700)
+        $pk = @(Get-ChildItem (Join-Path $hostDir "state\packets") -Filter "*$($d1.Substring(0,12)).packet.txt")
+        $ptext = [System.IO.File]::ReadAllText($pk[0].FullName)
+        $section = [regex]::Match($ptext, '(?s)\n=== CHANGED FILE MANIFEST \(701 files, sha256=([0-9a-f]{64})\) ===\n(.*?)\n=== END CHANGED FILE MANIFEST ===\n')
+        $global:FxChecks.canonical_manifest_once = ($section.Success -and ([regex]::Matches($ptext, '=== CHANGED FILE MANIFEST \(')).Count -eq 1)
+        $listed = if ($section.Success) { $section.Groups[2].Value } else { "" }
+        $global:FxChecks.canonical_manifest_digest_matches = ($section.Success -and (Fx-Sha ((New-Object System.Text.UTF8Encoding($false)).GetBytes($listed))) -eq $section.Groups[1].Value)
+        $global:FxChecks.canonical_manifest_lists_all = (@($listed -split "`n" | Where-Object { $_ }).Count -eq 701)
+        $r2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.reproducible = ((Fx-Line $r2 "PACKET_DIGEST") -eq $d1)
+        $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
+        # Pinned expectations: every value below is required; any other value is a failure of this scenario.
+        $expected = [ordered]@{
+            complete = "True"; incomplete_reasons = ""; every_call_body_within_42000 = $true
+            every_call_names_manifest_digest = $true; each_file_listed_once_across_calls = $true
+            canonical_manifest_once = $true; canonical_manifest_digest_matches = $true
+            canonical_manifest_lists_all = $true; reproducible = $true; ai_prompts = 0
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        if ($global:FxChecks.calls -lt 2) { $failed += "calls>=2" }
+        if (-not ($global:FxChecks.max_call_body_chars -gt 0 -and $global:FxChecks.max_call_body_chars -le 42000)) { $failed += "max_call_body_chars<=42000" }
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
+    }
+
     if ($Scenario -eq "packet-authority") {
         $skipOrch = $true
         $origRecord = $global:FxComments["9300"].body
