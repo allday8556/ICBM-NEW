@@ -847,6 +847,7 @@ def test_no_provider_ai_or_http_module_is_reachable_from_the_preparation() -> No
         "app.stages.connect.smartstore.credentials",
         "app.stages.connect.marketplace.service",
         "app.stages.connect.service",
+        # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
         "app.ai",
     )
     assert [m for m in loaded if m.startswith(forbidden)] == []

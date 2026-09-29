@@ -1,6 +1,6 @@
 # UI Prototypes
 
-Authority: [`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md`](../../documents/contracts/ui/UI_SOURCE_OF_TRUTH.md) decides which prototype is current. This file mirrors that record and must change in the same commit whenever the record changes.
+Authority: [`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md`](../../documents/contracts/ui/UI_SOURCE_OF_TRUTH.md) decides which prototype is current. This file mirrors that record and must change in the same commit whenever the record changes. It decides nothing itself: it is a test-pinned mirror (`tests/contracts/test_repository_rules.py::test_prototype_readme_mirrors_the_canonical_record`), as it was at `ui/prototypes/README.md` before Issue #151.
 
 ## Canonical prototype
 

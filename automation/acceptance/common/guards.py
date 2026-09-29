@@ -63,6 +63,7 @@ FORBIDDEN_MODULES = (
     "cv2",
     "azure.ai",
     "azure.cognitiveservices",
+    # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
     "integrations.ai",
     "integrations.marketplaces",

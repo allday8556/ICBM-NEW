@@ -85,7 +85,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 # Issue #151 kept the pre-restructure relative order: the acceptance-harness tests (some of which
 # deliberately trip the process-wide egress guard) run after the integration suite, as they did
-# when they lived in tests/integration and tests/unit.
+# when they lived in tests/integration and tests/unit. The four directories hold every test
+# module (tests/support and tests/fixtures hold none); tests/contracts/test_repository_rules.py
+# (test_testpaths_collect_every_test_module) proves it.
 testpaths = ["tests/contracts", "tests/integration", "tests/harness", "tests/unit"]
 addopts = "-ra --strict-markers"
 markers = [

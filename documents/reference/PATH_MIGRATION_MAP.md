@@ -6,7 +6,7 @@ A past issue, PR, review, comment, acceptance record or evidence file that names
 **not** rewritten (ADR-0021 §5); it is traced to the current location through this map.
 The same table is in `PATH_MIGRATION_MAP.csv` for tools.
 
-Dispositions: KEEP 99, MOVE 604, MERGE 0, ARCHIVE 12, REMOVE 1.
+Dispositions: KEEP 100, MOVE 604, MERGE 0, ARCHIVE 12, REMOVE 0.
 
 - `KEEP`: the path is unchanged (its content may still carry path-only edits).
 - `MOVE`: a structural move; path-only edits only (ADR-0021 §4).
@@ -612,7 +612,6 @@ Individual moves that do not follow a directory prefix:
 | old path | new path | disposition |
 | --- | --- | --- |
 | `docs/acceptance/evidence/README.md` | `automation/acceptance/m2/RUNBOOK.md` | MOVE |
-| `integrations/marketplaces/base.py` | — | REMOVE |
 | `tests/live_support.py` | `tests/support/live_safety_support.py` | MOVE |
 | `tests/suppliers.py` | `tests/support/fake_suppliers.py` | MOVE |
 | `tests/support.py` | `tests/support/jobs_support.py` | MOVE |

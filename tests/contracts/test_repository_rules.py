@@ -259,6 +259,26 @@ def test_the_rule_words_detector_masks_only_locators() -> None:
     assert _rule_words("mode `DRY_RUN`") != _rule_words("mode `LIVE`")
 
 
+def test_testpaths_collect_every_test_module() -> None:
+    """Issue #151: pyproject testpaths lists the test directories in their pre-restructure order; it
+    must still reach every test module, so none is silently dropped from the suite."""
+    config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text("utf-8"))
+    testpaths = [REPO_ROOT / p for p in config["tool"]["pytest"]["ini_options"]["testpaths"]]
+    assert all(p.is_dir() for p in testpaths), testpaths
+    modules = [
+        p
+        for p in (REPO_ROOT / "tests").rglob("*.py")
+        if p.name.startswith("test_") or p.name.endswith("_test.py")
+    ]
+    assert modules
+    outside = [
+        p.relative_to(REPO_ROOT).as_posix()
+        for p in modules
+        if not any(p.is_relative_to(root) for root in testpaths)
+    ]
+    assert outside == []
+
+
 def test_claude_md_auto_loads_every_rule_body() -> None:
     """ADR-0021 §3 (Issue #151 §2): the root CLAUDE.md is the bootstrap index.
 
@@ -2053,6 +2073,7 @@ SOURCE_TRUTH_FORBIDDEN = (
     "cv2",
     "azure.ai",
     "azure.cognitiveservices",
+    # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
     "integrations.ai",
     "integrations.marketplaces",
