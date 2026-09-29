@@ -245,7 +245,7 @@ def test_adr_0013_is_recorded_and_referenced_by_the_canonical_documents() -> Non
 def test_the_canonical_pricing_rule_reads_the_same_in_every_owner_document() -> None:
     rules = {
         path.name: canonical_pricing_rule(path.read_text("utf-8"))
-        for path in (DOMAIN_RULES_MD, ARCHITECTURE_MD, ADR_0013)
+        for path in (DOMAIN_RULES_MD, ARCHITECTURE_MD, ADR_0013, ROADMAP_MD)
     }
     assert None not in rules.values(), rules
     assert len(set(rules.values())) == 1, rules

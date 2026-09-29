@@ -281,6 +281,34 @@ def test_testpaths_collect_every_test_module() -> None:
     assert outside == []
 
 
+def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
+    """Issue #151 H6: the SmartStore README states the adopted endpoint set that ENDPOINT_MATRIX.md
+    §4 owns, and nothing more."""
+    smartstore = REPO_ROOT / "documents" / "contracts" / "platforms" / "smartstore"
+    matrix = _section(_read(smartstore / "ENDPOINT_MATRIX.md"), r"^4\. Master registry")
+    adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
+    assert len(adopted) == 5, adopted
+    boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
+    named = boundary.split("Every other SmartStore endpoint")[0]
+    assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
+
+
+def test_architecture_cites_the_phase_c_record_status() -> None:
+    """Issue #151 H9: the Phase C status in ARCHITECTURE is the acceptance record's own."""
+    status = "NOT ACCEPTED — C1 INCOMPLETE / STOPPED"
+    record = REPO_ROOT / "documents" / "acceptance" / "adaptive" / "ADAPTIVE-PHASE-C.md"
+    assert f"Status: **{status}" in _read(record)
+    assert f"ADAPTIVE-PHASE-C.md` ({status};" in _read(ARCHITECTURE_MD)
+
+
+def test_the_agent_host_protocol_states_its_merged_status() -> None:
+    """Issue #151 H10: the protocol says it is canonical since PR #147 merged, not a candidate."""
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    status = protocol.split("\n", 3)[2]
+    assert status.startswith("Status: **V2 — canonical.**"), status
+    assert "canonical candidate" not in protocol.split("## 0.", 1)[0]
+
+
 def test_claude_md_auto_loads_every_rule_body() -> None:
     """ADR-0021 §3 (Issue #151 §2): the root CLAUDE.md is the bootstrap index.
 

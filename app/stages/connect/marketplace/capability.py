@@ -1,7 +1,7 @@
 """SmartStore capability truth model (M2 PR-B).
 
 Contract: ``documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md``. Its §17 targets are
-owned per ``CAPABILITY_MAPPING.md`` Appendix A; PR-B owns the domain/state portion.
+owned per ``CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md``; PR-B owns the domain/state portion.
 
 This module is pure: no I/O, no clock and no provider call. Every value it can construct
 satisfies the contract's invariants, so neither persistence nor the read API can carry a
