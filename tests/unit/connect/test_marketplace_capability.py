@@ -1,7 +1,7 @@
 """SmartStore capability truth model (M2 PR-B): fixtures only, no credential, no provider call.
 
 Each ``test_s17_NN_*`` is a named test for CAPABILITY_MAPPING.md §17 target NN at the domain
-layer (ownership: CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md). Targets 16 and 17, and the
+layer (ownership: CAPABILITY_MAPPING.md Appendix A). Targets 16 and 17, and the
 persistence/service/API portion of 19, are proven in
 tests/integration/connect/test_marketplace_capability_store.py. Target 8 belongs to PR-A and target
 18

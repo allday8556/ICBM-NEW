@@ -6,7 +6,7 @@ A past issue, PR, review, comment, acceptance record or evidence file that names
 **not** rewritten (ADR-0021 §5); it is traced to the current location through this map.
 The same table is in `PATH_MIGRATION_MAP.csv` for tools.
 
-Dispositions: KEEP 100, MOVE 604, MERGE 0, ARCHIVE 12, REMOVE 0.
+Dispositions: KEEP 100, MOVE 603, MERGE 1, ARCHIVE 12, REMOVE 0.
 
 - `KEEP`: the path is unchanged (its content may still carry path-only edits).
 - `MOVE`: a structural move; path-only edits only (ADR-0021 §4).
@@ -531,7 +531,7 @@ The directory-level moves it contains are:
 | `docs/` | `documents/architecture/` | 2 |
 | `docs/` | `documents/archive/` | 1 |
 | `docs/` | `documents/archive/ui/` | 1 |
-| `docs/` | `documents/contracts/` | 9 |
+| `docs/` | `documents/contracts/` | 8 |
 | `docs/` | `documents/contracts/ui/` | 1 |
 | `docs/` | `documents/decisions/` | 22 |
 | `docs/` | `documents/decisions/architect-reviews/` | 1 |
@@ -612,6 +612,7 @@ Individual moves that do not follow a directory prefix:
 | old path | new path | disposition |
 | --- | --- | --- |
 | `docs/acceptance/evidence/README.md` | `automation/acceptance/m2/RUNBOOK.md` | MOVE |
+| `docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` | `documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md` | MERGE |
 | `tests/live_support.py` | `tests/support/live_safety_support.py` | MOVE |
 | `tests/suppliers.py` | `tests/support/fake_suppliers.py` | MOVE |
 | `tests/support.py` | `tests/support/jobs_support.py` | MOVE |
