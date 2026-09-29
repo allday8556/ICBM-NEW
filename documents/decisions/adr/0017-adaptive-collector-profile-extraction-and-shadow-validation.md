@@ -996,7 +996,7 @@ Nothing here runs until the first vertical closes, or until a canonical amendmen
 authorizes a bounded proof (Q6).
 
 **Preconditions.**
-- a KRW supplier (`ROADMAP.md` §14.3);
+- a KRW supplier (`documents/roadmap/ROADMAP.md` §14.3);
 - its CONNECT definition and access envelope, reviewed after a bounded reconnaissance on the
   ADR-0010 §5 pattern, with the user's go-ahead;
 - server-rendered product HTML over HTTP.
@@ -1051,7 +1051,7 @@ prototype in place.
 - the cutover to `ACTIVE`: the canonical write path, the canonical unmatched-template behaviour (Q3
   is recorded in §8.1 as its input), and when a code extractor is retired;
 - any widening of the gateway, transport, `EvidenceKind` or browser rendering;
-- a second currency (`ROADMAP.md` §14.3);
+- a second currency (`documents/roadmap/ROADMAP.md` §14.3);
 - the exact table and column names of the profile, validation and shadow owners;
 - the onboarding UI.
 
@@ -1119,7 +1119,7 @@ AC-29  Blocking evidence is bound to the exact content-addressed EPR: a content-
 - PR #111 and its reviews `5302725919`, `5302852218`, `5302910552`, `5302952567`; PR #112 audit `5307128101` and re-audits `5307485431`, `5307562621`;
   `documents/archive/reviews/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md`
 - ADR-0007, ADR-0010 §3–§12, ADR-0012 §9, ADR-0013 §3, ADR-0016
-- `documents/architecture/ARCHITECTURE.md` §4, §5, §11; `ROADMAP.md` §9, §14.3; `documents/acceptance/milestones/M3.md` §2;
+- `documents/architecture/ARCHITECTURE.md` §4, §5, §11; `documents/roadmap/ROADMAP.md` §9, §14.3; `documents/acceptance/milestones/M3.md` §2;
   `documents/architecture/GLOSSARY.md`
 - `integrations/suppliers/collection.py`, `integrations/suppliers/extraction.py`,
   `app/stages/collect/collection.py`, `app/stages/collect/facts.py`, `app/platform/db/database.py`,

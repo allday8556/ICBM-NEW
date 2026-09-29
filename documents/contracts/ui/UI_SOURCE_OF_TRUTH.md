@@ -112,7 +112,7 @@ requirement below was over-broad as originally written: read literally it made a
 ComplianceGate owner, a `COMPLIANCE` review count, a registration list/filter screen and a
 review-queue view of these states M5 requirements. The ComplianceGate part `documents/architecture/ARCHITECTURE.md` §7
 ("**No production ComplianceGate owner exists yet** … Gate 3 implements no ComplianceGate"),
-`ROADMAP.md` §14.1 and ADR-0018 §5 assign to a **separate later owner** under its own contract and
+`documents/roadmap/ROADMAP.md` §14.1 and ADR-0018 §5 assign to a **separate later owner** under its own contract and
 authorization; the list/filter and review-queue part no authorized M5 slice owns at all. That
 ownership boundary wins; the requirement is restated accordingly and narrowed to the surfaces that
 M5 actually authorized.
@@ -132,7 +132,7 @@ authorization.
 
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
-separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `ROADMAP.md`
+separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`
 §14.1). Regulated-category automation stays forbidden, and the first bounded canary stays restricted
 to a product whose reviewed category metadata proves it outside every regulated category: eligibility
 evidence for that canary alone, never a `COMPLIANCE PASS` verdict.
@@ -145,7 +145,7 @@ It must never be folded into a generic successful/failed state in the domain mod
 - Legacy repository UI implementations, including old `ICBM-PROJECT` / #86 functional implementation, are **not** implementation sources for ICBM-NEW.
 - Do not copy legacy functional owners, API bindings, DB assumptions, handlers, or runtime state from old UI code.
 - Functional behaviour must be connected fresh to ICBM-NEW application contracts.
-- If prototype JavaScript conflicts with `ROADMAP.md`, accepted ADRs, or `documents/architecture/ARCHITECTURE.md`, the canonical architecture wins. Prototype JavaScript is demo interaction only.
+- If prototype JavaScript conflicts with `documents/roadmap/ROADMAP.md`, accepted ADRs, or `documents/architecture/ARCHITECTURE.md`, the canonical architecture wins. Prototype JavaScript is demo interaction only.
 - When the user approves a later prototype revision, record filename, SHA-256, size, review decision and repository-copy verification before implementation switches to it.
 
 ## Current visual top-level IA

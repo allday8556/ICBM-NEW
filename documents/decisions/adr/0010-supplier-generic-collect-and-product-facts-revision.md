@@ -17,7 +17,7 @@ Two constraints shape the design:
 - the CONNECT boundary of ADR-0007 must stay intact, so a supplier package keeps holding site knowledge only;
 - COLLECT must not create the canonical `Product`. That is M4.
 
-`app/stages/products/service.py` said that both `Product` and `ProductFactsRevision` arrive in M4. `ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` say COLLECT creates `ProductFactsRevision` in M3. §1 resolves that conflict.
+`app/stages/products/service.py` said that both `Product` and `ProductFactsRevision` arrive in M4. `documents/roadmap/ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` say COLLECT creates `ProductFactsRevision` in M3. §1 resolves that conflict.
 
 ## Decision
 
@@ -250,7 +250,7 @@ revision 3 ─ source_product_id X ─ fingerprint F
 > read as `COVERAGE`. The level, its fields, its `ABSENT` rule and its acceptance semantics are
 > unchanged.
 
-`ROADMAP.md` §5 and `documents/architecture/ARCHITECTURE.md` §5 define the COLLECT source-truth contract. M3 keeps all of it in the schema and the parser/evidence model, and splits only what **acceptance** requires.
+`documents/roadmap/ROADMAP.md` §5 and `documents/architecture/ARCHITECTURE.md` §5 define the COLLECT source-truth contract. M3 keeps all of it in the schema and the parser/evidence model, and splits only what **acceptance** requires.
 
 | Level | Facts |
 | --- | --- |
@@ -585,7 +585,7 @@ PR #55 review `5204359614` §4 and follow-up `5204397433`. No question remains o
 ## References
 
 - Issue #52 and comments `5672341510`, `5672418057`; PR #55 reviews `5204359614`, `5204397433`
-- `ROADMAP.md` §5, §12; `documents/architecture/ARCHITECTURE.md` §4, §5, §8, §10, §11
+- `documents/roadmap/ROADMAP.md` §5, §12; `documents/architecture/ARCHITECTURE.md` §4, §5, §8, §10, §11
 - ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008
 - `app/__init__.py`, `integrations/suppliers/base.py`, `integrations/suppliers/transport/`, `integrations/suppliers/kmretail/`, `app/stages/collect/service.py`
 - `tests/contracts/test_repository_rules.py`

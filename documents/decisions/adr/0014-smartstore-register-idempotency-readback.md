@@ -780,15 +780,15 @@ The eight fail-closed readings submitted in Issue #89 comment `5740555092` were 
   - this ADR's invariants block (M5-01 to M5-24) and the decision text of R1–R4, including the addendum's nine required rules, and the absence of contradicting phrasings;
   - the review amendments: the canonical REGISTER owner list claims no image transformation (B1); only a `READY` non-asset candidate permits an upload (B2); an operator assertion alone never establishes a remote outcome (B3); every durable digest field hashes the sanitized representation (B4);
   - `documents/acceptance/milestones/M5.md` stays `PENDING` and names the bounded acceptance;
-  - `documents/architecture/ARCHITECTURE.md` and `ROADMAP.md` reference this ADR.
-- **The status documents** (CLAUDE.md §11, `ROADMAP.md` §14, README) name Issue #89 and this ADR as the M5 track. M5 stays CURRENT.
+  - `documents/architecture/ARCHITECTURE.md` and `documents/roadmap/ROADMAP.md` reference this ADR.
+- **The status documents** (CLAUDE.md §11, `documents/roadmap/ROADMAP.md` §14, README) name Issue #89 and this ADR as the M5 track. M5 stays CURRENT.
 - **The §28 amendment (`5845062336`)** extends the pinned invariants block to M5-36 and pins §28's rules and the positive-only lookup row of §10's resolution-evidence table. It changes no runtime, schema or adoption.
 
 ## References
 
 - Issue #89 (body; kickoff `5740316498`; addendum `5740352676`)
 - `documents/architecture/frozen/CANONICAL-V3.1.md` §2.4–§2.7, §3, §3.1, §6.5–§6.8, §8, §8.1, §9.1–§9.4, §10.1–§10.6, §11.2–§11.5, §14
-- `ROADMAP.md` §7, §12–§14; `documents/architecture/ARCHITECTURE.md` §4, §5, §7, §13; CLAUDE.md §6.5, §7
+- `documents/roadmap/ROADMAP.md` §7, §12–§14; `documents/architecture/ARCHITECTURE.md` §4, §5, §7, §13; CLAUDE.md §6.5, §7
 - ADR-0004, ADR-0008, ADR-0010 §9, ADR-0011, ADR-0012, ADR-0013 (§4, §8, §9, §11)
 - `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md` §4; `ERRORS.md` §2.2–§3; `app/stages/connect/marketplace/capability.py` (W1, write status)
 - Issue #56 (Image Studio); Issue #61 (detail composition); Issue #80 ruling `5738886070` (resale advisory)

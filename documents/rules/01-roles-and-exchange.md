@@ -27,6 +27,6 @@ ChatGPT and Claude do not rely on direct AI-to-AI conversation. GitHub is the ex
 Rules:
 
 - Proposal/review documents written by an AI must identify their author and status: `PROPOSAL`, `UNDER REVIEW`, `ACCEPTED`, or `SUPERSEDED`.
-- Canonical documents such as `ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` do not need author suffixes once accepted.
+- Canonical documents such as `documents/roadmap/ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` do not need author suffixes once accepted.
 - A contract/architecture decision becomes binding only when reflected in an ADR or canonical document.
 - If an implementation question changes architecture, Claude must stop implementation and open a GitHub issue for architect resolution.

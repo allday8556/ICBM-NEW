@@ -37,7 +37,7 @@ Any other pre-V2 Host behavior must conform to this document, or it is not used.
 **Product, domain and safety contracts are not changed by this protocol.** It does not amend,
 supersede or relax:
 - any ADR;
-- `CLAUDE.md`, `ROADMAP.md` or `documents/architecture/ARCHITECTURE.md`;
+- `CLAUDE.md`, `documents/roadmap/ROADMAP.md` or `documents/architecture/ARCHITECTURE.md`;
 - any marketplace safety contract, among them:
   - ADR-0014, including the never-resend and positive-only reconcile rules of §28;
   - ADR-0018, including G3-30 and G3-31;

@@ -17,7 +17,7 @@ Decision owner: the user (repository owner, product decisions and protected appr
 
 The canonical documents gate every remaining step behind its own authorization:
 
-- `ROADMAP.md` §14 and §14.1: each later slice / each gap "needs its own authorization";
+- `documents/roadmap/ROADMAP.md` §14 and §14.1: each later slice / each gap "needs its own authorization";
 - `CLAUDE.md` §11: none of the M5 gaps "may be closed without its own authorization";
 - ADR-0018 §6.1 and §12: CREATE and the positive-only reconcile path "each need their own
   separately authorized adoption slice";
@@ -40,9 +40,9 @@ rule in the canonical documents. It defines one standing way to satisfy it.
 A slice is **authorized by this standing authorization** — with no further user decision — when
 **all** of the following hold on the exact canonical main it starts from:
 
-1. **Next in canonical order.** It is the next incomplete step in the order of `ROADMAP.md` §12 and
+1. **Next in canonical order.** It is the next incomplete step in the order of `documents/roadmap/ROADMAP.md` §12 and
    §14, read fresh from that exact main. No earlier selection, lookahead or cached plan is reused.
-2. **Already decided.** The canonical documents (`ROADMAP.md`, `documents/architecture/ARCHITECTURE.md`, `documents/decisions/adr/*`,
+2. **Already decided.** The canonical documents (`documents/roadmap/ROADMAP.md`, `documents/architecture/ARCHITECTURE.md`, `documents/decisions/adr/*`,
    `documents/acceptance/*`) already define its scope, its safety invariants and its owner boundary.
 3. **Provider-zero.** It adds local runtime, tests and docs only. It makes no real provider or
    marketplace call.
@@ -82,7 +82,7 @@ condition and its canonical source.
 
 ### 4. The current order under this ADR
 
-At the canonical main this ADR was decided on, the next provider-zero slices of `ROADMAP.md` §14
+At the canonical main this ADR was decided on, the next provider-zero slices of `documents/roadmap/ROADMAP.md` §14
 item 1 (M5) are, in order and each as its own PR:
 
 | order | slice | scope | not in scope |
@@ -171,7 +171,7 @@ SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisit
 
 ## References
 
-- `ROADMAP.md` §12, §14, §14.1, §14.2
+- `documents/roadmap/ROADMAP.md` §12, §14, §14.1, §14.2
 - `CLAUDE.md` §1, §7.2, §11
 - ADR-0014 §17.2, §27, §28 (amendment note at §28.8)
 - ADR-0015 §2 (the target policy holds both authoring revisions as `null`)

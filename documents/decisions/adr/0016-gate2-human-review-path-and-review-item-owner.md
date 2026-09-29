@@ -25,7 +25,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - the Gate 1 acceptance `5804516180` and ADR-0015 §4, which moved `ReviewItem` (D3) to Gate 2;
 - `documents/architecture/ARCHITECTURE.md` §9 (one ReviewItem model, surfaced in the existing screens and dashboard
   counts, no separate top-level review application in v1) and the gap it records;
-- `ROADMAP.md` §14.1 and `documents/acceptance/milestones/M5.md` §9.2, which record the missing owner;
+- `documents/roadmap/ROADMAP.md` §14.1 and `documents/acceptance/milestones/M5.md` §9.2, which record the missing owner;
 - `documents/architecture/GLOSSARY.md` §3 (`REVIEW_REQUIRED` is a workflow state, not an error class);
 - the existing contract this ADR gives a durable owner to: `ReviewKind` and
   `ReviewService.open_counts()` in `app/capabilities/review/service.py`, consumed by `ScreensService.dashboard()`
@@ -450,6 +450,6 @@ G2-19  every producer slice proves that an OPEN item lost to an index failure af
 
 - Issue #89: Gate 2 kickoff `5804605624`; Gate 1 acceptance `5804516180`; ADR-0015 §4 (D3).
 - `documents/architecture/ARCHITECTURE.md` §7, §9, §11; `documents/architecture/GLOSSARY.md` §3.
-- `ROADMAP.md` §14.1; `documents/acceptance/milestones/M5.md` §9.2.
+- `documents/roadmap/ROADMAP.md` §14.1; `documents/acceptance/milestones/M5.md` §9.2.
 - ADR-0010 §9, ADR-0011, ADR-0013, ADR-0014 §9, §10, §15, M5-03, M5-23, M5-24, ADR-0015.
 - `app/capabilities/review/service.py`, `app/interface/screens/service.py`, `app/interface/screens/contracts.py`.

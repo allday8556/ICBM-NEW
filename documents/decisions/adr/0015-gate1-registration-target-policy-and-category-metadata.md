@@ -15,7 +15,7 @@ own authorization in GitHub, and any migration is authorized only with the slice
 Decision owner: Architect (ChatGPT). Sources:
 - the Gate 1 kickoff `5784108069` (decisions D1–D5, the slice order and the exit boundary) and the
   preparation proposal `5783937360` it answers;
-- the Gate 0 record: `ROADMAP.md` §14.1–§14.3 and `documents/acceptance/milestones/M5.md` §9, closed by `5783937028`;
+- the Gate 0 record: `documents/roadmap/ROADMAP.md` §14.1–§14.3 and `documents/acceptance/milestones/M5.md` §9, closed by `5783937028`;
 - ADR-0014 §3 (derived preflight), §4 (category and disclosure), §10 and §17.2 (the reconcile rule
   and the evidence verdict, unchanged here), §18 (AI is optional), §21 (Settings and policy
   ownership), §22 (the registration UI) and §24 (execution safety);
@@ -288,4 +288,4 @@ G1-12  Gate 1 creates no second review queue, claims no compliance PASS, and doe
 - `documents/decisions/adr/0011-marketplace-readback-retention-boundary.md`.
 - `app/stages/register/policy.py` (`TargetPolicy`, `RegistrationPolicySource`, `CategoryMetadata`,
   `RegistrationMetadataSource`).
-- `ROADMAP.md` §14, `documents/acceptance/milestones/M5.md` §9, `documents/architecture/GLOSSARY.md`.
+- `documents/roadmap/ROADMAP.md` §14, `documents/acceptance/milestones/M5.md` §9, `documents/architecture/GLOSSARY.md`.

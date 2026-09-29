@@ -32,7 +32,7 @@ Related:
 M3 is accepted. COLLECT persists immutable `ProductFactsRevision` records per `(supplier_key, source_product_id)`, their evidence, and content-addressed `SourceAsset` bytes. There is no canonical downstream product yet. M4 is CURRENT: canonical Product DB, image pipeline, and pricing and readiness foundations (Issue #80).
 
 The canonical documents name the downstream product in two vocabularies:
-- `ROADMAP.md` §6, `documents/architecture/ARCHITECTURE.md` §4–§5, CLAUDE.md §5.1 and ARCHITECT_REVIEW B6 speak of a **`Product`**, "the canonical ICBM product ID", that references the current accepted facts revision. `documents/architecture/ARCHITECTURE.md` §5 `MarketplaceRegistration` carries an `icbm_product_id`.
+- `documents/roadmap/ROADMAP.md` §6, `documents/architecture/ARCHITECTURE.md` §4–§5, CLAUDE.md §5.1 and ARCHITECT_REVIEW B6 speak of a **`Product`**, "the canonical ICBM product ID", that references the current accepted facts revision. `documents/architecture/ARCHITECTURE.md` §5 `MarketplaceRegistration` carries an `icbm_product_id`.
 - Canonical v3.1 (frozen) speaks of a **`ProductGroup`**: the intrinsic, same-sellable identity across supplier members (§2.2). Its frozen schema (§14) lists `ProductGroup`, `GroupMember`, `GroupMembershipRevision` and `GroupChangeEvent`, and no separate `Product`. Its Item layer keys everything downstream on `current_group_id + composition_signature` (§2.4, §2.5).
 
 Read side by side, these can suggest two canonical identities: a `Product` and a `ProductGroup`. Issue #80 §4 requires the relationship to be decided **before** any schema, with exactly one downstream canonical ID. This ADR decides it, and fixes the other boundaries PR-B to PR-F build on.
@@ -507,14 +507,14 @@ Ruling C (§7) already covers the minimum sale price. A generic `minimum_sale_pr
   - this ADR never reintroduces a source-side SKU or offer built from ABSENT options or tiers, and it keeps the `BASE_PRODUCT` binding;
   - this ADR keeps readiness layered and claims no single readiness for an Item across pricing contexts;
   - the pointer is never called an "accepted" revision in this ADR's decision;
-  - this ADR is referenced from `documents/architecture/ARCHITECTURE.md` and `ROADMAP.md`.
-- **The status documents** (CLAUDE.md §11, `ROADMAP.md` §14, README) name Issue #80 and this ADR as the M4 track. M4 stays CURRENT.
+  - this ADR is referenced from `documents/architecture/ARCHITECTURE.md` and `documents/roadmap/ROADMAP.md`.
+- **The status documents** (CLAUDE.md §11, `documents/roadmap/ROADMAP.md` §14, README) name Issue #80 and this ADR as the M4 track. M4 stays CURRENT.
 
 ## References
 
 - Issue #80 (body; kickoff `5726182664`); PR #81 architect review `5245152210` (rulings A–E, blockers 1–2)
 - `documents/architecture/frozen/CANONICAL-V3.1.md` §2.2–§2.7, §3.1, §5.2, §6.1–§6.8, §7.3, §7.7, §8, §8.1–§8.2, §9.3–§9.4, §10.1, §11.5, §12–§12.2, §14
-- `ROADMAP.md` §6; `documents/architecture/ARCHITECTURE.md` §4–§6, §10–§11; CLAUDE.md §5.1, §6
+- `documents/roadmap/ROADMAP.md` §6; `documents/architecture/ARCHITECTURE.md` §4–§6, §10–§11; CLAUDE.md §5.1, §6
 - `documents/decisions/architect-reviews/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` B1, B6, §8
 - ADR-0009, ADR-0010 (§1, §6 fingerprint/extractor boundary, §9), ADR-0011, ADR-0012 (§9, §14)
 - Issue #30 (and refinement `5661813529`); Issue #56 (§1–§13)

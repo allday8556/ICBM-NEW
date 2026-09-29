@@ -35,7 +35,7 @@ or M6.5 work. `M0_DRY_RUN_ONLY` / `M0_LIVE_FORBIDDEN` stays the only execution p
 
 Decision owner: Architect (ChatGPT). Sources:
 - the Gate 3 kickoff `5821078540` (D1–D7, the G3-0 scope and the expected later areas);
-- `ROADMAP.md` §14.1 (the LIVE-authorization and ComplianceGate gaps) and §14.2 (the preconditions
+- `documents/roadmap/ROADMAP.md` §14.1 (the LIVE-authorization and ComplianceGate gaps) and §14.2 (the preconditions
   for the first LIVE write);
 - `documents/architecture/ARCHITECTURE.md` §7 (ComplianceGate, RegistrationAttempt) and §13 (execution safety);
 - `documents/acceptance/milestones/M5.md` §6 (derived canary readiness) and §9.1–§9.3 (the provider-evidence verdict,
@@ -66,7 +66,7 @@ the first real SmartStore canary is impossible, for two independent reasons:
 1. **No safety contract governs a real write.** The execution-mode owner refuses LIVE outright
    (`M0_DRY_RUN_ONLY`, `M0_LIVE_FORBIDDEN`). That is the deliberate safe state, and nothing yet says
    who may leave it, for what, for how long, how it is stopped, and what must be proven first
-   (backup, retention, populated UI) — `ROADMAP.md` §14.1, §14.2; `documents/architecture/ARCHITECTURE.md` §13.
+   (backup, retention, populated UI) — `documents/roadmap/ROADMAP.md` §14.1, §14.2; `documents/architecture/ARCHITECTURE.md` §13.
 2. **The provider evidence is insufficient.** Product CREATE and the duplicate-lookup search stay
    `NOT_ADOPTED` after the official-evidence review closed `INSUFFICIENT` (Issue #89 `5768312853`,
    `5768347233`; `documents/acceptance/milestones/M5.md` §9.1).
@@ -625,7 +625,7 @@ G3-31  the registration read state and its status card and detail panel are surf
 
 ## Consequences
 
-- The LIVE-authorization gap (`ROADMAP.md` §14.1) and the §14.2 preconditions now have a contract.
+- The LIVE-authorization gap (`documents/roadmap/ROADMAP.md` §14.1) and the §14.2 preconditions now have a contract.
   Areas 1–3 implemented its provider-zero owners — the grant, the protected-write brake, the ASSET
   upload-attempt owner and the send-time stack (migration `0026`), the restore drill and the
   evidence-retention proof (`0029`) and the visual acceptance (`0030`) — and none of them is
@@ -649,5 +649,5 @@ G3-31  the registration read state and its status card and detail panel are surf
 - Gate 3 kickoff: Issue #89 `5821078540`.
 - Provider-evidence verdict: Issue #89 `5768247290` → `5768312853` → `5768347233`.
 - Gate 2 acceptance: `5818393660`, cross-audit `5818648647`; Gate 1 acceptance: `5804516180`.
-- `ROADMAP.md` §14; `documents/architecture/ARCHITECTURE.md` §7, §13; `documents/acceptance/milestones/M5.md` §6, §9; `documents/architecture/GLOSSARY.md` §4.
+- `documents/roadmap/ROADMAP.md` §14; `documents/architecture/ARCHITECTURE.md` §7, §13; `documents/acceptance/milestones/M5.md` §6, §9; `documents/architecture/GLOSSARY.md` §4.
 - ADR-0011, ADR-0014, ADR-0015, ADR-0016.

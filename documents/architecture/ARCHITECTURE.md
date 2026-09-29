@@ -289,7 +289,7 @@ Pricing snapshots must also support:
 - return/exchange costs
 - estimated vs actual settled margin
 
-**Today the implemented schema is KRW-only.** `product_facts_revisions.currency` is constrained to `KRW`, and the pricing owner computes in whole KRW with one rounding rule. That is sufficient for the first vertical (KM통상 → SmartStore, §15). A second-currency supplier — 1688, Rakuten or any other — first needs a currency and FX-snapshot extension of the source and pricing schema, decided in an ADR. **No such extension is authorized now**, and horizontal supplier expansion cannot start before it exists (`ROADMAP.md` §14).
+**Today the implemented schema is KRW-only.** `product_facts_revisions.currency` is constrained to `KRW`, and the pricing owner computes in whole KRW with one rounding rule. That is sufficient for the first vertical (KM통상 → SmartStore, §15). A second-currency supplier — 1688, Rakuten or any other — first needs a currency and FX-snapshot extension of the source and pricing schema, decided in an ADR. **No such extension is authorized now**, and horizontal supplier expansion cannot start before it exists (`documents/roadmap/ROADMAP.md` §14).
 
 ## 7. Registration safety
 

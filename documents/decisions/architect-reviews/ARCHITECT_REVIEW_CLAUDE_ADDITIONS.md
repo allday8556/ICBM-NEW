@@ -161,4 +161,4 @@ Only then expand suppliers/platforms.
 
 ## 11. Status
 
-The Claude additions are now **architecturally reviewed**. Implementation may use the accepted rulings above, together with `ROADMAP.md`, `documents/architecture/ARCHITECTURE.md`, and root `CLAUDE.md`.
+The Claude additions are now **architecturally reviewed**. Implementation may use the accepted rulings above, together with `documents/roadmap/ROADMAP.md`, `documents/architecture/ARCHITECTURE.md`, and root `CLAUDE.md`.

@@ -343,7 +343,7 @@ AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics t
   `5325435055`.
 - ADR-0010 §3, §4, §5, §8, §9, §12, §13 (amendment notes).
 - ADR-0017 §2, §5, §7.3, §10, §15 (amendment notes).
-- `documents/architecture/ARCHITECTURE.md` §4 COLLECT; `documents/architecture/GLOSSARY.md` §3a; `ROADMAP.md` §14.3.
+- `documents/architecture/ARCHITECTURE.md` §4 COLLECT; `documents/architecture/GLOSSARY.md` §3a; `documents/roadmap/ROADMAP.md` §14.3.
 - Code facts, at main `4ba99fbe`:
   - F1: ADR-0010 §3 names server-side browser execution;
   - F2: `integrations/suppliers/collection.py` `CollectionProfile.__post_init__` and
