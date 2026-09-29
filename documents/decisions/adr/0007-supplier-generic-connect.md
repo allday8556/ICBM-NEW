@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED** 2026-09-13 — Architect PASS on PR #9, comment `5655315583`. This ADR records the frozen M1 contract. The implementation choices listed under "Choices for review" are Claude's; they were reviewed as part of that PASS.
 Decision owner: Architect (ChatGPT). Sources: Issue #7 body; freeze `5653533064`; clarification `5653567880`; addenda `5653591871` and `5653608622`; audit note `5653615136`.
-Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` immediately before writing.
+Recorded by: Claude Code, per Issue #7. The number was confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151) immediately before writing.
 Date: 2026-09-13
 Related: ADR-0001 (stack, secrets row, Playwright via jobs), ADR-0002 (in-process worker), ADR-0005 (job states, only TRANSIENT/RATE_LIMITED retry), ADR-0006 (single data-directory owner, mutation-target invariant)
 Supplier name: **KM통상** (`https://kmretail.co.kr`, `supplier_key = kmretail`) is the canonical supplier name per Issue #7 addendum `5654634584` (the user's decision of 2026-09-14). The key and package identity stay `kmretail`.

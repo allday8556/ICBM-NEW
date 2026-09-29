@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED** 2026-09-15 — contract PR-A of Issue #52 (PR #55). Architect re-audit PASS `5205048938` and independent Claude cross-audit PASS on HEAD `5eb172f`; finalized per architect instruction `5674218319`. The architect review of PR #55 (`5204359614`, follow-up `5204397433`) is incorporated, including its rulings on the former open questions.
 Decision owner: Architect (ChatGPT). Sources: Issue #52 body; architect addendum after the independent cross-audit `5672341510`; architect clarification on Coupang representative images `5672418057`; PR #55 architect review `5204359614` and follow-up `5204397433`.
-Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151) and in every open PR immediately before writing.
 Date: 2026-09-15
 Related: ADR-0004 (automation guardrails), ADR-0005 (job states; only TRANSIENT/RATE_LIMITED retry), ADR-0006 (one owner per data directory), ADR-0007 (supplier-generic CONNECT — this ADR is its COLLECT counterpart and changes nothing in it), ADR-0008 (error taxonomy)
 

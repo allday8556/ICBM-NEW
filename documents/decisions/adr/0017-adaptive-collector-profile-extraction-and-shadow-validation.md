@@ -41,7 +41,7 @@ Decision owner: Architect (ChatGPT). Sources:
   `ProductFactsRevision`), ADR-0012 (AI runtime), ADR-0013 §3 (the current source revision
   pointer), ADR-0016 (ReviewItem).
 
-Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every open
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151), on `main` and in every open
 PR immediately before writing.
 Date: 2026-09-24
 Related:

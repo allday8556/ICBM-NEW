@@ -24,7 +24,7 @@ Decision owner: Architect (ChatGPT). Sources:
   `RegistrationPolicySource`, `CategoryMetadata` and `RegistrationMetadataSource` in
   `app/stages/register/policy.py`.
 
-Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151), on `main` and in every
 remote branch immediately before writing.
 Date: 2026-09-23
 Related:

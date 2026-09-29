@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED**
 Decision owner: Architect (ChatGPT) — Issue #4 directive `5653140744`, clarifications `5653161585` and `5653170835`; PR #6 review `5190681666` and follow-up `5653330407` (mutation-target invariant)
-Recorded by: Claude Code, per Issue #4 (number confirmed free in `docs/adr/` immediately before writing)
+Recorded by: Claude Code, per Issue #4 (number confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151) immediately before writing)
 Date accepted: 2026-09-13
 Related: `documents/decisions/adr/0001-runtime-stack.md` (SQLite WAL, one worker owner), `documents/decisions/adr/0002-job-worker-placement.md` (in-process worker), `documents/decisions/adr/0005-durable-job-state-and-attempt-history.md`, `documents/acceptance/milestones/M0.md` limitation L3
 

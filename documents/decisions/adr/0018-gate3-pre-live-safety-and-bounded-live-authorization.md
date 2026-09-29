@@ -45,7 +45,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - the owners and rules this ADR leaves exactly as they are: the execution-mode owner
   (`app/platform/system/execution_mode.py`), ADR-0014 §9–§11, §15, §17, §24 and §26, ADR-0011 and ADR-0016.
 
-Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` (the ADR directory then; `documents/decisions/adr/` since Issue #151), on `main` and in every
 remote branch immediately before writing.
 Date: 2026-09-24 UTC (2026-09-25 KST)
 Related:
