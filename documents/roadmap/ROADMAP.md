@@ -355,11 +355,14 @@ Canonical rule:
 
 ```text
 if minimum_sale_price exists:
-    final sale price = minimum_sale_price
-    price_basis = minimum_sale_price
+    final_sale_price = minimum_sale_price
+    price_basis = MINIMUM_SALE_PRICE
 else:
-    final sale price = target-margin calculated price
+    final_sale_price = target_margin_price
+    price_basis = TARGET_MARGIN
 ```
+
+This is the canonical block of `documents/rules/06-immutable-domain-rules.md` §6.1 and ADR-0013.
 
 Do **not** restore the old `max(target margin price, minimum sale price)` rule.
 
