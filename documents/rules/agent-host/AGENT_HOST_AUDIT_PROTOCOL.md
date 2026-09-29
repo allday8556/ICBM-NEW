@@ -1,9 +1,11 @@
 # Agent Host Audit and Merge Protocol
 
-Status: **V2 — canonical candidate (PR #147).** It becomes the Agent Host's canonical protocol from
-the main commit that contains this file, under the bootstrap transition of §0.1. Until then, the
-#146 trial instruction (`5870526033`) cites the pre-refresh text at `9cc4939a` as its protocol
-source.
+Status: **V2 — canonical.** PR #147 merged this file into main as `a0643e4642a759c93acc4204b3ff138ad4580e9a`,
+so it has been the Agent Host's canonical protocol since that commit, under the bootstrap transition
+of §0.1. The bootstrap ended on main `0919c2ae77f7d2f0162fbacdbd0d8274f34ea6f8` (PR #150 merged,
+POST_MERGE_VERIFY Issue #89 `5882586622`, owner acceptance Issue #151 `5882336231`); every slice
+since uses §1–§8. Before the merge, the #146 trial instruction (`5870526033`) cited the pre-refresh
+text at `9cc4939a` as its protocol source.
 Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`
 Scope: ICBM-NEW Agent Host audit, CI, merge, and post-merge verification workflow.
 
