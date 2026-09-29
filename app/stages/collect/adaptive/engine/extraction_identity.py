@@ -20,7 +20,9 @@ EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/validation.py",
 )
 # Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): the hashed inputs moved from
-# app/collect/adaptive/ to app/stages/collect/adaptive/engine/. EXTRACTOR_REVISION is unchanged
-# and the engine goldens pass unchanged. tests/unit/collect/adaptive/engine/test_identity.py
-# recomputes this digest from EXTRACTOR_INPUTS on every CI run.
+# app/collect/adaptive/ to app/stages/collect/adaptive/engine/ and their imports followed.
+# EXTRACTOR_REVISION is unchanged and the engine goldens pass unchanged. A reader cannot recompute
+# a SHA-256; the proof is mechanical: tests/unit/collect/adaptive/engine/test_identity.py
+# recomputes this digest from EXTRACTOR_INPUTS, and the merge guard requires that test green in
+# the FULL CI of the exact HEAD.
 EXTRACTOR_FINGERPRINT = "c44f0007a990062141b69272895a91560c85d69bb2538ee5fdd73ed88cf544ed"

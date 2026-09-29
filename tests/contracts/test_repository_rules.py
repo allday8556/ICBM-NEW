@@ -209,30 +209,34 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 
 # Issue #151 (ADR-0021 §3, §4): the rule bodies CLAUDE.md now imports are its former sections,
 # and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
-# at main e72a5cad) after the normalization below, which masks locators only: backtick spans,
-# markdown link targets and bare path tokens. Every rule word must be unchanged; a later reviewed
-# rule change updates its digest in the same PR. §11 (milestone status) is pinned by the milestone
-# agreement test instead.
+# at main e72a5cad) after the normalization below, which masks locators only: code spans that
+# name a path or a file, markdown link targets and bare path tokens. Every rule word must be
+# unchanged; a later reviewed rule change updates its digest in the same PR. §11 (milestone status)
+# is pinned by the milestone agreement test instead.
 _FORMER_CLAUDE_SECTIONS = {
-    "01-roles-and-exchange.md": "69cda22cbadffdc50fed4f5361ec0014108e0957be28c24161ebeec458d4079b",
+    "01-roles-and-exchange.md": "41d2e020b31971ce797b8d12eadacb06a15cec0b2c71d9ed5f9b46ea1223cc87",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
     "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
     "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
-    "05-architectural-rules.md": "0d7faee947ee9441a3fc81b954f79308d2b59c46a8ca651a03a88eb82d8e0be7",
+    "05-architectural-rules.md": "d6c2f27ab6a1ec86371de23099c0c2bd69e57936f0ece79c833023a03eac7d61",
     "06-immutable-domain-rules.md": (
-        "29b527b784c4a7d0bf8c1c639960ea954451d8ccb22012b39135a9a719da5c35"
+        "4f3460debfb15568611ad547a158ea15b75491471312a0cf2ab5c47f06e8c1b9"
     ),
-    "07-execution-safety.md": "883af77a8688b289a68d471fcf9e2af2bfdce08e635bc05885400b5f2a7fd3b4",
-    "08-git-conventions.md": "3006c00d03da870686b90bbdeaaa9e1768d8b2ab60da7fb02a743a521f6194b0",
+    "07-execution-safety.md": "f398e0d780f8f0f6f8cf072084798190a271d316936362d86dbf92251c5689e5",
+    "08-git-conventions.md": "3f3c36c1927cfeeb3a05ef7f09e008b45d873fc29785941d9bf51298447d230a",
     "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
     "10-working-style.md": "3d6f95d224b6b27b17ece1c6b850a0b0151795e673c5f9f391542741e9b50f42",
-    "12-first-vertical.md": "90c82d7ee2c30ef1fbca3624fcf8dcdfb2146473bf0144aeef60ed2d627af569",
+    "12-first-vertical.md": "3bf78de57d08ac04c4edfb8b5564b1070a1f3c348237359cfab49fd16db0746c",
 }
 
 
 def _rule_words(text: str) -> str:
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-    text = re.sub(r"`[^`\n]*`", "`L`", text)
+    # a code span is masked only when it is a locator (it names a path or a file); every other span,
+    # such as `DRY_RUN | LIVE` or `max(...)`, is a contract term and stays part of the digest
+    text = re.sub(
+        r"`[^`\n]*(?:/|\.(?:md|py|json|toml|ini|yml|html|js|csv|ps1)\b)[^`\n]*`", "`L`", text
+    )
     text = re.sub(r"\]\([^)\s]*\)", "](L)", text)
     text = re.sub(r"(?<![\w`])[\w.-]+(?:/[\w.*<>-]+)+/?", "L", text)
     text = re.sub(r"\n-{3,}\n", "\n", text)
@@ -252,6 +256,7 @@ def test_the_rule_words_detector_masks_only_locators() -> None:
     )
     assert _rule_words(before) == _rule_words(after)
     assert _rule_words("never resend CREATE") != _rule_words("always resend CREATE")
+    assert _rule_words("mode `DRY_RUN`") != _rule_words("mode `LIVE`")
 
 
 def test_claude_md_auto_loads_every_rule_body() -> None:

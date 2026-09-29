@@ -12,8 +12,9 @@ EXTRACTOR_INPUTS = (
     "integrations/suppliers/kmretail/collect/images.py",
     "integrations/suppliers/kmretail/collect/revision.py",
 )
-# Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): collect/facts.py and
-# ../collection.py changed only the import app.collect.facts -> app.stages.collect.facts.
-# EXTRACTOR_REVISION is unchanged. tests/contracts/test_repository_rules.py recomputes this
-# digest from EXTRACTOR_INPUTS on every CI run.
+# Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): collect/facts.py changed only
+# the import app.collect.facts -> app.stages.collect.facts; the other inputs are unchanged.
+# EXTRACTOR_REVISION is unchanged. A reader cannot recompute a SHA-256; the proof is mechanical:
+# tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
+# merge guard requires that test green in the FULL CI of the exact HEAD.
 EXTRACTOR_FINGERPRINT = "7055eac566872047afbfb4e961605915ea96fb5e56e5e77eb90f0d0fb1684ffa"

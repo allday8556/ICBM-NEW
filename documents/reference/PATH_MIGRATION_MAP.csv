@@ -233,7 +233,7 @@ app/system/__init__.py,app/platform/system/__init__.py,MOVE,runtime owner groupe
 app/system/diagnostics.py,app/platform/system/diagnostics.py,MOVE,runtime owner grouped by spine stage / capability / platform / interface
 app/system/execution_mode.py,app/platform/system/execution_mode.py,MOVE,runtime owner grouped by spine stage / capability / platform / interface
 app/system/readiness.py,app/platform/system/readiness.py,MOVE,runtime owner grouped by spine stage / capability / platform / interface
-app/system/secret_scan.py,automation/acceptance/common/secret_scan.py,MOVE,used only by acceptance harnesses and their tests (no app runtime importer)
+app/system/secret_scan.py,app/platform/system/secret_scan.py,MOVE,runtime owner grouped by spine stage / capability / platform / interface
 constraints.txt,constraints.txt,KEEP,tool-mandated root location: pinned-stack constraint file used by CI install at the root
 docs/AGENT_HOST_AUDIT_PROTOCOL.md,documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md,MOVE,Agent Host control-plane rules
 docs/ARCHITECTURE.md,documents/architecture/ARCHITECTURE.md,MOVE,architecture owner (CLAUDE.md §13 #3)
@@ -639,7 +639,7 @@ tests/unit/test_repository_rules.py,tests/contracts/test_repository_rules.py,MOV
 tests/unit/test_retry_policy.py,tests/unit/jobs/test_retry_policy.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_safe_payload.py,tests/unit/platform/core/test_safe_payload.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_schema_contract.py,tests/unit/platform/db/test_schema_contract.py,MOVE,unit test grouped by runtime owner
-tests/unit/test_secret_scan.py,tests/harness/common/test_secret_scan.py,MOVE,"test of an acceptance harness, not runtime"
+tests/unit/test_secret_scan.py,tests/unit/platform/system/test_secret_scan.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_secrets.py,tests/unit/platform/core/test_secrets.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_smartstore_binding.py,tests/unit/connect/test_smartstore_binding.py,MOVE,capability first-binding test grouped under connect; merging it into the capability test module is content consolidation for the reconciliation PR (ADR-0021 §7)
 tests/unit/test_smartstore_caller.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_caller.py,MOVE,unit test grouped by runtime owner

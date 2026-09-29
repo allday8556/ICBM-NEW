@@ -9,13 +9,13 @@ bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignor
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 233 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 234 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 19 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 59 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 60 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 110 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
-| `automation/` | 94 | tooling outside the runtime |
-| `automation/acceptance/` | 68 | acceptance harnesses by campaign; `common/` is the shared offline core |
+| `automation/` | 93 | tooling outside the runtime |
+| `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
 | `automation/agent-host/` | 13 | Agent Host scripts (sha256-pinned bytes) |
 | `automation/archive/` | 2 | historical entry points, byte-identical |
@@ -38,9 +38,9 @@ bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignor
 | `tests/` | 214 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
-| `tests/harness/` | 30 | tests of the acceptance harnesses |
+| `tests/harness/` | 28 | tests of the acceptance harnesses |
 | `tests/integration/` | 80 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 73 | unit tests by runtime owner |
+| `tests/unit/` | 75 | unit tests by runtime owner |
 | `ui/` | 44 |  |
 | `ui/web/` | 44 | the served web client |

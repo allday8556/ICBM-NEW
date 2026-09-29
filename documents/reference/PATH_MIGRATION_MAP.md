@@ -276,7 +276,7 @@ Job types, review producer names, table names and Alembic revision ids are uncha
 | `app.system.diagnostics` | `app.platform.system.diagnostics` |
 | `app.system.execution_mode` | `app.platform.system.execution_mode` |
 | `app.system.readiness` | `app.platform.system.readiness` |
-| `app.system.secret_scan` | `automation.acceptance.common.secret_scan` |
+| `app.system.secret_scan` | `app.platform.system.secret_scan` |
 | `scripts.g3_visual_acceptance` | `automation.acceptance.gate3_visual.g3_visual_acceptance` |
 | `scripts.g3visual` | `automation.acceptance.gate3_visual.harness` |
 | `scripts.g3visual.checker` | `automation.acceptance.gate3_visual.harness.checker` |
@@ -491,7 +491,7 @@ Job types, review producer names, table names and Alembic revision ids are uncha
 | `tests.unit.test_retry_policy` | `tests.unit.jobs.test_retry_policy` |
 | `tests.unit.test_safe_payload` | `tests.unit.platform.core.test_safe_payload` |
 | `tests.unit.test_schema_contract` | `tests.unit.platform.db.test_schema_contract` |
-| `tests.unit.test_secret_scan` | `tests.harness.common.test_secret_scan` |
+| `tests.unit.test_secret_scan` | `tests.unit.platform.system.test_secret_scan` |
 | `tests.unit.test_secrets` | `tests.unit.platform.core.test_secrets` |
 | `tests.unit.test_smartstore_binding` | `tests.unit.connect.test_smartstore_binding` |
 | `tests.unit.test_smartstore_caller` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_caller` |
@@ -520,14 +520,13 @@ The directory-level moves it contains are:
 | `(root)/` | `documents/roadmap/` | 1 |
 | `app/` | `app/capabilities/` | 26 |
 | `app/` | `app/interface/` | 18 |
-| `app/` | `app/platform/` | 56 |
+| `app/` | `app/platform/` | 57 |
 | `app/` | `app/stages/` | 79 |
 | `app/collect/adaptive/` | `app/stages/collect/adaptive/engine/` | 11 |
 | `app/collect/adaptive_capture/` | `app/stages/collect/adaptive/phase_c_capture/` | 7 |
 | `app/collect/adaptive_shadow/` | `app/stages/collect/adaptive/shadow/` | 7 |
 | `app/collect/adaptive_store/` | `app/stages/collect/adaptive/store/` | 4 |
 | `app/live/` | `app/capabilities/live_safety/` | 13 |
-| `app/system/` | `automation/acceptance/common/` | 1 |
 | `docs/` | `documents/` | 28 |
 | `docs/` | `documents/architecture/` | 2 |
 | `docs/` | `documents/archive/` | 1 |
@@ -583,7 +582,6 @@ The directory-level moves it contains are:
 | `tests/integration/` | `tests/integration/register/` | 16 |
 | `tests/integration/` | `tests/integration/review/` | 7 |
 | `tests/unit/` | `tests/contracts/` | 6 |
-| `tests/unit/` | `tests/harness/common/` | 1 |
 | `tests/unit/` | `tests/harness/gate3_visual/` | 1 |
 | `tests/unit/` | `tests/harness/m2/` | 6 |
 | `tests/unit/` | `tests/harness/m3/` | 4 |
@@ -597,6 +595,7 @@ The directory-level moves it contains are:
 | `tests/unit/` | `tests/unit/live_safety/` | 1 |
 | `tests/unit/` | `tests/unit/platform/core/` | 9 |
 | `tests/unit/` | `tests/unit/platform/db/` | 1 |
+| `tests/unit/` | `tests/unit/platform/system/` | 1 |
 | `tests/unit/` | `tests/unit/products/` | 3 |
 | `tests/unit/` | `tests/unit/register/` | 2 |
 | `tests/unit/adaptive/` | `tests/unit/collect/adaptive/engine/` | 11 |
@@ -657,7 +656,6 @@ Individual moves that do not follow a directory prefix:
 | `documents/rules/README.md` | rule body / index split from CLAUDE.md, or this map |
 | `tests/contracts/__init__.py` | package marker for a new Python package |
 | `tests/harness/__init__.py` | package marker for a new Python package |
-| `tests/harness/common/__init__.py` | package marker for a new Python package |
 | `tests/harness/gate3_visual/__init__.py` | package marker for a new Python package |
 | `tests/harness/m2/__init__.py` | package marker for a new Python package |
 | `tests/harness/m3/__init__.py` | package marker for a new Python package |
@@ -690,5 +688,6 @@ Individual moves that do not follow a directory prefix:
 | `tests/unit/platform/__init__.py` | package marker for a new Python package |
 | `tests/unit/platform/core/__init__.py` | package marker for a new Python package |
 | `tests/unit/platform/db/__init__.py` | package marker for a new Python package |
+| `tests/unit/platform/system/__init__.py` | package marker for a new Python package |
 | `tests/unit/products/__init__.py` | package marker for a new Python package |
 | `tests/unit/register/__init__.py` | package marker for a new Python package |
