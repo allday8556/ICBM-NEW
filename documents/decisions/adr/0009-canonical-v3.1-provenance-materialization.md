@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED** 2026-09-14. This ADR records the provenance resolution approved in PR #36, architect review `5198359602`.
 Relates to: ADR-0008 (not superseded)
-Recorded by: Claude Code, at the user's instruction after PR #36 merged. The number was confirmed free in `documents/decisions/adr/` immediately before writing.
+Recorded by: Claude Code, at the user's instruction after PR #36 merged. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-14
 
 ---

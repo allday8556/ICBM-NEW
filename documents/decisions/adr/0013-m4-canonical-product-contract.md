@@ -17,7 +17,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - Issue #56 (Image Studio, planned), whose extension points this foundation must keep open;
 - Issue #30 and ADR-0012 for the AI boundary.
 
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/` and in every open PR immediately before writing.
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
 Date: 2026-09-18
 Related:
 - ADR-0009: where Canonical v3.1 lives;

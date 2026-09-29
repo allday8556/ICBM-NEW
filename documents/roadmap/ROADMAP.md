@@ -167,6 +167,10 @@ tests/
 docs/
 ```
 
+This block is the Phase 0 starting layout as planned then. The current repository layout is
+`documents/reference/REPOSITORY_MAP.md` (Issue #151, ADR-0021), and every moved path is in
+`documents/reference/PATH_MIGRATION_MAP.md`.
+
 ## Acceptance
 
 Authority: **Issue #1 and `documents/acceptance/milestones/M0.md`** — M0 **ACCEPTED** on 2026-09-13 (PR #2). The gate was demonstrated from a clean checkout, not asserted:

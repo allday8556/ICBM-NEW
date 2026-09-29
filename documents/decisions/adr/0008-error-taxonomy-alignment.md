@@ -7,7 +7,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - architect comment `5657655857`: v3.1 is the target; a dedicated alignment ADR/PR is required before PR-A;
 - architect comment `5657668828`: not a subset; an explicit mapping table; a compatibility-preserving migration; a staged `NOT_FOUND` policy.
 
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/` immediately before writing.
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` immediately before writing.
 Date: 2026-09-14
 Related:
 - ADR-0004: only `TRANSIENT` and `RATE_LIMITED` are retried automatically;

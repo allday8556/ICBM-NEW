@@ -28,7 +28,7 @@ Decision owner: Architect (ChatGPT). Sources:
   ADR-0007 (CONNECT), ADR-0010 (COLLECT and `ProductFactsRevision`), ADR-0013 (the canonical
   Product and its current source revision pointer), ADR-0017 (the Adaptive Collector).
 
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/`, on `main` and in every open
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every open
 PR immediately before writing; ADR-0018 is Gate 3 and no competing ADR draft exists.
 Date: 2026-09-26
 Related:

@@ -12,7 +12,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - the architect kickoff `5725353427` on Issue #8, which authorized this contract-only PR, fixed the number and corrected the supplier name;
 - the architect's PR #79 review `5244523325`, which ruled the four former choices for review (see "Rulings");
 - Issue #30 and its refinement `5661813529`, which already fix the prompt source.
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/` and in every open PR immediately before writing.
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/` and in every open PR immediately before writing.
 Date: 2026-09-18
 Related:
 - ADR-0004 and ADR-0005: only `TRANSIENT` and `RATE_LIMITED` retry automatically;

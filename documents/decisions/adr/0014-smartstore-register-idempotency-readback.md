@@ -23,7 +23,7 @@ Decision owner: Architect (ChatGPT). Sources:
 - the SmartStore platform contracts: `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md` §4, `ERRORS.md` §2.2–§3 and the M2 capability owner (`app/stages/connect/marketplace/capability.py`);
 - Issue #61 (detail composition), Issue #56 (Image Studio) and Issue #80 ruling `5738886070` (supplier resale-price advisory).
 
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/`, on `main` and in every open branch immediately before writing.
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every open branch immediately before writing.
 Date: 2026-09-19
 Related:
 - ADR-0011: this ADR states the REGISTER sanitizer and safe-query-key contract ADR-0011 §3 requires (§15);

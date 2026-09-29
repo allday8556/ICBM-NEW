@@ -34,7 +34,7 @@ Decision owner: Architect (ChatGPT). Sources:
   sanitized and bounded), ADR-0011 (retention of sanitized evidence) and ADR-0014 §15 / M5-24
   (sanitize before hashing or persisting).
 
-Recorded by: Claude Code. The number was confirmed free in `documents/decisions/adr/`, on `main` and in every
+Recorded by: Claude Code. The number was confirmed free in `docs/adr/`, on `main` and in every
 remote branch immediately before writing.
 Date: 2026-09-24
 Related:
