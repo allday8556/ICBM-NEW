@@ -779,8 +779,11 @@ try {
         $calls = @(Get-ChildItem (Join-Path $hostDir "logs") -Filter "pr-1-packet-call*-*.txt")
         $global:FxChecks.calls = $calls.Count
         $callTexts = @($calls | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) })
-        $global:FxChecks.max_call_chars = (@($callTexts | ForEach-Object { $_.Length }) | Measure-Object -Maximum).Maximum
-        $global:FxChecks.every_call_body_under_limit = (@($callTexts | Where-Object { $_.Substring($_.IndexOf('CHANGED FILE MANIFEST (GitHub')).Length -gt 46000 }).Count -eq 0)
+        # A call body is the diff material the host limits (auditCallCharLimit = 42000): the call manifest reference plus
+        # its segments, without the call preamble and the source block that every call carries.
+        $bodies = @($callTexts | ForEach-Object { $_.Substring($_.IndexOf('CHANGED FILE MANIFEST (GitHub')) })
+        $global:FxChecks.max_call_body_chars = (@($bodies | ForEach-Object { $_.Length }) | Measure-Object -Maximum).Maximum
+        $global:FxChecks.every_call_body_within_42000 = (@($bodies | Where-Object { $_.Length -gt 42000 }).Count -eq 0)
         $global:FxChecks.every_call_names_manifest_digest = (@($callTexts | Where-Object { $_ -notmatch 'CHANGED FILE MANIFEST \(GitHub PR files API, 701 files, sha256=[0-9a-f]{64} ' }).Count -eq 0)
         $manyInCalls = @($callTexts | ForEach-Object { [regex]::Matches($_, '(?m)^docs/many/\S+\.md\r?$').Count } | Measure-Object -Sum).Sum
         $global:FxChecks.each_file_listed_once_across_calls = ($manyInCalls -eq 700)
@@ -796,13 +799,14 @@ try {
         $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
         # Pinned expectations: every value below is required; any other value is a failure of this scenario.
         $expected = [ordered]@{
-            complete = "True"; incomplete_reasons = ""; every_call_body_under_limit = $true
+            complete = "True"; incomplete_reasons = ""; every_call_body_within_42000 = $true
             every_call_names_manifest_digest = $true; each_file_listed_once_across_calls = $true
             canonical_manifest_once = $true; canonical_manifest_digest_matches = $true
             canonical_manifest_lists_all = $true; reproducible = $true; ai_prompts = 0
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
         if ($global:FxChecks.calls -lt 2) { $failed += "calls>=2" }
+        if (-not ($global:FxChecks.max_call_body_chars -gt 0 -and $global:FxChecks.max_call_body_chars -le 42000)) { $failed += "max_call_body_chars<=42000" }
         $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
         Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
     }
