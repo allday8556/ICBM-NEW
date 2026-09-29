@@ -7,4 +7,8 @@ The adapter boundary it anticipated is owned by the REGISTER provider ports of A
 ``app/stages/register/provider.py`` (``CreateSender``, ``ReadbackSource``, ``ProviderAssetSource``,
 ``DuplicateLookupSource``, ``ReconcileLookup`` and the others there), and ``identity.py`` in this
 package keeps ``MarketplaceIdentity``.
+
+The Protocol cited the ROADMAP "Marketplace adapter rule". That rule names no interface file ("Core
+product logic stays platform-neutral"; "Each marketplace implements the same registration/operation
+adapter boundaries"), so it needs no edit: those boundaries are the ADR-0014 ports above.
 """
