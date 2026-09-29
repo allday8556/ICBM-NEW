@@ -69,7 +69,7 @@ fails on `@($cancelled)` in this PowerShell build.
 | `run-lookahead-main-v1.ps1` | next-slice selector | `b5df030a58ddb7d0de875ee7463603038124532062fd7c17010c9058932dcba7` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `b2feaa8c8819a14f68f875dbce34844b1a3e4033757533f49cb076014f90b636` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `cfaceb9943718f16c4f55a5802dccb899cbb757ab6fe31b91eee171727d1dbbd` |
 | `tests/fx-run-all.ps1` | fixture runner | `315a8ac9ebe46ed351aae9f7b27789cbca0e21c255fbddd4fe12ff91daab580e` |
 
 `V2-LEGACY-INVENTORY.md` classifies every host script and state family as ACTIVE, SUPERSEDED,
@@ -92,4 +92,4 @@ Scenarios cover:
 - I2, including the #142→#146 regression;
 - cache and evidence rules;
 - the legacy scenarios.
-- `packet-many-files`: a PR whose changed-file manifest alone exceeds the 42K call limit. The full manifest is placed once in the canonical packet; every segmented call carries its count and sha256 plus its own FILES, stays within the limit, and the host still reassembles every file (the pre-fix bytes fail it with `CALL_OVER_LIMIT` on every call).
+- `packet-many-files`: a PR whose changed-file manifest alone exceeds the 42K call limit. The full manifest is placed once in the canonical packet; every segmented call carries its count and sha256 plus its own FILES, stays within the limit, and the host still reassembles every file (the pre-fix bytes fail it with `CALL_OVER_LIMIT` on every call). The scenario pins its expected values and reports `checks: ... expect=PASS` (or `expect=FAIL:<keys>`); run it with `fx-run-all.ps1 -Scenarios packet-many-files`.

@@ -794,6 +794,17 @@ try {
         $r2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
         $global:FxChecks.reproducible = ((Fx-Line $r2 "PACKET_DIGEST") -eq $d1)
         $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
+        # Pinned expectations: every value below is required; any other value is a failure of this scenario.
+        $expected = [ordered]@{
+            complete = "True"; incomplete_reasons = ""; every_call_body_under_limit = $true
+            every_call_names_manifest_digest = $true; each_file_listed_once_across_calls = $true
+            canonical_manifest_once = $true; canonical_manifest_digest_matches = $true
+            canonical_manifest_lists_all = $true; reproducible = $true; ai_prompts = 0
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        if ($global:FxChecks.calls -lt 2) { $failed += "calls>=2" }
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
     }
 
     if ($Scenario -eq "packet-authority") {
