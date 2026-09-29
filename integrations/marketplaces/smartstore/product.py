@@ -30,8 +30,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from app.register.model import ListingShape
-from app.register.sanitize import safe_provider_reference
+from app.stages.register.model import ListingShape
+from app.stages.register.sanitize import safe_provider_reference
 
 WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v1"
 

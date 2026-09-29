@@ -14,7 +14,7 @@ known duplicate, and still never releases an UNKNOWN CREATE conflict.
 
 from typing import Final
 
-from app.core.errors import AppError
+from app.platform.core.errors import AppError
 from integrations.marketplaces.smartstore.registry import (
     ADOPTION_GAPS,
     EndpointId,

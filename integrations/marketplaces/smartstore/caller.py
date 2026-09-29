@@ -26,10 +26,10 @@ from typing import Literal, cast, overload
 
 import httpx
 
-from app.connect.marketplace.capability import RemoteOutcome
-from app.core.egress import EGRESS
-from app.core.errors import AppError
-from app.core.safe_payload import safe_payload
+from app.platform.core.egress import EGRESS
+from app.platform.core.errors import AppError
+from app.platform.core.safe_payload import safe_payload
+from app.stages.connect.marketplace.capability import RemoteOutcome
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
 from integrations.marketplaces.smartstore.registry import (

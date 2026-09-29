@@ -21,15 +21,15 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from app.core.egress import EGRESS, EgressBlockedError
-from app.core.errors import (
+from app.platform.core.egress import EGRESS, EgressBlockedError
+from app.platform.core.errors import (
     AppError,
     AuthError,
     PolicyBlockedError,
     RateLimitedError,
     TransientError,
 )
-from app.core.safe_payload import safe_payload
+from app.platform.core.safe_payload import safe_payload
 from integrations.suppliers.base import (
     Credentials,
     ProbeResponse,

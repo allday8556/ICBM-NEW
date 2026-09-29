@@ -2,7 +2,8 @@
 
 CREATE and product search remain NOT_ADOPTED. IMAGE UPLOAD is separately adopted, but is not wired
 to this registration execution module: it has its own one-call adapter, and its durable owner is the
-ASSET upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``, Gate 3 area 1), not anything here.
+ASSET upload-attempt owner of ADR-0018 §3.4 (``app.capabilities.live_safety.assets``, Gate 3 area
+1), not anything here.
 The production seams here are shaped by those boundaries:
 
 * :class:`SmartStoreCreateSender` reports unavailable and, if called anyway, raises before any
@@ -14,14 +15,14 @@ The production seams here are shaped by those boundaries:
   absence (ADR-0014 §10).
 
 Nothing here decides retry, state or evidence: that is the domain owner's
-(``app.register.execution``). This module only hands over what the provider contract allows.
+(``app.stages.register.execution``). This module only hands over what the provider contract allows.
 """
 
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
-from app.core.errors import AppError
-from app.register.provider import CreateHandoff
+from app.platform.core.errors import AppError
+from app.stages.register.provider import CreateHandoff
 from integrations.marketplaces.smartstore.caller import (
     ProductReadRequest,
     SmartStoreEndpointCaller,

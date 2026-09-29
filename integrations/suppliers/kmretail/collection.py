@@ -28,7 +28,7 @@ COLLECT core.
 
 from collections.abc import Mapping
 
-from app.collect.facts import FieldFact
+from app.stages.collect.facts import FieldFact
 from integrations.suppliers.collection import (
     CollectionLimits,
     CollectionProfile,

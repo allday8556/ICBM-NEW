@@ -6,116 +6,120 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
-from app.audit.service import AuditLog
-from app.collect.adaptive.hooks import HookManifest
-from app.collect.adaptive_capture.accounting import PhaseCReadAccounting
-from app.collect.adaptive_capture.commands import PhaseCCommandStore
-from app.collect.adaptive_capture.runner import CaptureRunner
-from app.collect.adaptive_capture.store import CaptureStore
-from app.collect.adaptive_shadow.runner import ShadowRunner
-from app.collect.adaptive_shadow.store import ADR_RETENTION, ShadowEvidenceStore
-from app.collect.adaptive_shadow.switch import ShadowSwitch
-from app.collect.adaptive_store.gate import (
+from app.capabilities.audit.service import AuditLog
+from app.capabilities.jobs.diagnostic import FAILING_JOB
+from app.capabilities.jobs.policy import RetryPolicy
+from app.capabilities.jobs.registry import JobDefinition, JobRegistry
+from app.capabilities.jobs.runner import JobRunner
+from app.capabilities.jobs.service import JobService
+from app.capabilities.jobs.worker import JobWorker
+from app.capabilities.live_safety.assets import (
+    AssetUploadService,
+    PreparationCandidateGate,
+    UnwiredAssetSender,
+)
+from app.capabilities.live_safety.authority import LiveAuthorityService
+from app.capabilities.live_safety.drill import DrillPaths, RestoreDrillService
+from app.capabilities.live_safety.gates import CanaryStageReadiness
+from app.capabilities.live_safety.model import WireHostPolicy
+from app.capabilities.live_safety.proofs import DurableStageProofs
+from app.capabilities.live_safety.retention import RetentionProofService
+from app.capabilities.live_safety.stack import SafetyStack
+from app.capabilities.live_safety.status import LiveStatusService
+from app.capabilities.live_safety.store import LiveAuthorityStore
+from app.capabilities.live_safety.visual import VisualAcceptanceService
+from app.capabilities.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
+from app.capabilities.review.counts import ReviewCounts
+from app.capabilities.review.coverage import ReviewCoverageStore
+from app.capabilities.review.owner import ReviewItemStore
+from app.capabilities.review.preflight_producer import PreflightReviewProducer
+from app.capabilities.review.products_producer import ProductsReviewProducer
+from app.capabilities.review.reconciler import ReviewReconciler
+from app.capabilities.review.register_producer import RegisterReviewProducer
+from app.capabilities.review.service import ReviewService
+from app.config import AppConfig
+from app.interface.screens.service import ScreenService
+from app.platform.core.clock import Clock, SystemClock
+from app.platform.core.code_identity import running_checkout_sha, running_code_digest
+from app.platform.core.egress import EGRESS
+from app.platform.core.ownership import DataDirLease, require_ownership
+from app.platform.core.secrets import SecretStore, build_secret_store
+from app.platform.db.database import Database, sqlite_database_dir
+from app.platform.db.migrate import head_revision
+from app.platform.system.diagnostics import DiagnosticsService
+from app.platform.system.execution_mode import ExecutionModeService
+from app.platform.system.readiness import ReadinessService
+from app.stages.collect.adaptive.engine.hooks import HookManifest
+from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAccounting
+from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
+from app.stages.collect.adaptive.phase_c_capture.runner import CaptureRunner
+from app.stages.collect.adaptive.phase_c_capture.store import CaptureStore
+from app.stages.collect.adaptive.shadow.runner import ShadowRunner
+from app.stages.collect.adaptive.shadow.store import ADR_RETENTION, ShadowEvidenceStore
+from app.stages.collect.adaptive.shadow.switch import ShadowSwitch
+from app.stages.collect.adaptive.store.gate import (
     SupplierGate,
     build_supplier_gate,
     registered_suppliers,
 )
-from app.collect.adaptive_store.store import AdaptiveProfileStore, AdaptiveValidationStore
-from app.collect.assets import SourceAssetStore
-from app.collect.collection import (
+from app.stages.collect.adaptive.store.store import AdaptiveProfileStore, AdaptiveValidationStore
+from app.stages.collect.assets import SourceAssetStore
+from app.stages.collect.collection import (
     CollectionGateway,
     ProductCollectionService,
     RegisteredCollection,
     SessionProvider,
 )
-from app.collect.imagedecode import HeaderImageDecoder
-from app.collect.readback import SourceTruthReadback
-from app.collect.revisions import ProductFactsRevisionStore
-from app.collect.runs import CollectionRunStore
-from app.collect.service import CollectService
-from app.collect.sourceassets import SourceAssetRecorder
-from app.config import AppConfig
-from app.connect.accounts import MarketplaceAccountStore
-from app.connect.credentials import SupplierCredentialStore
-from app.connect.marketplace.attestation_service import PermissionAttestationService
-from app.connect.marketplace.revision import EndpointMappingRevisionProvider
-from app.connect.marketplace.service import MarketplaceCapabilityService
-from app.connect.marketplace.sources import ApplicationIdentitySource
-from app.connect.service import ConnectService
-from app.connect.sessions import (
+from app.stages.collect.imagedecode import HeaderImageDecoder
+from app.stages.collect.readback import SourceTruthReadback
+from app.stages.collect.revisions import ProductFactsRevisionStore
+from app.stages.collect.runs import CollectionRunStore
+from app.stages.collect.service import CollectService
+from app.stages.collect.sourceassets import SourceAssetRecorder
+from app.stages.connect.accounts import MarketplaceAccountStore
+from app.stages.connect.credentials import SupplierCredentialStore
+from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
+from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
+from app.stages.connect.marketplace.service import MarketplaceCapabilityService
+from app.stages.connect.marketplace.sources import ApplicationIdentitySource
+from app.stages.connect.service import ConnectService
+from app.stages.connect.sessions import (
     MARKETPLACE_SESSIONS_DIR_NAME,
     SESSIONS_DIR_NAME,
     SupplierSessionStore,
 )
-from app.connect.smartstore.service import SmartStoreConnectService
-from app.core.clock import Clock, SystemClock
-from app.core.code_identity import running_checkout_sha, running_code_digest
-from app.core.egress import EGRESS
-from app.core.ownership import DataDirLease, require_ownership
-from app.core.secrets import SecretStore, build_secret_store
-from app.db.database import Database, sqlite_database_dir
-from app.db.migrate import head_revision
-from app.jobs.diagnostic import FAILING_JOB
-from app.jobs.policy import RetryPolicy
-from app.jobs.registry import JobDefinition, JobRegistry
-from app.jobs.runner import JobRunner
-from app.jobs.service import JobService
-from app.jobs.worker import JobWorker
-from app.live.assets import AssetUploadService, PreparationCandidateGate, UnwiredAssetSender
-from app.live.authority import LiveAuthorityService
-from app.live.drill import DrillPaths, RestoreDrillService
-from app.live.gates import CanaryStageReadiness
-from app.live.model import WireHostPolicy
-from app.live.proofs import DurableStageProofs
-from app.live.retention import RetentionProofService
-from app.live.stack import SafetyStack
-from app.live.status import LiveStatusService
-from app.live.store import LiveAuthorityStore
-from app.live.visual import VisualAcceptanceService
-from app.operate.service import OperateService
-from app.products.image_store import DerivedImageStore
-from app.products.images import ProductImageService
-from app.products.materialization import ProductMaterializer
-from app.products.pricing_service import ProductPricingService
-from app.products.readiness import ProductReadinessService
-from app.products.service import ProductsService
-from app.products.store import ProductFoundationStore
-from app.register.authoring import RegistrationPreparationService
-from app.register.builder import RegistrationSnapshotBuilder
-from app.register.category_metadata import (
+from app.stages.connect.smartstore.service import SmartStoreConnectService
+from app.stages.operate.service import OperateService
+from app.stages.products.image_store import DerivedImageStore
+from app.stages.products.images import ProductImageService
+from app.stages.products.materialization import ProductMaterializer
+from app.stages.products.pricing_service import ProductPricingService
+from app.stages.products.readiness import ProductReadinessService
+from app.stages.products.service import ProductsService
+from app.stages.products.store import ProductFoundationStore
+from app.stages.register.authoring import RegistrationPreparationService
+from app.stages.register.builder import RegistrationSnapshotBuilder
+from app.stages.register.category_metadata import (
     CategoryMetadataService,
     CategoryMetadataStore,
     DurableRegistrationMetadata,
 )
-from app.register.drafting import DraftCommandService
-from app.register.execution import (
+from app.stages.register.drafting import DraftCommandService
+from app.stages.register.execution import (
     CREATE_ENDPOINT_GROUP,
     CREATE_POLICY,
     RegistrationExecutionService,
     create_job_definition,
 )
-from app.register.preflight import RegistrationPreflightService
-from app.register.service import RegisterService
-from app.register.store import RegistrationStore
-from app.register.target_policy import (
+from app.stages.register.preflight import RegistrationPreflightService
+from app.stages.register.service import RegisterService
+from app.stages.register.store import RegistrationStore
+from app.stages.register.target_policy import (
     DurableRegistrationPolicy,
     TargetPolicyService,
     TargetPolicyStore,
     editable_surfaces,
 )
-from app.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
-from app.review.counts import ReviewCounts
-from app.review.coverage import ReviewCoverageStore
-from app.review.owner import ReviewItemStore
-from app.review.preflight_producer import PreflightReviewProducer
-from app.review.products_producer import ProductsReviewProducer
-from app.review.reconciler import ReviewReconciler
-from app.review.register_producer import RegisterReviewProducer
-from app.review.service import ReviewService
-from app.screens.service import ScreenService
-from app.system.diagnostics import DiagnosticsService
-from app.system.execution_mode import ExecutionModeService
-from app.system.readiness import ReadinessService
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback

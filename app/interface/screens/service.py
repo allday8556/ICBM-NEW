@@ -1,0 +1,247 @@
+from collections.abc import Sequence
+from datetime import timedelta
+
+from app import MILESTONE, __version__
+from app.capabilities.review.service import KindCount, ReviewKind, ReviewService
+from app.interface.screens.contracts import (
+    AnalyticsView,
+    CollectView,
+    DashboardView,
+    DatePeriod,
+    EmptyReason,
+    InquiryView,
+    InsightView,
+    MarketplaceIdentityView,
+    OrdersView,
+    ProductDbView,
+    RegisterView,
+    ReviewCounts,
+    ReviewEmitterView,
+    ReviewKindCountView,
+    ScreenKey,
+    ScreenMeta,
+    ScreenState,
+    SettingsView,
+    ShellView,
+    SoldoutView,
+)
+from app.platform.core.clock import Clock
+from app.platform.system.execution_mode import ExecutionModeService
+from app.stages.collect.service import CollectService
+from app.stages.connect.service import ConnectService
+from app.stages.operate.service import OperateService
+from app.stages.products.service import ProductsService
+from app.stages.register.service import RegisterService
+from app.stages.register.target_policy import EditableSurface
+from integrations.marketplaces.identity import MarketplaceIdentity
+
+ANALYTICS_PERIOD_DAYS = 7
+
+
+def _count_view(count: KindCount) -> ReviewKindCountView:
+    return ReviewKindCountView(
+        kind=count.kind,
+        state=count.state,
+        open=count.open,
+        open_known=count.open_known,
+        emitters=[
+            ReviewEmitterView(
+                producer=e.producer, wired=e.wired, current=e.current, reason=e.reason
+            )
+            for e in count.emitters
+        ],
+    )
+
+
+class ScreenService:
+    """Assembles each top-level screen from stage-service state.
+
+    Emptiness is decided here, from canonical counts; the UI only renders the verdict
+    (CLAUDE.md §5.1: the UI displays server-owned state).
+    """
+
+    def __init__(
+        self,
+        *,
+        clock: Clock,
+        operator_name: str,
+        marketplaces: Sequence[MarketplaceIdentity],
+        connect: ConnectService,
+        collect: CollectService,
+        products: ProductsService,
+        register: RegisterService,
+        operate: OperateService,
+        review: ReviewService,
+        execution_mode: ExecutionModeService,
+        editable_surfaces: Sequence[EditableSurface] = (),
+        collection_suppliers: Sequence[str] = (),
+    ) -> None:
+        self._clock = clock
+        self._operator_name = operator_name
+        self._marketplaces = tuple(marketplaces)
+        self._connect = connect
+        self._collect = collect
+        self._products = products
+        self._register = register
+        self._operate = operate
+        self._review = review
+        self._execution_mode = execution_mode
+        self._editable_surfaces = tuple(editable_surfaces)
+        self._collection_suppliers = tuple(sorted(collection_suppliers))
+
+    def _meta(self, screen: ScreenKey, empty_reason: EmptyReason | None) -> ScreenMeta:
+        return ScreenMeta(
+            screen=screen,
+            state=ScreenState.EMPTY if empty_reason else ScreenState.READY,
+            empty_reason=empty_reason,
+            generated_at=self._clock.now(),
+            milestone=MILESTONE,
+        )
+
+    def shell(self) -> ShellView:
+        return ShellView(
+            app_name="ICBM",
+            version=__version__,
+            milestone=MILESTONE,
+            execution_mode=self._execution_mode.state().mode,
+            operator_display_name=self._operator_name,
+            server_time=self._clock.now(),
+            marketplaces=[
+                MarketplaceIdentityView(
+                    key=m.key,
+                    label=m.label,
+                    brand_color=m.brand_color,
+                    logo_url=f"/assets/marketplaces/{m.logo_asset}" if m.logo_asset else None,
+                )
+                for m in self._marketplaces
+            ],
+        )
+
+    def dashboard(self) -> DashboardView:
+        suppliers = self._connect.connected_supplier_count()
+        marketplaces = self._connect.connected_marketplace_count()
+        products = self._products.product_count()
+        review = self._review.open_counts()
+        # ADR-0016 §7: the empty verdict rests on review counts only when every kind is an
+        # authoritative zero. A NOT_WIRED or NOT_CURRENT kind proves nothing, so it is never empty.
+        empty = (
+            suppliers == 0
+            and marketplaces == 0
+            and products == 0
+            and all(count.authoritative_zero for count in review.values())
+        )
+        return DashboardView(
+            meta=self._meta(ScreenKey.DASHBOARD, EmptyReason.NO_CONNECTIONS if empty else None),
+            suppliers_connected=suppliers,
+            marketplaces_connected=marketplaces,
+            products_total=products,
+            review_counts=ReviewCounts(
+                collect_evidence=_count_view(review[ReviewKind.COLLECT_EVIDENCE]),
+                stock=_count_view(review[ReviewKind.STOCK]),
+                source_change=_count_view(review[ReviewKind.SOURCE_CHANGE]),
+                compliance=_count_view(review[ReviewKind.COMPLIANCE]),
+                registration_error=_count_view(review[ReviewKind.REGISTRATION_ERROR]),
+                fulfillment=_count_view(review[ReviewKind.FULFILLMENT]),
+            ),
+        )
+
+    def collect(self) -> CollectView:
+        jobs = self._collect.collection_job_count()
+        return CollectView(
+            meta=self._meta(
+                ScreenKey.COLLECT, EmptyReason.NO_COLLECTION_JOBS if jobs == 0 else None
+            ),
+            suppliers=self._connect.supplier_connections(),
+            collection_jobs_total=jobs,
+            collection_supplier_keys=list(self._collection_suppliers),
+        )
+
+    def product_db(self) -> ProductDbView:
+        products = self._products.product_count()
+        return ProductDbView(
+            meta=self._meta(ScreenKey.DB, EmptyReason.NO_PRODUCTS if products == 0 else None),
+            products_total=products,
+        )
+
+    def register(self) -> RegisterView:
+        candidates = self._register.registration_candidate_count()
+        registrations = self._register.registration_count()
+        empty = candidates == 0 and registrations == 0
+        return RegisterView(
+            meta=self._meta(
+                ScreenKey.REGISTER, EmptyReason.NO_REGISTRATION_CANDIDATES if empty else None
+            ),
+            registration_candidates_total=candidates,
+            registrations_total=registrations,
+        )
+
+    def orders(self) -> OrdersView:
+        orders = self._operate.order_count()
+        return OrdersView(
+            meta=self._meta(ScreenKey.ORDERS, EmptyReason.NO_ORDERS if orders == 0 else None),
+            orders_total=orders,
+            marketplaces_connected=self._connect.connected_marketplace_count(),
+        )
+
+    def inquiry(self) -> InquiryView:
+        inquiries = self._operate.inquiry_count()
+        return InquiryView(
+            meta=self._meta(
+                ScreenKey.INQUIRY, EmptyReason.NO_INQUIRIES if inquiries == 0 else None
+            ),
+            inquiries_total=inquiries,
+            marketplaces_connected=self._connect.connected_marketplace_count(),
+        )
+
+    def soldout(self) -> SoldoutView:
+        stock = self._review.open_counts()[ReviewKind.STOCK]
+        # Only an authoritative STOCK zero is "no stock review items" (ADR-0016 §7, G2-C).
+        return SoldoutView(
+            meta=self._meta(
+                ScreenKey.SOLDOUT,
+                EmptyReason.NO_STOCK_REVIEW_ITEMS if stock.authoritative_zero else None,
+            ),
+            stock_review=_count_view(stock),
+        )
+
+    def insight(self) -> InsightView:
+        products = self._products.product_count()
+        orders = self._operate.order_count()
+        empty = products == 0 and orders == 0
+        return InsightView(
+            meta=self._meta(
+                ScreenKey.AI_INSIGHT, EmptyReason.NO_INTERNAL_HISTORY if empty else None
+            ),
+            products_total=products,
+            orders_total=orders,
+        )
+
+    def analytics(self) -> AnalyticsView:
+        today = self._clock.now().astimezone().date()
+        orders = self._operate.order_count()
+        registrations = self._register.registration_count()
+        empty = orders == 0 and registrations == 0
+        return AnalyticsView(
+            meta=self._meta(ScreenKey.ANALYTICS, EmptyReason.NO_OPERATING_DATA if empty else None),
+            period=DatePeriod(
+                start=today - timedelta(days=ANALYTICS_PERIOD_DAYS - 1),
+                end=today,
+                days=ANALYTICS_PERIOD_DAYS,
+            ),
+            orders_total=orders,
+            registrations_total=registrations,
+        )
+
+    def settings(self) -> SettingsView:
+        policy_values: dict[str, str | int | float | bool | None] = {}
+        return SettingsView(
+            meta=self._meta(
+                ScreenKey.SETTINGS, EmptyReason.NO_SETTINGS_SAVED if not policy_values else None
+            ),
+            execution_mode=self._execution_mode.state().mode,
+            editable=False,
+            editable_surfaces=list(self._editable_surfaces),
+            marketplace_connections=self._connect.marketplace_connections(),
+            supplier_connections=self._connect.supplier_connections(),
+            policy_values=policy_values,
+        )

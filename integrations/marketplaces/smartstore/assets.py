@@ -4,7 +4,8 @@ The official 2.89.0 contract and Issue #89 amendments 5765557497/5765663972 adop
 ``POST /v1/product-images/upload`` with one immutable artifact in one ``imageFiles`` part. The
 adapter calls once and never retries. A transport/response ambiguity is represented only as
 ``UPLOAD_UNKNOWN`` here; it never enters ``RegistrationIntent.UNKNOWN``, and the durable owner that
-records and terminalizes it is the ASSET upload-attempt owner of ADR-0018 §3.4 (``app.live.assets``,
+records and terminalizes it is the ASSET upload-attempt owner of ADR-0018 §3.4
+(``app.capabilities.live_safety.assets``,
 Gate 3 area 1) — never this adapter, which owns no state.
 
 * one reference per exactly one M4 artifact, bound to the READY candidate fingerprint it was
@@ -19,9 +20,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from app.products.image_model import ImageAssetKind
-from app.register.preparation import PreparedAsset
-from app.register.sanitize import safe_provider_reference
+from app.stages.products.image_model import ImageAssetKind
+from app.stages.register.preparation import PreparedAsset
+from app.stages.register.sanitize import safe_provider_reference
 from integrations.marketplaces.smartstore.caller import (
     ImageUploadRequest,
     ImageUploadResponse,

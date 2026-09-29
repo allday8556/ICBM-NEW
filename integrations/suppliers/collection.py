@@ -18,7 +18,7 @@ from enum import StrEnum
 from hashlib import sha256
 from urllib.parse import urlsplit
 
-from app.collect.facts import FieldFact, LocatorForm
+from app.stages.collect.facts import FieldFact, LocatorForm
 from integrations.suppliers.base import SupplierProfile, SupplierTransport
 
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")

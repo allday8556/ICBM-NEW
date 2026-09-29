@@ -15,8 +15,8 @@ import socket
 from collections.abc import Iterator, Mapping, Sequence
 from enum import StrEnum
 
-from app.connect.marketplace.capability import RemoteOutcome
-from app.core.egress import EgressBlockedError
+from app.platform.core.egress import EgressBlockedError
+from app.stages.connect.marketplace.capability import RemoteOutcome
 
 
 class Phase(StrEnum):
