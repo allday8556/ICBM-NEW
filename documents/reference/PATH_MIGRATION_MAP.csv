@@ -361,7 +361,7 @@ docs/implementation/M2_SMARTSTORE_CONNECT_IMPLEMENTATION_INSTRUCTIONS.md,documen
 docs/platforms/smartstore/ACCOUNT_IDENTITY.md,documents/contracts/platforms/smartstore/ACCOUNT_IDENTITY.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/AUTH.md,documents/contracts/platforms/smartstore/AUTH.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/CAPABILITY_MAPPING.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
-docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md,MERGE,only restates the §17 targets with an M2 PR-owner column; fold into CAPABILITY_MAPPING.md §17
+docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md,documents/contracts/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/ENDPOINT_MATRIX.md,documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/ERRORS.md,documents/contracts/platforms/smartstore/ERRORS.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
 docs/platforms/smartstore/PERMISSIONS_SCOPES.md,documents/contracts/platforms/smartstore/PERMISSIONS_SCOPES.md,MOVE,SmartStore platform contract/ledger (ICBM adoption and safety state)
@@ -641,7 +641,7 @@ tests/unit/test_safe_payload.py,tests/unit/platform/core/test_safe_payload.py,MO
 tests/unit/test_schema_contract.py,tests/unit/platform/db/test_schema_contract.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_secret_scan.py,tests/harness/common/test_secret_scan.py,MOVE,"test of an acceptance harness, not runtime"
 tests/unit/test_secrets.py,tests/unit/platform/core/test_secrets.py,MOVE,unit test grouped by runtime owner
-tests/unit/test_smartstore_binding.py,tests/unit/connect/test_marketplace_capability.py,MERGE,73-line test of one capability function; fold into the capability owner's test module
+tests/unit/test_smartstore_binding.py,tests/unit/connect/test_smartstore_binding.py,MOVE,capability first-binding test grouped under connect; merging it into the capability test module is content consolidation for the reconciliation PR (ADR-0021 §7)
 tests/unit/test_smartstore_caller.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_caller.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_smartstore_classify.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_classify.py,MOVE,unit test grouped by runtime owner
 tests/unit/test_smartstore_image_upload.py,tests/unit/integrations/marketplaces/smartstore/test_smartstore_image_upload.py,MOVE,unit test grouped by runtime owner
