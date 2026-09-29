@@ -52,7 +52,7 @@ Job types, review producer names, table names and Alembic revision ids are uncha
 
 ## 3. Python modules
 
-450 dotted module names changed (`from`/`import`, `python -m`, monkeypatch strings).
+451 dotted module names changed (`from`/`import`, `python -m`, monkeypatch strings).
 
 | old module | new module |
 | --- | --- |
@@ -493,6 +493,7 @@ Job types, review producer names, table names and Alembic revision ids are uncha
 | `tests.unit.test_schema_contract` | `tests.unit.platform.db.test_schema_contract` |
 | `tests.unit.test_secret_scan` | `tests.unit.platform.system.test_secret_scan` |
 | `tests.unit.test_secrets` | `tests.unit.platform.core.test_secrets` |
+| `tests.unit.test_smartstore_binding` | `tests.unit.connect.test_marketplace_capability` |
 | `tests.unit.test_smartstore_caller` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_caller` |
 | `tests.unit.test_smartstore_classify` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_classify` |
 | `tests.unit.test_smartstore_image_upload` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_image_upload` |
