@@ -1,7 +1,7 @@
 # PATH_MIGRATION_MAP — repository restructure (Issue #151, ADR-0021)
 
 Status: **PERMANENT.** Authority: ADR-0021 §6 and Issue #151 §4–§5. Every path of the
-pre-migration tree (`7608eb5e60c175c11945a7c65e83481d6370a866`, 716 tracked files) is listed exactly once with its new path.
+pre-migration tree (`e72a5cad5303057945b547f7a2e480b398d5bc2d`, 716 tracked files) is listed exactly once with its new path.
 A past issue, PR, review, comment, acceptance record or evidence file that names an old path is
 **not** rewritten (ADR-0021 §5); it is traced to the current location through this map.
 The same table is in `PATH_MIGRATION_MAP.csv` for tools.
