@@ -281,6 +281,21 @@ def test_testpaths_collect_every_test_module() -> None:
     assert outside == []
 
 
+def test_the_s17_ownership_registry_matches_s17() -> None:
+    """Appendix A of CAPABILITY_MAPPING.md (the §17 ownership registry, merged by the Issue #151
+    reconciliation) names exactly the §17 target IDs, each once and each with an owner — the
+    exact-set rule its §4 follow-up asked for."""
+    text = _read(REPO_ROOT / "documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md")
+    s17 = _section(text, r"^17\. Implementation enforcement targets")
+    targets = [int(n) for n in re.findall(r"^(\d+)\. ", s17, re.M)]
+    appendix = text.split("## Appendix A. §17 implementation ownership registry", 1)[1]
+    rows = re.findall(r"^\| (\d+) \| [^|]+ \| ([^|]+) \|", appendix, re.M)
+    ids = [int(n) for n, _ in rows]
+    assert targets == list(range(1, len(targets) + 1)), targets
+    assert sorted(ids) == targets and len(ids) == len(set(ids)), ids
+    assert all("PR-" in owner for _, owner in rows), rows
+
+
 def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     """Issue #151 H6: the SmartStore README states the adopted endpoint set that ENDPOINT_MATRIX.md
     §4 owns, and nothing more."""
