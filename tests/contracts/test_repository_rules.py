@@ -207,6 +207,53 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
         assert "documents/contracts/ui/UI_SOURCE_OF_TRUTH.md" in text, heading
 
 
+# Issue #151 (ADR-0021 §3, §4): the rule bodies CLAUDE.md now imports are its former sections,
+# and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
+# at main e72a5cad) after the normalization below, which masks locators only: backtick spans,
+# markdown link targets and bare path tokens. Every rule word must be unchanged; a later reviewed
+# rule change updates its digest in the same PR. §11 (milestone status) is pinned by the milestone
+# agreement test instead.
+_FORMER_CLAUDE_SECTIONS = {
+    "01-roles-and-exchange.md": "69cda22cbadffdc50fed4f5361ec0014108e0957be28c24161ebeec458d4079b",
+    "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
+    "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
+    "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
+    "05-architectural-rules.md": "0d7faee947ee9441a3fc81b954f79308d2b59c46a8ca651a03a88eb82d8e0be7",
+    "06-immutable-domain-rules.md": (
+        "29b527b784c4a7d0bf8c1c639960ea954451d8ccb22012b39135a9a719da5c35"
+    ),
+    "07-execution-safety.md": "883af77a8688b289a68d471fcf9e2af2bfdce08e635bc05885400b5f2a7fd3b4",
+    "08-git-conventions.md": "3006c00d03da870686b90bbdeaaa9e1768d8b2ab60da7fb02a743a521f6194b0",
+    "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
+    "10-working-style.md": "3d6f95d224b6b27b17ece1c6b850a0b0151795e673c5f9f391542741e9b50f42",
+    "12-first-vertical.md": "90c82d7ee2c30ef1fbca3624fcf8dcdfb2146473bf0144aeef60ed2d627af569",
+}
+
+
+def _rule_words(text: str) -> str:
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    text = re.sub(r"`[^`\n]*`", "`L`", text)
+    text = re.sub(r"\]\([^)\s]*\)", "](L)", text)
+    text = re.sub(r"(?<![\w`])[\w.-]+(?:/[\w.*<>-]+)+/?", "L", text)
+    text = re.sub(r"\n-{3,}\n", "\n", text)
+    return " ".join(text.split())
+
+
+def test_rule_bodies_are_the_former_claude_md_sections() -> None:
+    for name, digest in _FORMER_CLAUDE_SECTIONS.items():
+        words = _rule_words(_read(RULES_DIR / name))
+        assert hashlib.sha256(words.encode()).hexdigest() == digest, name
+
+
+def test_the_rule_words_detector_masks_only_locators() -> None:
+    before = "Read `docs/adr/0001.md` and [x](docs/x.md) under docs/acceptance/ first."
+    after = (
+        "Read `documents/decisions/adr/0001.md` and [x](../x.md) under documents/acceptance/ first."
+    )
+    assert _rule_words(before) == _rule_words(after)
+    assert _rule_words("never resend CREATE") != _rule_words("always resend CREATE")
+
+
 def test_claude_md_auto_loads_every_rule_body() -> None:
     """ADR-0021 §3 (Issue #151 §2): the root CLAUDE.md is the bootstrap index.
 

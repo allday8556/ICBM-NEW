@@ -46,7 +46,7 @@ inside the new files, so `CLAUDE.md §N` still resolves.
 | Alembic `script_location` | `app/db/migrations` | `app/platform/db/migrations` | revision ids and file names unchanged, so no `alembic_version` impact |
 | served UI URLs | `/js/pages/<panel>.js`, `/js/core/capability.js` | `/js/pages/settings/<panel>.js`, `/js/platforms/smartstore/capability.js` | the six Settings panels and the SmartStore capability labels |
 | M2 harness keyring backend (operator env) | `scripts.m2harness.keyrings.*` | `automation.acceptance.m2.harness.keyrings.*` | a future M2 harness run must use the new dotted name |
-| CI docs-mode suite | `pytest tests/unit` | `pytest tests/unit tests/contracts tests/harness -m "not integration"` | the same 2030 tests plus the new auto-load rule test |
+| CI docs-mode suite | `pytest tests/unit` | `pytest tests/unit tests/contracts tests/harness -m "not integration"` | the same 2030 tests plus the new rule-migration tests (auto-load, former-section proof and its detector) |
 
 Job types, review producer names, table names and Alembic revision ids are unchanged.
 

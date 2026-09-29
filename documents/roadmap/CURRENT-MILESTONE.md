@@ -17,4 +17,4 @@ Every M5 implementation PR is merged (#90–#96) and main is green. **That is no
 
 The current approved visual source is the prototype recorded in `documents/contracts/ui/UI_SOURCE_OF_TRUTH.md`. Do not hard-code a prototype file name in this file or treat an older prototype as current.
 
-The accepted milestone sequence is `documents/roadmap/ROADMAP.md` §12. Implement one milestone at a time, and do not begin horizontal supplier/marketplace expansion before the first vertical (§12, `documents/rules/12-first-vertical.md`) closes.
+The accepted milestone sequence is `documents/roadmap/ROADMAP.md` §12. Implement one milestone at a time, and do not begin horizontal supplier/marketplace expansion before the first vertical (§12 below) closes.
