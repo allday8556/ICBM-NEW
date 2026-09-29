@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final
 
-from app.register.sanitize import safe_provider_reference
+from app.stages.register.sanitize import safe_provider_reference
 from integrations.marketplaces.smartstore.product import (
     FIELD_NAME,
     FIELD_OPTION_SELLER_CODE,

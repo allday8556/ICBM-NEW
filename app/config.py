@@ -10,11 +10,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from app.connect.marketplace.attestation import A0_MAX_AGE_DAYS, valid_max_age_days
-from app.core.execution import ExecutionMode
-from app.core.net import is_loopback_host
-from app.core.ownership import runtime_dir
-from app.core.secrets import SERVICE_NAME
+from app.platform.core.execution import ExecutionMode
+from app.platform.core.net import is_loopback_host
+from app.platform.core.ownership import runtime_dir
+from app.platform.core.secrets import SERVICE_NAME
+from app.stages.connect.marketplace.attestation import A0_MAX_AGE_DAYS, valid_max_age_days
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_UI_DIR = REPO_ROOT / "ui" / "web"

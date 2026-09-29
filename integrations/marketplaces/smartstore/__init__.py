@@ -1,4 +1,4 @@
-"""Naver SmartStore adapter, M2 CONNECT (docs/platforms/smartstore/, M2 PR-A).
+"""Naver SmartStore adapter, M2 CONNECT (documents/contracts/platforms/smartstore/, M2 PR-A).
 
 - ``registry``: the one provider endpoint contract (host, base URL, methods, paths, timeouts,
   redirect policy, success predicates) and the endpoint-mapping revision.

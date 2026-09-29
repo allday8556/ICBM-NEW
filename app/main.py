@@ -9,9 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import MILESTONE, __version__
-from app.api.errors import install_error_handlers
-from app.api.middleware import ClientHeaderGuard, RequestContextMiddleware
-from app.api.routes import (
+from app.capabilities.jobs.registry import JobDefinition
+from app.config import AppConfig
+from app.container import build_container
+from app.interface.api.errors import install_error_handlers
+from app.interface.api.middleware import ClientHeaderGuard, RequestContextMiddleware
+from app.interface.api.routes import (
     collect,
     connect,
     diagnostics,
@@ -22,15 +25,12 @@ from app.api.routes import (
     settings,
     system,
 )
-from app.collect.collection import CollectionGateway, RegisteredCollection, SessionProvider
-from app.config import AppConfig
-from app.connect.marketplace.revision import EndpointMappingRevisionProvider
-from app.connect.marketplace.sources import ApplicationIdentitySource
-from app.container import build_container
-from app.core.egress import EGRESS
-from app.core.logging import configure_logging
-from app.core.ownership import DataDirLease, acquire_data_dir, require_ownership
-from app.jobs.registry import JobDefinition
+from app.platform.core.egress import EGRESS
+from app.platform.core.logging import configure_logging
+from app.platform.core.ownership import DataDirLease, acquire_data_dir, require_ownership
+from app.stages.collect.collection import CollectionGateway, RegisteredCollection, SessionProvider
+from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
+from app.stages.connect.marketplace.sources import ApplicationIdentitySource
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.suppliers.base import SupplierGateway
 

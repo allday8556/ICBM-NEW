@@ -1,0 +1,24 @@
+"""Aggregates every ORM model so Alembic sees the complete canonical schema."""
+
+from app.capabilities.audit import models as _audit_models  # noqa: F401
+from app.capabilities.jobs import models as _job_models  # noqa: F401
+from app.capabilities.live_safety import models as _live_models  # noqa: F401
+from app.capabilities.review import models as _review_models  # noqa: F401
+from app.platform.db.base import Base
+from app.stages.collect import models as _collect_models  # noqa: F401
+from app.stages.collect.adaptive.phase_c_capture import (
+    models as _adaptive_capture_models,  # noqa: F401
+)
+from app.stages.collect.adaptive.shadow import models as _adaptive_shadow_models  # noqa: F401
+from app.stages.collect.adaptive.store import models as _adaptive_models  # noqa: F401
+from app.stages.connect import account_models as _account_models  # noqa: F401
+from app.stages.connect import models as _connect_models  # noqa: F401
+from app.stages.connect.marketplace import models as _marketplace_models  # noqa: F401
+from app.stages.connect.smartstore import models as _smartstore_models  # noqa: F401
+from app.stages.products import image_models as _image_models  # noqa: F401
+from app.stages.products import models as _product_models  # noqa: F401
+from app.stages.register import category_metadata_models as _category_metadata_models  # noqa: F401
+from app.stages.register import models as _register_models  # noqa: F401
+from app.stages.register import target_policy_models as _target_policy_models  # noqa: F401
+
+metadata = Base.metadata

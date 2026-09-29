@@ -7,11 +7,11 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig, database_path
 from app.container import Container, build_container
-from app.core.ownership import acquire_data_dir
-from app.core.secrets import MemorySecretStore
-from app.db.migrate import upgrade_to_head
 from app.main import create_app
-from tests.support import TEST_JOBS, FakeClock
+from app.platform.core.ownership import acquire_data_dir
+from app.platform.core.secrets import MemorySecretStore
+from app.platform.db.migrate import upgrade_to_head
+from tests.support.jobs_support import TEST_JOBS, FakeClock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL = "http://127.0.0.1"

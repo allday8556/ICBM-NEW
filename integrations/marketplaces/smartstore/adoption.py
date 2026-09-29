@@ -12,7 +12,7 @@ from integrations.marketplaces.smartstore.registry import ADOPTED, ADOPTION_GAPS
 
 
 class SmartStoreAdoption:
-    """The adapter's adoption facts, as `app.register.canary.AdoptionFacts` reads them."""
+    """The adapter's adoption facts, as `app.stages.register.canary.AdoptionFacts` reads them."""
 
     def adoption(self) -> Mapping[str, bool]:
         return {endpoint.value: endpoint in ADOPTED for endpoint in EndpointId}

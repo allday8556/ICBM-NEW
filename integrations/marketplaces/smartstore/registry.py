@@ -1,4 +1,5 @@
-"""The SmartStore endpoint registry (docs/platforms/smartstore/ENDPOINT_MATRIX.md; M2 PR-A, M5
+"""The SmartStore endpoint registry (documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md; M2
+PR-A, M5
 PR-D).
 
 This is the single source of the provider host, the base URL, and every endpoint's method, path,

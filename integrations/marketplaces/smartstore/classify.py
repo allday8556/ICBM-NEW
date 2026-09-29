@@ -1,4 +1,4 @@
-"""SmartStore failure classification (docs/platforms/smartstore/ERRORS.md; M2 PR-A).
+"""SmartStore failure classification (documents/contracts/platforms/smartstore/ERRORS.md; M2 PR-A).
 
 The layer is identified before a class is chosen (ERRORS §5). A class comes from the endpoint
 contract, the provider code and the request/response evidence, never from a bare HTTP-status
@@ -15,7 +15,7 @@ table (§8, Issue #39 §6).
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.core.errors import ErrorClass
+from app.platform.core.errors import ErrorClass
 from integrations.marketplaces.smartstore.transmission import Phase
 
 

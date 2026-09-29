@@ -43,16 +43,16 @@ from urllib.parse import SplitResult, unquote_plus, urlsplit
 
 import httpx
 
-from app.collect.facts import FetchTargetRefusal
-from app.core.egress import EGRESS, EgressBlockedError
-from app.core.errors import (
+from app.platform.core.egress import EGRESS, EgressBlockedError
+from app.platform.core.errors import (
     AppError,
     ErrorClass,
     PolicyBlockedError,
     RateLimitedError,
     TransientError,
 )
-from app.core.safe_payload import safe_payload
+from app.platform.core.safe_payload import safe_payload
+from app.stages.collect.facts import FetchTargetRefusal
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
     DISCOVERED_POLICY_PREFIX,

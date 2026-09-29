@@ -1,0 +1,28 @@
+"""Extraction identity of the Adaptive engine (ADR-0010 §12, ADR-0017 §5.1, §5.6).
+
+``EXTRACTOR_REVISION`` is the engine's semantic revision: it enters the semantic tuple, and the
+engine goldens force it to advance when behaviour changes. ``EXTRACTOR_FINGERPRINT`` is the
+implementation identity over ``EXTRACTOR_INPUTS``: provenance and validation freshness only. The
+hashed set is every other module of this package; this manifest is never part of it.
+"""
+
+EXTRACTOR_REVISION = "adaptive-engine-1"
+EXTRACTOR_INPUTS = (
+    "app/stages/collect/adaptive/engine/__init__.py",
+    "app/stages/collect/adaptive/engine/canonical.py",
+    "app/stages/collect/adaptive/engine/capture.py",
+    "app/stages/collect/adaptive/engine/document.py",
+    "app/stages/collect/adaptive/engine/engine.py",
+    "app/stages/collect/adaptive/engine/hooks.py",
+    "app/stages/collect/adaptive/engine/lint.py",
+    "app/stages/collect/adaptive/engine/locator.py",
+    "app/stages/collect/adaptive/engine/profiles.py",
+    "app/stages/collect/adaptive/engine/validation.py",
+)
+# Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): the hashed inputs moved from
+# app/collect/adaptive/ to app/stages/collect/adaptive/engine/ and their imports followed.
+# EXTRACTOR_REVISION is unchanged and the engine goldens pass unchanged. A reader cannot recompute
+# a SHA-256; the proof is mechanical: tests/unit/collect/adaptive/engine/test_identity.py
+# recomputes this digest from EXTRACTOR_INPUTS, and the merge guard requires that test green in
+# the FULL CI of the exact HEAD.
+EXTRACTOR_FINGERPRINT = "c44f0007a990062141b69272895a91560c85d69bb2538ee5fdd73ed88cf544ed"

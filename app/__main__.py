@@ -1,3 +1,3 @@
-from app.cli import main
+from app.interface.cli import main
 
 raise SystemExit(main())

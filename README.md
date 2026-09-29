@@ -3,19 +3,19 @@
 Local single-user commerce operations application:
 `CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE`.
 
-Read [`CLAUDE.md`](CLAUDE.md), [`ROADMAP.md`](ROADMAP.md) and
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing anything.
-The approved UI source is recorded in [`docs/UI_SOURCE_OF_TRUTH.md`](docs/UI_SOURCE_OF_TRUTH.md).
+Read [`CLAUDE.md`](CLAUDE.md), [`documents/roadmap/ROADMAP.md`](documents/roadmap/ROADMAP.md) and
+[`documents/architecture/ARCHITECTURE.md`](documents/architecture/ARCHITECTURE.md) before changing anything.
+The approved UI source is recorded in [`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md`](documents/contracts/ui/UI_SOURCE_OF_TRUTH.md).
 
 ## Status
 
-- **M0** — fresh v29 UI shell + Phase 0 foundation: **ACCEPTED** 2026-09-13 ([`docs/acceptance/M0.md`](docs/acceptance/M0.md)).
-- **Issue #4** — one ICBM process per data directory: **ACCEPTED** and merged ([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)).
-- **M1** — KM통상 CONNECT only: **ACCEPTED** 2026-09-13 (Issue #7, [ADR-0007](docs/adr/0007-supplier-generic-connect.md), [`docs/acceptance/M1.md`](docs/acceptance/M1.md)).
-- **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`docs/acceptance/M2.md`](docs/acceptance/M2.md)).
-- **M3** — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls: **ACCEPTED** 2026-09-18, bounded by its §2 capability boundary (Issue #52, [ADR-0010](docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md), [`docs/acceptance/M3.md`](docs/acceptance/M3.md)).
-- **M4** — canonical Product DB + image pipeline + pricing/readiness foundations: **ACCEPTED** 2026-09-19 on the final offline acceptance run at exact main `57a6676`, bounded by its §2 (Issue #80, [ADR-0013](docs/adr/0013-m4-canonical-product-contract.md), [`docs/acceptance/M4.md`](docs/acceptance/M4.md)).
-- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`ROADMAP.md`](ROADMAP.md) §12, Issue #89). Its contract ([ADR-0014](docs/adr/0014-smartstore-register-idempotency-readback.md)) and every implementation PR are merged, and M5 is **not accepted**: [`docs/acceptance/M5.md`](docs/acceptance/M5.md) stays `PENDING` with no acceptance run, product CREATE and the duplicate-lookup search stay `NOT_ADOPTED`, execution stays `DRY_RUN`, and no SmartStore write is authorized. What still blocks a bounded canary is `docs/acceptance/M5.md` §9.
+- **M0** — fresh v29 UI shell + Phase 0 foundation: **ACCEPTED** 2026-09-13 ([`documents/acceptance/milestones/M0.md`](documents/acceptance/milestones/M0.md)).
+- **Issue #4** — one ICBM process per data directory: **ACCEPTED** and merged ([ADR-0006](documents/decisions/adr/0006-single-data-directory-process-ownership.md)).
+- **M1** — KM통상 CONNECT only: **ACCEPTED** 2026-09-13 (Issue #7, [ADR-0007](documents/decisions/adr/0007-supplier-generic-connect.md), [`documents/acceptance/milestones/M1.md`](documents/acceptance/milestones/M1.md)).
+- **M2** — SmartStore CONNECT: **ACCEPTED** 2026-09-15 (Issue #46, closeout PR #51, [`documents/acceptance/milestones/M2.md`](documents/acceptance/milestones/M2.md)).
+- **M3** — KM통상 one-product COLLECT → ProductFactsRevision, with zero AI/OCR calls: **ACCEPTED** 2026-09-18, bounded by its §2 capability boundary (Issue #52, [ADR-0010](documents/decisions/adr/0010-supplier-generic-collect-and-product-facts-revision.md), [`documents/acceptance/milestones/M3.md`](documents/acceptance/milestones/M3.md)).
+- **M4** — canonical Product DB + image pipeline + pricing/readiness foundations: **ACCEPTED** 2026-09-19 on the final offline acceptance run at exact main `57a6676`, bounded by its §2 (Issue #80, [ADR-0013](documents/decisions/adr/0013-m4-canonical-product-contract.md), [`documents/acceptance/milestones/M4.md`](documents/acceptance/milestones/M4.md)).
+- **Current milestone:** M5 — SmartStore REGISTER idempotency/reconcile/read-back ([`documents/roadmap/ROADMAP.md`](documents/roadmap/ROADMAP.md) §12, Issue #89). Its contract ([ADR-0014](documents/decisions/adr/0014-smartstore-register-idempotency-readback.md)) and every implementation PR are merged, and M5 is **not accepted**: [`documents/acceptance/milestones/M5.md`](documents/acceptance/milestones/M5.md) stays `PENDING` with no acceptance run, product CREATE and the duplicate-lookup search stay `NOT_ADOPTED`, execution stays `DRY_RUN`, and no SmartStore write is authorized. What still blocks a bounded canary is `documents/acceptance/milestones/M5.md` §9.
 
 External calls happen only when the operator starts an action (no call at startup), and only for these accepted flows:
 - **KM통상 CONNECT:** the application authenticates and reads the protected 마이쇼핑 page, through the common, allowlisted supplier transport.
@@ -24,7 +24,7 @@ External calls happen only when the operator starts an action (no call at startu
 
 Collection is one product per operator action. There is no listing, category or bulk collection and no crawl.
 
-A recorded collection materializes the canonical `Product` (M4): its current source revision, its Items and their source bindings, which can be read through `GET /api/v1/products/{product_group_id}`. Pricing snapshots, derived image lineage with operator selection and exact-binary QA, and derived readiness are server-owned. The offline acceptance run proved them ([`docs/acceptance/M4.md`](docs/acceptance/M4.md)). Nothing is registered to a marketplace yet (M5). Positive `CONFIRMED` option-axis/configuration support and quantity-tier values/source totals are not claimed ([`docs/acceptance/M3.md`](docs/acceptance/M3.md) §2). The application makes **zero external business writes**. Every screen without a live contract renders the empty state reported by its application contract.
+A recorded collection materializes the canonical `Product` (M4): its current source revision, its Items and their source bindings, which can be read through `GET /api/v1/products/{product_group_id}`. Pricing snapshots, derived image lineage with operator selection and exact-binary QA, and derived readiness are server-owned. The offline acceptance run proved them ([`documents/acceptance/milestones/M4.md`](documents/acceptance/milestones/M4.md)). Nothing is registered to a marketplace yet (M5). Positive `CONFIRMED` option-axis/configuration support and quantity-tier values/source totals are not claimed ([`documents/acceptance/milestones/M3.md`](documents/acceptance/milestones/M3.md) §2). The application makes **zero external business writes**. Every screen without a live contract renders the empty state reported by its application contract.
 
 ## Quick start (Windows, Python 3.12)
 
@@ -77,12 +77,12 @@ ICBM process, and every harness that borrows a connection (the M3 reconnaissance
 same owner, so a login saved once in ICBM is the one reused everywhere. Nothing may define a
 second owner, login store or session store. The M3 reconnaissance binds the owner at its
 preflight and refuses a run against any other. Repository rules in
-`tests/unit/test_repository_rules.py` keep this fixed.
+`tests/contracts/test_repository_rules.py` keep this fixed.
 
 ### One process per data directory
 
 `icbm serve` and `icbm db upgrade` take an exclusive OS lock on `<data root>/runtime/owner.lock`
-([ADR-0006](docs/adr/0006-single-data-directory-process-ownership.md)). A second owner exits with
+([ADR-0006](documents/decisions/adr/0006-single-data-directory-process-ownership.md)). A second owner exits with
 status 3 and `DATA_DIR_IN_USE`; stop the server before running `icbm db upgrade`. `icbm db current`
 is read-only and takes no lock. After a crash the next start recovers on its own — never delete the
 lock file.

@@ -10,18 +10,18 @@
 // from this page.
 
 import { getJson } from '../core/api.js';
-import { authLine, statusChip } from '../core/capability.js';
+import { authLine, statusChip } from '../platforms/smartstore/capability.js';
 import { fragment, h } from '../core/dom.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
-import { capabilityProjection } from './capability-projection.js';
-import { permissionAttestationPanel } from './permission-attestation.js';
-import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings-schema.js';
-import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './smartstore-operator.js';
-import { categoryMetadataPanel } from './category-metadata.js';
-import { targetPolicyPanel } from './target-policy.js';
+import { capabilityProjection } from './settings/capability-projection.js';
+import { permissionAttestationPanel } from './settings/permission-attestation.js';
+import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings/settings-schema.js';
+import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './settings/smartstore-operator.js';
+import { categoryMetadataPanel } from './settings/category-metadata.js';
+import { targetPolicyPanel } from './settings/target-policy.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';

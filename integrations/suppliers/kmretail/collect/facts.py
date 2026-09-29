@@ -32,7 +32,7 @@ conditional shipping policy is never flattened into a fixed fee.
 import re
 from collections.abc import Iterator, Sequence
 
-from app.collect.facts import (
+from app.stages.collect.facts import (
     Availability,
     Evidence,
     EvidenceKind,
