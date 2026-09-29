@@ -7,10 +7,13 @@ by their ADRs (`documents/decisions/adr/`); nothing here copies them.
 
 Former `CLAUDE.md` section numbers are kept inside the imported files; the section map is in
 `documents/rules/README.md`, and every moved path is in `documents/reference/PATH_MIGRATION_MAP.md`.
-Each imported rule body is the former `CLAUDE.md` section, unchanged except for moved-path
-locators (ADR-0021 §4): `tests/contracts/test_repository_rules.py`
+Each imported rule body of former §1–§10 and §12 is the former `CLAUDE.md` section, unchanged
+except for moved-path locators (ADR-0021 §4): `tests/contracts/test_repository_rules.py`
 (`test_rule_bodies_are_the_former_claude_md_sections`) proves it against the pre-migration text,
 and `test_claude_md_auto_loads_every_rule_body` proves that every rule body is imported here.
+`documents/rules/README.md` is not a preserved body: it is the new index, which restates the former
+intro and §13 read order with the moved locators and adds the section map. Former §11 (milestone
+status) is roadmap content, pinned by the milestone agreement test.
 
 @documents/rules/README.md
 @documents/rules/01-roles-and-exchange.md

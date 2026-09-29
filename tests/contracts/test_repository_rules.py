@@ -212,7 +212,9 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 # at main e72a5cad) after the normalization below, which masks locators only: code spans that
 # name a path or a file, markdown link targets and bare path tokens. Every rule word must be
 # unchanged; a later reviewed rule change updates its digest in the same PR. §11 (milestone status)
-# is pinned by the milestone agreement test instead.
+# is pinned by the milestone agreement test instead. documents/rules/README.md is deliberately
+# absent: it is the new index (the former intro and §13 restated with moved locators, plus the
+# section map), not a preserved body.
 _FORMER_CLAUDE_SECTIONS = {
     "01-roles-and-exchange.md": "41d2e020b31971ce797b8d12eadacb06a15cec0b2c71d9ed5f9b46ea1223cc87",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",

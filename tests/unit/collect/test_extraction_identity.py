@@ -1,4 +1,11 @@
-"""The acyclic extraction-identity pin (ADR-0010 §12), on synthetic packages in a temp tree."""
+"""The acyclic extraction-identity pin (ADR-0010 §12), on synthetic packages in a temp tree.
+
+The real pins are recomputed elsewhere: the Adaptive engine's in
+``tests/unit/collect/adaptive/engine/test_identity.py``
+(``test_the_implementation_fingerprint_is_current``,
+moved from ``tests/unit/adaptive/test_identity.py``) and KM통상's in
+``tests/contracts/test_repository_rules.py``.
+"""
 
 import hashlib
 from pathlib import Path
