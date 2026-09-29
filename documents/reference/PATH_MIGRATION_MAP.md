@@ -1,0 +1,1304 @@
+# PATH_MIGRATION_MAP — repository restructure (Issue #151, ADR-0021)
+
+Status: **PERMANENT.** Authority: ADR-0021 §6 and Issue #151 §4–§5. Every path of the
+pre-migration tree (`7608eb5e60c175c11945a7c65e83481d6370a866`, 716 tracked files) is listed exactly once with its new path.
+A past issue, PR, review, comment, acceptance record or evidence file that names an old path is
+**not** rewritten (ADR-0021 §5); it is traced to the current location through this map.
+The same table is in `PATH_MIGRATION_MAP.csv` for tools.
+
+Dispositions: KEEP 99, MOVE 602, MERGE 2, ARCHIVE 12, REMOVE 1.
+
+- `KEEP`: the path is unchanged (its content may still carry path-only edits).
+- `MOVE`: a structural move; path-only edits only (ADR-0021 §4).
+- `ARCHIVE`: a historical file moved under an `archive/` folder; byte-identical.
+- `MERGE`: folded into the named owner with zero content loss; the old file is gone.
+- `REMOVE`: deleted after a fresh scan found no import, runtime, path or current-document reference.
+
+## 1. Former `CLAUDE.md` sections
+
+The root `CLAUDE.md` is now the auto-loaded bootstrap index (ADR-0021 §3). Section numbers are kept
+inside the new files, so `CLAUDE.md §N` still resolves.
+
+| former | canonical location |
+| --- | --- |
+| intro, §13 Canonical file index and read order | `documents/rules/README.md` |
+| §1 Roles, §1.1 Repository exchange protocol | `documents/rules/01-roles-and-exchange.md` |
+| §2 Absolute no-legacy rule | `documents/rules/02-no-legacy.md` |
+| §3 UI source rule | `documents/rules/03-ui-source.md` |
+| §4 Pinned runtime stack | `documents/rules/04-runtime-stack.md` |
+| §5 Architectural rules | `documents/rules/05-architectural-rules.md` |
+| §6 Immutable domain rules | `documents/rules/06-immutable-domain-rules.md` |
+| §7 Execution safety | `documents/rules/07-execution-safety.md` |
+| §8 Git conventions | `documents/rules/08-git-conventions.md` |
+| §9 Definition of Done | `documents/rules/09-definition-of-done.md` |
+| §10 Working style expected of Claude | `documents/rules/10-working-style.md` |
+| §11 Current milestone | `documents/roadmap/CURRENT-MILESTONE.md` |
+| §12 First vertical | `documents/rules/12-first-vertical.md` |
+
+## 2. Identities that changed with the move
+
+| identity | old | new | note |
+| --- | --- | --- | --- |
+| KM통상 `EXTRACTOR_FINGERPRINT` | `c622da511c86d35d263ba873d56fa013d4f71b00649af6a1f065ceb63138c41b` | `7055eac566872047afbfb4e961605915ea96fb5e56e5e77eb90f0d0fb1684ffa` | two hashed modules changed only an import path (`app.collect.facts` → `app.stages.collect.facts`); `EXTRACTOR_REVISION` stays `kmretail-1` |
+| Adaptive `EXTRACTOR_FINGERPRINT` | `90594482f3fb0e9661eec66bb018017670e509aaf72aee1a0d1447040301ec03` | `c44f0007a990062141b69272895a91560c85d69bb2538ee5fdd73ed88cf544ed` | the hashed input paths moved to `app/stages/collect/adaptive/engine/`; `EXTRACTOR_REVISION` stays `adaptive-engine-1` (goldens unchanged) |
+| Gate 3 running-code digest | per commit | per commit | every `app/` path label changed; the visual acceptance recorded before the migration is stale (G3-31) and is re-run on the merged main |
+| console entry point | `icbm = app.cli:main` | `icbm = app.interface.cli:main` | `pyproject.toml` |
+| Alembic `script_location` | `app/db/migrations` | `app/platform/db/migrations` | revision ids and file names unchanged, so no `alembic_version` impact |
+| served UI URLs | `/js/pages/<panel>.js`, `/js/core/capability.js` | `/js/pages/settings/<panel>.js`, `/js/platforms/smartstore/capability.js` | the six Settings panels and the SmartStore capability labels |
+| M2 harness keyring backend (operator env) | `scripts.m2harness.keyrings.*` | `automation.acceptance.m2.harness.keyrings.*` | a future M2 harness run must use the new dotted name |
+| CI docs-mode suite | `pytest tests/unit` | `pytest tests/unit tests/contracts tests/harness -m "not integration"` | the same 2030 tests plus the new auto-load rule test |
+
+Job types, review producer names, table names and Alembic revision ids are unchanged.
+
+## 3. Python modules
+
+450 dotted module names changed (`from`/`import`, `python -m`, monkeypatch strings).
+
+| old module | new module |
+| --- | --- |
+| `app.api` | `app.interface.api` |
+| `app.api.deps` | `app.interface.api.deps` |
+| `app.api.errors` | `app.interface.api.errors` |
+| `app.api.middleware` | `app.interface.api.middleware` |
+| `app.api.routes` | `app.interface.api.routes` |
+| `app.api.routes.collect` | `app.interface.api.routes.collect` |
+| `app.api.routes.connect` | `app.interface.api.routes.connect` |
+| `app.api.routes.diagnostics` | `app.interface.api.routes.diagnostics` |
+| `app.api.routes.products` | `app.interface.api.routes.products` |
+| `app.api.routes.register` | `app.interface.api.routes.register` |
+| `app.api.routes.review` | `app.interface.api.routes.review` |
+| `app.api.routes.screens` | `app.interface.api.routes.screens` |
+| `app.api.routes.settings` | `app.interface.api.routes.settings` |
+| `app.api.routes.system` | `app.interface.api.routes.system` |
+| `app.audit` | `app.capabilities.audit` |
+| `app.audit.models` | `app.capabilities.audit.models` |
+| `app.audit.service` | `app.capabilities.audit.service` |
+| `app.cli` | `app.interface.cli` |
+| `app.collect` | `app.stages.collect` |
+| `app.collect.adaptive` | `app.stages.collect.adaptive.engine` |
+| `app.collect.adaptive.canonical` | `app.stages.collect.adaptive.engine.canonical` |
+| `app.collect.adaptive.capture` | `app.stages.collect.adaptive.engine.capture` |
+| `app.collect.adaptive.document` | `app.stages.collect.adaptive.engine.document` |
+| `app.collect.adaptive.engine` | `app.stages.collect.adaptive.engine.engine` |
+| `app.collect.adaptive.extraction_identity` | `app.stages.collect.adaptive.engine.extraction_identity` |
+| `app.collect.adaptive.hooks` | `app.stages.collect.adaptive.engine.hooks` |
+| `app.collect.adaptive.lint` | `app.stages.collect.adaptive.engine.lint` |
+| `app.collect.adaptive.locator` | `app.stages.collect.adaptive.engine.locator` |
+| `app.collect.adaptive.profiles` | `app.stages.collect.adaptive.engine.profiles` |
+| `app.collect.adaptive.validation` | `app.stages.collect.adaptive.engine.validation` |
+| `app.collect.adaptive_capture` | `app.stages.collect.adaptive.phase_c_capture` |
+| `app.collect.adaptive_capture.accounting` | `app.stages.collect.adaptive.phase_c_capture.accounting` |
+| `app.collect.adaptive_capture.commands` | `app.stages.collect.adaptive.phase_c_capture.commands` |
+| `app.collect.adaptive_capture.controls` | `app.stages.collect.adaptive.phase_c_capture.controls` |
+| `app.collect.adaptive_capture.models` | `app.stages.collect.adaptive.phase_c_capture.models` |
+| `app.collect.adaptive_capture.runner` | `app.stages.collect.adaptive.phase_c_capture.runner` |
+| `app.collect.adaptive_capture.store` | `app.stages.collect.adaptive.phase_c_capture.store` |
+| `app.collect.adaptive_shadow` | `app.stages.collect.adaptive.shadow` |
+| `app.collect.adaptive_shadow.compare` | `app.stages.collect.adaptive.shadow.compare` |
+| `app.collect.adaptive_shadow.evidence` | `app.stages.collect.adaptive.shadow.evidence` |
+| `app.collect.adaptive_shadow.models` | `app.stages.collect.adaptive.shadow.models` |
+| `app.collect.adaptive_shadow.runner` | `app.stages.collect.adaptive.shadow.runner` |
+| `app.collect.adaptive_shadow.store` | `app.stages.collect.adaptive.shadow.store` |
+| `app.collect.adaptive_shadow.switch` | `app.stages.collect.adaptive.shadow.switch` |
+| `app.collect.adaptive_store` | `app.stages.collect.adaptive.store` |
+| `app.collect.adaptive_store.gate` | `app.stages.collect.adaptive.store.gate` |
+| `app.collect.adaptive_store.models` | `app.stages.collect.adaptive.store.models` |
+| `app.collect.adaptive_store.store` | `app.stages.collect.adaptive.store.store` |
+| `app.collect.assets` | `app.stages.collect.assets` |
+| `app.collect.collection` | `app.stages.collect.collection` |
+| `app.collect.contracts` | `app.stages.collect.contracts` |
+| `app.collect.facts` | `app.stages.collect.facts` |
+| `app.collect.imagedecode` | `app.stages.collect.imagedecode` |
+| `app.collect.models` | `app.stages.collect.models` |
+| `app.collect.readback` | `app.stages.collect.readback` |
+| `app.collect.revisions` | `app.stages.collect.revisions` |
+| `app.collect.runs` | `app.stages.collect.runs` |
+| `app.collect.service` | `app.stages.collect.service` |
+| `app.collect.shadow` | `app.stages.collect.shadow` |
+| `app.collect.sourceassets` | `app.stages.collect.sourceassets` |
+| `app.collect.urls` | `app.stages.collect.urls` |
+| `app.connect` | `app.stages.connect` |
+| `app.connect.account_models` | `app.stages.connect.account_models` |
+| `app.connect.accounts` | `app.stages.connect.accounts` |
+| `app.connect.contracts` | `app.stages.connect.contracts` |
+| `app.connect.credentials` | `app.stages.connect.credentials` |
+| `app.connect.marketplace` | `app.stages.connect.marketplace` |
+| `app.connect.marketplace.attestation` | `app.stages.connect.marketplace.attestation` |
+| `app.connect.marketplace.attestation_contracts` | `app.stages.connect.marketplace.attestation_contracts` |
+| `app.connect.marketplace.attestation_service` | `app.stages.connect.marketplace.attestation_service` |
+| `app.connect.marketplace.capability` | `app.stages.connect.marketplace.capability` |
+| `app.connect.marketplace.contracts` | `app.stages.connect.marketplace.contracts` |
+| `app.connect.marketplace.models` | `app.stages.connect.marketplace.models` |
+| `app.connect.marketplace.revision` | `app.stages.connect.marketplace.revision` |
+| `app.connect.marketplace.service` | `app.stages.connect.marketplace.service` |
+| `app.connect.marketplace.sources` | `app.stages.connect.marketplace.sources` |
+| `app.connect.models` | `app.stages.connect.models` |
+| `app.connect.proof` | `app.stages.connect.proof` |
+| `app.connect.service` | `app.stages.connect.service` |
+| `app.connect.sessions` | `app.stages.connect.sessions` |
+| `app.connect.singleflight` | `app.stages.connect.singleflight` |
+| `app.connect.smartstore` | `app.stages.connect.smartstore` |
+| `app.connect.smartstore.credentials` | `app.stages.connect.smartstore.credentials` |
+| `app.connect.smartstore.models` | `app.stages.connect.smartstore.models` |
+| `app.connect.smartstore.service` | `app.stages.connect.smartstore.service` |
+| `app.connect.state` | `app.stages.connect.state` |
+| `app.core` | `app.platform.core` |
+| `app.core.clock` | `app.platform.core.clock` |
+| `app.core.code_identity` | `app.platform.core.code_identity` |
+| `app.core.correlation` | `app.platform.core.correlation` |
+| `app.core.egress` | `app.platform.core.egress` |
+| `app.core.errors` | `app.platform.core.errors` |
+| `app.core.execution` | `app.platform.core.execution` |
+| `app.core.logging` | `app.platform.core.logging` |
+| `app.core.net` | `app.platform.core.net` |
+| `app.core.ownership` | `app.platform.core.ownership` |
+| `app.core.safe_payload` | `app.platform.core.safe_payload` |
+| `app.core.secrets` | `app.platform.core.secrets` |
+| `app.core.send_guard` | `app.platform.core.send_guard` |
+| `app.db` | `app.platform.db` |
+| `app.db.base` | `app.platform.db.base` |
+| `app.db.database` | `app.platform.db.database` |
+| `app.db.metadata` | `app.platform.db.metadata` |
+| `app.db.migrate` | `app.platform.db.migrate` |
+| `app.db.migrations.env` | `app.platform.db.migrations.env` |
+| `app.db.migrations.versions.0001_m0_foundation` | `app.platform.db.migrations.versions.0001_m0_foundation` |
+| `app.db.migrations.versions.0002_m1_supplier_connections` | `app.platform.db.migrations.versions.0002_m1_supplier_connections` |
+| `app.db.migrations.versions.0003_m2_marketplace_capabilities` | `app.platform.db.migrations.versions.0003_m2_marketplace_capabilities` |
+| `app.db.migrations.versions.0004_m2_permission_attestations` | `app.platform.db.migrations.versions.0004_m2_permission_attestations` |
+| `app.db.migrations.versions.0005_error_class_taxonomy` | `app.platform.db.migrations.versions.0005_error_class_taxonomy` |
+| `app.db.migrations.versions.0006_m2_marketplace_connections` | `app.platform.db.migrations.versions.0006_m2_marketplace_connections` |
+| `app.db.migrations.versions.0007_m3_product_facts_revisions` | `app.platform.db.migrations.versions.0007_m3_product_facts_revisions` |
+| `app.db.migrations.versions.0008_m3_collection_runs` | `app.platform.db.migrations.versions.0008_m3_collection_runs` |
+| `app.db.migrations.versions.0009_m3_one_revision_per_run` | `app.platform.db.migrations.versions.0009_m3_one_revision_per_run` |
+| `app.db.migrations.versions.0010_m3_same_product_pacing` | `app.platform.db.migrations.versions.0010_m3_same_product_pacing` |
+| `app.db.migrations.versions.0011_m3_image_reference_diagnostics` | `app.platform.db.migrations.versions.0011_m3_image_reference_diagnostics` |
+| `app.db.migrations.versions.0012_m4_product_foundation` | `app.platform.db.migrations.versions.0012_m4_product_foundation` |
+| `app.db.migrations.versions.0013_m4_pricing_snapshots` | `app.platform.db.migrations.versions.0013_m4_pricing_snapshots` |
+| `app.db.migrations.versions.0014_m4_derived_image_lineage` | `app.platform.db.migrations.versions.0014_m4_derived_image_lineage` |
+| `app.db.migrations.versions.0015_m4_quantity_offers` | `app.platform.db.migrations.versions.0015_m4_quantity_offers` |
+| `app.db.migrations.versions.0016_m5_registration_foundation` | `app.platform.db.migrations.versions.0016_m5_registration_foundation` |
+| `app.db.migrations.versions.0017_m5_registration_execution_scope` | `app.platform.db.migrations.versions.0017_m5_registration_execution_scope` |
+| `app.db.migrations.versions.0018_m5_registration_preparation` | `app.platform.db.migrations.versions.0018_m5_registration_preparation` |
+| `app.db.migrations.versions.0019_g1_registration_target_policy` | `app.platform.db.migrations.versions.0019_g1_registration_target_policy` |
+| `app.db.migrations.versions.0020_g1_registration_category_metadata` | `app.platform.db.migrations.versions.0020_g1_registration_category_metadata` |
+| `app.db.migrations.versions.0021_g2_review_items` | `app.platform.db.migrations.versions.0021_g2_review_items` |
+| `app.db.migrations.versions.0022_g2_review_coverage` | `app.platform.db.migrations.versions.0022_g2_review_coverage` |
+| `app.db.migrations.versions.0023_g2_review_coverage_fence` | `app.platform.db.migrations.versions.0023_g2_review_coverage_fence` |
+| `app.db.migrations.versions.0024_adaptive_profile_validation` | `app.platform.db.migrations.versions.0024_adaptive_profile_validation` |
+| `app.db.migrations.versions.0025_adaptive_shadow_foundation` | `app.platform.db.migrations.versions.0025_adaptive_shadow_foundation` |
+| `app.db.migrations.versions.0026_g3_live_authority` | `app.platform.db.migrations.versions.0026_g3_live_authority` |
+| `app.db.migrations.versions.0027_adaptive_capture_seam` | `app.platform.db.migrations.versions.0027_adaptive_capture_seam` |
+| `app.db.migrations.versions.0028_phase_c_read_accounting` | `app.platform.db.migrations.versions.0028_phase_c_read_accounting` |
+| `app.db.migrations.versions.0029_g3_restore_retention` | `app.platform.db.migrations.versions.0029_g3_restore_retention` |
+| `app.db.migrations.versions.0030_g3_visual_acceptance` | `app.platform.db.migrations.versions.0030_g3_visual_acceptance` |
+| `app.db.schema_contract` | `app.platform.db.schema_contract` |
+| `app.db.types` | `app.platform.db.types` |
+| `app.jobs` | `app.capabilities.jobs` |
+| `app.jobs.diagnostic` | `app.capabilities.jobs.diagnostic` |
+| `app.jobs.models` | `app.capabilities.jobs.models` |
+| `app.jobs.policy` | `app.capabilities.jobs.policy` |
+| `app.jobs.records` | `app.capabilities.jobs.records` |
+| `app.jobs.registry` | `app.capabilities.jobs.registry` |
+| `app.jobs.runner` | `app.capabilities.jobs.runner` |
+| `app.jobs.service` | `app.capabilities.jobs.service` |
+| `app.jobs.worker` | `app.capabilities.jobs.worker` |
+| `app.live` | `app.capabilities.live_safety` |
+| `app.live.assets` | `app.capabilities.live_safety.assets` |
+| `app.live.authority` | `app.capabilities.live_safety.authority` |
+| `app.live.drill` | `app.capabilities.live_safety.drill` |
+| `app.live.gates` | `app.capabilities.live_safety.gates` |
+| `app.live.model` | `app.capabilities.live_safety.model` |
+| `app.live.models` | `app.capabilities.live_safety.models` |
+| `app.live.proofs` | `app.capabilities.live_safety.proofs` |
+| `app.live.retention` | `app.capabilities.live_safety.retention` |
+| `app.live.stack` | `app.capabilities.live_safety.stack` |
+| `app.live.status` | `app.capabilities.live_safety.status` |
+| `app.live.store` | `app.capabilities.live_safety.store` |
+| `app.live.visual` | `app.capabilities.live_safety.visual` |
+| `app.operate` | `app.stages.operate` |
+| `app.operate.service` | `app.stages.operate.service` |
+| `app.products` | `app.stages.products` |
+| `app.products.catalog` | `app.stages.products.catalog` |
+| `app.products.contracts` | `app.stages.products.contracts` |
+| `app.products.image_model` | `app.stages.products.image_model` |
+| `app.products.image_models` | `app.stages.products.image_models` |
+| `app.products.image_store` | `app.stages.products.image_store` |
+| `app.products.images` | `app.stages.products.images` |
+| `app.products.materialization` | `app.stages.products.materialization` |
+| `app.products.model` | `app.stages.products.model` |
+| `app.products.models` | `app.stages.products.models` |
+| `app.products.pricing` | `app.stages.products.pricing` |
+| `app.products.pricing_service` | `app.stages.products.pricing_service` |
+| `app.products.pricing_store` | `app.stages.products.pricing_store` |
+| `app.products.quantity` | `app.stages.products.quantity` |
+| `app.products.readiness` | `app.stages.products.readiness` |
+| `app.products.service` | `app.stages.products.service` |
+| `app.products.store` | `app.stages.products.store` |
+| `app.register` | `app.stages.register` |
+| `app.register.authoring` | `app.stages.register.authoring` |
+| `app.register.builder` | `app.stages.register.builder` |
+| `app.register.canary` | `app.stages.register.canary` |
+| `app.register.category_metadata` | `app.stages.register.category_metadata` |
+| `app.register.category_metadata_models` | `app.stages.register.category_metadata_models` |
+| `app.register.contracts` | `app.stages.register.contracts` |
+| `app.register.drafting` | `app.stages.register.drafting` |
+| `app.register.execution` | `app.stages.register.execution` |
+| `app.register.model` | `app.stages.register.model` |
+| `app.register.models` | `app.stages.register.models` |
+| `app.register.payload` | `app.stages.register.payload` |
+| `app.register.policy` | `app.stages.register.policy` |
+| `app.register.preflight` | `app.stages.register.preflight` |
+| `app.register.preparation` | `app.stages.register.preparation` |
+| `app.register.provider` | `app.stages.register.provider` |
+| `app.register.sanitize` | `app.stages.register.sanitize` |
+| `app.register.service` | `app.stages.register.service` |
+| `app.register.store` | `app.stages.register.store` |
+| `app.register.target_policy` | `app.stages.register.target_policy` |
+| `app.register.target_policy_models` | `app.stages.register.target_policy_models` |
+| `app.review` | `app.capabilities.review` |
+| `app.review.collect_producer` | `app.capabilities.review.collect_producer` |
+| `app.review.contracts` | `app.capabilities.review.contracts` |
+| `app.review.counts` | `app.capabilities.review.counts` |
+| `app.review.coverage` | `app.capabilities.review.coverage` |
+| `app.review.model` | `app.capabilities.review.model` |
+| `app.review.models` | `app.capabilities.review.models` |
+| `app.review.owner` | `app.capabilities.review.owner` |
+| `app.review.preflight_producer` | `app.capabilities.review.preflight_producer` |
+| `app.review.products_producer` | `app.capabilities.review.products_producer` |
+| `app.review.reconciler` | `app.capabilities.review.reconciler` |
+| `app.review.register_producer` | `app.capabilities.review.register_producer` |
+| `app.review.scopes` | `app.capabilities.review.scopes` |
+| `app.review.service` | `app.capabilities.review.service` |
+| `app.screens` | `app.interface.screens` |
+| `app.screens.contracts` | `app.interface.screens.contracts` |
+| `app.screens.service` | `app.interface.screens.service` |
+| `app.system` | `app.platform.system` |
+| `app.system.diagnostics` | `app.platform.system.diagnostics` |
+| `app.system.execution_mode` | `app.platform.system.execution_mode` |
+| `app.system.readiness` | `app.platform.system.readiness` |
+| `app.system.secret_scan` | `automation.acceptance.common.secret_scan` |
+| `scripts.g3_visual_acceptance` | `automation.acceptance.gate3_visual.g3_visual_acceptance` |
+| `scripts.g3visual` | `automation.acceptance.gate3_visual.harness` |
+| `scripts.g3visual.checker` | `automation.acceptance.gate3_visual.harness.checker` |
+| `scripts.g3visual.harness` | `automation.acceptance.gate3_visual.harness.harness` |
+| `scripts.g3visual.scenario` | `automation.acceptance.gate3_visual.harness.scenario` |
+| `scripts.m0_acceptance` | `automation.acceptance.m0.m0_acceptance` |
+| `scripts.m1_acceptance` | `automation.archive.m1.m1_acceptance` |
+| `scripts.m2_acceptance` | `automation.acceptance.m2.m2_acceptance` |
+| `scripts.m2harness` | `automation.acceptance.m2.harness` |
+| `scripts.m2harness.campaign` | `automation.acceptance.m2.harness.campaign` |
+| `scripts.m2harness.cli` | `automation.acceptance.m2.harness.cli` |
+| `scripts.m2harness.crash` | `automation.acceptance.m2.harness.crash` |
+| `scripts.m2harness.evidence` | `automation.acceptance.m2.harness.evidence` |
+| `scripts.m2harness.fake_provider` | `automation.acceptance.m2.harness.fake_provider` |
+| `scripts.m2harness.gates` | `automation.acceptance.m2.harness.gates` |
+| `scripts.m2harness.keyrings` | `automation.acceptance.m2.harness.keyrings` |
+| `scripts.m2harness.ledger` | `automation.acceptance.m2.harness.ledger` |
+| `scripts.m2harness.paths` | `automation.acceptance.m2.harness.paths` |
+| `scripts.m2harness.transport` | `automation.acceptance.m2.harness.transport` |
+| `scripts.m3_accept` | `automation.acceptance.m3.m3_accept` |
+| `scripts.m3_collect` | `automation.acceptance.m3.m3_collect` |
+| `scripts.m3_recon` | `automation.archive.m3.m3_recon` |
+| `scripts.m3accept` | `automation.acceptance.m3.campaign` |
+| `scripts.m3accept.campaign` | `automation.acceptance.m3.campaign.campaign` |
+| `scripts.m3accept.gateways` | `automation.acceptance.m3.campaign.gateways` |
+| `scripts.m3accept.ledger` | `automation.acceptance.m3.campaign.ledger` |
+| `scripts.m3accept.m1` | `automation.acceptance.m3.campaign.m1` |
+| `scripts.m3accept.manifest` | `automation.acceptance.m3.campaign.manifest` |
+| `scripts.m3accept.prep` | `automation.acceptance.m3.campaign.prep` |
+| `scripts.m3collect` | `automation.acceptance.m3.rehearsal` |
+| `scripts.m3collect.fake_shop` | `automation.acceptance.m3.rehearsal.fake_shop` |
+| `scripts.m3collect.runner` | `automation.acceptance.m3.rehearsal.runner` |
+| `scripts.m3harness` | `automation.acceptance.m3.recon` |
+| `scripts.m3harness.capture` | `automation.acceptance.m3.recon.capture` |
+| `scripts.m3harness.cli` | `automation.acceptance.m3.recon.cli` |
+| `scripts.m3harness.fake_site` | `automation.acceptance.m3.recon.fake_site` |
+| `scripts.m3harness.inventory` | `automation.acceptance.m3.recon.inventory` |
+| `scripts.m3harness.ledger` | `automation.acceptance.m3.recon.ledger` |
+| `scripts.m3harness.paths` | `automation.acceptance.m3.recon.paths` |
+| `scripts.m3harness.recon` | `automation.acceptance.m3.recon.recon` |
+| `scripts.m4_acceptance` | `automation.acceptance.m4.m4_acceptance` |
+| `scripts.m4accept` | `automation.acceptance.common` |
+| `scripts.m4accept.checkout` | `automation.acceptance.common.checkout` |
+| `scripts.m4accept.evidence` | `automation.acceptance.common.evidence` |
+| `scripts.m4accept.guards` | `automation.acceptance.common.guards` |
+| `scripts.m4accept.harness` | `automation.acceptance.m4.harness` |
+| `scripts.m4accept.operator` | `automation.acceptance.common.operator` |
+| `scripts.m4accept.owners` | `automation.acceptance.m4.owners` |
+| `scripts.m4accept.root` | `automation.acceptance.common.root` |
+| `scripts.m4accept.synthetic` | `automation.acceptance.common.synthetic` |
+| `scripts.m5_acceptance` | `automation.acceptance.m5.m5_acceptance` |
+| `scripts.m5accept` | `automation.acceptance.m5.harness` |
+| `scripts.m5accept.guards` | `automation.acceptance.m5.harness.guards` |
+| `scripts.m5accept.harness` | `automation.acceptance.m5.harness.harness` |
+| `scripts.m5accept.owners` | `automation.acceptance.m5.harness.owners` |
+| `scripts.m5accept.root` | `automation.acceptance.m5.harness.root` |
+| `scripts.m5accept.seams` | `automation.acceptance.m5.harness.seams` |
+| `scripts.m5accept.synthetic` | `automation.acceptance.m5.harness.synthetic` |
+| `scripts.phase_c` | `automation.adaptive.phase_c.phase_c` |
+| `scripts.phasec` | `automation.adaptive.phase_c.harness` |
+| `scripts.phasec.artifacts` | `automation.adaptive.phase_c.harness.artifacts` |
+| `scripts.phasec.ceilings` | `automation.adaptive.phase_c.harness.ceilings` |
+| `scripts.phasec.grants` | `automation.adaptive.phase_c.harness.grants` |
+| `scripts.phasec.harness` | `automation.adaptive.phase_c.harness.harness` |
+| `scripts.phasec.ledger` | `automation.adaptive.phase_c.harness.ledger` |
+| `scripts.phasec.roots` | `automation.adaptive.phase_c.harness.roots` |
+| `scripts.visual_check` | `automation.acceptance.m0.visual_check` |
+| `tests.adaptive_support` | `tests.support.adaptive_support` |
+| `tests.collect_submit_support` | `tests.support.collect_submit_support` |
+| `tests.collect_support` | `tests.support.collect_support` |
+| `tests.gate1_support` | `tests.support.gate1_support` |
+| `tests.integration.test_adaptive_phase_c_c0` | `tests.integration.collect.adaptive.test_adaptive_phase_c_c0` |
+| `tests.integration.test_adaptive_phase_c_prep0` | `tests.integration.collect.adaptive.test_adaptive_phase_c_prep0` |
+| `tests.integration.test_adaptive_shadow` | `tests.integration.collect.adaptive.test_adaptive_shadow` |
+| `tests.integration.test_adaptive_store` | `tests.integration.collect.adaptive.test_adaptive_store` |
+| `tests.integration.test_api` | `tests.integration.interface.api.test_api` |
+| `tests.integration.test_authoring_revision_ownership` | `tests.integration.register.test_authoring_revision_ownership` |
+| `tests.integration.test_authoring_unowned_revisions` | `tests.integration.register.test_authoring_unowned_revisions` |
+| `tests.integration.test_authoring_unowned_revisions_ui` | `tests.integration.register.test_authoring_unowned_revisions_ui` |
+| `tests.integration.test_collect_diagnostic_contract_reproduction` | `tests.integration.collect.test_collect_diagnostic_contract_reproduction` |
+| `tests.integration.test_collect_image_acceptance_path` | `tests.integration.collect.test_collect_image_acceptance_path` |
+| `tests.integration.test_collect_image_reference_diagnostics` | `tests.integration.collect.test_collect_image_reference_diagnostics` |
+| `tests.integration.test_collect_product_collection` | `tests.integration.collect.test_collect_product_collection` |
+| `tests.integration.test_collect_run_lifecycle` | `tests.integration.collect.test_collect_run_lifecycle` |
+| `tests.integration.test_collect_source_asset_path` | `tests.integration.collect.test_collect_source_asset_path` |
+| `tests.integration.test_collect_source_truth_store` | `tests.integration.collect.test_collect_source_truth_store` |
+| `tests.integration.test_connect_api` | `tests.integration.connect.test_connect_api` |
+| `tests.integration.test_connect_collection_session` | `tests.integration.connect.test_connect_collection_session` |
+| `tests.integration.test_connect_credentials` | `tests.integration.connect.test_connect_credentials` |
+| `tests.integration.test_connect_lifecycle` | `tests.integration.connect.test_connect_lifecycle` |
+| `tests.integration.test_g1a_settings_ui` | `tests.integration.register.test_g1a_settings_ui` |
+| `tests.integration.test_g1a_target_policy` | `tests.integration.register.test_g1a_target_policy` |
+| `tests.integration.test_g1b_category_metadata` | `tests.integration.register.test_g1b_category_metadata` |
+| `tests.integration.test_g1b_category_metadata_ui` | `tests.integration.register.test_g1b_category_metadata_ui` |
+| `tests.integration.test_g1c_product_db` | `tests.integration.products.test_g1c_product_db` |
+| `tests.integration.test_g1c_product_db_ui` | `tests.integration.products.test_g1c_product_db_ui` |
+| `tests.integration.test_g1d_draft_command` | `tests.integration.register.test_g1d_draft_command` |
+| `tests.integration.test_g1d_draft_ui` | `tests.integration.register.test_g1d_draft_ui` |
+| `tests.integration.test_g1d_gate1_rehearsal` | `tests.integration.register.test_g1d_gate1_rehearsal` |
+| `tests.integration.test_g1e_collect_submit` | `tests.integration.collect.test_g1e_collect_submit` |
+| `tests.integration.test_g1e_collect_submit_ui` | `tests.integration.collect.test_g1e_collect_submit_ui` |
+| `tests.integration.test_g2a_review_owner` | `tests.integration.review.test_g2a_review_owner` |
+| `tests.integration.test_g2b_collect_review` | `tests.integration.review.test_g2b_collect_review` |
+| `tests.integration.test_g2b_collect_review_ui` | `tests.integration.review.test_g2b_collect_review_ui` |
+| `tests.integration.test_g2c_review_counts` | `tests.integration.review.test_g2c_review_counts` |
+| `tests.integration.test_g2c_review_counts_ui` | `tests.integration.review.test_g2c_review_counts_ui` |
+| `tests.integration.test_g2c_review_paths` | `tests.integration.review.test_g2c_review_paths` |
+| `tests.integration.test_g2c_review_paths_ui` | `tests.integration.review.test_g2c_review_paths_ui` |
+| `tests.integration.test_g3a_live_authority` | `tests.integration.live_safety.test_g3a_live_authority` |
+| `tests.integration.test_g3a_live_create` | `tests.integration.live_safety.test_g3a_live_create` |
+| `tests.integration.test_g3b_restore_retention` | `tests.integration.live_safety.test_g3b_restore_retention` |
+| `tests.integration.test_g3c_visual_acceptance` | `tests.integration.live_safety.test_g3c_visual_acceptance` |
+| `tests.integration.test_g3c_visual_checker_ui` | `tests.harness.gate3_visual.test_g3c_visual_checker_ui` |
+| `tests.integration.test_job_runner` | `tests.integration.jobs.test_job_runner` |
+| `tests.integration.test_job_terminal_owner` | `tests.integration.jobs.test_job_terminal_owner` |
+| `tests.integration.test_job_terminal_reconciliation` | `tests.integration.jobs.test_job_terminal_reconciliation` |
+| `tests.integration.test_m2_harness_crash` | `tests.harness.m2.test_m2_harness_crash` |
+| `tests.integration.test_m2_harness_dry_run` | `tests.harness.m2.test_m2_harness_dry_run` |
+| `tests.integration.test_m3_accept_campaign` | `tests.harness.m3.test_m3_accept_campaign` |
+| `tests.integration.test_m3_collect_rehearsal` | `tests.harness.m3.test_m3_collect_rehearsal` |
+| `tests.integration.test_m3_recon_dry` | `tests.harness.m3.test_m3_recon_dry` |
+| `tests.integration.test_m4_acceptance` | `tests.harness.m4.test_m4_acceptance` |
+| `tests.integration.test_m4_images` | `tests.integration.products.test_m4_images` |
+| `tests.integration.test_m4_materialization` | `tests.integration.products.test_m4_materialization` |
+| `tests.integration.test_m4_pricing` | `tests.integration.products.test_m4_pricing` |
+| `tests.integration.test_m4_product_foundation` | `tests.integration.products.test_m4_product_foundation` |
+| `tests.integration.test_m4_quantity_offers` | `tests.integration.products.test_m4_quantity_offers` |
+| `tests.integration.test_m5_acceptance` | `tests.harness.m5.test_m5_acceptance` |
+| `tests.integration.test_m5_register_adapter` | `tests.integration.register.test_m5_register_adapter` |
+| `tests.integration.test_m5_register_api` | `tests.integration.register.test_m5_register_api` |
+| `tests.integration.test_m5_register_execution` | `tests.integration.register.test_m5_register_execution` |
+| `tests.integration.test_m5_register_ui` | `tests.integration.register.test_m5_register_ui` |
+| `tests.integration.test_m5_registration_foundation` | `tests.integration.register.test_m5_registration_foundation` |
+| `tests.integration.test_m5_registration_preflight` | `tests.integration.register.test_m5_registration_preflight` |
+| `tests.integration.test_marketplace_attestation_store` | `tests.integration.connect.test_marketplace_attestation_store` |
+| `tests.integration.test_marketplace_capability_store` | `tests.integration.connect.test_marketplace_capability_store` |
+| `tests.integration.test_migrations` | `tests.integration.platform.db.test_migrations` |
+| `tests.integration.test_ownership_app` | `tests.integration.platform.core.test_ownership_app` |
+| `tests.integration.test_ownership_children` | `tests.integration.platform.core.test_ownership_children` |
+| `tests.integration.test_ownership_processes` | `tests.integration.platform.core.test_ownership_processes` |
+| `tests.integration.test_register_admission_facts` | `tests.integration.live_safety.test_register_admission_facts` |
+| `tests.integration.test_smartstore_capability_projection` | `tests.integration.connect.test_smartstore_capability_projection` |
+| `tests.integration.test_smartstore_connect` | `tests.integration.connect.test_smartstore_connect` |
+| `tests.integration.test_smartstore_operator_api` | `tests.integration.connect.test_smartstore_operator_api` |
+| `tests.integration.test_smartstore_operator_ui` | `tests.integration.connect.test_smartstore_operator_ui` |
+| `tests.live_support` | `tests.support.live_safety_support` |
+| `tests.product_support` | `tests.support.product_support` |
+| `tests.register_support` | `tests.support.register_support` |
+| `tests.shadow_support` | `tests.support.shadow_support` |
+| `tests.suppliers` | `tests.support.fake_suppliers` |
+| `tests.support` | `tests.support.jobs_support` |
+| `tests.unit.adaptive` | `tests.unit.collect.adaptive.engine` |
+| `tests.unit.adaptive.conftest` | `tests.unit.collect.adaptive.engine.conftest` |
+| `tests.unit.adaptive.test_canonical` | `tests.unit.collect.adaptive.engine.test_canonical` |
+| `tests.unit.adaptive.test_capture` | `tests.unit.collect.adaptive.engine.test_capture` |
+| `tests.unit.adaptive.test_capture_candidate` | `tests.unit.collect.adaptive.engine.test_capture_candidate` |
+| `tests.unit.adaptive.test_extraction` | `tests.unit.collect.adaptive.engine.test_extraction` |
+| `tests.unit.adaptive.test_hooks` | `tests.unit.collect.adaptive.engine.test_hooks` |
+| `tests.unit.adaptive.test_identity` | `tests.unit.collect.adaptive.engine.test_identity` |
+| `tests.unit.adaptive.test_lint` | `tests.unit.collect.adaptive.engine.test_lint` |
+| `tests.unit.adaptive.test_profiles` | `tests.unit.collect.adaptive.engine.test_profiles` |
+| `tests.unit.adaptive.test_validation` | `tests.unit.collect.adaptive.engine.test_validation` |
+| `tests.unit.adaptive_shadow` | `tests.unit.collect.adaptive.shadow` |
+| `tests.unit.adaptive_shadow.test_compare` | `tests.unit.collect.adaptive.shadow.test_compare` |
+| `tests.unit.adaptive_shadow.test_evidence` | `tests.unit.collect.adaptive.shadow.test_evidence` |
+| `tests.unit.phasec` | `tests.harness.phase_c` |
+| `tests.unit.phasec.test_campaign_units` | `tests.harness.phase_c.test_campaign_units` |
+| `tests.unit.test_collect_facts` | `tests.unit.collect.test_collect_facts` |
+| `tests.unit.test_collect_fetch_target_contract` | `tests.unit.collect.test_collect_fetch_target_contract` |
+| `tests.unit.test_collect_gateway` | `tests.unit.collect.test_collect_gateway` |
+| `tests.unit.test_collect_image_acceptance` | `tests.unit.collect.test_collect_image_acceptance` |
+| `tests.unit.test_collect_image_decode` | `tests.unit.collect.test_collect_image_decode` |
+| `tests.unit.test_config` | `tests.unit.platform.core.test_config` |
+| `tests.unit.test_connect_state` | `tests.unit.connect.test_connect_state` |
+| `tests.unit.test_correlation_and_logging` | `tests.unit.platform.core.test_correlation_and_logging` |
+| `tests.unit.test_data_root` | `tests.unit.platform.core.test_data_root` |
+| `tests.unit.test_egress` | `tests.unit.platform.core.test_egress` |
+| `tests.unit.test_egress_grant` | `tests.unit.platform.core.test_egress_grant` |
+| `tests.unit.test_error_taxonomy` | `tests.contracts.test_error_taxonomy` |
+| `tests.unit.test_errors` | `tests.unit.platform.core.test_errors` |
+| `tests.unit.test_extraction_identity` | `tests.unit.collect.test_extraction_identity` |
+| `tests.unit.test_g1c_product_db_contract` | `tests.contracts.test_g1c_product_db_contract` |
+| `tests.unit.test_g1e_collect_contract` | `tests.contracts.test_g1e_collect_contract` |
+| `tests.unit.test_g3a_replay_key` | `tests.unit.live_safety.test_g3a_replay_key` |
+| `tests.unit.test_g3c_visual_checker` | `tests.harness.gate3_visual.test_g3c_visual_checker` |
+| `tests.unit.test_image_sample_policy` | `tests.unit.collect.test_image_sample_policy` |
+| `tests.unit.test_km_facts_parser` | `tests.unit.integrations.suppliers.kmretail.test_km_facts_parser` |
+| `tests.unit.test_km_image_roles` | `tests.unit.integrations.suppliers.kmretail.test_km_image_roles` |
+| `tests.unit.test_m2_harness_evidence` | `tests.harness.m2.test_m2_harness_evidence` |
+| `tests.unit.test_m2_harness_gates` | `tests.harness.m2.test_m2_harness_gates` |
+| `tests.unit.test_m2_harness_ledger` | `tests.harness.m2.test_m2_harness_ledger` |
+| `tests.unit.test_m2_harness_operator` | `tests.harness.m2.test_m2_harness_operator` |
+| `tests.unit.test_m2_harness_static` | `tests.harness.m2.test_m2_harness_static` |
+| `tests.unit.test_m2_harness_transport` | `tests.harness.m2.test_m2_harness_transport` |
+| `tests.unit.test_m3_findings_secrets` | `tests.harness.m3.test_m3_findings_secrets` |
+| `tests.unit.test_m3_ledger_guard` | `tests.harness.m3.test_m3_ledger_guard` |
+| `tests.unit.test_m3_recon_inventory` | `tests.harness.m3.test_m3_recon_inventory` |
+| `tests.unit.test_m3_recon_ledger` | `tests.harness.m3.test_m3_recon_ledger` |
+| `tests.unit.test_m4_acceptance_harness` | `tests.harness.m4.test_m4_acceptance_harness` |
+| `tests.unit.test_m4_product_contract` | `tests.contracts.test_m4_product_contract` |
+| `tests.unit.test_m5_preflight_rules` | `tests.unit.register.test_m5_preflight_rules` |
+| `tests.unit.test_m5_register_adapter` | `tests.unit.integrations.marketplaces.smartstore.test_m5_register_adapter` |
+| `tests.unit.test_m5_register_contract` | `tests.contracts.test_m5_register_contract` |
+| `tests.unit.test_m5_register_execution_rules` | `tests.unit.register.test_m5_register_execution_rules` |
+| `tests.unit.test_marketplace_attestation` | `tests.unit.connect.test_marketplace_attestation` |
+| `tests.unit.test_marketplace_capability` | `tests.unit.connect.test_marketplace_capability` |
+| `tests.unit.test_ownership` | `tests.unit.platform.core.test_ownership` |
+| `tests.unit.test_pricing` | `tests.unit.products.test_pricing` |
+| `tests.unit.test_products_model` | `tests.unit.products.test_products_model` |
+| `tests.unit.test_quantity_offers` | `tests.unit.products.test_quantity_offers` |
+| `tests.unit.test_repository_rules` | `tests.contracts.test_repository_rules` |
+| `tests.unit.test_retry_policy` | `tests.unit.jobs.test_retry_policy` |
+| `tests.unit.test_safe_payload` | `tests.unit.platform.core.test_safe_payload` |
+| `tests.unit.test_schema_contract` | `tests.unit.platform.db.test_schema_contract` |
+| `tests.unit.test_secret_scan` | `tests.harness.common.test_secret_scan` |
+| `tests.unit.test_secrets` | `tests.unit.platform.core.test_secrets` |
+| `tests.unit.test_smartstore_caller` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_caller` |
+| `tests.unit.test_smartstore_classify` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_classify` |
+| `tests.unit.test_smartstore_image_upload` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_image_upload` |
+| `tests.unit.test_smartstore_product_reads` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_product_reads` |
+| `tests.unit.test_smartstore_registry` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_registry` |
+| `tests.unit.test_smartstore_signing` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_signing` |
+| `tests.unit.test_smartstore_storage` | `tests.unit.connect.test_smartstore_storage` |
+| `tests.unit.test_smartstore_transmission` | `tests.unit.integrations.marketplaces.smartstore.test_smartstore_transmission` |
+| `tests.unit.test_supplier_credentials` | `tests.unit.connect.test_supplier_credentials` |
+| `tests.unit.test_supplier_probes` | `tests.unit.connect.test_supplier_probes` |
+| `tests.unit.test_supplier_sessions` | `tests.unit.connect.test_supplier_sessions` |
+| `tests.unit.test_supplier_transport` | `tests.unit.integrations.suppliers.test_supplier_transport` |
+| `tests.visual_support` | `tests.support.visual_support` |
+
+## 4. Every path
+
+| old path | new path | disposition | reason |
+| --- | --- | --- | --- |
+| `.gitattributes` | `.gitattributes` | KEEP | tool-mandated root location: git reads the root .gitattributes (byte-exact prototype rule) |
+| `.github/workflows/ci.yml` | `.github/workflows/ci.yml` | KEEP | tool-mandated root location: GitHub Actions only runs workflows under .github/workflows |
+| `.gitignore` | `.gitignore` | KEEP | tool-mandated root location: git reads the root .gitignore |
+| `CLAUDE.md` | `CLAUDE.md` | KEEP | tool-mandated root location: Claude Code loads project rules from the root CLAUDE.md |
+| `README.md` | `README.md` | KEEP | tool-mandated root location: GitHub renders the repository landing page from the root README |
+| `ROADMAP-ADDITIONS-BY-CLAUDE.md` | `documents/archive/proposals/ROADMAP-ADDITIONS-BY-CLAUDE.md` | ARCHIVE | every item ruled in ARCHITECT_REVIEW; historical Claude proposal kept for traceability |
+| `ROADMAP.md` | `documents/roadmap/ROADMAP.md` | MOVE | roadmap owner (CLAUDE.md §13 #2) gets its role home |
+| `alembic.ini` | `alembic.ini` | KEEP | tool-mandated root location: the alembic CLI discovers ./alembic.ini from the working directory (CI runs it at the root) |
+| `app/__init__.py` | `app/__init__.py` | KEEP | application composition root (package, python -m entry, config, container, ASGI factory) |
+| `app/__main__.py` | `app/__main__.py` | KEEP | application composition root (package, python -m entry, config, container, ASGI factory) |
+| `app/api/__init__.py` | `app/interface/api/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/deps.py` | `app/interface/api/deps.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/errors.py` | `app/interface/api/errors.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/middleware.py` | `app/interface/api/middleware.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/__init__.py` | `app/interface/api/routes/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/collect.py` | `app/interface/api/routes/collect.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/connect.py` | `app/interface/api/routes/connect.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/diagnostics.py` | `app/interface/api/routes/diagnostics.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/products.py` | `app/interface/api/routes/products.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/register.py` | `app/interface/api/routes/register.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/review.py` | `app/interface/api/routes/review.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/screens.py` | `app/interface/api/routes/screens.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/settings.py` | `app/interface/api/routes/settings.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/api/routes/system.py` | `app/interface/api/routes/system.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/audit/__init__.py` | `app/capabilities/audit/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/audit/models.py` | `app/capabilities/audit/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/audit/service.py` | `app/capabilities/audit/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/cli.py` | `app/interface/cli.py` | MOVE | operator command-line interface |
+| `app/collect/__init__.py` | `app/stages/collect/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/__init__.py` | `app/stages/collect/adaptive/engine/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/canonical.py` | `app/stages/collect/adaptive/engine/canonical.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/capture.py` | `app/stages/collect/adaptive/engine/capture.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/document.py` | `app/stages/collect/adaptive/engine/document.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/engine.py` | `app/stages/collect/adaptive/engine/engine.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/extraction_identity.py` | `app/stages/collect/adaptive/engine/extraction_identity.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/hooks.py` | `app/stages/collect/adaptive/engine/hooks.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/lint.py` | `app/stages/collect/adaptive/engine/lint.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/locator.py` | `app/stages/collect/adaptive/engine/locator.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/profiles.py` | `app/stages/collect/adaptive/engine/profiles.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive/validation.py` | `app/stages/collect/adaptive/engine/validation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/__init__.py` | `app/stages/collect/adaptive/phase_c_capture/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/accounting.py` | `app/stages/collect/adaptive/phase_c_capture/accounting.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/commands.py` | `app/stages/collect/adaptive/phase_c_capture/commands.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/controls.py` | `app/stages/collect/adaptive/phase_c_capture/controls.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/models.py` | `app/stages/collect/adaptive/phase_c_capture/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/runner.py` | `app/stages/collect/adaptive/phase_c_capture/runner.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_capture/store.py` | `app/stages/collect/adaptive/phase_c_capture/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/__init__.py` | `app/stages/collect/adaptive/shadow/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/compare.py` | `app/stages/collect/adaptive/shadow/compare.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/evidence.py` | `app/stages/collect/adaptive/shadow/evidence.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/models.py` | `app/stages/collect/adaptive/shadow/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/runner.py` | `app/stages/collect/adaptive/shadow/runner.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/store.py` | `app/stages/collect/adaptive/shadow/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_shadow/switch.py` | `app/stages/collect/adaptive/shadow/switch.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_store/__init__.py` | `app/stages/collect/adaptive/store/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_store/gate.py` | `app/stages/collect/adaptive/store/gate.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_store/models.py` | `app/stages/collect/adaptive/store/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/adaptive_store/store.py` | `app/stages/collect/adaptive/store/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/assets.py` | `app/stages/collect/assets.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/collection.py` | `app/stages/collect/collection.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/contracts.py` | `app/stages/collect/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/facts.py` | `app/stages/collect/facts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/imagedecode.py` | `app/stages/collect/imagedecode.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/models.py` | `app/stages/collect/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/readback.py` | `app/stages/collect/readback.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/revisions.py` | `app/stages/collect/revisions.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/runs.py` | `app/stages/collect/runs.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/service.py` | `app/stages/collect/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/shadow.py` | `app/stages/collect/shadow.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/sourceassets.py` | `app/stages/collect/sourceassets.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/collect/urls.py` | `app/stages/collect/urls.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/config.py` | `app/config.py` | KEEP | application composition root (package, python -m entry, config, container, ASGI factory) |
+| `app/connect/__init__.py` | `app/stages/connect/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/account_models.py` | `app/stages/connect/account_models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/accounts.py` | `app/stages/connect/accounts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/contracts.py` | `app/stages/connect/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/credentials.py` | `app/stages/connect/credentials.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/__init__.py` | `app/stages/connect/marketplace/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/attestation.py` | `app/stages/connect/marketplace/attestation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/attestation_contracts.py` | `app/stages/connect/marketplace/attestation_contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/attestation_service.py` | `app/stages/connect/marketplace/attestation_service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/capability.py` | `app/stages/connect/marketplace/capability.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/contracts.py` | `app/stages/connect/marketplace/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/models.py` | `app/stages/connect/marketplace/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/revision.py` | `app/stages/connect/marketplace/revision.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/service.py` | `app/stages/connect/marketplace/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/marketplace/sources.py` | `app/stages/connect/marketplace/sources.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/models.py` | `app/stages/connect/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/proof.py` | `app/stages/connect/proof.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/service.py` | `app/stages/connect/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/sessions.py` | `app/stages/connect/sessions.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/singleflight.py` | `app/stages/connect/singleflight.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/smartstore/__init__.py` | `app/stages/connect/smartstore/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/smartstore/credentials.py` | `app/stages/connect/smartstore/credentials.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/smartstore/models.py` | `app/stages/connect/smartstore/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/smartstore/service.py` | `app/stages/connect/smartstore/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/connect/state.py` | `app/stages/connect/state.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/container.py` | `app/container.py` | KEEP | application composition root (package, python -m entry, config, container, ASGI factory) |
+| `app/core/__init__.py` | `app/platform/core/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/clock.py` | `app/platform/core/clock.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/code_identity.py` | `app/platform/core/code_identity.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/correlation.py` | `app/platform/core/correlation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/egress.py` | `app/platform/core/egress.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/errors.py` | `app/platform/core/errors.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/execution.py` | `app/platform/core/execution.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/logging.py` | `app/platform/core/logging.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/net.py` | `app/platform/core/net.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/ownership.py` | `app/platform/core/ownership.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/safe_payload.py` | `app/platform/core/safe_payload.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/secrets.py` | `app/platform/core/secrets.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/core/send_guard.py` | `app/platform/core/send_guard.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/__init__.py` | `app/platform/db/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/base.py` | `app/platform/db/base.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/database.py` | `app/platform/db/database.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/metadata.py` | `app/platform/db/metadata.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrate.py` | `app/platform/db/migrate.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/env.py` | `app/platform/db/migrations/env.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/script.py.mako` | `app/platform/db/migrations/script.py.mako` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0001_m0_foundation.py` | `app/platform/db/migrations/versions/0001_m0_foundation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0002_m1_supplier_connections.py` | `app/platform/db/migrations/versions/0002_m1_supplier_connections.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0003_m2_marketplace_capabilities.py` | `app/platform/db/migrations/versions/0003_m2_marketplace_capabilities.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0004_m2_permission_attestations.py` | `app/platform/db/migrations/versions/0004_m2_permission_attestations.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0005_error_class_taxonomy.py` | `app/platform/db/migrations/versions/0005_error_class_taxonomy.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0006_m2_marketplace_connections.py` | `app/platform/db/migrations/versions/0006_m2_marketplace_connections.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0007_m3_product_facts_revisions.py` | `app/platform/db/migrations/versions/0007_m3_product_facts_revisions.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0008_m3_collection_runs.py` | `app/platform/db/migrations/versions/0008_m3_collection_runs.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0009_m3_one_revision_per_run.py` | `app/platform/db/migrations/versions/0009_m3_one_revision_per_run.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0010_m3_same_product_pacing.py` | `app/platform/db/migrations/versions/0010_m3_same_product_pacing.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0011_m3_image_reference_diagnostics.py` | `app/platform/db/migrations/versions/0011_m3_image_reference_diagnostics.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0012_m4_product_foundation.py` | `app/platform/db/migrations/versions/0012_m4_product_foundation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0013_m4_pricing_snapshots.py` | `app/platform/db/migrations/versions/0013_m4_pricing_snapshots.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0014_m4_derived_image_lineage.py` | `app/platform/db/migrations/versions/0014_m4_derived_image_lineage.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0015_m4_quantity_offers.py` | `app/platform/db/migrations/versions/0015_m4_quantity_offers.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0016_m5_registration_foundation.py` | `app/platform/db/migrations/versions/0016_m5_registration_foundation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0017_m5_registration_execution_scope.py` | `app/platform/db/migrations/versions/0017_m5_registration_execution_scope.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0018_m5_registration_preparation.py` | `app/platform/db/migrations/versions/0018_m5_registration_preparation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0019_g1_registration_target_policy.py` | `app/platform/db/migrations/versions/0019_g1_registration_target_policy.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0020_g1_registration_category_metadata.py` | `app/platform/db/migrations/versions/0020_g1_registration_category_metadata.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0021_g2_review_items.py` | `app/platform/db/migrations/versions/0021_g2_review_items.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0022_g2_review_coverage.py` | `app/platform/db/migrations/versions/0022_g2_review_coverage.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0023_g2_review_coverage_fence.py` | `app/platform/db/migrations/versions/0023_g2_review_coverage_fence.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0024_adaptive_profile_validation.py` | `app/platform/db/migrations/versions/0024_adaptive_profile_validation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0025_adaptive_shadow_foundation.py` | `app/platform/db/migrations/versions/0025_adaptive_shadow_foundation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0026_g3_live_authority.py` | `app/platform/db/migrations/versions/0026_g3_live_authority.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0027_adaptive_capture_seam.py` | `app/platform/db/migrations/versions/0027_adaptive_capture_seam.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0028_phase_c_read_accounting.py` | `app/platform/db/migrations/versions/0028_phase_c_read_accounting.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0029_g3_restore_retention.py` | `app/platform/db/migrations/versions/0029_g3_restore_retention.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/migrations/versions/0030_g3_visual_acceptance.py` | `app/platform/db/migrations/versions/0030_g3_visual_acceptance.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/schema_contract.py` | `app/platform/db/schema_contract.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/db/types.py` | `app/platform/db/types.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/__init__.py` | `app/capabilities/jobs/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/diagnostic.py` | `app/capabilities/jobs/diagnostic.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/models.py` | `app/capabilities/jobs/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/policy.py` | `app/capabilities/jobs/policy.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/records.py` | `app/capabilities/jobs/records.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/registry.py` | `app/capabilities/jobs/registry.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/runner.py` | `app/capabilities/jobs/runner.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/service.py` | `app/capabilities/jobs/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/jobs/worker.py` | `app/capabilities/jobs/worker.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/__init__.py` | `app/capabilities/live_safety/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/assets.py` | `app/capabilities/live_safety/assets.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/authority.py` | `app/capabilities/live_safety/authority.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/drill.py` | `app/capabilities/live_safety/drill.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/gates.py` | `app/capabilities/live_safety/gates.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/model.py` | `app/capabilities/live_safety/model.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/models.py` | `app/capabilities/live_safety/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/proofs.py` | `app/capabilities/live_safety/proofs.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/retention.py` | `app/capabilities/live_safety/retention.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/stack.py` | `app/capabilities/live_safety/stack.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/status.py` | `app/capabilities/live_safety/status.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/store.py` | `app/capabilities/live_safety/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/live/visual.py` | `app/capabilities/live_safety/visual.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/main.py` | `app/main.py` | KEEP | application composition root (package, python -m entry, config, container, ASGI factory) |
+| `app/operate/__init__.py` | `app/stages/operate/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/operate/service.py` | `app/stages/operate/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/__init__.py` | `app/stages/products/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/catalog.py` | `app/stages/products/catalog.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/contracts.py` | `app/stages/products/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/image_model.py` | `app/stages/products/image_model.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/image_models.py` | `app/stages/products/image_models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/image_store.py` | `app/stages/products/image_store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/images.py` | `app/stages/products/images.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/materialization.py` | `app/stages/products/materialization.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/model.py` | `app/stages/products/model.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/models.py` | `app/stages/products/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/pricing.py` | `app/stages/products/pricing.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/pricing_service.py` | `app/stages/products/pricing_service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/pricing_store.py` | `app/stages/products/pricing_store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/quantity.py` | `app/stages/products/quantity.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/readiness.py` | `app/stages/products/readiness.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/service.py` | `app/stages/products/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/products/store.py` | `app/stages/products/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/__init__.py` | `app/stages/register/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/authoring.py` | `app/stages/register/authoring.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/builder.py` | `app/stages/register/builder.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/canary.py` | `app/stages/register/canary.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/category_metadata.py` | `app/stages/register/category_metadata.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/category_metadata_models.py` | `app/stages/register/category_metadata_models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/contracts.py` | `app/stages/register/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/drafting.py` | `app/stages/register/drafting.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/execution.py` | `app/stages/register/execution.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/model.py` | `app/stages/register/model.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/models.py` | `app/stages/register/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/payload.py` | `app/stages/register/payload.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/policy.py` | `app/stages/register/policy.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/preflight.py` | `app/stages/register/preflight.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/preparation.py` | `app/stages/register/preparation.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/provider.py` | `app/stages/register/provider.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/sanitize.py` | `app/stages/register/sanitize.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/service.py` | `app/stages/register/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/store.py` | `app/stages/register/store.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/target_policy.py` | `app/stages/register/target_policy.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/register/target_policy_models.py` | `app/stages/register/target_policy_models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/__init__.py` | `app/capabilities/review/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/collect_producer.py` | `app/capabilities/review/collect_producer.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/contracts.py` | `app/capabilities/review/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/counts.py` | `app/capabilities/review/counts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/coverage.py` | `app/capabilities/review/coverage.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/model.py` | `app/capabilities/review/model.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/models.py` | `app/capabilities/review/models.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/owner.py` | `app/capabilities/review/owner.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/preflight_producer.py` | `app/capabilities/review/preflight_producer.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/products_producer.py` | `app/capabilities/review/products_producer.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/reconciler.py` | `app/capabilities/review/reconciler.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/register_producer.py` | `app/capabilities/review/register_producer.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/scopes.py` | `app/capabilities/review/scopes.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/review/service.py` | `app/capabilities/review/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/screens/__init__.py` | `app/interface/screens/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/screens/contracts.py` | `app/interface/screens/contracts.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/screens/service.py` | `app/interface/screens/service.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/system/__init__.py` | `app/platform/system/__init__.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/system/diagnostics.py` | `app/platform/system/diagnostics.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/system/execution_mode.py` | `app/platform/system/execution_mode.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/system/readiness.py` | `app/platform/system/readiness.py` | MOVE | runtime owner grouped by spine stage / capability / platform / interface |
+| `app/system/secret_scan.py` | `automation/acceptance/common/secret_scan.py` | MOVE | used only by acceptance harnesses and their tests (no app runtime importer) |
+| `constraints.txt` | `constraints.txt` | KEEP | tool-mandated root location: pinned-stack constraint file used by CI install at the root |
+| `docs/AGENT_HOST_AUDIT_PROTOCOL.md` | `documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md` | MOVE | Agent Host control-plane rules |
+| `docs/ARCHITECTURE.md` | `documents/architecture/ARCHITECTURE.md` | MOVE | architecture owner (CLAUDE.md §13 #3) |
+| `docs/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` | `documents/decisions/architect-reviews/ARCHITECT_REVIEW_CLAUDE_ADDITIONS.md` | MOVE | pre-ADR architect rulings A1-D6; still CLAUDE.md §13 #7 context, so decisions (not archive) |
+| `docs/GLOSSARY.md` | `documents/architecture/GLOSSARY.md` | MOVE | canonical naming reference of the architecture |
+| `docs/UI_BUILD_GAPS.md` | `documents/archive/ui/UI_BUILD_GAPS.md` | ARCHIVE | self-declared historical record superseded by UI_SOURCE_OF_TRUTH |
+| `docs/UI_SOURCE_OF_TRUTH.md` | `documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` | MOVE | UI source-of-truth contract (CLAUDE.md §3, §13 #5) |
+| `docs/acceptance/ADAPTIVE-PHASE-C.md` | `documents/acceptance/adaptive/ADAPTIVE-PHASE-C.md` | MOVE | Adaptive Phase C acceptance record |
+| `docs/acceptance/G3-VISUAL.md` | `documents/acceptance/gates/G3-VISUAL.md` | MOVE | Gate 3 area 3 acceptance record |
+| `docs/acceptance/ISSUE-4-data-dir-ownership.md` | `documents/acceptance/issues/ISSUE-4-data-dir-ownership.md` | MOVE | accepted Issue #4 acceptance record (ADR-0006); acceptance, not archive |
+| `docs/acceptance/M0.md` | `documents/acceptance/milestones/M0.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/M0/evidence.json` | `documents/acceptance/milestones/M0/evidence.json` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/logs/icbm.jsonl` | `documents/acceptance/milestones/M0/logs/icbm.jsonl` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/migrate.log` | `documents/acceptance/milestones/M0/migrate.log` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/trace-deadletter.jsonl` | `documents/acceptance/milestones/M0/trace-deadletter.jsonl` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual.log` | `documents/acceptance/milestones/M0/visual.log` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/ai-insight__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/ai-insight__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/ai-insight__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/ai-insight__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/analytics__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/analytics__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/analytics__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/analytics__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/collect-suppliers__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/collect-suppliers__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/collect-suppliers__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/collect-suppliers__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/collect__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/collect__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/collect__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/collect__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/dashboard__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/dashboard__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/dashboard__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/dashboard__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/db__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/db__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/db__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/db__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/inquiry__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/inquiry__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/inquiry__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/inquiry__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/orders__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/orders__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/orders__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/orders__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/register__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/register__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/register__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/register__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/settings__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/settings__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/settings__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/settings__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/soldout__m0.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/soldout__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/landscape-1920x1080/soldout__v29.jpg` | `documents/acceptance/milestones/M0/visual/landscape-1920x1080/soldout__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/ai-insight__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/ai-insight__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/ai-insight__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/ai-insight__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/analytics__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/analytics__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/analytics__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/analytics__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/collect-suppliers__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/collect-suppliers__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/collect-suppliers__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/collect-suppliers__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/collect__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/collect__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/collect__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/collect__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/dashboard__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/dashboard__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/dashboard__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/dashboard__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/db__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/db__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/db__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/db__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/inquiry__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/inquiry__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/inquiry__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/inquiry__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/orders__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/orders__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/orders__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/orders__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/register__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/register__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/register__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/register__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/settings__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/settings__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/settings__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/settings__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/soldout__m0.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/soldout__m0.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/portrait-1080x1920/soldout__v29.jpg` | `documents/acceptance/milestones/M0/visual/portrait-1080x1920/soldout__v29.jpg` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M0/visual/visual-report.json` | `documents/acceptance/milestones/M0/visual/visual-report.json` | MOVE | frozen M0 acceptance evidence bundle; stays beside M0.md (relative image links) |
+| `docs/acceptance/M1.md` | `documents/acceptance/milestones/M1.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/M2.md` | `documents/acceptance/milestones/M2.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/M3.md` | `documents/acceptance/milestones/M3.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/M4.md` | `documents/acceptance/milestones/M4.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/M5.md` | `documents/acceptance/milestones/M5.md` | MOVE | milestone acceptance record |
+| `docs/acceptance/README.md` | `documents/acceptance/README.md` | MOVE | acceptance area landing page |
+| `docs/acceptance/evidence/M2-CLOSEOUT.md` | `documents/acceptance/milestones/M2/M2-CLOSEOUT.md` | MOVE | M2 closeout record and its byte-pinned campaign evidence, beside M2.md |
+| `docs/acceptance/evidence/M2-EVIDENCE-TEMPLATE.md` | `documents/archive/acceptance/M2-EVIDENCE-TEMPLATE.md` | ARCHIVE | one-use template, M2 accepted |
+| `docs/acceptance/evidence/README.md` | `automation/acceptance/m2/RUNBOOK.md` | MOVE | M2 harness operator runbook/contract, not evidence |
+| `docs/acceptance/evidence/m2-campaign-02-preflight.json` | `documents/acceptance/milestones/M2/m2-campaign-02-preflight.json` | MOVE | M2 closeout record and its byte-pinned campaign evidence, beside M2.md |
+| `docs/acceptance/evidence/m2-campaign-02.json` | `documents/acceptance/milestones/M2/m2-campaign-02.json` | MOVE | M2 closeout record and its byte-pinned campaign evidence, beside M2.md |
+| `docs/acceptance/evidence/m2-campaign-evidence.schema.json` | `automation/acceptance/m2/m2-campaign-evidence.schema.json` | MOVE | runtime input of the M2 harness evidence writer, not evidence |
+| `docs/adr/0001-runtime-stack.md` | `documents/decisions/adr/0001-runtime-stack.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0002-job-worker-placement.md` | `documents/decisions/adr/0002-job-worker-placement.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0003-ui-reproduction-strategy.md` | `documents/decisions/adr/0003-ui-reproduction-strategy.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0004-registration-automation-guardrails.md` | `documents/decisions/adr/0004-registration-automation-guardrails.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0005-durable-job-state-and-attempt-history.md` | `documents/decisions/adr/0005-durable-job-state-and-attempt-history.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0006-single-data-directory-process-ownership.md` | `documents/decisions/adr/0006-single-data-directory-process-ownership.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0007-supplier-generic-connect.md` | `documents/decisions/adr/0007-supplier-generic-connect.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0008-error-taxonomy-alignment.md` | `documents/decisions/adr/0008-error-taxonomy-alignment.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0009-canonical-v3.1-provenance-materialization.md` | `documents/decisions/adr/0009-canonical-v3.1-provenance-materialization.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0010-supplier-generic-collect-and-product-facts-revision.md` | `documents/decisions/adr/0010-supplier-generic-collect-and-product-facts-revision.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0011-marketplace-readback-retention-boundary.md` | `documents/decisions/adr/0011-marketplace-readback-retention-boundary.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0012-ai-runtime-provider-contract.md` | `documents/decisions/adr/0012-ai-runtime-provider-contract.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0013-m4-canonical-product-contract.md` | `documents/decisions/adr/0013-m4-canonical-product-contract.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0014-smartstore-register-idempotency-readback.md` | `documents/decisions/adr/0014-smartstore-register-idempotency-readback.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0015-gate1-registration-target-policy-and-category-metadata.md` | `documents/decisions/adr/0015-gate1-registration-target-policy-and-category-metadata.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0016-gate2-human-review-path-and-review-item-owner.md` | `documents/decisions/adr/0016-gate2-human-review-path-and-review-item-owner.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` | `documents/decisions/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0018-gate3-pre-live-safety-and-bounded-live-authorization.md` | `documents/decisions/adr/0018-gate3-pre-live-safety-and-bounded-live-authorization.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0019-extension-primary-collection-transport.md` | `documents/decisions/adr/0019-extension-primary-collection-transport.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0020-roadmap-standing-authorization.md` | `documents/decisions/adr/0020-roadmap-standing-authorization.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/0021-repository-structure-and-path-migration-governance.md` | `documents/decisions/adr/0021-repository-structure-and-path-migration-governance.md` | MOVE | ADR owner of binding decisions |
+| `docs/adr/README.md` | `documents/decisions/adr/README.md` | MOVE | ADR owner of binding decisions |
+| `docs/architecture/CANONICAL-V3.1.md` | `documents/architecture/frozen/CANONICAL-V3.1.md` | MOVE | frozen canonical v3.1 reference (ADR-0009) |
+| `docs/evidence/marketplace-apis/ATTRIBUTE.md` | `documents/evidence/marketplace-apis/ATTRIBUTE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/AUTH.md` | `documents/evidence/marketplace-apis/AUTH.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/CANCEL.md` | `documents/evidence/marketplace-apis/CANCEL.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/CATEGORY.md` | `documents/evidence/marketplace-apis/CATEGORY.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/CLAIM.md` | `documents/evidence/marketplace-apis/CLAIM.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/ERRORS.md` | `documents/evidence/marketplace-apis/ERRORS.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/EXCHANGE.md` | `documents/evidence/marketplace-apis/EXCHANGE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/IMAGE_UPLOAD.md` | `documents/evidence/marketplace-apis/IMAGE_UPLOAD.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/NOTICE.md` | `documents/evidence/marketplace-apis/NOTICE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/OPTION.md` | `documents/evidence/marketplace-apis/OPTION.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/ORDER_CONFIRM.md` | `documents/evidence/marketplace-apis/ORDER_CONFIRM.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/ORDER_READ.md` | `documents/evidence/marketplace-apis/ORDER_READ.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PERMISSIONS.md` | `documents/evidence/marketplace-apis/PERMISSIONS.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRICE.md` | `documents/evidence/marketplace-apis/PRICE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRODUCT_CREATE.md` | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRODUCT_DELETE.md` | `documents/evidence/marketplace-apis/PRODUCT_DELETE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRODUCT_READ.md` | `documents/evidence/marketplace-apis/PRODUCT_READ.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRODUCT_SEARCH.md` | `documents/evidence/marketplace-apis/PRODUCT_SEARCH.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/PRODUCT_UPDATE.md` | `documents/evidence/marketplace-apis/PRODUCT_UPDATE.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/QNA.md` | `documents/evidence/marketplace-apis/QNA.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/RATE_LIMIT.md` | `documents/evidence/marketplace-apis/RATE_LIMIT.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/README.md` | `documents/evidence/marketplace-apis/README.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/RETURN.md` | `documents/evidence/marketplace-apis/RETURN.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/REVIEW.md` | `documents/evidence/marketplace-apis/REVIEW.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/SHIPMENT.md` | `documents/evidence/marketplace-apis/SHIPMENT.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/STOCK.md` | `documents/evidence/marketplace-apis/STOCK.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/evidence/marketplace-apis/TRACKING.md` | `documents/evidence/marketplace-apis/TRACKING.md` | MOVE | external provider evidence catalog (provider documented facts) |
+| `docs/implementation/M2_SMARTSTORE_CONNECT_IMPLEMENTATION_INSTRUCTIONS.md` | `documents/archive/implementation/M2_SMARTSTORE_CONNECT_IMPLEMENTATION_INSTRUCTIONS.md` | ARCHIVE | M2 implementation instructions; M2 accepted, zero inbound references |
+| `docs/platforms/smartstore/ACCOUNT_IDENTITY.md` | `documents/contracts/platforms/smartstore/ACCOUNT_IDENTITY.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/AUTH.md` | `documents/contracts/platforms/smartstore/AUTH.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/CAPABILITY_MAPPING.md` | `documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/CAPABILITY_MAPPING_IMPLEMENTATION_OWNERSHIP.md` | `documents/contracts/platforms/smartstore/CAPABILITY_MAPPING.md` | MERGE | only restates the §17 targets with an M2 PR-owner column; fold into CAPABILITY_MAPPING.md §17 |
+| `docs/platforms/smartstore/ENDPOINT_MATRIX.md` | `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/ERRORS.md` | `documents/contracts/platforms/smartstore/ERRORS.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/PERMISSIONS_SCOPES.md` | `documents/contracts/platforms/smartstore/PERMISSIONS_SCOPES.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/README.md` | `documents/contracts/platforms/smartstore/README.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/platforms/smartstore/SOURCES.md` | `documents/contracts/platforms/smartstore/SOURCES.md` | MOVE | SmartStore platform contract/ledger (ICBM adoption and safety state) |
+| `docs/review/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md` | `documents/archive/reviews/ADAPTIVE-COLLECTOR-PROPOSAL-BY-CLAUDE.md` | ARCHIVE | accepted or superseded Claude proposal; binding content lives in ADR/canonical docs |
+| `docs/review/ADAPTIVE-PHASE-C-OPENING-BY-CLAUDE.md` | `documents/archive/reviews/ADAPTIVE-PHASE-C-OPENING-BY-CLAUDE.md` | ARCHIVE | accepted or superseded Claude proposal; binding content lives in ADR/canonical docs |
+| `docs/review/ADR-0001-runtime-stack-DRAFT-BY-CLAUDE.md` | `documents/archive/reviews/ADR-0001-runtime-stack-DRAFT-BY-CLAUDE.md` | ARCHIVE | accepted or superseded Claude proposal; binding content lives in ADR/canonical docs |
+| `docs/review/README.md` | `documents/reviews/README.md` | MOVE | the Claude-proposal channel of CLAUDE.md §1.1 |
+| `docs/review/ROADMAP-PATCH-BY-CLAUDE.md` | `documents/archive/reviews/ROADMAP-PATCH-BY-CLAUDE.md` | ARCHIVE | accepted or superseded Claude proposal; binding content lives in ADR/canonical docs |
+| `docs/review/V29-CHANGES-BY-CLAUDE.md` | `documents/archive/reviews/V29-CHANGES-BY-CLAUDE.md` | ARCHIVE | accepted or superseded Claude proposal; binding content lives in ADR/canonical docs |
+| `integrations/__init__.py` | `integrations/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/__init__.py` | `integrations/marketplaces/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/base.py` | — | REMOVE | MarketplaceAdapter Protocol: 0 imports, 0 path/basename/doc mentions; superseded by ADR-0014 ports |
+| `integrations/marketplaces/identity.py` | `integrations/marketplaces/identity.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/__init__.py` | `integrations/marketplaces/smartstore/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/adoption.py` | `integrations/marketplaces/smartstore/adoption.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/assets.py` | `integrations/marketplaces/smartstore/assets.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/caller.py` | `integrations/marketplaces/smartstore/caller.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/classify.py` | `integrations/marketplaces/smartstore/classify.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/execution.py` | `integrations/marketplaces/smartstore/execution.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/lookup.py` | `integrations/marketplaces/smartstore/lookup.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/product.py` | `integrations/marketplaces/smartstore/product.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/readback.py` | `integrations/marketplaces/smartstore/readback.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/registry.py` | `integrations/marketplaces/smartstore/registry.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/retention.py` | `integrations/marketplaces/smartstore/retention.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/signing.py` | `integrations/marketplaces/smartstore/signing.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/marketplaces/smartstore/transmission.py` | `integrations/marketplaces/smartstore/transmission.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/__init__.py` | `integrations/suppliers/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/base.py` | `integrations/suppliers/base.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/collection.py` | `integrations/suppliers/collection.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/extraction.py` | `integrations/suppliers/extraction.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/__init__.py` | `integrations/suppliers/kmretail/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/__init__.py` | `integrations/suppliers/kmretail/collect/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/dom.py` | `integrations/suppliers/kmretail/collect/dom.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/facts.py` | `integrations/suppliers/kmretail/collect/facts.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/identity.py` | `integrations/suppliers/kmretail/collect/identity.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/images.py` | `integrations/suppliers/kmretail/collect/images.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collect/revision.py` | `integrations/suppliers/kmretail/collect/revision.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/collection.py` | `integrations/suppliers/kmretail/collection.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/kmretail/extraction_identity.py` | `integrations/suppliers/kmretail/extraction_identity.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/registry.py` | `integrations/suppliers/registry.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/transport/__init__.py` | `integrations/suppliers/transport/__init__.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/transport/collection.py` | `integrations/suppliers/transport/collection.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/transport/gateway.py` | `integrations/suppliers/transport/gateway.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/transport/pacing.py` | `integrations/suppliers/transport/pacing.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `integrations/suppliers/transport/session_payload.py` | `integrations/suppliers/transport/session_payload.py` | KEEP | adapter layer already reads integrations / suppliers\|marketplaces / provider / detail |
+| `pyproject.toml` | `pyproject.toml` | KEEP | tool-mandated root location: pip/PEP 517 and pytest/ruff/mypy read the root pyproject.toml |
+| `scripts/g3_visual_acceptance.py` | `automation/acceptance/gate3_visual/g3_visual_acceptance.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/g3visual/__init__.py` | `automation/acceptance/gate3_visual/harness/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/g3visual/checker.py` | `automation/acceptance/gate3_visual/harness/checker.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/g3visual/harness.py` | `automation/acceptance/gate3_visual/harness/harness.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/g3visual/measure.js` | `automation/acceptance/gate3_visual/harness/measure.js` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/g3visual/scenario.py` | `automation/acceptance/gate3_visual/harness/scenario.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m0_acceptance.py` | `automation/acceptance/m0/m0_acceptance.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m1_acceptance.py` | `automation/archive/m1/m1_acceptance.py` | ARCHIVE | historical entry point, not runnable/needed; archived |
+| `scripts/m2_acceptance.py` | `automation/acceptance/m2/m2_acceptance.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m2harness/__init__.py` | `automation/acceptance/m2/harness/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/campaign.py` | `automation/acceptance/m2/harness/campaign.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/cli.py` | `automation/acceptance/m2/harness/cli.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/crash.py` | `automation/acceptance/m2/harness/crash.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/evidence.py` | `automation/acceptance/m2/harness/evidence.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/fake_provider.py` | `automation/acceptance/m2/harness/fake_provider.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/gates.py` | `automation/acceptance/m2/harness/gates.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/keyrings.py` | `automation/acceptance/m2/harness/keyrings.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/ledger.py` | `automation/acceptance/m2/harness/ledger.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/paths.py` | `automation/acceptance/m2/harness/paths.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m2harness/transport.py` | `automation/acceptance/m2/harness/transport.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3_accept.py` | `automation/acceptance/m3/m3_accept.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m3_collect.py` | `automation/acceptance/m3/m3_collect.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m3_recon.py` | `automation/archive/m3/m3_recon.py` | ARCHIVE | historical entry point, not runnable/needed; archived |
+| `scripts/m3accept/__init__.py` | `automation/acceptance/m3/campaign/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/campaign.py` | `automation/acceptance/m3/campaign/campaign.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/gateways.py` | `automation/acceptance/m3/campaign/gateways.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/ledger.py` | `automation/acceptance/m3/campaign/ledger.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/m1.py` | `automation/acceptance/m3/campaign/m1.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/manifest.py` | `automation/acceptance/m3/campaign/manifest.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3accept/prep.py` | `automation/acceptance/m3/campaign/prep.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3collect/__init__.py` | `automation/acceptance/m3/rehearsal/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3collect/fake_shop.py` | `automation/acceptance/m3/rehearsal/fake_shop.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3collect/runner.py` | `automation/acceptance/m3/rehearsal/runner.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/__init__.py` | `automation/acceptance/m3/recon/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/capture.py` | `automation/acceptance/m3/recon/capture.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/cli.py` | `automation/acceptance/m3/recon/cli.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/fake_site.py` | `automation/acceptance/m3/recon/fake_site.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/inventory.py` | `automation/acceptance/m3/recon/inventory.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/ledger.py` | `automation/acceptance/m3/recon/ledger.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/paths.py` | `automation/acceptance/m3/recon/paths.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m3harness/recon.py` | `automation/acceptance/m3/recon/recon.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m4_acceptance.py` | `automation/acceptance/m4/m4_acceptance.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m4accept/__init__.py` | `automation/acceptance/common/__init__.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/checkout.py` | `automation/acceptance/common/checkout.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/evidence.py` | `automation/acceptance/common/evidence.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/guards.py` | `automation/acceptance/common/guards.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/harness.py` | `automation/acceptance/m4/harness.py` | MOVE | M4-specific acceptance harness |
+| `scripts/m4accept/operator.py` | `automation/acceptance/common/operator.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/owners.py` | `automation/acceptance/m4/owners.py` | MOVE | M4-specific acceptance harness |
+| `scripts/m4accept/root.py` | `automation/acceptance/common/root.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m4accept/synthetic.py` | `automation/acceptance/common/synthetic.py` | MOVE | shared offline-acceptance core used by M4, M5, Gate-3 visual and Phase C |
+| `scripts/m5_acceptance.py` | `automation/acceptance/m5/m5_acceptance.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/m5accept/__init__.py` | `automation/acceptance/m5/harness/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/guards.py` | `automation/acceptance/m5/harness/guards.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/harness.py` | `automation/acceptance/m5/harness/harness.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/owners.py` | `automation/acceptance/m5/harness/owners.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/root.py` | `automation/acceptance/m5/harness/root.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/seams.py` | `automation/acceptance/m5/harness/seams.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/m5accept/synthetic.py` | `automation/acceptance/m5/harness/synthetic.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phase_c.py` | `automation/adaptive/phase_c/phase_c.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `scripts/phasec/__init__.py` | `automation/adaptive/phase_c/harness/__init__.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/artifacts.py` | `automation/adaptive/phase_c/harness/artifacts.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/ceilings.py` | `automation/adaptive/phase_c/harness/ceilings.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/grants.py` | `automation/adaptive/phase_c/harness/grants.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/harness.py` | `automation/adaptive/phase_c/harness/harness.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/ledger.py` | `automation/adaptive/phase_c/harness/ledger.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/phasec/roots.py` | `automation/adaptive/phase_c/harness/roots.py` | MOVE | acceptance/adaptive harness grouped by campaign |
+| `scripts/visual_check.py` | `automation/acceptance/m0/visual_check.py` | MOVE | acceptance/automation entry point grouped by campaign |
+| `tests/__init__.py` | `tests/__init__.py` | KEEP | test package root and root fixtures |
+| `tests/adaptive_support.py` | `tests/support/adaptive_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/collect_submit_support.py` | `tests/support/collect_submit_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/collect_support.py` | `tests/support/collect_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/conftest.py` | `tests/conftest.py` | KEEP | test package root and root fixtures |
+| `tests/fixtures/adaptive/expected/on_sale.json` | `tests/fixtures/adaptive/expected/on_sale.json` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/expected/optioned.json` | `tests/fixtures/adaptive/expected/optioned.json` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/expected/sold_out.json` | `tests/fixtures/adaptive/expected/sold_out.json` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/goldens.json` | `tests/fixtures/adaptive/goldens.json` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/hooked.html` | `tests/fixtures/adaptive/pages/hooked.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/listing.html` | `tests/fixtures/adaptive/pages/listing.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/login.html` | `tests/fixtures/adaptive/pages/login.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/on_sale.html` | `tests/fixtures/adaptive/pages/on_sale.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/optioned.html` | `tests/fixtures/adaptive/pages/optioned.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/fixtures/adaptive/pages/sold_out.html` | `tests/fixtures/adaptive/pages/sold_out.html` | KEEP | test fixtures already in tests/fixtures/<area> |
+| `tests/gate1_support.py` | `tests/support/gate1_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/integration/__init__.py` | `tests/integration/__init__.py` | KEEP | test layer package marker |
+| `tests/integration/test_adaptive_phase_c_c0.py` | `tests/integration/collect/adaptive/test_adaptive_phase_c_c0.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_adaptive_phase_c_prep0.py` | `tests/integration/collect/adaptive/test_adaptive_phase_c_prep0.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_adaptive_shadow.py` | `tests/integration/collect/adaptive/test_adaptive_shadow.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_adaptive_store.py` | `tests/integration/collect/adaptive/test_adaptive_store.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_api.py` | `tests/integration/interface/api/test_api.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_authoring_revision_ownership.py` | `tests/integration/register/test_authoring_revision_ownership.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_authoring_unowned_revisions.py` | `tests/integration/register/test_authoring_unowned_revisions.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_authoring_unowned_revisions_ui.py` | `tests/integration/register/test_authoring_unowned_revisions_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_diagnostic_contract_reproduction.py` | `tests/integration/collect/test_collect_diagnostic_contract_reproduction.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_image_acceptance_path.py` | `tests/integration/collect/test_collect_image_acceptance_path.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_image_reference_diagnostics.py` | `tests/integration/collect/test_collect_image_reference_diagnostics.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_product_collection.py` | `tests/integration/collect/test_collect_product_collection.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_run_lifecycle.py` | `tests/integration/collect/test_collect_run_lifecycle.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_source_asset_path.py` | `tests/integration/collect/test_collect_source_asset_path.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_collect_source_truth_store.py` | `tests/integration/collect/test_collect_source_truth_store.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_connect_api.py` | `tests/integration/connect/test_connect_api.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_connect_collection_session.py` | `tests/integration/connect/test_connect_collection_session.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_connect_credentials.py` | `tests/integration/connect/test_connect_credentials.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_connect_lifecycle.py` | `tests/integration/connect/test_connect_lifecycle.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1a_settings_ui.py` | `tests/integration/register/test_g1a_settings_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1a_target_policy.py` | `tests/integration/register/test_g1a_target_policy.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1b_category_metadata.py` | `tests/integration/register/test_g1b_category_metadata.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1b_category_metadata_ui.py` | `tests/integration/register/test_g1b_category_metadata_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1c_product_db.py` | `tests/integration/products/test_g1c_product_db.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1c_product_db_ui.py` | `tests/integration/products/test_g1c_product_db_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1d_draft_command.py` | `tests/integration/register/test_g1d_draft_command.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1d_draft_ui.py` | `tests/integration/register/test_g1d_draft_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1d_gate1_rehearsal.py` | `tests/integration/register/test_g1d_gate1_rehearsal.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1e_collect_submit.py` | `tests/integration/collect/test_g1e_collect_submit.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g1e_collect_submit_ui.py` | `tests/integration/collect/test_g1e_collect_submit_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2a_review_owner.py` | `tests/integration/review/test_g2a_review_owner.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2b_collect_review.py` | `tests/integration/review/test_g2b_collect_review.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2b_collect_review_ui.py` | `tests/integration/review/test_g2b_collect_review_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2c_review_counts.py` | `tests/integration/review/test_g2c_review_counts.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2c_review_counts_ui.py` | `tests/integration/review/test_g2c_review_counts_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2c_review_paths.py` | `tests/integration/review/test_g2c_review_paths.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g2c_review_paths_ui.py` | `tests/integration/review/test_g2c_review_paths_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g3a_live_authority.py` | `tests/integration/live_safety/test_g3a_live_authority.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g3a_live_create.py` | `tests/integration/live_safety/test_g3a_live_create.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g3b_restore_retention.py` | `tests/integration/live_safety/test_g3b_restore_retention.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g3c_visual_acceptance.py` | `tests/integration/live_safety/test_g3c_visual_acceptance.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_g3c_visual_checker_ui.py` | `tests/harness/gate3_visual/test_g3c_visual_checker_ui.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_job_runner.py` | `tests/integration/jobs/test_job_runner.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_job_terminal_owner.py` | `tests/integration/jobs/test_job_terminal_owner.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_job_terminal_reconciliation.py` | `tests/integration/jobs/test_job_terminal_reconciliation.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m2_harness_crash.py` | `tests/harness/m2/test_m2_harness_crash.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m2_harness_dry_run.py` | `tests/harness/m2/test_m2_harness_dry_run.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m3_accept_campaign.py` | `tests/harness/m3/test_m3_accept_campaign.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m3_collect_rehearsal.py` | `tests/harness/m3/test_m3_collect_rehearsal.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m3_recon_dry.py` | `tests/harness/m3/test_m3_recon_dry.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m4_acceptance.py` | `tests/harness/m4/test_m4_acceptance.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m4_images.py` | `tests/integration/products/test_m4_images.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m4_materialization.py` | `tests/integration/products/test_m4_materialization.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m4_pricing.py` | `tests/integration/products/test_m4_pricing.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m4_product_foundation.py` | `tests/integration/products/test_m4_product_foundation.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m4_quantity_offers.py` | `tests/integration/products/test_m4_quantity_offers.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_acceptance.py` | `tests/harness/m5/test_m5_acceptance.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/integration/test_m5_register_adapter.py` | `tests/integration/register/test_m5_register_adapter.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_register_api.py` | `tests/integration/register/test_m5_register_api.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_register_execution.py` | `tests/integration/register/test_m5_register_execution.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_register_ui.py` | `tests/integration/register/test_m5_register_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_registration_foundation.py` | `tests/integration/register/test_m5_registration_foundation.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_m5_registration_preflight.py` | `tests/integration/register/test_m5_registration_preflight.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_marketplace_attestation_store.py` | `tests/integration/connect/test_marketplace_attestation_store.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_marketplace_capability_store.py` | `tests/integration/connect/test_marketplace_capability_store.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_migrations.py` | `tests/integration/platform/db/test_migrations.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_ownership_app.py` | `tests/integration/platform/core/test_ownership_app.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_ownership_children.py` | `tests/integration/platform/core/test_ownership_children.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_ownership_processes.py` | `tests/integration/platform/core/test_ownership_processes.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_register_admission_facts.py` | `tests/integration/live_safety/test_register_admission_facts.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_smartstore_capability_projection.py` | `tests/integration/connect/test_smartstore_capability_projection.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_smartstore_connect.py` | `tests/integration/connect/test_smartstore_connect.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_smartstore_operator_api.py` | `tests/integration/connect/test_smartstore_operator_api.py` | MOVE | integration test grouped by runtime owner |
+| `tests/integration/test_smartstore_operator_ui.py` | `tests/integration/connect/test_smartstore_operator_ui.py` | MOVE | integration test grouped by runtime owner |
+| `tests/live_support.py` | `tests/support/live_safety_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/product_support.py` | `tests/support/product_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/register_support.py` | `tests/support/register_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/shadow_support.py` | `tests/support/shadow_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/suppliers.py` | `tests/support/fake_suppliers.py` | MOVE | shared test support grouped under tests/support |
+| `tests/support.py` | `tests/support/jobs_support.py` | MOVE | shared test support grouped under tests/support |
+| `tests/unit/__init__.py` | `tests/unit/__init__.py` | KEEP | test layer package marker |
+| `tests/unit/adaptive/__init__.py` | `tests/unit/collect/adaptive/engine/__init__.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/conftest.py` | `tests/unit/collect/adaptive/engine/conftest.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_canonical.py` | `tests/unit/collect/adaptive/engine/test_canonical.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_capture.py` | `tests/unit/collect/adaptive/engine/test_capture.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_capture_candidate.py` | `tests/unit/collect/adaptive/engine/test_capture_candidate.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_extraction.py` | `tests/unit/collect/adaptive/engine/test_extraction.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_hooks.py` | `tests/unit/collect/adaptive/engine/test_hooks.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_identity.py` | `tests/unit/collect/adaptive/engine/test_identity.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_lint.py` | `tests/unit/collect/adaptive/engine/test_lint.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_profiles.py` | `tests/unit/collect/adaptive/engine/test_profiles.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive/test_validation.py` | `tests/unit/collect/adaptive/engine/test_validation.py` | MOVE | Adaptive engine unit tests |
+| `tests/unit/adaptive_shadow/__init__.py` | `tests/unit/collect/adaptive/shadow/__init__.py` | MOVE | Adaptive shadow unit tests |
+| `tests/unit/adaptive_shadow/test_compare.py` | `tests/unit/collect/adaptive/shadow/test_compare.py` | MOVE | Adaptive shadow unit tests |
+| `tests/unit/adaptive_shadow/test_evidence.py` | `tests/unit/collect/adaptive/shadow/test_evidence.py` | MOVE | Adaptive shadow unit tests |
+| `tests/unit/phasec/__init__.py` | `tests/harness/phase_c/__init__.py` | MOVE | Phase C harness tests |
+| `tests/unit/phasec/test_campaign_units.py` | `tests/harness/phase_c/test_campaign_units.py` | MOVE | Phase C harness tests |
+| `tests/unit/test_collect_facts.py` | `tests/unit/collect/test_collect_facts.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_collect_fetch_target_contract.py` | `tests/unit/collect/test_collect_fetch_target_contract.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_collect_gateway.py` | `tests/unit/collect/test_collect_gateway.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_collect_image_acceptance.py` | `tests/unit/collect/test_collect_image_acceptance.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_collect_image_decode.py` | `tests/unit/collect/test_collect_image_decode.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_config.py` | `tests/unit/platform/core/test_config.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_connect_state.py` | `tests/unit/connect/test_connect_state.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_correlation_and_logging.py` | `tests/unit/platform/core/test_correlation_and_logging.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_data_root.py` | `tests/unit/platform/core/test_data_root.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_egress.py` | `tests/unit/platform/core/test_egress.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_egress_grant.py` | `tests/unit/platform/core/test_egress_grant.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_error_taxonomy.py` | `tests/contracts/test_error_taxonomy.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_errors.py` | `tests/unit/platform/core/test_errors.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_extraction_identity.py` | `tests/unit/collect/test_extraction_identity.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_g1c_product_db_contract.py` | `tests/contracts/test_g1c_product_db_contract.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_g1e_collect_contract.py` | `tests/contracts/test_g1e_collect_contract.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_g3a_replay_key.py` | `tests/unit/live_safety/test_g3a_replay_key.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_g3c_visual_checker.py` | `tests/harness/gate3_visual/test_g3c_visual_checker.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_image_sample_policy.py` | `tests/unit/collect/test_image_sample_policy.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_km_facts_parser.py` | `tests/unit/integrations/suppliers/kmretail/test_km_facts_parser.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_km_image_roles.py` | `tests/unit/integrations/suppliers/kmretail/test_km_image_roles.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_m2_harness_evidence.py` | `tests/harness/m2/test_m2_harness_evidence.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m2_harness_gates.py` | `tests/harness/m2/test_m2_harness_gates.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m2_harness_ledger.py` | `tests/harness/m2/test_m2_harness_ledger.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m2_harness_operator.py` | `tests/harness/m2/test_m2_harness_operator.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m2_harness_static.py` | `tests/harness/m2/test_m2_harness_static.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m2_harness_transport.py` | `tests/harness/m2/test_m2_harness_transport.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m3_findings_secrets.py` | `tests/harness/m3/test_m3_findings_secrets.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m3_ledger_guard.py` | `tests/harness/m3/test_m3_ledger_guard.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m3_recon_inventory.py` | `tests/harness/m3/test_m3_recon_inventory.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m3_recon_ledger.py` | `tests/harness/m3/test_m3_recon_ledger.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m4_acceptance_harness.py` | `tests/harness/m4/test_m4_acceptance_harness.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_m4_product_contract.py` | `tests/contracts/test_m4_product_contract.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_m5_preflight_rules.py` | `tests/unit/register/test_m5_preflight_rules.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_m5_register_adapter.py` | `tests/unit/integrations/marketplaces/smartstore/test_m5_register_adapter.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_m5_register_contract.py` | `tests/contracts/test_m5_register_contract.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_m5_register_execution_rules.py` | `tests/unit/register/test_m5_register_execution_rules.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_marketplace_attestation.py` | `tests/unit/connect/test_marketplace_attestation.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_marketplace_capability.py` | `tests/unit/connect/test_marketplace_capability.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_ownership.py` | `tests/unit/platform/core/test_ownership.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_pricing.py` | `tests/unit/products/test_pricing.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_products_model.py` | `tests/unit/products/test_products_model.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_quantity_offers.py` | `tests/unit/products/test_quantity_offers.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_repository_rules.py` | `tests/contracts/test_repository_rules.py` | MOVE | repository-rule / document-contract test |
+| `tests/unit/test_retry_policy.py` | `tests/unit/jobs/test_retry_policy.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_safe_payload.py` | `tests/unit/platform/core/test_safe_payload.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_schema_contract.py` | `tests/unit/platform/db/test_schema_contract.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_secret_scan.py` | `tests/harness/common/test_secret_scan.py` | MOVE | test of an acceptance harness, not runtime |
+| `tests/unit/test_secrets.py` | `tests/unit/platform/core/test_secrets.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_binding.py` | `tests/unit/connect/test_marketplace_capability.py` | MERGE | 73-line test of one capability function; fold into the capability owner's test module |
+| `tests/unit/test_smartstore_caller.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_caller.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_classify.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_classify.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_image_upload.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_image_upload.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_product_reads.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_product_reads.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_registry.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_registry.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_signing.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_signing.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_storage.py` | `tests/unit/connect/test_smartstore_storage.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_smartstore_transmission.py` | `tests/unit/integrations/marketplaces/smartstore/test_smartstore_transmission.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_supplier_credentials.py` | `tests/unit/connect/test_supplier_credentials.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_supplier_probes.py` | `tests/unit/connect/test_supplier_probes.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_supplier_sessions.py` | `tests/unit/connect/test_supplier_sessions.py` | MOVE | unit test grouped by runtime owner |
+| `tests/unit/test_supplier_transport.py` | `tests/unit/integrations/suppliers/test_supplier_transport.py` | MOVE | unit test grouped by runtime owner |
+| `tests/visual_support.py` | `tests/support/visual_support.py` | MOVE | shared test support grouped under tests/support |
+| `tools/agent-host/README.md` | `automation/agent-host/README.md` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/V2-LEGACY-INVENTORY.md` | `automation/agent-host/V2-LEGACY-INVENTORY.md` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/agent-host-authority-v2.ps1` | `automation/agent-host/agent-host-authority-v2.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/orchestrator-v1.2.ps1` | `automation/agent-host/orchestrator-v1.2.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/orchestrator-v1.3.ps1` | `automation/agent-host/orchestrator-v1.3.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/resume-orchestrator-v1.3.ps1` | `automation/agent-host/resume-orchestrator-v1.3.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/run-audit-v1.1.ps1` | `automation/agent-host/run-audit-v1.1.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/run-full-audit-v1.ps1` | `automation/agent-host/run-full-audit-v1.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/run-lookahead-main-v1.ps1` | `automation/agent-host/run-lookahead-main-v1.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/run-lookahead-v1.ps1` | `automation/agent-host/run-lookahead-v1.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/run-repair-v1.1.ps1` | `automation/agent-host/run-repair-v1.1.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/tests/fx-harness.ps1` | `automation/agent-host/tests/fx-harness.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `tools/agent-host/tests/fx-run-all.ps1` | `automation/agent-host/tests/fx-run-all.ps1` | MOVE | Agent Host control-plane automation (Issue #151 §7, ADR-0021 §8); bytes unchanged |
+| `ui/prototypes/README.md` | `design/prototypes/README.md` | MOVE | design reference (approved visual shell), not runtime UI |
+| `ui/prototypes/icbm_redesign_test_v28_icbm_new_gaps.html` | `design/prototypes/archive/icbm_redesign_test_v28_icbm_new_gaps.html` | ARCHIVE | superseded prototype kept for history (recorded SHA) |
+| `ui/prototypes/icbm_redesign_test_v29_final.html` | `design/prototypes/icbm_redesign_test_v29_final.html` | MOVE | design reference (approved visual shell), not runtime UI |
+| `ui/web/assets/marketplaces/auction.png` | `ui/web/assets/marketplaces/auction.png` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/assets/marketplaces/coupang.png` | `ui/web/assets/marketplaces/coupang.png` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/assets/marketplaces/gmarket.png` | `ui/web/assets/marketplaces/gmarket.png` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/assets/marketplaces/smartstore.png` | `ui/web/assets/marketplaces/smartstore.png` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/assets/marketplaces/st11.png` | `ui/web/assets/marketplaces/st11.png` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/css/base.css` | `ui/web/css/base.css` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/css/components.css` | `ui/web/css/components.css` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/css/settings.css` | `ui/web/css/settings.css` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/css/shell.css` | `ui/web/css/shell.css` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/css/tokens.css` | `ui/web/css/tokens.css` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/index.html` | `ui/web/index.html` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/components/page-head.js` | `ui/web/js/components/page-head.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/components/review-counts.js` | `ui/web/js/components/review-counts.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/components/review-items.js` | `ui/web/js/components/review-items.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/components/states.js` | `ui/web/js/components/states.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/api.js` | `ui/web/js/core/api.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/capability.js` | `ui/web/js/platforms/smartstore/capability.js` | MOVE | SmartStore-specific capability labels do not belong in the generic core/ |
+| `ui/web/js/core/dom.js` | `ui/web/js/core/dom.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/format.js` | `ui/web/js/core/format.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/help.js` | `ui/web/js/core/help.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/inert.js` | `ui/web/js/core/inert.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/modal.js` | `ui/web/js/core/modal.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/platform.js` | `ui/web/js/core/platform.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/router.js` | `ui/web/js/core/router.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/core/toast.js` | `ui/web/js/core/toast.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/main.js` | `ui/web/js/main.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/ai-insight.js` | `ui/web/js/pages/ai-insight.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/analytics.js` | `ui/web/js/pages/analytics.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/capability-projection.js` | `ui/web/js/pages/settings/capability-projection.js` | MOVE | a Settings sub-panel, not a top-level page |
+| `ui/web/js/pages/category-metadata.js` | `ui/web/js/pages/settings/category-metadata.js` | MOVE | a Settings sub-panel, not a top-level page |
+| `ui/web/js/pages/collect.js` | `ui/web/js/pages/collect.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/contract-page.js` | `ui/web/js/pages/contract-page.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/dashboard.js` | `ui/web/js/pages/dashboard.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/db.js` | `ui/web/js/pages/db.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/index.js` | `ui/web/js/pages/index.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/inquiry.js` | `ui/web/js/pages/inquiry.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/orders.js` | `ui/web/js/pages/orders.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/permission-attestation.js` | `ui/web/js/pages/settings/permission-attestation.js` | MOVE | a Settings sub-panel, not a top-level page |
+| `ui/web/js/pages/register.js` | `ui/web/js/pages/register.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/settings-schema.js` | `ui/web/js/pages/settings/settings-schema.js` | MOVE | a Settings sub-panel, not a top-level page |
+| `ui/web/js/pages/settings.js` | `ui/web/js/pages/settings.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/smartstore-operator.js` | `ui/web/js/pages/settings/smartstore-operator.js` | MOVE | a Settings sub-panel, not a top-level page |
+| `ui/web/js/pages/soldout.js` | `ui/web/js/pages/soldout.js` | KEEP | served runtime web client: ui (role) / web (client) / detail already role-based |
+| `ui/web/js/pages/target-policy.js` | `ui/web/js/pages/settings/target-policy.js` | MOVE | a Settings sub-panel, not a top-level page |
+
+## 5. Files added by the migration
+
+| path | why |
+| --- | --- |
+| `app/capabilities/__init__.py` | package marker for a new Python package |
+| `app/interface/__init__.py` | package marker for a new Python package |
+| `app/platform/__init__.py` | package marker for a new Python package |
+| `app/platform/db/migrations/__init__.py` | package marker for a new Python package |
+| `app/platform/db/migrations/versions/__init__.py` | package marker for a new Python package |
+| `app/stages/__init__.py` | package marker for a new Python package |
+| `app/stages/collect/adaptive/__init__.py` | package marker for a new Python package |
+| `automation/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/gate3_visual/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/m0/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/m2/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/m3/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/m4/__init__.py` | package marker for a new Python package |
+| `automation/acceptance/m5/__init__.py` | package marker for a new Python package |
+| `automation/adaptive/__init__.py` | package marker for a new Python package |
+| `automation/adaptive/phase_c/__init__.py` | package marker for a new Python package |
+| `documents/reference/PATH_MIGRATION_MAP.csv` | rule body / index split from CLAUDE.md, or this map |
+| `documents/reference/PATH_MIGRATION_MAP.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/reference/REPOSITORY_MAP.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/roadmap/CURRENT-MILESTONE.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/01-roles-and-exchange.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/02-no-legacy.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/03-ui-source.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/04-runtime-stack.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/05-architectural-rules.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/06-immutable-domain-rules.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/07-execution-safety.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/08-git-conventions.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/09-definition-of-done.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/10-working-style.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/12-first-vertical.md` | rule body / index split from CLAUDE.md, or this map |
+| `documents/rules/README.md` | rule body / index split from CLAUDE.md, or this map |
+| `tests/contracts/__init__.py` | package marker for a new Python package |
+| `tests/harness/__init__.py` | package marker for a new Python package |
+| `tests/harness/common/__init__.py` | package marker for a new Python package |
+| `tests/harness/gate3_visual/__init__.py` | package marker for a new Python package |
+| `tests/harness/m2/__init__.py` | package marker for a new Python package |
+| `tests/harness/m3/__init__.py` | package marker for a new Python package |
+| `tests/harness/m4/__init__.py` | package marker for a new Python package |
+| `tests/harness/m5/__init__.py` | package marker for a new Python package |
+| `tests/integration/collect/__init__.py` | package marker for a new Python package |
+| `tests/integration/collect/adaptive/__init__.py` | package marker for a new Python package |
+| `tests/integration/connect/__init__.py` | package marker for a new Python package |
+| `tests/integration/interface/__init__.py` | package marker for a new Python package |
+| `tests/integration/interface/api/__init__.py` | package marker for a new Python package |
+| `tests/integration/jobs/__init__.py` | package marker for a new Python package |
+| `tests/integration/live_safety/__init__.py` | package marker for a new Python package |
+| `tests/integration/platform/__init__.py` | package marker for a new Python package |
+| `tests/integration/platform/core/__init__.py` | package marker for a new Python package |
+| `tests/integration/platform/db/__init__.py` | package marker for a new Python package |
+| `tests/integration/products/__init__.py` | package marker for a new Python package |
+| `tests/integration/register/__init__.py` | package marker for a new Python package |
+| `tests/integration/review/__init__.py` | package marker for a new Python package |
+| `tests/support/__init__.py` | package marker for a new Python package |
+| `tests/unit/collect/__init__.py` | package marker for a new Python package |
+| `tests/unit/collect/adaptive/__init__.py` | package marker for a new Python package |
+| `tests/unit/connect/__init__.py` | package marker for a new Python package |
+| `tests/unit/integrations/__init__.py` | package marker for a new Python package |
+| `tests/unit/integrations/marketplaces/__init__.py` | package marker for a new Python package |
+| `tests/unit/integrations/marketplaces/smartstore/__init__.py` | package marker for a new Python package |
+| `tests/unit/integrations/suppliers/__init__.py` | package marker for a new Python package |
+| `tests/unit/integrations/suppliers/kmretail/__init__.py` | package marker for a new Python package |
+| `tests/unit/jobs/__init__.py` | package marker for a new Python package |
+| `tests/unit/live_safety/__init__.py` | package marker for a new Python package |
+| `tests/unit/platform/__init__.py` | package marker for a new Python package |
+| `tests/unit/platform/core/__init__.py` | package marker for a new Python package |
+| `tests/unit/platform/db/__init__.py` | package marker for a new Python package |
+| `tests/unit/products/__init__.py` | package marker for a new Python package |
+| `tests/unit/register/__init__.py` | package marker for a new Python package |
