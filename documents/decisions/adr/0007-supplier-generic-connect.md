@@ -185,7 +185,7 @@ Every supplier request logs one `supplier.request` line with these fields:
 Audit and log payloads in CONNECT come only from the allowlist builder `app.platform.core.safe_payload`:
 
 - unknown fields and non-scalar values raise, so a new field cannot leak by default;
-- runtime secret scanning (`automation/acceptance/common/secret_scan.py`) is the second, independent control;
+- runtime secret scanning (`app/platform/system/secret_scan.py`) is the second, independent control;
 - the scan covers five encodings (raw, URL, JSON, Base64 at every alignment, HTML entities) and reports counts only.
 
 ### 9. Scope
@@ -212,7 +212,7 @@ These are implementation choices within the contract, recorded for the architect
 ## References
 
 - Issue #7 and the comments listed above
-- `app/stages/connect/`, `app/platform/core/egress.py`, `app/platform/core/safe_payload.py`, `automation/acceptance/common/secret_scan.py`, `app/platform/system/readiness.py`
+- `app/stages/connect/`, `app/platform/core/egress.py`, `app/platform/core/safe_payload.py`, `app/platform/system/secret_scan.py`, `app/platform/system/readiness.py`
 - `integrations/suppliers/base.py`, `integrations/suppliers/transport/`, `integrations/suppliers/kmretail/`
 - `tests/unit/connect/test_supplier_probes.py`, `tests/unit/platform/core/test_egress_grant.py`, `tests/unit/connect/test_supplier_sessions.py`, `tests/integration/connect/test_connect_lifecycle.py`, `tests/integration/connect/test_connect_api.py`, `tests/integration/platform/core/test_ownership_children.py`, `tests/contracts/test_repository_rules.py`
 - `automation/archive/m1/m1_acceptance.py`

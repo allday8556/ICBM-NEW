@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from automation.acceptance.common.secret_scan import scan
+from app.platform.system.secret_scan import scan
 from automation.acceptance.m2.harness.campaign import DECLINE, TerminalOperator, resume_dry, run_dry
 from automation.acceptance.m2.harness.evidence import validate
 from automation.acceptance.m2.harness.fake_provider import Scenario

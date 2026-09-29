@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
+from app.platform.system.secret_scan import VARIANTS, variants
 from app.stages.connect.marketplace.capability import AuthStatus
-from automation.acceptance.common.secret_scan import VARIANTS, variants
 from automation.acceptance.m2.harness import crash
 from automation.acceptance.m2.harness.evidence import (
     SCHEMA_VERSION,

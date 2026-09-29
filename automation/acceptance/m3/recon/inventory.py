@@ -22,8 +22,8 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
+from app.platform.system.secret_scan import variants
 from app.stages.collect.urls import secret_looking
-from automation.acceptance.common.secret_scan import variants
 
 # ASCII fragments looked for in id/class names, per fact the parser will need.
 SELECTOR_KEYWORDS: Mapping[str, tuple[str, ...]] = {

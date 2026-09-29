@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from automation.acceptance.common.secret_scan import variants
+from app.platform.system.secret_scan import variants
 from automation.acceptance.m3.recon.inventory import (
     EXCLUSION_REASON,
     assert_sanitized,

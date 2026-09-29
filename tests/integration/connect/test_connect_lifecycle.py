@@ -21,12 +21,12 @@ from app.platform.core.errors import (
 )
 from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
+from app.platform.system.secret_scan import scan
 from app.stages.connect.contracts import SupplierConnectionSummary
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.proof import ProtectedReadProof
 from app.stages.connect.sessions import SESSIONS_DIR_NAME
 from app.stages.connect.state import CapabilityStatus, ConnectionState
-from automation.acceptance.common.secret_scan import scan
 from integrations.suppliers.base import Credentials, RequestKind
 from tests.support.fake_suppliers import (
     FAKE_KEY,

@@ -37,9 +37,9 @@ from app import __version__
 from app.capabilities.audit.models import AuditEventType
 from app.config import database_path
 from app.platform.core.ownership import acquire_data_dir, runtime_dir
+from app.platform.system.secret_scan import scan
 from app.stages.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME
 from app.stages.connect.smartstore.service import SmartStoreConnectService
-from automation.acceptance.common.secret_scan import scan
 from automation.acceptance.m2.harness.evidence import write_bytes
 from automation.acceptance.m2.harness.ledger import (
     CRASH_ATTEMPTS,

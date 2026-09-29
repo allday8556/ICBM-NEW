@@ -34,6 +34,7 @@ from app.main import create_app
 from app.platform.core.egress import EGRESS
 from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
+from app.platform.system.secret_scan import scan
 from app.stages.connect.marketplace.attestation import (
     A0_MAX_AGE_DAYS,
     SELF_AUTH_MODE,
@@ -52,7 +53,6 @@ from app.stages.connect.marketplace.capability import (
     WriteScopeStatus,
     WriteStatus,
 )
-from automation.acceptance.common.secret_scan import scan
 from tests.conftest import LOCAL
 from tests.support.jobs_support import FakeClock
 

@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from automation.acceptance.common.secret_scan import variants
+from app.platform.system.secret_scan import variants
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCHEMA_PATH = REPO_ROOT / "automation" / "acceptance" / "m2" / "m2-campaign-evidence.schema.json"

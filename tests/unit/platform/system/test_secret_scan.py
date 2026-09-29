@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 import pytest
 
-from automation.acceptance.common.secret_scan import VARIANTS, scan
+from app.platform.system.secret_scan import VARIANTS, scan
 from tests.support.fake_suppliers import PASSWORD
 
 

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.main import create_app
-from automation.acceptance.common.secret_scan import scan
+from app.platform.system.secret_scan import scan
 from integrations.suppliers.base import RequestKind
 from tests.conftest import LOCAL
 from tests.support.fake_suppliers import (

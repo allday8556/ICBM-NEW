@@ -45,10 +45,10 @@ from app.config import database_path
 from app.platform.core.ownership import DataDirOwnershipError, acquire_data_dir, runtime_dir
 from app.platform.core.secrets import KeyringSecretStore
 from app.platform.db.migrate import upgrade_to_head
+from app.platform.system.secret_scan import scan
 from app.stages.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME, SupplierSessionStore
 from app.stages.connect.smartstore.credentials import ApplicationCredentialStore
 from app.stages.connect.smartstore.service import CommittedSession
-from automation.acceptance.common.secret_scan import scan
 from automation.acceptance.m2.harness import crash
 from automation.acceptance.m2.harness.evidence import (
     SCHEMA_VERSION,
