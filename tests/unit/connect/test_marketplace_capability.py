@@ -54,6 +54,7 @@ from app.stages.connect.marketplace.capability import (
     freshness_allows,
     observe_auth,
     observe_failure,
+    observe_first_binding,
     observe_permission,
     on_process_start,
     record_freshness,
@@ -715,3 +716,62 @@ def test_a_failure_without_a_mutation_keeps_an_unknown_remote_outcome() -> None:
         ),
     )
     assert reconciled.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
+# --- First-binding transition (merged from tests/unit/connect/test_smartstore_binding.py by the
+# Issue #151 reconciliation, ADR-0021 §7; every test kept, colliding names prefixed BINDING_)
+# The first-binding transition (ACCOUNT_IDENTITY §5, CAPABILITY_MAPPING F5; review 5200019078
+# blocker 2): binding an account is new trust, gated on a CURRENT contract in its own right.
+
+BINDING_NOW = datetime(2026, 9, 15, tzinfo=UTC)
+BINDING_GENERATIONS = Generations(1, 1)
+BINDING_EVIDENCE = AuthEvidence(
+    binding_committed=True,
+    expected_account_uid="uid-fixture-A",
+    current=BINDING_GENERATIONS,
+    proof=IdentityProof(BINDING_GENERATIONS, "uid-fixture-A", BINDING_NOW),
+)
+BINDING_REVIEW = WorkflowOverlay(WorkflowState.REVIEW_REQUIRED, WorkflowScope.AUTHENTICATION)
+
+
+def _binding_recorded(freshness: ContractFreshness) -> object:
+    return replace(INITIAL, contract_freshness=freshness, freshness_recorded_at=BINDING_NOW)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        INITIAL,
+        _binding_recorded(ContractFreshness.STALE),
+        _binding_recorded(ContractFreshness.REVIEW_REQUIRED),
+    ],
+    ids=["UNRECORDED", "STALE", "REVIEW_REQUIRED"],
+)
+def test_a_first_binding_waits_for_a_current_contract(state: object) -> None:
+    with pytest.raises(ExpansionBlockedError):
+        observe_first_binding(state, BINDING_EVIDENCE)  # type: ignore[arg-type]
+
+
+def test_the_gate_holds_even_when_an_overlay_keeps_auth_from_ready() -> None:
+    state = replace(INITIAL, overlays=(BINDING_REVIEW,))
+    # observe_auth alone never reaches its READY gate here: the overlay keeps auth NOT_READY.
+    assert observe_auth(state, BINDING_EVIDENCE).auth is AuthStatus.NOT_READY
+    with pytest.raises(ExpansionBlockedError):
+        observe_first_binding(state, BINDING_EVIDENCE)
+
+
+def test_a_current_contract_admits_the_first_binding() -> None:
+    state = _binding_recorded(ContractFreshness.CURRENT)
+    assert observe_first_binding(state, BINDING_EVIDENCE).auth is AuthStatus.READY  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        replace(BINDING_EVIDENCE, binding_committed=False),
+        replace(BINDING_EVIDENCE, expected_account_uid=None),
+    ],
+)
+def test_a_first_binding_carries_the_identity_it_binds(evidence: AuthEvidence) -> None:
+    with pytest.raises(CapabilityInvariantError):
+        observe_first_binding(_binding_recorded(ContractFreshness.CURRENT), evidence)  # type: ignore[arg-type]

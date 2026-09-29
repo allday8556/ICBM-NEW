@@ -4,6 +4,11 @@ Where each role lives after the repository restructure (Issue #151, ADR-0021 §2
 middle area → detailed purpose. Old paths resolve through `documents/reference/PATH_MIGRATION_MAP.md`.
 The root keeps only files that tools require there: `README.md`, `CLAUDE.md` (auto-loaded
 bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignore`, `.gitattributes`.
+The files column counts the tracked files under each path; `tests/contracts/test_repository_rules.py`
+(`test_the_repository_map_counts_match_the_tree`) checks every count against `git ls-files`.
+Note: until PR #157 the map under-counted `integrations/` and `integrations/marketplaces/` by one,
+because `integrations/marketplaces/base.py` was restored after the counts were taken; with that file
+removed by PR #157, the listed 35 and 15 are the tree's counts.
 
 | path | files | role |
 | --- | --- | --- |
@@ -35,12 +40,12 @@ bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignor
 | `integrations/` | 35 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 15 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 214 | tests |
+| `tests/` | 213 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
 | `tests/integration/` | 80 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 75 | unit tests by runtime owner |
+| `tests/unit/` | 74 | unit tests by runtime owner |
 | `ui/` | 44 |  |
 | `ui/web/` | 44 | the served web client |
