@@ -6,6 +6,9 @@ The root keeps only files that tools require there: `README.md`, `CLAUDE.md` (au
 bootstrap index), `pyproject.toml`, `constraints.txt`, `alembic.ini`, `.gitignore`, `.gitattributes`.
 The files column counts the tracked files under each path; `tests/contracts/test_repository_rules.py`
 (`test_the_repository_map_counts_match_the_tree`) checks every count against `git ls-files`.
+Note: until PR #157 the map under-counted `integrations/` and `integrations/marketplaces/` by one,
+because `integrations/marketplaces/base.py` was restored after the counts were taken; with that file
+removed by PR #157, the listed 35 and 15 are the tree's counts.
 
 | path | files | role |
 | --- | --- | --- |
