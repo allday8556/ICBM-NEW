@@ -22,12 +22,15 @@ status is ``originProduct.statusType`` and the SmartStore display status is
 — a ``windowChannelProduct`` display status or a status nested elsewhere is never taken for them —
 and a value outside the documented enumerations is unreadable.
 
-**A published state is proven only against an explicit expectation** (ADR-0014 §11). The sale
-status ICBM registers is ``SALE``, the only CREATE input. Which display status ICBM registers —
-``ON`` or ``SUSPENSION`` — has no owner yet: it is one of the unowned CREATE request members. So
-the comparison reads both, refuses a sale status that is not the expected one, and states a
-``published_state`` only when both halves are expected and equal. Until the display status has an
-owner it states none, and the execution owner refuses with ``REGISTER_PUBLISHED_STATE_UNPROVEN``.
+**A published state is proven only against an explicit expectation** (ADR-0014 §11): the one the
+Snapshot's own CREATE projection writes. The sale status is ``SALE``, the only CREATE input; the
+display status is ``ON``, the first-vertical publication decision of architect resolution
+``5915900049`` D1. So the expected published state is exactly ``SALE/ON``. The comparison reads
+both halves, refuses a half that differs, and states ``published_state`` only when both were read
+and both equal the expectation. ``SALE/SUSPENSION``, another sale status, a missing half or an
+unreadable half never proves it, and the execution owner then refuses to confirm
+(``REGISTER_PUBLISHED_STATE_UNPROVEN``). This proves the two documented values only — not buyer
+visibility, and not any read-after-write timing.
 
 Only retained, sanitized values reach this module (``retention.py``), so nothing it returns can
 carry credential, session or signed material into a durable comparison digest.
@@ -51,11 +54,15 @@ from integrations.marketplaces.smartstore.product import (
     FIELD_STATUS_TYPE,
     MAX_SALE_PRICE,
     MAX_STOCK_QUANTITY,
+    REGISTRATION_DISPLAY_STATUS,
+    WireContractError,
+    project,
     seller_codes,
 )
 
 NORMALIZER_VERSION: Final = "smartstore-readback-normalizer/v2"
-COMPARISON_CONTRACT_VERSION: Final = "smartstore-readback-comparison/v2"
+# v3: the display status is expected (ON) and compared exactly (architect resolution 5915900049 D1).
+COMPARISON_CONTRACT_VERSION: Final = "smartstore-readback-comparison/v3"
 
 # The documented enumerations of the two published-state members (Issue #89 5911962320).
 SALE_STATUSES: Final = frozenset(
@@ -231,14 +238,24 @@ class ExpectedPublishedState:
 
 
 def expected_published_state(snapshot_payload: Mapping[str, Any]) -> ExpectedPublishedState:
-    """What this Snapshot expects the listing's published state to be.
+    """What this Snapshot expects the listing's published state to be: exactly the two values its
+    own frozen CREATE projection writes — ``SALE`` and ``ON`` (5915900049 D1).
 
-    The sale status is the one ICBM registers with: ``SALE``, the only CREATE input. The display
-    status has no owner — no Snapshot value, policy or ruling says whether a unit is registered
-    ``ON`` or ``SUSPENSION`` (``product.GAP_CHANNEL_DISPLAY_STATUS``) — so none is expected, and
-    no published state can be proven until one is.
+    Read from the projected document, never assumed: a Snapshot that cannot be projected expects
+    nothing, so no published state can be proven for it.
     """
-    return ExpectedPublishedState(sale_status=CREATE_STATUS_TYPE, display_status=None)
+    try:
+        body = project(snapshot_payload).document.mapping()
+    except WireContractError:
+        return ExpectedPublishedState(sale_status=None, display_status=None)
+    origin = body.get(FIELD_ORIGIN_PRODUCT) or {}
+    channel = body.get(FIELD_CHANNEL_PRODUCT) or {}
+    sale = origin.get(FIELD_STATUS_TYPE)
+    display = channel.get(FIELD_CHANNEL_DISPLAY_STATUS)
+    return ExpectedPublishedState(
+        sale_status=sale if sale in SALE_STATUSES else None,
+        display_status=display if display in DISPLAY_STATUSES else None,
+    )
 
 
 def published_state(listing: NormalizedListing, expected: ExpectedPublishedState) -> str | None:
@@ -293,10 +310,10 @@ def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) ->
     if listing.unsafe_image_references:
         # Proof that cannot survive sanitation is not proof (ADR-0014 §15).
         reasons.append("IMAGE_REFERENCE_UNSAFE")
-    # §11 "published state: EXACT against the explicitly expected state". A half that was read and
-    # differs from its explicit expectation is a mismatch of the listing. A half that was not read,
-    # or that nothing expects, is not a mismatch: no published state is stated, and the execution
-    # owner refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
+    # §11 "published state: EXACT against the explicitly expected state" — SALE/ON (5915900049 D1).
+    # A half that was read and differs from its expectation is a mismatch of the listing. A half
+    # that was not read is not a mismatch: no published state is stated, and the execution owner
+    # refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
     state = expected_published_state(snapshot_payload)
     if (
         state.sale_status is not None
@@ -345,13 +362,14 @@ def reads_published_state() -> bool:
 def proves_published_state() -> bool:
     """Whether a read-back comparison can prove a published state at all (ADR-0014 §11).
 
-    Proving needs two things: reading the state, and an explicit expectation to compare it with.
-    The adopted origin read supplies the first (:func:`reads_published_state`). The second is
-    incomplete: the sale status ICBM registers is known (``SALE``), but no owner states the
-    display status a unit is registered with, so :func:`expected_published_state` expects none and
-    :func:`published_state` can never be stated. The execution owner therefore still refuses to
-    confirm (``REGISTER_PUBLISHED_STATE_UNPROVEN``), and the canary readiness still names the
-    proof as missing. This becomes ``True`` only when that expectation has an owner, never by
-    declaring it.
+    It can: the adopted origin read carries both halves at their documented paths
+    (:func:`reads_published_state`), and the Snapshot's own projection states both expected
+    values — the sale status ``SALE`` and the owned display status ``ON`` (5915900049 D1). Whether
+    a given registration *is* proven stays a per-read-back fact: only ``SALE/ON`` read back proves
+    it.
     """
-    return expected_published_state({}).complete
+    return (
+        reads_published_state()
+        and CREATE_STATUS_TYPE in SALE_STATUSES
+        and REGISTRATION_DISPLAY_STATUS in DISPLAY_STATUSES
+    )

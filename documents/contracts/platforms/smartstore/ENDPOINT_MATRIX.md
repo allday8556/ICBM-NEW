@@ -177,10 +177,12 @@ enumeration; a `windowChannelProduct` display status or a status nested anywhere
 taken for them. No endpoint is adopted or re-adopted by this: method, path, predicate, timeouts and
 query keys are unchanged, and the channel read — whose response is not captured — retains neither
 leaf. **Reading is not proving**: ADR-0014 §11 compares the published state against an explicit
-expectation, the sale status ICBM registers is `SALE`, and the display status it registers
-(`ON` or `SUSPENSION`) has no owner — it is one of the unowned CREATE request members of §4.1.1 —
-so no published state is stated and a read-back still confirms nothing
-(`REGISTER_PUBLISHED_STATE_UNPROVEN`).
+expectation. That expectation is the Snapshot's own CREATE projection — the sale status `SALE`
+and the display status `ON`, which every registration carries (Issue #89 architect resolution
+`5915900049` D1; §4.1.1) — so it is exactly `SALE/ON` (`smartstore-readback-comparison/v3`).
+Only a read-back that carries both and both equal it states a published state; `SALE/SUSPENSION`,
+another sale status or a missing or unreadable half proves nothing and a read-back then confirms
+nothing (`REGISTER_PUBLISHED_STATE_UNPROVEN`).
 
 Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; one artifact in one
 `imageFiles` multipart part; HTTP 200 with `images[].url`; no query keys; only `url` is retained.
@@ -263,11 +265,17 @@ not carry, or that no ICBM owner decides, stays **fail-closed** as a named gap, 
 not sendable — the REGISTER execution owner refuses with `REGISTER_WIRE_NOT_SENDABLE` before it
 opens an Attempt, and the SmartStore sender, re-projecting the Snapshot itself, refuses again with
 its adapter-level `SMARTSTORE_CREATE_WIRE_NOT_SENDABLE` — for: the ICBM-owned value source of
-the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision
-behind `channelProductDisplayStatusType`; the registration `originProduct.stockQuantity` (required,
+the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the registration `originProduct.stockQuantity` (required,
 at least 1, but owned by no Snapshot — never the option default 0 and never an invented 1); the
 type-specific child of `productInfoProvidedNotice`; and,
 for an option listing, whether a combination price is absolute or a difference.
+
+**The display status is owned** (Issue #89 architect resolution `5915900049` D1): every CREATE
+document carries `smartstoreChannelProduct.channelProductDisplayStatusType = ON` and no other
+channel member; any other value, a missing channel object or an unowned channel member is refused
+before freezing (wire `smartstore-register-wire/v3`). It is the first-vertical publication
+decision, frozen with the Snapshot's projection and never derived from the provider or a session,
+and the read-back compares against it (§4.1).
 
 `sellerManagementCode` is the ICBM projection `smartstore-seller-management-code/v1` (architect
 ruling R1, Issue #89 `5861607665`): the first 30 lowercase hexadecimal characters of

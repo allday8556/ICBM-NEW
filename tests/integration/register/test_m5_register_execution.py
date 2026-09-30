@@ -819,6 +819,7 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
     return smartstore_product.create_document(
         listing_identity,
         {
+            "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
             "originProduct": {
                 "statusType": "SALE",
                 "name": "테스트",
@@ -833,7 +834,7 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
                         )
                     }
                 },
-            }
+            },
         },
     )
 

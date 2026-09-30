@@ -605,10 +605,11 @@ def test_the_canary_summary_reads_each_stage_from_the_owner_that_decides_it() ->
     assert "reconcile_path_adopted=registration_execution.reconcile_path_adopted," in wiring
 
 
-def test_the_adopted_smartstore_readback_proves_no_published_state() -> None:
-    """The normalizer's canonical form has a fixed key set with no published state (PR-D), so the
-    adapter answers ``False`` and the execution owner refuses rather than inventing the field."""
+def test_the_adopted_smartstore_readback_can_prove_the_published_state() -> None:
+    """The origin read carries both halves and the Snapshot projection states the expectation,
+    SALE/ON (architect resolution 5915900049 D1), so the adapter answers ``True``. The normalized
+    form itself never carries a published state: only a comparison that read SALE/ON adds one."""
     from integrations.marketplaces.smartstore import readback as smartstore_readback
 
-    assert smartstore_readback.proves_published_state() is False
+    assert smartstore_readback.proves_published_state() is True
     assert "published_state" not in smartstore_readback.normalize({}).canonical()
