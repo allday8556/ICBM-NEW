@@ -2253,19 +2253,45 @@ def test_no_durable_hash_carries_forbidden_material(
 
 def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
     container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 4 + 25: the container's own CREATE seam is the SmartStore one. Its contract is adopted, so
-    # it reports the endpoint adopted — and it still cannot reach a marketplace, because
-    # production wires no committed session and every request is refused before a transport
-    # exists. A local refusal is transmission-precluded, so it is NOT_APPLIED_PROVEN and FATAL:
-    # nothing was applied and nothing is automatically retried (ERRORS.md §15.1, ADR-0014 §9).
-    sender = SmartStoreCreateSender(caller=SmartStoreEndpointCaller(), bearer=lambda: None)
+    # 4 + 25: the container's own CREATE seam — read from the container, exactly as production
+    # wires it, never a hand-built one — is the SmartStore sender over the registry caller with no
+    # committed session. Its contract is adopted, so it reports the endpoint adopted, and it still
+    # cannot reach a marketplace: every request is refused before a transport exists. A local
+    # refusal is transmission-precluded, so it is NOT_APPLIED_PROVEN and FATAL: nothing was applied
+    # and nothing is automatically retried (ERRORS.md §15.1, ADR-0014 §9).
+    sender = container.registration_execution._sender
+    assert type(sender) is SmartStoreCreateSender
+    assert type(sender._caller) is SmartStoreEndpointCaller
+    assert sender._bearer() is None
     assert sender.available()
-    handoff = sender.send(payload={}, idempotency_key="k", listing_identity="icbm-x")
-    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
-    assert handoff.error_class is ErrorClass.FATAL
-    assert handoff.marketplace_product_id is None
-    assert handoff.details["transmission_phase"] == "LOCAL_PREFLIGHT"
+    touched: list[object] = []
+
+    def no_network(self: object, request: object) -> object:
+        touched.append(request)
+        raise AssertionError("the production CREATE seam reached an HTTP transport")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_network)
+    # A real frozen Snapshot, and a payload that is not one: both refuse locally.
+    ready = prepare(container, sources, store, account, prep)
+    frozen = store.snapshot_payload(ready.snapshot_id)
+    assert frozen is not None
+    for payload in (frozen, {}):
+        handoff = sender.send(
+            payload=payload,
+            idempotency_key="k",
+            listing_identity=str(frozen["listing_identity"]),
+        )
+        assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+        assert handoff.error_class is ErrorClass.FATAL
+        assert handoff.marketplace_product_id is None
+        assert handoff.details["transmission_phase"] == "LOCAL_PREFLIGHT"
+    assert touched == []
     lookup = SmartStoreReconcileLookup()
     assert not lookup.available()
     with pytest.raises(ReconcileLookupNotAdoptedError):

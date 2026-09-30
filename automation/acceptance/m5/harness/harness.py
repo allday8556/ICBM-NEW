@@ -972,10 +972,16 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()
-    # Adoption is a contract, never a call: this run's measured marketplace mutation count is 0.
+    # Adoption is a contract, never a call: the CREATE contract is adopted, yet the real projection
+    # of this unit is unsendable and its frozen document lacks parts the provider requires on
+    # registration, so both the sender and the wire boundary refuse it before any transport. This
+    # run's measured marketplace mutation count (below) is 0.
     checks.check(
         "boundary.create_adopted_but_unreachable",
-        adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is True,
+        adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is True
+        and not unsent.sendable
+        and bool(smartstore_product.completeness_gaps(unsent.document)),
+        missing=len(smartstore_product.completeness_gaps(unsent.document)),
     )
     checks.check(
         "boundary.upload_adopted_but_unreachable",
