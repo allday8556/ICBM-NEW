@@ -382,42 +382,6 @@ class PreparationCandidateGate:
         )
 
 
-class UnwiredAssetSender:
-    """Production at this main: the upload path exists, but no sender is wired to a provider.
-
-    It declares the adopted wire endpoint so the replay key and readiness are real, and refuses to
-    send: the safety stack refuses before ever calling it (``LIVE_SENDER_NOT_WIRED``).
-    """
-
-    def __init__(
-        self,
-        *,
-        marketplace_key: str,
-        wire: tuple[str, str, str],
-        contract_label: str,
-        adopted: bool,
-    ) -> None:
-        self.marketplace_key = marketplace_key
-        self._wire = wire
-        self._label = contract_label
-        self._adopted = adopted
-
-    def available(self) -> bool:
-        return False
-
-    def endpoint_adopted(self) -> bool:
-        return self._adopted
-
-    def wire(self) -> tuple[str, str, str]:
-        return self._wire
-
-    def contract_label(self) -> str:
-        return self._label
-
-    def send(self, *, content: bytes, file_name: str, media_type: str) -> UploadSendResult:
-        raise TransmissionPrecluded("no provider sender is wired at this main")
-
-
 __all__ = [
     "AssetUploadRequest",
     "AssetUploadResult",
@@ -426,6 +390,5 @@ __all__ = [
     "CandidateGate",
     "PreparationCandidateGate",
     "TransmissionPrecluded",
-    "UnwiredAssetSender",
     "UploadSendResult",
 ]

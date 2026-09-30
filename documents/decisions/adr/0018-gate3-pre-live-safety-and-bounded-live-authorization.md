@@ -592,6 +592,16 @@ at send time. Each requirement is proven from its own durable evidence, never as
   ASSET sender is wired, and canary eligibility (§5) has no owner, each of which refuses on its own.
   *(Amendment note: the eligibility owner exists now — §5.1. No record exists for any lineage, so
   the layer still refuses; the other two refuse unchanged.)*
+  *(Amendment note — the production ASSET sender.)* The ASSET sender is wired now: the adopted
+  SmartStore image upload behind the §3.4 attempt owner
+  (`integrations/marketplaces/smartstore/assets.py`, `SmartStoreAssetSender`). It is **available
+  only with a committed provider session**, and production wires none, so the sender layer still
+  refuses (`LIVE_SENDER_NOT_WIRED`) and nothing is sent. Its outcomes are the §3.4 ones and no
+  other: applied only on exactly one sanitized reference from a passed success predicate; not
+  applied only when transmission was provably precluded (no session, a local refusal, an egress
+  refusal, or a new connection that failed before any request byte); everything else
+  `UPLOAD_UNKNOWN`, never retried. The replay fence, the budget and the started-before-transmission
+  rule are the attempt owner's, unchanged.
   It also stays `BLOCKED` whenever the §3.4 owner is absent, unreadable, stale or unable to persist
   the required evidence.
 - **The ASSET readiness queries the whole replay-conflict scope**, never only the attempts of the
@@ -730,7 +740,8 @@ G3-31  the registration read state and its status card and detail panel are surf
   adoption and the residual-risk acceptance (§6.1) are missing independently, so the canary is
   `BLOCKED` for several independent reasons at once. *(Amendment note: CREATE and SEARCH were
   adopted by their own slices — §12 — and the eligibility owner exists — §5.1; the eligibility
-  layer is proven only per exact reviewed lineage, and every other reason still refuses.)*
+  layer is proven only per exact reviewed lineage, and every other reason still refuses. The ASSET
+  sender is wired as well — §10 — and stays unavailable while no committed session exists.)*
 - The grant and the protected-write brake were implemented, with the ASSET upload-attempt owner, by
   the separately authorized Gate 3 area 1 slice, which added migration `0026_g3_live_authority`
   under its own authorization.
