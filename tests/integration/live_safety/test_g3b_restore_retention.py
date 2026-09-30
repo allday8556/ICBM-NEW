@@ -36,6 +36,7 @@ from tests.support.gate1_support import (
     CLIENT,
     MARKET,
     OPERATOR,
+    owned_revisions,
     record_reviewed_metadata,
     save_policy,
 )
@@ -102,7 +103,7 @@ def durable_unit(api: TestClient, container: Container, config: AppConfig) -> di
             "draft_id": draft.draft_id,
             "item_ids": [result.item_id],
             "actor": OPERATOR,
-            "inputs": authored_inputs(),
+            "inputs": authored_inputs(revisions=owned_revisions(container, account)),
         },
         headers=CLIENT,
     )
@@ -346,9 +347,8 @@ def test_a_lost_artifact_or_a_missing_required_element_fails_the_drill(
 def frozen_unit(api: TestClient, container: Container, config: AppConfig) -> tuple[Any, dict]:
     """One frozen unit with its Intent, authored through the application's own preparation owner.
 
-    No durable policy can reach READY at this main (its authoring revisions have no owner), so the
-    served preflight reads the test's static sources — pointed at **real durable revision rows**,
-    so the policy and metadata revisions a CREATE drill proves are owner rows, not labels.
+    The served preflight reads the test's static sources — pointed at **real durable revision
+    rows**, so the policy and metadata revisions a CREATE drill proves are owner rows, not labels.
     """
     from app.stages.register.category_metadata import CategoryMetadataStore
     from app.stages.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
@@ -365,7 +365,9 @@ def frozen_unit(api: TestClient, container: Container, config: AppConfig) -> tup
     )
 
     account = establish(container, config, UNIT_MARKET, "uid-market-a-1")
-    policy = TargetPolicyStore(container.db, container.clock, container.audit).append(
+    policy = TargetPolicyStore(
+        container.db, container.clock, container.audit, container.authoring_revisions
+    ).append(
         UNIT_MARKET, account,
         {"marketplace_key": UNIT_MARKET, "marketplace_account_id": account, "source": "g3b"},
         expected_current_revision=None, authored_by=OPERATOR, correlation_id=CID,

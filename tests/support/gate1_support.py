@@ -11,6 +11,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.container import Container
+from app.stages.register.target_policy import (
+    TargetPolicyInputsView,
+    TargetPolicyStore,
+    encode_content,
+)
+
 CLIENT = {"X-ICBM-Client": "pytest"}
 MARKET = "smartstore"
 OPERATOR = "operator-1"
@@ -33,9 +40,9 @@ def pricing_context(account_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def save_policy(api: TestClient, account: str, *, account_scoped: bool = False) -> str:
-    """The account's target policy through the durable G1-A owner; its new current revision."""
-    inputs = {
+def policy_inputs(account: str, *, account_scoped: bool = False) -> dict[str, Any]:
+    """What Settings sends: both authoring revisions are server-owned, so always ``null``."""
+    return {
         "taxonomy_revision": TAXONOMY,
         "pricing_context": pricing_context(account if account_scoped else None),
         "sanitizer_profile_version": "sanitizer-g1-1",
@@ -52,6 +59,12 @@ def save_policy(api: TestClient, account: str, *, account_scoped: bool = False) 
         "category_mapping_revision": None,
         "detail_composition_revision": None,
     }
+
+
+def save_policy(api: TestClient, account: str, *, account_scoped: bool = False) -> str:
+    """The account's target policy through the durable G1-A owner; its new current revision. The
+    server stamps the authoring-revision owner's current revisions into it (ADR-0014 §27.1)."""
+    inputs = policy_inputs(account, account_scoped=account_scoped)
     current = api.get(f"/api/v1/settings/target-policies/{MARKET}/{account}", headers=CLIENT)
     expected = (current.json().get("current") or {}).get("policy_revision")
     response = api.post(
@@ -61,6 +74,35 @@ def save_policy(api: TestClient, account: str, *, account_scoped: bool = False) 
     )
     assert response.status_code == 200, response.text
     return str(response.json()["current"]["policy_revision"])
+
+
+def save_unowned_policy(container: Container, account: str) -> str:
+    """A target-policy revision as one appended **before the authoring-revision owners existed**
+    left it: both authoring revisions ``null``. Nothing backfills such a revision (Issue #89
+    ``5907626428`` D3), so it is written through the store without the server's stamping."""
+    content = encode_content(
+        MARKET, account, TargetPolicyInputsView.model_validate(policy_inputs(account))
+    )
+    store = TargetPolicyStore(
+        container.db, container.clock, container.audit, container.authoring_revisions
+    )
+    current = store.current(MARKET, account)
+    return store.append(
+        MARKET,
+        account,
+        content,
+        expected_current_revision=None if current is None else current.policy_revision,
+        authored_by=OPERATOR,
+        correlation_id="cid-unowned-policy",
+    ).policy_revision
+
+
+def owned_revisions(container: Container, account: str) -> tuple[str | None, str | None]:
+    """The account's current server-owned authoring revisions, as the authoring form echoes them:
+    ``(category mapping, detail composition)``."""
+    policy = container.registration_preflight.target_policy(MARKET, account)
+    assert policy is not None
+    return policy.category_mapping_revision, policy.detail_composition_revision
 
 
 def _rule(key: str, **overrides: Any) -> dict[str, Any]:

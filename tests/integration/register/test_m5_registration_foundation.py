@@ -495,6 +495,7 @@ ADAPTIVE_TABLES = (
     "retention_proofs",
     "visual_acceptances",
     "registration_reconcile_checks",
+    "registration_authoring_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -128,8 +128,10 @@ CANONICAL_TABLES = (
     "visual_acceptances",
     # The SEARCH positive-only reconcile slice (ADR-0014 §28.4): the reconcile-check owner.
     "registration_reconcile_checks",
+    # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428).
+    "registration_authoring_revisions",
 )
-HEAD = "0031_m5_registration_reconcile"
+HEAD = "0032_m5_registration_authoring_revisions"
 
 
 def _url(path: Path) -> str:

@@ -45,8 +45,8 @@ from app.platform.db.schema_contract import (
 )
 from app.stages.register.sanitize import SANITIZER_RULES_VERSION
 
-# v3: the reconcile-check owner (ADR-0014 §28.4, migration 0031) joins the protected tables.
-RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v3"
+# v4: the authoring-revision owner (ADR-0014 §27.1, migration 0032) joins the protected tables.
+RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v4"
 
 # Every table whose rows are canary evidence or the chain a restore proof compares (§7, §8).
 PROTECTED_TABLES: Final = (
@@ -72,6 +72,7 @@ PROTECTED_TABLES: Final = (
     "registration_target_policies",
     "registration_target_policy_revisions",
     "registration_target_policy_current",
+    "registration_authoring_revisions",
     "registration_category_metadata",
     "registration_category_metadata_revisions",
     "registration_category_metadata_current",

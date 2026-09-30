@@ -17,8 +17,9 @@ What it proves is narrow on purpose: the two local owner gaps Gate 1 closes are 
 ``REGISTER_TARGET_POLICY_MISSING`` and ``CATEGORY_METADATA_MISSING`` do not appear — while every
 other reason the preflight still gives is reported as it is, not claimed away. Gate 1 needs an
 authored preparation and a reachable candidate, not a freezable unit (ADR-0015 §6, decision
-5800619183): the two authoring revisions have no owner, so they are authored as ``null``, the
-candidate reports ``AUTHORING_REVISIONS_UNOWNED`` and FREEZE stays disabled.
+5800619183). The two authoring revisions are owner-held now (ADR-0014 §27.1): the saved policy is
+stamped with them and the form sends them back exactly, so ``AUTHORING_REVISIONS_UNOWNED`` is not
+reported — and FREEZE stays disabled on the reasons that remain.
 """
 
 import contextlib
@@ -227,13 +228,18 @@ def test_gate1_from_a_fresh_data_root_through_reload_and_restart(
             evidence["preflight"] = {"status": status, "reason_codes": codes}
             for gap in GATE1_GAPS:
                 assert gap not in codes, (gap, codes)
-            # The authoring revisions have no owner (5800619183): authored as null, reported,
-            # and nothing can be frozen.
-            assert AUTHORING_REVISIONS_UNOWNED in codes
+            # The authoring revisions are owner-held (ADR-0014 §27.1): the server stamped the
+            # policy with them, the form sent them back exactly, and the candidate no longer
+            # reports them. Every other reason still stands, so nothing can be frozen.
+            assert AUTHORING_REVISIONS_UNOWNED not in codes
             assert status != "READY"
+            target = container.registration_preflight.target_policy(MARKET, account)
+            assert target is not None
+            assert target.category_mapping_revision and target.detail_composition_revision
             authored = container.registrations.preparations_of_draft(draft_id)[0].current
-            assert authored.category["mapping_revision"] is None
-            assert authored.detail is not None and authored.detail["composition_revision"] is None
+            assert authored.category["mapping_revision"] == target.category_mapping_revision
+            assert authored.detail is not None
+            assert authored.detail["composition_revision"] == target.detail_composition_revision
             freeze = page.locator(
                 f".register-unit[data-draft='{draft_id}'] button[data-action='FREEZE']"
             )
