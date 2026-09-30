@@ -92,7 +92,7 @@ class StoredRevision:
     facts_status: FactsStatus
     fields: Mapping[str, StoredField]  # registry order
     images: tuple[ImageReference, ...]  # representative first, then source order
-    # ADR-0019 §4: provenance copied from the run; NULL before migration 0032. Never an input of
+    # ADR-0019 §4: provenance copied from the run; NULL before migration 0033. Never an input of
     # ``fingerprints_intact`` or of any other digest.
     transport_kind: str | None = None
     capture_policy_revision: str | None = None

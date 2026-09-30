@@ -16,9 +16,13 @@ REGISTER preflight reads on every evaluation, and this module is its only owner:
   policy and the authoring revision references. No Product, price, readiness, Snapshot, capability
   or provider truth, and no category metadata.
 - **The authoring revision references are server-owned.** ``category_mapping_revision`` and
-  ``detail_composition_revision`` name revisions of owners that do not exist yet, so a client can
-  never supply one: a save accepts only an explicit ``null`` for each, and an invented value is
-  refused. They become authorable only when their owner exists and can validate them.
+  ``detail_composition_revision`` name revisions of the authoring-revision owner
+  (``app.stages.register.authoring_revisions``; ADR-0014 §27.1, Issue #89 ``5907626428``). A client
+  never supplies one: a save accepts only an explicit ``null`` for each and an invented value is
+  refused. The server stamps the owner's current revisions — the category mapping of exactly this
+  policy's marketplace and taxonomy, the detail composition of exactly its marketplace — into
+  every revision it appends, in the same unit of work. Nothing is backfilled: a revision appended
+  before the owner existed keeps its ``null`` and stays unowned.
 - **M5 never prices.** The pricing context is an M4 ``PricingContextInput`` for this policy's own
   marketplace, whose ``account_id`` discriminator is this policy's canonical account or ``None``
   (account-invariant); the M4 pricing owner prices under it.
@@ -49,6 +53,7 @@ from app.platform.db.database import Database
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore, binding_state
 from app.stages.products.pricing import PricingContextInput, PricingError, Rounding
 from app.stages.register import sanitize
+from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.model import RegistrationConflictError, canonical_json, sanitized_digest
 from app.stages.register.policy import AssetPolicy, DuplicateKeyKind, TargetPolicy
 from app.stages.register.target_policy_models import (
@@ -68,10 +73,13 @@ TARGET_POLICY_CURRENT_MOVED: Final = "TARGET_POLICY_CURRENT_MOVED"
 TARGET_POLICY_UNCHANGED: Final = "TARGET_POLICY_UNCHANGED"
 TARGET_POLICY_AUTHORING_REVISION_UNOWNED: Final = "TARGET_POLICY_AUTHORING_REVISION_UNOWNED"
 
-# The server-owned authoring revision references a target policy carries (ADR-0015 §2). No server
-# owner of either revision exists yet, so a client cannot name one: only an explicit null is
-# accepted. When an owner exists, a reference is validated against it here instead.
-UNOWNED_AUTHORING_REVISIONS: Final = ("category_mapping_revision", "detail_composition_revision")
+# The server-owned authoring revision references a target policy carries (ADR-0015 §2). A client
+# cannot name one: only an explicit null is accepted, and the server stamps the owner's current
+# revisions when it appends the policy revision (ADR-0014 §27.1).
+SERVER_OWNED_AUTHORING_REVISIONS: Final = (
+    "category_mapping_revision",
+    "detail_composition_revision",
+)
 
 
 class EditableSurface(StrEnum):
@@ -120,8 +128,9 @@ class TargetPolicyInputsView(_Strict):
     """The supported target-policy surface (ADR-0015 §2).
 
     ``category_mapping_revision`` and ``detail_composition_revision`` are server-owned references.
-    While no server owner of either exists they must be sent as an explicit ``null``; an invented
-    non-null value is refused (``TARGET_POLICY_AUTHORING_REVISION_UNOWNED``)."""
+    A save sends each as an explicit ``null``; a non-null value is refused
+    (``TARGET_POLICY_AUTHORING_REVISION_UNOWNED``). A stored revision answers with the values the
+    server stamped, or ``null`` for a revision appended before the owner existed."""
 
     taxonomy_revision: StrictStr
     pricing_context: PricingContextInputView
@@ -188,7 +197,8 @@ def _label(value: str, field: str) -> str:
 def encode_content(
     marketplace_key: str, marketplace_account_id: str, inputs: TargetPolicyInputsView
 ) -> dict[str, Any]:
-    """The canonical sanitized content of one revision, or a refusal of the whole save."""
+    """The canonical sanitized content of one revision as authored, or a refusal of the whole
+    save. Both authoring revisions are ``null`` here: the store stamps the owner-held ones."""
     pricing = inputs.pricing_context
     if pricing.marketplace_key != marketplace_key or pricing.account_id not in (
         None,
@@ -224,12 +234,12 @@ def encode_content(
         raise _invalid(
             TARGET_POLICY_INVALID, "a lookup key is listed twice", "duplicate_lookup_keys"
         )
-    for name in UNOWNED_AUTHORING_REVISIONS:
+    for name in SERVER_OWNED_AUTHORING_REVISIONS:
         if getattr(inputs, name) is not None:
             raise _invalid(
                 TARGET_POLICY_AUTHORING_REVISION_UNOWNED,
-                "this is a server-owned authoring revision and no server owner of it exists yet;"
-                " a client cannot name one, so only null is accepted",
+                "this is a server-owned authoring revision: a client cannot name one, so only"
+                " null is accepted and the server stamps the owner's current revision",
                 name,
             )
     content: dict[str, Any] = {
@@ -251,7 +261,7 @@ def encode_content(
         "templates": dict(sorted(templates.items())),
         "duplicate_proof_required": inputs.duplicate_proof_required,
         "duplicate_lookup_keys": sorted(keys),
-        # Always null while no owner exists (checked above): never a client-invented label.
+        # Never a client-invented label (checked above): the store stamps the owner-held ones.
         "category_mapping_revision": None,
         "detail_composition_revision": None,
     }
@@ -336,10 +346,17 @@ class PolicyRecord:
 class TargetPolicyStore:
     """The only production writer of the three target-policy tables."""
 
-    def __init__(self, db: Database, clock: Clock, audit: AuditLog) -> None:
+    def __init__(
+        self,
+        db: Database,
+        clock: Clock,
+        audit: AuditLog,
+        authoring: AuthoringRevisionStore,
+    ) -> None:
         self._db = db
         self._clock = clock
         self._audit = audit
+        self._authoring = authoring
 
     # -------------------------------------------------------------- reads
 
@@ -381,9 +398,14 @@ class TargetPolicyStore:
         expected_current_revision: str | None,
         authored_by: str,
         correlation_id: str,
+        stamp_authoring_revisions: bool = False,
     ) -> PolicyRevisionRecord:
-        """Append one revision and make it current, in one unit of work, or change nothing."""
-        fingerprint = sanitized_digest(content)
+        """Append one revision and make it current, in one unit of work, or change nothing.
+
+        With ``stamp_authoring_revisions`` the server resolves the authoring-revision owner's
+        current revisions for exactly this content's marketplace and taxonomy and writes them into
+        the revision (ADR-0014 §27.1), in this same unit of work: a refused save creates no owner
+        revision either. Whatever the content carried for them is replaced."""
         now = self._clock.now()
         with self._db.write() as session:
             if (
@@ -406,6 +428,17 @@ class TargetPolicyStore:
                         "current_revision": None if current is None else current.policy_revision_id
                     },
                 )
+            if stamp_authoring_revisions:
+                content = {
+                    **content,
+                    **self._authoring.stamp(
+                        session,
+                        marketplace_key,
+                        str(content["taxonomy_revision"]),
+                        correlation_id=correlation_id,
+                    ),
+                }
+            fingerprint = sanitized_digest(content)
             if current is not None:
                 previous = session.get(RegistrationTargetPolicyRevision, current.policy_revision_id)
                 if previous is not None and previous.content_fingerprint == fingerprint:
@@ -582,6 +615,7 @@ class TargetPolicyService:
             expected_current_revision=request.expected_current_revision,
             authored_by=request.actor,
             correlation_id=correlation_id,
+            stamp_authoring_revisions=True,
         )
         return self._view(self._store.policy(marketplace_key, marketplace_account_id))
 

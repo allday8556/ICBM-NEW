@@ -1054,15 +1054,18 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Five are still missing at this main —
-    a production ASSET sender, the durable canary-eligibility owner, the ADR-0014 §27
-    authoring-revision owners without which neither stage's own preflight gate can ever be met, an
-    executable committed-session read-back and a comparison that proves published state, the two
-    halves of ADR-0014 §11's success proof — and none is authorized by ADR-0020."""
+    order may never omit a mandatory pre-canary prerequisite. Four are still missing at this main —
+    a production ASSET sender, the durable canary-eligibility owner, an executable
+    committed-session read-back and a comparison that proves published state, the two halves of
+    ADR-0014 §11's success proof — and none is authorized by ADR-0020. A fifth, the ADR-0014 §27
+    authoring-revision owners without which neither stage's own preflight gate could be met, was
+    closed by its own slice under the architect resolution 5907626428 (ADR-0014 §27.1), and the
+    order records it as closed rather than dropping it."""
     from app.capabilities.live_safety.assets import UnwiredAssetSender
     from app.capabilities.live_safety.proofs import DurableStageProofs
+    from app.stages.register.authoring_revisions import AuthoringRevisionKind
     from app.stages.register.preparation import AUTHORING_REVISIONS_UNOWNED
-    from app.stages.register.target_policy import UNOWNED_AUTHORING_REVISIONS
+    from app.stages.register.target_policy import SERVER_OWNED_AUTHORING_REVISIONS
     from integrations.marketplaces.smartstore import readback as smartstore_readback
 
     adr = _read(STANDING_ADR)
@@ -1078,12 +1081,16 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the **durable canary-eligibility owner** (ADR-0018 §5)",
         "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
         "the eligibility record's data model is explicitly undecided (ADR-0018 §13)",
-        "the **authoring-revision owners** for the category mapping and the detail composition",
-        "the candidate preflight answers `AUTHORING_REVISIONS_UNOWNED`",
+        "~~the **authoring-revision owners** for the category mapping and the detail composition"
+        " (ADR-0014 §27)~~ — **closed by its own slice** (ADR-0014 §27.1; Issue #89 architect"
+        " resolution `5907626428`; migration `0032`)",
+        "the candidate preflight answered `AUTHORING_REVISIONS_UNOWNED`",
         "each stage's own gate is a mandatory requirement (ADR-0018 §10)",
-        "no Snapshot and no Intent can exist",
-        'ADR-0014 §27 records real owners for both revisions as "a later, separately authorized'
+        "no Snapshot and no Intent could exist",
+        "nothing is backfilled",
+        'ADR-0014 §27 recorded real owners for both revisions as "a later, separately authorized'
         ' decision"',
+        "never this standing authorization",
         "the **executable committed-session read-back** (ADR-0014 §11)",
         "`SmartStoreReadback.available()` is `False` and `verify` refuses",
         "a **read-back comparison that proves published state** (ADR-0014 §11)",
@@ -1096,13 +1103,18 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**Correction note (post-merge full audit of main `a10e4b79dbd3`).**",
         "**Correction note (post-merge full audit of main `cfb0aa4f3af1`).**",
         "This correction grants nothing",
+        "**Amendment note (authoring-revision owners slice; Issue #89 `5907626428`).**",
+        "Four prerequisites are still",
+        "note grants none of them",
+        "Closing that row makes no unit `READY` by itself",
     ):
         assert element in flat, element
     # The prerequisites carry no numbered position, so the order above never contradicts the
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 5
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 4
+    assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
     # The remaining user-decision steps are still listed, and now after those prerequisites.
     assert flat.index("production ASSET sender") < flat.index("the residual-risk acceptance, the")
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
@@ -1110,7 +1122,7 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert list(invariants) == [f"SA-{n:02d}" for n in range(1, 11)]
     for element in (
         "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
-        "the ADR-0014 §27 authoring-revision owners",
+        "the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1",
         "the executable committed-session read-back",
         "a read-back comparison that proves published state",
         "are still missing, are not authorized here",
@@ -1130,11 +1142,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the standing authorization does **not** cover any of them",
         "production ASSET sender",
         "**durable canary-eligibility owner** of ADR-0018 §5",
-        "**authoring-revision owners** of ADR-0014 §27",
-        "no unit is ever `READY`, no Snapshot and no `PREPARED` Intent can exist",
         "not provider-zero",
         "ADR-0018 §13 leaves its data model undecided",
-        "ADR-0014 §27 records real owners for both as a later, separately authorized decision",
         "**executable committed-session read-back**",
         "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
@@ -1145,13 +1154,25 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
     assert later in ordering
     assert ordering.index("ASSET sender") < ordering.index(later)
+    # The closed prerequisite is recorded as closed, with what it does not grant.
+    for element in (
+        "**Pre-canary prerequisite closed — the authoring-revision owners** (ADR-0014 §27.1;",
+        "architect resolution `5907626428`; migration `0032`",
+        "outside the standing authorization",
+        "nothing is backfilled",
+        "No provider call, no session, no LIVE, no canary; every other prerequisite below still"
+        " refuses",
+    ):
+        assert element in ordering, element
+    assert "authoring-revision owners** of ADR-0014 §27 for" not in ordering
     preconditions = " ".join(_section(roadmap, r"^14\.2 Preconditions").split())
     for element in (
         "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
         "`UnwiredAssetSender` declares the adopted wire endpoint and refuses every send",
         "proving `CANARY_NON_REGULATED`",
-        "**owners for the category-mapping and detail-composition authoring revisions**",
-        "no unit is ever `READY` and neither stage's own gate",
+        "**owners for the category-mapping and detail-composition authoring revisions** — is"
+        " closed by its own slice (ADR-0014 §27.1)",
+        "still has to be `READY` on every other rule",
         "none is authorized by the ADR-0020 standing authorization",
         "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
         "an **executable committed-session read-back**",
@@ -1159,8 +1180,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
-    # The runtime facts that make them prerequisites still hold: no sender, no eligibility owner,
-    # and no owner of either authoring revision.
+    # The runtime facts that make them prerequisites still hold: no sender and no eligibility
+    # owner. The authoring-revision owner exists and is wired; a client still names neither
+    # revision.
     sender = UnwiredAssetSender(
         marketplace_key="smartstore",
         wire=("POST", "host", "/path"),
@@ -1171,10 +1193,15 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "return False" in inspect.getsource(DurableStageProofs.canary_non_regulated)
     assert "UnwiredAssetSender(" in _read(REPO_ROOT / "app" / "container.py")
     assert AUTHORING_REVISIONS_UNOWNED == "AUTHORING_REVISIONS_UNOWNED"
-    assert UNOWNED_AUTHORING_REVISIONS == (
+    assert SERVER_OWNED_AUTHORING_REVISIONS == (
         "category_mapping_revision",
         "detail_composition_revision",
     )
+    assert [kind.value for kind in AuthoringRevisionKind] == [
+        "CATEGORY_MAPPING",
+        "DETAIL_COMPOSITION",
+    ]
+    assert "AuthoringRevisionStore(db, clock, audit)" in _read(REPO_ROOT / "app" / "container.py")
     # And ADR-0014 §11's two halves: production wires no session to read back with, and the
     # adopted comparison proves no published state.
     assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
@@ -3050,6 +3077,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # The SEARCH positive-only reconcile slice (ADR-0014 §28.4; Issue #89 5904349289 H-S2):
         # the append-only reconcile-check owner, recorded by every reconcile of an Intent.
         "registration_reconcile_checks",
+        # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428): the append-only
+        # category-mapping and detail-composition profile revisions.
+        "registration_authoring_revisions",
     }
     offenders = [
         path

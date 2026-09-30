@@ -1,7 +1,7 @@
 """COLLECT transport provenance (ADR-0019 §4; extension slice E1).
 
-Revision ID: 0032_collect_transport_provenance
-Revises: 0031_m5_registration_reconcile
+Revision ID: 0033_collect_transport_provenance
+Revises: 0032_m5_registration_authoring_revisions
 Create Date: 2026-09-30
 
 Issue #126 rulings ``5906290729`` (B-6) and ``5906712259`` (N-2), bound by the owner amendment
@@ -40,8 +40,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0032_collect_transport_provenance"
-down_revision: str | None = "0031_m5_registration_reconcile"
+revision: str = "0033_collect_transport_provenance"
+down_revision: str | None = "0032_m5_registration_authoring_revisions"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

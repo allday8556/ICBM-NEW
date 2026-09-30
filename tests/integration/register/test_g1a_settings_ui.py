@@ -147,13 +147,13 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
             state, history, _ = _state(page, account)
             assert (state, history) == ("none", "0")
             assert writes == []
-            # The two server-owned references have no owner yet: shown, never authorable.
+            # The two server-owned references are shown, never authorable.
             editor = page.locator(_editor(account))
             for reference in ("category_mapping_revision", "detail_composition_revision"):
                 assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
                 shown = editor.locator(f"[data-policy-reference='{reference}']")
                 assert shown.locator("input, textarea, select").count() == 0
-                assert "입력할 수 없습니다" in shown.inner_text()
+                assert "서버 소유 리비전" in shown.inner_text()
             _fill(page, account, VALUES)
             page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
             page.wait_for_selector(
@@ -174,8 +174,9 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         stored = served.target_policies.policy(MARKETPLACE, account)
         current = stored.current
         assert current is not None and stored.inputs is not None
-        assert stored.inputs.category_mapping_revision is None
-        assert stored.inputs.detail_composition_revision is None
+        # The save sent null for both; the server stamped its owner's revisions.
+        assert stored.inputs.category_mapping_revision
+        assert stored.inputs.detail_composition_revision
     # A restart: a new process owns the same data directory and serves the same durable policy.
     with (
         _served(config) as client,

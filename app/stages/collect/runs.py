@@ -130,7 +130,7 @@ class CollectionRunRecord:
     finished_at: datetime | None
     frozen: FrozenRun | None = None
     settled_by_recovery: bool | None = None
-    # NULL on a run opened before the provenance columns existed (migration 0032).
+    # NULL on a run opened before the provenance columns existed (migration 0033).
     provenance: RunProvenance | None = None
 
 

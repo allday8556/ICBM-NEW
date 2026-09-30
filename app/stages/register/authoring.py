@@ -502,7 +502,8 @@ class RegistrationPreparationService:
     ) -> None:
         """The authoring revisions are server-owned (decision 5801915996): each one a client
         submits, and each one these inputs would store, must be **exactly** the account's current
-        target-policy value, ``None`` included while no owner exists. Anything else is refused
+        target-policy value — ``None`` included under a policy revision appended before the
+        authoring-revision owner existed (ADR-0014 §27.1). Anything else is refused
         before anything is written, so no sentinel, default or stale revision ever becomes an
         authored input."""
         target = self._preflight.target_policy(marketplace_key, marketplace_account_id)

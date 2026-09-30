@@ -93,6 +93,13 @@ nothing else:
 - the server-owned authoring revision references `TargetPolicy` carries
   (`category_mapping_revision`, `detail_composition_revision`).
 
+> **Amendment note (authoring-revision owners; Issue #89 resolution `5907626428`).** These two
+> references name revisions of the authoring-revision owner of ADR-0014 §27.1. A client still
+> supplies neither — a non-null client value is refused — and the server stamps the owner's current
+> revisions into each target-policy revision it appends. A revision appended before that owner
+> existed keeps `null`; nothing is backfilled. The target policy still owns no authoring profile
+> content: it only references it.
+
 **What it never owns.** No Product or ProductFacts, no `PricingSnapshot` and no price, no readiness
 or reason code, no `RegistrationSnapshot`, Intent, Attempt or Registration, no capability, auth or
 permission truth, no provider truth, and no category metadata (§3).
@@ -242,6 +249,8 @@ COLLECT UI
   revisions stay `null` while no owner exists for them (§2), so the Gate 1 candidate reports
   `AUTHORING_REVISIONS_UNOWNED` and is not `READY`; a Snapshot freeze still requires owner-held
   revisions and stays refused (ADR-0014 §27). No default or sentinel revision is created to pass it.
+  *(Amendment note: the owners exist now — ADR-0014 §27.1 — so a newly appended target-policy
+  revision is owner-held; this clarification still describes a revision appended before them.)*
 - Its evidence is recorded in GitHub against the exact main SHA it ran on. **Gate 1 evidence is not
   M5 acceptance**, and `documents/acceptance/milestones/M5.md` stays `PENDING`.
 

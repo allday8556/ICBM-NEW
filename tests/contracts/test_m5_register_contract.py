@@ -157,6 +157,8 @@ M5_HEAD = "0020_g1_registration_category_metadata"
 # The SEARCH positive-only reconcile slice (ADR-0014 §28.4; Issue #89 5904349289 H-S2 (a)) adds the
 # reconcile-check owner and the channel identity columns, concretely authorized as 0031.
 M5_RECONCILE = "0031_m5_registration_reconcile"
+# The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428), authorized as 0032.
+M5_AUTHORING = "0032_m5_registration_authoring_revisions"
 M5_MIGRATIONS = (
     M5_FOUNDATION,
     M5_EXECUTION_SCOPE,
@@ -164,6 +166,7 @@ M5_MIGRATIONS = (
     G1_TARGET_POLICY,
     M5_HEAD,
     M5_RECONCILE,
+    M5_AUTHORING,
 )
 # Gate 2 (ADR-0016) adds the ReviewItem owner after the M5 head: G2-A its items, G2-B its
 # coverage watermark, G2-C the owner truth token of that watermark. None is registration
@@ -187,7 +190,7 @@ G3_AREA2 = "0029_g3_restore_retention"
 G3_AREA3 = "0030_g3_visual_acceptance"
 # ADR-0019 E1 (Issue #126 5906290729 B-6, 5906712259 N-2): the COLLECT transport provenance columns
 # on the run and the revision. It adds no table and holds no registration state.
-COLLECT_TRANSPORT = "0032_collect_transport_provenance"
+COLLECT_TRANSPORT = "0033_collect_transport_provenance"
 SCHEMA_HEAD = COLLECT_TRANSPORT
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -201,6 +204,7 @@ AFTER_M5 = (
     G3_AREA2,
     G3_AREA3,
     M5_RECONCILE,
+    M5_AUTHORING,
     COLLECT_TRANSPORT,
 )
 REGISTRATION_STATE = re.compile(
@@ -238,6 +242,8 @@ REGISTRATION_TABLES = frozenset(
         "registration_category_metadata_current",
         # ADR-0014 §28.4 (Issue #89 5904349289 §A): the durable reconcile-check owner.
         "registration_reconcile_checks",
+        # ADR-0014 §27.1 (Issue #89 5907626428): the authoring-revision owner.
+        "registration_authoring_revisions",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column

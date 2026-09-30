@@ -111,6 +111,7 @@ from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
 from app.stages.products.store import ProductFoundationStore
 from app.stages.register.authoring import RegistrationPreparationService
+from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.builder import RegistrationSnapshotBuilder
 from app.stages.register.category_metadata import (
     CategoryMetadataService,
@@ -220,6 +221,7 @@ class Container:
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
+    authoring_revisions: AuthoringRevisionStore
     target_policies: TargetPolicyService
     category_metadata: CategoryMetadataService
     registration_preflight: RegistrationPreflightService
@@ -494,7 +496,10 @@ def build_container(
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
     # revision still fails closed with REGISTER_TARGET_POLICY_MISSING.
-    target_policy_store = TargetPolicyStore(db, clock, audit)
+    # ADR-0014 §27.1 (Issue #89 5907626428): the server-owned category-mapping and
+    # detail-composition revisions a newly appended target-policy revision is stamped with.
+    authoring_revisions = AuthoringRevisionStore(db, clock, audit)
+    target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
     target_policies = TargetPolicyService(target_policy_store, accounts)
     # Gate 1 G1-B (ADR-0015 §3): the durable operator-reviewed category metadata of each
     # marketplace × taxonomy × category. No provider category endpoint is adopted; a category with
@@ -749,6 +754,7 @@ def build_container(
         product_readiness=product_readiness,
         accounts=accounts,
         registrations=registrations,
+        authoring_revisions=authoring_revisions,
         target_policies=target_policies,
         category_metadata=category_metadata,
         registration_preflight=registration_preflight,

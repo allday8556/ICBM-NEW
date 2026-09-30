@@ -1,5 +1,5 @@
 """COLLECT transport provenance (ADR-0019 §4, AC-08; rulings 5906290729 B-6 and 5906712259 N-2):
-migration 0032, what the run and the revision record, and that provenance is never identity."""
+migration 0033, what the run and the revision record, and that provenance is never identity."""
 
 import contextlib
 import sqlite3
@@ -23,8 +23,8 @@ from tests.support.shadow_support import collect_once, container, gateway, rows
 
 pytestmark = pytest.mark.integration
 
-BEFORE = "0031_m5_registration_reconcile"
-MIGRATION = "0032_collect_transport_provenance"
+BEFORE = "0032_m5_registration_authoring_revisions"
+MIGRATION = "0033_collect_transport_provenance"
 TABLES = ("collection_runs", "product_facts_revisions")
 COLUMNS = ("transport_kind", "capture_policy_revision", "capture_policy_digest")
 AT = "'2026-09-30 00:00:00'"
@@ -58,10 +58,10 @@ def _old_rows(database: Path) -> None:
         raw.commit()
 
 
-# ---------------------------------------------------------------- migration 0032
+# ---------------------------------------------------------------- migration 0033
 
 
-def test_0032_adds_nullable_columns_and_rewrites_nothing(tmp_path: Path) -> None:
+def test_0033_adds_nullable_columns_and_rewrites_nothing(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     command.upgrade(alembic_config(_url(database)), BEFORE)
     _old_rows(database)
@@ -80,7 +80,7 @@ def test_0032_adds_nullable_columns_and_rewrites_nothing(tmp_path: Path) -> None
     assert _triggers(database) == triggers
 
 
-def test_0032_keeps_the_append_only_triggers_working(tmp_path: Path) -> None:
+def test_0033_keeps_the_append_only_triggers_working(tmp_path: Path) -> None:
     # Ruling N-2: the columns are added with ADD COLUMN, never by rebuilding the table, so the
     # UPDATE/DELETE protection of the revision is still enforced after the upgrade.
     database = tmp_path / "icbm.db"
@@ -105,7 +105,7 @@ def test_0032_keeps_the_append_only_triggers_working(tmp_path: Path) -> None:
             assert name in triggers
 
 
-def test_0032_uses_add_column_only() -> None:
+def test_0033_uses_add_column_only() -> None:
     source = (
         REPO_ROOT / "app" / "platform" / "db" / "migrations" / "versions" / f"{MIGRATION}.py"
     ).read_text("utf-8")

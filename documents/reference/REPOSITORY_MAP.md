@@ -11,21 +11,22 @@ because `integrations/marketplaces/base.py` was restored after the counts were t
 removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #158) added
 `integrations/marketplaces/smartstore/create.py` and its unit suite (36 and 16), and the SEARCH
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
-and migration `0031` (37 and 17).
+and migration `0031` (37 and 17). The authoring-revision owners slice added
+`app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite.
 The extension capture transport, slice E1 (ADR-0019; Issue #126), added the client under
 `ui/extension/`, the ingest owner under `app/stages/collect/extension/`, its router, the KM
-capture policy beside the KM collect package, migration `0032` and their tests. No file moved,
-so `PATH_MIGRATION_MAP` is unchanged.
+capture policy beside the KM collect package, migration `0033`, the test-browser owner
+`tests/support/browser.py` and their tests. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 245 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 247 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 62 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 118 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 63 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 119 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 93 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -47,11 +48,11 @@ so `PATH_MIGRATION_MAP` is unchanged.
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 230 | tests |
+| `tests/` | 231 | tests |
 | `tests/contracts/` | 8 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
-| `tests/integration/` | 86 | integration tests by runtime owner |
+| `tests/integration/` | 87 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 81 | unit tests by runtime owner |
 | `ui/` | 52 | operator clients: the served web client and the capture extension |

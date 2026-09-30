@@ -194,7 +194,8 @@ class CategoryChoiceView(BaseModel):
     """The category an operator chose, with the revisions it was chosen under (§4).
 
     ``mapping_revision`` is required and nullable: the client sends back exactly what the server
-    gave it, ``None`` included while no mapping owner exists (decision 5800619183)."""
+    gave it — the owner's revision the target policy holds, or ``None`` under a policy revision
+    appended before that owner existed (decision 5800619183, ADR-0014 §27.1)."""
 
     category_id: str
     mapping_revision: str | None
@@ -212,7 +213,8 @@ class AuthoringMetadataView(BaseModel):
     """Server-owned revisions and reviewed fields for one category authoring form.
 
     ``mapping_revision`` and ``detail_composition_revision`` are the target policy's own values,
-    ``None`` while no owner exists for them (decision 5800619183): never a default."""
+    ``None`` under a policy revision appended before their owner existed (decision 5800619183,
+    ADR-0014 §27.1): never a default."""
 
     category_id: str
     mapping_revision: str | None

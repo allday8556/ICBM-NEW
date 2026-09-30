@@ -349,7 +349,8 @@ class RegisterService:
                 "the category has no reviewed metadata for the current taxonomy",
             )
         # The two authoring revisions are handed on exactly as the policy holds them, None
-        # included while no owner exists for them (decision 5800619183). Their absence does not
+        # included under a policy revision appended before their owner existed (decision
+        # 5800619183, ADR-0014 §27.1). Their absence does not
         # stop authoring; the candidate preflight reports it as AUTHORING_REVISIONS_UNOWNED.
 
         def fields(rules: Sequence[Any]) -> tuple[AuthoringFieldView, ...]:
