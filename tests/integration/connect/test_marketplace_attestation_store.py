@@ -15,7 +15,6 @@ and nothing reads the wall clock.
 
 import json
 import sqlite3
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -54,6 +53,7 @@ from app.stages.connect.marketplace.capability import (
     WriteStatus,
 )
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.jobs_support import FakeClock
 
 pytestmark = pytest.mark.integration
@@ -72,7 +72,6 @@ ROWS = f"SELECT COUNT(*) FROM {TABLE}"
 ALL_ROWS = f"SELECT * FROM {TABLE} ORDER BY seq"
 BOUND = timedelta(days=A0_MAX_AGE_DAYS)
 # The channels test_ownership_children uses: the locally installed browser, nothing downloaded.
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 
 
 class FixtureIdentity:
@@ -598,7 +597,7 @@ def _rendered_validity(client: TestClient) -> str:
 
     with sync_playwright() as playwright:
         try:
-            browser = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            browser = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

@@ -69,13 +69,6 @@ BODY = (
     '<div id="prdDetail"><p>합성 샘플 상품 설명입니다.</p>'
     '<img ec-data-src="/web/upload/synthetic/detail-1.jpg"></div>'
 )
-# Every browser these tests launch resolves no host name at all: only the literal loopback address
-# is reachable. A page is served by answering its requests in the test, which happens before any
-# name is resolved, so tests still load pages "at" the supplier's host — and a request the test
-# did not answer (a redirect follow-up is never offered to a route handler) fails in the resolver
-# instead of leaving the machine. Without this argument a routed 302 sends a real request.
-NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
-
 # Every table an accepted extension capture may touch. Everything else must stay exactly as it is.
 RUN_OWNED_TABLES = frozenset({"collection_runs", "jobs", "job_attempts", "audit_events"})
 

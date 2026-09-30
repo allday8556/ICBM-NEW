@@ -10,7 +10,6 @@ No provider is reached: execution stays DRY_RUN and every seam refuses locally.
 """
 
 import json
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -33,12 +32,12 @@ from tests.integration.register.test_m5_register_execution import (
     execution,
     prepare,
 )
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import Collections
 from tests.support.register_support import CATEGORY, MARKET, Preparation, establish, preparation
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 REGISTER = f"{LOCAL}/#/register"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 
@@ -47,7 +46,7 @@ FORWARDED = ("x-icbm-client", "content-type", "accept")
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

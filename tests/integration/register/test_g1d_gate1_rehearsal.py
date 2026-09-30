@@ -23,7 +23,6 @@ candidate reports ``AUTHORING_REVISIONS_UNOWNED`` and FREEZE stays disabled.
 
 import contextlib
 import json
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -38,6 +37,7 @@ from app.config import AppConfig
 from app.container import Container
 from app.stages.register.preparation import AUTHORING_REVISIONS_UNOWNED
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_submit_support import (
     ScriptedShop,
     product_url,
@@ -50,7 +50,6 @@ from tests.support.register_support import establish
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 GATE1_GAPS = ("REGISTER_TARGET_POLICY_MISSING", "CATEGORY_METADATA_MISSING")
 NEVER_IN_GATE1 = (
@@ -67,7 +66,7 @@ RECHECK_LIMIT = 40
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

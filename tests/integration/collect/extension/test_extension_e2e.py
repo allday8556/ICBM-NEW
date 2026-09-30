@@ -13,7 +13,6 @@ no such browser is installed the tests are skipped, and say why.
 
 import contextlib
 import logging
-import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -29,10 +28,10 @@ from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
 from app.stages.collect.models import CollectionOutcome, TransportKind
+from tests.support.browser import BROWSER_CHANNEL, launch_extension_context
 from tests.support.extension_support import (
     EXTENSION_ROOT,
     FIXTURE,
-    NETWORK_BLOCK,
     PRODUCT_NUMBER,
     PRODUCT_URL,
     SUPPLIER,
@@ -73,9 +72,6 @@ def _served(config: AppConfig) -> Iterator[tuple[Container, str, uvicorn.Server]
         thread.join(timeout=20)
 
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
-
-
 @pytest.fixture
 def chromium(tmp_path: Path) -> Iterator[BrowserContext]:
     """A Chromium with the unpacked extension loaded, and no way off this machine.
@@ -84,24 +80,18 @@ def chromium(tmp_path: Path) -> Iterator[BrowserContext]:
     not load an unpacked extension — some branded builds refuse the switch — starts no service
     worker, and the test is skipped with that reason rather than passed.
     """
-    arguments = [
-        NETWORK_BLOCK,
-        "--headless=new",
-        f"--disable-extensions-except={EXTENSION_ROOT}",
-        f"--load-extension={EXTENSION_ROOT}",
-    ]
     with sync_playwright() as playwright:
         reasons: list[str] = []
-        for label, options in (
-            (BROWSER_CHANNEL, {"channel": BROWSER_CHANNEL}),
-            ("bundled chromium", {"channel": "chromium"}),
+        for label, channel in (
+            (BROWSER_CHANNEL, BROWSER_CHANNEL),
+            ("bundled chromium", "chromium"),
         ):
             try:
-                context = playwright.chromium.launch_persistent_context(
-                    str(tmp_path / label.replace(" ", "-")),
-                    headless=True,
-                    args=arguments,
-                    **options,
+                context = launch_extension_context(
+                    playwright,
+                    tmp_path / label.replace(" ", "-"),
+                    extension_root=EXTENSION_ROOT,
+                    channel=channel,
                 )
             except PlaywrightError as exc:
                 reasons.append(f"{label}: not launched ({type(exc).__name__})")

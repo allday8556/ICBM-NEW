@@ -17,7 +17,6 @@ What it proves:
 
 import copy
 import json
-import sys
 import threading
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +37,7 @@ from app.stages.collect.extension.policy import CapturePolicySource
 from app.stages.collect.models import CollectionOutcome
 from integrations.suppliers.collection import DocumentView, ReadKind, SourceIdentity
 from integrations.suppliers.kmretail.collection import COLLECTION
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.extension_support import (
     CAPTURES,
     EXTENSION_ID,
@@ -45,7 +45,6 @@ from tests.support.extension_support import (
     FIXTURE,
     ICBM_ORIGIN,
     KM_POLICY,
-    NETWORK_BLOCK,
     ORIGIN,
     PRODUCT_NUMBER,
     PRODUCT_URL,
@@ -56,7 +55,6 @@ from tests.support.extension_support import (
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 MODULE_BASE = "https://kmretail.co.kr/__icbm_extension__/"
 CUT = """async (policy) => {
   const module = await import("/__icbm_extension__/lib/capture.js");
@@ -69,9 +67,7 @@ PRODUCT_ROLES = {"PRIMARY", "THUMBNAIL", "DETAIL", "PRODUCT_AUX"}
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(
-                channel=BROWSER_CHANNEL, headless=True, args=[NETWORK_BLOCK]
-            )
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:
