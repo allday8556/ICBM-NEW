@@ -551,9 +551,10 @@ def test_the_production_wiring_supplies_the_identity_and_the_revision(p: Contain
     assert p.smartstore.current_identity() == ApplicationIdentity("SMARTSTORE", "SELF", CLIENT_ID)
     available = p.permission_attestation.attestation(KEY)
     assert (available.recording_available, available.recording_refusal) == (True, None)
-    # The attestation context names whichever mapping revision the registry currently binds; M5
-    # PR-D bumped it when it adopted the product read-backs.
-    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-image-upload-r1"
+    # The attestation context names whichever mapping revision the registry currently binds; the
+    # CREATE adoption slice bumped it when it adopted POST /v2/products, and again when it
+    # reconciled CREATE to the value-level evidence packet (Issue #89 `5868542027`).
+    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-create-r2"
 
 
 @pytest.mark.parametrize(

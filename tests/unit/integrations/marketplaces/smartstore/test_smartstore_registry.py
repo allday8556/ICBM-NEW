@@ -21,6 +21,7 @@ from integrations.marketplaces.smartstore.registry import (
     account_succeeded,
     image_upload_succeeded,
     mapping_fingerprint,
+    product_create_succeeded,
     resolve,
     token_succeeded,
 )
@@ -30,10 +31,11 @@ ACCOUNT = EndpointId.SMARTSTORE_SELLER_ACCOUNT
 ORIGIN_READ = EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2
 CHANNEL_READ = EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2
 IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
-# M5 PR-D adopts the two product read-backs; everything else the 2.89.0 packet leaves unproven
+CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
+# M5 PR-D adopts the two product read-backs, the IMAGE UPLOAD amendment the one-artifact upload and
+# the CREATE adoption slice POST /v2/products; everything else the official evidence leaves unproven
 # stays NOT_ADOPTED with a named gap (registry.ADOPTION_GAPS).
 STILL_NOT_ADOPTED = {
-    "SMARTSTORE_PRODUCT_CREATE_V2",
     "SMARTSTORE_PRODUCT_SEARCH",
     "SMARTSTORE_CATEGORY_LIST",
     "SMARTSTORE_CATEGORY_READ",
@@ -48,8 +50,8 @@ STILL_NOT_ADOPTED = {
 # ---------------------------------------------------------------- adoption
 
 
-def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_read_backs() -> None:
-    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ, IMAGE_UPLOAD}
+def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() -> None:
+    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ, IMAGE_UPLOAD, CREATE}
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
     assert not set(ADOPTED) & NOT_ADOPTED
@@ -68,7 +70,7 @@ def test_em13_2_a_not_adopted_endpoint_never_resolves(endpoint: EndpointId) -> N
 
 
 @pytest.mark.parametrize(
-    "value", ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_PRODUCT_CREATE_V2", "/v2/products", None, 7]
+    "value", ["SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_PRODUCT_SEARCH", "/v1/products/search", None, 7]
 )
 def test_only_a_typed_adopted_endpoint_id_resolves(value: object) -> None:
     # Free text equal to an adopted id is still not the typed id: nothing resolves by string.
@@ -120,7 +122,11 @@ def test_em5_the_adopted_group_union_and_the_only_adopted_mutation() -> None:
     assert union == {"판매자정보", "상품"}
     assert resolve(TOKEN).required_groups == frozenset()
     assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
-    assert [c.endpoint_id for c in ADOPTED.values() if c.mutating] == [IMAGE_UPLOAD]
+    # The two adopted mutations, and no third. Adoption is never LIVE authority: the send-time
+    # safety stack refuses both while M0_DRY_RUN_ONLY holds.
+    assert sorted(c.endpoint_id for c in ADOPTED.values() if c.mutating) == sorted(
+        [CREATE, IMAGE_UPLOAD]
+    )
 
 
 def test_the_image_upload_contract_is_exactly_the_approved_scope() -> None:
@@ -149,6 +155,60 @@ def test_the_image_upload_contract_is_exactly_the_approved_scope() -> None:
 )
 def test_image_upload_success_predicate(status: int, body: object, accepted: bool) -> None:
     assert image_upload_succeeded(status, body) is accepted
+
+
+def test_the_create_contract_is_exactly_the_captured_official_evidence() -> None:
+    # documents/evidence/marketplace-apis/PRODUCT_CREATE.md § SmartStore: the wire facts of
+    # `(v2) 상품 등록`. The timeouts and the redirect policy are ICBM policy, never provider facts.
+    contract = resolve(CREATE)
+    assert (contract.method, contract.path, contract.content_type) == (
+        Method.POST,
+        "/v2/products",
+        "application/json",
+    )
+    assert contract.requires_bearer and contract.mutating
+    assert contract.required_groups == frozenset({"상품"})
+    assert contract.redirect is RedirectPolicy.NO_FOLLOW
+    assert (contract.connect_timeout_s, contract.read_timeout_s) == (5.0, 30.0)
+    assert contract.path_params == frozenset()
+    # Deny-by-default: the CREATE sends no query key at all.
+    assert contract.safe_query_keys == frozenset()
+    # Only the approved provider identifiers and the safe product leaves may be retained.
+    assert contract.retained_response_fields == frozenset(
+        {
+            "originProductNo",
+            "smartstoreChannelProductNo",
+            "windowChannelProductNo",
+            "name",
+            "salePrice",
+            "stockQuantity",
+            "sellerManagementCode",
+            "sellerManagerCode",
+            "url",
+        }
+    )
+    assert contract.predicate_revision == "m5-create-r1"
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "accepted"),
+    [
+        (200, {"originProductNo": 1234}, True),
+        # The predicate asserts no identifier shape: whether the documented top-level int64
+        # identifiers came back is the response contract's decision (create.py), and a missing one
+        # is UNKNOWN there — never a failed predicate that could read as a non-application.
+        (200, {}, True),
+        (200, None, False),
+        (200, [{"originProductNo": 1234}], False),
+        (200, "originProductNo", False),
+        (201, {"originProductNo": 1234}, False),
+        (308, {}, False),
+        (400, {"code": "BAD_REQUEST"}, False),
+        (500, {}, False),
+    ],
+)
+def test_the_create_success_predicate(status: int, body: object, accepted: bool) -> None:
+    assert product_create_succeeded(status, body) is accepted
 
 
 @pytest.mark.parametrize(
@@ -278,14 +338,19 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-image-upload-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r2"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
         "m5-register-r1",
         "m5-image-upload-r1",
+        "m5-create-r1",
+        "m5-create-r2",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
+    # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2
+    # binds the same fingerprint m5-create-r1 does; the revision records the changed read/send.
+    assert MAPPING_FINGERPRINTS["m5-create-r2"] == MAPPING_FINGERPRINTS["m5-create-r1"]
     assert RegistryMappingRevision().current_revision() == SMARTSTORE_ENDPOINT_MAPPING_REVISION
 
 
@@ -309,10 +374,10 @@ def test_a_permission_relevant_change_changes_the_fingerprint(
 
 def test_adopting_another_endpoint_changes_the_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
     before = mapping_fingerprint()
-    create = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
-    adopted = dataclasses.replace(ADOPTED[ACCOUNT], endpoint_id=create)
-    monkeypatch.setitem(registry.ADOPTED, create, adopted)  # type: ignore[arg-type]
-    monkeypatch.setattr(registry, "NOT_ADOPTED", NOT_ADOPTED - {create})
+    search = EndpointId.SMARTSTORE_PRODUCT_SEARCH
+    adopted = dataclasses.replace(ADOPTED[ACCOUNT], endpoint_id=search)
+    monkeypatch.setitem(registry.ADOPTED, search, adopted)  # type: ignore[arg-type]
+    monkeypatch.setattr(registry, "NOT_ADOPTED", NOT_ADOPTED - {search})
     assert mapping_fingerprint() != before
 
 

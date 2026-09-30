@@ -396,7 +396,7 @@ class RegisterService:
 
         Every rule stays with its owner: the final preflight must be READY under current truth,
         the builder refuses a drifted one, and the store's invariants guard the write. Nothing is
-        sent — a CREATE is queued only by its own action, and the endpoint is still NOT_ADOPTED.
+        sent — a CREATE is queued only by its own action, and execution stays DRY_RUN.
         """
         frozen = self._require_authoring().freeze(
             preparation_id, actor=actor, correlation_id=correlation_id

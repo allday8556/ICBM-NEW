@@ -18,7 +18,7 @@
 
 - **Captured (NAVER Commerce API 2.89.0; `NAVER-P0-PACKET-289` 5746489554, `NAVER-P0-FIELDS-CREATE-289` 5861477977):** in the product body, `originProduct.salePrice` is required, at most 999,999,990; `optionInfo.optionCombinations[].price` defaults to 0, at most 999,999,990 ([PRODUCT_CREATE § Request structure](PRODUCT_CREATE.md#request-structure)). The adopted read-backs retain `salePrice` ([PRODUCT_READ](PRODUCT_READ.md#smartstore)).
 - **Missing:** a standalone price-change endpoint (method/path/request/response); the meaning of the option `price` relative to `salePrice`; price-change errors and idempotency.
-- **ICBM:** price is written only through the `NOT_ADOPTED` CREATE; no price-change endpoint is registered (`ENDPOINT_MATRIX.md` §4). Runtime `UNVERIFIED`.
+- **ICBM:** price is written only through CREATE, which is adopted as a contract only and never called (`ENDPOINT_MATRIX.md` §4.1.1); no price-change endpoint is registered (`ENDPOINT_MATRIX.md` §4). Runtime `UNVERIFIED`.
 
 ## Coupang
 

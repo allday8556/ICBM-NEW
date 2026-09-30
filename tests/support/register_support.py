@@ -440,3 +440,59 @@ def prepared(result: PreflightResult, **overrides: str) -> tuple[PreparedAsset, 
         )
         for _key, image in sorted(images.items())
     )
+
+
+# ------------------------------------------- the adopted CREATE seam, past its production gates
+#
+# Production never sends a CREATE at this adoption: the sender takes no projection and refuses on
+# every gap ``product.project`` records, and the caller refuses every document whose body lacks a
+# part the provider requires on registration (``product.completeness_gaps``). To exercise what the
+# sender and caller do *after* those gates — the registry-gated transport, the success predicate,
+# the response contract and the outcome classification — a test declares both, only here, through
+# these test-only subclasses. The container wires the base classes.
+
+
+def declared(document: Any, gaps: tuple[str, ...] = ()) -> Any:
+    """A real WireProjection around ``document`` that declares exactly ``gaps``."""
+    from integrations.marketplaces.smartstore import product
+
+    identity = getattr(document, "listing_identity", "")
+    return product.WireProjection(
+        encoding_version=product.WIRE_ENCODING_VERSION,
+        listing_shape=ListingShape.SEPARATE_LISTINGS,
+        codes=product.SellerCodes(
+            seller_management_code=product.seller_management_code(identity) if identity else "",
+            option_codes=(),
+            listing_identity=identity,
+        ),
+        document=document,
+        image_references=(),
+        gaps=gaps,
+    )
+
+
+def declared_complete_caller(transport: Any) -> Any:
+    """A registry-gated caller whose CREATE completeness gate the test declares passed."""
+    from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+
+    class DeclaredCompleteCaller(SmartStoreEndpointCaller):
+        def _require_complete(self, request: object) -> None:
+            return None
+
+    return DeclaredCompleteCaller(transport=transport)
+
+
+def declared_projection_sender(*, caller: Any, bearer: Any, projection: Any) -> Any:
+    """A CREATE sender whose projection comes from the test instead of the Snapshot."""
+    from integrations.marketplaces.smartstore.execution import SmartStoreCreateSender
+
+    class DeclaredProjectionSender(SmartStoreCreateSender):
+        def _projection(self, payload: Any) -> object:
+            return projection(payload)
+
+        def _completeness(self, document: Any) -> tuple[str, ...]:
+            # Declared complete by the test, like the projection above; the production sender
+            # recomputes this from the document body and refuses every CREATE at this adoption.
+            return ()
+
+    return DeclaredProjectionSender(caller=caller, bearer=bearer)

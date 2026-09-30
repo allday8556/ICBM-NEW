@@ -6,7 +6,7 @@ server's state and the server's action verdicts, and computes none of them. A di
 disabled because the server said so; pressing an offered one calls the contract that offered it;
 and a reload rebuilds the same screen from durable rows, with nothing kept in the page.
 
-No provider is reached: CREATE stays NOT_ADOPTED and every seam refuses locally.
+No provider is reached: execution stays DRY_RUN and every seam refuses locally.
 """
 
 import json
@@ -137,12 +137,16 @@ def test_the_screen_renders_server_state_and_the_servers_verdicts(
         assert _action(page, "RECONCILE")["disabled"] is True
         assert _action(page, "VERIFY")["disabled"] is True
         assert _action(page, "RESUME_SCOPE")["disabled"] is True
-        # The canary plan is BLOCKED and names the unadopted contracts, not "not needed".
+        # The canary plan is BLOCKED and names the unadopted contract, not "not needed".
         canary = page.locator(".register-canary")
         assert canary.get_attribute("data-canary") == "BLOCKED"
+        reconcile = page.locator("li[data-requirement='RECONCILE_PATH_ADOPTED']")
+        assert reconcile.get_attribute("data-satisfied") == "false"
+        assert "SMARTSTORE_PRODUCT_SEARCH" in reconcile.inner_text()
+        # CREATE is adopted, and the screen shows that without implying the canary may run: the
+        # verdict above is still BLOCKED and every action is still disabled.
         create = page.locator("li[data-requirement='CREATE_ADOPTED']")
-        assert create.get_attribute("data-satisfied") == "false"
-        assert "SMARTSTORE_PRODUCT_CREATE_V2" in create.inner_text()
+        assert create.get_attribute("data-satisfied") == "true"
         # The page performed no write at all while rendering.
         assert writes == []
 
