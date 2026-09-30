@@ -574,7 +574,18 @@ but not the base or a GitHub authority source edited in that window.
 
 Mitigations in this protocol:
 - conditions 7 and 8 and §7.1 are re-evaluated **immediately before** the merge call;
-- POST_MERGE_VERIFY's tree equality detects a base that moved in the window (HOLD).
+- POST_MERGE_VERIFY's tree equality detects a base that moved in the window (HOLD). A merge found
+  on a moved base is never accepted as the audited result: the run holds as a TECHNICAL_HOLD and
+  no next slice starts from it.
+
+**The atomic close is GitHub's, and it is a repository setting.** GitHub's merge API binds only the
+head (`expected_head_sha`); it has no parameter that binds the base. What binds the base atomically
+is the repository ruleset's strict required-status-check policy ("require branches to be up to date
+before merging"): GitHub then refuses the merge mutation itself when the base moved. On this
+repository that policy is off (`strict_required_status_checks_policy: false`). Changing a
+repository ruleset is a change of standing configuration, which is the user's (rule §7), so the
+Host never changes it and never asks for it as a condition of a merge. Until it is on, the window
+is bounded and detected as above; once it is on, GitHub closes it.
 
 **Cut-off:** a cited source edited after that final re-scan is outside this merge's audited
 input and binds the next audit, not this merge.
@@ -583,7 +594,8 @@ input and binds the next audit, not this merge.
 up to date before it is audited, with GitHub's own update-branch (no force), and the new HEAD is
 audited from scratch. A conflict GitHub cannot merge is a TECHNICAL_HOLD for the repair path.
 
-A stronger atomic mitigation is assigned to PR-C (§9).
+A stronger atomic mitigation was assigned to PR-C (§9). Its reachable form is the ruleset policy
+above; the Host scripts have no atomic means of their own.
 
 ### 7.1 Pre-merge packet regeneration and full re-scan
 
