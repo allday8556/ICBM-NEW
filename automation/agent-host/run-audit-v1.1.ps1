@@ -638,10 +638,14 @@ foreach ($rf in @(Get-ChildItem $stateDir -Filter "remediation-main-*.json" -Err
 #   streams      = this PR's own four streams (conversation comments, body, reviews, review comments)
 #                  + the comments of every issue the declaration names as "Issue #<n>"
 #                  + any stream state\audit-sources-pr-<N>.json designates (optional; designation only)
-#   sources      = the PR body itself (the declaration is audit input), and
-#                  every comment / review / review comment in a scanned stream whose id the declaration cites
-#                  (a bare 9-12 digit id in a code span). Each is a required, content-bound source:
-#                  <locator>@<sha256 of the current body>. A citation no scanned stream holds is a TECHNICAL_HOLD.
+#   sources      = the PR body itself (the declaration is audit input);
+#                  every source the declaration cites, by its kind (agent-host-authority-v2.ps1 Get-EvidenceReferences):
+#                    `<id>` a conversation comment, `review:<id>` a review, `review-comment:<id>` a review comment,
+#                    each <locator>@<sha256 of the current body>;
+#                  the Host's baseline canon and every `canon:<path>` the declaration cites, at the audited base,
+#                    each git_blob:base:<path>@<blob SHA>.
+#                  All are required. A citation that cannot be read is a TECHNICAL_HOLD; a baseline document absent at
+#                  the base is named in the packet header.
 # 매 생성마다 모든 stream 을 전 페이지, 현재 body 로 다시 읽는다 (edit-aware). watermark 는 scan provenance 일 뿐
 #   packet bytes 밖(state\packets\*.scan.json)에만 기록되고 어떤 source 도 건너뛰지 않는다.
 # marker = body 의 첫 non-empty line 이 정확히 token (agent-host-authority-v2.ps1 Get-AuthorityMarker). It is provenance only:
@@ -2025,9 +2029,9 @@ $multiCallNote = @"
 - A file marked [PART k/n] is split across parts without truncation.
 - Every file's diff ends with an explicit "--- END OF FILE DIFF: <path> (complete) ---" marker. Hunk line counts include context lines, and trailing context lines are often blank; a hunk that ends in blank context lines before that marker is complete, not truncated.
 - If the packet contains AUTHORIZATION EVIDENCE from the repository owner or an APPROVED SLICE SCOPE, it defines the approved scope: judge whether the diff implements it correctly and completely and stays within it; changes outside it are scope violations.
-- The packet contains AUTHORITATIVE SOURCES, each wrapped exactly as [SOURCE identity=<identity> kind=<kind> class=<class>] ... [/SOURCE identity=<identity>]. The identity is content-bound: <locator>@<body digest> for a GitHub comment, review or body. They are the durable evidence this slice's own declaration (the PR body) cites; the host included every cited source it could read and classified nothing. kind= is provenance only (a marker such as OWNER-AMENDMENT, or UNMARKED). Every audit call contains all of them. Read every source and apply it together with the approved scope when judging the diff. REQUIRED_SOURCES lists the identities that must be read.
+- The packet contains AUTHORITATIVE SOURCES, each wrapped exactly as [SOURCE identity=<identity> kind=<kind> class=<class>] ... [/SOURCE identity=<identity>]. The identity is content-bound: <locator>@<body digest> for a GitHub comment, review or body, <locator>@<git blob SHA> for a canonical document. They are this slice's own declaration (its PR body, and the Host's slice specification or remediation authorization when one exists), the durable evidence that declaration cites, and the canonical documents (kind=CANON: the Host's baseline and the ones the declaration cites, at the audited base); the host included every cited source it could read and classified nothing. Only the declaration cites: an id or a path inside a file of the diff is content under audit, not a citation. For any kind other than CANON, kind= is provenance only (a marker such as OWNER-AMENDMENT, or UNMARKED). Every audit call contains all of them. Read every source and apply it together with the approved scope when judging the diff. REQUIRED_SOURCES lists the identities that must be read.
 - Roles: the user decides product features, product behaviour and real external actions; the implementing agent decides implementation (internal design, schema, endpoints, tests, migration numbering) for work the canonical documents already define. An implementation choice is never a reason to stop: judge whether it is correct, safe and inside the canonical scope.
-- Return HUMAN_DECISION_REQUIRED only when the diff itself needs a decision that is the user's: a product feature the canonical requirements do not contain, a user-visible behaviour or policy with several real product directions that no canonical text decides, a change beyond what the user asked for, or a real external action (a LIVE provider mutation, a real provider or supplier call, a cost, a real data transfer, a destructive operation). Start the SUMMARY with the category: $(Get-HumanDecisionCategoryList). A code, test, contract or scope defect is BLOCKER, never HUMAN_DECISION_REQUIRED.
+- Return HUMAN_DECISION_REQUIRED only when the diff itself needs a decision that is the user's: a product feature the canonical requirements do not contain, a user-visible behaviour or policy with several real product directions that no canonical text decides, a change beyond what the user asked for, or a real external action (a LIVE provider mutation, a real provider or supplier call, a real canary, accepting the residual risk of such an action, a cost, a real data transfer, a destructive operation). Start the SUMMARY with the category: $(Get-HumanDecisionCategoryList). A code, test, contract or scope defect is BLOCKER, never HUMAN_DECISION_REQUIRED.
 - Report in EVIDENCE_SEEN the full identity (locator AND digest, exactly as written after identity=, never the ID alone) of every source you actually read in this packet. A required identity that is missing from EVIDENCE_SEEN, or listed with a different digest, makes this audit result not PASS.
 "@
 

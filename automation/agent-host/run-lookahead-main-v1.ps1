@@ -264,8 +264,12 @@ if ($config.track -and $config.track.name) {
     $trackNote = @"
 TRACK:
 This Host runs the track "$($config.track.name)" only: $($config.track.scope)
-Select the next incomplete canonical step OF THIS TRACK. Work that belongs to another track is not yours to select,
-even when it comes earlier in the roadmap; if this track has nothing left, DECISION=DONE.
+Select the next incomplete canonical step OF THIS TRACK. Work that belongs to another track is not yours to build.
+The canonical order still binds across tracks: if this track's next step depends, in the canonical documents, on a
+step of another track that is not complete (for example an earlier step of the first vertical, ROADMAP §12), do not
+skip it: DECISION=HOLD with HOLD_CATEGORY=EARLIER_STEP_INCOMPLETE and the step it waits for. That is a technical hold:
+this Host waits for the other track. A track only runs ahead of another where the canonical documents make its work
+independent of that other track's open steps. If this track has nothing left, DECISION=DONE.
 
 "@
 }
@@ -301,7 +305,9 @@ WHO DECIDES WHAT (ADR-0022):
   GPT and Claude audits verify those choices. A missing implementation detail is never a reason to hold.
 - The user already authorized continuous execution of the canonically defined work. A canonical sentence that asks
   for a separate per-step authorization, a kickoff or an architect sign-off for work of that kind is satisfied by
-  that standing authority. It still stands when what it gates is a real external action.
+  that standing authority. It still stands when what it gates is one of the user's decisions: a real external
+  action, a product feature outside the canonical requirements, an undecided product direction, a change beyond the
+  user's requirements, or the user's own hold.
 
 DECISION=PROCEED when ALL of these hold:
 1. The canonical documents define the step: what it is for and how it is accepted. They need not spell out its design.
@@ -330,7 +336,7 @@ NEXT_MAIN=$mainHead
 DECISION=<PROCEED|HOLD|DONE>
 SLICE_ID=<short-kebab-id or NONE>
 SLICE_TITLE=<one line>
-HOLD_CATEGORY=<NONE|$(Get-HumanDecisionCategoryList)|NEXT_UNCLEAR>
+HOLD_CATEGORY=<NONE|$(Get-HumanDecisionCategoryList)|EARLIER_STEP_INCOMPLETE|NEXT_UNCLEAR>
 HOLD_REASON=<one line with file:section evidence, or NONE>
 CANONICAL_SOURCES=<file:section references that fix scope and order>
 ALLOWED_PATHS=<comma-separated repository path prefixes where the slice lives (an estimate; the implementer may need more), or NONE>
@@ -457,8 +463,8 @@ documents/rules/, documents/roadmap/ROADMAP.md §12/§14, documents/architecture
 relevant documents/decisions/adr/*, documents/acceptance/*).
 $trackNote
 AGREE when ALL hold:
-1. It is the next incomplete step of this track in canonical order, and no real external action or acceptance that it
-   depends on is still open before it.
+1. It is the next incomplete step of this track in canonical order, and no step it depends on in the canonical
+   documents — of this track or of another, a real external action or acceptance included — is still open before it.
 2. The canonical documents define what it is for and how it is accepted. Implementation detail (design, schema,
    endpoint shape, paths) is the implementer's to decide and is not a reason to disagree.
 3. It adds no product feature outside the canonical requirements and needs no undecided product direction.

@@ -98,10 +98,10 @@ identity.
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `1ed00eb96c0a0514580e7cdd1dd88f9fe2b4d433a095db4cfb243a17840ca712` |
-| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `50eae876d85792b93777a53e0b670d744311eac915fe5813591c6b2429ea3651` |
+| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `fb4851603408ad239d1cb4ea6ca5583e26d4f59d2db50c96c838feb89ee7071b` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
 | `run-full-audit-v1.ps1` | post-merge main audit | `7c6c9cfecfd4d810dbf346e1a988ea4008a989c21e3fe68a49f82027d6738c37` |
-| `run-lookahead-main-v1.ps1` | next-slice selector | `6e07b517ea2d425609db4767421f2e3f6d575272a1ac0b8da6c9350aa41329c9` |
+| `run-lookahead-main-v1.ps1` | next-slice selector | `a8b7dac0bafb24358c891ed4aa0fd02cc24229c271c0717a9b7fa611e012142d` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
 | `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `590afff2475162c83ef50d81b76f247419a9ec0fc47a325c8f50e9ed9ea37cd7` |

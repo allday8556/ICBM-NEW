@@ -645,7 +645,10 @@ the PR merged, so a restart cannot skip it.
 canonical ROADMAP on that fresh main and starts the next canonical slice of its track. One Host runs
 one track; parallel tracks run as separate Host directories, each with its own state, worktrees,
 PR, packet, audit identity and merge. A track whose next step is one of the user's decisions stops
-with `HUMAN_DECISION_REQUIRED`; the other tracks go on.
+with `HUMAN_DECISION_REQUIRED`; the other tracks go on. Tracks never reorder the canon: a track whose
+next step depends on an incomplete step of another track waits (`EARLIER_STEP_INCOMPLETE`, a
+technical hold) instead of skipping it, and a track runs ahead only where the canonical documents
+make its work independent of the other track's open steps.
 
 **A merge moves main, so it changes the accepted code SHA.** Every exact-main proof bound to the
 previous main is stale for the new one, among them the Gate 3 visual acceptance (ADR-0018 G3-31).
