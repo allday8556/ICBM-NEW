@@ -9,8 +9,12 @@ forgotten while a request carrying it would still be accepted.
   entry is never evicted to make room.
 - It lives in this process only: no database table and no file. A restart empties it, which is
   accepted — the timestamp window still bounds what a replay could be.
+- It is safe to call from several threads. The policy route runs in the server's thread pool, so
+  two requests carrying one nonce can arrive together; the check and the insert are one step
+  under a lock, and exactly one of them is accepted.
 """
 
+import threading
 from datetime import datetime, timedelta
 
 from app.platform.core.clock import Clock
@@ -40,23 +44,29 @@ class NonceCache:
         self._ttl = timedelta(seconds=ttl_s)
         self._capacity = capacity
         self._seen: dict[str, dict[str, datetime]] = {}
+        self._lock = threading.Lock()
 
     def consume(self, pairing_id: str, nonce: str) -> None:
         """Record one nonce as used, or refuse it as a replay or because the cache is full."""
-        now = self._clock.now()
-        live = self._seen.setdefault(pairing_id, {})
-        for known in [key for key, expires in live.items() if expires <= now]:
-            del live[known]
-        if nonce in live:
-            raise NonceReplayed("EXTENSION_NONCE_REPLAYED", "the request nonce was already used")
-        if len(live) >= self._capacity:
-            raise NonceCacheFull(
-                "EXTENSION_NONCE_CACHE_FULL", "too many requests are inside the replay window"
-            )
-        live[nonce] = now + self._ttl
+        with self._lock:
+            now = self._clock.now()
+            live = self._seen.setdefault(pairing_id, {})
+            for known in [key for key, expires in live.items() if expires <= now]:
+                del live[known]
+            if nonce in live:
+                raise NonceReplayed(
+                    "EXTENSION_NONCE_REPLAYED", "the request nonce was already used"
+                )
+            if len(live) >= self._capacity:
+                raise NonceCacheFull(
+                    "EXTENSION_NONCE_CACHE_FULL", "too many requests are inside the replay window"
+                )
+            live[nonce] = now + self._ttl
 
     def size(self, pairing_id: str) -> int:
-        return len(self._seen.get(pairing_id, {}))
+        with self._lock:
+            return len(self._seen.get(pairing_id, {}))
 
     def clear(self) -> None:
-        self._seen.clear()
+        with self._lock:
+            self._seen.clear()

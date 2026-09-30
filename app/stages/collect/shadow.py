@@ -184,6 +184,7 @@ DryRunState = Literal["NO_BUNDLE", "COMPARED", "COMPARE_FAILED"]
 # The Adaptive result of a run for which the supplier has no reviewed bundle enabled. It is not a
 # comparison PASS, ``VALIDATED``, ``SHADOW`` or ``ACTIVE``, and says nothing about extraction.
 NO_BUNDLE: DryRunState = "NO_BUNDLE"
+COMPARE_FAILED: DryRunState = "COMPARE_FAILED"
 
 
 @dataclass(frozen=True)

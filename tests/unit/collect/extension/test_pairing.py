@@ -3,6 +3,9 @@ E1 specification 5907009512 §2.2)."""
 
 import base64
 import json
+import threading
+import time
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -265,10 +268,75 @@ def test_the_cache_is_memory_only_and_a_restart_empties_it(clock: FakeClock) -> 
     first = NonceCache(clock)
     first.consume("p", "a")
     # A new process holds a new cache: nothing was written anywhere it could be read back from.
-    assert vars(first).keys() == {"_clock", "_ttl", "_capacity", "_seen"}
+    assert vars(first).keys() == {"_clock", "_ttl", "_capacity", "_seen", "_lock"}
     restarted = NonceCache(clock)
     restarted.consume("p", "a")
     with pytest.raises(ValueError):
         NonceCache(clock, ttl_s=0)
     with pytest.raises(ValueError):
         NonceCache(clock, capacity=0)
+
+
+class _SlowClock:
+    """A clock that takes a moment to answer: it holds every caller inside ``consume`` between
+    the start of the check and the insert, which is the window an unsynchronized cache loses."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        self._clock = clock
+
+    def now(self) -> datetime:
+        time.sleep(0.01)
+        return self._clock.now()
+
+
+def test_one_nonce_presented_by_many_threads_is_accepted_exactly_once(clock: FakeClock) -> None:
+    # GPT audit 5365019650 B-3: the policy route runs in a thread pool, so the same signed
+    # request can arrive twice at once. Exactly one is accepted; every other is a replay.
+    threads = 16
+    for round_number in range(5):
+        cache = NonceCache(_SlowClock(clock))  # type: ignore[arg-type]
+        gate = threading.Barrier(threads)
+        outcomes: list[str] = []
+
+        def present(
+            cache: NonceCache = cache,
+            gate: threading.Barrier = gate,
+            outcomes: list[str] = outcomes,
+        ) -> None:
+            gate.wait()
+            try:
+                cache.consume("p", "same-nonce")
+            except NonceReplayed:
+                outcomes.append("replayed")
+            else:
+                outcomes.append("accepted")
+
+        workers = [threading.Thread(target=present) for _ in range(threads)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        assert sorted(outcomes) == ["accepted"] + ["replayed"] * (threads - 1), round_number
+        assert cache.size("p") == 1
+
+
+def test_many_threads_never_take_the_cache_over_its_bound(clock: FakeClock) -> None:
+    capacity, threads = 4, 16
+    cache = NonceCache(_SlowClock(clock), capacity=capacity)  # type: ignore[arg-type]
+    gate = threading.Barrier(threads)
+    accepted: list[int] = []
+
+    def present(index: int) -> None:
+        gate.wait()
+        try:
+            cache.consume("p", f"nonce-{index}")
+        except NonceCacheFull:
+            return
+        accepted.append(index)
+
+    workers = [threading.Thread(target=present, args=(i,)) for i in range(threads)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert len(accepted) == capacity == cache.size("p")

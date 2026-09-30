@@ -21,10 +21,12 @@ from app.container import Container, build_container
 from app.platform.core.errors import AppError
 from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
+from app.stages.collect.adaptive.shadow import dry_run as dry_run_module
 from app.stages.collect.adaptive.store.gate import build_supplier_gate
 from app.stages.collect.extension.capture import CaptureEnvelope
 from app.stages.collect.extension.policy import POLICY_FILE
 from app.stages.collect.extension.service import (
+    EXTENSION_ADAPTIVE_COMPARE_FAILED,
     EXTENSION_CAPTURE_BUFFER_MISSING,
     EXTENSION_CAPTURE_JOB,
     EXTENSION_CAPTURE_POLICY,
@@ -409,6 +411,48 @@ def test_an_enabled_bundle_is_compared_in_memory_and_nothing_is_written(
         assert run.frozen is None
         states = rows(config, "SELECT DISTINCT to_state FROM adaptive_profile_transitions")
         assert ("ACTIVE",) not in states
+
+
+def _boom(*_: Any, **__: Any) -> Any:
+    raise RuntimeError("synthetic evaluation failure")
+
+
+@pytest.mark.parametrize("where", ["inside-the-comparer", "escaped-from-the-step"])
+def test_a_dry_run_that_cannot_compare_fails_the_run(
+    config: AppConfig,
+    clock: FakeClock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    where: str,
+) -> None:
+    # GPT audit 5365019650 B-2; E1 specification §3: step 12 is the Adaptive dry run, and any
+    # failure from step 9 on settles the run FAILED. NO_BUNDLE and a comparison are the only
+    # answers of a successful run.
+    reports: list[CaptureReport] = []
+    root = _policy_root(tmp_path, FAKE_POLICY)
+    with _fake_process(config, clock, root, reports.append) as app:
+        enabled_profile(app)
+        if where == "inside-the-comparer":
+            monkeypatch.setattr(dry_run_module, "extract", _boom)
+        else:
+            monkeypatch.setattr(app.extension_capture, "_dry_run", _boom)
+        before = table_counts(config)
+        accepted = app.extension_capture.ingest(
+            CaptureEnvelope.model_validate(_fake_envelope(root))
+        )
+        result = app.runner.run_next()
+        assert result is not None and result.state is JobState.DEAD
+        assert result.error_code == EXTENSION_ADAPTIVE_COMPARE_FAILED
+        run = app.collection.run(accepted.collection_run_id)
+        assert (run.outcome, run.detail) == (
+            CollectionOutcome.FAILED,
+            EXTENSION_ADAPTIVE_COMPARE_FAILED,
+        )
+        # No report of a successful comparison exists, and nothing was written or retried.
+        assert reports == []
+        assert untouched(before, table_counts(config)) == {}
+        assert count(config, "adaptive_shadow_records") == 0
+        assert app.runner.run_next() is None
 
 
 # ---------------------------------------------------------------- helpers

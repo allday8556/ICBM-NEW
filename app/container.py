@@ -51,7 +51,11 @@ from app.platform.db.migrate import head_revision
 from app.platform.system.diagnostics import DiagnosticsService
 from app.platform.system.execution_mode import ExecutionModeService
 from app.platform.system.readiness import ReadinessService
-from app.stages.collect.adaptive.engine.capture import CaptureRefused, capture_candidate
+from app.stages.collect.adaptive.engine.capture import (
+    CaptureRefused,
+    RegionClass,
+    capture_candidate,
+)
 from app.stages.collect.adaptive.engine.hooks import HookManifest
 from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAccounting
 from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
@@ -156,13 +160,33 @@ SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
 
 def _server_final_scan(html: str) -> tuple[str, ...]:
     """The server's own sanitizer and final scan of an extension capture (ADR-0019 §6; ADR-0017
-    §7.3 note): the capture owner's, unchanged, over exactly what arrived. It answers the refusal
-    — kinds and boundaries only, never a captured value — or nothing when the capture is clean."""
+    §7.3 note; owner amendment ``5909645067`` §1): the capture owner's, unchanged, over exactly
+    what arrived.
+
+    The pipeline goes on with the capture **as it arrived**, never with the sanitized candidate.
+    So the candidate is evidence only, and a capture is clean only when the sanitizer had nothing
+    to take out of it for privacy or security:
+
+    - a residual finding of the independent final scan refuses it;
+    - anything the sanitizer removed — a secret, private, contact, session, account or
+      user-entered value, an event handler, executable code, a URL query — refuses it;
+    - a private region the sanitizer excluded refuses it.
+
+    A navigation or non-authoritative region the sanitizer sets aside is not private material and
+    is not a finding. The answer is kinds and boundaries only, never a captured value; empty means
+    clean.
+    """
     try:
-        capture_candidate(html)
+        candidate = capture_candidate(html)
     except CaptureRefused as refused:
         return (str(refused),)
-    return ()
+    findings = [f"SANITIZER_REMOVED:{entry[0]}@{entry[1]}" for entry in candidate.removals]
+    findings.extend(
+        f"SANITIZER_EXCLUDED:{entry[1]}@{entry[0]}"
+        for entry in candidate.excluded
+        if entry[1] == RegionClass.PRIVATE.value
+    )
+    return tuple(findings)
 
 
 @dataclass

@@ -14,7 +14,8 @@ owner does the rest::
     10 the same ``DocumentView``
     11 the supplier's canonical extractor, in memory
     12 the Adaptive dry run: a comparison, or ``NO_BUNDLE``
-    13 the run settles ``NO_REVISION``; any failure from step 9 on settles it ``FAILED``
+    13 the run settles ``NO_REVISION``; any failure from step 9 on — a dry run that could
+       not compare included — settles it ``FAILED``
 
 Steps 5–8 never open a run. Steps 9–13 always settle the run that was opened. Nothing is appended:
 no ``ProductFactsRevision``, no source asset, no Adaptive row. ``RECORDED`` is unreachable here.
@@ -67,7 +68,13 @@ from app.stages.collect.extension.policy import (
 from app.stages.collect.facts import CollectedFacts
 from app.stages.collect.models import CollectionOutcome, TransportKind
 from app.stages.collect.runs import CollectionRunRecord, CollectionRunStore, RunProvenance
-from app.stages.collect.shadow import NO_BUNDLE, DryRunInput, DryRunResult, DryRunStep
+from app.stages.collect.shadow import (
+    COMPARE_FAILED,
+    NO_BUNDLE,
+    DryRunInput,
+    DryRunResult,
+    DryRunStep,
+)
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
     CollectionProfile,
@@ -94,11 +101,16 @@ EXTENSION_CAPTURE_BUFFER_MISSING = "EXTENSION_CAPTURE_BUFFER_MISSING"
 EXTENSION_CAPTURE_POLICY_CHANGED = "EXTENSION_CAPTURE_POLICY_CHANGED"
 EXTENSION_CAPTURE_POLICY_VIOLATION = "EXTENSION_CAPTURE_POLICY_VIOLATION"
 EXTENSION_FINAL_SCAN_REFUSED = "EXTENSION_FINAL_SCAN_REFUSED"
+# The ``detail`` of a run whose Adaptive dry run could not evaluate or compare its bundle. A
+# failure of step 12 is a failure of the run; only ``NO_BUNDLE`` and a comparison are answers.
+EXTENSION_ADAPTIVE_COMPARE_FAILED = "EXTENSION_ADAPTIVE_COMPARE_FAILED"
 UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
 
-# The server's own final scan of a capture: the findings, as kinds and boundaries only. Empty
-# means clean. The container hands in the capture owner's sanitizer and final scan, so this
-# package never depends on the Adaptive packages.
+# The server's own final gate of a capture: the findings, as kinds and boundaries only. Empty
+# means the capture owner's sanitizer had nothing private or secret to take out of it and its
+# final scan found no residual — only then may the capture go on as it arrived. The container
+# hands in the capture owner's sanitizer and final scan, so this package never depends on the
+# Adaptive packages.
 FinalScan = Callable[[str], Sequence[str]]
 
 
@@ -405,7 +417,7 @@ class ExtensionCaptureService:
         if findings:
             raise ExtensionCaptureFailed(
                 EXTENSION_FINAL_SCAN_REFUSED,
-                "the server's final scan found residual secret or private material",
+                "the server's sanitizer and final scan found secret or private material",
                 details={"findings": len(findings)},
             )
         # 10. The same DocumentView, from what the browser observed and nothing else.
@@ -456,6 +468,13 @@ class ExtensionCaptureService:
                 candidates=candidates,
             )
         )
+        if adaptive.state == COMPARE_FAILED:
+            # E1 specification §3: any failure from step 9 on settles the run FAILED.
+            raise ExtensionCaptureFailed(
+                EXTENSION_ADAPTIVE_COMPARE_FAILED,
+                "the Adaptive dry run could not evaluate or compare its bundle",
+                details=dict(adaptive.summary or {}),
+            )
         return CaptureReport(
             collection_run_id=run_id,
             supplier_key=supplier_key,
@@ -495,7 +514,7 @@ class ExtensionCaptureService:
                 "collect.extension_dry_run_escaped",
                 extra={"collection_run_id": dry_run.collection_run_id},
             )
-            return DryRunResult("COMPARE_FAILED", None, {"failure": type(failure).__name__})
+            return DryRunResult(COMPARE_FAILED, None, {"failure": type(failure).__name__})
 
     # ------------------------------------------------------------------ common
 

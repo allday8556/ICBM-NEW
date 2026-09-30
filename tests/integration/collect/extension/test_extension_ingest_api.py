@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import AppConfig
-from app.container import Container
+from app.container import Container, _server_final_scan
 from app.stages.collect.extension.pairing import (
     BODY_DIGEST_HEADER,
     NONCE_HEADER,
@@ -195,6 +195,57 @@ def test_private_material_inside_the_scope_still_refuses(
     assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
     assert (run["revision_id"], run["transport_kind"]) == (None, "EXTENSION")
     assert untouched(before, table_counts(config)) == {}
+
+
+IN_SCOPE = '<div class="xans-product-action">'
+
+
+@pytest.mark.parametrize(
+    "addition",
+    [
+        # GPT audit 5365019650 B-1: a private region with no phone, e-mail or token in it. The
+        # sanitizer takes it out and its final scan then finds nothing, so only the gate sees it.
+        '<div class="member-benefit"><p>회원 전용 안내</p></div>',
+        '<div id="mypage-summary"><p>등급 안내</p></div>',
+        # What the sanitizer removes rather than excludes: a query on a URL it would keep.
+        '<img src="/web/product/extra/synthetic-9001.jpg?v=20260930">',
+    ],
+    ids=["private-class-region", "private-id-region", "url-query"],
+)
+def test_a_capture_the_sanitizer_would_have_to_clean_fails_the_run(
+    client: TestClient, config: AppConfig, paired: PairingRecord, addition: str
+) -> None:
+    # Owner amendment 5909645067 §1: the pipeline goes on with the capture as it arrived, so a
+    # capture the capture owner's sanitizer had to take anything private or secret out of never
+    # reaches the extractor. It sits inside the product scope, where the browser cut kept it.
+    assert BODY.count(IN_SCOPE) == 1
+    before = table_counts(config)
+    response = post_capture(
+        client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, addition + IN_SCOPE)))
+    )
+    assert response.status_code == 202
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
+    assert (run["revision_id"], run["transport_kind"]) == (None, "EXTENSION")
+    assert untouched(before, table_counts(config)) == {}
+
+
+def test_the_final_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
+    gate = _server_final_scan
+    assert gate(frame()) == ()
+    private = gate(frame(body=BODY + '<div class="member-benefit"><p>회원 전용 안내</p></div>'))
+    assert private == ("SANITIZER_EXCLUDED:PRIVATE@div#.member-benefit",)
+    removed = gate(frame(body=BODY + '<img src="/a.jpg?session=synthetic-value">'))
+    assert removed == ("SANITIZER_REMOVED:URL_QUERY:src@img#.",)
+    residual = gate(frame(body=BODY + "<p>문의 010-0000-0000</p>"))
+    assert len(residual) == 1 and residual[0].startswith("residual secret or private material")
+    for findings in (private, removed, residual):
+        assert all(
+            "회원" not in f and "synthetic-value" not in f and "010-" not in f for f in findings
+        )
+    # A navigation or non-authoritative region is not private material: the sanitizer sets it
+    # aside, and that is not a finding.
+    assert gate(frame(body=BODY + '<div class="banner"><p>안내</p></div><nav>메뉴</nav>')) == ()
 
 
 def test_a_capture_the_policy_does_not_allow_fails_the_run(

@@ -9,7 +9,8 @@ canonical extractor read from it, and it answers one of three things:
   S7), so a supplier whose switch is off, or whose enabled bundle this engine can no longer run,
   has none. ``NO_BUNDLE`` is never a comparison PASS, ``VALIDATED``, ``SHADOW`` or ``ACTIVE``.
 - ``COMPARED`` — the enabled bundle was evaluated by the pure engine and compared in memory.
-- ``COMPARE_FAILED`` — the evaluation raised; the failure is contained and named by its type.
+- ``COMPARE_FAILED`` — the evaluation raised; the failure is named by its type, and the
+  extension owner settles the run ``FAILED`` on it. It is never a successful run.
 
 **It writes nothing.** It reads the switch and the bundle, and it never calls the shadow evidence
 owner: no shadow record, no evidence window, no ledger event and no profile transition. A
@@ -28,7 +29,7 @@ from app.stages.collect.adaptive.engine.hooks import HookManifest
 from app.stages.collect.adaptive.shadow.compare import compare
 from app.stages.collect.adaptive.shadow.switch import ShadowSwitch, running_bundle
 from app.stages.collect.adaptive.store.store import AdaptiveProfileStore
-from app.stages.collect.shadow import NO_BUNDLE, DryRunInput, DryRunResult
+from app.stages.collect.shadow import COMPARE_FAILED, NO_BUNDLE, DryRunInput, DryRunResult
 
 logger = logging.getLogger("icbm.collect.shadow")
 
@@ -80,7 +81,7 @@ class DryRunComparer:
                 },
             )
             return DryRunResult(
-                "COMPARE_FAILED", frozen.bundle_key, {"failure": type(failure).__name__}
+                COMPARE_FAILED, frozen.bundle_key, {"failure": type(failure).__name__}
             )
         return DryRunResult(
             "COMPARED",
