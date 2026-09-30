@@ -73,15 +73,9 @@ class ReconcileLookupNotAdoptedError(AppError):
 class SmartStoreCreateSender:
     """The adopted CREATE handoff (``POST /v2/products``), through the registry-gated caller."""
 
-    def __init__(
-        self,
-        caller: SmartStoreEndpointCaller,
-        bearer: "BearerSource",
-        projector: Callable[[Mapping[str, Any]], Any] = product.project,
-    ) -> None:
+    def __init__(self, caller: SmartStoreEndpointCaller, bearer: "BearerSource") -> None:
         self._caller = caller
         self._bearer = bearer
-        self._project = projector
 
     def available(self) -> bool:
         """Whether the provider CREATE contract is adopted at all.
@@ -175,12 +169,22 @@ class SmartStoreCreateSender:
             details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},
         )
 
+    def _projection(self, payload: Mapping[str, Any]) -> object:
+        """The one projection a CREATE is ever sent from: the adopted wire projection of the frozen
+        Snapshot itself (``product.project``).
+
+        Nothing can hand this sender a projection: whether a request is complete is decided only by
+        the gaps ``product.project`` records from the Snapshot, never by a caller's declaration. At
+        this adoption every projection carries gaps, so every CREATE is refused here.
+        """
+        return product.project(payload)
+
     def _document(
         self, payload: Mapping[str, Any], listing_identity: str
     ) -> tuple[CreateHandoff | None, product.CreateDocument | None]:
         """The typed CREATE request of this Snapshot, or the local refusal that replaces it."""
         try:
-            projection = self._project(payload)
+            projection = self._projection(payload)
         except product.WireContractError as refused:
             # The Snapshot violates a documented provider rule, or is not a registration payload
             # at all. Either way no request exists and nothing left the machine.
@@ -192,7 +196,16 @@ class SmartStoreCreateSender:
                 ),
                 None,
             )
-        if not projection.sendable:
+        if not isinstance(projection, product.WireProjection):
+            return (
+                _local_refusal(
+                    "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION",
+                    {},
+                    reason="the projection is not the adopted wire projection",
+                ),
+                None,
+            )
+        if projection.gaps:
             return (
                 _local_refusal(
                     "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE",
@@ -204,8 +217,8 @@ class SmartStoreCreateSender:
             )
         try:
             # Only the wire projection may build a request, and only through the validated, frozen
-            # document type — re-proven here, because the type's constructor proves nothing and the
-            # projector is injectable. Anything else is a broken projector, not a request.
+            # document type — re-proven here, because the type's constructor proves nothing.
+            # Anything else is a broken projection, not a request.
             document = product.verified(projection.document)
         except product.WireContractError:
             return (

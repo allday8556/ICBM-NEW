@@ -86,6 +86,7 @@ from tests.support.register_support import (
     ready_item,
     request,
 )
+from tests.support.smartstore_create_support import DeclaredProjectionSender, declared
 
 pytestmark = pytest.mark.integration
 
@@ -755,24 +756,17 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
     )
 
 
-class _Sendable:
-    """A declared-sendable projection of a real, validated document the adopted contract builds.
+def _sendable(payload: Mapping[str, Any]) -> smartstore_product.WireProjection:
+    """A declared gap-free projection of a real, validated document the adopted contract builds.
 
-    The document is a genuine :class:`CreateDocument`: the caller accepts nothing else, so even a
-    test cannot hand the wire an unchecked mapping. The real projection refuses every unit at this
-    adoption — required values stay uncaptured or unowned and none of them is ever invented
-    (`smartstore.product`) — and that refusal is pinned in the adapter suites. Declaring
-    it sendable here is what lets the **domain owner's** behaviour be exercised against the real
-    sender and the real registry-gated caller.
+    The document is a genuine :class:`CreateDocument`, bound to the frozen Snapshot's own listing
+    identity as the real projection is; the wire boundary re-validates it. The real projection
+    refuses every unit at this adoption — required values stay uncaptured or unowned and none of
+    them is ever invented (`smartstore.product`) — and that refusal is pinned in the adapter suites.
+    Declaring it here, through the test-only sender, is what lets the **domain owner's** behaviour
+    be exercised against the real sender logic and the real registry-gated caller.
     """
-
-    sendable = True
-    gaps: tuple[str, ...] = ()
-
-    def __init__(self, payload: Mapping[str, Any]) -> None:
-        # Bound to the frozen Snapshot's own listing identity, as the real projection is: the
-        # sender refuses a document of any other identity before a transport exists.
-        self.document = _wire_document(str(payload["listing_identity"]))
+    return declared(_wire_document(str(payload["listing_identity"])))
 
 
 def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx.Request]]:
@@ -784,10 +778,10 @@ def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx
             raise answer
         return answer
 
-    sender = SmartStoreCreateSender(
+    sender = DeclaredProjectionSender(
         caller=SmartStoreEndpointCaller(transport=httpx.MockTransport(transport)),
         bearer=_Bearer,
-        projector=_Sendable,
+        projection=_sendable,
     )
     return sender, seen
 

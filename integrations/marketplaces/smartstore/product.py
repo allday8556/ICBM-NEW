@@ -421,7 +421,7 @@ def verified(document: object) -> CreateDocument:
     """The same document, re-proven to be a validated projection output — or a refusal.
 
     :class:`CreateDocument` is a plain frozen dataclass, so its constructor alone proves nothing: a
-    document built directly, or handed over by an injected projector, could carry any JSON. The wire
+    document built directly, outside :func:`project`, could carry any JSON. The wire
     boundary therefore re-runs the whole adopted-contract validation over the document's own body
     and identity and requires the canonical text to be exactly what :func:`create_document` would
     freeze. Only a document that survives that is ever encoded onto the wire.

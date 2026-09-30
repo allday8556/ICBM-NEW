@@ -31,6 +31,7 @@ from integrations.marketplaces.smartstore.caller import (
 from integrations.marketplaces.smartstore.execution import SmartStoreCreateSender
 from integrations.marketplaces.smartstore.registry import EndpointId, resolve
 from integrations.marketplaces.smartstore.retention import retain
+from tests.support.smartstore_create_support import DeclaredProjectionSender, declared
 
 BEARER = "fixture-access-token-Qx7"
 BASE = "https://api.commerce.naver.com/external"
@@ -97,13 +98,8 @@ def _sender(provider: Provider, *, bearer: object = Bearer()) -> SmartStoreCreat
     values uncaptured), and that refusal is pinned separately below and in the adapter suite.
     """
 
-    class Sendable:
-        sendable = True
-        document = FROZEN
-        gaps: tuple[str, ...] = ()
-
-    return SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: bearer, projector=lambda payload: Sendable()
+    return DeclaredProjectionSender(
+        caller=_caller(provider), bearer=lambda: bearer, projection=lambda payload: declared(FROZEN)
     )
 
 
@@ -200,8 +196,8 @@ def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport(
         document: ClassVar[dict[str, Any]] = DOCUMENT
         gaps: tuple[str, ...] = ()
 
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Raw()
+    sender = DeclaredProjectionSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projection=lambda payload: Raw()
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
     assert provider.requests == []
@@ -245,13 +241,10 @@ def test_a_directly_built_document_never_reaches_the_wire(forged: product.Create
     assert refused.value.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
     assert provider.requests == []
 
-    class Injected:
-        sendable = True
-        document = forged
-        gaps: tuple[str, ...] = ()
-
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Injected()
+    sender = DeclaredProjectionSender(
+        caller=_caller(provider),
+        bearer=lambda: Bearer(),
+        projection=lambda payload: declared(forged),
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=forged.listing_identity)
     assert provider.requests == []
@@ -382,13 +375,11 @@ def test_the_sanitized_request_is_the_document_and_carries_no_credential() -> No
 def test_a_request_carrying_secret_material_never_reaches_the_transport() -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 
-    class Leaky:
-        sendable = True
-        document = product.create_document(IDENTITY, _origin(name="Bearer abcdefghijklmnop"))
-        gaps: tuple[str, ...] = ()
-
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Leaky()
+    leaky = product.create_document(IDENTITY, _origin(name="Bearer abcdefghijklmnop"))
+    sender = DeclaredProjectionSender(
+        caller=_caller(provider),
+        bearer=lambda: Bearer(),
+        projection=lambda payload: declared(leaky),
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
     assert provider.requests == []
@@ -416,13 +407,9 @@ def test_a_document_of_another_listing_identity_never_reaches_the_transport() ->
 def test_an_unsendable_projection_never_reaches_the_transport() -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 
-    class NotSendable:
-        sendable = False
-        document = FROZEN
-        gaps = (product.GAP_SHOPPING_REGISTRATION,)
-
-    sender = SmartStoreCreateSender(
-        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: NotSendable()
+    unsendable = declared(FROZEN, gaps=(product.GAP_SHOPPING_REGISTRATION,))
+    sender = DeclaredProjectionSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projection=lambda payload: unsendable
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
     assert provider.requests == []
@@ -768,3 +755,14 @@ def test_the_seam_holds_no_resend_path_of_its_own() -> None:
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert not imported & {"time", "asyncio", "threading", "sched"}
+
+
+def test_the_production_sender_takes_no_projection() -> None:
+    # Whether a CREATE request is complete is decided only by the gaps the adopted projection
+    # records from the frozen Snapshot. The production sender therefore accepts no projection, no
+    # projector and no sendability claim from its caller: its only inputs are the registry-gated
+    # caller and the session source, and it always projects through ``product.project``.
+    parameters = list(inspect.signature(SmartStoreCreateSender.__init__).parameters)
+    assert parameters == ["self", "caller", "bearer"]
+    source = inspect.getsource(SmartStoreCreateSender._projection)
+    assert "product.project(payload)" in source
