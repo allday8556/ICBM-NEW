@@ -186,7 +186,10 @@ DRAFT implementation
 ```
 
 A BLOCKER from either auditor returns to the top on a new HEAD: repair, new packet, both audits
-again. The loop ends on a DUAL PASS or on a real `HUMAN_DECISION_REQUIRED`, never on a count.
+again. A slice ends on its DUAL PASS and merge, or on a real `HUMAN_DECISION_REQUIRED`. The number
+of BLOCKERs and repairs never ends it and never hands it to the user. The one other way a run ends
+is the cost circuit breaker of §5.1: a technical hold that keeps returning on the same state ends
+the run as `TECHNICAL_HOLD_EXHAUSTED`, which is a report and asks for no decision.
 
 ## 2. Identity
 
@@ -571,7 +574,8 @@ Must land as one safe unit:
 
 Do not deploy packet unification without completeness and reproducibility in the same slice.
 
-Required discovery tests (V3; `automation/agent-host/tests/`, pinned by the fixture test):
+Required discovery tests (V3; `automation/agent-host/tests/`, pinned by the fixture test; every
+fixture scenario pins its ending, and the runner fails on a failed or missing pin):
 - a packet is complete with no `[OWNER-AMENDMENT]` and no classification record anywhere;
 - a legacy `[OWNER-AMENDMENT]` in a scanned stream, classified or not, never produces a hold;
 - no `scope: PR #<N>` record is needed for a canonical slice packet;

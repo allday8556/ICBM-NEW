@@ -1206,7 +1206,7 @@ $prHead = [string]$pr.headRefOid
 #
 # A count never hands the PR to the user. After repair_loop.max_cycles attempts the fixer stops repeating itself: every
 # later attempt is an INDEPENDENT RE-ANALYSIS, given the blockers the earlier attempts left, and told to take another
-# approach. The loop ends on DUAL PASS or on a real HUMAN_DECISION_REQUIRED, never on a number.
+# approach. The number of repairs never ends the loop and never hands it over (protocol §1, §5.1).
 # -------------------------------------------------
 
 $cycles = 0

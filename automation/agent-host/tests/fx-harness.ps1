@@ -1115,16 +1115,33 @@ try {
             $p1.labels = @(); $p1.state = "CLOSED"
             $global:FxChecks.v7_closed_same_slice_inactive_proceeds = Fx-Hold (Fx-Repair @{ ImplementNext = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            $dup = "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#1"
+            $expected = [ordered]@{
+                v1_branch_and_body_older_main = $dup; v1_implementer_prompts = 0; v2_body_only = $dup; v3_registry_only = $dup
+                v4_same_slice_other_base = "REPAIR_HOLD=SAME_SLICE_PR_OTHER_BASE:#1"; v5_open_pr_list_unreadable = "REPAIR_HOLD=OPEN_PR_LIST_UNREADABLE"
+                pr_creates_before_superseded = 0; v6_superseded_label_still_active = $dup; pr_creates_after_label = 0
+                v7_closed_same_slice_inactive_proceeds = "NEXT_PR=3"; pr_creates_total = 1
+            }
+            $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+            $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
         if ($Scenario -eq "i2-dup-legacy") {
             # same fixture against the frozen pre-alignment host: shows the real #142 → #146 duplicate
             $global:FxChecks.v1_branch_and_body_older_main = Fx-Hold (Fx-Repair @{ ImplementNext = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            # against this host the duplicate is refused; the frozen pre-alignment host is given with -SrcHost
+            $ok = ($global:FxChecks.v1_branch_and_body_older_main -eq "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#1" -and $global:FxChecks.pr_creates_total -eq 0)
+            $global:FxChecks.expect = if ($ok) { "PASS" } else { "FAIL:v1_branch_and_body_older_main" }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
         if ($Scenario -eq "i2-remediation") {
             [ordered]@{ main = $newMain; status = "BLOCKED"; policy = "full-audit-fx"; mode = "FULL" } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $hostDir "state\full-audit-state.json")
             $global:FxChecks.remediation_open_on_older_main = Fx-Hold (Fx-Repair @{ RemediateMain = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            $ok = ($global:FxChecks.remediation_open_on_older_main -eq "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#2" -and $global:FxChecks.pr_creates_total -eq 0)
+            $global:FxChecks.expect = if ($ok) { "PASS" } else { "FAIL:remediation_open_on_older_main" }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
     }
     if ($skipOrch) {
@@ -1220,6 +1237,28 @@ $orchestratorExpect = @{
     "packet-legacy-cache"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
     "packet-blocker-no-cache" = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
     "auto-next-scope"         = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1; lines = @("SCOPE_WIDENED=app/unrelated.py") }
+    "remediation-open-pr-guard" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_OPEN_PR_ALREADY_EXISTS"; merged = 1; human = $false; created = 0 }
+    "remediation-authorized"  = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1 }
+    "remediation-authorized-scope" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_SCOPE_OUTSIDE_THE_RULING"; merged = 1; human = $false; created = 0; lines = @("OUT_OF_AUTHORIZATION=app/unrelated.py") }
+    "remediation-auth-invalid" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_REMEDIATION_AUTHORIZATION_INVALID"; merged = 1; human = $false; created = 0 }
+    "remediation-claude-only" = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1 }
+    "remediation-fallback"    = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1; lines = @("(REMEDIATION_REGISTRY)") }
+    "auto-next-disputed"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "NEXT_HOLD_NEXT_SELECTION_DISPUTED"; merged = 1; human = $false; created = 0 }
+    "two-merges"              = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("AUDIT_MODE=DELTA") }
+    "two-merges-milestone"    = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=MILESTONE_BOUNDARY:M5->M6") }
+    "two-merges-periodic"     = @{ status = "COMPLETE"; merged = 2; human = $false }
+    "two-merges-escalate"     = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=ESCALATED:GPT_DELTA_CROSS_CUTTING") }
+    "two-merges-insufficient" = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=ESCALATED:GPT_DELTA_INSUFFICIENT") }
+    "guard-ci-failed"         = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "packet-evidence-omit"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-omit-claude"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "CLAUDE_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-evwrong"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-evidence-idonly"  = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-source-missing"   = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "packet-guard-digest"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-stream-perm"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:pr_reviews:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-stream-truncated" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_TRUNCATED:issue_comments:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-big"              = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
     "config-no-automerge"     = @{ status = "WAITING_FOR_MERGE_BY_CONFIG"; action = "DUAL_PASS_COMPLETE"; merged = 0; human = $false; merge_calls = 0 }
     "config-no-autonext"      = @{ status = "IDLE"; action = "AUTO_NEXT_DISABLED_BY_CONFIG"; merged = 1; human = $false; created = 0 }
 }

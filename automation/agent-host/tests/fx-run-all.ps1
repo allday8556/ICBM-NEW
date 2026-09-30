@@ -35,7 +35,8 @@ foreach ($s in $Scenarios) {
         "    key: $(@($r.key_lines) -join ' | ')"
         "    checks: $(if ($r.checks) { ($r.checks.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value) -join ';')" }) -join ' | ' })"
         "    EXPECT {0} = {1}" -f $s, $(if ($r.checks -and $r.checks.expect) { $r.checks.expect } else { "NOT_PINNED" })
-        if ($r.checks -and $r.checks.expect -and $r.checks.expect -ne "PASS") { $failedScenarios.Add($s) }
+        # a scenario with no pinned ending proves nothing, so it fails the run like a failed pin
+        if (-not ($r.checks -and $r.checks.expect -eq "PASS")) { $failedScenarios.Add($s) }
     }
     else {
         $failedScenarios.Add($s)
@@ -43,7 +44,7 @@ foreach ($s in $Scenarios) {
     }
 }
 
-# A pinned scenario that did not end as pinned, or one that produced no result, fails the run.
+# A scenario that did not end as pinned, has no pinned ending, or produced no result fails the run.
 if ($failedScenarios.Count -gt 0) {
     "FX_RUN=FAIL ($($failedScenarios -join ', '))"
     exit 1
