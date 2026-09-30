@@ -155,8 +155,8 @@ This inventory describes V2. V3 changes the control flow below; the rest of the 
 |---|---|
 | §6 classification record grammar (`Read-ClassificationRecord`, `scope: PR #<N>`, typed entries) | **SUPERSEDED.** Removed from run-audit-v1.1.ps1. No record is parsed; existing records are history. |
 | HOLD reasons `UNCLASSIFIED_MARKED_SOURCE`, `CLASSIFIED_SOURCE_DIGEST_CHANGED`, `CLASSIFICATION_CONFLICT`, `CLASSIFICATION_RECORD_*`, `HOST_MANIFEST_MAY_NOT_CLASSIFY` | **SUPERSEDED.** They no longer exist. A marker never holds a packet. |
-| packet sources = entries of a classification record | **SUPERSEDED.** Sources are the ids the slice declaration (the PR body) cites, in the scanned streams. |
-| host manifest `audit-sources-pr-<N>.json` required to designate an authority issue | optional. `Issue #<n>` in the PR body designates that issue's comments. |
+| packet sources = entries of a classification record | **SUPERSEDED.** Sources are what the slice declaration cites — the PR body, plus the Host's slice specification or remediation authorization when one exists — in the scanned streams, and the Host's baseline canon. |
+| host manifest `audit-sources-pr-<N>.json` required to designate an authority issue | optional. `Issue #<n>` in the declaration designates that issue's comments. |
 | `HUMAN_HOLD` as the status of every stop | **SUPERSEDED.** `HUMAN_DECISION_REQUIRED` (closed category list) or `TECHNICAL_HOLD` (retried by the supervisor). |
 | `MAX_REPAIR_CYCLES`, `SCOPE_EXPANSION_REQUIRED`, `NEW_SCHEMA_OR_MIGRATION_REQUIRED` stop the run | **SUPERSEDED.** Independent re-analysis; scope, migration and removal are reported for the auditors. |
 | fixer / implementer result `HUMAN_HOLD` | `HUMAN_DECISION_REQUIRED` with a category of the closed list; the old word is a technical decline. |
