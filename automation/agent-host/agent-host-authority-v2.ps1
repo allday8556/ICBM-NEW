@@ -1,10 +1,13 @@
-﻿# AGENT_HOST_PROTOCOL_V2 (main a0643e4) §3 — shared authority helpers for every Host script.
+﻿# AGENT_HOST_AUDIT_PROTOCOL §0.2, §3, §5.1 — shared authority helpers for every Host script.
 #
-#   Get-AuthorityMarker   : the deterministic marker grammar (§3 "Recognition grammar").
+#   Get-AuthorityMarker   : the deterministic marker grammar (§3 "Recognition grammar"). A marker is provenance:
+#                           it never makes a source a packet input and never holds a packet (ADR-0022).
 #   Invoke-GhWrite        : the single Host GitHub write path with the authority write guard (§3 "Authority write guard").
+#   Get-HoldClass         : the closed hold taxonomy (§5.1): HUMAN_DECISION_REQUIRED or TECHNICAL_HOLD.
+#   Get-EvidenceReferences: the ids a slice declaration cites, for referenced-evidence discovery (§3, §4).
 #
-# Dot-sourced by orchestrator-v1.3.ps1, run-audit-v1.1.ps1 and run-repair-v1.1.ps1.
-# This file has no state and makes no network call of its own.
+# Dot-sourced by orchestrator-v1.3.ps1, resume-orchestrator-v1.3.ps1, run-audit-v1.1.ps1, run-repair-v1.1.ps1 and
+# run-lookahead-main-v1.ps1. This file has no state and makes no network call of its own.
 
 $script:AuthorityMarkerTokens = @("[ARCHITECT-INSTRUCTION]", "[EVIDENCE-PACKET]", "[OWNER-AMENDMENT]")
 
@@ -169,4 +172,86 @@ function Invoke-GhWrite {
     }
 
     return [pscustomobject]@{ Refused = $false; Reason = ""; Output = $out; ExitCode = $code }
+}
+
+# -------------------------------------------------
+# Hold taxonomy (AGENT_HOST_AUDIT_PROTOCOL §5.1; ADR-0022 §3-§4)
+#
+# Exactly two classes stop a loop pass:
+#   HUMAN_DECISION_REQUIRED : a product decision or a real external action that only the user may decide. Closed list below.
+#   TECHNICAL_HOLD          : everything else. The Host recovers or retries by itself and never asks the user.
+#
+# The class is decided by the category, never by how often something failed. A hold reason is HUMAN_DECISION_REQUIRED
+# only when it names one of these categories as a whole "_"-separated token sequence.
+# -------------------------------------------------
+
+$script:HumanDecisionCategories = @(
+    "NEW_PRODUCT_FEATURE",          # A: a product feature the canonical requirements do not contain
+    "PRODUCT_DIRECTION_UNDECIDED",  # B: a user-visible behaviour, UX or policy with several real product directions
+    "BEYOND_USER_REQUIREMENT",      # C: a change that goes beyond what the user asked for
+    "LIVE",                         # D: a LIVE provider mutation
+    "PROVIDER_CALL",                # D: a real provider or marketplace call
+    "CANARY",                       # D: a real canary
+    "REAL_EXTERNAL_READ",           # D: a real supplier/provider read whose acceptance needs its own grant
+    "RESIDUAL_RISK_APPROVAL",       # D: accepting a residual risk of a real external action
+    "COST",                         # D: a payment or a cost
+    "EXTERNAL_DATA_TRANSFER",       # D: sending real data to an external service
+    "DESTRUCTIVE",                  # D: a destructive operation, a force-push, a branch deletion
+    "OWNER_HOLD"                    # the owner's own hold file on a PR (state\merge-hold-pr-<N>.json)
+)
+
+function Get-HoldClass {
+    param([AllowNull()][string]$Reason)
+
+    $r = "$Reason".ToUpperInvariant()
+
+    if ($r.Contains("HUMAN_DECISION_REQUIRED")) {
+        return "HUMAN_DECISION_REQUIRED"
+    }
+
+    foreach ($cat in $script:HumanDecisionCategories) {
+        if ($r -match "(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)") {
+            return "HUMAN_DECISION_REQUIRED"
+        }
+    }
+
+    return "TECHNICAL_HOLD"
+}
+
+# The closed category list as one prompt line, so every prompt and every parser uses the same words.
+function Get-HumanDecisionCategoryList {
+    return (@($script:HumanDecisionCategories | Where-Object { $_ -ne "OWNER_HOLD" }) -join "|")
+}
+
+# -------------------------------------------------
+# Referenced evidence (AGENT_HOST_AUDIT_PROTOCOL §3, §4; ADR-0022 §5)
+#
+# A slice declares its evidence by citing it. The declaration is the PR body (and the host slice specification when one
+# exists). Two deterministic reference forms are read from it, nothing is inferred:
+#   an issue reference  "Issue #<n>"            -> that issue's comments are a scanned stream of this packet
+#   a source id         a bare number of 9-12 digits -> the comment / review / review comment with that id, when a
+#                                                  scanned stream holds it
+# A cited id that no scanned stream holds is recorded as unresolved provenance and is never a hold.
+# -------------------------------------------------
+
+function Get-EvidenceReferences {
+    param([AllowNull()][string]$Text)
+
+    $issues = New-Object "System.Collections.Generic.SortedSet[long]"
+    $ids = New-Object "System.Collections.Generic.SortedSet[long]"
+
+    if ($Text) {
+        foreach ($m in [regex]::Matches($Text, '(?<![A-Za-z0-9])Issue #([1-9][0-9]{0,6})(?![0-9])')) {
+            [void]$issues.Add([long]$m.Groups[1].Value)
+        }
+
+        foreach ($m in [regex]::Matches($Text, '(?<![0-9A-Za-z_./#-])([1-9][0-9]{8,11})(?![0-9A-Za-z_])')) {
+            [void]$ids.Add([long]$m.Groups[1].Value)
+        }
+    }
+
+    return [pscustomobject]@{
+        Issues = @($issues | ForEach-Object { [string]$_ })
+        Ids = @($ids | ForEach-Object { [string]$_ })
+    }
 }
