@@ -399,7 +399,9 @@ class RegisterService:
         the builder refuses a drifted one, and the store's invariants guard the write. Nothing is
         sent — a CREATE is queued only by its own action, and execution stays DRY_RUN.
         """
-        frozen = self._require_authoring().freeze(
+        # The exact current inputs the owners hold: the duplicate evidence of the owner seam and
+        # the provider assets the ASSET upload owner prepared for this candidate (5919917893 §3).
+        frozen = self._require_authoring().freeze_current(
             preparation_id, actor=actor, correlation_id=correlation_id
         )
         return ActionResult(

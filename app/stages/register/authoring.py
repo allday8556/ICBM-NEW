@@ -60,7 +60,7 @@ from app.stages.register.preparation import (
     UnitRequest,
     resolve_unit,
 )
-from app.stages.register.provider import DuplicateLookupSource
+from app.stages.register.provider import DuplicateLookupSource, PreparedAssetSource
 from app.stages.register.sanitize import require_clean
 from app.stages.register.store import (
     IntentRecord,
@@ -78,6 +78,8 @@ logger = logging.getLogger("icbm.register.authoring")
 PREPARATION_VERSION = "registration-preparation/v1"
 # A submitted authoring revision that is not exactly the target policy's own (decision 5801915996).
 AUTHORING_REVISION_NOT_OWNED = "REGISTER_AUTHORING_REVISION_NOT_OWNED"
+# The policy needs provider asset identities but no prepared-asset owner is wired (5919917893 §3).
+PREPARED_ASSETS_UNAVAILABLE = "REGISTER_PREPARED_ASSETS_UNAVAILABLE"
 MAPPING_REVISION = "mapping_revision"
 COMPOSITION_REVISION = "detail_composition_revision"
 
@@ -258,11 +260,13 @@ class RegistrationPreparationService:
         preflight: RegistrationPreflightService,
         builder: RegistrationSnapshotBuilder,
         duplicate_lookup: DuplicateLookupSource | None = None,
+        prepared_assets: PreparedAssetSource | None = None,
     ) -> None:
         self._registrations = registrations
         self._preflight = preflight
         self._builder = builder
         self._duplicate_lookup = duplicate_lookup
+        self._prepared_assets = prepared_assets
 
     # ------------------------------------------------------------------ authoring
 
@@ -385,6 +389,53 @@ class RegistrationPreparationService:
             return candidate
         evidence = self._current_duplicate_evidence(candidate)
         return self.evaluate(preparation_id, duplicate_evidence=evidence)
+
+    def freeze_current(
+        self, preparation_id: str, *, actor: str, correlation_id: str | None = None
+    ) -> FrozenUnit:
+        """Freeze with the exact current inputs the owners hold — the application freeze path
+        (Issue #89 architect follow-up 5919917893 §3).
+
+        The candidate is :meth:`stage_candidate`'s: with a duplicate-proof policy it carries the
+        owner seam's admissible evidence, exactly as the ASSET stage and the first CREATE copy do,
+        and missing evidence refuses (``DUPLICATE_EVIDENCE_UNAVAILABLE``). When the policy needs
+        provider asset identities, the prepared assets are the ones the ASSET upload-attempt owner
+        holds for this exact preparation revision under that candidate fingerprint. Nothing is
+        substituted: missing duplicate evidence and a missing, stale or mismatched asset are left
+        to the final preflight, which names them and refuses (``REGISTER_PREFLIGHT_NOT_READY``,
+        the same refusal the unit's FREEZE action shows), and :meth:`freeze` re-evaluates every
+        rule and freezes nothing unless READY.
+        """
+        try:
+            candidate = self.stage_candidate(preparation_id)
+        except RegistrationConflictError as refused:
+            if refused.code != DUPLICATE_EVIDENCE_UNAVAILABLE:
+                raise
+            # No admissible evidence: the final preflight carries DUPLICATE_EVIDENCE_MISSING under
+            # this policy, so it can never be READY, and nothing is frozen.
+            return self.freeze(preparation_id, actor=actor, correlation_id=correlation_id)
+        prepared: tuple[PreparedAsset, ...] = ()
+        if candidate.resolved.target.asset_policy.provider_asset_identity_required:
+            source = self._prepared_assets
+            if source is None:
+                raise RegistrationConflictError(
+                    PREPARED_ASSETS_UNAVAILABLE,
+                    "no prepared-asset owner is wired, so no provider asset can be frozen",
+                )
+            preparation = self.preparation(preparation_id)
+            prepared = source.prepared_assets(
+                marketplace_key=preparation.marketplace_key,
+                marketplace_account_id=preparation.marketplace_account_id,
+                preparation_revision_id=preparation.current.preparation_revision_id,
+                candidate_fingerprint=candidate.candidate_fingerprint,
+            )
+        return self.freeze(
+            preparation_id,
+            actor=actor,
+            duplicate_evidence=candidate.request.duplicate_evidence,
+            prepared_assets=prepared,
+            correlation_id=correlation_id,
+        )
 
     def freeze(
         self,

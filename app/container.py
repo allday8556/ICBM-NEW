@@ -16,6 +16,7 @@ from app.capabilities.jobs.worker import JobWorker
 from app.capabilities.live_safety.assets import (
     AssetUploadService,
     PreparationCandidateGate,
+    PreparedUploadAssets,
 )
 from app.capabilities.live_safety.authority import LiveAuthorityService
 from app.capabilities.live_safety.drill import DrillPaths, RestoreDrillService
@@ -466,11 +467,15 @@ def build_container(
     )
     # M5 PR-F (ADR-0014 §27, decision 5751540323): the durable operator-authored preparation. It
     # owns inputs only; the preflight still derives every verdict, and the builder still freezes.
+    # The durable ASSET upload-attempt owner (ADR-0018 §3.4) is read by the application freeze:
+    # the provider assets prepared for the exact candidate being frozen (5919917893 §3).
+    live_store = LiveAuthorityStore(db, clock, audit)
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
         duplicate_lookup=SmartStoreDuplicateLookup(),
+        prepared_assets=PreparedUploadAssets(live_store),
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
@@ -478,7 +483,6 @@ def build_container(
     # Gate 3 area 1 (ADR-0018 §3, §3.4, §4, §10): the pre-LIVE safety owners. The stack reads the
     # execution-mode owner, whose M0 policy refuses every LIVE write, and no eligibility, restore,
     # retention or visual proof exists yet, so every mutation it judges is refused at this main.
-    live_store = LiveAuthorityStore(db, clock, audit)
     # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs are durable
     # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the
     # commit this process runs at and its running code digest (both taken once at composition), at
