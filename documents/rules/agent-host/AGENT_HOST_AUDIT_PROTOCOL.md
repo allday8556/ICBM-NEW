@@ -240,6 +240,13 @@ inferred.
   wrong id, a source on an issue the declaration does not name, a source deleted since — cannot be
   read. That is a **TECHNICAL_HOLD** (`CITED_SOURCE_UNRESOLVED`), which the agent clears by
   correcting the declaration. It is never dropped from the packet.
+- **The declaration chooses evidence, never authority.** A user's product decision binds through
+  the canonical documents, because a decision is binding only once it is reflected in an ADR or a
+  canonical document (rule §1.1). The audited base SHA fixes that canon (§4), and both auditors
+  judge the diff against it whatever the declaration cites. A comment the declaration does not
+  cite is therefore missing evidence at most, never a removed decision: a diff that goes beyond
+  the canon is `HUMAN_DECISION_REQUIRED` (§0.2) whatever its declaration cites or omits. The
+  user's own stop on a PR is the owner's hold file, which no declaration can affect.
 
 **The scan is full and edit-aware.** Every packet generation, including the pre-merge regeneration
 of §7.1, reads every source of every scanned stream in full (all pages) at its current body. It

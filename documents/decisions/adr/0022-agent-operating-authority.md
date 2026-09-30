@@ -42,9 +42,11 @@ canonical documents already define for it**, until it is done. The canonical doc
 the acceptance records, read from the fresh main.
 
 The user is not a per-step approver. A canonical sentence that asks for a separate per-step
-authorization, a kickoff or an architect sign-off is satisfied by this standing authority when the
-step is of the agent's kind (§3). It still stands when what it gates is one of the user's decisions
-(§2).
+authorization, a kickoff or an architect sign-off is satisfied by this standing authority only when
+the step it gates is of the agent's kind (§3).
+
+The standing authority never satisfies a sentence that gates one of the user's decisions (§2).
+That sentence keeps its full force: the step waits for the user, as §2 and §7 require.
 
 ### 2. What the user decides
 
@@ -117,6 +119,14 @@ The marker-and-classification gate is removed from the packet.
 - A citation that cannot be read is a technical hold, never a smaller packet: declared evidence
   does not disappear silently.
 - A marker is provenance. It never makes a source a packet input and never holds a packet.
+- The declaration chooses **evidence, never authority**. A user's product decision binds through
+  the canonical documents — the ROADMAP, the ADRs, the architecture, the contracts and the
+  acceptance records — because a decision is binding only once it is reflected there (rule §1.1).
+  Every audit judges the diff against that canon at the audited base, whatever the declaration
+  cites. So a declaration that does not cite a comment removes no decision of the user's: the
+  decision is in the canon, where the auditors read it, or it is not binding yet. A diff that
+  goes beyond the canon is `HUMAN_DECISION_REQUIRED` (§2) whatever its declaration cites or
+  omits, and the user's own stop on a PR is the hold file, which no declaration can affect.
 - No `scope: PR #<N>` record with `required:` / `evidence-only:` / `excluded:` sections is read,
   required or requested.
 - Existing `[OWNER-AMENDMENT]` and `[ARCHITECT-INSTRUCTION]` records are kept as history. They are
