@@ -1300,7 +1300,7 @@ $headMatch = [regex]::Match(
 
 $verdictMatch = [regex]::Match(
     $auditResult,
-    '(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT)\s*$'
+    '(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT|HOLD|HUMAN_DECISION_REQUIRED)\s*$'
 )
 
 $summaryMatch = [regex]::Match(

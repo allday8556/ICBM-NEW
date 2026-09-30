@@ -370,7 +370,12 @@ does not cover that source.
 
 ### 5.1 Verdicts and holds
 
-An audit returns one of:
+The audit output contract is the prompt of `automation/agent-host/run-audit-v1.1.ps1` under policy
+`packet-v9`: it offers exactly `VERDICT=<PASS|BLOCKER|INSUFFICIENT|HUMAN_DECISION_REQUIRED>`, and the
+Host itself may turn a verdict into `HOLD`. A Host that still runs an earlier policy offers only the
+first three; its prompt is that Host's, not this contract.
+
+An exact-head audit returns one of:
 
 - **PASS** — audit satisfied for this audit identity.
 - **BLOCKER** — a code, test or contract defect. It is repaired automatically: new HEAD, new

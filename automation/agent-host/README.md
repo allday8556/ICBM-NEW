@@ -87,14 +87,18 @@ identity.
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `20be4f6abef49c7fa271ebbc07f11f0af1c5fd365b6332014669e1c38819e083` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f556d9fef16cd6b85ab468ca94bc13acfd84bff5dd4d0c42fceec843dbaddb6d` |
 | `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `ce2cd5d2387657cbd848a8eea3f3610ef95b909239e9fe7abfcdaa2a9dab7454` |
-| `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
+| `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `88c00d10450a40f0790fc4cfe3d1acd06dc9a1af28cfc57c0580b87c9e138b63` |
 | `run-full-audit-v1.ps1` | post-merge main audit | `7c6c9cfecfd4d810dbf346e1a988ea4008a989c21e3fe68a49f82027d6738c37` |
 | `run-lookahead-main-v1.ps1` | next-slice selector | `6e07b517ea2d425609db4767421f2e3f6d575272a1ac0b8da6c9350aa41329c9` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `2c5fbe631922cb38b1aa240369b0e412d198c24f24e889684fb4e757776275ca` |
-| `tests/fx-run-all.ps1` | fixture runner | `bcc8023009662aa740893d8734b0e81379e0fe0d1d6169ed3f2c83879b5229f6` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `e214af312cfaf8f45791098443e6d6b04a98bbf52833f80c17e653bdada1ccca` |
+| `tests/fx-run-all.ps1` | fixture runner | `db3e78b1471e338b24150b16e720ec3056560375e0fa4a6389f9289982204a97` |
 | `tests/fx-config.json` | fixture host configuration | `d6bdac1a09b04cdf078d351f99ac92a693f6843b32f3d409b1a11cecc2d7180c` |
+
+The table is checked mechanically, so a reader does not recompute it:
+`tests/contracts/test_repository_rules.py::test_the_agent_host_readme_pins_the_committed_script_bytes`
+fails when a hash differs from the committed file or a script is missing from the table.
 
 `V2-LEGACY-INVENTORY.md` is the V2 inventory of host scripts and state families. Its §7 records what
 V3 supersedes.

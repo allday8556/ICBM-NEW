@@ -1040,7 +1040,8 @@ try {
         $technical = @("GPT_HUMAN_DECISION_REQUIRED", "HUMAN_DECISION_REQUIRED", "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY", "REPAIR_FIXER_DECLINED_WITHOUT_A_HUMAN_CATEGORY", "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998", "AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "")
         $global:FxChecks.taxonomy_human_all = (@($human | Where-Object { (Get-HoldClass $_) -ne "HUMAN_DECISION_REQUIRED" }) -join ',')
         $global:FxChecks.taxonomy_technical_all = (@($technical | Where-Object { (Get-HoldClass $_) -ne "TECHNICAL_HOLD" }) -join ',')
-        # citation grammar: "Issue #n" and bare 9-12 digit ids; hashes, short numbers, paths and PR numbers are not ids
+        # citation grammar: "Issue #n" names a stream; a citation is a 9-12 digit id INSIDE a code span. A bare id, a CI
+        # run number, a hash, a shorter or longer number, a doubled code span and a lower-case "issue" are not citations.
         $refs = Get-EvidenceReferences "Authority (Issue #126, Issue #89): ``5906290729``, ``5907009512`` and bare 5909188774. PR #160, issue #7 lower-case, run 36699770595, ``36699770595x``, ``12345678``, ``1234567890123``, ``bb9906ccd61c``, ````5906712259````."
         $global:FxChecks.citation_issues = $refs.Issues -join ','
         $global:FxChecks.citation_ids = $refs.Ids -join ','

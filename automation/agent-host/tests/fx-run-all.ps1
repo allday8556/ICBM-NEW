@@ -1,5 +1,8 @@
 ﻿param([string[]]$Scenarios = @("gpt-loop", "claude-loop", "big-pr", "scope-expansion", "max-cycles", "post-merge-remediation", "remediation-migration-hold", "remediation-open-pr-guard"), [string]$RootName = "fx", [string]$SrcHost = (Split-Path $PSScriptRoot -Parent))
 
+# -SrcHost is the directory that holds the host scripts under test. The default is this repository's own
+# automation\agent-host (the parent of tests\), which is where orchestrator-v1.3.ps1 and the others live; pass a
+# runtime directory to test a deployed copy instead.
 $sp = $PSScriptRoot
 # Fixture output never lands in the repository: a fixture repository holds files that repository-wide scans would read.
 $outDir = Join-Path ([System.IO.Path]::GetTempPath()) "icbm-agent-host-fx"
