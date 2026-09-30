@@ -39,7 +39,11 @@ from app.stages.register.execution import (
     encode_detail,
     encode_field,
 )
-from app.stages.register.model import RegistrationConflictError, sanitized_digest
+from app.stages.register.model import (
+    DUPLICATE_EVIDENCE_UNAVAILABLE,
+    RegistrationConflictError,
+    sanitized_digest,
+)
 from app.stages.register.payload import build_payload
 from app.stages.register.policy import Provenance
 from app.stages.register.preflight import RegistrationPreflightService
@@ -72,7 +76,6 @@ logger = logging.getLogger("icbm.register.authoring")
 # The durable shape of one authored revision. A revision of another version is refused rather than
 # guessed at, exactly as the send request's codec refuses one.
 PREPARATION_VERSION = "registration-preparation/v1"
-DUPLICATE_EVIDENCE_UNAVAILABLE = "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"
 # A submitted authoring revision that is not exactly the target policy's own (decision 5801915996).
 AUTHORING_REVISION_NOT_OWNED = "REGISTER_AUTHORING_REVISION_NOT_OWNED"
 MAPPING_REVISION = "mapping_revision"
@@ -364,6 +367,25 @@ class RegistrationPreparationService:
         )
         return self._preflight.candidate(request)
 
+    def stage_candidate(self, preparation_id: str) -> PreflightResult:
+        """The candidate a mutation stage binds: what is authored now, evaluated the way the
+        CREATE path evaluates it (Issue #89 resolution 5915900049 D4).
+
+        When the target policy requires duplicate proof, the final preflight and the first
+        CREATE copy evaluate the unit with the admissible evidence of the duplicate-evidence
+        owner seam, and that evidence is part of the candidate fingerprint. The ASSET stage —
+        its candidate gate, its grant and its eligibility review packet — evaluates with the same
+        evidence here, so every stage binds one fingerprint for one canonical candidate. Missing
+        evidence refuses (``DUPLICATE_EVIDENCE_UNAVAILABLE``): the stage stays fail-closed and
+        nothing is uploaded. A policy without duplicate proof never consults the seam. Nothing
+        here changes what the fingerprint covers.
+        """
+        candidate = self.evaluate(preparation_id)
+        if not candidate.resolved.target.duplicate_proof_required:
+            return candidate
+        evidence = self._current_duplicate_evidence(candidate)
+        return self.evaluate(preparation_id, duplicate_evidence=evidence)
+
     def freeze(
         self,
         preparation_id: str,
@@ -529,9 +551,10 @@ class RegistrationPreparationService:
     def _current_duplicate_evidence(self, candidate: PreflightResult) -> DuplicateEvidence:
         """Read current evidence through the provider-neutral owner seam, or fail closed.
 
-        The production SmartStore implementation reports unavailable while product search is not
+        The production SmartStore implementation reports unavailable while no duplicate lookup is
         adopted, so this method performs no provider call in that state. Preparations never store
-        the outcome; the execution copy only uses this current read to reproduce the Snapshot.
+        the outcome; the first CREATE copy and the mutation-stage candidate
+        (:meth:`stage_candidate`) only use this current read.
         """
         source = self._duplicate_lookup
         if source is None or not source.available():

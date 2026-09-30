@@ -340,9 +340,9 @@ def _require_reference(
 
 
 class CandidateEvaluator(Protocol):
-    """The preparation owner's candidate evaluation (``RegistrationPreparationService``)."""
+    """The preparation owner's mutation-stage candidate (``RegistrationPreparationService``)."""
 
-    def evaluate(self, preparation_id: str) -> PreflightResult: ...
+    def stage_candidate(self, preparation_id: str) -> PreflightResult: ...
 
 
 class CanaryEligibilityService:
@@ -366,7 +366,8 @@ class CanaryEligibilityService:
             raise NotFoundError("CANARY_ELIGIBILITY_PREPARATION_NOT_FOUND", "no such preparation")
         revision_id = preparation.current.preparation_revision_id
         built = review_packet(
-            self._preparations.evaluate(preparation_id),
+            # The candidate both stages bind, duplicate evidence included (5915900049 D4).
+            self._preparations.stage_candidate(preparation_id),
             revision_id,
             unit_ref=asset_unit_ref(revision_id),
         )
