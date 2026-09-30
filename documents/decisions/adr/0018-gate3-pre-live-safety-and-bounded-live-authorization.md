@@ -311,6 +311,14 @@ independently of any UI state and of any grant.
 > changes the execution mode — the send-time stack still refuses every mutation under
 > `M0_DRY_RUN_ONLY`. Running one is itself a protected action and needs its own approval (rule
 > §7.2); this note grants none.
+>
+> **Amendment note (the local proof commands; Issue #89 follow-ups `5919917893`, `5921110564`).**
+> The two local proofs a canary needs had owners but no operator surface. Three owning commands of
+> the same family run them: `icbm live restore-drill-asset --grant-id` and
+> `restore-drill-create --intent-id` call `RestoreDrillService.drill_asset` / `drill_create` (§7)
+> into a fresh restore root the operator names, and `prove-retention` calls
+> `RetentionProofService.prove` (§8). Each owner computes its own target and records its own
+> PASSED or FAILED proof; the command decides nothing, and a proof proves only its own layer.
 
 #### 4.2 What the brake never does
 
