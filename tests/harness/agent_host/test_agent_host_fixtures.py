@@ -93,7 +93,20 @@ def _run(scenario: str, root: Path) -> dict[str, object]:
         return {"expect": f"NO_RESULT (exit {completed.returncode}): {tail}"}
     loaded = json.loads(result.read_text("utf-8-sig"))
     checks = loaded.get("checks") or {}
-    return {"expect": checks.get("expect", "NOT_PINNED"), "status": loaded.get("runtime_status")}
+    # What the harness itself reported, so that a failure elsewhere (another runner, another git)
+    # says why instead of only which pin it missed.
+    output = completed.stdout.decode("utf-8", "replace")
+    reported = [
+        line.strip()
+        for line in output.splitlines()
+        if line.lstrip().startswith(("HARNESS_", "FX_EXPECT=", "HOLD_CLASS=", "SUPERVISOR="))
+    ]
+    return {
+        "expect": checks.get("expect", "NOT_PINNED"),
+        "status": loaded.get("runtime_status"),
+        "reported": reported[-12:],
+        "stderr": completed.stderr.decode("utf-8", "replace")[-1500:],
+    }
 
 
 @pytest.fixture(scope="module")
