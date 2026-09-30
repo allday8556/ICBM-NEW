@@ -49,6 +49,7 @@ SCENARIOS = {
     "auto-next-human": "a step that needs a new product feature waits for the user",
     "auto-next-live": "a LIVE step waits for the user",
     "gpt-human": "an auditor's HUMAN_DECISION_REQUIRED waits and is never repaired",
+    "gpt-human-uncategorised": "a human verdict with no closed-list category is technical",
     "fixer-human": "a fixer's product-direction stop waits for the user",
     "owner-hold": "the owner's own hold file stops the PR before any audit",
     # 12-13: identity

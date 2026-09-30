@@ -6,7 +6,7 @@ These rules are the enforcement layer for `documents/roadmap/ROADMAP.md` and `do
 The roadmap says what to build; architecture defines the approved contracts and stack;
 these rules define how implementation work is performed and recorded.
 
-If documents conflict, stop and request architect resolution in GitHub instead of guessing.
+If documents conflict, stop and request architect resolution in GitHub instead of guessing. That applies to a conflict about a product decision or a real external action (§14.4); a conflict on an implementation matter is decided under §14.5.
 
 The root `CLAUDE.md` is the bootstrap index that Claude Code loads automatically; it imports every
 file below with `@` imports, so the rules load with it (ADR-0021 §3). The rule bodies live here.
@@ -62,4 +62,4 @@ Additional locations:
 | `documents/reference/PATH_MIGRATION_MAP.md` | Permanent old → new path map of the repository restructure (ADR-0021 §6) |
 | `documents/reference/REPOSITORY_MAP.md` | Where each role lives after the restructure |
 
-If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing.
+If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing. That applies to a conflict about a product decision or a real external action (§14.4); a conflict on an implementation matter is decided under §14.5.

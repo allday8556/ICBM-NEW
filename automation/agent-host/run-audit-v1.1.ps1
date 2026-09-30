@@ -638,8 +638,10 @@ foreach ($rf in @(Get-ChildItem $stateDir -Filter "remediation-main-*.json" -Err
 #   streams      = this PR's own four streams (conversation comments, body, reviews, review comments)
 #                  + the comments of every issue the declaration names as "Issue #<n>"
 #                  + any stream state\audit-sources-pr-<N>.json designates (optional; designation only)
-#   sources      = every comment / review / review comment in a scanned stream whose id the declaration cites.
-#                  Each is a required, content-bound source: <locator>@<sha256 of the current body>.
+#   sources      = the PR body itself (the declaration is audit input), and
+#                  every comment / review / review comment in a scanned stream whose id the declaration cites
+#                  (a bare 9-12 digit id in a code span). Each is a required, content-bound source:
+#                  <locator>@<sha256 of the current body>. A citation no scanned stream holds is a TECHNICAL_HOLD.
 # 매 생성마다 모든 stream 을 전 페이지, 현재 body 로 다시 읽는다 (edit-aware). watermark 는 scan provenance 일 뿐
 #   packet bytes 밖(state\packets\*.scan.json)에만 기록되고 어떤 source 도 건너뛰지 않는다.
 # marker = body 의 첫 non-empty line 이 정확히 token (agent-host-authority-v2.ps1 Get-AuthorityMarker). It is provenance only:
@@ -647,7 +649,7 @@ foreach ($rf in @(Get-ChildItem $stateDir -Filter "remediation-main-*.json" -Err
 #   A marked source never holds a packet, and no "scope: PR #<N>" record is read (ADR-0022 §5; legacy records stay as history).
 # Edits still bind: a cited source's body digest is in the packet, so an edited body changes the packet digest.
 # TECHNICAL_HOLD only (the Host retries by itself, never the user): an unreadable or truncated stream, an unreadable
-#   declaration, an invalid host manifest, a packet derivation failure.
+#   declaration, a citation no scanned stream holds, an invalid host manifest, a packet derivation failure.
 # -------------------------------------------------
 
 $packetHoldReasons = New-Object System.Collections.Generic.List[string]
@@ -961,6 +963,26 @@ foreach ($id in $evidenceRefs.Ids) {
 $resolvedIds = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 $seenLocators = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
+# The declaration is audit input itself: what the slice says it does, does not do and relies on. The PR body is always a
+# required source, so both auditors read it and an edited body is a new audit identity.
+foreach ($it in @($streamItems | Where-Object { $_.Locator -eq "github_pr_body:$PrNumber" })) {
+    [void]$seenLocators.Add($it.Locator)
+    $packetSources.Add([pscustomobject]@{
+        Identity = "$($it.Locator)@$($it.Digest)"
+        Locator = $it.Locator
+        Digest = $it.Digest
+        Kind = $(if ($it.Marker) { $it.Marker } else { "UNMARKED" })
+        Class = "required"
+        Required = $true
+        Origin = "declaration"
+        Record = "pr-body"
+        Text = $it.Text
+        TextSha = $it.Digest
+        Bytes = $utf8Out.GetByteCount($it.Text)
+        UpdatedAt = $it.UpdatedAt
+    })
+}
+
 foreach ($it in $streamItems) {
     if (($it.Locator -split ":", 2)[0] -notin $citableKinds -or -not $citedIds.Contains($it.Id)) {
         continue
@@ -989,8 +1011,17 @@ foreach ($it in $streamItems) {
     })
 }
 
-# provenance only (scan.json, outside the packet bytes): what was cited and not found, and what is marked and not cited
+# A citation is declared evidence. One that no scanned stream holds (a wrong id, an issue the declaration does not
+# name, a source deleted since) cannot be read: hard completeness fails, as a TECHNICAL_HOLD. It is never dropped.
 $unresolvedRefs = @($evidenceRefs.Ids | Where-Object { -not $resolvedIds.Contains($_) })
+
+if ($packetHoldReasons.Count -eq 0) {
+    foreach ($id in $unresolvedRefs) {
+        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$id" "the declaration cites $id and no scanned stream holds it"
+    }
+}
+
+# provenance only (scan.json, outside the packet bytes): what is marked and not cited
 $markedUncited = @($streamItems | Where-Object { $_.Marker -and -not $seenLocators.Contains($_.Locator) })
 
 foreach ($ps in $packetSources) {
@@ -1067,7 +1098,7 @@ function Stop-PacketHold {
 Write-Host "SOURCE_MANIFEST : $sourceManifestRel (optional stream designation; no classification)"
 Write-Host "SOURCES         : $(@($packetSources).Count) cited by the slice declaration (all required)"
 Write-Host "MARKED_NOT_CITED: $(@($markedUncited).Count) (provenance only; never a hold)"
-Write-Host "UNRESOLVED_REFS : $(@($unresolvedRefs).Count) (cited ids no scanned stream holds; provenance only)"
+Write-Host "UNRESOLVED_REFS : $(@($unresolvedRefs).Count) (citations no scanned stream holds; each is a TECHNICAL_HOLD)"
 Write-Host "SCAN_PROVENANCE : $scanPath"
 
 foreach ($sp in $scanProvenance) {
@@ -1786,6 +1817,12 @@ function Read-CallVerdict {
 
     if ($r.Valid -and @($r.Missing).Count -gt 0) {
         $r.Summary = "EVIDENCE_NOT_SEEN:$(@($r.Missing) -join ',') (auditor verdict was $($r.Verdict): $($r.Summary))"
+        $r.Verdict = "HOLD"
+    }
+    elseif ($r.Valid -and $r.Verdict -eq "HUMAN_DECISION_REQUIRED" -and -not (Get-HumanDecisionCategory $r.Summary)) {
+        # §5.1: only a category of the closed list is the user's. An auditor that names none has not said what the
+        # user should decide, so this is a technical hold and the audit is run again.
+        $r.Summary = "HUMAN_DECISION_WITHOUT_CATEGORY (auditor summary: $($r.Summary))"
         $r.Verdict = "HOLD"
     }
 

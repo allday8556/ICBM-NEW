@@ -61,7 +61,8 @@ Only these stop a loop for the user:
   - sending real data to an external service;
   - a destructive operation, a force-push, a branch deletion.
 
-The Host calls this `HUMAN_DECISION_REQUIRED`. A technical choice is never one of them.
+The Host calls this `HUMAN_DECISION_REQUIRED`. A technical choice is never one of them, and a stop
+that names none of these categories is not the user's, whatever it calls itself.
 
 ### 3. What the agent decides and does
 
@@ -108,6 +109,8 @@ The marker-and-classification gate is removed from the packet.
 - A slice declares its evidence by citing it in its PR body. The packet's sources are the
   comments, reviews and review comments the declaration cites, read at their current body and bound
   by their SHA-256.
+- A citation that cannot be read is a technical hold, never a smaller packet: declared evidence
+  does not disappear silently.
 - A marker is provenance. It never makes a source a packet input and never holds a packet.
 - No `scope: PR #<N>` record with `required:` / `evidence-only:` / `excluded:` sections is read,
   required or requested.

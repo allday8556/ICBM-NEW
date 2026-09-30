@@ -211,16 +211,22 @@ Rules:
 inferred.
 
 - The **declaration** is the PR body, together with the Host's slice specification or remediation
-  authorization when one exists.
+  authorization when one exists. The PR body is itself a required packet source: both auditors
+  read what the slice says it does, does not do and relies on, and an edited body is a new audit
+  identity.
 - The **scanned streams** are:
   - the PR's own four streams: conversation comments, body, reviews, review comments;
   - the comments of every issue the declaration names as `Issue #<n>`;
   - any stream an optional Host manifest designates. The manifest only designates streams.
+- A **citation** is a source id in a code span: a bare number of 9 to 12 digits between
+  backticks. A number outside a code span, such as a CI run id, is not a citation.
 - A **packet source** is a comment, review or review comment in a scanned stream whose id the
-  declaration cites. An id is a bare number of 9 to 12 digits. Every packet source is `required`:
-  both auditors must report it in `evidence_seen`.
-- A cited id that no scanned stream holds is recorded as scan provenance. It is not a source and
-  not a hold.
+  declaration cites. Every packet source is `required`: both auditors must report it in
+  `evidence_seen`.
+- **Declared evidence never disappears silently.** A citation that no scanned stream holds — a
+  wrong id, a source on an issue the declaration does not name, a source deleted since — cannot be
+  read. That is a **TECHNICAL_HOLD** (`CITED_SOURCE_UNRESOLVED`), which the agent clears by
+  correcting the declaration. It is never dropped from the packet.
 
 **The scan is full and edit-aware.** Every packet generation, including the pre-merge regeneration
 of §7.1, reads every source of every scanned stream in full (all pages) at its current body. It
@@ -305,7 +311,8 @@ used to build it.
 
 Hard completeness checks:
 
-- every cited source a scanned stream holds is present in the packet, once, with its body;
+- every citation of the declaration resolves to a source a scanned stream holds, and that source
+  is present in the packet, once, with its body;
 - every source in every scanned stream is re-scanned in full at its current body (§3);
 - every changed file of the PR is in the packet, complete;
 - packet HEAD and base match the candidate being audited.
@@ -366,7 +373,9 @@ An audit returns one of:
 - **BLOCKER** — a code, test or contract defect. It is repaired automatically: new HEAD, new
   packet, both audits again.
 - **HUMAN_DECISION_REQUIRED** — the diff itself needs one of the user's decisions (§0.2). The
-  auditor names the category.
+  auditor names the category of the closed list at the start of its summary. A verdict that names
+  none has not said what the user should decide: the Host records it as a technical **HOLD** and
+  audits again.
 - **INSUFFICIENT**, or a verdict the Host turns into **HOLD** because a required source is missing
   from `evidence_seen` — a technical hold: the audit is run again.
 
@@ -377,7 +386,8 @@ HUMAN_DECISION_REQUIRED   the closed list of §0.2. The run ends and waits for t
 TECHNICAL_HOLD            everything else. The Host recovers or retries by itself.
 ```
 
-- The class comes from the **category** of the reason, never from how often something failed.
+- The class comes from the **category** of the reason, never from how often something failed, and
+  never from the words `HUMAN_DECISION_REQUIRED` alone.
 - The human categories are a closed list in the Host: `NEW_PRODUCT_FEATURE`,
   `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`, `PROVIDER_CALL`, `CANARY`,
   `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`, `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`,
@@ -567,6 +577,10 @@ Required discovery tests (V3; `automation/agent-host/tests/`, pinned by the fixt
 - no `scope: PR #<N>` record is needed for a canonical slice packet;
 - audit bookkeeping never produces `HUMAN_DECISION_REQUIRED`;
 - a stream page that cannot be read, or a truncated listing → TECHNICAL_HOLD, never a partial scan;
+- a citation no scanned stream holds, or a cited source deleted since → TECHNICAL_HOLD, never a
+  smaller packet;
+- an auditor's `HUMAN_DECISION_REQUIRED` without a category of the closed list → technical, audited
+  again;
 - an edited body of a cited source, and a changed citation, each change the packet digest (§4, §7.1);
 - an uncited source edited in place to add a marker changes nothing;
 - marker grammar (§3), positive and negative, as in V2;

@@ -29,4 +29,4 @@ Rules:
 - Proposal/review documents written by an AI must identify their author and status: `PROPOSAL`, `UNDER REVIEW`, `ACCEPTED`, or `SUPERSEDED`.
 - Canonical documents such as `documents/roadmap/ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` do not need author suffixes once accepted.
 - A contract/architecture decision becomes binding only when reflected in an ADR or canonical document.
-- If an implementation question changes architecture, Claude must stop implementation and open a GitHub issue for architect resolution.
+- If an implementation question needs a product decision or a real external action (§14.4), Claude stops and asks the user. An implementation or internal-architecture question is Claude's to decide: decide it, state the choice in the PR, and the audits verify it (§14, ADR-0022).

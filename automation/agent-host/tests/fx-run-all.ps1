@@ -13,6 +13,8 @@ $jobs = foreach ($s in $Scenarios) {
 
 $jobs | Wait-Process -Timeout 1200
 
+$failedScenarios = New-Object System.Collections.Generic.List[string]
+
 foreach ($s in $Scenarios) {
     $rp = Join-Path $root "$s\result.json"
     if (Test-Path $rp) {
@@ -33,8 +35,19 @@ foreach ($s in $Scenarios) {
         "    key: $(@($r.key_lines) -join ' | ')"
         "    checks: $(if ($r.checks) { ($r.checks.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value) -join ';')" }) -join ' | ' })"
         "    EXPECT {0} = {1}" -f $s, $(if ($r.checks -and $r.checks.expect) { $r.checks.expect } else { "NOT_PINNED" })
+        if ($r.checks -and $r.checks.expect -and $r.checks.expect -ne "PASS") { $failedScenarios.Add($s) }
     }
     else {
+        $failedScenarios.Add($s)
         "{0,-28} NO RESULT (see $outDir\$RootName-$s.out.txt / .err.txt)" -f $s
     }
 }
+
+# A pinned scenario that did not end as pinned, or one that produced no result, fails the run.
+if ($failedScenarios.Count -gt 0) {
+    "FX_RUN=FAIL ($($failedScenarios -join ', '))"
+    exit 1
+}
+
+"FX_RUN=PASS ($($Scenarios.Count) scenarios)"
+exit 0

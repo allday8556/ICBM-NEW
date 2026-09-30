@@ -1697,8 +1697,10 @@ while ($true) {
 
     # the user's decision (closed list, §5.1): the auditor names the category at the start of its summary
     if ($gpt.Verdict -eq "HUMAN_DECISION_REQUIRED") {
+        # the category decides the class; a verdict without one of the closed list is technical and is audited again
+        $category = Get-HumanDecisionCategory ($gpt.Summary -replace '^(\[CALL\d+\]\s*)+', '')
         Stop-Hold `
-            -Reason "GPT_HUMAN_DECISION_REQUIRED" `
+            -Reason $(if ($category) { "GPT_HUMAN_DECISION_REQUIRED_$category" } else { "GPT_HUMAN_DECISION_WITHOUT_CATEGORY" }) `
             -PrHead $prHead `
             -MainHead $mainHead `
             -Detail $gpt.Summary
@@ -1764,8 +1766,10 @@ while ($true) {
 
     # the user's decision (closed list, §5.1): the auditor names the category at the start of its summary
     if ($claude.Verdict -eq "HUMAN_DECISION_REQUIRED") {
+        # the category decides the class; a verdict without one of the closed list is technical and is audited again
+        $category = Get-HumanDecisionCategory ($claude.Summary -replace '^(\[CALL\d+\]\s*)+', '')
         Stop-Hold `
-            -Reason "CLAUDE_HUMAN_DECISION_REQUIRED" `
+            -Reason $(if ($category) { "CLAUDE_HUMAN_DECISION_REQUIRED_$category" } else { "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY" }) `
             -PrHead $prHead `
             -MainHead $mainHead `
             -Detail $claude.Summary

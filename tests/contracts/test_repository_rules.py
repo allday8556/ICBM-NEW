@@ -211,12 +211,14 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 # and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
 # at main e72a5cad) after the normalization below, which masks locators only: code spans that
 # name a path or a file, markdown link targets and bare path tokens. Every rule word must be
-# unchanged; a later reviewed rule change updates its digest in the same PR. §11 (milestone status)
+# unchanged; a later reviewed rule change updates its digest in the same PR. ADR-0022 is one: it
+# reworded one sentence of §1 and one of §10 (who decides an implementation matter), and their
+# digests below are of that text. §11 (milestone status)
 # is pinned by the milestone agreement test instead. documents/rules/README.md is deliberately
 # absent: it is the new index (the former intro and §13 restated with moved locators, plus the
 # section map), not a preserved body.
 _FORMER_CLAUDE_SECTIONS = {
-    "01-roles-and-exchange.md": "41d2e020b31971ce797b8d12eadacb06a15cec0b2c71d9ed5f9b46ea1223cc87",
+    "01-roles-and-exchange.md": "33bf7de49b592acb7441cb0b241d036f14e6eb954e91a1ff7fee75d945cb9ef5",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
     "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
     "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
@@ -227,7 +229,7 @@ _FORMER_CLAUDE_SECTIONS = {
     "07-execution-safety.md": "f398e0d780f8f0f6f8cf072084798190a271d316936362d86dbf92251c5689e5",
     "08-git-conventions.md": "3f3c36c1927cfeeb3a05ef7f09e008b45d873fc29785941d9bf51298447d230a",
     "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
-    "10-working-style.md": "3d6f95d224b6b27b17ece1c6b850a0b0151795e673c5f9f391542741e9b50f42",
+    "10-working-style.md": "8c685dad839064be75eb77ea075d63fb01757b31a764f96715e6638637473b9d",
     "12-first-vertical.md": "3bf78de57d08ac04c4edfb8b5564b1070a1f3c348237359cfab49fd16db0746c",
 }
 
@@ -402,6 +404,12 @@ def test_the_host_stops_for_the_user_only_on_the_closed_category_list() -> None:
     protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
     for category in HUMAN_DECISION_CATEGORIES[:-1]:
         assert f"`{category}`" in protocol, category
+    # the class word alone decides nothing: only a category of the list makes a stop the user's
+    assert '.Replace("HUMAN_DECISION_REQUIRED", "")' in authority
+    assert '$r.Contains("HUMAN_DECISION_REQUIRED")' not in authority
+    audit = _host_script("run-audit-v1.1.ps1")
+    assert "-not (Get-HumanDecisionCategory $r.Summary)" in audit
+    assert "HUMAN_DECISION_WITHOUT_CATEGORY" in audit
     # every script that can stop takes its class from that one helper
     for name in ("orchestrator-v1.3.ps1", "run-repair-v1.1.ps1"):
         script = _host_script(name)
@@ -432,6 +440,8 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
     ):
         assert gone not in audit, gone
     assert "Get-EvidenceReferences $declarationText" in audit
+    # declared evidence never silently disappears: a citation nothing holds is a technical hold
+    assert 'Add-PacketHold "CITED_SOURCE_UNRESOLVED:$id"' in audit
     assert 'Origin = "referenced"' in audit
     assert 'Write-Output "HOLD_CLASS=TECHNICAL_HOLD"' in audit
     # what V3 keeps in the generator

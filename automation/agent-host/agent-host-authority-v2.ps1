@@ -182,7 +182,8 @@ function Invoke-GhWrite {
 #   TECHNICAL_HOLD          : everything else. The Host recovers or retries by itself and never asks the user.
 #
 # The class is decided by the category, never by how often something failed. A hold reason is HUMAN_DECISION_REQUIRED
-# only when it names one of these categories as a whole "_"-separated token sequence.
+# only when it names one of these categories as a whole "_"-separated token sequence. The words
+# "HUMAN_DECISION_REQUIRED" alone decide nothing: a stop that names no category of the closed list is technical.
 # -------------------------------------------------
 
 $script:HumanDecisionCategories = @(
@@ -203,11 +204,8 @@ $script:HumanDecisionCategories = @(
 function Get-HoldClass {
     param([AllowNull()][string]$Reason)
 
-    $r = "$Reason".ToUpperInvariant()
-
-    if ($r.Contains("HUMAN_DECISION_REQUIRED")) {
-        return "HUMAN_DECISION_REQUIRED"
-    }
+    # the class word itself is not a category
+    $r = "$Reason".ToUpperInvariant().Replace("HUMAN_DECISION_REQUIRED", "")
 
     foreach ($cat in $script:HumanDecisionCategories) {
         if ($r -match "(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)") {
@@ -223,15 +221,31 @@ function Get-HumanDecisionCategoryList {
     return (@($script:HumanDecisionCategories | Where-Object { $_ -ne "OWNER_HOLD" }) -join "|")
 }
 
+# The category an auditor, a fixer or the selector named at the START of a text, when it is one of the closed list
+# (the owner's hold file is not theirs to name). Anything else returns $null, and the stop is then technical.
+function Get-HumanDecisionCategory {
+    param([AllowNull()][string]$Text)
+
+    $m = [regex]::Match("$Text".TrimStart(), '^\[?([A-Z_]+)\]?(?:[:\s\-]|$)')
+
+    if ($m.Success -and $m.Groups[1].Value -cin @($script:HumanDecisionCategories | Where-Object { $_ -ne "OWNER_HOLD" })) {
+        return $m.Groups[1].Value
+    }
+
+    return $null
+}
+
 # -------------------------------------------------
 # Referenced evidence (AGENT_HOST_AUDIT_PROTOCOL §3, §4; ADR-0022 §5)
 #
 # A slice declares its evidence by citing it. The declaration is the PR body (and the host slice specification when one
 # exists). Two deterministic reference forms are read from it, nothing is inferred:
-#   an issue reference  "Issue #<n>"            -> that issue's comments are a scanned stream of this packet
-#   a source id         a bare number of 9-12 digits -> the comment / review / review comment with that id, when a
-#                                                  scanned stream holds it
-# A cited id that no scanned stream holds is recorded as unresolved provenance and is never a hold.
+#   an issue reference  "Issue #<n>"              -> that issue's comments are a scanned stream of this packet
+#   a citation          `<id>` : a bare number of 9-12 digits in a code span
+#                                                  -> the comment / review / review comment with that id
+# A citation is a claim that the source is evidence. One that no scanned stream holds cannot be read, so it is a
+# TECHNICAL_HOLD (CITED_SOURCE_UNRESOLVED): declared evidence never silently disappears from a packet. A number that is
+# not in a code span (a CI run id, a line count) is not a citation.
 # -------------------------------------------------
 
 function Get-EvidenceReferences {
@@ -245,7 +259,7 @@ function Get-EvidenceReferences {
             [void]$issues.Add([long]$m.Groups[1].Value)
         }
 
-        foreach ($m in [regex]::Matches($Text, '(?<![0-9A-Za-z_./#-])([1-9][0-9]{8,11})(?![0-9A-Za-z_])')) {
+        foreach ($m in [regex]::Matches($Text, '(?<!`)`([1-9][0-9]{8,11})`(?!`)')) {
             [void]$ids.Add([long]$m.Groups[1].Value)
         }
     }

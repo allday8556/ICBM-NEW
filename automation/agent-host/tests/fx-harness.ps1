@@ -138,7 +138,7 @@ switch ($Scenario) {
         }
         [void](Add-FxPr "feat/big")
     }
-    { $_ -like "auto-next*" -or $_ -like "config-*" -or $_ -in @("ci-flaky", "ci-hard-fail", "automerge-success", "guard-head-moved", "guard-main-moved", "guard-ci-pending", "guard-ci-failed", "gpt-insufficient", "gpt-human", "merge-sha-mismatch", "draft-pr", "unmergeable", "behind-base", "owner-hold", "post-merge-tree-mismatch") } {
+    { $_ -like "auto-next*" -or $_ -like "config-*" -or $_ -in @("ci-flaky", "ci-hard-fail", "automerge-success", "guard-head-moved", "guard-main-moved", "guard-ci-pending", "guard-ci-failed", "gpt-insufficient", "gpt-human", "gpt-human-uncategorised", "merge-sha-mismatch", "draft-pr", "unmergeable", "behind-base", "owner-hold", "post-merge-tree-mismatch") } {
         New-PrBranch "feat/clean" { W "docs/contract.md" "# Contract`nrule: never resend CREATE`nclarified`n" }
         $n = Add-FxPr "feat/clean"
         $pushBranch = {
@@ -296,7 +296,7 @@ function global:Fx-Record {
     return $body
 }
 
-$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``100009101``.`nNot sources: CI run 36699770595 and the unknown id ``100009999``.`n"
+$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``100009101``.`nNot a citation (no code span): CI run 36699770595.`n"
 
 if ($Scenario -like "packet-*") {
     Fx-C 100009001 "  [ARCHITECT-INSTRUCTION]  `r`n`r`nArchitect: keep the contract rule; clarify wording only.`r`n"
@@ -658,6 +658,8 @@ $global:FxAi = {
             if ($sc -like "remediation-authorized*" -and $prompt -notmatch 'AUTHORIZATION EVIDENCE') { return (Fx-Verdict "AUDIT_HEAD" $h "INSUFFICIENT" "no authorization evidence in packet") }
             if ($sc -eq "gpt-insufficient") { return (Fx-Verdict "AUDIT_HEAD" $h "INSUFFICIENT" "packet not enough") }
             if ($sc -eq "gpt-human") { return (Fx-Verdict "AUDIT_HEAD" $h "HUMAN_DECISION_REQUIRED" "NEW_PRODUCT_FEATURE: the diff adds a feature no canonical requirement contains") }
+            # an auditor that asks for the user without naming a category of the closed list has decided nothing
+            if ($sc -eq "gpt-human-uncategorised") { return (Fx-Verdict "AUDIT_HEAD" $h "HUMAN_DECISION_REQUIRED" "someone should look at this architecture choice") }
             # blocked until a repair re-analyses the problem (the marker only an INDEPENDENT RE-ANALYSIS writes)
             if ($sc -eq "max-cycles" -and $prompt -notmatch '\+REANALYSED_ROOT_CAUSE') { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "still blocked") }
             if ($prompt -match '\+BUG_MARKER_GPT') { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "BUG_MARKER_GPT contradicts contract") }
@@ -826,7 +828,7 @@ try {
         # the declaration cites one more source → it becomes a fourth required source, new digest
         $global:FxIssueBodies["1"] = $global:FxPrBody + "Also: background ``100009004``.`n"
         $r9 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 4)
+        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 5)
         $global:FxIssueBodies["1"] = $global:FxPrBody
         # an optional host manifest that designates a stream the body already names changes no source
         $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $mfPath
@@ -837,12 +839,12 @@ try {
         $expected = [ordered]@{
             complete_1 = "True"; hold_reasons_1 = ""; same_inputs_twice_same_digest = $true; write_1_2 = "WRITTEN/EXISTING_BYTE_IDENTICAL"
             digest_is_sha256_of_packet_bytes = $true; no_bom_no_cr = $true; no_abs_path = $true; no_watermark_or_updated_at_in_packet = $true
-            source_locators = "github_issue_comment:100009001 github_issue_comment:100009002 github_pr_review:1/100009101"
+            source_locators = "github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
             each_section_once = $true; legacy_record_not_in_packet = $true; uncited_marker_not_in_packet = $true
-            manifest_json_sources = "required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:EVIDENCE-PACKET:referenced"
-            manifest_json_required_count = 3; packet_format = "icbm-audit-packet-v3"
+            manifest_json_sources = "required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
+            manifest_json_required_count = 4; packet_format = "icbm-audit-packet-v3"
             scanned_streams = "issue_comments:1,issue_comments:89,pr_body:1,pr_review_comments:1,pr_reviews:1"
-            scan_unresolved = "100009999,36699770595"; scan_marked_not_cited = "100009300,100009004"
+            scan_unresolved = ""; scan_marked_not_cited = "100009300,100009004"
             provenance_only_change_same_digest = $true; tampered_rebuild = "PACKET_IMMUTABILITY_VIOLATION"
             cited_body_edit_new_digest = $true; reverted_digest_equals_first = $true; reverted_write = "EXISTING_BYTE_IDENTICAL"
             markers_and_legacy_record_are_provenance = $true; no_record_at_all_same_digest = $true; pointer_present = $true
@@ -920,15 +922,26 @@ try {
         Fx-SetBody 100009300 "[OWNER-AMENDMENT]`nscope: PR #1`nrequired:`n- 100009004 deadbeef (untyped)`n- git blobs at base: CLAUDE.md abc`n"
         $rd = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
         $global:FxChecks.d_unparseable_legacy_record_no_hold = "$(Fx-Line $rd 'PACKET_COMPLETE')/$(Fx-Reason $rd)"
-        # e) the declaration cites an id no scanned stream holds → provenance, no hold
+        # e) the declaration cites an id no scanned stream holds → declared evidence cannot be read: TECHNICAL_HOLD
         $global:FxIssueBodies["1"] = $global:FxPrBody + "gone ``100009998``.`n"
         $re = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.e_unresolved_citation_no_hold = "$(Fx-Line $re 'PACKET_COMPLETE')/$(Fx-Reason $re)"
-        # f) the declaration names no issue → issue #89 is not scanned, its evidence is simply not a source
+        $global:FxChecks.e_unresolved_citation_holds = "$(Fx-Reason $re)/$(Fx-Class $re)/digest=$(Fx-Line $re 'PACKET_DIGEST')"
+        # e2) a cited source deleted after it was cited → the same hold, never a silently smaller packet
+        $global:FxIssueBodies["1"] = $global:FxPrBody
+        $kept = $global:FxStreams["issue:89"]; $global:FxStreams["issue:89"] = @($kept | Where-Object { $_ -ne 100009002 })
+        $re2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.e2_deleted_cited_source_holds = "$(Fx-Reason $re2)/$(Fx-Class $re2)"
+        $global:FxStreams["issue:89"] = $kept
+        # f) the declaration cites evidence of an issue it does not name → that stream is not scanned, the citation
+        #    is unresolved and holds; naming the issue is what makes it readable
         $global:FxIssueBodies["1"] = "fixture PR body`n`nSources: ``100009001``, ``100009002``, ``100009101``.`n"
         $rf = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
         $global:FxChecks.f_streams_without_issue_reference = (@($rf | Where-Object { $_ -match 'SCANNED_STREAM' } | ForEach-Object { ([regex]::Match($_, 'SCANNED_STREAM\s*:\s*(\S+)')).Groups[1].Value }) -join ',')
-        $global:FxChecks.f_sources = @($rf | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count
+        $global:FxChecks.f_unnamed_issue_citation_holds = Fx-Reason $rf
+        # f2) numbers outside a code span are not citations
+        $global:FxIssueBodies["1"] = $global:FxPrBody + "run 100009998 and 36699770595, 100009004 too.`n"
+        $rf2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.f2_bare_numbers_are_not_citations = "$(Fx-Line $rf2 'PACKET_COMPLETE')/$((Fx-Line $rf2 'PACKET_DIGEST') -ne (Fx-Line $base 'PACKET_DIGEST'))/$(@($rf2 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count)"
         $global:FxIssueBodies["1"] = $global:FxPrBody
         # g) unreadable / truncated streams → TECHNICAL_HOLD, never a partial scan
         $global:FxStreamFail["issue:89"] = "page"
@@ -943,8 +956,12 @@ try {
             a0_clean_with_grammar_negatives_and_markers_in_stream = "True"
             a_host_manifest_with_unknown_key = "SOURCE_MANIFEST_INVALID:UNKNOWN_KEY:sources"; a_hold_class = "HOLD_CLASS=TECHNICAL_HOLD"
             b_unclassified_marker_no_hold = "True//True"; c_conflicting_legacy_records_no_hold = "True//True"
-            d_unparseable_legacy_record_no_hold = "True/"; e_unresolved_citation_no_hold = "True/"
-            f_streams_without_issue_reference = "issue_comments:1,pr_body:1,pr_review_comments:1,pr_reviews:1"; f_sources = 2
+            d_unparseable_legacy_record_no_hold = "True/"
+            e_unresolved_citation_holds = "CITED_SOURCE_UNRESOLVED:100009998/HOLD_CLASS=TECHNICAL_HOLD/digest="
+            e2_deleted_cited_source_holds = "CITED_SOURCE_UNRESOLVED:100009002/HOLD_CLASS=TECHNICAL_HOLD"
+            f_streams_without_issue_reference = "issue_comments:1,pr_body:1,pr_review_comments:1,pr_reviews:1"
+            f_unnamed_issue_citation_holds = "CITED_SOURCE_UNRESOLVED:100009002"
+            f2_bare_numbers_are_not_citations = "True/True/4"
             g_stream_page_fail = "STREAM_UNREADABLE:issue_comments:89/HOLD_CLASS=TECHNICAL_HOLD"
             h_stream_truncated = "STREAM_TRUNCATED:issue_comments:1/HOLD_CLASS=TECHNICAL_HOLD"; ai_prompts = 0
         }
@@ -1019,18 +1036,21 @@ try {
         $global:FxChecks.guard_allowed_sent = (@($allowedOk | Where-Object { $_ -notmatch 'refused:False/requests_sent:1$' }).Count -eq 0)
         $global:FxChecks.local_draft_written = (Test-Path $draft) -and ([System.IO.File]::ReadAllText($draft).Contains("[OWNER-AMENDMENT]"))
         # hold taxonomy (§5.1): the class comes from the category, and only the closed list is the user's
-        $human = @("NEXT_HOLD_NEW_PRODUCT_FEATURE", "NEXT_HOLD_PRODUCT_DIRECTION_UNDECIDED", "NEXT_HOLD_BEYOND_USER_REQUIREMENT", "NEXT_HOLD_LIVE", "NEXT_HOLD_PROVIDER_CALL", "NEXT_HOLD_CANARY", "NEXT_HOLD_REAL_EXTERNAL_READ", "NEXT_HOLD_RESIDUAL_RISK_APPROVAL", "NEXT_HOLD_COST", "NEXT_HOLD_EXTERNAL_DATA_TRANSFER", "NEXT_HOLD_DESTRUCTIVE", "PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD", "GPT_HUMAN_DECISION_REQUIRED", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_LIVE")
-        $technical = @("AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "")
+        $human = @("GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE", "CLAUDE_HUMAN_DECISION_REQUIRED_COST", "NEXT_HOLD_NEW_PRODUCT_FEATURE", "NEXT_HOLD_PRODUCT_DIRECTION_UNDECIDED", "NEXT_HOLD_BEYOND_USER_REQUIREMENT", "NEXT_HOLD_LIVE", "NEXT_HOLD_PROVIDER_CALL", "NEXT_HOLD_CANARY", "NEXT_HOLD_REAL_EXTERNAL_READ", "NEXT_HOLD_RESIDUAL_RISK_APPROVAL", "NEXT_HOLD_COST", "NEXT_HOLD_EXTERNAL_DATA_TRANSFER", "NEXT_HOLD_DESTRUCTIVE", "PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_LIVE")
+        $technical = @("GPT_HUMAN_DECISION_REQUIRED", "HUMAN_DECISION_REQUIRED", "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY", "REPAIR_FIXER_DECLINED_WITHOUT_A_HUMAN_CATEGORY", "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998", "AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "")
         $global:FxChecks.taxonomy_human_all = (@($human | Where-Object { (Get-HoldClass $_) -ne "HUMAN_DECISION_REQUIRED" }) -join ',')
         $global:FxChecks.taxonomy_technical_all = (@($technical | Where-Object { (Get-HoldClass $_) -ne "TECHNICAL_HOLD" }) -join ',')
         # citation grammar: "Issue #n" and bare 9-12 digit ids; hashes, short numbers, paths and PR numbers are not ids
-        $refs = Get-EvidenceReferences "Authority (Issue #126, Issue #89): ``5906290729`` and 5907009512. PR #160, issue #7 lower-case, run 36699770595, sha bb9906ccd61cac270908ad64de50be98, 0033_collect, v1234567890, path/123456789, 12345678, 1234567890123."
+        $refs = Get-EvidenceReferences "Authority (Issue #126, Issue #89): ``5906290729``, ``5907009512`` and bare 5909188774. PR #160, issue #7 lower-case, run 36699770595, ``36699770595x``, ``12345678``, ``1234567890123``, ``bb9906ccd61c``, ````5906712259````."
         $global:FxChecks.citation_issues = $refs.Issues -join ','
         $global:FxChecks.citation_ids = $refs.Ids -join ','
+        $global:FxChecks.category_at_start = (@("NEW_PRODUCT_FEATURE: x", "[LIVE] y", "COST", "  PROVIDER_CALL - z") | ForEach-Object { Get-HumanDecisionCategory $_ }) -join ','
+        $global:FxChecks.category_absent = (@("the diff needs a decision", "maybe LIVE later", "OWNER_HOLD: not an auditor's", "new_product_feature: lower", "") | ForEach-Object { "[$(Get-HumanDecisionCategory $_)]" }) -join ''
         $expected = [ordered]@{
             grammar_positive_all_marked = $true; grammar_negative_all_unmarked = $true; guard_all_refused_zero_requests = $true
             guard_allowed_sent = $true; local_draft_written = $true; taxonomy_human_all = ""; taxonomy_technical_all = ""
-            citation_issues = "89,126"; citation_ids = "5906290729,5907009512,36699770595"
+            citation_issues = "89,126"; citation_ids = "5906290729,5907009512"
+            category_at_start = "NEW_PRODUCT_FEATURE,LIVE,COST,PROVIDER_CALL"; category_absent = "[][][][][]"
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
         $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
@@ -1169,7 +1189,8 @@ $orchestratorExpect = @{
     "auto-next-human"         = @{ status = "HUMAN_DECISION_REQUIRED"; action = "NEXT_HOLD_NEW_PRODUCT_FEATURE"; merged = 1; human = $true; created = 0 }
     "auto-next-live"          = @{ status = "HUMAN_DECISION_REQUIRED"; action = "NEXT_HOLD_LIVE"; merged = 1; human = $true; created = 0 }
     "auto-next-hold"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED"; merged = 1; human = $false; created = 0 }
-    "gpt-human"               = @{ status = "HUMAN_DECISION_REQUIRED"; action = "GPT_HUMAN_DECISION_REQUIRED"; merged = 0; human = $true; fixer = 0; merge_calls = 0 }
+    "gpt-human"               = @{ status = "HUMAN_DECISION_REQUIRED"; action = "GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE"; merged = 0; human = $true; fixer = 0; merge_calls = 0 }
+    "gpt-human-uncategorised" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; fixer = 0; merge_calls = 0 }
     "fixer-human"             = @{ status = "HUMAN_DECISION_REQUIRED"; action = "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_PRODUCT_DIRECTION_UNDECIDED"; merged = 0; human = $true; merge_calls = 0 }
     "claude-blocker-hold"     = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "gpt-insufficient"        = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_INSUFFICIENT"; merged = 0; human = $false; gpt = 3; merge_calls = 0 }
