@@ -16,18 +16,10 @@ const PAIRING_KEY = "pairing";
 const RUN_POLL_MS = 1000;
 const RUN_POLL_LIMIT = 60;
 
-// The capture UX is the side panel. Chrome 109–113 has no side panel API, so there the same page
-// opens as a small window, and the tab the operator clicked from is remembered for that session.
-const TARGET_TAB_KEY = "target_tab";
-
+// The capture UX is the side panel, which exists from Chrome 114: the manifest's minimum. There is
+// no other surface, and the pairing is the only thing this extension stores.
 chrome.runtime.onInstalled.addListener(() => {
-  if (chrome.sidePanel) chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
-
-chrome.action.onClicked.addListener(async (tab) => {
-  if (chrome.sidePanel) return;
-  await chrome.storage.session.set({ [TARGET_TAB_KEY]: tab.id });
-  await chrome.windows.create({ url: "sidepanel.html", type: "popup", width: 420, height: 640 });
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
 async function pairing() {
@@ -36,17 +28,8 @@ async function pairing() {
 }
 
 async function targetTab() {
-  if (chrome.sidePanel) {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    return tab || null;
-  }
-  const remembered = (await chrome.storage.session.get(TARGET_TAB_KEY))[TARGET_TAB_KEY];
-  if (remembered === undefined) return null;
-  try {
-    return await chrome.tabs.get(remembered);
-  } catch {
-    return null;
-  }
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab || null;
 }
 
 async function activeSupplierTab() {

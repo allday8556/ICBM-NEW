@@ -3,7 +3,7 @@
   "name": "ICBM Capture",
   "description": "Captures one reviewed supplier product page and sends it to the local ICBM application.",
   "version": "0.1.0",
-  "minimum_chrome_version": "109",
+  "minimum_chrome_version": "114",
   "action": {
     "default_title": "ICBM Capture"
   },
