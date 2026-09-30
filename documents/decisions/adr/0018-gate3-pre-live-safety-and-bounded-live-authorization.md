@@ -302,9 +302,10 @@ independently of any UI state and of any grant.
 > never a new screen or route: `icbm live inspect` (the brake, every grant and its readiness, and
 > the canary readiness — read-only), `eligibility-packet` and `record-eligibility` (§5.1),
 > `issue-asset-grant` and `issue-create-grant` (§3.2), and `release-brake` / `engage-brake` (§4.1).
-> Each is an owning command that holds the data directory (ADR-0006) and calls exactly one
-> existing owner — `CanaryEligibilityService`, `LiveAuthorityService`, `LiveStatusService` or the
-> REGISTER canary readiness — and prints that owner's answer or refusal code. The commands own no
+> Each is an owning command that holds the data directory (ADR-0006). Each protected action calls
+> exactly one existing owner method, of `CanaryEligibilityService` or `LiveAuthorityService`;
+> `inspect` writes nothing and reads the two existing read-only projections, `LiveStatusService`
+> and the REGISTER canary readiness. Each prints the owners' answer or refusal code. The commands own no
 > truth: no duplicate eligibility, grant or brake model exists, every value given is only an
 > expectation the owner checks, releasing still needs an authorization reference, and nothing here
 > changes the execution mode — the send-time stack still refuses every mutation under

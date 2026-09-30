@@ -3,12 +3,14 @@ visual acceptance (ADR-0018 §9) — the only path by which one is ever recorded
 protected pre-LIVE operator commands of the first canary (Issue #89 architect resolution
 ``5915900049`` D3).
 
-**The protected operator commands own no truth.** ``icbm live inspect``, ``eligibility-packet``,
-``record-eligibility``, ``issue-asset-grant``, ``issue-create-grant``, ``release-brake`` and
-``engage-brake`` each call exactly one existing server owner — the canary-eligibility owner
-(ADR-0018 §5.1), the LIVE authority (§3, §4) or the read-only live projections — and print what
-that owner returned. Every rule, identity and refusal stays with the owner: a value given here is
-only an expectation the owner checks, never a fact it records as given. Nothing here reaches a
+**The protected operator commands own no truth.** Each protected action —
+``eligibility-packet``, ``record-eligibility``, ``issue-asset-grant``, ``issue-create-grant``,
+``release-brake`` and ``engage-brake`` — calls exactly one existing owner method, of the
+canary-eligibility owner (ADR-0018 §5.1) or the LIVE authority (§3, §4). ``icbm live inspect``
+writes nothing and reads two existing read-only projections, the live status and the canary
+readiness. Each prints what the owners returned. Every rule, identity and refusal stays with the
+owner: a value given here is only an expectation the owner checks, never a fact it records as
+given. Nothing here reaches a
 provider, changes the execution mode or makes a mutation permitted: a grant and a released brake
 are two layers of the send-time stack, which still refuses under ``M0_DRY_RUN_ONLY``.
 
@@ -99,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_operator_commands(live_commands: Any) -> None:
-    """The protected operator commands of 5915900049 D3: one existing owner each."""
+    """The protected operator commands of 5915900049 D3: existing owners only."""
     inspect = live_commands.add_parser(
         "inspect", help="print the brake, every grant and the canary readiness (read-only)"
     )
@@ -294,7 +296,7 @@ def _artifacts(path: Path) -> list[Any]:
 
 
 def _operate(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
-    """Run one protected operator command against the one owner it names (5915900049 D3).
+    """Run one protected operator command against the existing owners it names (5915900049 D3).
 
     The owner decides; this prints its answer as JSON, or its refusal code on stderr and exits 1.
     """

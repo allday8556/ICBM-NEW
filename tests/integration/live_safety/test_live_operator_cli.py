@@ -2,7 +2,8 @@
 
 ``icbm live inspect / eligibility-packet / record-eligibility / issue-asset-grant /
 issue-create-grant / release-brake / engage-brake`` extend the existing ``icbm live`` family. Each
-calls exactly one existing owner and prints its answer; the command owns no truth:
+protected action calls exactly one existing owner method, ``inspect`` reads the two existing
+read-only projections, and each prints the answer; no command owns truth:
 
 - an input that is not even well-formed (a naive time, an unreadable file) is refused before any
   owner is asked, and nothing is written;
