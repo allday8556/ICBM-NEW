@@ -1042,11 +1042,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Two are still missing at this main
-    — an executable committed-session read-back and a comparison that proves published state,
-    the two halves of ADR-0014 §11's success proof — and none is authorized by ADR-0020. Three
-    were closed by their own slices, and the order records them as closed rather than dropping
-    them: the production ASSET sender (wired with no committed session), the ADR-0014 §27
+    order may never omit a mandatory pre-canary prerequisite. Three are still missing at this main
+    — a production ASSET sender that can transmit (the adapter is wired with no committed session
+    and sends nothing), an executable committed-session read-back and a comparison that proves
+    published state, the two halves of ADR-0014 §11's success proof — and none is authorized by
+    ADR-0020. Two were closed by their own slices, each under its own architect resolution, and
+    the order records them as closed rather than dropping them: the ADR-0014 §27
     authoring-revision owners (5907626428, ADR-0014 §27.1) and the durable canary-eligibility
     owner (5910018106, ADR-0018 §5.1)."""
     from app.capabilities.live_safety.proofs import DurableStageProofs
@@ -1063,14 +1064,15 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the mutation-stage prerequisites of ADR-0018 §10 and the read-back success proof of"
         " ADR-0014 §11",
         "This ADR authorizes none of them, and none may be skipped",
-        "~~the **production ASSET sender**~~ — **closed by its own slice** (ADR-0018 §10 amendment"
-        " note): `app/container.py` wires `SmartStoreAssetSender`",
+        "the **production ASSET sender** — `app/container.py` wires `SmartStoreAssetSender`",
+        "**with no committed session**: it is unavailable and refuses every send"
+        " (`LIVE_SENDER_NOT_WIRED`)",
         "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
-        "The sender layer still refuses (`LIVE_SENDER_NOT_WIRED`) while no committed session"
-        " exists",
-        "the slice that wired it transmits nothing",
-        "**Amendment note (production ASSET sender slice).**",
-        "Two prerequisites are still missing",
+        "a sender that transmits to the provider is not provider-zero",
+        "The wired adapter transmits nothing; giving it a committed session is that user decision",
+        "**Amendment note (production ASSET sender adapter).**",
+        "**not closed**",
+        "Three prerequisites are therefore still missing",
         "~~the **durable canary-eligibility owner** (ADR-0018 §5)~~ — **closed by its own slice**"
         " (ADR-0018 §5.1; Issue #89 architect resolution `5910018106`; migration `0033`)",
         "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
@@ -1112,8 +1114,7 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 2
-    assert len(re.findall(r"^\| ~~the \*\*production ASSET sender\*\*~~", order, re.M)) == 1
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 3
     assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*durable canary-eligibility owner\*\*", order, re.M)) == 1
     # The remaining user-decision steps are still listed, and now after those prerequisites.
@@ -1142,7 +1143,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     )
     for element in (
         "the standing authorization does **not** cover any of them",
-        "not provider-zero",
+        "production ASSET sender",
+        "`app/container.py` wires `SmartStoreAssetSender` with no committed session",
+        "the sender and the committed session because a real provider transport is not"
+        " provider-zero",
         "**executable committed-session read-back**",
         "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
@@ -1152,16 +1156,23 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         assert element in ordering, element
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
     assert later in ordering
-    assert ordering.index("committed-session read-back") < ordering.index(later)
+    assert ordering.index("ASSET sender") < ordering.index(later)
+    # The adapter is recorded as groundwork, never as a closed prerequisite.
     for element in (
-        "**Pre-canary prerequisite closed — the production ASSET sender** (ADR-0018 §10 amendment"
-        " note)",
+        "**Pre-canary groundwork, prerequisite still open — the production ASSET sender adapter**"
+        " (ADR-0018 §10 amendment note)",
         "With no committed session it is unavailable, the sender layer refuses"
         " (`LIVE_SENDER_NOT_WIRED`)",
         "anything possibly transmitted is `UPLOAD_UNKNOWN` and is never resent",
+        "**It closes no prerequisite**",
     ):
         assert element in ordering, element
     assert "`app/container.py` wires `UnwiredAssetSender`" not in ordering
+    assert "Pre-canary prerequisite closed — the production ASSET sender" not in ordering
+    # "After those two" still refers to the two adoption slices: every recorded slice follows it.
+    assert ordering.index("After those two, the mandatory") < ordering.index(
+        "**Pre-canary prerequisite closed"
+    )
     # The closed prerequisite is recorded as closed, with what it does not grant.
     for element in (
         "**Pre-canary prerequisite closed — the authoring-revision owners** (ADR-0014 §27.1;",
@@ -1186,10 +1197,11 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "canary-eligibility owner** of ADR-0018 §5 (" not in ordering
     preconditions = " ".join(_section(roadmap, r"^14\.2 Preconditions").split())
     for element in (
-        "the **mutation-stage prerequisites of ADR-0018 §10**, each closed by its own slice and"
-        " none of them permission",
-        "the **production ASSET sender** for the ASSET stage is wired (`SmartStoreAssetSender`",
-        "stays unavailable — `LIVE_SENDER_NOT_WIRED` — while no committed session exists",
+        "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
+        "a **production ASSET sender** for the ASSET stage that can transmit"
+        " (`SmartStoreAssetSender`",
+        "is wired with no committed session and refuses every send with `LIVE_SENDER_NOT_WIRED`",
+        "which is not authorized by the ADR-0020 standing authorization",
         "The **durable canary-eligibility owner** (ADR-0018 §5) is closed by its own slice"
         " (ADR-0018 §5.1)",
         "`CANARY_NON_REGULATED` still has to be proven for the exact canary lineage by a current"
@@ -1203,8 +1215,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
-    # The runtime facts behind the closed rows. The ASSET sender is the adopted upload with no
-    # committed session, so it is unavailable. The authoring-revision owner exists and is wired;
+    # The runtime facts behind the rows. The ASSET sender is the adopted upload with no committed
+    # session, so it is unavailable and its prerequisite — a sender that transmits — stays open.
+    # The authoring-revision owner exists and is wired;
     # a client still names neither revision. The eligibility owner exists and is the only thing
     # the durable proof source reads.
     from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
