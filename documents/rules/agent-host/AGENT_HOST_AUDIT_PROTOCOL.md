@@ -251,6 +251,9 @@ inferred.
   - `` `review-comment:<id>` `` — a review comment of the PR.
 
   A number outside a code span, such as a CI run id, is not a citation.
+- Citations are read **from the declaration only**. An id or a path in a code span inside a file
+  of the diff — an ADR that names a historical record, a document that names another — is content
+  under audit, not a citation of the slice.
 - A **canonical document citation** is `` `canon:<repository path>` `` in a code span. It puts that
   file, as it is at the audited HEAD, into the packet as a required source bound by its git blob
   SHA. The declaration cites the canonical documents the slice implements or is judged against

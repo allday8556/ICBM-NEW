@@ -135,7 +135,8 @@ The marker-and-classification gate is removed from the packet.
   required or requested.
 - Existing `[OWNER-AMENDMENT]` and `[ARCHITECT-INSTRUCTION]` records are kept as history. They are
   never deleted or edited. Among them: `5907095955`, `5909645067` and the PR #147 bootstrap record
-  `5876525801`.
+  `5876525801`. (Naming them here does not cite them: a citation is read from a slice's
+  declaration, never from a document in its diff.)
 - No new `[OWNER-AMENDMENT]` is created, and the user is never asked to post one.
 
 ### 6. What is not relaxed
@@ -201,5 +202,7 @@ OA-10  Tracks are separate: their own branch, worktree, PR, packet, audit identi
 - A wrong implementation choice is caught by an audit, not by a question. A loop can therefore
   spend audit and repair cycles on a problem a person would have resolved with one answer. The
   circuit breaker of §4 bounds that cost.
-- The audit input of a slice is what its own PR body cites. A PR that cites nothing is audited on
-  its diff alone; the auditors decide whether that is enough.
+- The audit input of a slice is its diff, its PR body, which is always a required source, and
+  the evidence and canonical documents that body cites. Choosing what to cite is the agent's work,
+  and it cannot make an audit easier: an auditor that needs evidence or canon the packet does not
+  carry returns `INSUFFICIENT`, never a PASS on the diff alone.
