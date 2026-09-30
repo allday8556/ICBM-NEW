@@ -66,19 +66,20 @@ def _code() -> list[tuple[str, str]]:
 
 M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
 # M5 PR-D adopts the two product reads (packet 5746489554), the IMAGE UPLOAD amendment the
-# one-artifact upload, and the CREATE adoption slice (ADR-0020 §4 order 1) POST /v2/products.
-# Nothing else, and no third mutation.
+# one-artifact upload, the CREATE adoption slice (ADR-0020 §4 order 1) POST /v2/products, and the
+# SEARCH positive-only reconcile slice (order 2; Issue #89 5904349289) POST /v1/products/search as
+# a read. Nothing else, and no third mutation.
 M5_ADOPTED = frozenset(
     {
         "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
         "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
         "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_SEARCH",
     }
 )
 M5_UNPROVEN = frozenset(
     {
-        "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
@@ -88,7 +89,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-create-r2"
+M5_MAPPING_REVISION = "m5-search-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -116,28 +117,29 @@ def test_the_image_upload_and_the_create_are_the_only_adopted_mutating_contracts
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    # SEARCH is the separate later slice (ADR-0020 §4 order 2, ADR-0014 §28.2-§28.4).
-    assert "SMARTSTORE_PRODUCT_SEARCH" in {e.value for e in registry.NOT_ADOPTED}
+    # SEARCH (ADR-0020 §4 order 2, ADR-0014 §28.2-§28.4) is adopted as a read, never a mutation.
+    search = registry.resolve(registry.EndpointId.SMARTSTORE_PRODUCT_SEARCH)
+    assert search.mutating is False
 
 
-def test_adopting_create_never_adopts_the_reconcile_lookup_with_it() -> None:
-    # ADR-0020 SA-09: CREATE and the positive-only reconcile are two separate slices, CREATE
-    # first. The CREATE seam is real; the lookup seam still refuses locally, so an UNKNOWN stays
-    # unresolved rather than being fabricated into an absence (ADR-0014 §10, §28.2).
-    from integrations.marketplaces.smartstore.execution import (
-        ReconcileLookupNotAdoptedError,
-        SmartStoreReconcileLookup,
-    )
+def test_the_adopted_reconcile_lookup_without_a_session_proves_nothing() -> None:
+    # ADR-0020 SA-09: the positive-only reconcile is its own slice after CREATE. Its lookup is
+    # adopted, but with no committed session (production wires none) a lookup is UNAVAILABLE:
+    # it raises nothing, names no candidate and never proves absence (ADR-0014 §17.2, §28.2).
+    from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+    from integrations.marketplaces.smartstore.execution import SmartStoreReconcileLookup
 
-    lookup = SmartStoreReconcileLookup()
-    assert lookup.available() is False
-    with pytest.raises(ReconcileLookupNotAdoptedError):
-        lookup.find(marketplace_account_id="mpa-1", listing_identity="icbm-x")
+    lookup = SmartStoreReconcileLookup(caller=SmartStoreEndpointCaller(), bearer=lambda: None)
+    assert lookup.available() is True
+    found = lookup.find(marketplace_account_id="mpa-1", listing_identity="icbm-" + "0" * 32)
+    assert found["status"] == "UNAVAILABLE"
+    assert found["code"] == "SMARTSTORE_SESSION_UNAVAILABLE"
+    assert found["candidates"] == []
 
 
 def test_the_adoption_detector_fires() -> None:
-    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_SEARCH"]
-    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_SEARCH"]
+    adopted = [*M2_ENDPOINTS, "SMARTSTORE_CATEGORY_LIST"]
+    assert adoption_problems(adopted) == ["SMARTSTORE_CATEGORY_LIST"]
 
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
@@ -152,7 +154,17 @@ M5_PREPARATION = "0018_m5_registration_preparation"
 # else registration-shaped is still forbidden.
 G1_TARGET_POLICY = "0019_g1_registration_target_policy"
 M5_HEAD = "0020_g1_registration_category_metadata"
-M5_MIGRATIONS = (M5_FOUNDATION, M5_EXECUTION_SCOPE, M5_PREPARATION, G1_TARGET_POLICY, M5_HEAD)
+# The SEARCH positive-only reconcile slice (ADR-0014 §28.4; Issue #89 5904349289 H-S2 (a)) adds the
+# reconcile-check owner and the channel identity columns, concretely authorized as 0031.
+M5_RECONCILE = "0031_m5_registration_reconcile"
+M5_MIGRATIONS = (
+    M5_FOUNDATION,
+    M5_EXECUTION_SCOPE,
+    M5_PREPARATION,
+    G1_TARGET_POLICY,
+    M5_HEAD,
+    M5_RECONCILE,
+)
 # Gate 2 (ADR-0016) adds the ReviewItem owner after the M5 head: G2-A its items, G2-B its
 # coverage watermark, G2-C the owner truth token of that watermark. None is registration
 # state, so the registration guards below still apply to them unchanged. Nothing else follows.
@@ -172,7 +184,8 @@ ADAPTIVE_C1_PREP0 = "0028_phase_c_read_accounting"
 # Gate 3 area 2 (ADR-0018 §12): the restore-drill and evidence-retention proof records.
 G3_AREA2 = "0029_g3_restore_retention"
 # Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record, never registration state.
-SCHEMA_HEAD = "0030_g3_visual_acceptance"
+G3_AREA3 = "0030_g3_visual_acceptance"
+SCHEMA_HEAD = M5_RECONCILE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -183,7 +196,8 @@ AFTER_M5 = (
     ADAPTIVE_C0,
     ADAPTIVE_C1_PREP0,
     G3_AREA2,
-    SCHEMA_HEAD,
+    G3_AREA3,
+    M5_RECONCILE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
@@ -218,6 +232,8 @@ REGISTRATION_TABLES = frozenset(
         "registration_category_metadata",
         "registration_category_metadata_revisions",
         "registration_category_metadata_current",
+        # ADR-0014 §28.4 (Issue #89 5904349289 §A): the durable reconcile-check owner.
+        "registration_reconcile_checks",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column

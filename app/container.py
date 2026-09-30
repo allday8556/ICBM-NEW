@@ -520,7 +520,12 @@ def build_container(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
             bearer=lambda: None,
         ),
-        lookup=SmartStoreReconcileLookup(),
+        # SEARCH is adopted for positive-only reconcile, with the same absent session: a check
+        # records LOOKUP_UNAVAILABLE and proves nothing, and no provider is read.
+        lookup=SmartStoreReconcileLookup(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=lambda: None,
+        ),
         capability=marketplace_capability,
         compare=smartstore_readback,
         projection=smartstore_product.project,

@@ -1208,7 +1208,12 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
     before = schema()
     upgrade_to_head(url)
     after = schema()
-    assert {name for name in before if before[name] != after[name]} == {"collection_runs"}
+    assert {name for name in before if before[name] != after[name]} == {
+        "collection_runs",
+        # Migration 0031 adds the provider channel identity column to these two.
+        "registration_intents",
+        "marketplace_registrations",
+    }
     assert {"adaptive_capture_requests", "adaptive_capture_candidates"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0026_g3_live_authority")
     assert schema() == before

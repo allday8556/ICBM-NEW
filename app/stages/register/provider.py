@@ -16,6 +16,7 @@ Each seam is written so that *not having* the capability is expressible without 
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 from app.platform.core.errors import ErrorClass
@@ -92,6 +93,10 @@ class CreateHandoff:
     remote_outcome: RemoteOutcome
     sanitized_request: Mapping[str, Any]
     marketplace_product_id: str | None = None
+    # The provider's channel identity of the same listing, when the response names it
+    # (for SmartStore the STOREFARM ``smartstoreChannelProductNo``; Issue #89 5904349289 §B).
+    # Only an applied outcome carries it, and it is never guessed.
+    marketplace_channel_product_id: str | None = None
     response_status: int | None = None
     sanitized_response: Mapping[str, Any] | None = None
     error_class: ErrorClass | None = None
@@ -134,16 +139,49 @@ class WireProjector(Protocol):
         ...
 
 
+class LookupStatus(StrEnum):
+    """What one reconcile lookup managed to observe (ADR-0014 §28.2, §28.4).
+
+    ``COMPLETE`` means every page was enumerated consistently, so its exact-candidate count is
+    trustworthy — and even then zero is never absence. ``UNAVAILABLE`` (no session, a rate or quota
+    refusal, a result too large for the bounded read budget) and ``ERROR`` (anything else) prove
+    nothing at all.
+    """
+
+    COMPLETE = "COMPLETE"
+    UNAVAILABLE = "UNAVAILABLE"
+    ERROR = "ERROR"
+
+
 @runtime_checkable
 class ReconcileLookup(Protocol):
-    """A lookup by the stable listing identity, for reconciling an UNKNOWN CREATE (§10)."""
+    """The positive-only reconcile lookup by the stable listing identity (§10, §28.2).
+
+    ``find`` returns sanitized evidence with, at least:
+
+    * ``status`` — a :class:`LookupStatus` value;
+    * ``code`` — the reason when the status is not ``COMPLETE``;
+    * ``candidates`` — only when ``COMPLETE``: every provider listing whose seller code is
+      **exactly** this listing identity's provider projection, each as ``origin_product_no`` and
+      ``channel_product_no`` (strings); never the provider's similar or partial matches.
+
+    It never raises for a provider or session failure: that is ``UNAVAILABLE`` or ``ERROR``, which
+    prove nothing. A lookup never proves remote absence (§17.2) and never authorizes a CREATE.
+    """
 
     def available(self) -> bool:
-        """``False`` where no lookup contract is adopted: the UNKNOWN then stays unresolved."""
+        """Whether the lookup contract is adopted at all. ``False`` keeps the path fail-closed."""
         ...
 
     def find(self, *, marketplace_account_id: str, listing_identity: str) -> Mapping[str, Any]:
-        """The retained evidence of one lookup, or a raised error. Never a fabricated absence."""
+        """The sanitized evidence of one lookup. Never a fabricated absence."""
+        ...
+
+    def confirms_candidate(
+        self, *, listing_identity: str, retained_readback: Mapping[str, Any]
+    ) -> bool:
+        """Whether a candidate's read-back carries exactly this listing identity's provider code
+        — the second half of §28.2's presence proof. ``False`` for anything unreadable."""
         ...
 
 
@@ -152,6 +190,7 @@ __all__ = [
     "CreateSender",
     "DuplicateEvidence",
     "DuplicateLookupSource",
+    "LookupStatus",
     "PreparedAsset",
     "ProviderAssetSource",
     "ReadbackComparator",

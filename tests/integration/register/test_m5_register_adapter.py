@@ -146,7 +146,7 @@ def _read(body: dict[str, Any]) -> Any:
 
 
 def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r2"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-search-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
     # The CREATE adoption slice adds the second adopted mutation and no third. Adoption is never
     # LIVE authority: execution stays DRY_RUN and the send-time stack refuses every mutation.
@@ -154,9 +154,11 @@ def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    # The duplicate-lookup search is the separate later slice and still fails locally.
+    # The SEARCH slice adopts the product search as a read, never a mutation, and every endpoint
+    # it did not adopt still fails locally.
+    assert resolve(EndpointId.SMARTSTORE_PRODUCT_SEARCH).mutating is False
     with pytest.raises(EndpointNotAdoptedError):
-        resolve(EndpointId.SMARTSTORE_PRODUCT_SEARCH)
+        resolve(EndpointId.SMARTSTORE_CATEGORY_LIST)
 
 
 def test_the_capability_stays_unverified_for_product_write(container: Container) -> None:

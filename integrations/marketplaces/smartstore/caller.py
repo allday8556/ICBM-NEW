@@ -47,6 +47,12 @@ from integrations.marketplaces.smartstore.registry import (
     resolve,
 )
 from integrations.marketplaces.smartstore.retention import retain
+from integrations.marketplaces.smartstore.search import (
+    FIRST_PAGE,
+    INT32_MAX,
+    MAX_PAGE_SIZE,
+    request_body,
+)
 from integrations.marketplaces.smartstore.signing import (
     TOKEN_FORM_FIELDS,
     ApplicationCredentials,
@@ -77,6 +83,11 @@ _PRODUCT_READS = frozenset(
 )
 _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
+_PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
+# The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
+# of an ICBM listing identity (ruling R1), 30 lowercase hexadecimal characters. A search is never
+# made with an operator's text, a product name or the 37-character internal identity.
+_SEARCH_CODE = re.compile(r"^[0-9a-f]{30}$")
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -158,6 +169,23 @@ class ProductCreateRequest:
 
 
 @dataclass(frozen=True)
+class ProductSearchRequest:
+    """One page of the seller-code search (SEARCH positive-only reconcile slice; S1).
+
+    ``seller_management_code`` must be the R1 projection of an ICBM listing identity, and the body
+    is exactly the documented seller-code search (``search.request_body``): no other filter is
+    invented. ``page`` starts at 1 and ``size`` is at most 500.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    seller_management_code: str
+    page: int
+    size: int
+
+
+@dataclass(frozen=True)
 class ImageUploadRequest:
     """Upload exactly one immutable artifact in exactly one ``imageFiles`` part.
 
@@ -200,6 +228,19 @@ class ProductCreateResponse:
 
     retained: Mapping[str, object]
     http_status: int
+
+
+@dataclass(frozen=True)
+class ProductSearchPage:
+    """One search page reduced to the endpoint's retained-field allow-list.
+
+    Reaching this type means only that a documented page arrived. What the page proves is decided
+    by the search contract (``search.py``) — and a page never proves remote absence.
+    """
+
+    retained: Mapping[str, object]
+    http_status: int
+    page: int
 
 
 @dataclass(frozen=True)
@@ -260,7 +301,12 @@ def _generations(request: object) -> tuple[int | None, int | None]:
     if isinstance(request, TokenRequest):
         return request.credentials.credential_generation, None
     if isinstance(
-        request, AccountRequest | ProductReadRequest | ProductCreateRequest | ImageUploadRequest
+        request,
+        AccountRequest
+        | ProductReadRequest
+        | ProductCreateRequest
+        | ProductSearchRequest
+        | ImageUploadRequest,
     ):
         return request.credential_generation, request.session_generation
     return None, None
@@ -353,6 +399,27 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         assert contract.content_type is not None
         headers["Content-Type"] = contract.content_type
         return _Wire(contract.path, headers, {}, content=_json_body(request.document))
+    if contract.endpoint_id is _PRODUCT_SEARCH:
+        if (
+            not isinstance(request, ProductSearchRequest)
+            or not isinstance(request.seller_management_code, str)
+            or not _SEARCH_CODE.fullmatch(request.seller_management_code)
+            or isinstance(request.page, bool)
+            or not isinstance(request.page, int)
+            or not FIRST_PAGE <= request.page <= INT32_MAX
+            or isinstance(request.size, bool)
+            or not isinstance(request.size, int)
+            or not 1 <= request.size <= MAX_PAGE_SIZE
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        body = request_body(request.seller_management_code, request.page, request.size)
+        content = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return _Wire(contract.path, headers, {}, content=content)
     if contract.endpoint_id is _IMAGE_UPLOAD:
         if not isinstance(request, ImageUploadRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -401,7 +468,14 @@ def _marker(value: object) -> str | None:
     return value if isinstance(value, str) and _PROVIDER_MARKER.fullmatch(value) else None
 
 
-_Result = TokenGrant | SellerAccount | ProductReadback | ProductCreateResponse | ImageUploadResponse
+_Result = (
+    TokenGrant
+    | SellerAccount
+    | ProductReadback
+    | ProductCreateResponse
+    | ProductSearchPage
+    | ImageUploadResponse
+)
 
 
 def _result(contract: EndpointContract, request: object, body: object, status: int) -> _Result:
@@ -419,6 +493,12 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
             product_no=request.product_no,
             retained=retain(contract, fields),
             http_status=status,
+        )
+    if contract.endpoint_id is _PRODUCT_SEARCH:
+        assert isinstance(request, ProductSearchRequest)
+        # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
+        return ProductSearchPage(
+            retained=retain(contract, fields), http_status=status, page=request.page
         )
     if contract.endpoint_id is _IMAGE_UPLOAD:
         assert isinstance(request, ImageUploadRequest)
@@ -473,6 +553,13 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_CREATE_V2],
         request: ProductCreateRequest,
     ) -> ProductCreateResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
+        request: ProductSearchRequest,
+    ) -> ProductSearchPage: ...
 
     @overload
     def call(

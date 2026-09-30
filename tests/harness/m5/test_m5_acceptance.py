@@ -101,7 +101,7 @@ REQUIRED_CHECKS = {
     ),
     "13 an operator assertion alone resolves no UNKNOWN": (
         "s13.no_operator_assertion_evidence",
-        "s13.unadopted_lookup_resolves_nothing",
+        "s13.zero_result_resolves_nothing",
     ),
     "14 every durable digest is over the sanitized canonical": (
         "s14.payload_hash_is_over_the_sanitized_canonical",
@@ -125,7 +125,7 @@ REQUIRED_CHECKS = {
         "boundary.value_packet_alone_leaves_create_unsendable",
         "boundary.create_adopted_but_unreachable",
         "boundary.upload_adopted_but_unreachable",
-        "boundary.search_not_adopted",
+        "boundary.search_adopted_for_positive_reconcile_only",
         "boundary.product_registration_write_unverified",
         "boundary.no_provider_audit_event",
     ),
@@ -191,7 +191,7 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["checks_passed"] == report["checks_total"] >= 50
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
     assert report["execution_mode"] == "DRY_RUN"
-    assert report["database_revision"] == "0030_g3_visual_acceptance"
+    assert report["database_revision"] == "0031_m5_registration_reconcile"
 
 
 @pytest.mark.parametrize("names", REQUIRED_CHECKS.values(), ids=REQUIRED_CHECKS.keys())
@@ -228,11 +228,12 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "endpoint_id": "SMARTSTORE_PRODUCT_CREATE_V2",
         "endpoint_adopted": True,
     }
-    # The positive-only reconcile path is the separate later slice, so it really is unadopted.
+    # The positive-only reconcile lookup is adopted (ADR-0020 §4 order 2): it is declared only
+    # because an offline run has no provider to answer it.
     assert declared["RECONCILE_LOOKUP"] == {
-        "reason": "ENDPOINT_NOT_ADOPTED",
+        "reason": "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE",
         "endpoint_id": "SMARTSTORE_PRODUCT_SEARCH",
-        "endpoint_adopted": False,
+        "endpoint_adopted": True,
     }
     # The read-back contract **is** adopted: it is declared because an offline run has no provider
     # to answer it, and it is never reported as unadopted.
@@ -253,7 +254,7 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
     adoption = report["endpoint_adoption"]
     assert adoption["SMARTSTORE_PRODUCT_CREATE_V2"] is True
     assert adoption["SMARTSTORE_PRODUCT_IMAGE_UPLOAD"] is True
-    assert adoption["SMARTSTORE_PRODUCT_SEARCH"] is False
+    assert adoption["SMARTSTORE_PRODUCT_SEARCH"] is True
     assert adoption["SMARTSTORE_ORIGIN_PRODUCT_READ_V2"] is True
     # Adoption is a contract, never a call: the measured mutation count stays 0, and the real
     # wire projection still refuses because the official evidence leaves required values
@@ -266,11 +267,12 @@ def test_the_canary_plan_is_blocked_and_names_its_missing_contracts(accepted: Ac
     canary = accepted.report["canary_readiness"]
     assert canary["verdict"] == "BLOCKED"
     assert canary["write_status"] == "UNVERIFIED" and canary["execution_mode"] == "DRY_RUN"
-    # CREATE adoption satisfies its own requirement and nothing else: the canary is still BLOCKED,
-    # and the positive-only reconcile path is still named as unadopted.
+    # CREATE and SEARCH adoption satisfy their own requirements and nothing else: the canary is
+    # still BLOCKED, and no registration endpoint is left unadopted.
     assert "CREATE_ADOPTED" not in canary["missing"]
-    assert "RECONCILE_PATH_ADOPTED" in canary["missing"]
-    assert set(canary["unadopted_endpoints"]) == {"SMARTSTORE_PRODUCT_SEARCH"}
+    assert "RECONCILE_PATH_ADOPTED" not in canary["missing"]
+    assert "CREATE_MUTATION_READY" in canary["missing"]
+    assert set(canary["unadopted_endpoints"]) == set()
 
 
 def test_the_hard_zero_counters_are_measured_zero(accepted: Accepted) -> None:

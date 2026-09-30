@@ -576,6 +576,8 @@ def test_a_readable_success_is_applied_proven_and_hands_on_the_read_back_identit
     handoff = _send(Provider(httpx.Response(200, json=body)))
     assert handoff.remote_outcome is RemoteOutcome.APPLIED_PROVEN
     assert handoff.marketplace_product_id == str(ORIGIN_NO)
+    # Both provider identities travel on to the durable owner (Issue #89 5904349289 §B).
+    assert handoff.marketplace_channel_product_id == str(CHANNEL_NO)
     assert handoff.response_status == 200
     assert handoff.error_class is None and handoff.error_code is None
     contract = handoff.sanitized_response["response_contract"]

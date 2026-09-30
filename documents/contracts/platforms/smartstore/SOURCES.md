@@ -336,6 +336,20 @@ facts; the code-side contract (`integrations/marketplaces/smartstore/registry.py
 `create.py`) changed with that slice, not with this evidence record. Adoption is a contract, never a
 call: execution stays `DRY_RUN` and the provider-evidence verdict above is unchanged.
 
+### 5.3 M5 product-search evidence (`2.89.0`)
+
+This is the single ledger entry for the sources of the `POST /v1/products/search` contract that the
+positive-only reconcile slice adopts (ADR-0020 §4 order 2).
+
+| Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-SEARCH-289` | Issue #89 comment 5904349289 (architect resolution of the 2.89.0 `상품 목록 조회` reference, https://apicenter.commerce.naver.com/docs/commerce-api/current/search-product, S1–S4) | S1 the seller-code request (`searchKeywordType` `SELLER_CODE`, `sellerManagementCode`, `page` from 1, `size` at most 500, `application/json`); S2 the HTTP 200 page (`contents[]` with `originProductNo` and `channelProducts[]` carrying `originProductNo`, `channelProductNo`, `channelServiceType` `STOREFARM`/`WINDOW`/`AFFILIATE` and `sellerManagementCode`; `page`, `size`, `totalElements`, `totalPages`, `first`, `last`); S3 the documented statuses and the gateway `429` rate/quota refusals; S4 the page-size bound and the dynamic rate/quota model | `documents/evidence/marketplace-apis/PRODUCT_SEARCH.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.1.2; `integrations/marketplaces/smartstore/{search,caller,execution}.py` | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+
+The support answers of §5.2's reviews (similar/partial/exact seller-code matching, no uniqueness, no
+completeness or freshness guarantee) still bind this endpoint. This evidence adopts nothing and
+authorizes no call; the adoption, and the rule that no search result is ever remote absence or a
+CREATE authorization, are `ENDPOINT_MATRIX.md` §4.1.2 and ADR-0014 §28.2–§28.4.
+
 ---
 
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)

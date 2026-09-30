@@ -1,6 +1,7 @@
-"""The SmartStore side of registration execution (M5 PR-E; CREATE adoption slice, ADR-0020 §4).
+"""The SmartStore side of registration execution (M5 PR-E; CREATE and SEARCH adoption slices,
+ADR-0020 §4 orders 1 and 2).
 
-Product search remains NOT_ADOPTED. IMAGE UPLOAD is separately adopted, but is not wired to this
+IMAGE UPLOAD is separately adopted, but is not wired to this
 registration execution module: it has its own one-call adapter, and its durable owner is the ASSET
 upload-attempt owner of ADR-0018 §3.4 (``app.capabilities.live_safety.assets``, Gate 3 area 1),
 not anything here.
@@ -10,9 +11,11 @@ not anything here.
   :class:`~app.stages.register.provider.CreateHandoff`;
 * :class:`SmartStoreReadback` calls the adopted origin read-back through the same caller and
   returns only the retained, sanitized response (PR-D's profile);
-* :class:`SmartStoreReconcileLookup` reports unavailable, because no product-search contract is
-  adopted; an UNKNOWN CREATE therefore stays unresolved rather than being fabricated into an
-  absence (ADR-0014 §10, §28.2).
+* :class:`SmartStoreReconcileLookup` implements the adopted positive-only reconcile lookup
+  (``POST /v1/products/search``): it enumerates the seller-code search within a bounded read
+  budget and names only the exact ``STOREFARM`` candidates of this listing identity's provider
+  code. It never proves remote absence and never authorizes a CREATE; an exact candidate still
+  needs the origin read-back to carry the same code (ADR-0014 §10, §17.2, §28.2).
 
 **Adoption is not permission.** Nothing here decides retry, state or evidence: that is the domain
 owner's (``app.stages.register.execution``), and the ADR-0018 §4.3 send-time safety stack stands in
@@ -41,33 +44,22 @@ from typing import Any, Final
 
 from app.platform.core.errors import AppError, ErrorClass
 from app.stages.connect.marketplace.capability import RemoteOutcome
-from app.stages.register.provider import CreateHandoff
+from app.stages.register.provider import CreateHandoff, LookupStatus
 from app.stages.register.sanitize import SECRET_MATERIAL, problems
-from integrations.marketplaces.smartstore import create, product
+from integrations.marketplaces.smartstore import create, product, readback, search
 from integrations.marketplaces.smartstore.caller import (
     ProductCreateRequest,
     ProductReadRequest,
+    ProductSearchRequest,
     SmartStoreCallError,
     SmartStoreEndpointCaller,
 )
-from integrations.marketplaces.smartstore.registry import ADOPTED, ADOPTION_GAPS, EndpointId
+from integrations.marketplaces.smartstore.registry import ADOPTED, EndpointId
 from integrations.marketplaces.smartstore.transmission import Phase
 
 MARKETPLACE_KEY: Final = "smartstore"
 # The committed CONNECT session a call is made with, or None when there is none.
 BearerSource = Callable[[], Any]
-
-
-class ReconcileLookupNotAdoptedError(AppError):
-    """A reconcile lookup was requested while no lookup contract is adopted."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "SMARTSTORE_RECONCILE_LOOKUP_NOT_ADOPTED",
-            "SmartStore product search is not adopted: "
-            + ADOPTION_GAPS[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
-            details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_SEARCH.value},
-        )
 
 
 class SmartStoreCreateSender:
@@ -151,6 +143,7 @@ class SmartStoreCreateSender:
                 remote_outcome=RemoteOutcome.APPLIED_PROVEN,
                 sanitized_request=sanitized_request,
                 marketplace_product_id=reading.marketplace_product_id,
+                marketplace_channel_product_id=reading.marketplace_channel_product_id,
                 response_status=response.http_status,
                 sanitized_response=sanitized_response,
                 details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_CREATE_V2.value},
@@ -331,19 +324,122 @@ class SmartStoreReadback:
 
 
 class SmartStoreReconcileLookup:
-    """The reconcile lookup seam. Unavailable while product search is not adopted."""
+    """The adopted positive-only reconcile lookup (``POST /v1/products/search``; ADR-0014 §28.2).
+
+    It searches by the ``smartstore-seller-management-code/v1`` projection of the listing identity
+    and enumerates every page within a bounded read budget (``search.MAX_PAGES_PER_CHECK``). Only a
+    complete, consistent enumeration is a trustworthy count, and from it only the exact
+    ``STOREFARM`` matches are candidates. It never raises for a session, provider or response
+    failure: each becomes ``UNAVAILABLE`` or ``ERROR``, which prove nothing. It never proves
+    remote absence and never authorizes a CREATE — the REGISTER owner reads its answer under
+    ADR-0014 §28.2–§28.4 only.
+    """
+
+    def __init__(self, caller: SmartStoreEndpointCaller, bearer: "BearerSource") -> None:
+        self._caller = caller
+        self._bearer = bearer
 
     def available(self) -> bool:
-        return False
+        """Whether the lookup contract is adopted — the endpoint-adoption fact the ADR-0018 §10
+        stack reads, and nothing else. A missing session is the lookup's own ``UNAVAILABLE``."""
+        return EndpointId.SMARTSTORE_PRODUCT_SEARCH in ADOPTED
 
     def find(self, *, marketplace_account_id: str, listing_identity: str) -> Mapping[str, Any]:
-        raise ReconcileLookupNotAdoptedError()
+        try:
+            code = product.seller_management_code(listing_identity)
+        except product.WireContractError:
+            return self._evidence(LookupStatus.ERROR, "SMARTSTORE_SEARCH_IDENTITY_INVALID", None)
+        bearer = self._bearer()
+        if bearer is None:
+            return self._evidence(LookupStatus.UNAVAILABLE, "SMARTSTORE_SESSION_UNAVAILABLE", code)
+        pages: list[search.SearchPage] = []
+        for number in range(search.FIRST_PAGE, search.FIRST_PAGE + search.MAX_PAGES_PER_CHECK):
+            try:
+                answer = self._caller.call(
+                    EndpointId.SMARTSTORE_PRODUCT_SEARCH,
+                    ProductSearchRequest(
+                        bearer.access_token,
+                        bearer.credential_generation,
+                        bearer.session_generation,
+                        code,
+                        number,
+                        search.MAX_PAGE_SIZE,
+                    ),
+                )
+                page = search.read_page(answer.retained)
+            except SmartStoreCallError as failure:
+                # A rate or quota refusal defers the check (§28.4); anything else is an error.
+                # Neither proves anything about the listing.
+                status = (
+                    LookupStatus.UNAVAILABLE
+                    if failure.error_class is ErrorClass.RATE_LIMITED
+                    else LookupStatus.ERROR
+                )
+                return self._evidence(status, failure.code, code, pages=len(pages))
+            except search.SearchContractError as unreadable:
+                return self._evidence(LookupStatus.ERROR, unreadable.code, code, pages=len(pages))
+            pages.append(page)
+            if page.last:
+                break
+        else:
+            # The result needs more pages than one check may read: a partial enumeration is never
+            # a count, let alone a unique positive result.
+            return self._evidence(
+                LookupStatus.UNAVAILABLE,
+                "SMARTSTORE_SEARCH_READ_BUDGET_EXCEEDED",
+                code,
+                pages=len(pages),
+            )
+        try:
+            search.check_enumeration(pages)
+        except search.SearchContractError as inconsistent:
+            return self._evidence(LookupStatus.ERROR, inconsistent.code, code, pages=len(pages))
+        candidates = search.exact_candidates(pages, code)
+        return self._evidence(
+            LookupStatus.COMPLETE,
+            None,
+            code,
+            pages=len(pages),
+            total_elements=pages[0].total_elements,
+            candidates=[candidate.canonical() for candidate in candidates],
+        )
+
+    def confirms_candidate(
+        self, *, listing_identity: str, retained_readback: Mapping[str, Any]
+    ) -> bool:
+        """Whether the candidate's origin read-back carries exactly the projected code (§28.2)."""
+        try:
+            expected = product.seller_management_code(listing_identity)
+        except product.WireContractError:
+            return False
+        listing = readback.normalize(retained_readback)
+        return listing.readable and listing.seller_management_code == expected
+
+    @staticmethod
+    def _evidence(
+        status: LookupStatus,
+        code: str | None,
+        seller_management_code: str | None,
+        *,
+        pages: int = 0,
+        total_elements: int | None = None,
+        candidates: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """The sanitized evidence of one lookup: identities, counts and versions only."""
+        return {
+            "lookup_contract_version": search.SEARCH_CONTRACT_VERSION,
+            "status": status.value,
+            "code": code,
+            "seller_management_code": seller_management_code,
+            "pages_read": pages,
+            "total_elements": total_elements,
+            "candidates": list(candidates or []),
+        }
 
 
 __all__ = [
     "MARKETPLACE_KEY",
     "BearerSource",
-    "ReconcileLookupNotAdoptedError",
     "SmartStoreCreateSender",
     "SmartStoreReadback",
     "SmartStoreReconcileLookup",

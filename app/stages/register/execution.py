@@ -42,7 +42,7 @@ so `JobRunner.reconcile_terminal_owners()` converges after any crash.
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Any, Final, Protocol
 
@@ -62,10 +62,13 @@ from app.stages.register.model import (
     CREATE_ENDPOINT_GROUP,
     OPERATOR_RESUMABLE,
     IntentState,
+    ReconcileResult,
+    ReconcileTrigger,
     ResolutionEvidence,
     ResolvedBy,
     ScopePauseReason,
     VerificationState,
+    sanitized_digest,
 )
 from app.stages.register.policy import DuplicateKeyKind, Provenance
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
@@ -85,6 +88,7 @@ from app.stages.register.preparation import (
 )
 from app.stages.register.provider import (
     CreateSender,
+    LookupStatus,
     ReadbackComparator,
     ReadbackSource,
     ReconcileLookup,
@@ -464,6 +468,19 @@ class ExecutionPolicy:
     version: str = EXECUTION_POLICY_VERSION
     endpoint_group: str = CREATE_ENDPOINT_GROUP
     max_proven_failures: int = 3
+    # ADR-0014 §28.4: the bounded automatic reconcile schedule — implementation policy, finite by
+    # construction. The first automatic check of an Intent runs when it is first found; after the
+    # n-th one the next is due ``reconcile_schedule[n-1]`` after it finished. There are therefore
+    # ``len(reconcile_schedule) + 1`` automatic checks at most; after the last no further automatic
+    # check is ever due, and the Intent stays 재확인필요 for an operator.
+    reconcile_schedule: tuple[timedelta, ...] = (
+        timedelta(minutes=15),
+        timedelta(hours=1),
+        timedelta(hours=6),
+        timedelta(hours=24),
+    )
+    # The most Intents one automatic pass reconciles: its provider-read budget (§28.4).
+    reconcile_batch: int = 10
 
     def __post_init__(self) -> None:
         # M5 sends one operation, CREATE, to one endpoint group, and the budget it counts is that
@@ -753,6 +770,9 @@ class RegistrationExecutionService:
                 remote_outcome=handoff.remote_outcome,
                 correlation_id=correlation_id,
                 marketplace_product_id=handoff.marketplace_product_id,
+                marketplace_channel_product_id=getattr(
+                    handoff, "marketplace_channel_product_id", None
+                ),
                 response_status=handoff.response_status,
                 sanitized_response=handoff.sanitized_response,
                 error_class=handoff.error_class,
@@ -914,15 +934,31 @@ class RegistrationExecutionService:
             marketplace_product_id=registration.marketplace_product_id,
         )
 
-    # ------------------------------------------------------------------ reconcile (§10, §7)
+    # ------------------------------------------------------------------ reconcile (§10, §28)
 
-    def reconcile(self, intent_id: str, *, correlation_id: str) -> ExecutionResult:
-        """Settle an UNKNOWN with provider evidence only. An operator's word is never evidence.
+    def reconcile(
+        self,
+        intent_id: str,
+        *,
+        correlation_id: str,
+        trigger: ReconcileTrigger = ReconcileTrigger.OPERATOR,
+    ) -> ExecutionResult:
+        """One positive-only reconcile check of an UNKNOWN Intent (ADR-0014 §28.2–§28.4).
 
-        Only a read-back by an already known provider identity settles it here (ADR-0014 §28.3).
-        The seller-code lookup is never consulted: product search is ``NOT_ADOPTED``, a lookup
-        never proves remote absence, and the positive-only reconcile of §28.2 is a separately
-        authorized slice. Without a known identity the ambiguity stays an ambiguity.
+        Every check is recorded by the reconcile-check owner, single-flight, and finished exactly
+        once with what it observed. Only one result moves the Intent: exactly one exact candidate
+        whose read-back by its origin product number carries this listing identity's provider
+        code — ``ONE_VERIFIED``, which settles the UNKNOWN as applied and persists both provider
+        identities. Presence is not success: confirmation still needs the read-back comparison
+        (§11). Zero candidates are never absence, several are never a selection, and an
+        unavailable or failed lookup proves nothing; each leaves the Intent UNKNOWN, its conflict
+        scope closed and no CREATE possible (§17.2, §28.3). An operator's word is never evidence.
+
+        §28.3's other route — a read-back by an *already known* provider identity — cannot start
+        here: an Intent carries its provider identity only together with an applied outcome
+        (CHECK ``provider_identity_when_applied``, migration 0016), so an UNKNOWN Intent has none
+        and every reconcile of it is this lookup. Once presence is proven the Intent is SENT with
+        its identity, and every later read-back is ``verify`` by that identity — never a search.
         """
         intent = self._intent(intent_id)
         if intent.state is not IntentState.UNKNOWN:
@@ -933,59 +969,197 @@ class RegistrationExecutionService:
             )
         snapshot = self._registrations.snapshot(intent.registration_snapshot_id)
         assert snapshot is not None
-        if intent.marketplace_product_id is not None and self._readback.available():
-            retained = self._readback.read(marketplace_product_id=intent.marketplace_product_id)
-            return self._resolve(
+        checks = self._registrations.reconcile_checks(intent_id)
+        if checks and checks[-1].in_flight:
+            # §28.4 single-flight: a trigger while a check is in flight coalesces into it and
+            # reads nothing. (The store refuses a second open check as well, for a race.) A check
+            # an earlier process left open is closed at startup (``settle_interrupted_checks``).
+            return ExecutionResult(
                 intent_id,
-                RemoteOutcome.APPLIED_PROVEN,
-                ResolutionEvidence.PROVIDER_READ_BACK,
-                retained,
-                correlation_id,
-                marketplace_product_id=intent.marketplace_product_id,
+                "RECONCILE_IN_FLIGHT",
+                IntentState.UNKNOWN,
+                details={"seq": checks[-1].seq},
             )
-        # §28 and §17.2: no lookup result is evidence here, whatever it says and whether or not a
-        # lookup reports itself available. The conflict scope is not freed, nothing is fabricated,
-        # and no CREATE can follow (§28.3).
+        due = checks[-1].next_due_at if checks else None
+        if due is not None and self._clock.now() < due:
+            # §28.4: a repeated trigger before the next due time coalesces into the pending one;
+            # it never multiplies provider reads.
+            return ExecutionResult(
+                intent_id,
+                "RECONCILE_NOT_DUE",
+                IntentState.UNKNOWN,
+                details={"next_due_at": due.isoformat()},
+            )
+        with self._registrations.transaction() as unit:
+            check = unit.start_reconcile_check(intent_id, trigger=trigger)
+        automatic = sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) + (
+            1 if trigger is ReconcileTrigger.AUTO else 0
+        )
+        try:
+            result, count, evidence, candidate = self._observe(
+                intent.marketplace_account_id, snapshot.listing_identity, trigger
+            )
+        except BaseException:
+            # Nothing may leave a check in flight: that would block every later check.
+            with self._registrations.transaction() as unit:
+                unit.finish_reconcile_check(
+                    intent_id,
+                    check.seq,
+                    result=ReconcileResult.ERROR,
+                    candidate_count=None,
+                    sanitized_evidence={"reconcile_contract_version": RECONCILE_CONTRACT_VERSION},
+                    next_due_at=self._next_due(automatic),
+                )
+            raise
+        next_due = None if result is ReconcileResult.ONE_VERIFIED else self._next_due(automatic)
+        with self._registrations.transaction() as unit:
+            unit.finish_reconcile_check(
+                intent_id,
+                check.seq,
+                result=result,
+                candidate_count=count,
+                sanitized_evidence=evidence,
+                next_due_at=next_due,
+            )
+            if result is ReconcileResult.ONE_VERIFIED:
+                assert candidate is not None
+                settled = unit.resolve_unknown(
+                    intent_id,
+                    outcome=RemoteOutcome.APPLIED_PROVEN,
+                    resolved_by=ResolvedBy.LOOKUP,
+                    evidence_kind=ResolutionEvidence.PROVIDER_LOOKUP,
+                    sanitized_evidence=evidence,
+                    correlation_id=correlation_id,
+                    actor=self._actor,
+                    marketplace_product_id=candidate[0],
+                    marketplace_channel_product_id=candidate[1],
+                )
+        if result is ReconcileResult.ONE_VERIFIED:
+            return ExecutionResult(
+                intent_id,
+                "RECONCILED_APPLIED_PROVEN",
+                settled.state,
+                remote_outcome=RemoteOutcome.APPLIED_PROVEN,
+                marketplace_product_id=candidate[0] if candidate else None,
+                details={"seq": check.seq, "result": result.value},
+            )
         raise ExecutionRefused(
-            "REGISTER_RECONCILE_UNAVAILABLE",
-            "no admissible provider evidence can resolve this UNKNOWN; it stays unresolved",
+            _UNRESOLVED[result],
+            "the reconcile check proved nothing that settles this UNKNOWN; it stays unresolved",
             error_class=ErrorClass.REVIEW_REQUIRED,
-            details={"intent_id": intent_id, "listing_identity": snapshot.listing_identity},
+            details={
+                "intent_id": intent_id,
+                "seq": check.seq,
+                "result": result.value,
+                "next_due_at": None if next_due is None else next_due.isoformat(),
+            },
         )
 
-    def _resolve(
-        self,
-        intent_id: str,
-        outcome: RemoteOutcome,
-        evidence_kind: ResolutionEvidence,
-        evidence: Mapping[str, Any],
-        correlation_id: str,
-        *,
-        marketplace_product_id: str | None = None,
-    ) -> ExecutionResult:
-        # The resolver names how the evidence was obtained: this service resolves by read-back
-        # only, and the store pairs READ_BACK with PROVIDER_READ_BACK. USER is never used here,
-        # because an operator's word is not evidence (§10, B3).
-        assert evidence_kind is ResolutionEvidence.PROVIDER_READ_BACK
-        resolver = ResolvedBy.READ_BACK
+    def reconcile_due(self, *, correlation_id: str) -> tuple[ExecutionResult | str, ...]:
+        """One bounded automatic pass over the UNKNOWN Intents (§28.4).
+
+        Every UNKNOWN Intent is considered — a local read — but at most ``reconcile_batch`` checks
+        run, which bounds the provider reads of one pass. An Intent whose check is in flight, whose
+        next check is not yet due, or whose automatic schedule is exhausted is skipped without a
+        read, so an exhausted Intent never starves a newer one. Each check is read-only towards
+        the provider and decides nothing by itself.
+        """
+        limit = len(self._policy.reconcile_schedule) + 1
+        outcomes: list[ExecutionResult | str] = []
+        for intent_id in self._registrations.unknown_intents():
+            if len(outcomes) >= self._policy.reconcile_batch:
+                break
+            checks = self._registrations.reconcile_checks(intent_id)
+            if checks and checks[-1].in_flight:
+                continue
+            if sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) >= limit:
+                continue
+            due = checks[-1].next_due_at if checks else None
+            if due is not None and self._clock.now() < due:
+                continue
+            try:
+                outcomes.append(
+                    self.reconcile(
+                        intent_id, correlation_id=correlation_id, trigger=ReconcileTrigger.AUTO
+                    )
+                )
+            except AppError as unresolved:
+                outcomes.append(unresolved.code)
+        return tuple(outcomes)
+
+    def settle_interrupted_checks(self) -> int:
+        """Close every reconcile check an earlier process left in flight (§28.4), at startup."""
         with self._registrations.transaction() as unit:
-            settled = unit.resolve_unknown(
-                intent_id,
-                outcome=outcome,
-                resolved_by=resolver,
-                evidence_kind=evidence_kind,
-                sanitized_evidence=dict(evidence),
-                correlation_id=correlation_id,
-                actor=self._actor,
-                marketplace_product_id=marketplace_product_id,
+            return unit.settle_interrupted_checks()
+
+    def _next_due(self, automatic_checks: int) -> datetime | None:
+        """When the next check is due after one that brings an Intent to ``automatic_checks``
+        automatic checks, or ``None`` once the automatic series is exhausted.
+
+        After the n-th automatic check the wait is ``reconcile_schedule[n-1]``; an operator check
+        made before any automatic one waits the first interval, so a repeated trigger coalesces.
+        """
+        schedule = self._policy.reconcile_schedule
+        if automatic_checks > len(schedule):
+            return None
+        return self._clock.now() + schedule[max(automatic_checks - 1, 0)]
+
+    def _observe(
+        self, marketplace_account_id: str, listing_identity: str, trigger: ReconcileTrigger
+    ) -> tuple[ReconcileResult, int | None, dict[str, Any], tuple[str, str] | None]:
+        """What one lookup and, for a single exact candidate, its read-back observed.
+
+        Returns the result, its trustworthy count (``None`` when there is none), the sanitized
+        evidence the check digest is taken over, and the ``(origin, channel)`` identities of a
+        verified candidate.
+        """
+        evidence: dict[str, Any] = {
+            "reconcile_contract_version": RECONCILE_CONTRACT_VERSION,
+            "trigger": trigger.value,
+            "listing_identity": listing_identity,
+        }
+        if not self._lookup.available():
+            evidence["code"] = "REGISTER_RECONCILE_LOOKUP_NOT_ADOPTED"
+            return ReconcileResult.LOOKUP_UNAVAILABLE, None, evidence, None
+        try:
+            found = dict(
+                self._lookup.find(
+                    marketplace_account_id=marketplace_account_id,
+                    listing_identity=listing_identity,
+                )
             )
-        return ExecutionResult(
-            intent_id,
-            f"RECONCILED_{outcome.value}",
-            settled.state,
-            remote_outcome=outcome,
-            marketplace_product_id=marketplace_product_id,
-        )
+        except AppError as failure:
+            evidence["code"] = failure.code
+            return ReconcileResult.ERROR, None, evidence, None
+        evidence["lookup"] = found
+        status = found.get("status")
+        if status == LookupStatus.UNAVAILABLE.value:
+            return ReconcileResult.LOOKUP_UNAVAILABLE, None, evidence, None
+        candidates = _candidates(found) if status == LookupStatus.COMPLETE.value else None
+        if candidates is None:
+            # ERROR, or an answer that is not the documented shape: nothing is proven.
+            return ReconcileResult.ERROR, None, evidence, None
+        if not candidates:
+            return ReconcileResult.ZERO, 0, evidence, None
+        if len(candidates) > 1:
+            return ReconcileResult.MULTIPLE, len(candidates), evidence, None
+        (candidate,) = candidates
+        if not self._readback.available():
+            # The candidate cannot be read back, so it is not yet a presence proof (§28.2).
+            evidence["code"] = "REGISTER_READBACK_UNAVAILABLE"
+            return ReconcileResult.LOOKUP_UNAVAILABLE, None, evidence, None
+        try:
+            retained = self._readback.read(marketplace_product_id=candidate[0])
+        except AppError as failure:
+            evidence["code"] = failure.code
+            return ReconcileResult.ERROR, None, evidence, None
+        # The read-back itself is sanitized retention; the check keeps only its digest.
+        evidence["readback_digest"] = sanitized_digest(retained)
+        if self._lookup.confirms_candidate(
+            listing_identity=listing_identity, retained_readback=retained
+        ):
+            return ReconcileResult.ONE_VERIFIED, 1, evidence, candidate
+        return ReconcileResult.ONE_MISMATCH, 1, evidence, None
 
     # ------------------------------------------------------------------ crash settlement (§6)
 
@@ -1264,6 +1438,37 @@ class RegistrationExecutionService:
     @staticmethod
     def _sanitizer_version(fresh: PreflightResult) -> str:
         return fresh.resolved.target.sanitizer_profile_version
+
+
+RECONCILE_CONTRACT_VERSION: Final = "register-positive-reconcile/v1"
+
+# The refusal each unresolved check result raises; none of them is ever absence (§17.2, §28.2).
+_UNRESOLVED: Final[Mapping[ReconcileResult, str]] = MappingProxyType(
+    {
+        ReconcileResult.ZERO: "REGISTER_RECONCILE_ZERO",
+        ReconcileResult.MULTIPLE: "REGISTER_RECONCILE_MULTIPLE",
+        ReconcileResult.ONE_MISMATCH: "REGISTER_RECONCILE_MISMATCH",
+        ReconcileResult.LOOKUP_UNAVAILABLE: "REGISTER_RECONCILE_UNAVAILABLE",
+        ReconcileResult.ERROR: "REGISTER_RECONCILE_ERROR",
+    }
+)
+
+
+def _candidates(found: Mapping[str, Any]) -> tuple[tuple[str, str], ...] | None:
+    """The exact candidates of a complete lookup as ``(origin, channel)`` identities, or
+    ``None`` when the answer is not the documented shape — which proves nothing."""
+    raw = found.get("candidates")
+    if not isinstance(raw, list):
+        return None
+    pairs: list[tuple[str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            return None
+        origin, channel = entry.get("origin_product_no"), entry.get("channel_product_no")
+        if not (isinstance(origin, str) and origin and isinstance(channel, str) and channel):
+            return None
+        pairs.append((origin, channel))
+    return tuple(dict.fromkeys(pairs))
 
 
 def _published_state(evidence: Mapping[str, Any]) -> str | None:

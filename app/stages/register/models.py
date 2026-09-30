@@ -29,6 +29,11 @@ migration 0017 (§26, architect decision `5749504280`):
   unit, revisioned and append-only, and the link proving which exact revision froze a Snapshot. It
   stores inputs only: no readiness, no status, no reason code, no price, no image, no capability
   and no provider fact — a preflight stays derived from these inputs and current owner truth (§3).
+- ``registration_reconcile_checks`` (migration 0031, ADR-0014 §28.4, Issue #89 ``5904349289`` §A):
+  one append-only row per reconcile check of one Intent, single-flight, finished once and never
+  changed or deleted. Migration 0031 also adds ``marketplace_channel_product_id`` to the Intent and
+  the registration (§B): the provider's channel identity, written only with an applied outcome and
+  immutable afterwards.
 
 **Account scope.** Every "account" here is the canonical ``marketplace_account_id`` of
 ``app.stages.connect.account_models`` (``ACCOUNT_IDENTITY.md`` §2), never a free string and never
@@ -74,6 +79,8 @@ from app.stages.register.model import (
     IntentState,
     ListingShape,
     Operation,
+    ReconcileResult,
+    ReconcileTrigger,
     RegistrationLifecycle,
     ResolutionEvidence,
     ResolvedBy,
@@ -369,6 +376,10 @@ class RegistrationIntent(Base):
     state: Mapped[str] = mapped_column(String(20))
     remote_outcome: Mapped[str | None] = mapped_column(String(20))
     marketplace_product_id: Mapped[str | None] = mapped_column(String(64))
+    # Migration 0031 (Issue #89 5904349289 §B): the provider's channel identity of the same
+    # listing — for SmartStore the STOREFARM channelProductNo. Written only together with an
+    # applied outcome, immutable afterwards, never guessed (triggers of migration 0031).
+    marketplace_channel_product_id: Mapped[str | None] = mapped_column(String(64))
     verification_state: Mapped[str] = mapped_column(String(20))
     comparison_contract_version: Mapped[str | None] = mapped_column(String(64))
     normalizer_version: Mapped[str | None] = mapped_column(String(64))
@@ -524,6 +535,8 @@ class MarketplaceRegistration(Base):
     marketplace_key: Mapped[str] = mapped_column(String(40))
     marketplace_account_id: Mapped[str] = mapped_column(String(40))
     marketplace_product_id: Mapped[str] = mapped_column(String(64))
+    # Migration 0031: a copy of the confirmed Intent's channel identity, immutable.
+    marketplace_channel_product_id: Mapped[str | None] = mapped_column(String(64))
     # The provider-listing unit's listing identity as sent (§7). Its wire field is PR-D's.
     seller_product_code: Mapped[str] = mapped_column(String(64))
     published_state: Mapped[str] = mapped_column(String(40))
@@ -833,3 +846,64 @@ class RegistrationSnapshotPreparation(Base):
     # unit again needs it: deriving it afresh would name the *next* unit, not this one.
     identity_generation: Mapped[int] = mapped_column(Integer)
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+_CHECK_FINISHED = (
+    "(finished_at IS NULL) = (result IS NULL) AND (finished_at IS NULL) = (evidence_digest IS NULL)"
+)
+_CHECK_COUNT = (
+    "(finished_at IS NOT NULL OR candidate_count IS NULL)"
+    " AND (result IS NOT 'ZERO' OR candidate_count IS 0)"
+    " AND (result IS NOT 'ONE_VERIFIED' OR candidate_count IS 1)"
+    " AND (result IS NOT 'ONE_MISMATCH' OR candidate_count IS 1)"
+    " AND (result IS NOT 'MULTIPLE' OR (candidate_count IS NOT NULL AND candidate_count >= 2))"
+    " AND (candidate_count IS NULL OR candidate_count >= 0)"
+)
+
+
+class RegistrationReconcileCheck(Base):
+    """One reconcile check of one Intent (ADR-0014 §28.4; migration 0031, Issue #89 5904349289 §A).
+
+    Every reconcile, automatic or operator-triggered, is recorded here, append-only: a check is
+    opened in flight, finished exactly once, and never changed or deleted afterwards. At most one
+    check per Intent is in flight (single-flight). It records what was observed; it decides nothing
+    by itself — the Intent moves only through the §9–§11 and §28.2–§28.3 owners.
+    """
+
+    __tablename__ = "registration_reconcile_checks"
+    __table_args__ = (
+        Index(
+            "ux_registration_reconcile_checks_in_flight",
+            "intent_id",
+            unique=True,
+            sqlite_where=sql("finished_at IS NULL"),
+        ),
+        CheckConstraint("seq > 0", name="seq_positive"),
+        CheckConstraint(_in('"trigger"', ReconcileTrigger), name="trigger_valid"),
+        CheckConstraint(f"result IS NULL OR {_in('result', ReconcileResult)}", name="result_valid"),
+        CheckConstraint(_CHECK_FINISHED, name="finished_together"),
+        CheckConstraint(_CHECK_COUNT, name="count_agrees_with_result"),
+        CheckConstraint(
+            f"evidence_digest IS NULL OR ({_hex64('evidence_digest')})", name="evidence_digest_hex"
+        ),
+        CheckConstraint(
+            "finished_at IS NULL OR finished_at >= started_at", name="finished_after_start"
+        ),
+        CheckConstraint(
+            "next_due_at IS NULL OR (finished_at IS NOT NULL AND next_due_at >= finished_at)",
+            name="next_due_after_finish",
+        ),
+    )
+
+    intent_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("registration_intents.intent_id"), primary_key=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    trigger: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    result: Mapped[str | None] = mapped_column(String(20))
+    candidate_count: Mapped[int | None] = mapped_column(Integer)
+    # SHA-256 of the sanitized canonical evidence (§15), never of wire bytes.
+    evidence_digest: Mapped[str | None] = mapped_column(String(64))
+    next_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

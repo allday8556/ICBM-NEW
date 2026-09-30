@@ -4,11 +4,11 @@ It drives the accepted M5 acceptance-plan cases through the **real production ow
 dedicated root, and records what it observed. Every case is a check: a failure is a recorded
 problem, never a crash and never a silent pass.
 
-The run is offline and provider-zero. Product search is NOT_ADOPTED; CREATE and image upload are
-ADOPTED as contracts but no provider call is made: image upload has no application route, and its
-transport module is forbidden in this run. Provider seams are local fakes (`seams.py`). The guards
-refuse every HTTP client, browser, AI, OCR and supplier transport for the life of the run, and the
-report states the measured counters, including a marketplace mutation count of zero.
+The run is offline and provider-zero. CREATE, the positive-only reconcile search and image upload
+are ADOPTED as contracts but no provider call is made: image upload has no application route, and
+the transport module is forbidden in this run. Provider seams are local fakes (`seams.py`). The
+guards refuse every HTTP client, browser, AI, OCR and supplier transport for the life of the run,
+and the report states the measured counters, including a marketplace mutation count of zero.
 
 A PASS here is offline evidence for one commit. It is **not** M5 acceptance, and it authorizes no
 real write: the bounded canary readiness result it records is `BLOCKED` while the contracts it
@@ -119,7 +119,9 @@ DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
     # reason left: a provider-zero run has no provider to answer it, and the production sender
     # holds the transport-owning caller this run may not even load.
     "CREATE_HANDOFF": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_CREATE_V2"),
-    "RECONCILE_LOOKUP": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_SEARCH"),
+    # The positive-only reconcile lookup is adopted (ADR-0020 §4 order 2), so it too is declared
+    # only because a provider-zero run has no provider to answer it.
+    "RECONCILE_LOOKUP": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_SEARCH"),
     "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
     "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
     "PUBLISHED_STATE": (PUBLISHED_STATE_UNPROVEN, None),
@@ -487,19 +489,27 @@ def scenario_unknown(run: Run, unit: Unit) -> dict[str, object]:
         "USER" not in {kind.value for kind in ResolutionEvidence}
         and ResolvedBy.USER in set(ResolvedBy),
     )
+    # §28.2: the adopted lookup answers a complete enumeration with zero exact candidates. Zero
+    # is never absence: the check is recorded, the Intent stays UNKNOWN, and nothing is freed.
     reconcile_refusal = "none"
     try:
         owners.execution.reconcile(unit.intent_id, correlation_id=CID)
     except AppError as refused:
         reconcile_refusal = refused.code
     after = owners.registrations.intent(unit.intent_id)
+    recorded = owners.registrations.reconcile_checks(unit.intent_id)
     checks.check(
-        "s13.unadopted_lookup_resolves_nothing",
-        reconcile_refusal == "REGISTER_RECONCILE_UNAVAILABLE"
+        "s13.zero_result_resolves_nothing",
+        reconcile_refusal == "REGISTER_RECONCILE_ZERO"
         and after is not None
-        and after.state is IntentState.UNKNOWN,
+        and after.state is IntentState.UNKNOWN
+        and len(recorded) == 1
+        and recorded[0].result is not None
+        and recorded[0].result.value == "ZERO"
+        and not recorded[0].in_flight,
         refusal=reconcile_refusal,
         state=None if after is None else after.state.value,
+        checks=len(recorded),
     )
     return {
         "create_calls": sent,
@@ -987,7 +997,12 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         "boundary.upload_adopted_but_unreachable",
         adoption.get("SMARTSTORE_PRODUCT_IMAGE_UPLOAD") is True,
     )
-    checks.check("boundary.search_not_adopted", adoption.get("SMARTSTORE_PRODUCT_SEARCH") is False)
+    # SEARCH is adopted for positive-only reconcile only: a read that recovers a presence candidate,
+    # never duplicate-absence evidence and never a CREATE authorization (ADR-0014 §28.2).
+    checks.check(
+        "boundary.search_adopted_for_positive_reconcile_only",
+        adoption.get("SMARTSTORE_PRODUCT_SEARCH") is True,
+    )
     capability = owners.capability.capability(MARKETPLACE)
     checks.check(
         "boundary.product_registration_write_unverified",

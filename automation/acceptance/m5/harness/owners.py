@@ -7,11 +7,11 @@ the preflight and Snapshot builder, the execution owner over the real M0 job sys
 Registration Management read model.
 
 **Only the provider seams are local fakes** (`seams.py`): the CREATE handoff, the reconcile lookup
-and the read-back. The reconcile lookup's contract is NOT_ADOPTED; CREATE's is adopted and the
-read-back's has always been, and both production seams hold the transport-owning registry caller
-this run may not even load (`guards.py`). So no production seam is constructed here, and the run
-proves provider-zero the way it always did: by measuring a marketplace mutation count of 0 while
-the module that could reach a provider stays unimportable.
+and the read-back. All three contracts are adopted — CREATE's and the positive-only reconcile
+lookup's by their own slices, the read-back's since PR-D — and every production seam holds the
+transport-owning registry caller this run may not even load (`guards.py`). So no production
+seam is constructed here, and the run proves provider-zero the way it always did: by measuring a
+marketplace mutation count of 0 while the module that could reach a provider stays unimportable.
 
 The data root is owned the way the application owns it (ADR-0006): the lease is taken before the
 database is migrated or opened and released only after it is disposed, and a restart closes the

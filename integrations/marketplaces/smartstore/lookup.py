@@ -1,9 +1,10 @@
 """Duplicate-lookup evidence for SmartStore — fail-closed in PR-D (ADR-0014 §13; kickoff §6).
 
-The 2.89.0 packet proves that ``POST /v1/products/search`` exists and nothing more: it does not
-prove the request schema, so no strong duplicate key (``sellerManagementCode``, a barcode or a
-GTIN) and no normalized-name filter is proven. Existence is not a lookup contract, so the endpoint
-stays NOT_ADOPTED and this adapter produces **no evidence at all**.
+``POST /v1/products/search`` is adopted, but **for positive-only reconcile only** (ADR-0014
+§28.2; the SEARCH adoption slice). It is never a duplicate lookup: the provider's seller-code
+match is similar, partial or exact, its codes are not unique, and no result is complete or fresh
+enough to be absence (ADR-0014 §13, §17.2). So this adapter still produces **no evidence at
+all**.
 
 That is deliberate. PR-C treats absent evidence as ``DUPLICATE_EVIDENCE_MISSING`` and refuses
 READY wherever the target requires duplicate proof, which is exactly the fail-closed outcome the
@@ -15,10 +16,7 @@ known duplicate, and still never releases an UNKNOWN CREATE conflict.
 from typing import Final
 
 from app.platform.core.errors import AppError
-from integrations.marketplaces.smartstore.registry import (
-    ADOPTION_GAPS,
-    EndpointId,
-)
+from integrations.marketplaces.smartstore.registry import EndpointId
 
 LOOKUP_CONTRACT_VERSION: Final = "smartstore-duplicate-lookup/unproven"
 
@@ -29,8 +27,9 @@ class DuplicateLookupUnavailableError(AppError):
     def __init__(self) -> None:
         super().__init__(
             "SMARTSTORE_DUPLICATE_LOOKUP_NOT_ADOPTED",
-            "SmartStore duplicate lookup is not adopted: "
-            + ADOPTION_GAPS[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
+            "SmartStore duplicate lookup is not adopted: product search is adopted for"
+            " positive-only reconcile only and is never duplicate-absence evidence"
+            " (ADR-0014 §13, §17.2, §28.2)",
             details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_SEARCH.value},
         )
 

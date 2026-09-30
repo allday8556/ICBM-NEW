@@ -120,6 +120,31 @@ class ResolutionEvidence(StrEnum):
     REVIEWED_MACHINE_PROOF = "REVIEWED_MACHINE_PROOF"
 
 
+class ReconcileTrigger(StrEnum):
+    """ADR-0014 §28.4: what started one reconcile check (Issue #89 5904349289 §A)."""
+
+    AUTO = "AUTO"
+    OPERATOR = "OPERATOR"
+    OPERATOR_CANDIDATE = "OPERATOR_CANDIDATE"
+
+
+class ReconcileResult(StrEnum):
+    """ADR-0014 §28.2, §28.4: what one finished reconcile check observed.
+
+    Only ``ONE_VERIFIED`` ever moves an Intent, and only towards applied: an exact candidate whose
+    read-back carries the same provider code. Every other result leaves an ``UNKNOWN`` ``UNKNOWN``
+    — ``ZERO`` is never absence, ``MULTIPLE`` is never a selection, and ``LOOKUP_UNAVAILABLE`` and
+    ``ERROR`` prove nothing at all.
+    """
+
+    ZERO = "ZERO"
+    ONE_VERIFIED = "ONE_VERIFIED"
+    ONE_MISMATCH = "ONE_MISMATCH"
+    MULTIPLE = "MULTIPLE"
+    LOOKUP_UNAVAILABLE = "LOOKUP_UNAVAILABLE"
+    ERROR = "ERROR"
+
+
 class AbsenceEvidence(StrEnum):
     """ADR-0014 §14 (R4): only provider evidence proves a listing absent.
 

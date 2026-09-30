@@ -302,8 +302,8 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     smartstore = REPO_ROOT / "documents" / "contracts" / "platforms" / "smartstore"
     matrix = _section(_read(smartstore / "ENDPOINT_MATRIX.md"), r"^4\. Master registry")
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
-    # M2's two, PR-D's two read-backs, IMAGE UPLOAD and the CREATE adoption slice
-    assert len(adopted) == 6, adopted
+    # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices
+    assert len(adopted) == 7, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -3031,6 +3031,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "restore_drills",
         "retention_proofs",
         "visual_acceptances",
+        # The SEARCH positive-only reconcile slice (ADR-0014 §28.4; Issue #89 5904349289 H-S2):
+        # the append-only reconcile-check owner, recorded by every reconcile of an Intent.
+        "registration_reconcile_checks",
     }
     offenders = [
         path

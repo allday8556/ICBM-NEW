@@ -9,16 +9,18 @@ The files column counts the tracked files under each path; `tests/contracts/test
 Note: until PR #157 the map under-counted `integrations/` and `integrations/marketplaces/` by one,
 because `integrations/marketplaces/base.py` was restored after the counts were taken; with that file
 removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #158) added
-`integrations/marketplaces/smartstore/create.py` and its unit suite, so the table now lists 36 and 16.
+`integrations/marketplaces/smartstore/create.py` and its unit suite (36 and 16), and the SEARCH
+positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
+and migration `0031` (37 and 17).
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 234 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 235 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 19 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 60 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 61 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 110 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 93 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -38,15 +40,15 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 13 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 36 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 16 |  |
+| `integrations/` | 37 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 214 | tests |
+| `tests/` | 215 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
 | `tests/integration/` | 80 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 75 | unit tests by runtime owner |
+| `tests/unit/` | 76 | unit tests by runtime owner |
 | `ui/` | 44 |  |
 | `ui/web/` | 44 | the served web client |

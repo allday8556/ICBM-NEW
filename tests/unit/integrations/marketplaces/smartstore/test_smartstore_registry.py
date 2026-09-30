@@ -36,7 +36,6 @@ CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 # the CREATE adoption slice POST /v2/products; everything else the official evidence leaves unproven
 # stays NOT_ADOPTED with a named gap (registry.ADOPTION_GAPS).
 STILL_NOT_ADOPTED = {
-    "SMARTSTORE_PRODUCT_SEARCH",
     "SMARTSTORE_CATEGORY_LIST",
     "SMARTSTORE_CATEGORY_READ",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
@@ -51,7 +50,15 @@ STILL_NOT_ADOPTED = {
 
 
 def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() -> None:
-    assert set(ADOPTED) == {TOKEN, ACCOUNT, ORIGIN_READ, CHANNEL_READ, IMAGE_UPLOAD, CREATE}
+    assert set(ADOPTED) == {
+        TOKEN,
+        ACCOUNT,
+        ORIGIN_READ,
+        CHANNEL_READ,
+        IMAGE_UPLOAD,
+        CREATE,
+        EndpointId.SMARTSTORE_PRODUCT_SEARCH,
+    }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
     assert not set(ADOPTED) & NOT_ADOPTED
@@ -338,7 +345,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-create-r2"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-search-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -346,6 +353,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-image-upload-r1",
         "m5-create-r1",
         "m5-create-r2",
+        "m5-search-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2
@@ -374,10 +382,10 @@ def test_a_permission_relevant_change_changes_the_fingerprint(
 
 def test_adopting_another_endpoint_changes_the_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
     before = mapping_fingerprint()
-    search = EndpointId.SMARTSTORE_PRODUCT_SEARCH
-    adopted = dataclasses.replace(ADOPTED[ACCOUNT], endpoint_id=search)
-    monkeypatch.setitem(registry.ADOPTED, search, adopted)  # type: ignore[arg-type]
-    monkeypatch.setattr(registry, "NOT_ADOPTED", NOT_ADOPTED - {search})
+    category = EndpointId.SMARTSTORE_CATEGORY_LIST
+    adopted = dataclasses.replace(ADOPTED[ACCOUNT], endpoint_id=category)
+    monkeypatch.setitem(registry.ADOPTED, category, adopted)  # type: ignore[arg-type]
+    monkeypatch.setattr(registry, "NOT_ADOPTED", NOT_ADOPTED - {category})
     assert mapping_fingerprint() != before
 
 
