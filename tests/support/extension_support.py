@@ -71,6 +71,16 @@ BODY = (
 )
 # Every table an accepted extension capture may touch. Everything else must stay exactly as it is.
 RUN_OWNED_TABLES = frozenset({"collection_runs", "jobs", "job_attempts", "audit_events"})
+# What one recorded collection appends, by either transport: the revision and what hangs on it.
+REVISION_TABLES = frozenset(
+    {
+        "product_facts_revisions",
+        "product_facts_fields",
+        "product_facts_evidence",
+        "product_facts_image_refs",
+        "source_assets",
+    }
+)
 
 
 def frame(head: str = HEAD, body: str = BODY) -> str:
@@ -204,7 +214,11 @@ def table_counts(config: AppConfig) -> dict[str, int]:
 
 
 def untouched(before: Mapping[str, int], after: Mapping[str, int]) -> dict[str, tuple[int, int]]:
-    """Every table outside the run's own that changed: what a zero-write proof must find empty."""
+    """Every table outside the run's own that changed.
+
+    A refused or failed capture must leave this empty; a recorded one may leave only
+    ``REVISION_TABLES`` in it.
+    """
     return {
         name: (before[name], after[name])
         for name in before

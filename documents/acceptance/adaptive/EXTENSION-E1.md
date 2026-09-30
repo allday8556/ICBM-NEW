@@ -50,7 +50,7 @@ a failure after the run is opened is `FAILED`; `RECORDED` is unreachable.
 | ingest, pairing, replay cache, buffer, policy loader | `app/stages/collect/extension/` |
 | routes | `app/interface/api/routes/collect_extension.py` |
 | KM capture policy | `integrations/suppliers/kmretail/browser_capture_policy.json` |
-| Adaptive dry run | `app/stages/collect/adaptive/shadow/dry_run.py` |
+| Adaptive dry run | `app/stages/collect/adaptive/shadow/dry_run.py` in E1; removed by E2, where the run takes the frozen shadow decision of the one pipeline (`EXTENSION-E2.md`) |
 | provenance | migration `0034_collect_transport_provenance` |
 | pairing commands | `icbm extension pair | rotate | revoke` |
 

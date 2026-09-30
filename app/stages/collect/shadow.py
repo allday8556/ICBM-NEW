@@ -36,19 +36,11 @@ the canonical owners never depend on them.
     answers the ``SendGuard`` that durably reserves each of the attempt's sends, or refuses before
     any send when the binding is missing, mismatched or unreadable. For every other run it answers
     ``None`` and the run is exactly as before.
-
-``DryRunStep``
-    Called by the extension ingest (ADR-0019 E1) with the one in-memory ``DocumentView`` of an
-    accepted capture and what the canonical extractor read from it. It answers ``NO_BUNDLE`` when
-    the supplier has no reviewed bundle enabled, or an in-memory comparison when it has. It
-    **writes nothing**: no shadow record, no evidence window, no ledger event, no profile
-    transition. It has no gateway, session or budget, and it never raises into the run.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from sqlalchemy.orm import Session
 
@@ -178,44 +170,3 @@ class ShadowInput:
 
 class ShadowStep(Protocol):
     def __call__(self, shadow: ShadowInput) -> None: ...
-
-
-DryRunState = Literal["NO_BUNDLE", "COMPARED", "COMPARE_FAILED"]
-# The Adaptive result of a run for which the supplier has no reviewed bundle enabled. It is not a
-# comparison PASS, ``VALIDATED``, ``SHADOW`` or ``ACTIVE``, and says nothing about extraction.
-NO_BUNDLE: DryRunState = "NO_BUNDLE"
-COMPARE_FAILED: DryRunState = "COMPARE_FAILED"
-
-
-@dataclass(frozen=True)
-class DryRunInput:
-    """What a dry run may use: what the capture's run holds in memory, and nothing to spend.
-
-    ``collected`` is what the canonical extractor read, with no image references — a compare-only
-    run fetches no image — or ``None`` when the canonical identity is unresolved.
-    """
-
-    collection_run_id: str
-    supplier_key: str
-    source_url: str
-    document: DocumentView = field(repr=False)
-    identity: SourceIdentityResult
-    collected: CollectedFacts | None
-    url_policy: UrlPolicy
-    candidates: tuple[ImageCandidate, ...] = field(repr=False)
-
-
-@dataclass(frozen=True)
-class DryRunResult:
-    """``NO_BUNDLE``, or what an in-memory comparison found. Never persisted by the dry run.
-
-    ``summary`` holds verdicts, statuses and counts only: no captured value, URL or digest.
-    """
-
-    state: DryRunState
-    bundle_key: str | None = None
-    summary: Mapping[str, Any] = field(default_factory=dict)
-
-
-class DryRunStep(Protocol):
-    def __call__(self, dry_run: DryRunInput) -> DryRunResult: ...

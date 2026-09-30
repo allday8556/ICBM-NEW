@@ -61,7 +61,6 @@ from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAcc
 from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
 from app.stages.collect.adaptive.phase_c_capture.runner import CaptureRunner
 from app.stages.collect.adaptive.phase_c_capture.store import CaptureStore
-from app.stages.collect.adaptive.shadow.dry_run import DryRunComparer
 from app.stages.collect.adaptive.shadow.runner import ShadowRunner
 from app.stages.collect.adaptive.shadow.store import ADR_RETENTION, ShadowEvidenceStore
 from app.stages.collect.adaptive.shadow.switch import ShadowSwitch
@@ -446,10 +445,11 @@ def build_container(
     )
     registry.register(collection.job_definition())
 
-    # ADR-0019 E1: the extension capture transport. The pairing lives in the keyring only, the
+    # ADR-0019 E1/E2: the extension capture transport. The pairing lives in the keyring only, the
     # replay cache and the capture buffer in this process only, and the capture policy is read
-    # from the repository on every use. An accepted capture opens a canonical run and is compared
-    # in memory; nothing is appended, and no supplier request is ever sent for it.
+    # from the repository on every use. An accepted capture opens a canonical run, and the
+    # collection owner records its document through the one pipeline a direct run uses: the
+    # server reads no product page for it, and fetches its images through the policed gateway.
     extension_pairing = ExtensionPairing(secrets, clock, NonceCache(clock))
     extension_capture = ExtensionCaptureService(
         db=db,
@@ -461,8 +461,8 @@ def build_container(
         final_scan=_server_final_scan,
         # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
         worker_in_process=worker.IN_PROCESS,
+        recorder=collection,
         collections=registered_collections,
-        dry_run=DryRunComparer(db, shadow_switch, adaptive_profiles, hook_manifests),
         report_sink=extension_report_sink,
     )
     registry.register(extension_capture.job_definition())

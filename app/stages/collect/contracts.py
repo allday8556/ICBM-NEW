@@ -136,9 +136,9 @@ class CollectionRunView(BaseModel):
     """One run's durable result.
 
     ``NO_REVISION`` is a finished run with nothing to append: the source stated no stable
-    identity, and ``detail`` then holds the parser's reason; or the run was an extension capture
-    of slice E1, which compares in memory and appends nothing (``EXTENSION_COMPARE_ONLY``). Only a
-    ``RECORDED`` run names a revision.
+    identity, and ``detail`` then holds the parser's reason. A run slice E1 of the extension
+    transport settled is also one (``EXTENSION_COMPARE_ONLY``): it compared in memory and appended
+    nothing. Only a ``RECORDED`` run names a revision.
 
     ``transport_kind`` is how the run's document was acquired (ADR-0019 §4), and the capture
     policy fields name the policy an ``EXTENSION`` capture was cut with. All three are ``None`` on
