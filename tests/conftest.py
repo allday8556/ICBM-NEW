@@ -20,35 +20,36 @@ LOCAL = "http://127.0.0.1"
 
 
 @contextmanager
-def deliberate_egress_attempts() -> Iterator[None]:
-    """Keep the blocked attempts a test makes **on purpose** out of later tests' readiness.
+def deliberate_egress_attempts(destination: str) -> Iterator[None]:
+    """Take the blocked attempts a test makes **on purpose** to ``destination`` back out of the
+    process-global guard when the block ends.
 
     The egress guard is one process-global object and its audit hook can never be removed
     (``app.platform.core.egress``). A test that blocks an external attempt deliberately would
     therefore leave ``external_attempts`` raised for every later test of the same process, and a
-    readiness check that reads it would fail for a reason that is not its own. Inside this block
-    the guard counts exactly as in production; on exit the count and the recent attempts are what
-    they were on entry.
+    readiness check that reads it would fail for a reason that is not its own.
 
-    It is opt-in, for a test that names its own attempt. It is never applied suite-wide: an
-    attempt a test did not intend stays counted, so a later readiness check still exposes it.
+    Only what was declared is withdrawn: on exit, the attempts recorded **during the block** to
+    exactly ``destination`` are removed and the count is lowered by exactly that many. Nothing is
+    restored to a snapshot, so an attempt to any other destination — made by the test, by code it
+    calls or by another thread — stays counted, and so does everything recorded before the block.
+    Inside the block the guard counts exactly as in production.
     """
     with EGRESS._lock:
-        attempts, recent = EGRESS._attempts, tuple(EGRESS._recent)
+        known = list(EGRESS._recent)
     try:
         yield
     finally:
         with EGRESS._lock:
-            EGRESS._attempts = attempts
-            EGRESS._recent.clear()
-            EGRESS._recent.extend(recent)
-
-
-@pytest.fixture
-def deliberate_egress() -> Iterator[None]:
-    """:func:`deliberate_egress_attempts` for the whole test that asks for it."""
-    with deliberate_egress_attempts():
-        yield
+            declared = [
+                attempt
+                for attempt in EGRESS._recent
+                if attempt.destination == destination
+                and not any(attempt is earlier for earlier in known)
+            ]
+            for attempt in declared:
+                EGRESS._recent.remove(attempt)
+            EGRESS._attempts -= len(declared)
 
 
 @pytest.fixture(scope="session")
