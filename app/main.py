@@ -3,6 +3,7 @@
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ from app.interface.api.errors import install_error_handlers
 from app.interface.api.middleware import ClientHeaderGuard, RequestContextMiddleware
 from app.interface.api.routes import (
     collect,
+    collect_extension,
     connect,
     diagnostics,
     products,
@@ -29,6 +31,7 @@ from app.platform.core.egress import EGRESS
 from app.platform.core.logging import configure_logging
 from app.platform.core.ownership import DataDirLease, acquire_data_dir, require_ownership
 from app.stages.collect.collection import CollectionGateway, RegisteredCollection, SessionProvider
+from app.stages.collect.extension.service import ReportSink
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.sources import ApplicationIdentitySource
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
@@ -51,6 +54,8 @@ def create_app(
     collection_gateway: CollectionGateway | None = None,
     collection_sessions: SessionProvider | None = None,
     collections: Sequence[RegisteredCollection] | None = None,
+    capture_policy_root: Path | None = None,
+    extension_report_sink: ReportSink | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -82,6 +87,8 @@ def create_app(
             collection_gateway=collection_gateway,
             collection_sessions=collection_sessions,
             collections=collections,
+            capture_policy_root=capture_policy_root,
+            extension_report_sink=extension_report_sink,
         )
     except BaseException:
         if owns_lease:
@@ -154,6 +161,7 @@ def create_app(
     app.include_router(screens.router)
     app.include_router(connect.router)
     app.include_router(collect.router)
+    app.include_router(collect_extension.router)
     app.include_router(products.router)
     app.include_router(register.router)
     app.include_router(settings.router)

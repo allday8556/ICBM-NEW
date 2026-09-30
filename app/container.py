@@ -5,7 +5,9 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 
+import integrations.suppliers as supplier_packages
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -49,11 +51,13 @@ from app.platform.db.migrate import head_revision
 from app.platform.system.diagnostics import DiagnosticsService
 from app.platform.system.execution_mode import ExecutionModeService
 from app.platform.system.readiness import ReadinessService
+from app.stages.collect.adaptive.engine.capture import CaptureRefused, capture_candidate
 from app.stages.collect.adaptive.engine.hooks import HookManifest
 from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAccounting
 from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
 from app.stages.collect.adaptive.phase_c_capture.runner import CaptureRunner
 from app.stages.collect.adaptive.phase_c_capture.store import CaptureStore
+from app.stages.collect.adaptive.shadow.dry_run import DryRunComparer
 from app.stages.collect.adaptive.shadow.runner import ShadowRunner
 from app.stages.collect.adaptive.shadow.store import ADR_RETENTION, ShadowEvidenceStore
 from app.stages.collect.adaptive.shadow.switch import ShadowSwitch
@@ -70,6 +74,11 @@ from app.stages.collect.collection import (
     RegisteredCollection,
     SessionProvider,
 )
+from app.stages.collect.extension.buffer import CaptureBuffer
+from app.stages.collect.extension.nonces import NonceCache
+from app.stages.collect.extension.pairing import ExtensionPairing
+from app.stages.collect.extension.policy import CapturePolicySource
+from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
@@ -141,6 +150,20 @@ from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
+# Where the supplier packages, and with them each reviewed capture policy, live.
+SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
+
+
+def _server_final_scan(html: str) -> tuple[str, ...]:
+    """The server's own sanitizer and final scan of an extension capture (ADR-0019 §6; ADR-0017
+    §7.3 note): the capture owner's, unchanged, over exactly what arrived. It answers the refusal
+    — kinds and boundaries only, never a captured value — or nothing when the capture is clean."""
+    try:
+        capture_candidate(html)
+    except CaptureRefused as refused:
+        return (str(refused),)
+    return ()
+
 
 @dataclass
 class Container:
@@ -163,6 +186,8 @@ class Container:
     revisions: ProductFactsRevisionStore
     source_truth: SourceTruthReadback
     collection: ProductCollectionService
+    extension_pairing: ExtensionPairing
+    extension_capture: ExtensionCaptureService
     product_store: ProductFoundationStore
     products: ProductsService
     materializer: ProductMaterializer
@@ -218,6 +243,8 @@ def build_container(
     smartstore_caller: SmartStoreEndpointCaller | None = None,
     adaptive_supplier_gate: SupplierGate | None = None,
     adaptive_hook_manifests: Mapping[str, HookManifest] | None = None,
+    capture_policy_root: Path | None = None,
+    extension_report_sink: ReportSink | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -395,6 +422,27 @@ def build_container(
         accounting=phase_c_reads,
     )
     registry.register(collection.job_definition())
+
+    # ADR-0019 E1: the extension capture transport. The pairing lives in the keyring only, the
+    # replay cache and the capture buffer in this process only, and the capture policy is read
+    # from the repository on every use. An accepted capture opens a canonical run and is compared
+    # in memory; nothing is appended, and no supplier request is ever sent for it.
+    extension_pairing = ExtensionPairing(secrets, clock, NonceCache(clock))
+    extension_capture = ExtensionCaptureService(
+        db=db,
+        clock=clock,
+        jobs=jobs,
+        runs=runs,
+        policies=CapturePolicySource(capture_policy_root or SUPPLIER_PACKAGES),
+        buffer=CaptureBuffer(),
+        final_scan=_server_final_scan,
+        # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
+        worker_in_process=worker.IN_PROCESS,
+        collections=registered_collections,
+        dry_run=DryRunComparer(db, shadow_switch, adaptive_profiles, hook_manifests),
+        report_sink=extension_report_sink,
+    )
+    registry.register(extension_capture.job_definition())
 
     products = ProductsService(product_store)
     # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
@@ -667,6 +715,8 @@ def build_container(
         revisions=revisions,
         source_truth=SourceTruthReadback(revisions, source_assets),
         collection=collection,
+        extension_pairing=extension_pairing,
+        extension_capture=extension_capture,
         product_store=product_store,
         products=products,
         materializer=materializer,
