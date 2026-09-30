@@ -116,10 +116,13 @@ The marker-and-classification gate is removed from the packet.
   by their SHA-256.
 - A citation names the kind of its source as well as its id, and resolves only to a source of
   that kind.
-- The declaration also cites the canonical documents the slice is judged against, and the packet
-  carries them as they are at the audited HEAD. An auditor that needs canon the packet does not
-  carry returns `INSUFFICIENT`; it never passes on a diff alone, so citing less never helps a
-  slice pass.
+- Canon is read at the audited base: the canon that binds before the slice. What the slice
+  changes in it is in the diff.
+- Every packet carries the Host's baseline canon whatever the declaration cites: the roadmap, the
+  current milestone, the execution-safety rule and the operating-authority rule. The declaration
+  only adds the further canonical documents the slice implements; it cannot leave the baseline
+  out. An auditor that needs canon the packet does not carry returns `INSUFFICIENT`; it never
+  passes on a diff alone, so citing less never helps a slice pass.
 - A citation that cannot be read is a technical hold, never a smaller packet: declared evidence
   does not disappear silently.
 - A marker is provenance. It never makes a source a packet input and never holds a packet.
@@ -202,7 +205,8 @@ OA-10  Tracks are separate: their own branch, worktree, PR, packet, audit identi
 - A wrong implementation choice is caught by an audit, not by a question. A loop can therefore
   spend audit and repair cycles on a problem a person would have resolved with one answer. The
   circuit breaker of §4 bounds that cost.
-- The audit input of a slice is its diff, its PR body, which is always a required source, and
-  the evidence and canonical documents that body cites. Choosing what to cite is the agent's work,
+- The audit input of a slice is its diff, its PR body, which is always a required source, the
+  Host's baseline canon at the audited base, and the evidence and canonical documents that body
+  cites. Choosing what to cite is the agent's work,
   and it cannot make an audit easier: an auditor that needs evidence or canon the packet does not
   carry returns `INSUFFICIENT`, never a PASS on the diff alone.

@@ -452,6 +452,17 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
     assert "$citedIds" not in audit
     # the canon the slice is judged against is in the packet, and an auditor never passes without it
     assert "foreach ($cp in $evidenceRefs.Canon)" in audit and 'Kind = "CANON"' in audit
+    # canon is read at the audited base, and the Host's baseline is in every packet: a declaration
+    # only adds to it
+    assert "foreach ($cp in (Get-BaselineCanon))" in audit
+    assert '$locator = "git_blob:base:$cp"' in audit and "git_blob:HEAD:$cp" not in audit
+    baseline = _host_script("agent-host-authority-v2.ps1").split("function Get-BaselineCanon", 1)[1]
+    assert re.findall(r'"(documents/[^"]+)"', baseline.split("}", 1)[0]) == [
+        "documents/roadmap/ROADMAP.md",
+        "documents/roadmap/CURRENT-MILESTONE.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md",
+    ]
     assert audit.count("never assume what an unseen document says") == 2
     assert "(review:|review-comment:)?([1-9][0-9]{8,11})" in _host_script(
         "agent-host-authority-v2.ps1"

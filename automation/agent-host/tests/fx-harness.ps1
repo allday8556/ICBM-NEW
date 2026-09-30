@@ -43,6 +43,8 @@ function W { param([string]$Rel, [string]$Text, [string]$Base = $seed)
 W "README.md" "fixture repo`n"
 W "docs/contract.md" "# Contract`nrule: never resend CREATE`n"
 W "docs/stale.md" "# Stale`nok`n"
+# one baseline canon document at the base; the other three are absent, and the packet must say so
+W "documents/roadmap/ROADMAP.md" "# Fixture roadmap`nM5: build what the fixture PR builds`n"
 W "app/x.py" "def x():`n    return 1`n"
 W "app/__init__.py" "MILESTONE = ""M5""`n"
 W "app/unrelated.py" "def u():`n    return 0`n"
@@ -792,6 +794,8 @@ try {
         $global:FxChecks.each_section_once = (@($idents | Where-Object { ([regex]::Matches($ptext, [regex]::Escape("[SOURCE identity=$_ "))).Count -ne 1 -or ([regex]::Matches($ptext, [regex]::Escape("[/SOURCE identity=$_]"))).Count -ne 1 }).Count -eq 0)
         $global:FxChecks.legacy_record_not_in_packet = (-not $ptext.Contains("100009300")) -and (-not $ptext.Contains("scope: PR #1"))
         $global:FxChecks.uncited_marker_not_in_packet = (-not $ptext.Contains("100009004"))
+        # the baseline canon is the Host's: present at the base -> a source; absent -> named, never skipped
+        $global:FxChecks.baseline_absent_named = $ptext.Contains("BASELINE_CANON_ABSENT_AT_BASE=documents/roadmap/CURRENT-MILESTONE.md,documents/rules/07-execution-safety.md,documents/rules/14-operating-authority.md`n")
         $pm = Get-Content (Get-ChildItem $pkDir -Filter "*$($d1.Substring(0,12)).manifest.json")[0].FullName -Raw | ConvertFrom-Json
         $global:FxChecks.manifest_json_sources = @($pm.sources | ForEach-Object { "$($_.class):$($_.kind):$($_.origin)" }) -join ","
         $global:FxChecks.manifest_json_required_count = @($pm.required).Count
@@ -834,7 +838,7 @@ try {
         # the declaration cites one more source → it becomes a fourth required source, new digest
         $global:FxIssueBodies["1"] = $global:FxPrBody + "Also: background ``100009004``.`n"
         $r9 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 6)
+        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 7)
         $global:FxIssueBodies["1"] = $global:FxPrBody
         # an optional host manifest that designates a stream the body already names changes no source
         $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $mfPath
@@ -845,10 +849,10 @@ try {
         $expected = [ordered]@{
             complete_1 = "True"; hold_reasons_1 = ""; same_inputs_twice_same_digest = $true; write_1_2 = "WRITTEN/EXISTING_BYTE_IDENTICAL"
             digest_is_sha256_of_packet_bytes = $true; no_bom_no_cr = $true; no_abs_path = $true; no_watermark_or_updated_at_in_packet = $true
-            source_locators = "git_blob:HEAD:docs/contract.md github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
-            each_section_once = $true; legacy_record_not_in_packet = $true; uncited_marker_not_in_packet = $true
-            manifest_json_sources = "required:CANON:referenced,required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
-            manifest_json_required_count = 5; packet_format = "icbm-audit-packet-v3"
+            source_locators = "git_blob:base:docs/contract.md git_blob:base:documents/roadmap/ROADMAP.md github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
+            each_section_once = $true; legacy_record_not_in_packet = $true; uncited_marker_not_in_packet = $true; baseline_absent_named = $true
+            manifest_json_sources = "required:CANON:referenced,required:CANON:baseline,required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
+            manifest_json_required_count = 6; packet_format = "icbm-audit-packet-v3"
             scanned_streams = "issue_comments:1,issue_comments:89,pr_body:1,pr_review_comments:1,pr_reviews:1"
             scan_unresolved = ""; scan_marked_not_cited = "100009300,100009004"
             provenance_only_change_same_digest = $true; tampered_rebuild = "PACKET_IMMUTABILITY_VIOLATION"
@@ -967,7 +971,7 @@ try {
             e2_deleted_cited_source_holds = "CITED_SOURCE_UNRESOLVED:100009002/HOLD_CLASS=TECHNICAL_HOLD"
             f_streams_without_issue_reference = "issue_comments:1,pr_body:1,pr_review_comments:1,pr_reviews:1"
             f_unnamed_issue_citation_holds = "CITED_SOURCE_UNRESOLVED:100009002"
-            f2_bare_numbers_are_not_citations = "True/True/5"
+            f2_bare_numbers_are_not_citations = "True/True/6"
             g_stream_page_fail = "STREAM_UNREADABLE:issue_comments:89/HOLD_CLASS=TECHNICAL_HOLD"
             h_stream_truncated = "STREAM_TRUNCATED:issue_comments:1/HOLD_CLASS=TECHNICAL_HOLD"; ai_prompts = 0
         }
@@ -1056,6 +1060,7 @@ try {
         $global:FxChecks.citation_keys = $typed.Keys -join ','
         $canon = Get-EvidenceReferences "``canon:documents/decisions/adr/0019-x.md``, ``canon:CLAUDE.md``, ``canon:../secret``, ``canon:a/../b``, ``canon:/abs``, ``canon:dir/``, ``canon:a b.md``, ``Canon:docs/x.md``, canon:docs/bare.md, ``documents/plain.md``."
         $global:FxChecks.citation_canon = $canon.Canon -join ','
+        $global:FxChecks.baseline_canon = (Get-BaselineCanon) -join ','
         $global:FxChecks.category_at_start = (@("NEW_PRODUCT_FEATURE: x", "[LIVE] y", "COST", "  PROVIDER_CALL - z") | ForEach-Object { Get-HumanDecisionCategory $_ }) -join ','
         $global:FxChecks.category_absent = (@("the diff needs a decision", "maybe LIVE later", "OWNER_HOLD: not an auditor's", "new_product_feature: lower", "") | ForEach-Object { "[$(Get-HumanDecisionCategory $_)]" }) -join ''
         $expected = [ordered]@{
@@ -1064,6 +1069,7 @@ try {
             citation_issues = "89,126"; citation_ids = "5906290729,5907009512"
             citation_keys = "github_issue_comment:100009001,github_pr_review:100009101,github_pr_review_comment:100009201"
             citation_canon = "CLAUDE.md,documents/decisions/adr/0019-x.md"
+            baseline_canon = "documents/roadmap/ROADMAP.md,documents/roadmap/CURRENT-MILESTONE.md,documents/rules/07-execution-safety.md,documents/rules/14-operating-authority.md"
             category_at_start = "NEW_PRODUCT_FEATURE,LIVE,COST,PROVIDER_CALL"; category_absent = "[][][][][]"
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })

@@ -254,17 +254,27 @@ inferred.
 - Citations are read **from the declaration only**. An id or a path in a code span inside a file
   of the diff — an ADR that names a historical record, a document that names another — is content
   under audit, not a citation of the slice.
-- A **canonical document citation** is `` `canon:<repository path>` `` in a code span. It puts that
-  file, as it is at the audited HEAD, into the packet as a required source bound by its git blob
-  SHA. The declaration cites the canonical documents the slice implements or is judged against
-  (rule §8.3: which contract it implements), so the auditors read that canon in the packet.
+- **Canon is read at the audited base.** The base is the canon that binds before the slice; what
+  the slice changes in the canon is in its diff, and is judged, never judged by. A slice can
+  therefore not rewrite the canon it is held to.
+- **The baseline canon is the Host's, not the declaration's.** Every packet carries, at the audited
+  base and whatever the declaration cites: `documents/roadmap/ROADMAP.md`,
+  `documents/roadmap/CURRENT-MILESTONE.md`, `documents/rules/07-execution-safety.md` and
+  `documents/rules/14-operating-authority.md` — what may be built, in which order, what is never
+  done, and who decides. The list is fixed in the Host (`Get-BaselineCanon`); no runtime
+  configuration and no declaration shortens it. A baseline document that is not at the base is
+  named as absent in the packet header, never skipped silently.
+- A **canonical document citation** is `` `canon:<repository path>` `` in a code span. It adds that
+  file, as it is at the audited base, to the packet as a required source bound by its git blob
+  SHA. The declaration cites the further canonical documents the slice implements (rule §8.3:
+  which contract it implements). A declaration only adds canon to the baseline.
 - A **packet source** is a comment, review or review comment in a scanned stream that the
   declaration cites **by its kind and its id**. A source of another kind that carries the same id
   never resolves the citation. Every packet source is `required`: both auditors must report it in
   `evidence_seen`.
 - **Declared evidence never disappears silently.** A citation that no scanned stream holds — a
   wrong id, a source on an issue the declaration does not name, a source deleted since — or a
-  canonical document that is not at the audited HEAD cannot be
+  cited canonical document that is not at the audited base cannot be
   read. That is a **TECHNICAL_HOLD** (`CITED_SOURCE_UNRESOLVED`), which the agent clears by
   correcting the declaration. It is never dropped from the packet.
 - **The declaration chooses evidence, never authority.** A user's product decision binds through
@@ -274,11 +284,12 @@ inferred.
   cite is therefore missing evidence at most, never a removed decision: a diff that goes beyond
   the canon is `HUMAN_DECISION_REQUIRED` (§0.2) whatever its declaration cites or omits. The
   user's own stop on a PR is the owner's hold file, which no declaration can affect.
-- **An audit is never blind to the canon.** The packet carries the canonical documents the diff
-  changes and the ones the declaration cites. An auditor that needs a canonical document the
-  packet does not carry returns `INSUFFICIENT` and names its path; it never assumes what an unseen
-  document says, and it never passes on a diff alone. The agent then cites that document and the
-  new packet is audited. A declaration cannot make an audit pass by citing less.
+- **An audit is never blind to the canon.** The packet carries the baseline canon, the canonical
+  documents the declaration adds, and the ones the diff changes. An auditor that needs a canonical
+  document the packet does not carry returns `INSUFFICIENT` and names its path; it never assumes
+  what an unseen document says, and it never passes on a diff alone. The agent then cites that
+  document and the new packet is audited. A declaration cannot make an audit pass by citing less:
+  the scope and authority documents are in the packet without it.
 
 **The scan is full and edit-aware.** Every packet generation, including the pre-merge regeneration
 of §7.1, reads every source of every scanned stream in full (all pages) at its current body. It
@@ -341,8 +352,8 @@ Its inputs are **content-bound source identities**:
     per generation;
   - the Host's slice specification or remediation authorization, when one exists, by the identity
     listed above;
-- the canonical documents the declaration cites (§3), each by its path and git blob SHA at the
-  audited HEAD;
+- the baseline canon and the canonical documents the declaration cites (§3), each by its path and
+  git blob SHA at the audited base;
 - the durable evidence the declaration cites (§3). Citations are read from the whole declaration:
   the PR body as it was read for the packet, and the slice specification or remediation
   authorization when one exists;

@@ -1017,26 +1017,42 @@ foreach ($it in $streamItems) {
     })
 }
 
-# Canonical documents the declaration cites (`canon:<path>`): the file at the audited HEAD, read from the host-owned
-# exact-HEAD audit worktree. Its identity is content-bound by the git blob SHA, so a changed document is a new packet.
+# Canonical documents, read at the AUDITED BASE ($mainHead): the canon that binds before this slice. What the slice
+# changes in it is in the diff, so a slice never rewrites the canon it is judged against.
+#   baseline   : Get-BaselineCanon, carried by every packet whatever the declaration cites. One that is not at the base
+#                is recorded as absent in the packet header; it is never silently skipped.
+#   referenced : `canon:<path>` citations of the declaration. One that is not at the base is a TECHNICAL_HOLD.
+# Identity is content-bound by the git blob SHA, so a changed document is a new packet.
 $unresolvedCanon = New-Object System.Collections.Generic.List[string]
+$baselineAbsent = New-Object System.Collections.Generic.List[string]
+$canonWanted = New-Object System.Collections.Generic.List[object]
+
+foreach ($cp in (Get-BaselineCanon)) {
+    $canonWanted.Add([pscustomobject]@{ Path = $cp; Origin = "baseline" })
+}
 
 foreach ($cp in $evidenceRefs.Canon) {
-    $blobSha = "$(Invoke-Git @('-C', $auditWorktree, 'rev-parse', '--verify', '--quiet', "HEAD:$cp"))".Trim()
-    $kind = if ($blobSha -match '^[0-9a-f]{40}$') { "$(Invoke-Git @('-C', $auditWorktree, 'cat-file', '-t', $blobSha))".Trim() } else { "" }
-    $full = Join-Path $auditWorktree ($cp -replace '/', '\')
+    $canonWanted.Add([pscustomobject]@{ Path = $cp; Origin = "referenced" })
+}
 
-    if ($kind -ne "blob" -or -not (Test-Path -LiteralPath $full -PathType Leaf)) {
-        $unresolvedCanon.Add("canon:$cp")
+foreach ($cw in $canonWanted) {
+    $cp = $cw.Path
+    $locator = "git_blob:base:$cp"
+
+    if ($seenLocators.Contains($locator)) {
         continue
     }
 
-    $canonText = ConvertTo-LfText ([System.IO.File]::ReadAllText($full, (New-Object System.Text.UTF8Encoding($false))))
-    $locator = "git_blob:HEAD:$cp"
+    $blobSha = "$(Invoke-Git @('-C', $repo, 'rev-parse', '--verify', '--quiet', "${mainHead}:$cp"))".Trim()
+    $kind = if ($blobSha -match '^[0-9a-f]{40}$') { "$(Invoke-Git @('-C', $repo, 'cat-file', '-t', $blobSha))".Trim() } else { "" }
 
-    if (-not $seenLocators.Add($locator)) {
+    if ($kind -ne "blob") {
+        if ($cw.Origin -eq "baseline") { $baselineAbsent.Add($cp) } else { $unresolvedCanon.Add("canon:$cp") }
         continue
     }
+
+    $canonText = ConvertTo-LfText ((@(Invoke-Git @('-C', $repo, 'cat-file', 'blob', $blobSha)) -join "`n") + "`n")
+    [void]$seenLocators.Add($locator)
 
     $packetSources.Add([pscustomobject]@{
         Identity = "$locator@$blobSha"
@@ -1045,8 +1061,8 @@ foreach ($cp in $evidenceRefs.Canon) {
         Kind = "CANON"
         Class = "required"
         Required = $true
-        Origin = "referenced"
-        Record = "pr-body"
+        Origin = $cw.Origin
+        Record = $(if ($cw.Origin -eq "baseline") { "host-baseline" } else { "pr-body" })
         Text = $canonText
         TextSha = Get-Sha256Hex $canonText
         Bytes = $utf8Out.GetByteCount($canonText)
@@ -1060,7 +1076,7 @@ $unresolvedRefs = @(@($evidenceRefs.Keys | Where-Object { -not $resolvedKeys.Con
 
 if ($packetHoldReasons.Count -eq 0) {
     foreach ($label in $unresolvedRefs) {
-        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and it cannot be read: no scanned stream holds a source of that kind with that id, or no such file is at the audited HEAD"
+        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and it cannot be read: no scanned stream holds a source of that kind with that id, or no such file is at the audited base"
     }
 }
 
@@ -1430,6 +1446,8 @@ foreach ($ps in $packetSources) {
     $sourceLines.Add("SOURCE=$($ps.Identity) kind=$($ps.Kind) class=$($ps.Class) required=$($ps.Required.ToString().ToLower()) origin=$($ps.Origin) record=$($ps.Record) bytes=$($ps.Bytes)")
 }
 
+$sourceLines.Add("BASELINE_CANON=$((Get-BaselineCanon) -join ',')")
+$sourceLines.Add("BASELINE_CANON_ABSENT_AT_BASE=$(if ($baselineAbsent.Count -gt 0) { $baselineAbsent -join ',' } else { 'NONE' })")
 $sourceLines.Add("REQUIRED_SOURCES=$(if (@($requiredSourceIds).Count -gt 0) { $requiredSourceIds -join ',' } else { 'NONE' })")
 $sourceLines.Add("--- AUTHORITATIVE SOURCES START ($(@($packetSources).Count)) ---")
 
@@ -2038,7 +2056,7 @@ IMPORTANT:
 $multiCallNote
 - Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
 - Do not trust commit messages as proof.
-- The canonical documents this slice is judged against are in the packet: the kind=CANON sources (files at the audited HEAD the declaration cites) and the documents the diff itself changes. Judge the diff against them. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
+- The canon this slice is judged against is the kind=CANON sources: files as they are at the AUDITED BASE, which is what binds before this slice. origin=baseline are the Host's own (the roadmap, the current milestone, execution safety, operating authority) and are in every packet; origin=referenced are the ones the declaration adds. What the slice changes in the canon is in the diff: judge that change, do not judge by it. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not enough to decide safely, return INSUFFICIENT.
 - PASS only if this packet contains enough evidence and no blocker is visible.
 
@@ -2185,7 +2203,7 @@ IMPORTANT:
 - If the evidence packet contains multiple audit segments, treat them as one evidence set and verify consistency across the segments.
 $multiCallNote
 - Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
-- The canonical documents this slice is judged against are in the packet: the kind=CANON sources (files at the audited HEAD the declaration cites) and the documents the diff itself changes. Judge the diff against them. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
+- The canon this slice is judged against is the kind=CANON sources: files as they are at the AUDITED BASE, which is what binds before this slice. origin=baseline are the Host's own (the roadmap, the current milestone, execution safety, operating authority) and are in every packet; origin=referenced are the ones the declaration adds. What the slice changes in the canon is in the diff: judge that change, do not judge by it. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not sufficient to decide safely, return INSUFFICIENT.
 - PASS only when this packet provides sufficient evidence and no blocker is visible.
 

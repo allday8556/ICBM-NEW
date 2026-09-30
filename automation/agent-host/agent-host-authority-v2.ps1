@@ -257,13 +257,28 @@ function Get-HumanDecisionCategory {
 # GitHub numbers the three kinds separately, so an id alone does not identify a source. A citation resolves only to a
 # source of its own kind: a review that happens to carry the id of a cited comment never stands in for it.
 #   a canonical document citation, in a code span:
-#       `canon:<repository path>`  -> that file at the audited HEAD, as a git blob source
-# It is how the declaration puts the canonical text the slice is judged against into the packet, so an audit never
-# depends on canon the auditors cannot read. The path is a plain repository path: no "..", no leading "/", no space.
+#       `canon:<repository path>`  -> that file at the AUDITED BASE, as a git blob source
+# It is how the declaration adds canonical text the slice is judged against to the packet. The base is what binds
+# before the slice: what the slice itself changes in the canon is in its diff, so a slice can never rewrite the canon
+# it is judged against. The path is a plain repository path: no "..", no leading "/", no space.
+#
+# The declaration only ADDS canon. The baseline below is carried by every packet whatever the declaration cites, so
+# an agent-written declaration can never leave out the documents that decide what may be built and who decides it.
 # A citation is a claim that the source is evidence. One that no scanned stream holds cannot be read, so it is a
 # TECHNICAL_HOLD (CITED_SOURCE_UNRESOLVED): declared evidence never silently disappears from a packet. A number that is
 # not in a code span (a CI run id, a line count) is not a citation.
 # -------------------------------------------------
+
+# The Host's baseline canon: the scope and authority documents, read at the audited base. Not configurable per
+# runtime and not selectable by a declaration.
+function Get-BaselineCanon {
+    return @(
+        "documents/roadmap/ROADMAP.md",
+        "documents/roadmap/CURRENT-MILESTONE.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md"
+    )
+}
 
 function Get-EvidenceReferences {
     param([AllowNull()][string]$Text)
