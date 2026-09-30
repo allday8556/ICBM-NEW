@@ -495,9 +495,10 @@ class SmartStoreEndpointCaller:
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
-            wire = _compose(contract, request)
             if contract.endpoint_id is _PRODUCT_CREATE:
+                # Before the request is composed: no body is encoded for an incomplete CREATE.
                 self._require_complete(request)
+            wire = _compose(contract, request)
         except EndpointNotAdoptedError as exc:
             error = self._local(endpoint, "SMARTSTORE_ENDPOINT_NOT_ADOPTED", exc)
         except _Preflight as exc:
@@ -571,13 +572,23 @@ class SmartStoreEndpointCaller:
         """Refuse a CREATE whose validated document lacks a part the provider requires on
         registration (``product.completeness_gaps``).
 
-        This is the last gate before wire bytes exist, and it reads the document itself: no
-        projection, sender or caller of this method can declare a request complete. At this
-        adoption every CREATE document has gaps, so every CREATE is refused here, locally and
-        before any transport — ``NOT_APPLIED_PROVEN`` by the pre-handoff whitelist.
+        It runs before the request is composed, so no body is ever encoded for an incomplete
+        CREATE, and it reads the document itself: no projection, sender or caller of this method
+        can declare a request complete. A document that is not a validated projection output is a
+        contract violation first. At this adoption every CREATE document has gaps, so every CREATE
+        is refused here, locally and before any transport — ``NOT_APPLIED_PROVEN`` by the
+        pre-handoff whitelist.
         """
         document = getattr(request, "document", None)
-        if not isinstance(document, CreateDocument) or completeness_gaps(document):
+        if not isinstance(request, ProductCreateRequest) or not isinstance(
+            document, CreateDocument
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        try:
+            verified(document)
+        except WireContractError as refused:
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from refused
+        if completeness_gaps(document):
             raise _Preflight("SMARTSTORE_CREATE_REQUEST_INCOMPLETE")
 
     @staticmethod

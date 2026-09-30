@@ -837,3 +837,26 @@ def test_the_sender_recomputes_completeness_from_the_document() -> None:
     assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE"
     assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
     assert set(handoff.details["gaps"]) == set(product.completeness_gaps(FROZEN))
+
+
+def test_no_body_is_encoded_for_an_incomplete_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The production caller refuses an incomplete CREATE before it composes the request, so the
+    # request body is never even encoded, let alone written.
+    from integrations.marketplaces.smartstore import caller as caller_module
+
+    encoded: list[object] = []
+    real = caller_module._json_body
+
+    def record(document: product.CreateDocument) -> bytes:
+        encoded.append(document)
+        return real(document)
+
+    monkeypatch.setattr(caller_module, "_json_body", record)
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    production = SmartStoreEndpointCaller(transport=httpx.MockTransport(provider))
+    with pytest.raises(SmartStoreCallError) as refused:
+        production.call(
+            EndpointId.SMARTSTORE_PRODUCT_CREATE_V2, ProductCreateRequest(BEARER, 3, 7, FROZEN)
+        )
+    assert refused.value.code == "SMARTSTORE_CREATE_REQUEST_INCOMPLETE"
+    assert encoded == [] and provider.requests == []
