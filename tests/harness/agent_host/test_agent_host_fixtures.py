@@ -12,6 +12,7 @@ elsewhere.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -68,6 +69,17 @@ SCENARIOS = {
 }
 
 
+def _windows_powershell_env() -> dict[str, str]:
+    """The environment for Windows PowerShell 5.1, without an inherited PowerShell 7 module path.
+
+    A runner whose shell is PowerShell 7 hands its PSModulePath down; Windows PowerShell then loads
+    the PowerShell 7 builds of its own utility modules and loses cmdlets such as Get-FileHash.
+    Without the variable, Windows PowerShell builds its own default module path, as it does when
+    the Host runs it.
+    """
+    return {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+
+
 def _run(scenario: str, root: Path) -> dict[str, object]:
     assert POWERSHELL is not None
     completed = subprocess.run(
@@ -86,6 +98,7 @@ def _run(scenario: str, root: Path) -> dict[str, object]:
         capture_output=True,
         timeout=TIMEOUT_S,
         check=False,
+        env=_windows_powershell_env(),
     )
     result = root / scenario / "result.json"
     if not result.is_file():
