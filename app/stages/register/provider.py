@@ -66,13 +66,14 @@ class ReadbackComparator(Protocol):
         ...
 
     def proves_published_state(self) -> bool:
-        """Whether this comparison's canonical evidence can carry a published state at all.
+        """Whether this comparison can prove a published state at all.
 
-        ADR-0014 §11 confirms a registration only on an exact published-state comparison, and the
-        execution owner refuses with ``REGISTER_PUBLISHED_STATE_UNPROVEN`` rather than invent one.
-        ``False`` is the honest answer while the adopted read-back contract proves no published
-        state, so a readiness that names the proofs a real CREATE needs can report it as missing
-        instead of implying that endpoint adoption alone covers it.
+        ADR-0014 §11 confirms a registration only on an exact published-state comparison against
+        the explicitly expected state, and the execution owner refuses with
+        ``REGISTER_PUBLISHED_STATE_UNPROVEN`` rather than invent one. ``False`` is the honest
+        answer while either half is missing — the read-back cannot carry the state, or nothing
+        states the expected one — so a readiness that names the proofs a real CREATE needs can
+        report it as missing instead of implying that endpoint adoption alone covers it.
         """
         ...
 

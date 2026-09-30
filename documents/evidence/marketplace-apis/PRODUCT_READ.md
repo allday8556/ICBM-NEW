@@ -19,7 +19,7 @@
 ### Provenance
 
 - **Locators:** `(v2) 원상품 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product ; `(v2) 채널 상품 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/read-channel-product-1-product ; support https://github.com/commerce-api-naver/commerce-api/discussions/3170
-- **Authority / version:** `OFFICIAL_API_DOC`, NAVER Commerce API 2.89.0 (2026-09-15); `OFFICIAL_SUPPORT` for the identity-stability line. Source IDs `NAVER-P0-PACKET-289` (5746489554), `NAVER-P0-PRODUCT-READ`, `NAVER-P0-REVIEW-CREATE-289` (5768199984). Below, `PACKET` = 5746489554 and `REVIEW` = 5768199984.
+- **Authority / version:** `OFFICIAL_API_DOC`, NAVER Commerce API 2.89.0 (2026-09-15); `OFFICIAL_SUPPORT` for the identity-stability line. Source IDs `NAVER-P0-PACKET-289` (5746489554), `NAVER-P0-PRODUCT-READ`, `NAVER-P0-REVIEW-CREATE-289` (5768199984). Below, `PACKET` = 5746489554, `REVIEW` = 5768199984 and `STATUS` = 5911962320 (`NAVER-P0-READ-STATUS-290`, `SOURCES.md` §5.4: a reading of the 2.90.0 reference made through GPT on 2026-09-30, not reviewed by a second reader).
 
 ### Provider contract
 
@@ -30,19 +30,23 @@
 | API group | `상품` | `상품` | PACKET |
 | Request body / Content-Type | none | none | `ENDPOINT_MATRIX.md` §4.1 |
 | Response structure | the `원상품 정보 구조체` schema is used for read responses as well as registration (see [PRODUCT_CREATE](PRODUCT_CREATE.md#request-structure) for its captured keys) | not captured | PACKET |
+| Response top level (2.90.0) | `groupProduct`, `originProduct`, `windowChannelProduct`, `smartstoreChannelProduct` | not captured | STATUS |
+| Sale status (2.90.0) | `originProduct.statusType` — string, `상품 판매 상태 코드`; `WAIT`, `SALE`, `OUTOFSTOCK`, `UNADMISSION`, `REJECTION`, `SUSPENSION`, `CLOSE`, `PROHIBITION`, `DELETE`; the 200 schema gives no per-value meaning | not captured | STATUS |
+| SmartStore display status (2.90.0) | `smartstoreChannelProduct.channelProductDisplayStatusType` — string, `전시 상태 코드(스마트스토어 채널 전용)`; `WAIT` 전시 대기, `ON` 전시 중, `SUSPENSION` 전시 중지. `windowChannelProduct.channelProductDisplayStatusType` carries the same values for the window channel (read-only) | not captured | STATUS |
 | Lookup semantics | `originProductNo` and `channelProductNo` are provider-issued unique numbers, stable across later product edits (`OFFICIAL_SUPPORT` #3170) — a deterministic single-item lookup once the number is known, not a way to find a product whose CREATE response was lost | same | REVIEW |
 | Errors | the read reference documents product error examples used by `ERRORS.md` (`NAVER-P0-PRODUCT-READ`); API-server `NOT_FOUND` is resource context, distinct from `GW.NOT_FOUND` (`ERRORS.md` §9.3, §10.4) | same | `ERRORS.md` |
 
 ### Unresolved (exact)
 
-- The channel-product read response structure and the JSON paths of every retained field in either response.
+- The channel-product read response structure, and the JSON paths of the retained fields other than the two status members above.
+- Any statement that `SALE` with `ON` means a buyer can see and purchase the listing: none is documented, and no single "visible and purchasable" field exists.
 - The endpoint-specific error statuses/codes of both reads.
 - Any read-after-write consistency window after a mutation (`ERRORS.md` Q5).
 - Endpoint-specific rate limits.
 
 ### ICBM adoption and runtime state — ICBM-side, not provider facts
 
-- `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` and `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` are `ADOPTED` (M5 PR-D; `ENDPOINT_MATRIX.md` §4, §4.1). ICBM policy: connect `5s`, read `15s`; redirect `NO_FOLLOW`; success predicate HTTP 200 AND the body parses as a JSON object (`m5d-origin-read-r1`, `m5d-channel-read-r1`); no query keys (deny-by-default); retained response fields `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` (safe-retention profile `smartstore-safe-retention/v1`, ADR-0014 §15).
+- `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` and `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` are `ADOPTED` (M5 PR-D; `ENDPOINT_MATRIX.md` §4, §4.1). ICBM policy: connect `5s`, read `15s`; redirect `NO_FOLLOW`; success predicate HTTP 200 AND the body parses as a JSON object (`m5d-origin-read-r1`, `m5d-channel-read-r1`); no query keys (deny-by-default); retained response fields `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` (safe-retention profile `smartstore-safe-retention/v1`, ADR-0014 §15). The origin read also retains `statusType` and `channelProductDisplayStatusType` and reads them at exactly the two documented paths above (mapping revision `m5-published-state-r1`); the channel read does not. Reading them proves no published state by itself: the display status ICBM registers has no owner, so there is no explicit expectation to compare against (ADR-0014 §11; `ENDPOINT_MATRIX.md` §4.1).
 - Runtime: `UNVERIFIED`; execution is `DRY_RUN`/provider-zero. A missing read-back resource never proves `NOT_APPLIED_PROVEN` (`ERRORS.md` §10.4).
 
 ## Coupang

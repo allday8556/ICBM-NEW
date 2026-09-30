@@ -913,8 +913,9 @@ class RegistrationExecutionService:
             )
         published_state = _published_state(evidence)
         if published_state is None:
-            # ADR-0014 §11 compares the published state exactly. Nothing in the adopted read-back
-            # proves it today (PR-D), so a confirmation cannot be claimed rather than invented.
+            # ADR-0014 §11 compares the published state exactly, against an explicit expectation.
+            # The comparison states one only when it read both halves and both equal what the
+            # Snapshot expects; otherwise a confirmation is not claimed rather than invented.
             raise ExecutionRefused(
                 "REGISTER_PUBLISHED_STATE_UNPROVEN",
                 "the read-back proves no published state, so the listing is not confirmed",
