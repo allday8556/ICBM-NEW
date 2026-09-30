@@ -957,6 +957,12 @@ class RegistrationExecutionService:
         (§11). Zero candidates are never absence, several are never a selection, and an
         unavailable or failed lookup proves nothing; each leaves the Intent UNKNOWN, its conflict
         scope closed and no CREATE possible (§17.2, §28.3). An operator's word is never evidence.
+
+        §28.3's other route — a read-back by an *already known* provider identity — cannot start
+        here: an Intent carries its provider identity only together with an applied outcome
+        (CHECK ``provider_identity_when_applied``, migration 0016), so an UNKNOWN Intent has none
+        and every reconcile of it is this lookup. Once presence is proven the Intent is SENT with
+        its identity, and every later read-back is ``verify`` by that identity — never a search.
         """
         intent = self._intent(intent_id)
         if intent.state is not IntentState.UNKNOWN:

@@ -2719,3 +2719,28 @@ def test_an_exhausted_schedule_never_leaves_its_last_check_open(
     (check,) = store.reconcile_checks(ready.intent_id)
     assert not check.in_flight and check.result is ReconcileResult.ERROR
     assert run.lookup.calls == 0
+
+
+def test_an_unknown_intent_never_carries_a_provider_identity(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # ADR-0014 §28.3's read-back by an already known identity cannot apply to an UNKNOWN Intent:
+    # the database gives an Intent a provider identity only with an applied outcome (migration
+    # 0016, provider_identity_when_applied), so every reconcile of an UNKNOWN is the §28.2 lookup,
+    # and a known identity is read back by verify() once the Intent is SENT.
+    ready = prepare(container, sources, store, account, prep)
+    _unknown(container, store, prep, ready)
+    with contextlib.closing(raw(config)) as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE registration_intents SET marketplace_product_id = '9900112233'"
+            " WHERE intent_id = ?",
+            (ready.intent_id,),
+        )
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+    assert intent.marketplace_product_id is None
