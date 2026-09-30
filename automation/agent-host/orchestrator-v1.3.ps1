@@ -4,7 +4,10 @@
 
     [int]$PollSeconds = 60,
 
-    [int]$MaxWaitMinutes = 360
+    [int]$MaxWaitMinutes = 360,
+
+    # first wait before a TECHNICAL_HOLD is retried; doubles per repeat of the same state (default: PollSeconds)
+    [int]$TechnicalBackoffSeconds = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +18,7 @@ $script:OutputEncoding = $nativeUtf8
 
 $hostRoot = $PSScriptRoot
 
-# V2 §3 marker grammar + authority write guard: every Host GitHub write goes through Invoke-GhWrite
+# §3 marker grammar + authority write guard (every Host GitHub write goes through Invoke-GhWrite) and the §5.1 hold taxonomy
 . (Join-Path $PSScriptRoot "agent-host-authority-v2.ps1")
 
 $configPath = Join-Path $hostRoot "state\orchestrator-config.json"
@@ -32,13 +35,20 @@ $config = Get-Content $configPath -Raw -Encoding utf8 |
 
 $repoSlug = [string]$config.repository
 
-# MERGE_GUARD를 통과한 DUAL PASS PR에 한해 자동 병합.
-# config.auto_merge=false 이면 기존처럼 WAITING_FOR_HUMAN_MERGE 에서 정지.
+# MERGE_GUARD를 통과한 DUAL PASS PR에 한해 자동 병합 (protocol §0.2: the default operating mode).
+# config.auto_merge=false 는 host 설정에 의한 정지 (WAITING_FOR_MERGE_BY_CONFIG) 이며 hold 가 아니다.
 $autoMerge = ($config.auto_merge -eq $true)
 $autoMergeMethod = if ($config.auto_merge_method) { [string]$config.auto_merge_method } else { "merge" }
 
 # full-main DUAL PASS 이후 ROADMAP 재조회 → 다음 slice 자동 진행
 $autoNext = ($config.auto_next.enabled -eq $true)
+
+# TECHNICAL_HOLD self-recovery (protocol §5.1): the same (PR, HEAD, main, reason) is retried with a doubling wait.
+# The ceiling is a cost circuit breaker, never a hand-off for a decision: it ends the run as TECHNICAL_HOLD_EXHAUSTED.
+$technicalMaxRetries = if ($config.technical_hold.max_same_state_retries) { [int]$config.technical_hold.max_same_state_retries } else { 5 }
+$technicalBackoff = if ($TechnicalBackoffSeconds -gt 0) { $TechnicalBackoffSeconds } else { $PollSeconds }
+$technicalBackoffMax = if ($config.technical_hold.max_backoff_seconds) { [int]$config.technical_hold.max_backoff_seconds } else { 900 }
+$script:lastHold = $null
 $logDir = Join-Path $hostRoot "logs"
 
 # 마지막 자동 병합 SHA (post-merge full audit의 exact main 확인용)
@@ -95,6 +105,8 @@ function Save-RuntimeState {
         main_head = $MainHead
         detail = $Detail
         auto_merge = $autoMerge
+        auto_next = $autoNext
+        hold_class = $(if ($Status -in @("HUMAN_DECISION_REQUIRED", "TECHNICAL_HOLD", "TECHNICAL_HOLD_EXHAUSTED")) { $Status } else { "NONE" })
         toolset_sha256 = $toolsetSha
         updated_at = (Get-Date).ToString("o")
     }
@@ -108,7 +120,10 @@ function Save-RuntimeState {
     Move-Item $tmp $runtimeStatePath -Force
 }
 
-# 모든 사람 개입 정지는 runtime.json에 HUMAN_HOLD + 사유로 기록한다.
+# A pass stops in exactly one of two classes (protocol §5.1; agent-host-authority-v2.ps1 Get-HoldClass):
+#   HUMAN_DECISION_REQUIRED : the closed product / real-external-action list. The run ends and waits for the user.
+#   TECHNICAL_HOLD          : everything else. The supervisor below retries it; nobody is asked anything.
+# The class comes from the reason's category, never from how often something failed.
 function Stop-Hold {
     param(
         [string]$Reason,
@@ -117,15 +132,20 @@ function Stop-Hold {
         [string]$Detail = ""
     )
 
+    $class = Get-HoldClass $Reason
+
     Save-RuntimeState `
-        -Status "HUMAN_HOLD" `
+        -Status $class `
         -Action $Reason `
         -PrHead $PrHead `
         -MainHead $MainHead `
         -Detail $Detail
 
+    $script:lastHold = [pscustomobject]@{ Class = $class; Reason = $Reason; PrHead = $PrHead; MainHead = $MainHead; Detail = $Detail }
+
     Write-Host ""
-    Write-Host "HUMAN_HOLD=$Reason"
+    Write-Host "HOLD_CLASS=$class"
+    Write-Host "$class=$Reason"
 
     # 구축 기간 동안 보류된 전수 감사 — 실사용 전 필요
     $deferredPath = Join-Path $hostRoot "state\full-audit-deferred.json"
@@ -141,6 +161,22 @@ function Stop-Hold {
         catch {
         }
     }
+}
+
+# A configured or finished stop: not a hold, nothing to retry, nothing to decide.
+function Stop-Idle {
+    param(
+        [string]$Status,
+        [string]$Action,
+        [string]$PrHead = "",
+        [string]$MainHead = "",
+        [string]$Detail = ""
+    )
+
+    Save-RuntimeState -Status $Status -Action $Action -PrHead $PrHead -MainHead $MainHead -Detail $Detail
+    $script:lastHold = $null
+    Write-Host ""
+    Write-Host "STATE=$Status ($Action)"
 }
 
 # 하위 스크립트의 모든 stream(output/error/warning/information)을 캡처하면서 화면에도 표시.
@@ -255,8 +291,8 @@ function Stop-DuplicateFullCi {
         [ordered]@{
             head = $Head
             reason = "exact HEAD already had a GREEN FULL CI; ready_for_review started a duplicate FULL CI, cancelled per owner instruction (no FULL CI re-run on the same HEAD)"
-            runs = @($cancelled)
-            check_suite_ids = @($cancelled | ForEach-Object { $_.check_suite_id })
+            runs = $cancelled.ToArray()
+            check_suite_ids = @($cancelled.ToArray() | ForEach-Object { $_.check_suite_id })
             cancelled_at = (Get-Date).ToString("o")
         } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $dupPath
     }
@@ -268,6 +304,79 @@ function Stop-DuplicateFullCi {
 function Get-MainHead {
     $sha = gh api "repos/$repoSlug/commits/main" --jq .sha
     return "$sha".Trim()
+}
+
+# §7 condition 8: how many commits of the current base the PR HEAD does not contain. -1 = unreadable.
+function Get-BehindBy {
+    param([string]$Base, [string]$Head)
+
+    $oldEap = $ErrorActionPreference
+
+    try {
+        $ErrorActionPreference = "Continue"
+        $raw = gh api "repos/$repoSlug/compare/$Base...$Head" --jq .behind_by 2>$null
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
+
+    if ($code -ne 0 -or "$raw".Trim() -notmatch '^\d+$') {
+        return -1
+    }
+
+    return [int]"$raw".Trim()
+}
+
+# §8: the tree a commit points at. Empty = unreadable.
+function Get-CommitTree {
+    param([string]$Sha)
+
+    $oldEap = $ErrorActionPreference
+
+    try {
+        $ErrorActionPreference = "Continue"
+        $raw = gh api "repos/$repoSlug/git/commits/$Sha" --jq .tree.sha 2>$null
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
+
+    if ($code -ne 0 -or "$raw".Trim() -notmatch '^[0-9a-f]{40}$') {
+        return ""
+    }
+
+    return "$raw".Trim()
+}
+
+# §8 POST_MERGE_VERIFY: the merge commit's tree equals the merged PR HEAD's tree, whatever the merge commit's
+# metadata. Read from GitHub's record of the merge on every pass that finds the PR merged, so nothing local can
+# make it look verified. A mismatch is never accepted silently and never lets the next slice start.
+function Test-PostMergeTree {
+    param([string]$MergedHead)
+
+    $info = Get-PrMergeInfo
+    $mergeSha = [string]$info.mergeCommit.oid
+
+    if (-not $mergeSha) {
+        Write-Host "POST_MERGE_VERIFY=FAIL (no merge commit recorded)"
+        return [pscustomobject]@{ Ok = $false; Detail = "merge_commit=NONE" }
+    }
+
+    $mergedTree = Get-CommitTree -Sha $mergeSha
+    $auditedTree = Get-CommitTree -Sha $MergedHead
+    Write-Host "POST_MERGE_MERGE_COMMIT=$mergeSha"
+    Write-Host "POST_MERGE_MERGED_TREE=$mergedTree"
+    Write-Host "POST_MERGE_AUDITED_TREE=$auditedTree"
+
+    if (-not $mergedTree -or $mergedTree -ne $auditedTree) {
+        Write-Host "POST_MERGE_VERIFY=FAIL"
+        return [pscustomobject]@{ Ok = $false; Detail = "merge_sha=$mergeSha;merged_tree=$mergedTree;audited_tree=$auditedTree" }
+    }
+
+    Write-Host "POST_MERGE_VERIFY=PASS"
+    return [pscustomobject]@{ Ok = $true; Detail = "merge_sha=$mergeSha;tree=$mergedTree" }
 }
 
 function Get-AuditPolicyVersion {
@@ -369,7 +478,7 @@ function Get-CiState {
     }
 }
 
-# CI 실패 시 실패한 job만 1회 재실행 (flaky 대응). 같은 HEAD에서 두 번째 실패는 HUMAN_HOLD.
+# CI 실패 시 실패한 job만 1회 재실행 (flaky 대응). 같은 HEAD에서 두 번째 실패는 TECHNICAL_HOLD (CI_FAILED).
 # 반환: WAIT (재실행 요청 또는 run 진행 중) | HOLD
 function Invoke-CiRerunOnce {
     param([string]$Head)
@@ -565,7 +674,7 @@ function Get-AuditResult {
 
     $verdictMatch = [regex]::Match(
         $text,
-        '(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT|HOLD)\s*$'
+        '(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT|HOLD|HUMAN_DECISION_REQUIRED)\s*$'
     )
 
     $summaryMatch = [regex]::Match(
@@ -898,9 +1007,22 @@ function Invoke-MergeGuard {
         return [pscustomobject]@{ Decision = "RELOOP"; Reason = "MAIN_MOVED_AFTER_AUDIT" }
     }
 
+    # --- §7 condition 8: the PR HEAD contains the current base (behind_by == 0), checked before the merge ---
+    $behindBy = Get-BehindBy -Base $remoteMain -Head $AuditedHead
+    Write-Host "GUARD_BEHIND_BY=$behindBy"
+
+    if ($behindBy -lt 0) {
+        return [pscustomobject]@{ Decision = "HOLD"; Reason = "GUARD_BASE_COMPARE_UNREADABLE" }
+    }
+
+    if ($behindBy -gt 0) {
+        # the loop brings the branch up to date and audits the new HEAD
+        return [pscustomobject]@{ Decision = "RELOOP"; Reason = "HEAD_BEHIND_BASE" }
+    }
+
     # --- current packet digest (V2 §7.2-§7.3): 같은 HEAD/base 에서 packet 을 다시 생성 (AI 호출 없음) →
     #     hard completeness PASS + 감사된 digest 와 byte-identical 이어야 한다.
-    #     full authority re-scan 포함 (V2 §7.1). 분류 없는 marker / 불완전 stream / 읽을 수 없는 source → HOLD ---
+    #     full re-scan of every stream 포함 (§7.1). 불완전 stream / 읽을 수 없는 source → TECHNICAL_HOLD ---
     $pkText = Invoke-HostScript `
         -Path $auditScript `
         -Params @{ PrNumber = $CurrentPr; PacketOnly = $true }
@@ -923,9 +1045,9 @@ function Invoke-MergeGuard {
 
     Write-Host "GUARD_CURRENT_PACKET_DIGEST=$($pkDigest.Groups[1].Value)"
 
-    # V2 §7.1: 다른 차이(body digest, 새 분류 source, manifest/bytes/digest 변경)는 DUAL PASS 무효 → 새 audit identity 로 재감사.
-    # 재생성된 packet 이 이 HEAD 의 current pointer 가 되므로 다음 loop 의 캐시 판정은 새 digest 로만 맞는다. 같은 HEAD 의 CI 는 유효.
-    # (분류 없는 marker / 읽을 수 없는 stream·source 는 위에서 HOLD)
+    # §7.1: 어떤 차이든 (cited source 의 body digest, 새로 인용된 source, manifest/bytes/digest 변경) DUAL PASS 무효
+    # → 새 audit identity 로 재감사. 재생성된 packet 이 이 HEAD 의 current pointer 가 되므로 다음 loop 의 캐시 판정은
+    # 새 digest 로만 맞는다. 같은 HEAD 의 CI 는 유효. (읽을 수 없는 stream·source 는 위에서 TECHNICAL_HOLD)
     if ($pkDigest.Groups[1].Value -ne $gptR.Digest) {
         return [pscustomobject]@{ Decision = "RELOOP"; Reason = "PACKET_DIGEST_CHANGED_AFTER_AUDIT" }
     }
@@ -954,7 +1076,7 @@ function Invoke-MergeGuard {
 }
 
 # GitHub merge API. sha=<exact audited HEAD> → HEAD가 움직였으면 GitHub가 거부(409).
-# force 없음. 성공 시 merge commit SHA, 실패 시 $null (HUMAN_HOLD 기록됨).
+# force 없음. 성공 시 merge commit SHA, 실패 시 $null (hold 기록됨).
 function Invoke-AutoMerge {
     param(
         [string]$AuditedHead,
@@ -1043,6 +1165,8 @@ function Invoke-AutoMerge {
         return $null
     }
 
+    # §8 POST_MERGE_VERIFY (tree equality) runs at the top of the next pass, from GitHub's own record of the merge:
+    # it is stateless, so a restart or a retry can never skip it.
     Save-RuntimeState `
         -Status "AUTO_MERGED" `
         -Action "MERGE_VERIFIED" `
@@ -1086,7 +1210,7 @@ function Invoke-AutoNext {
     }
 
     if ($selText -match '(?m)^NEXT_DECISION=DONE\s*$') {
-        Stop-Hold -Reason "ROADMAP_COMPLETE" -PrHead $MergedHead -MainHead $MainHead
+        Stop-Idle -Status "COMPLETE" -Action "ROADMAP_COMPLETE" -PrHead $MergedHead -MainHead $MainHead
         return [pscustomobject]@{ Action = "HOLD"; Pr = 0 }
     }
 
@@ -1202,8 +1326,9 @@ function Invoke-PostMerge {
 
     if ($fullText -match '(?m)^FULL_AUDIT_RESULT=DUAL_PASS\s*$') {
         if (-not $autoNext) {
-            Stop-Hold `
-                -Reason "FULL_AUDIT_DUAL_PASS_NEXT_AUTHORIZATION_REQUIRED" `
+            Stop-Idle `
+                -Status "IDLE" `
+                -Action "AUTO_NEXT_DISABLED_BY_CONFIG" `
                 -PrHead $MergedHead `
                 -MainHead $mainHead `
                 -Detail "GPT=PASS;CLAUDE=PASS"
@@ -1262,7 +1387,7 @@ function Invoke-PostMerge {
     $reason = if ($fullHold.Success) {
         "FULL_AUDIT_$($fullHold.Groups[1].Value)"
     }
-    elseif ($fullText -match '(?m)^FULL_AUDIT_RESULT=HUMAN_HOLD_INSUFFICIENT\s*$') {
+    elseif ($fullText -match '(?m)^FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT\s*$') {
         "FULL_AUDIT_INSUFFICIENT"
     }
     elseif ($fullText -match 'HOST_SCRIPT_EXCEPTION=') {
@@ -1310,6 +1435,9 @@ if (Test-Path $runtimeStatePath) {
 
 Write-Host ""
 
+# One pass of the control loop. It returns on a hold, on a configured stop or when the work is done; the supervisor
+# below decides what happens next. Dot-sourced, so its variables (the current PR among them) stay in script scope.
+$controlPass = {
 while ($true) {
 
     if ((Get-Date) -ge $deadline) {
@@ -1317,7 +1445,7 @@ while ($true) {
         return
     }
 
-    # owner 가 보류한 PR: FIXER / 추가 CI / 병합 없이 즉시 HOLD (state/merge-hold-pr-N.json 삭제 전까지)
+    # owner 가 보류한 PR: FIXER / 추가 CI / 병합 없이 즉시 HUMAN_DECISION_REQUIRED (state/merge-hold-pr-N.json 삭제 전까지)
     $mergeHoldPath = Join-Path $hostRoot "state\merge-hold-pr-$CurrentPr.json"
 
     if (Test-Path $mergeHoldPath) {
@@ -1352,6 +1480,18 @@ while ($true) {
 
         Write-Host ""
         Write-Host "CURRENT_STATE=MERGED"
+
+        $treeCheck = Test-PostMergeTree -MergedHead $prHead
+
+        if (-not $treeCheck.Ok) {
+            Stop-Hold `
+                -Reason "POST_MERGE_TREE_MISMATCH" `
+                -PrHead $prHead `
+                -MainHead $mainHead `
+                -Detail $treeCheck.Detail
+            return
+        }
+
         Write-Host "NEXT=POST_MERGE_FULL_AUDIT"
 
         $post = Invoke-PostMerge -MergedHead $prHead
@@ -1390,6 +1530,54 @@ while ($true) {
 
     # State + NEXT-1~3 freshness update
     Invoke-StateRefresh
+
+    # -------------------------------------------------
+    # Base freshness (§7 condition 8). A PR HEAD that does not contain the current main is brought up to date first:
+    # auditing it would be wasted, and merging it would put an unaudited tree on main. This is mechanical work, never a
+    # question for the user. A conflict GitHub cannot merge is a TECHNICAL_HOLD for the repair path.
+    # -------------------------------------------------
+
+    $behindBy = Get-BehindBy -Base $mainHead -Head $prHead
+
+    if ($behindBy -lt 0) {
+        Stop-Hold -Reason "BASE_COMPARE_UNREADABLE" -PrHead $prHead -MainHead $mainHead
+        return
+    }
+
+    if ($behindBy -gt 0) {
+        Write-Host ""
+        Write-Host "BASE_SYNC=PR_HEAD_BEHIND_MAIN_BY_$behindBy"
+
+        # the synced HEAD is unaudited: no FULL CI on it
+        if (-not $pr.isDraft -and -not (Set-PrDraft -Draft $true)) {
+            Stop-Hold -Reason "PR_DRAFT_CONVERT_FAILED" -PrHead $prHead -MainHead $mainHead
+            return
+        }
+
+        $sync = Invoke-GhWrite `
+            -GhArgs @("api", "-X", "PUT", "repos/$repoSlug/pulls/$CurrentPr/update-branch", "-f", "expected_head_sha=$prHead") `
+            -Site "orchestrator:base-sync"
+
+        if ($sync.Refused -or $sync.ExitCode -ne 0) {
+            Stop-Hold `
+                -Reason "BASE_SYNC_FAILED" `
+                -PrHead $prHead `
+                -MainHead $mainHead `
+                -Detail "behind_by=$behindBy;exit=$($sync.ExitCode)"
+            return
+        }
+
+        Save-RuntimeState `
+            -Status "BASE_SYNC" `
+            -Action "UPDATE_BRANCH_REQUESTED" `
+            -PrHead $prHead `
+            -MainHead $mainHead `
+            -Detail "behind_by=$behindBy"
+
+        Write-Host "BASE_SYNC=UPDATE_BRANCH_REQUESTED (new HEAD is audited from scratch)"
+        Start-Sleep -Seconds $PollSeconds
+        continue
+    }
 
     # -------------------------------------------------
     # audit-before-CI (owner decision 2026-09-28): exact candidate HEAD → GPT + Claude 감사 먼저.
@@ -1507,7 +1695,18 @@ while ($true) {
         return
     }
 
-    # V2 HOLD (예: EVIDENCE_NOT_SEEN): code BLOCKER 가 아니므로 FIXER 로 가지 않는다
+    # the user's decision (closed list, §5.1): the auditor names the category at the start of its summary
+    if ($gpt.Verdict -eq "HUMAN_DECISION_REQUIRED") {
+        Stop-Hold `
+            -Reason "GPT_HUMAN_DECISION_REQUIRED" `
+            -PrHead $prHead `
+            -MainHead $mainHead `
+            -Detail $gpt.Summary
+        return
+    }
+
+    # HOLD (예: EVIDENCE_NOT_SEEN) 와 INSUFFICIENT 는 TECHNICAL_HOLD: code BLOCKER 가 아니므로 FIXER 로 가지 않고,
+    # supervisor 가 같은 identity 를 다시 감사한다
     if ($gpt.Verdict -eq "HOLD") {
         Stop-Hold `
             -Reason "GPT_HOLD" `
@@ -1563,7 +1762,18 @@ while ($true) {
         return
     }
 
-    # V2 HOLD (예: EVIDENCE_NOT_SEEN): code BLOCKER 가 아니므로 FIXER 로 가지 않는다
+    # the user's decision (closed list, §5.1): the auditor names the category at the start of its summary
+    if ($claude.Verdict -eq "HUMAN_DECISION_REQUIRED") {
+        Stop-Hold `
+            -Reason "CLAUDE_HUMAN_DECISION_REQUIRED" `
+            -PrHead $prHead `
+            -MainHead $mainHead `
+            -Detail $claude.Summary
+        return
+    }
+
+    # HOLD (예: EVIDENCE_NOT_SEEN) 와 INSUFFICIENT 는 TECHNICAL_HOLD: code BLOCKER 가 아니므로 FIXER 로 가지 않고,
+    # supervisor 가 같은 identity 를 다시 감사한다
     if ($claude.Verdict -eq "HOLD") {
         Stop-Hold `
             -Reason "CLAUDE_HOLD" `
@@ -1699,14 +1909,13 @@ while ($true) {
     Write-Host "CLAUDE=PASS"
 
     if (-not $autoMerge) {
-        Save-RuntimeState `
-            -Status "WAITING_FOR_HUMAN_MERGE" `
+        Stop-Idle `
+            -Status "WAITING_FOR_MERGE_BY_CONFIG" `
             -Action "DUAL_PASS_COMPLETE" `
             -PrHead $prHead `
             -MainHead $mainHead `
             -Detail "CI=GREEN;GPT=PASS;CLAUDE=PASS"
 
-        Write-Host "STATE=WAITING_FOR_HUMAN_MERGE"
         Write-Host "AUTO_MERGE=FALSE"
         Write-Host ""
         return
@@ -1760,4 +1969,60 @@ while ($true) {
 
     # 다음 loop: PR MERGED → exact 새 main 기준 post-merge full audit
     continue
+}
+}
+
+# -------------------------------------------------
+# Supervisor (protocol §5.1)
+#
+#   no hold                  → the pass finished or stopped by configuration: end.
+#   HUMAN_DECISION_REQUIRED  → end and wait for the user. This is the only class that waits for a person.
+#   TECHNICAL_HOLD           → wait, then run the pass again from the live GitHub state. Nobody is asked.
+#                              The same (PR, HEAD, main, reason) is retried technical_hold.max_same_state_retries times
+#                              with a doubling wait; then the run ends TECHNICAL_HOLD_EXHAUSTED (a cost circuit breaker,
+#                              reported, not a request for a decision). A different state starts a new count.
+# -------------------------------------------------
+
+$technicalCounts = @{}
+
+while ($true) {
+    $script:lastHold = $null
+
+    . $controlPass
+
+    $hold = $script:lastHold
+
+    if (-not $hold) {
+        break
+    }
+
+    if ($hold.Class -eq "HUMAN_DECISION_REQUIRED") {
+        Write-Host "SUPERVISOR=WAITING_FOR_USER_DECISION ($($hold.Reason))"
+        break
+    }
+
+    if ((Get-Date) -ge $deadline) {
+        Write-Host "SUPERVISOR=DEADLINE_REACHED (resume continues from the recorded state)"
+        break
+    }
+
+    $key = "$CurrentPr|$($hold.PrHead)|$($hold.MainHead)|$($hold.Reason)"
+    $technicalCounts[$key] = 1 + [int]$technicalCounts[$key]
+    $n = [int]$technicalCounts[$key]
+
+    if ($n -gt $technicalMaxRetries) {
+        Save-RuntimeState `
+            -Status "TECHNICAL_HOLD_EXHAUSTED" `
+            -Action $hold.Reason `
+            -PrHead $hold.PrHead `
+            -MainHead $hold.MainHead `
+            -Detail "retries=$technicalMaxRetries;$($hold.Detail)"
+
+        Write-Host "SUPERVISOR=TECHNICAL_HOLD_EXHAUSTED ($($hold.Reason) after $technicalMaxRetries retries of the same state)"
+        break
+    }
+
+    $wait = [int][Math]::Min($technicalBackoff * [Math]::Pow(2, $n - 1), $technicalBackoffMax)
+    Write-Host "SUPERVISOR=TECHNICAL_RETRY $n/$technicalMaxRetries ($($hold.Reason)) in $wait seconds"
+    Start-Sleep -Seconds $wait
 }
