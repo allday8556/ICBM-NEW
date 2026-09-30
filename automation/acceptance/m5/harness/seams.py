@@ -1,14 +1,14 @@
 """The local provider seams one M5 acceptance run drives (Issue #89 PR-F §A).
 
-They exist because a provider-zero run has no provider: there is no adopted product search, no
-committed session for a CREATE or a read-back, and no marketplace to answer one, so a run that must
+They exist because a provider-zero run has no provider: there is no committed session for a
+CREATE, a product search or a read-back, and no marketplace to answer one, so a run that must
 exercise applied, unproven and mismatched outcomes has to say what the provider did. Each fake
 answers exactly what the scenario states and counts every call, so the report can show that a
 *real* marketplace mutation count stayed zero while the state machine was exercised end to end.
 
-Nothing here reaches a network: they hold no transport and no client. The production CREATE and
-read-back seams are not built alongside them either, because both hold the transport-owning
-registry caller a run may not load (`guards.py`).
+Nothing here reaches a network: they hold no transport and no client. The production CREATE,
+search and read-back seams are not built alongside them either, because each holds the
+transport-owning registry caller a run may not load (`guards.py`).
 """
 
 from collections.abc import Mapping
@@ -180,12 +180,20 @@ class DeclaredComparator:
         return True
 
 
+def _complete_zero() -> dict[str, Any]:
+    return {"status": "COMPLETE", "code": None, "candidates": []}
+
+
 @dataclass
 class RecordingLookup:
-    """The reconcile lookup. Unavailable by default, exactly as production is (§10)."""
+    """The positive-only reconcile lookup (ADR-0014 §28.2). Its contract is adopted, so it is a
+    declaration only because an offline run has no provider to answer it: by default it answers
+    a complete enumeration with **zero** exact candidates — the answer that must never become
+    absence — and its candidates' read-backs confirm nothing."""
 
-    is_available: bool = False
-    found: dict[str, Any] = field(default_factory=dict)
+    is_available: bool = True
+    found: dict[str, Any] = field(default_factory=_complete_zero)
+    confirms: bool = False
     calls: int = 0
 
     def available(self) -> bool:
@@ -195,7 +203,12 @@ class RecordingLookup:
         self.calls += 1
         if not self.is_available:
             raise AppError(
-                "M5_ACCEPTANCE_LOOKUP_NOT_ADOPTED",
-                "no product-search contract is adopted, so nothing is looked up",
+                "M5_ACCEPTANCE_LOOKUP_UNAVAILABLE",
+                "the declared lookup is unavailable, so nothing is looked up",
             )
         return dict(self.found)
+
+    def confirms_candidate(
+        self, *, listing_identity: str, retained_readback: Mapping[str, Any]
+    ) -> bool:
+        return self.confirms

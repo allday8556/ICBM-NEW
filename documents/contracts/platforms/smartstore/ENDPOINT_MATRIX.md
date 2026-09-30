@@ -5,10 +5,10 @@
 | Field | Value |
 | --- | --- |
 | Provider | NAVER SmartStore / Commerce API |
-| Contract status | `M5_CREATE_READBACK_AND_IMAGE_UPLOAD_ADOPTED_FROZEN_FOR_REVIEW` |
+| Contract status | `M5_CREATE_SEARCH_READBACK_AND_IMAGE_UPLOAD_ADOPTED_FROZEN_FOR_REVIEW` |
 | M2 integration mode | `OWN_STORE_SELF` |
-| Adopted endpoint count | `6` (2 M2 CONNECT + 2 M5 read-backs + 1 M5 image upload + 1 M5 product CREATE) |
-| M5 endpoints | `4 ADOPTED (2 read-back, 1 image upload, 1 product CREATE), 8 NOT_ADOPTED with recorded gaps` |
+| Adopted endpoint count | `7` (2 M2 CONNECT + 2 M5 read-backs + 1 M5 image upload + 1 M5 product CREATE + 1 M5 product search) |
+| M5 endpoints | `5 ADOPTED (2 read-back, 1 image upload, 1 product CREATE, 1 product search), 7 NOT_ADOPTED with recorded gaps` |
 | Runtime verification | `PENDING` |
 | Upstream version | `2.88.0` (M2 rows) / `2.89.0` (M5 PR-D rows, packet 5746489554; M5 image upload, Issue #89 decisions 5765557497 and 5765663972) |
 | Retrieved at | `2026-09-14` |
@@ -120,7 +120,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_STANDARD_OPTIONS` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/options/standard-options` | Standard-option discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_NOTICE_TYPES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice` | Notice-type discovery | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_NOTICE_TYPE_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | Notice-type read | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_PRODUCT_SEARCH` | `NOT_ADOPTED` | M5 candidate | `POST` | `/v1/products/search` | Duplicate lookup candidate | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
 
 The remaining M5 rows are planning metadata only. Presence does not imply eventual adoption.
 
@@ -129,13 +129,13 @@ The remaining M5 rows are planning metadata only. Presence does not imply eventu
 PR-D adopted the two product read-backs. Issue #89 decisions `5765557497` and `5765663972`
 subsequently adopted IMAGE UPLOAD, and the separately authorized CREATE adoption slice
 (ADR-0020 §4 order 1) later adopted `SMARTSTORE_PRODUCT_CREATE_V2`, whose frozen contract is
-§4.1.1. Every other M5 row of §4 stays `NOT_ADOPTED`. Each of those adoptions is a contract and
+§4.1.1, and the SEARCH positive-only reconcile slice (order 2) `SMARTSTORE_PRODUCT_SEARCH`, whose
+frozen contract is §4.1.2. Every other M5 row of §4 stays `NOT_ADOPTED`. Each of those adoptions is a contract and
 never a call: the application remains `DRY_RUN`/provider-zero, `product_registration.write` stays
 `UNVERIFIED`, and no application route invokes the upload caller or the CREATE caller.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
-| `SMARTSTORE_PRODUCT_SEARCH` | existence only: no request schema, so no strong duplicate key and no name filter is proven |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
 
@@ -144,13 +144,14 @@ never a call: the application remains `DRY_RUN`/provider-zero, `product_registra
 proves no CREATE idempotency or ambiguous-outcome replay safety, no `sellerManagementCode`
 uniqueness, and no read-after-write freshness that would make a zero-result lookup an authoritative
 absence — a seller-code search may return similar, partial or exact matches. Both rows stayed
-`NOT_ADOPTED` under that review, `SMARTSTORE_PRODUCT_SEARCH` still does, and no implementation may
-proceed on the assumption that a deterministic provider lookup exists. The verdict stays
+`NOT_ADOPTED` under that review, and no implementation may proceed on the assumption that a
+deterministic provider lookup exists — the later SEARCH adoption (§4.1.2) is positive-only and
+assumes none. The verdict stays
 `INSUFFICIENT` and is not overturned, and overturning it
 is not the adoption condition (ADR-0014 §17.2, §28; ADR-0018 §6.1): CREATE and the positive-only
 reconcile path each need their own separately authorized adoption slice — CREATE took its own
 (§4.1.1), recording the provider's actual (absent) idempotency and bound to the §28 never-resend
-rule; SEARCH's, for positive-only reconcile only, is not taken. An `UNKNOWN` CREATE is never
+rule; SEARCH took its own (§4.1.2), for positive-only reconcile only. An `UNKNOWN` CREATE is never
 resent, a zero-result lookup never proves absence, and the residual-risk acceptance stays a
 separate canary prerequisite.
 
@@ -188,8 +189,8 @@ slice's reconciliation to the value-level packet `NAVER-P0-VALUES-CREATE-289` (I
 `smartstore-create-response/v2`; it changes only the request projection (`statusType`), the
 request-completeness gaps, the response reading and the outcome classification below. Nothing
 else in this file changes, and the adoption slice touched **its own endpoint only**
-(ADR-0020 §4): `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, and the positive-only reconcile
-path is its own later slice (ADR-0014 §28.2–§28.4, ADR-0018 §6.1, SA-09).
+(ADR-0020 §4): `SMARTSTORE_PRODUCT_SEARCH` stayed `NOT_ADOPTED` under it, and the positive-only
+reconcile path took its own later slice (§4.1.2; ADR-0014 §28.2–§28.4, ADR-0018 §6.1, SA-09).
 
 Adopted CREATE contract, in the registry and pinned by tests:
 
@@ -263,6 +264,60 @@ uniqueness proof.
 The provider-evidence verdict stays `INSUFFICIENT` (§4.1, ADR-0014 §17.2), `product_registration.write`
 stays `UNVERIFIED`, execution stays `DRY_RUN` / `M0_DRY_RUN_ONLY`, a real canary stays `BLOCKED`,
 and M5 stays `PENDING`.
+
+### 4.1.2 SEARCH positive-only reconcile adoption (ADR-0020 §4 order 2)
+
+**Amendment note, not a rewrite.** The `SMARTSTORE_PRODUCT_SEARCH` row of §4 moves from
+`NOT_ADOPTED` to `ADOPTED`, its §4.1 gap row is removed because the slice closed it with the
+architect's official evidence resolution (Issue #89 `5904349289`, S1–S4; `SOURCES.md` §5.3), and the
+mapping revision is bumped to `m5-search-r1` with its own fingerprint in the same change. The slice
+touched **its own endpoint only**: every other row of §4 is unchanged.
+
+Adopted search contract, in the registry and pinned by tests:
+
+| Field | `SMARTSTORE_PRODUCT_SEARCH` |
+| --- | --- |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, group `상품` |
+| Method / path | `POST /v1/products/search` |
+| Request media type | `application/json`; the body is exactly the documented seller-code search: `searchKeywordType` `SELLER_CODE`, `sellerManagementCode` — only ever the `smartstore-seller-management-code/v1` projection of an ICBM listing identity (30 lowercase hex characters, ruling R1) — `page` from 1 and `size` at most 500. No other filter is invented, and a request outside this shape is refused before any transport |
+| Timeouts | connect `5s`, read `15s` (ICBM policy; no endpoint-specific timeout is documented) |
+| Redirect | `NO_FOLLOW` |
+| Mutation | **No** — a read |
+| Success predicate | HTTP 200 AND a JSON object whose `contents` is an array of objects, `page`/`size`/`totalElements`/`totalPages` are integers and `first`/`last` are booleans (predicate revision `m5-search-r1`). The predicate asserts only that a page arrived |
+| Response reading | `smartstore-product-search/v1` (`search.py`): each `contents[n].originProductNo` and each `channelProducts[m]` `originProductNo`/`channelProductNo` must be a JSON integer (never a `bool`) in the int64 range, `channelServiceType` one of `STOREFARM`/`WINDOW`/`AFFILIATE`, `sellerManagementCode` a string when present, and a channel entry must name its own item's origin product. Anything else is an undocumented page and proves nothing |
+| Enumeration | every page is read, up to a bounded budget of 4 pages of 500 per check (ICBM policy). Page `n` must answer as page `n`, every page must report the same totals, the last page must be read and the items read must equal `totalElements`; otherwise nothing is concluded. A result larger than the budget is `UNAVAILABLE`, never a partial count |
+| Safe query keys | **none** (deny-by-default) |
+| Retained response fields | `originProductNo`, `channelProductNo`, `channelServiceType`, `sellerManagementCode`, `page`, `size`, `totalElements`, `totalPages`, `first`, `last` — product names and every other leaf are dropped |
+
+What a lookup may conclude (ADR-0014 §28.2–§28.4), and nothing more:
+
+- only a `STOREFARM` channel entry whose `sellerManagementCode` is **exactly** the projection is a
+  candidate — the provider's own match is similar, partial or exact and is never trusted;
+- zero exact candidates are `ZERO`: never absence, never a CREATE authorization;
+- more than one is `MULTIPLE`: no automatic selection, `REVIEW_REQUIRED`;
+- exactly one is only an identity-recovery candidate. It becomes presence (`ONE_VERIFIED`,
+  `APPLIED_PROVEN` by `PROVIDER_LOOKUP`) only when the adopted origin read-back by its
+  `originProductNo` carries exactly the same code; otherwise it is `ONE_MISMATCH`. Presence is not
+  success: the read-back comparison of ADR-0014 §11 still decides that;
+- a missing session, a `429` rate or quota refusal and a result beyond the read budget are
+  `LOOKUP_UNAVAILABLE` (the next bounded check is deferred); every other failure, and an
+  undocumented or inconsistent page, is `ERROR`. Neither proves anything.
+
+Every check is recorded by the durable reconcile-check owner of ADR-0014 §28.4
+(`registration_reconcile_checks`, migration `0031`, Issue #89 `5904349289` §A): single-flight per
+Intent, finished exactly once, append-only and never deleted, with the SHA-256 of its sanitized
+evidence and a bounded automatic schedule. When presence is proven both provider identities are
+persisted: `marketplace_product_id` stays the `originProductNo` and `marketplace_channel_product_id`
+holds the `STOREFARM` `channelProductNo` (§B); a missing or ambiguous channel identity is never
+guessed and proves nothing.
+
+**Adoption is a contract, never a call.** Production wires the lookup with no committed session, so
+every check is `LOOKUP_UNAVAILABLE` and no provider is read; execution stays `DRY_RUN`,
+`product_registration.write` stays `UNVERIFIED`, and the canary stays `BLOCKED` on every other
+prerequisite. The provider-evidence verdict stays `INSUFFICIENT` (ADR-0014 §17.2): this adoption
+needs no deterministic lookup and assumes none. The search is **never** a duplicate lookup —
+duplicate evidence stays fail-closed (`lookup.py`; ADR-0014 §13) — and an `UNKNOWN` CREATE is still
+never resent.
 
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 

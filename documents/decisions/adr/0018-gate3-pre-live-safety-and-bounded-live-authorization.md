@@ -340,7 +340,9 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
   authorized adoption slice" — see the amendment at §12. Adoption changed no rule of this section:
   the verdict is still `INSUFFICIENT`, the canary is still `BLOCKED`, and the bullets below still
   hold as written.)*
-- `SMARTSTORE_PRODUCT_SEARCH` stays **`NOT_ADOPTED`**.
+- `SMARTSTORE_PRODUCT_SEARCH` stays **`NOT_ADOPTED`**. *(Amendment note: it was adopted for
+  positive-only reconcile only by its own separately authorized slice — see the SEARCH amendment
+  at §12. That changed no rule of this section: the bullets below still hold as written.)*
 - The official-evidence verdict stays **`INSUFFICIENT`** (Issue #89 `5768312853` / `5768347233`;
   `documents/acceptance/milestones/M5.md` §9.1).
 - **No LIVE grant, brake release, backup proof, retention proof, visual acceptance or user approval
@@ -541,7 +543,9 @@ at send time. Each requirement is proven from its own durable evidence, never as
 - The overall canary readiness (`documents/acceptance/milestones/M5.md` §6) only **summarizes** the two stages. It is
   derived, read-only and authorizes nothing: even `READY` is not permission. A real write stays a
   separate, explicitly user-authorized, single-product canary (ADR-0014 §24), and while CREATE and
-  SEARCH are `NOT_ADOPTED` the CREATE stage — and so the canary — stays `BLOCKED`.
+  SEARCH are `NOT_ADOPTED` the CREATE stage — and so the canary — stays `BLOCKED`. *(Amendment
+  note: both are adopted now — §12 — so the CREATE stage's endpoint-adoption layer is satisfied;
+  every other layer of this section still refuses, and the canary stays `BLOCKED`.)*
 
 ### 11. Unchanged
 
@@ -589,6 +593,18 @@ expected areas, none authorized by this ADR:
 > and the canary stay **`BLOCKED`**. `SMARTSTORE_PRODUCT_SEARCH` stays `NOT_ADOPTED`, so the CREATE
 > stage still refuses on its own endpoint-adoption layer (§10,
 > `LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED`).
+>
+> **Amendment note (SEARCH positive-only reconcile slice, ADR-0020 §4 order 2).** The second slice
+> has landed: `SMARTSTORE_PRODUCT_SEARCH` is `ADOPTED` for the positive-only reconcile of ADR-0014
+> §28.2–§28.4 only (`ENDPOINT_MATRIX.md` §4.1.2, ADR-0014 §17.4; Issue #89 `5904349289`), with the
+> durable reconcile-check owner of §28.4 (migration `0031`). The CREATE stage's endpoint-adoption
+> layer (§10) is therefore satisfied — `LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED` no longer refuses —
+> and that is **not** readiness: `M0_DRY_RUN_ONLY` still refuses every mutation (G3-01), no
+> committed session is wired, so every lookup is unavailable, no ASSET sender is wired, no
+> eligibility, restore, retention or visual proof exists, the residual-risk acceptance of §6.1 is
+> still unrecorded, and both stage readinesses and the canary stay **`BLOCKED`**. It weakens no
+> refusal: a lookup is positive evidence only, zero results never prove absence (G3-15), no
+> `UNKNOWN` is ever resent (G3-07), and the verdict stays `INSUFFICIENT`.
 
 ### 13. What this ADR does not decide
 

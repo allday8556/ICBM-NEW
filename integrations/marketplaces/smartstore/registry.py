@@ -32,8 +32,15 @@ the same 2.89.0 contract, recorded field by field in
 ``documents/evidence/marketplace-apis/PRODUCT_CREATE.md`` § SmartStore: bearer-authenticated
 ``POST /v2/products``, ``application/json``, the ``상품`` group, bounded ICBM timeouts, no
 redirect, a mutation, and a deny-by-default retention profile of the provider identifiers plus the
-safe product leaves. ``SMARTSTORE_PRODUCT_SEARCH`` stays NOT_ADOPTED: the positive-only reconcile
-path is its own later slice.
+safe product leaves.
+
+**The SEARCH positive-only reconcile slice** (ADR-0020 §4 order 2; Issue #89 architect resolution
+``5904349289``, S1–S4) adds ``SMARTSTORE_PRODUCT_SEARCH``: bearer-authenticated
+``POST /v1/products/search``, ``application/json``, the ``상품`` group, no redirect, **not** a
+mutation, and a deny-by-default retention profile of the candidate identities, their seller code
+and the pagination envelope (``search.py``). It is read for positive-only reconcile and nothing
+else: it never authorizes a CREATE, a zero result is never absence, and duplicate lookup stays
+fail-closed (``lookup.py``; ADR-0014 §13, §17.2, §28.2).
 
 Adoption is never LIVE authority and never a call. The application remains DRY_RUN/provider-zero,
 the ADR-0018 send-time safety stack refuses every mutation, no real canary is authorized, and an
@@ -66,9 +73,9 @@ class EndpointId(StrEnum):
     # ADOPTED for M5 PR-D: the two product read-backs.
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
-    # ADOPTED by the CREATE adoption slice. IMAGE UPLOAD was adopted by the earlier bounded M5
-    # amendment. Search and the metadata reads remain NOT_ADOPTED (see ADOPTION_GAPS); adoption
-    # does not grant LIVE authority to any of them.
+    # ADOPTED by the CREATE adoption slice and the SEARCH positive-only reconcile slice. IMAGE
+    # UPLOAD was adopted by the earlier bounded M5 amendment. The metadata reads remain NOT_ADOPTED
+    # (see ADOPTION_GAPS); adoption does not grant LIVE authority to any of them.
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
@@ -149,6 +156,30 @@ def product_create_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+def _int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def product_search_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND a JSON object carrying the documented pagination envelope (S2): ``contents``
+    an array of objects, ``page``/``size``/``totalElements``/``totalPages`` integers and
+    ``first``/``last`` booleans.
+
+    The predicate proves only that a page arrived. The items are read, at their documented
+    positions and types, by the search contract (``search.py``), and nothing a page says is ever
+    remote absence or a CREATE authorization (ADR-0014 §17.2, §28.2).
+    """
+    if status != 200 or not isinstance(body, dict):
+        return False
+    contents = body.get("contents")
+    return (
+        isinstance(contents, list)
+        and all(isinstance(item, dict) for item in contents)
+        and all(_int(body.get(key)) for key in ("page", "size", "totalElements", "totalPages"))
+        and all(isinstance(body.get(key), bool) for key in ("first", "last"))
+    )
+
+
 def image_upload_succeeded(status: int, body: object) -> bool:
     """HTTP 200 plus the documented ``images[].url`` response shape.
 
@@ -211,6 +242,22 @@ _PRODUCT_CREATE_FIELDS = _PRODUCT_READ_FIELDS | {
     "smartstoreChannelProductNo",
     "windowChannelProductNo",
 }
+# The product search (S2): the candidate identities, the channel type, the seller code a positive
+# reconcile compares, and the pagination envelope. Product names and every other leaf are dropped.
+_PRODUCT_SEARCH_FIELDS = frozenset(
+    {
+        "originProductNo",
+        "channelProductNo",
+        "channelServiceType",
+        "sellerManagementCode",
+        "page",
+        "size",
+        "totalElements",
+        "totalPages",
+        "first",
+        "last",
+    }
+)
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
@@ -297,6 +344,25 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5-create-r1",
         retained_response_fields=frozenset(_PRODUCT_CREATE_FIELDS),
     ),
+    # ---- M5 SEARCH positive-only reconcile slice (Issue #89 architect resolution 5904349289,
+    # S1-S4; official Commerce API 2.89.0). A read, never a mutation: it may only ever recover a
+    # presence candidate, which the origin read-back must still prove (ADR-0014 §28.2).
+    EndpointId.SMARTSTORE_PRODUCT_SEARCH: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_PRODUCT_SEARCH,
+        method=Method.POST,
+        path="/v1/products/search",
+        content_type="application/json",
+        requires_bearer=True,
+        # ICBM policy, never a provider fact: the read bounds the other product reads use.
+        connect_timeout_s=5.0,
+        read_timeout_s=15.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=product_search_succeeded,
+        predicate_revision="m5-search-r1",
+        retained_response_fields=_PRODUCT_SEARCH_FIELDS,
+    ),
     # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
     EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
@@ -326,11 +392,6 @@ _NO_RESPONSE_CONTRACT = (
 )
 
 ADOPTION_GAPS: Mapping[EndpointId, str] = {
-    EndpointId.SMARTSTORE_PRODUCT_SEARCH: (
-        "existence only: the packet does not prove the request schema, so no strong duplicate key"
-        " (sellerManagementCode, barcode/GTIN) and no normalized-name filter is proven; duplicate"
-        " lookup stays fail-closed (lookup.py)"
-    ),
     EndpointId.SMARTSTORE_PRODUCT_ATTRIBUTE_LIST: (
         "카테고리별 조회 needs a category query key the packet does not name; under a"
         " deny-by-default allow-list the endpoint could only ever be called without it"
@@ -388,7 +449,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-create-r2"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-search-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -409,6 +470,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # permission-relevant registry content, so the fingerprint is the one m5-create-r1 names; the
     # revision still moves, because the mapping it names now reads and sends differently.
     "m5-create-r2": "635b1d1c281e2a05f9467a5362ff2f6395318d77c8c969b370a84c8384b1bfea",
+    # The SEARCH positive-only reconcile slice adopts POST /v1/products/search and its retention
+    # profile (Issue #89 5904349289).
+    "m5-search-r1": "0d5934ab1430543016b3c31a8948635d11124711cf058c77e2eb74335bd9a73b",
 }
 
 

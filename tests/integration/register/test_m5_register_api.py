@@ -426,9 +426,10 @@ def test_a_multi_unit_draft_never_passes_the_single_canary_unit_gate(
     named = _get(api, f"{CANARY}?unit_ref={frozen[0].snapshot_id}")
     assert named["verdict"] == "BLOCKED"
     assert "SINGLE_UNIT" not in named["missing"]
-    # CREATE is adopted; the positive-only reconcile path is the separate later slice, so the
-    # plan is still BLOCKED on the endpoint-adoption row alone (ADR-0020 SA-09).
-    assert "RECONCILE_PATH_ADOPTED" in named["missing"]
+    # CREATE and the positive-only reconcile path are adopted; adoption is not readiness, so the
+    # plan is still BLOCKED on everything a real canary needs (ADR-0020 SA-09).
+    assert "RECONCILE_PATH_ADOPTED" not in named["missing"]
+    assert "CREATE_MUTATION_READY" in named["missing"]
     # A unit that does not exist is refused, never quietly answered for another one.
     assert api.get(f"{CANARY}?unit_ref=not-a-unit", headers=CLIENT).status_code >= 400
 
@@ -1203,14 +1204,14 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     missing = {
         item["requirement"]: item for item in canary["requirements"] if not item["satisfied"]
     }
-    # The unadopted contract is named as unadopted, never as absent or unnecessary. CREATE is
-    # adopted now; the positive-only reconcile path (SMARTSTORE_PRODUCT_SEARCH) is not, and it is
-    # a mandatory row of the CREATE stage's endpoint-adoption layer (ADR-0018 §10).
-    assert missing["RECONCILE_PATH_ADOPTED"]["reason_code"] == "ENDPOINT_NOT_ADOPTED"
-    assert missing["RECONCILE_PATH_ADOPTED"]["endpoint_id"] == "SMARTSTORE_PRODUCT_SEARCH"
+    # CREATE and the positive-only reconcile path (SMARTSTORE_PRODUCT_SEARCH) are both adopted
+    # now, so the CREATE stage's endpoint-adoption rows are satisfied (ADR-0018 §10) — and that is
+    # not readiness: every other requirement still names why it is missing.
+    satisfied = {item["requirement"] for item in canary["requirements"] if item["satisfied"]}
+    assert {"CREATE_ADOPTED", "RECONCILE_PATH_ADOPTED"} <= satisfied
+    assert "RECONCILE_PATH_ADOPTED" not in canary["missing"]
     # A running application cannot prove its own checkout, so it says so rather than assuming.
     assert missing["CLEAN_RUNTIME"]["reason_code"] == "PROOF_NOT_AVAILABLE_IN_PROCESS"
-    assert "RECONCILE_PATH_ADOPTED" in canary["missing"]
     # Adoption is not readiness: CREATE_ADOPTED is satisfied while everything a real canary still
     # needs stays missing, so the verdict is unchanged.
     assert "CREATE_ADOPTED" not in canary["missing"]

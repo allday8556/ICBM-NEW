@@ -511,7 +511,11 @@ def test_0028_is_additive_and_its_downgrade_never_destroys_accounting(
     before = schema()
     upgrade_to_head(url)
     after = schema()
-    assert {name for name in before if before[name] != after[name]} == set()
+    # Migration 0031 adds the provider channel identity column to these two; nothing else moves.
+    assert {name for name in before if before[name] != after[name]} == {
+        "registration_intents",
+        "marketplace_registrations",
+    }
     assert set(ACCOUNTING) | {"adaptive_phase_c_read_refusals"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0027_adaptive_capture_seam")
     assert schema() == before

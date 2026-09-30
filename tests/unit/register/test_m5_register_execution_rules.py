@@ -385,22 +385,42 @@ def test_an_operator_assertion_is_not_a_resolution_evidence_kind() -> None:
     assert ResolvedBy.USER in set(ResolvedBy)
 
 
-def test_reconcile_never_consults_a_lookup_and_no_code_reads_a_lookup_absence() -> None:
-    # ADR-0014 §17.2, §28: product search is NOT_ADOPTED, a lookup never proves remote absence,
-    # and positive-only reconcile is a separately authorized slice. The pre-§28 path in which a
-    # lookup result settled an UNKNOWN (and so freed a new CREATE) must not come back.
+def test_reconcile_uses_a_lookup_only_as_positive_evidence_and_never_reads_absence() -> None:
+    # ADR-0014 §17.2, §28.2-§28.3: the adopted lookup is positive evidence only. The pre-§28 path
+    # in which a lookup result settled an UNKNOWN as not applied (and so freed a new CREATE) must
+    # not come back: the reconcile path never names NOT_APPLIED_PROVEN, never touches the CREATE
+    # sender, and resolves by PROVIDER_LOOKUP only towards APPLIED_PROVEN.
     import ast
     import inspect
     import textwrap
 
     from app.stages.register import execution
 
-    tree = ast.parse(
-        textwrap.dedent(inspect.getsource(execution.RegistrationExecutionService.reconcile))
-    )
-    touched = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    assert "_lookup" not in touched
-    assert "PROVIDER_LOOKUP" not in touched
+    owner = execution.RegistrationExecutionService
+    sources = [
+        textwrap.dedent(inspect.getsource(method))
+        for method in (owner.reconcile, owner._observe, owner.reconcile_due)
+    ]
+    touched = {
+        node.attr
+        for source in sources
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Attribute)
+    }
+    assert "NOT_APPLIED_PROVEN" not in touched
+    assert "_sender" not in touched and "send" not in touched
+    tree = ast.parse(sources[0])
+    resolutions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "resolve_unknown"
+    ]
+    assert len(resolutions) == 1
+    keywords = {k.arg: ast.unparse(k.value) for k in resolutions[0].keywords}
+    assert keywords["outcome"] == "RemoteOutcome.APPLIED_PROVEN"
+    assert keywords["evidence_kind"] == "ResolutionEvidence.PROVIDER_LOOKUP"
     repo = Path(__file__).resolve().parents[3]
     for root in ("app", "integrations"):
         for path in (repo / root).rglob("*.py"):

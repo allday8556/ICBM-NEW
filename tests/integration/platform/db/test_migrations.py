@@ -126,8 +126,10 @@ CANONICAL_TABLES = (
     "retention_proofs",
     # Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record.
     "visual_acceptances",
+    # The SEARCH positive-only reconcile slice (ADR-0014 §28.4): the reconcile-check owner.
+    "registration_reconcile_checks",
 )
-HEAD = "0030_g3_visual_acceptance"
+HEAD = "0031_m5_registration_reconcile"
 
 
 def _url(path: Path) -> str:

@@ -40,12 +40,14 @@ The only SmartStore endpoints currently `ADOPTED` for M2 execution are:
 
 The exact endpoint contract and base-path rules are defined in `ENDPOINT_MATRIX.md`.
 
-Since M2, M5 adopted four more endpoints, all on the REGISTER path, which stays `DRY_RUN`: the two
+Since M2, M5 adopted five more endpoints, all on the REGISTER path, which stays `DRY_RUN`: the two
 product read-backs `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` and `SMARTSTORE_CHANNEL_PRODUCT_READ_V2`
-(PR-D), `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` (the IMAGE UPLOAD amendment) and product CREATE
+(PR-D), `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` (the IMAGE UPLOAD amendment), product CREATE
 `SMARTSTORE_PRODUCT_CREATE_V2` (the CREATE adoption slice, `ENDPOINT_MATRIX.md` §4.1.1; a contract,
-never a call). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint,
-including product SEARCH, remains:
+never a call) and the product search `SMARTSTORE_PRODUCT_SEARCH` (the SEARCH positive-only
+reconcile slice, `ENDPOINT_MATRIX.md` §4.1.2; a read for positive-only reconcile only, never
+duplicate absence). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
+remains:
 
 `NOT_ADOPTED`
 
@@ -114,7 +116,7 @@ Until that happens:
 
 ```text
 product CREATE          = ADOPTED as a contract only, never a call (ENDPOINT_MATRIX.md §4.1.1)
-product SEARCH          = NOT_ADOPTED   (ENDPOINT_MATRIX.md §4)
+product SEARCH          = ADOPTED for positive-only reconcile only (ENDPOINT_MATRIX.md §4.1.2)
 product write           = UNVERIFIED
 ```
 

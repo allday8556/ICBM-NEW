@@ -494,6 +494,7 @@ ADAPTIVE_TABLES = (
     "restore_drills",
     "retention_proofs",
     "visual_acceptances",
+    "registration_reconcile_checks",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
@@ -1247,7 +1248,8 @@ def test_one_intent_per_exact_snapshot_across_restarts(
         "INSERT INTO registration_intents SELECT ?, registration_batch_id,"
         " registration_snapshot_id, marketplace_key, marketplace_account_id, operation, ?,"
         " 'PREPARED', NULL, NULL, 'NOT_VERIFIED', NULL, NULL, NULL, NULL, created_by,"
-        " correlation_id, created_at, updated_at FROM registration_intents",
+        " correlation_id, created_at, updated_at, marketplace_channel_product_id"
+        " FROM registration_intents",
         str(uuid.uuid4()), "f" * 64,
         match="UNIQUE",
     )  # fmt: skip

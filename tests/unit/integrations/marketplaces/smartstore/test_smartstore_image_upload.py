@@ -127,12 +127,13 @@ def test_transport_ambiguity_is_upload_unknown_and_is_not_retried() -> None:
     assert len(provider.requests) == 1
 
 
-def test_search_remains_unadopted_and_create_stays_a_separate_contract() -> None:
-    from integrations.marketplaces.smartstore.registry import ADOPTED, NOT_ADOPTED, resolve
+def test_search_and_create_are_separate_contracts_from_the_upload() -> None:
+    from integrations.marketplaces.smartstore.registry import ADOPTED, resolve
 
-    # The CREATE adoption slice adopted POST /v2/products; the duplicate-lookup search is the
-    # separate later slice (ADR-0020 §4 order 2) and still fails locally.
-    assert EndpointId.SMARTSTORE_PRODUCT_SEARCH in NOT_ADOPTED
+    # The CREATE adoption slice adopted POST /v2/products and the SEARCH slice (ADR-0020 §4
+    # order 2) POST /v1/products/search, as a read for positive-only reconcile only.
+    assert EndpointId.SMARTSTORE_PRODUCT_SEARCH in ADOPTED
+    assert resolve(EndpointId.SMARTSTORE_PRODUCT_SEARCH).mutating is False
     assert EndpointId.SMARTSTORE_PRODUCT_CREATE_V2 in ADOPTED
     # Adoption never merges two contracts: the upload keeps its own path, media type and profile.
     upload, create = (

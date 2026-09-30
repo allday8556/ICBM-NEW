@@ -48,6 +48,9 @@ from app.stages.register.model import (
     ExecutionScopeState,
     IntentState,
     Operation,
+    ReconcileResult,
+    ReconcileTrigger,
+    RegistrationConflictError,
     ResolutionEvidence,
     ResolvedBy,
     ScopePauseReason,
@@ -67,7 +70,6 @@ from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.execution import (
-    ReconcileLookupNotAdoptedError,
     SmartStoreCreateSender,
     SmartStoreReconcileLookup,
 )
@@ -112,6 +114,7 @@ class FakeSender:
     is_available: bool = True
     calls: list[Mapping[str, Any]] = field(default_factory=list)
     raises: Exception | None = None
+    channel_id: str | None = None
 
     def available(self) -> bool:
         return self.is_available
@@ -127,6 +130,9 @@ class FakeSender:
             sanitized_request={"listing_identity": listing_identity},
             marketplace_product_id=(
                 self.product_id if self.outcome is RemoteOutcome.APPLIED_PROVEN else None
+            ),
+            marketplace_channel_product_id=(
+                self.channel_id if self.outcome is RemoteOutcome.APPLIED_PROVEN else None
             ),
             response_status=200 if self.outcome is RemoteOutcome.APPLIED_PROVEN else 500,
             sanitized_response={"accepted": True},
@@ -156,8 +162,14 @@ class FakeReadback:
 
 @dataclass
 class FakeLookup:
+    """A positive-only reconcile lookup that answers what the test says, and counts every call.
+
+    ``confirms`` is what the candidate's read-back proves about the listing code (§28.2).
+    """
+
     found: Mapping[str, Any] = field(default_factory=dict)
     is_available: bool = False
+    confirms: bool = False
     calls: int = 0
 
     def available(self) -> bool:
@@ -166,6 +178,23 @@ class FakeLookup:
     def find(self, *, marketplace_account_id: str, listing_identity: str) -> Mapping[str, Any]:
         self.calls += 1
         return dict(self.found)
+
+    def confirms_candidate(
+        self, *, listing_identity: str, retained_readback: Mapping[str, Any]
+    ) -> bool:
+        return self.confirms
+
+
+def complete(*candidates: tuple[str, str]) -> dict[str, Any]:
+    """A complete lookup answer naming exactly these exact candidates."""
+    return {
+        "status": "COMPLETE",
+        "code": None,
+        "candidates": [
+            {"origin_product_no": origin, "channel_product_no": channel}
+            for origin, channel in candidates
+        ],
+    }
 
 
 @dataclass
@@ -443,6 +472,57 @@ def test_an_applied_create_is_confirmed_only_by_its_read_back(
     assert container.marketplace_capability.capability("smartstore").write.status.value == (
         "UNVERIFIED"
     )
+
+
+def test_both_provider_identities_are_durable_and_immutable(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Issue #89 5904349289 §B: marketplace_product_id stays the origin product number, and the
+    # SmartStore channel number is kept beside it — carried from the CREATE response, copied into
+    # the registration, and never changed once applied (migration 0031).
+    ready = prepare(container, sources, store, account, prep)
+    run = execution(container, prep, sender=FakeSender(channel_id="8800112233"))
+    run.service.run(context(ready))
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.CONFIRMED
+    assert (intent.marketplace_product_id, intent.marketplace_channel_product_id) == (
+        PRODUCT_NO,
+        "8800112233",
+    )
+    other = prepare(container, sources, store, account, prep, source_product_id="5678")
+    with contextlib.closing(raw(config)) as connection:
+        (registration,) = connection.execute(
+            "SELECT marketplace_channel_product_id FROM marketplace_registrations"
+            " WHERE intent_id = ?",
+            (ready.intent_id,),
+        ).fetchall()
+        assert registration[0] == "8800112233"
+        for statement, target in (
+            # An applied channel identity never changes, on the Intent or the registration.
+            (
+                "UPDATE registration_intents SET marketplace_channel_product_id = '1'"
+                " WHERE intent_id = ?",
+                ready.intent_id,
+            ),
+            (
+                "UPDATE marketplace_registrations SET marketplace_channel_product_id = '1'"
+                " WHERE intent_id = ?",
+                ready.intent_id,
+            ),
+            # A channel identity never exists without an applied outcome.
+            (
+                "UPDATE registration_intents SET marketplace_channel_product_id = '1'"
+                " WHERE intent_id = ?",
+                other.intent_id,
+            ),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement, (target,))
 
 
 def test_a_confirmed_intent_replays_as_a_no_op(
@@ -964,35 +1044,73 @@ def _unknown(
 
 
 @pytest.mark.parametrize(
-    "found",
+    ("found", "confirms", "code", "result", "count"),
     [
-        {"marketplace_product_id": PRODUCT_NO, "evidence": "sanitized"},
-        {"absence_proven": True, "evidence": "sanitized"},
-        {"searched": True},
+        (complete(), False, "REGISTER_RECONCILE_ZERO", ReconcileResult.ZERO, 0),
+        (
+            complete(("111", "211"), ("112", "212")),
+            True,
+            "REGISTER_RECONCILE_MULTIPLE",
+            ReconcileResult.MULTIPLE,
+            2,
+        ),
+        (
+            complete(("111", "211")),
+            False,
+            "REGISTER_RECONCILE_MISMATCH",
+            ReconcileResult.ONE_MISMATCH,
+            1,
+        ),
+        (
+            {"status": "UNAVAILABLE", "code": "SMARTSTORE_RATE_LIMITED", "candidates": []},
+            True,
+            "REGISTER_RECONCILE_UNAVAILABLE",
+            ReconcileResult.LOOKUP_UNAVAILABLE,
+            None,
+        ),
+        ({"absence_proven": True}, True, "REGISTER_RECONCILE_ERROR", ReconcileResult.ERROR, None),
+        (
+            {"status": "COMPLETE", "candidates": [{"origin_product_no": "111"}]},
+            True,
+            "REGISTER_RECONCILE_ERROR",
+            ReconcileResult.ERROR,
+            None,
+        ),
     ],
-    ids=["a-match", "a-claimed-absence", "nothing"],
+    ids=["zero", "multiple", "one-mismatch", "rate-limited", "claimed-absence", "malformed"],
 )
-def test_no_lookup_result_ever_resolves_an_unknown(
+def test_only_a_verified_single_candidate_resolves_an_unknown(
     container: Container,
     sources: Collections,
     store: RegistrationStore,
     account: str,
     prep: Preparation,
     found: Mapping[str, Any],
+    confirms: bool,
+    code: str,
+    result: ReconcileResult,
+    count: int | None,
 ) -> None:
     ready = prepare(container, sources, store, account, prep)
     run = _unknown(container, store, prep, ready)
-    # ADR-0014 §17.2, §28: even an available lookup is never consulted. A match is not a presence
-    # proof (§28.2), and no lookup ever proves absence, so the Intent stays UNKNOWN.
+    # ADR-0014 §28.2: zero is never absence, several are never a selection, a candidate whose
+    # read-back does not carry the code proves nothing, and an unavailable, failed or
+    # undocumented answer proves nothing at all. Each is recorded, and the Intent stays UNKNOWN.
     run.lookup.is_available = True
     run.lookup.found = found
+    run.lookup.confirms = confirms
     with pytest.raises(ExecutionRefused) as refused:
         run.service.reconcile(ready.intent_id, correlation_id=CID)
-    assert refused.value.code == "REGISTER_RECONCILE_UNAVAILABLE"
-    assert run.lookup.calls == 0
+    assert refused.value.code == code
+    assert run.lookup.calls == 1
+    (check,) = store.reconcile_checks(ready.intent_id)
+    assert check.result is result and check.candidate_count == count
+    assert check.trigger is ReconcileTrigger.OPERATOR and not check.in_flight
+    assert check.evidence_digest is not None and len(check.evidence_digest) == 64
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
     assert intent.marketplace_product_id is None
+    assert intent.marketplace_channel_product_id is None
     # §28.3: nothing freed it, so no CREATE can be queued for it.
     with pytest.raises(ExecutionRefused) as queued:
         enqueue_create(
@@ -1003,6 +1121,146 @@ def test_no_lookup_result_ever_resolves_an_unknown(
             frozen=ready.final,
         )
     assert queued.value.code == "REGISTER_INTENT_NOT_SENDABLE"
+
+
+def test_a_verified_single_candidate_proves_presence_and_keeps_both_identities(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete(("9900112233", "8800112233"))
+    run.lookup.confirms = True
+    result = run.service.reconcile(ready.intent_id, correlation_id=CID)
+    # §28.2: presence — APPLIED_PROVEN, resolved by the lookup and the read-back — and both
+    # provider identities are durable (Issue #89 5904349289 §B). It is not success: the Intent is
+    # SENT and still needs the read-back comparison (§11).
+    assert result.action == "RECONCILED_APPLIED_PROVEN"
+    assert run.readback.calls == 1
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.SENT
+    assert intent.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    assert intent.marketplace_product_id == "9900112233"
+    assert intent.marketplace_channel_product_id == "8800112233"
+    (check,) = store.reconcile_checks(ready.intent_id)
+    assert check.result is ReconcileResult.ONE_VERIFIED and check.candidate_count == 1
+    assert check.next_due_at is None
+    attempt = store.attempts(ready.intent_id)[-1]
+    assert attempt.resolved_by is ResolvedBy.LOOKUP
+    assert attempt.resolution_evidence_kind is ResolutionEvidence.PROVIDER_LOOKUP
+    # The CREATE count stays one: presence never leads to a second CREATE.
+    assert len(run.sender.calls) == 1
+
+
+def test_a_candidate_that_cannot_be_read_back_is_not_presence(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete(("111", "211"))
+    run.lookup.confirms = True
+    run.readback.is_available = False
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_RECONCILE_UNAVAILABLE"
+    (check,) = store.reconcile_checks(ready.intent_id)
+    assert check.result is ReconcileResult.LOOKUP_UNAVAILABLE and check.candidate_count is None
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+
+
+def test_reconcile_checks_are_single_flight_and_coalesce_until_due(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete()
+    with pytest.raises(ExecutionRefused):
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    (first,) = store.reconcile_checks(ready.intent_id)
+    assert first.next_due_at is not None
+    # §28.4: a repeated trigger before the next due time coalesces; it reads nothing.
+    again = run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert again.action == "RECONCILE_NOT_DUE"
+    assert run.lookup.calls == 1 and len(store.reconcile_checks(ready.intent_id)) == 1
+    # Single-flight: while a check is open, no second one starts.
+    with store.transaction() as unit:
+        unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.OPERATOR)
+    with pytest.raises(RegistrationConflictError) as busy, store.transaction() as unit:
+        unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.AUTO)
+    assert busy.value.code == "REGISTER_RECONCILE_IN_FLIGHT"
+
+
+def test_the_automatic_schedule_is_bounded_and_ends_in_review(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete()
+    schedule = ExecutionPolicy().reconcile_schedule
+    for _ in range(len(schedule) + 3):
+        run.service.reconcile_due(correlation_id=CID)
+        container.clock.advance(int(max(schedule).total_seconds()) + 1)
+    checks = store.reconcile_checks(ready.intent_id)
+    # §28.4: a finite series — exactly the schedule's length — then nothing is ever due again,
+    # and the Intent stays 재확인필요 (UNKNOWN) for an operator.
+    assert [c.trigger for c in checks] == [ReconcileTrigger.AUTO] * len(schedule)
+    assert checks[-1].next_due_at is None
+    assert all(c.result is ReconcileResult.ZERO for c in checks)
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+    assert run.lookup.calls == len(schedule)
+
+
+def test_a_reconcile_check_is_append_only_and_only_for_an_unknown_intent(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete()
+    with pytest.raises(ExecutionRefused):
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    # A second Intent that is PREPARED, not UNKNOWN: no check may open for it.
+    other = prepare(container, sources, store, account, prep, source_product_id="5678")
+    with contextlib.closing(raw(config)) as connection:
+        for statement in (
+            "UPDATE registration_reconcile_checks SET result = 'ONE_VERIFIED'",
+            "UPDATE registration_reconcile_checks SET next_due_at = NULL",
+            "DELETE FROM registration_reconcile_checks",
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement)
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                'INSERT INTO registration_reconcile_checks (intent_id, seq, "trigger", started_at)'
+                " VALUES (?, 1, 'OPERATOR', '2026-09-30 00:00:00')",
+                (other.intent_id,),
+            )
 
 
 def test_without_an_adopted_lookup_the_unknown_stays_unresolved(
@@ -2292,10 +2550,16 @@ def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
         assert handoff.marketplace_product_id is None
         assert handoff.details["transmission_phase"] == "LOCAL_PREFLIGHT"
     assert touched == []
-    lookup = SmartStoreReconcileLookup()
-    assert not lookup.available()
-    with pytest.raises(ReconcileLookupNotAdoptedError):
-        lookup.find(marketplace_account_id="mpa-1", listing_identity="icbm-x")
+    # The adopted reconcile lookup, as the container wires it: no committed session, so every
+    # lookup is UNAVAILABLE — nothing is read and nothing is proven (ADR-0014 §28.2).
+    lookup = container.registration_execution._lookup
+    assert type(lookup) is SmartStoreReconcileLookup
+    assert lookup.available()
+    found = lookup.find(
+        marketplace_account_id="mpa-1", listing_identity=str(frozen["listing_identity"])
+    )
+    assert found["status"] == "UNAVAILABLE" and found["candidates"] == []
+    assert touched == []
     assert CREATE_JOB_TYPE in container.job_registry.job_types()
     definition = container.job_registry.get(CREATE_JOB_TYPE)
     # 15: the CREATE job is non-idempotent, so recovery never replays a possible handoff.
@@ -2323,3 +2587,28 @@ def test_an_unknown_blocks_a_new_overlapping_create_intent_but_not_another_group
     other = prepare(container, sources, store, account, prep, source_product_id="5678")
     intent = store.intent(other.intent_id)
     assert intent is not None and intent.state is IntentState.PREPARED
+
+
+def test_an_exhausted_intent_never_starves_a_newer_one(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §28.4: one pass reads at most ``reconcile_batch`` Intents from the provider, and an Intent
+    # whose automatic schedule is exhausted is skipped without a read — so it can never take the
+    # place of a newer UNKNOWN Intent in the bounded budget.
+    older = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, older)
+    newer = prepare(container, sources, store, account, prep, source_product_id="5678")
+    _unknown(container, store, prep, newer)
+    policy = ExecutionPolicy(reconcile_schedule=(timedelta(minutes=1),), reconcile_batch=1)
+    auto = execution(container, prep, lookup=run.lookup, policy=policy)
+    run.lookup.is_available = True
+    run.lookup.found = complete()
+    auto.service.reconcile_due(correlation_id=CID)
+    auto.service.reconcile_due(correlation_id=CID)
+    assert [c.trigger for c in store.reconcile_checks(older.intent_id)] == [ReconcileTrigger.AUTO]
+    assert [c.trigger for c in store.reconcile_checks(newer.intent_id)] == [ReconcileTrigger.AUTO]
+    assert run.lookup.calls == 2

@@ -62,6 +62,8 @@ from app.stages.register.model import (
     IntentState,
     ListingShape,
     Operation,
+    ReconcileResult,
+    ReconcileTrigger,
     RegistrationConflictError,
     RegistrationLifecycle,
     ResolutionEvidence,
@@ -91,6 +93,7 @@ from app.stages.register.models import (
     RegistrationPreparation,
     RegistrationPreparationItem,
     RegistrationPreparationRevision,
+    RegistrationReconcileCheck,
     RegistrationSnapshot,
     RegistrationSnapshotPreparation,
 )
@@ -254,6 +257,27 @@ class IntentRecord:
     remote_outcome: RemoteOutcome | None
     marketplace_product_id: str | None
     verification_state: VerificationState
+    # The provider's channel identity of the same listing (migration 0031), when proven.
+    marketplace_channel_product_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ReconcileCheckRecord:
+    """One reconcile check of one Intent (ADR-0014 §28.4; migration 0031)."""
+
+    intent_id: str
+    seq: int
+    trigger: ReconcileTrigger
+    started_at: datetime
+    finished_at: datetime | None
+    result: ReconcileResult | None
+    candidate_count: int | None
+    evidence_digest: str | None
+    next_due_at: datetime | None
+
+    @property
+    def in_flight(self) -> bool:
+        return self.finished_at is None
 
 
 @dataclass(frozen=True)
@@ -308,6 +332,7 @@ class RegistrationRecord:
     published_state: str
     lifecycle_state: RegistrationLifecycle
     items: tuple[RegistrationItemRecord, ...]
+    marketplace_channel_product_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -478,6 +503,14 @@ class RegistrationStore:
     def attempts(self, intent_id: str) -> tuple[AttemptRecord, ...]:
         with self.reading() as unit:
             return unit.attempts(intent_id)
+
+    def reconcile_checks(self, intent_id: str) -> tuple[ReconcileCheckRecord, ...]:
+        with self.reading() as unit:
+            return unit.reconcile_checks(intent_id)
+
+    def unknown_intents(self) -> tuple[str, ...]:
+        with self.reading() as unit:
+            return unit.unknown_intents()
 
     def registration(self, registration_id: str) -> RegistrationRecord | None:
         with self.reading() as unit:
@@ -1806,6 +1839,7 @@ class RegistrationUnit:
         sanitized_response: Mapping[str, Any] | None = None,
         error_class: ErrorClass | None = None,
         error_code: str | None = None,
+        marketplace_channel_product_id: str | None = None,
     ) -> IntentRecord:
         """Close the open attempt with the outcome the caller proved, and move its Intent:
         applied to SENT with its provider identity, proven not applied to FAILED, UNKNOWN to
@@ -1819,6 +1853,7 @@ class RegistrationUnit:
                 "REGISTER_PROVIDER_IDENTITY",
                 "an applied outcome names its provider identity, and only an applied one does",
             )
+        _require_channel(outcome, marketplace_channel_product_id)
         row.finished_at = self._clock.now()
         row.remote_outcome = outcome.value
         row.response_status = response_status
@@ -1829,7 +1864,7 @@ class RegistrationUnit:
         row.error_code = error_code
         self.session.flush()
         intent = self._intent_row(row.intent_id)
-        self._settle(intent, outcome, marketplace_product_id)
+        self._settle(intent, outcome, marketplace_product_id, marketplace_channel_product_id)
         self._attempt_event("finish_attempt", row, intent, correlation_id)
         return _intent_record(intent)
 
@@ -1844,6 +1879,7 @@ class RegistrationUnit:
         correlation_id: str,
         actor: str,
         marketplace_product_id: str | None = None,
+        marketplace_channel_product_id: str | None = None,
     ) -> IntentRecord:
         """Settle an UNKNOWN Intent with machine or provider evidence (§10, B3).
 
@@ -1875,6 +1911,17 @@ class RegistrationUnit:
                 "REGISTER_LOOKUP_NEVER_PROVES_ABSENCE",
                 "a provider lookup never proves that a CREATE was not applied",
             )
+        _require_channel(proven, marketplace_channel_product_id)
+        if (
+            evidence is ResolutionEvidence.PROVIDER_LOOKUP
+            and marketplace_channel_product_id is None
+        ):
+            # Issue #89 5904349289 §B: a positive reconcile recovers both provider identities, and
+            # a missing or ambiguous channel identity is never guessed — so it proves nothing.
+            raise InputValidationError(
+                "REGISTER_CHANNEL_IDENTITY_MISSING",
+                "a lookup-recovered presence names both provider identities",
+            )
         attempt = self._latest_attempt(intent_id)
         assert attempt is not None and attempt.remote_outcome == RemoteOutcome.UNKNOWN.value
         attempt.resolved_outcome = proven.value
@@ -1883,7 +1930,7 @@ class RegistrationUnit:
         attempt.resolution_evidence_digest = sanitized_digest(sanitized_evidence)
         attempt.resolved_at = self._clock.now()
         self.session.flush()
-        self._settle(intent, proven, marketplace_product_id)
+        self._settle(intent, proven, marketplace_product_id, marketplace_channel_product_id)
         self._event(
             AuditEventType.REGISTRATION_OUTCOME_RESOLVED,
             "resolve_unknown",
@@ -1900,6 +1947,102 @@ class RegistrationUnit:
             },
         )
         return _intent_record(intent)
+
+    # ------------------------------------------------------------------ reconcile checks (§28.4)
+
+    def start_reconcile_check(
+        self, intent_id: str, *, trigger: ReconcileTrigger
+    ) -> ReconcileCheckRecord:
+        """Open the next reconcile check of an UNKNOWN Intent, in flight (§28.4).
+
+        Single-flight: while a check of the Intent is open, no second one starts. The database
+        repeats every rule (migration 0031): the sequence, the in-flight shape, UNKNOWN only.
+        """
+        intent = self._intent_row(intent_id)
+        if intent.state != IntentState.UNKNOWN.value:
+            raise RegistrationConflictError("REGISTER_NOT_UNKNOWN", "only an UNKNOWN is reconciled")
+        if self._open_check(intent_id) is not None:
+            raise RegistrationConflictError(
+                "REGISTER_RECONCILE_IN_FLIGHT", "a reconcile check of this Intent is in flight"
+            )
+        seq = (
+            self.session.scalar(
+                select(func.max(RegistrationReconcileCheck.seq)).where(
+                    RegistrationReconcileCheck.intent_id == intent_id
+                )
+            )
+            or 0
+        ) + 1
+        row = RegistrationReconcileCheck(
+            intent_id=intent_id,
+            seq=seq,
+            trigger=ReconcileTrigger(trigger).value,
+            started_at=self._clock.now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        return _check_record(row)
+
+    def finish_reconcile_check(
+        self,
+        intent_id: str,
+        seq: int,
+        *,
+        result: ReconcileResult,
+        candidate_count: int | None,
+        sanitized_evidence: Mapping[str, Any],
+        next_due_at: datetime | None,
+    ) -> ReconcileCheckRecord:
+        """Finish one in-flight check, exactly once, with what it observed (§28.4).
+
+        The evidence digest is taken over the sanitized canonical representation (§15), never
+        over wire bytes. The check decides nothing: the Intent moves only through its owners.
+        """
+        row = self.session.get(RegistrationReconcileCheck, (intent_id, seq))
+        if row is None or row.finished_at is not None:
+            raise RegistrationConflictError(
+                "REGISTER_RECONCILE_CHECK_NOT_OPEN", "the reconcile check is not in flight"
+            )
+        found = problems(sanitized_evidence)
+        if found:
+            raise InputValidationError(
+                "REGISTER_EVIDENCE_UNSANITIZED",
+                "reconcile evidence must be sanitized before it is digested",
+                details={"problems": [code for code, _ in found][:4]},
+            )
+        row.finished_at = self._clock.now()
+        row.result = ReconcileResult(result).value
+        row.candidate_count = candidate_count
+        row.evidence_digest = sanitized_digest(sanitized_evidence)
+        row.next_due_at = next_due_at
+        self.session.flush()
+        return _check_record(row)
+
+    def reconcile_checks(self, intent_id: str) -> tuple[ReconcileCheckRecord, ...]:
+        rows = self.session.scalars(
+            select(RegistrationReconcileCheck)
+            .where(RegistrationReconcileCheck.intent_id == intent_id)
+            .order_by(RegistrationReconcileCheck.seq)
+        ).all()
+        return tuple(_check_record(row) for row in rows)
+
+    def unknown_intents(self) -> tuple[str, ...]:
+        """The UNKNOWN Intents, oldest first: the candidates of the bounded automatic schedule."""
+        return tuple(
+            self.session.scalars(
+                select(RegistrationIntent.intent_id)
+                .where(RegistrationIntent.state == IntentState.UNKNOWN.value)
+                .order_by(RegistrationIntent.updated_at, RegistrationIntent.intent_id)
+            ).all()
+        )
+
+    def _open_check(self, intent_id: str) -> RegistrationReconcileCheck | None:
+        return self.session.scalar(
+            select(RegistrationReconcileCheck).where(
+                RegistrationReconcileCheck.intent_id == intent_id,
+                RegistrationReconcileCheck.finished_at.is_(None),
+            )
+        )
 
     def attempts(self, intent_id: str) -> tuple[AttemptRecord, ...]:
         rows = self.session.scalars(
@@ -2204,6 +2347,7 @@ class RegistrationUnit:
             marketplace_key=intent.marketplace_key,
             marketplace_account_id=intent.marketplace_account_id,
             marketplace_product_id=intent.marketplace_product_id,
+            marketplace_channel_product_id=intent.marketplace_channel_product_id,
             seller_product_code=snapshot.listing_identity,
             published_state=published_state,
             lifecycle_state=RegistrationLifecycle.ACTIVE.value,
@@ -2323,6 +2467,7 @@ class RegistrationUnit:
             seller_product_code=row.seller_product_code,
             published_state=row.published_state,
             lifecycle_state=RegistrationLifecycle(row.lifecycle_state),
+            marketplace_channel_product_id=row.marketplace_channel_product_id,
             items=tuple(
                 RegistrationItemRecord(
                     registration_item_id=i.registration_item_id,
@@ -2562,10 +2707,12 @@ class RegistrationUnit:
         intent: RegistrationIntent,
         outcome: RemoteOutcome,
         marketplace_product_id: str | None,
+        marketplace_channel_product_id: str | None = None,
     ) -> None:
         if outcome is RemoteOutcome.APPLIED_PROVEN:
             intent.state = IntentState.SENT.value
             intent.marketplace_product_id = marketplace_product_id
+            intent.marketplace_channel_product_id = marketplace_channel_product_id
         elif outcome is RemoteOutcome.NOT_APPLIED_PROVEN:
             intent.state = IntentState.FAILED.value
         else:
@@ -2795,6 +2942,32 @@ def _intent_record(row: RegistrationIntent) -> IntentRecord:
         remote_outcome=None if row.remote_outcome is None else RemoteOutcome(row.remote_outcome),
         marketplace_product_id=row.marketplace_product_id,
         verification_state=VerificationState(row.verification_state),
+        marketplace_channel_product_id=row.marketplace_channel_product_id,
+    )
+
+
+def _require_channel(outcome: RemoteOutcome, channel_product_id: str | None) -> None:
+    """A channel identity is carried only with an applied outcome, and never blank."""
+    if channel_product_id is not None and (
+        outcome is not RemoteOutcome.APPLIED_PROVEN or not channel_product_id.strip()
+    ):
+        raise InputValidationError(
+            "REGISTER_PROVIDER_IDENTITY",
+            "a channel identity is named only with an applied outcome",
+        )
+
+
+def _check_record(row: RegistrationReconcileCheck) -> ReconcileCheckRecord:
+    return ReconcileCheckRecord(
+        intent_id=row.intent_id,
+        seq=row.seq,
+        trigger=ReconcileTrigger(row.trigger),
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        result=None if row.result is None else ReconcileResult(row.result),
+        candidate_count=row.candidate_count,
+        evidence_digest=row.evidence_digest,
+        next_due_at=row.next_due_at,
     )
 
 

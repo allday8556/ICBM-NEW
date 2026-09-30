@@ -146,6 +146,15 @@ class CreateResponse:
         """
         return str(self.origin_product_no) if self.readable else None
 
+    @property
+    def marketplace_channel_product_id(self) -> str | None:
+        """The SmartStore channel identity, ``smartstoreChannelProductNo``, only when readable.
+
+        It is carried into the same durable owner as the origin identity (Issue #89 5904349289
+        §B). That is identity persistence only: it broadens nothing the CREATE contract reads.
+        """
+        return str(self.smartstore_channel_product_no) if self.readable else None
+
     def canonical(self) -> dict[str, Any]:
         """The sanitized canonical evidence of what the contract read, and what it could not."""
         read = {

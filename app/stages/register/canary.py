@@ -8,9 +8,10 @@ write remains a separate, explicitly authorized bounded campaign.
 A requirement is satisfied only by a proof that exists now. A missing endpoint contract is
 reported as **not adopted**, never as "not needed" and never as "absent capability": the whole
 point of this result is to name what is still unproven. The bounded image upload
-(`SMARTSTORE_PRODUCT_IMAGE_UPLOAD`) is `ADOPTED` since the #96 amendment; CREATE
-(`SMARTSTORE_PRODUCT_CREATE_V2`) and the deterministic product lookup
-(`SMARTSTORE_PRODUCT_SEARCH`) stay `NOT_ADOPTED`, so the verdict stays `BLOCKED`.
+(`SMARTSTORE_PRODUCT_IMAGE_UPLOAD`) is `ADOPTED` since the #96 amendment, CREATE
+(`SMARTSTORE_PRODUCT_CREATE_V2`) since its own slice, and the product search
+(`SMARTSTORE_PRODUCT_SEARCH`) since its own slice, for positive-only reconcile only. Adoption is
+not readiness: every other requirement still refuses, so the verdict stays `BLOCKED`.
 
 **Adoption is not the whole proof of a seam**, and this result never lets one stand in for the
 other (post-merge audit of main `a10e4b79dbd3`). The origin-product read-back is adopted (PR-D),
