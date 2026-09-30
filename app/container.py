@@ -53,7 +53,7 @@ from app.platform.system.execution_mode import ExecutionModeService
 from app.platform.system.readiness import ReadinessService
 from app.stages.collect.adaptive.engine.capture import (
     CaptureRefused,
-    RegionClass,
+    boundary_of,
     capture_candidate,
 )
 from app.stages.collect.adaptive.engine.hooks import HookManifest
@@ -79,6 +79,7 @@ from app.stages.collect.collection import (
     SessionProvider,
 )
 from app.stages.collect.extension.buffer import CaptureBuffer
+from app.stages.collect.extension.gate import Sanitized, final_gate
 from app.stages.collect.extension.nonces import NonceCache
 from app.stages.collect.extension.pairing import ExtensionPairing
 from app.stages.collect.extension.policy import CapturePolicySource
@@ -159,35 +160,29 @@ from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
 
 
-def _server_final_scan(html: str) -> tuple[str, ...]:
-    """The server's own sanitizer and final scan of an extension capture (ADR-0019 §6; ADR-0017
-    §7.3 note; owner amendment ``5909645067`` §1): the capture owner's, unchanged, over exactly
-    what arrived.
-
-    The pipeline goes on with the capture **as it arrived**, never with the sanitized candidate.
-    So the candidate is evidence only, and a capture is clean only when the sanitizer had nothing
-    to take out of it for privacy or security:
-
-    - a residual finding of the independent final scan refuses it;
-    - anything the sanitizer removed — a secret, private, contact, session, account or
-      user-entered value, an event handler, executable code, a URL query — refuses it;
-    - a private region the sanitizer excluded refuses it.
-
-    A navigation or non-authoritative region the sanitizer sets aside is not private material and
-    is not a finding. The answer is kinds and boundaries only, never a captured value; empty means
-    clean.
-    """
+def _capture_owner_sanitizer(html: str) -> Sanitized:
+    """The capture owner's sanitizer and final scan, unchanged (ADR-0017 §7.3 note), as the
+    extension gate reads it: its refusal, what it removed and what it set aside. Kinds and
+    boundaries only, never a captured value."""
     try:
         candidate = capture_candidate(html)
     except CaptureRefused as refused:
-        return (str(refused),)
-    findings = [f"SANITIZER_REMOVED:{entry[0]}@{entry[1]}" for entry in candidate.removals]
-    findings.extend(
-        f"SANITIZER_EXCLUDED:{entry[1]}@{entry[0]}"
-        for entry in candidate.excluded
-        if entry[1] == RegionClass.PRIVATE.value
+        return Sanitized(refusal=str(refused))
+    except RecursionError:
+        # Deeper than the capture owner can walk: refused, never passed unscanned.
+        return Sanitized(refusal="the capture nests deeper than the final scan can read")
+    return Sanitized(
+        refusal=None,
+        removals=tuple((entry[0], entry[1]) for entry in candidate.removals),
+        excluded=tuple((entry[0], entry[1]) for entry in candidate.excluded),
     )
-    return tuple(findings)
+
+
+def _server_final_scan(html: str) -> tuple[str, ...]:
+    """The server's final gate over an extension capture (ADR-0019 §6; owner amendment
+    ``5909645067`` §1): ``app.stages.collect.extension.gate`` over the capture owner's own
+    sanitizer. Empty means the capture may go on as it arrived."""
+    return final_gate(html, sanitize=_capture_owner_sanitizer, boundary_of=boundary_of)
 
 
 @dataclass

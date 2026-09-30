@@ -114,6 +114,15 @@ class BrowserCapturePolicy:
             self.allowed_attributes.get(tag, frozenset())
         )
 
+    def is_excluded_region(self, attributes: Mapping[str, str]) -> bool:
+        """Whether an element with these attributes is one of the policy's excluded regions."""
+        identifier = attributes.get("id", "")
+        classes = attributes.get("class", "").split()
+        return any(
+            region.token == identifier if region.by == "id" else region.token in classes
+            for region in self.excluded_regions
+        )
+
     def keeps_head(self, tag: str, attributes: Mapping[str, str]) -> bool:
         return any(
             allowed.tag == tag

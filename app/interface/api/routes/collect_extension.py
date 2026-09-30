@@ -37,7 +37,11 @@ from app.stages.collect.extension.pairing import (
     VerifiedSender,
 )
 from app.stages.collect.extension.policy import MAX_HTML_BYTES
-from app.stages.collect.extension.service import ExtensionCeilingExceeded
+from app.stages.collect.extension.service import (
+    AcceptedCapture,
+    ExtensionCaptureService,
+    ExtensionCeilingExceeded,
+)
 
 router = APIRouter(tags=["collect-extension"])
 
@@ -107,17 +111,14 @@ def capture_policy(supplier_key: str, request: Request, container: ContainerDep)
     return response
 
 
-@router.post(CAPTURE_PATH, status_code=status.HTTP_202_ACCEPTED)
-async def submit_capture(request: Request, container: ContainerDep) -> Response:
-    """Accept one capture, or refuse it whole. Nothing here is a collection result."""
-    sender = _authenticate(request, container.extension_pairing)
-    body = await _bounded_body(request)
+def _envelope(body: bytes, sender: VerifiedSender) -> CaptureEnvelope:
+    """The signed body as the exact envelope, or a refusal that names where and why only."""
     if hashlib.sha256(body).hexdigest() != sender.body_sha256:
         raise PairingRefused(
             "EXTENSION_BODY_DIGEST_MISMATCH", "the body is not the one the request signed"
         )
     try:
-        envelope = CaptureEnvelope.model_validate_json(body)
+        return CaptureEnvelope.model_validate_json(body)
     except ValidationError as invalid:
         # Where and why only: never a submitted value.
         raise InputValidationError(
@@ -130,7 +131,25 @@ async def submit_capture(request: Request, container: ContainerDep) -> Response:
                 ]
             },
         ) from None
-    accepted = await run_in_threadpool(container.extension_capture.ingest, envelope)
+
+
+def _accept(
+    service: ExtensionCaptureService, body: bytes, sender: VerifiedSender
+) -> AcceptedCapture:
+    return service.ingest(_envelope(body, sender))
+
+
+@router.post(CAPTURE_PATH, status_code=status.HTTP_202_ACCEPTED)
+async def submit_capture(request: Request, container: ContainerDep) -> Response:
+    """Accept one capture, or refuse it whole. Nothing here is a collection result.
+
+    The order is fixed: the sender is proven from the headers, then the bounded body is read, then
+    its digest, its envelope and the ingest. Only the body read runs on the event loop; the keyring
+    read, the hashing and the parsing of up to a megabyte do not.
+    """
+    sender = await run_in_threadpool(_authenticate, request, container.extension_pairing)
+    body = await _bounded_body(request)
+    accepted = await run_in_threadpool(_accept, container.extension_capture, body, sender)
     response = JSONResponse(
         {
             "collection_run_id": accepted.collection_run_id,

@@ -101,6 +101,9 @@ EXTENSION_CAPTURE_BUFFER_MISSING = "EXTENSION_CAPTURE_BUFFER_MISSING"
 EXTENSION_CAPTURE_POLICY_CHANGED = "EXTENSION_CAPTURE_POLICY_CHANGED"
 EXTENSION_CAPTURE_POLICY_VIOLATION = "EXTENSION_CAPTURE_POLICY_VIOLATION"
 EXTENSION_FINAL_SCAN_REFUSED = "EXTENSION_FINAL_SCAN_REFUSED"
+# The ``detail`` of a run whose processing raised something no one classified. The exception's
+# own text never leaves the process: it may quote the captured page.
+EXTENSION_PROCESSING_FAILED = "EXTENSION_PROCESSING_FAILED"
 # The ``detail`` of a run whose Adaptive dry run could not evaluate or compare its bundle. A
 # failure of step 12 is a failure of the run; only ``NO_BUNDLE`` and a comparison are answers.
 EXTENSION_ADAPTIVE_COMPARE_FAILED = "EXTENSION_ADAPTIVE_COMPARE_FAILED"
@@ -362,7 +365,18 @@ class ExtensionCaptureService:
                     EXTENSION_CAPTURE_BUFFER_MISSING,
                     "the capture was not in this process's memory when its job ran",
                 )
-            report = self._compare(record, capture)
+            try:
+                report = self._compare(record, capture)
+            except AppError:
+                raise
+            except Exception as unclassified:
+                # The extractor holds captured page content. Whatever it raised is reduced to its
+                # type before it can reach the job's stored error text or a log.
+                raise ExtensionCaptureFailed(
+                    EXTENSION_PROCESSING_FAILED,
+                    "the capture could not be processed",
+                    details={"failure": type(unclassified).__name__},
+                ) from None
         except AppError as error:
             self._runs.failed(run_id, detail=error.code)
             logger.warning(

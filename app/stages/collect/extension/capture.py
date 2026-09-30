@@ -8,8 +8,9 @@ none of that: it measures and checks exactly what arrived.
   policy: an image reference is any attribute of an ``<img>`` that is not its own ``id``,
   ``class`` or ``style``, and each ``srcset`` entry is one.
 - :func:`policy_violations` reads the capture as structure and names everything the policy does
-  not allow: an excluded tag, an attribute outside the allowlist, anything in ``<head>`` beyond the
-  head allowance, or a frame that is not the one the extension builds.
+  not allow: an excluded tag or region, an attribute outside the allowlist, anything in ``<head>``
+  beyond the head allowance, a frame that is not the one the extension builds, a declaration other
+  than the one leading doctype, or nesting deeper than :data:`MAX_DEPTH`.
 - :class:`TransportEvidence` is what the browser observed of the navigation. Each value becomes a
   ``DocumentView`` field only if it is present and valid; nothing is defaulted (ADR-0019 §2).
 
@@ -28,6 +29,9 @@ CAPTURED_CONTENT_TYPE = "text/html"
 CAPTURED_STATUS = 200
 # The frame the extension builds around a capture: exactly these, in this order.
 _FRAME = ("html", "head", "body")
+# How deep a capture may nest. A product page is far shallower, and everything that reads the
+# capture afterwards walks it element by element.
+MAX_DEPTH = 96
 _VOID = frozenset(
     {
         "area",
@@ -105,6 +109,7 @@ class _Structure(HTMLParser):
         self._policy = policy
         self._open: list[str] = []
         self._frame: list[str] = []
+        self._declarations = 0
         self.nodes = 0
         self.image_refs = 0
         self.violations: list[str] = []
@@ -116,6 +121,8 @@ class _Structure(HTMLParser):
         self.nodes += 1
         values = {name.lower(): value or "" for name, value in attrs}
         depth = len(self._open)
+        if depth >= MAX_DEPTH:
+            self.violations.append("DEPTH_EXCEEDED")
         if tag == "img":
             self._images(values)
         if tag in _FRAME and depth == (0 if tag == "html" else 1):
@@ -131,6 +138,9 @@ class _Structure(HTMLParser):
                     self.violations.append(f"HEAD_NOT_ALLOWED:{tag}")
             elif tag in self._policy.excluded_tags:
                 self.violations.append(f"TAG_EXCLUDED:{tag}")
+            elif self._policy.is_excluded_region(values):
+                # The browser cuts these out; one that arrives was not cut by the policy.
+                self.violations.append(f"REGION_EXCLUDED:{tag}")
             for name in values:
                 if not self._policy.keeps_attribute(tag, name):
                     self.violations.append(f"ATTRIBUTE_NOT_ALLOWED:{tag}[{name}]")
@@ -156,6 +166,16 @@ class _Structure(HTMLParser):
 
     def handle_comment(self, data: str) -> None:
         self.violations.append("COMMENT")
+
+    def handle_decl(self, decl: str) -> None:
+        # The one declaration the extension writes: a leading ``<!doctype html>``.
+        self._declarations += 1
+        if decl.strip().lower() != "doctype html" or self._declarations > 1 or self.nodes:
+            self.violations.append("DECLARATION")
+
+    def unknown_decl(self, data: str) -> None:
+        # ``<![CDATA[...]]>`` and the like: never text the checks would read, so never allowed.
+        self.violations.append("DECLARATION")
 
     def handle_pi(self, data: str) -> None:
         self.violations.append("PROCESSING_INSTRUCTION")
