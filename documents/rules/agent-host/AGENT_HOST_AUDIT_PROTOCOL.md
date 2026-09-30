@@ -449,8 +449,13 @@ first three; its prompt is that Host's, not this contract.
 An exact-head audit returns one of:
 
 - **PASS** — audit satisfied for this audit identity.
-- **BLOCKER** — a code, test or contract defect. It is repaired automatically: new HEAD, new
-  packet, both audits again.
+- **BLOCKER** — only one of the five kinds of ADR-0022 §4.1: real data damage, a real duplicate
+  registration or wrong external transmission, a security or credential leak, a core function that
+  does not work, or a test or CI failure caused by a real code defect. The auditor names the kind
+  at the start of its summary. It is repaired automatically: new HEAD, new packet, both audits
+  again. A wording difference between documents, citation format, a non-essential packet detail,
+  a suggestion to be more rigorous or a request to prove a decided requirement in more detail is
+  not a BLOCKER: the auditor passes and records it as a note.
 - **HUMAN_DECISION_REQUIRED** — the diff itself needs one of the user's decisions (§0.2). The
   auditor names the category of the closed list at the start of its summary. A verdict that names
   none has not said what the user should decide: the Host records it as a technical **HOLD** and

@@ -450,6 +450,20 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
     # a citation names its kind and resolves only to a source of that kind, never by the id alone
     assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
     assert "$citedIds" not in audit
+    # the user's rule (ADR-0022 §4.1): only five kinds of finding block; the rest are notes
+    assert audit.count("WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1)") == 2
+    assert _host_script("run-full-audit-v1.ps1").count("WHAT A BLOCKER IS") == 2
+    for kind in (
+        "DATA_DAMAGE",
+        "DUPLICATE_OR_WRONG_SEND",
+        "SECURITY",
+        "CORE_BROKEN",
+        "CI_CODE_DEFECT",
+    ):
+        assert audit.count(kind) >= 2, kind
+    assert "### 4.1 What a BLOCKER is" in (
+        REPO_ROOT / "documents/decisions/adr/0022-agent-operating-authority.md"
+    ).read_text("utf-8")
     # the canon the slice is judged against is in the packet, and an auditor never passes without it
     assert "foreach ($cp in $evidenceRefs.Canon)" in audit and 'Kind = "CANON"' in audit
     # canon is read at the audited base, and the Host's baseline is in every packet: a declaration

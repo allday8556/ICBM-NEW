@@ -43,6 +43,13 @@ Do not ask the user, and do not ask the user to post anything on GitHub, about:
 
 No `[OWNER-AMENDMENT]` and no classification comment is requested. Existing ones are history.
 
+### 14.3.1 What an audit may block on
+
+Only real data damage, a real duplicate registration or wrong external transmission, a security or
+credential leak, a core function that does not work, or a test or CI failure from a real code
+defect (ADR-0022 §4.1). Wording, citation format, non-essential packet detail, "could be more
+rigorous" and "prove the decided requirement in more detail" are notes, not blockers.
+
 ### 14.4 Stop for the user only for
 
 - a product feature the canonical requirements do not contain;

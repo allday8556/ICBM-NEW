@@ -107,6 +107,22 @@ A technical hold that keeps returning on the same state ends the run as
 `TECHNICAL_HOLD_EXHAUSTED`. That is a circuit breaker on cost, which is itself one of §2 D, and a
 report. It asks for no decision.
 
+### 4.1 What a BLOCKER is
+
+Decided by the user on 2026-10-01 (PR #165 comment `5921331154`). An audit BLOCKER is only:
+
+1. a real possibility of data damage;
+2. a real possibility of a duplicate registration or a wrong external transmission;
+3. a security hole or a credential leak;
+4. a core function that does not actually work;
+5. a test or CI failure caused by a real code defect.
+
+None of these is a BLOCKER: a difference in document wording; the same meaning phrased differently
+across rule files; citation format; a non-essential difference in how the packet is built; a
+README, ADR or ROADMAP wording mismatch; a suggestion that something could be made more rigorous; a
+request to prove an already-decided product requirement in more detail. An auditor passes those and
+records them as notes. Notes are never repaired as blockers and never hold a merge.
+
 ### 5. No human classification
 
 The marker-and-classification gate is removed from the packet.

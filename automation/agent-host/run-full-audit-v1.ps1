@@ -868,6 +868,7 @@ RULES:
 - Do not use commit messages as proof.
 - You may use read-only local inspection commands such as rg, git log/show/diff and file reads.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 
 The first four output lines MUST be exactly:
 
@@ -1005,6 +1006,7 @@ RULES:
 - Do not run commands that mutate repository state.
 - Do not run the product against a real provider.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 - A documented stale proof is not automatically a code blocker if the canonical
   state correctly marks it stale and refuses to rely on it.
 - Separate true BLOCKERS from expected/deferred roadmap gaps.
