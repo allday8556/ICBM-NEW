@@ -10,12 +10,12 @@ SmartStore records the official 2.89.0 CREATE contract field by field (packet ``
 reviews ``5768199984`` / ``5768247290``, field packet ``5861477977``, required/conditional packet
 ``5861933729``, registration-requirement packet ``5862400626``, value-level packet ``5868542027``).
 The CREATE adoption slice freezes it here. The provider's request top level is ``originProduct``
-plus the required ``smartstoreChannelProduct``, and of those this projection emits ``originProduct``
-only: no Snapshot or ICBM policy owns the value of either required field of
-``smartstoreChannelProduct``, so the structure stays a named *gap* rather than a half-built required
-object — which means **no** Snapshot is sendable at this adoption, by design and not by omission.
-Adoption froze the contract and this refusal; the slice that gives those values an ICBM-owned source
-is what makes a request sendable.
+plus the required ``smartstoreChannelProduct``. This projection emits both, but the channel carries
+only the one member ICBM owns — the display status (below); the value of its other required member,
+``naverShoppingRegistration``, has no ICBM-owned source, so it stays a named *gap* and is never
+guessed — which means **no** Snapshot is sendable yet, by design and not by omission. Adoption froze
+the contract and this refusal; a slice that gives each remaining value an ICBM-owned source is what
+can make a request sendable.
 ``windowChannelProduct`` is a separate Shopping Window channel structure, out of scope, and is
 **never emitted**.
 
