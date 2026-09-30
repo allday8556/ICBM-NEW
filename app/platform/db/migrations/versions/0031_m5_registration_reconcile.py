@@ -103,9 +103,10 @@ def upgrade() -> None:
         ),
         _check(
             "(finished_at IS NOT NULL OR candidate_count IS NULL)"
-            " AND (result IS NOT 'ZERO' OR candidate_count = 0)"
-            " AND (result NOT IN ('ONE_VERIFIED', 'ONE_MISMATCH') OR candidate_count = 1)"
-            " AND (result IS NOT 'MULTIPLE' OR candidate_count >= 2)"
+            " AND (result IS NOT 'ZERO' OR candidate_count IS 0)"
+            " AND (result IS NOT 'ONE_VERIFIED' OR candidate_count IS 1)"
+            " AND (result IS NOT 'ONE_MISMATCH' OR candidate_count IS 1)"
+            " AND (result IS NOT 'MULTIPLE' OR (candidate_count IS NOT NULL AND candidate_count >= 2))"
             " AND (candidate_count IS NULL OR candidate_count >= 0)",
             "count_agrees_with_result",
         ),

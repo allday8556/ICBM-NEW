@@ -258,6 +258,19 @@ def test_only_an_exact_storefarm_code_is_a_candidate() -> None:
             "SEARCH_RESPONSE_INCONSISTENT",
         ),
         (
+            # A non-final page that claims to be the last.
+            [
+                {**page([], total_pages=2, total=0), "last": True},
+                page([], number=2, total_pages=2, total=0),
+            ],
+            "SEARCH_RESPONSE_INCONSISTENT",
+        ),
+        (
+            # More pages answered than totalPages.
+            [page([], total=0), {**page([], number=2, total=0), "first": False, "last": True}],
+            "SEARCH_RESPONSE_INCONSISTENT",
+        ),
+        (
             # Drift: product 1 shifted onto page 2 as well, so another product was never read.
             [
                 page([item(1, channel(1, 2))], total_pages=2, total=2),
@@ -271,6 +284,8 @@ def test_only_an_exact_storefarm_code_is_a_candidate() -> None:
         "last-page-unread",
         "count-disagrees",
         "totals-moved",
+        "early-last",
+        "pages-beyond-total",
         "product-read-twice",
     ],
 )

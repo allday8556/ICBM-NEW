@@ -227,14 +227,22 @@ def exact_candidates(pages: Sequence[SearchPage], expected_code: str) -> tuple[C
 def check_enumeration(pages: Sequence[SearchPage]) -> None:
     """Refuse an enumeration whose pages do not form one complete, consistent result.
 
-    Page ``n`` must answer as page ``n``; every page must report the same totals; the last page
-    read must be the documented last page; the items read must be exactly ``totalElements``; and
+    Exactly ``totalPages`` pages (at least one) must be read; page ``n`` must answer as page
+    ``n``; every page must report the same totals; ``first`` and ``last`` must be true on exactly
+    the first and the final page; the items read must be exactly ``totalElements``; and
     no product or channel product may be read twice. Anything else is not a trustworthy count, so
     nothing may be concluded from it.
     """
     if not pages:
         raise SearchContractError("SEARCH_ENUMERATION_INCOMPLETE", "no page was read")
     first = pages[0]
+    expected = max(first.total_pages, 1)
+    if len(pages) < expected:
+        raise SearchContractError("SEARCH_ENUMERATION_INCOMPLETE", "the last page was not read")
+    if len(pages) > expected:
+        raise SearchContractError(
+            "SEARCH_RESPONSE_INCONSISTENT", "more pages were answered than totalPages"
+        )
     for number, page in enumerate(pages, start=FIRST_PAGE):
         if page.page != number:
             raise SearchContractError("SEARCH_RESPONSE_INCONSISTENT", f"page {number} answered")
@@ -242,8 +250,8 @@ def check_enumeration(pages: Sequence[SearchPage]) -> None:
             raise SearchContractError("SEARCH_RESPONSE_INCONSISTENT", "the totals moved")
         if page.first != (number == FIRST_PAGE):
             raise SearchContractError("SEARCH_RESPONSE_INCONSISTENT", "first is misplaced")
-    if not pages[-1].last or len(pages) < max(first.total_pages, 1):
-        raise SearchContractError("SEARCH_ENUMERATION_INCOMPLETE", "the last page was not read")
+        if page.last != (number == expected):
+            raise SearchContractError("SEARCH_RESPONSE_INCONSISTENT", "last is misplaced")
     if sum(len(page.items) for page in pages) != first.total_elements:
         raise SearchContractError(
             "SEARCH_RESPONSE_INCONSISTENT", "the items read are not totalElements"

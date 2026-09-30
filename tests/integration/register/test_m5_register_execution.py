@@ -2655,3 +2655,44 @@ def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
     assert current.result is ReconcileResult.ZERO and not current.in_flight
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
+
+
+def test_a_finished_check_names_a_count_that_agrees_with_its_result(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Migration 0031 §A, NULL-safe: a ZERO, ONE_* or MULTIPLE check must carry its count; only an
+    # unavailable or failed lookup may leave it unknown.
+    ready = prepare(container, sources, store, account, prep)
+    _unknown(container, store, prep, ready)
+    with store.transaction() as unit:
+        unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.OPERATOR)
+    digest = "a" * 64
+    with contextlib.closing(raw(config)) as connection:
+        for result, count in (
+            ("ZERO", None),
+            ("ZERO", 1),
+            ("ONE_VERIFIED", None),
+            ("ONE_MISMATCH", 2),
+            ("MULTIPLE", None),
+            ("MULTIPLE", 1),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE registration_reconcile_checks SET finished_at = started_at,"
+                    " result = ?, candidate_count = ?, evidence_digest = ? WHERE intent_id = ?",
+                    (result, count, digest, ready.intent_id),
+                )
+        connection.execute(
+            "UPDATE registration_reconcile_checks SET finished_at = started_at,"
+            " result = 'LOOKUP_UNAVAILABLE', candidate_count = NULL, evidence_digest = ?"
+            " WHERE intent_id = ?",
+            (digest, ready.intent_id),
+        )
+        connection.commit()
+    (check,) = store.reconcile_checks(ready.intent_id)
+    assert check.result is ReconcileResult.LOOKUP_UNAVAILABLE and check.candidate_count is None
