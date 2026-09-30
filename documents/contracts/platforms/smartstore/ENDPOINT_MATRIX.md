@@ -165,7 +165,22 @@ Adopted read-back contract, in the registry and pinned by tests:
 | Redirect | `NO_FOLLOW` |
 | Success predicate | HTTP 200 AND the body parses as a JSON object (`m5d-origin-read-r1`, `m5d-channel-read-r1`) |
 | Safe query keys | **none** (deny-by-default) |
-| Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
+| Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url`; **the origin read also** `statusType` and `channelProductDisplayStatusType` (the published-state read, below) |
+
+**The published-state read (origin read only; mapping revision `m5-published-state-r1`).** The
+documented 200 response of `(v2) 원상품 조회` (Commerce API 2.90.0; `SOURCES.md` §5.4,
+`NAVER-P0-READ-STATUS-290`) has the top-level members `groupProduct`, `originProduct`,
+`windowChannelProduct` and `smartstoreChannelProduct`. ICBM reads the sale status at exactly
+`originProduct.statusType` and the SmartStore display status at exactly
+`smartstoreChannelProduct.channelProductDisplayStatusType`, each only as a value of its documented
+enumeration; a `windowChannelProduct` display status or a status nested anywhere else is never
+taken for them. No endpoint is adopted or re-adopted by this: method, path, predicate, timeouts and
+query keys are unchanged, and the channel read — whose response is not captured — retains neither
+leaf. **Reading is not proving**: ADR-0014 §11 compares the published state against an explicit
+expectation, the sale status ICBM registers is `SALE`, and the display status it registers
+(`ON` or `SUSPENSION`) has no owner — it is one of the unowned CREATE request members of §4.1.1 —
+so no published state is stated and a read-back still confirms nothing
+(`REGISTER_PUBLISHED_STATE_UNPROVEN`).
 
 Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; one artifact in one
 `imageFiles` multipart part; HTTP 200 with `images[].url`; no query keys; only `url` is retained.

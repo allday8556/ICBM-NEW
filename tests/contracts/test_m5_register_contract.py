@@ -89,7 +89,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-search-r1"
+M5_MAPPING_REVISION = "m5-published-state-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
