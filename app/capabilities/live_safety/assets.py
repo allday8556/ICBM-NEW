@@ -55,6 +55,7 @@ from app.capabilities.live_safety.store import (
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError
 from app.stages.products.model import ReadinessStatus
+from app.stages.register.model import DUPLICATE_EVIDENCE_UNAVAILABLE, RegistrationConflictError
 from app.stages.register.preparation import PreparedAsset
 from app.stages.register.sanitize import PayloadSanitationError
 
@@ -365,7 +366,14 @@ class PreparationCandidateGate:
         if preparation is None:
             return CandidateState(preparation_revision_id, False, False, None)
         current = preparation.current.preparation_revision_id == preparation_revision_id
-        result = self._preparations.evaluate(preparation.preparation_id)
+        try:
+            # The candidate the CREATE path binds, duplicate evidence included (5915900049 D4).
+            result = self._preparations.stage_candidate(preparation.preparation_id)
+        except RegistrationConflictError as refused:
+            if refused.code != DUPLICATE_EVIDENCE_UNAVAILABLE:
+                raise
+            # No admissible duplicate evidence: the stage stays closed and nothing is uploaded.
+            return CandidateState(preparation_revision_id, current, False, None)
         return CandidateState(
             preparation_revision_id,
             current=current,
