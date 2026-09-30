@@ -306,7 +306,10 @@ What a lookup may conclude (ADR-0014 §28.2–§28.4), and nothing more:
 Every check is recorded by the durable reconcile-check owner of ADR-0014 §28.4
 (`registration_reconcile_checks`, migration `0031`, Issue #89 `5904349289` §A): single-flight per
 Intent, finished exactly once, append-only and never deleted, with the SHA-256 of its sanitized
-evidence and a bounded automatic schedule. When presence is proven both provider identities are
+evidence and a bounded automatic schedule (the first automatic check when an Intent is found, then
+waits of 15 minutes, 1, 6 and 24 hours, then none). A check a crashed process left in flight is
+finished as `ERROR` after a bounded timeout, so single-flight never blocks its Intent forever; that
+records only that nothing was observed. When presence is proven both provider identities are
 persisted: `marketplace_product_id` stays the `originProductNo` and `marketplace_channel_product_id`
 holds the `STOREFARM` `channelProductNo` (§B); a missing or ambiguous channel identity is never
 guessed and proves nothing.

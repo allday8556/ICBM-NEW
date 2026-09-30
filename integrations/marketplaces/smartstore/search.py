@@ -206,7 +206,8 @@ class Candidate:
 
 def exact_candidates(pages: Sequence[SearchPage], expected_code: str) -> tuple[Candidate, ...]:
     """The ``STOREFARM`` channel entries whose ``sellerManagementCode`` is exactly
-    ``expected_code``, over every enumerated page, deduplicated and in provider order.
+    ``expected_code``, over every enumerated page, in provider order. The enumeration check has
+    already refused a product read twice, so every candidate here is a distinct listing.
 
     The provider's own match is similar, partial or exact; only local exact equality counts, and
     only on the SmartStore channel.
@@ -219,9 +220,7 @@ def exact_candidates(pages: Sequence[SearchPage], expected_code: str) -> tuple[C
                     channel.channel_service_type == STOREFARM
                     and channel.seller_management_code == expected_code
                 ):
-                    candidate = Candidate(item.origin_product_no, channel.channel_product_no)
-                    if candidate not in found:
-                        found.append(candidate)
+                    found.append(Candidate(item.origin_product_no, channel.channel_product_no))
     return tuple(found)
 
 
@@ -229,8 +228,9 @@ def check_enumeration(pages: Sequence[SearchPage]) -> None:
     """Refuse an enumeration whose pages do not form one complete, consistent result.
 
     Page ``n`` must answer as page ``n``; every page must report the same totals; the last page
-    read must be the documented last page; and the items read must be exactly ``totalElements``.
-    Anything else is not a trustworthy count, so nothing may be concluded from it.
+    read must be the documented last page; the items read must be exactly ``totalElements``; and
+    no product or channel product may be read twice. Anything else is not a trustworthy count, so
+    nothing may be concluded from it.
     """
     if not pages:
         raise SearchContractError("SEARCH_ENUMERATION_INCOMPLETE", "no page was read")
@@ -247,6 +247,19 @@ def check_enumeration(pages: Sequence[SearchPage]) -> None:
     if sum(len(page.items) for page in pages) != first.total_elements:
         raise SearchContractError(
             "SEARCH_RESPONSE_INCONSISTENT", "the items read are not totalElements"
+        )
+    # The same product, or the same channel product, read twice means the result moved between
+    # pages: another product may have been displaced and never read. That is never a count.
+    origins = [item.origin_product_no for page in pages for item in page.items]
+    channels = [
+        channel.channel_product_no
+        for page in pages
+        for item in page.items
+        for channel in item.channels
+    ]
+    if len(set(origins)) != len(origins) or len(set(channels)) != len(channels):
+        raise SearchContractError(
+            "SEARCH_RESPONSE_INCONSISTENT", "a product was read twice across the enumeration"
         )
 
 

@@ -2018,6 +2018,24 @@ class RegistrationUnit:
         self.session.flush()
         return _check_record(row)
 
+    def abandon_stale_check(self, intent_id: str, *, older_than: datetime) -> bool:
+        """Finish, as ``ERROR``, an in-flight check that started before ``older_than``.
+
+        A check left open by a process that died mid-check would otherwise block every later
+        check of its Intent forever (single-flight). Abandoning it records only that nothing was
+        observed — it never moves the Intent and proves nothing (§28.4).
+        """
+        row = self._open_check(intent_id)
+        if row is None or row.started_at >= older_than:
+            return False
+        row.finished_at = self._clock.now()
+        row.result = ReconcileResult.ERROR.value
+        row.candidate_count = None
+        row.evidence_digest = sanitized_digest({"code": "REGISTER_RECONCILE_CHECK_ABANDONED"})
+        row.next_due_at = None
+        self.session.flush()
+        return True
+
     def reconcile_checks(self, intent_id: str) -> tuple[ReconcileCheckRecord, ...]:
         rows = self.session.scalars(
             select(RegistrationReconcileCheck)

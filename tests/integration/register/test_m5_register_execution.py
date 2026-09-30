@@ -1217,18 +1217,31 @@ def test_the_automatic_schedule_is_bounded_and_ends_in_review(
     run.lookup.is_available = True
     run.lookup.found = complete()
     schedule = ExecutionPolicy().reconcile_schedule
-    for _ in range(len(schedule) + 3):
+    # The first automatic check runs at once; the n-th waits exactly schedule[n-1] for the next,
+    # and nothing is due a moment earlier.
+    run.service.reconcile_due(correlation_id=CID)
+    for wait in schedule:
+        (latest, *_) = reversed(store.reconcile_checks(ready.intent_id))
+        assert latest.next_due_at is not None and latest.finished_at is not None
+        assert latest.next_due_at - latest.finished_at == pytest.approx(
+            wait, abs=timedelta(seconds=1)
+        )
+        container.clock.advance(int(wait.total_seconds()) - 1)
         run.service.reconcile_due(correlation_id=CID)
+        container.clock.advance(1)
+        run.service.reconcile_due(correlation_id=CID)
+    for _ in range(3):
         container.clock.advance(int(max(schedule).total_seconds()) + 1)
+        run.service.reconcile_due(correlation_id=CID)
     checks = store.reconcile_checks(ready.intent_id)
-    # §28.4: a finite series — exactly the schedule's length — then nothing is ever due again,
-    # and the Intent stays 재확인필요 (UNKNOWN) for an operator.
-    assert [c.trigger for c in checks] == [ReconcileTrigger.AUTO] * len(schedule)
+    # §28.4: a finite series — the schedule's length plus the first check — then nothing is ever
+    # due again, and the Intent stays 재확인필요 (UNKNOWN) for an operator.
+    assert [c.trigger for c in checks] == [ReconcileTrigger.AUTO] * (len(schedule) + 1)
     assert checks[-1].next_due_at is None
     assert all(c.result is ReconcileResult.ZERO for c in checks)
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
-    assert run.lookup.calls == len(schedule)
+    assert run.lookup.calls == len(schedule) + 1
 
 
 def test_a_reconcile_check_is_append_only_and_only_for_an_unknown_intent(
@@ -2603,7 +2616,7 @@ def test_an_exhausted_intent_never_starves_a_newer_one(
     run = _unknown(container, store, prep, older)
     newer = prepare(container, sources, store, account, prep, source_product_id="5678")
     _unknown(container, store, prep, newer)
-    policy = ExecutionPolicy(reconcile_schedule=(timedelta(minutes=1),), reconcile_batch=1)
+    policy = ExecutionPolicy(reconcile_schedule=(), reconcile_batch=1)
     auto = execution(container, prep, lookup=run.lookup, policy=policy)
     run.lookup.is_available = True
     run.lookup.found = complete()
@@ -2612,3 +2625,33 @@ def test_an_exhausted_intent_never_starves_a_newer_one(
     assert [c.trigger for c in store.reconcile_checks(older.intent_id)] == [ReconcileTrigger.AUTO]
     assert [c.trigger for c in store.reconcile_checks(newer.intent_id)] == [ReconcileTrigger.AUTO]
     assert run.lookup.calls == 2
+
+
+def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §28.4 single-flight, with liveness: a process that died mid-check leaves the check open.
+    # Within the timeout nothing else may start; after it, the next check finishes the abandoned
+    # one as ERROR — proving nothing, moving nothing — and runs.
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    run.lookup.is_available = True
+    run.lookup.found = complete()
+    with store.transaction() as unit:
+        unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.AUTO)
+    with pytest.raises(RegistrationConflictError) as busy:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert busy.value.code == "REGISTER_RECONCILE_IN_FLIGHT"
+    container.clock.advance(int(ExecutionPolicy().reconcile_check_timeout.total_seconds()) + 1)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_RECONCILE_ZERO"
+    abandoned, current = store.reconcile_checks(ready.intent_id)
+    assert abandoned.result is ReconcileResult.ERROR and abandoned.next_due_at is None
+    assert current.result is ReconcileResult.ZERO and not current.in_flight
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN

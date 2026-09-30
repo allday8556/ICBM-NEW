@@ -340,9 +340,11 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
   authorized adoption slice" — see the amendment at §12. Adoption changed no rule of this section:
   the verdict is still `INSUFFICIENT`, the canary is still `BLOCKED`, and the bullets below still
   hold as written.)*
-- `SMARTSTORE_PRODUCT_SEARCH` stays **`NOT_ADOPTED`**. *(Amendment note: it was adopted for
-  positive-only reconcile only by its own separately authorized slice — see the SEARCH amendment
-  at §12. That changed no rule of this section: the bullets below still hold as written.)*
+- `SMARTSTORE_PRODUCT_SEARCH` stayed **`NOT_ADOPTED`** when this was decided. *(Amendment note:
+  it is `ADOPTED` now, for positive-only reconcile only, by its own separately authorized slice —
+  see the SEARCH amendment at §12. That adoption relaxes none of the rules that follow: the
+  verdict, the override refusals, the insufficiency of a zero-result search and the `BLOCKED`
+  canary all still hold.)*
 - The official-evidence verdict stays **`INSUFFICIENT`** (Issue #89 `5768312853` / `5768347233`;
   `documents/acceptance/milestones/M5.md` §9.1).
 - **No LIVE grant, brake release, backup proof, retention proof, visual acceptance or user approval

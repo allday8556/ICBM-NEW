@@ -469,9 +469,10 @@ class ExecutionPolicy:
     endpoint_group: str = CREATE_ENDPOINT_GROUP
     max_proven_failures: int = 3
     # ADR-0014 §28.4: the bounded automatic reconcile schedule — implementation policy, finite by
-    # construction. After the n-th automatic check of an Intent the next is due this long after
-    # it finished; after the last one no further automatic check is ever due, and the Intent
-    # stays 재확인필요 for an operator.
+    # construction. The first automatic check of an Intent runs when it is first found; after the
+    # n-th one the next is due ``reconcile_schedule[n-1]`` after it finished. There are therefore
+    # ``len(reconcile_schedule) + 1`` automatic checks at most; after the last no further automatic
+    # check is ever due, and the Intent stays 재확인필요 for an operator.
     reconcile_schedule: tuple[timedelta, ...] = (
         timedelta(minutes=15),
         timedelta(hours=1),
@@ -480,6 +481,10 @@ class ExecutionPolicy:
     )
     # The most Intents one automatic pass reconciles: its provider-read budget (§28.4).
     reconcile_batch: int = 10
+    # A check still in flight this long after it started was abandoned by a process that died
+    # mid-check; it is finished as ERROR so single-flight never blocks its Intent forever. Longer
+    # than any bounded check can take (at most four search pages and one read-back).
+    reconcile_check_timeout: timedelta = timedelta(minutes=10)
 
     def __post_init__(self) -> None:
         # M5 sends one operation, CREATE, to one endpoint group, and the budget it counts is that
@@ -974,6 +979,9 @@ class RegistrationExecutionService:
                 details={"next_due_at": due.isoformat()},
             )
         with self._registrations.transaction() as unit:
+            unit.abandon_stale_check(
+                intent_id, older_than=self._clock.now() - self._policy.reconcile_check_timeout
+            )
             check = unit.start_reconcile_check(intent_id, trigger=trigger)
         automatic = sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) + (
             1 if trigger is ReconcileTrigger.AUTO else 0
@@ -1047,13 +1055,14 @@ class RegistrationExecutionService:
         read, so an exhausted Intent never starves a newer one. Each check is read-only towards
         the provider and decides nothing by itself.
         """
-        limit = len(self._policy.reconcile_schedule)
+        limit = len(self._policy.reconcile_schedule) + 1
         outcomes: list[ExecutionResult | str] = []
         for intent_id in self._registrations.unknown_intents():
             if len(outcomes) >= self._policy.reconcile_batch:
                 break
             checks = self._registrations.reconcile_checks(intent_id)
-            if checks and checks[-1].in_flight:
+            stale = self._clock.now() - self._policy.reconcile_check_timeout
+            if checks and checks[-1].in_flight and checks[-1].started_at >= stale:
                 continue
             if sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) >= limit:
                 continue
@@ -1071,11 +1080,16 @@ class RegistrationExecutionService:
         return tuple(outcomes)
 
     def _next_due(self, automatic_checks: int) -> datetime | None:
-        """When the next automatic check is due, or ``None`` once the schedule is exhausted."""
+        """When the next check is due after one that brings an Intent to ``automatic_checks``
+        automatic checks, or ``None`` once the automatic series is exhausted.
+
+        After the n-th automatic check the wait is ``reconcile_schedule[n-1]``; an operator check
+        made before any automatic one waits the first interval, so a repeated trigger coalesces.
+        """
         schedule = self._policy.reconcile_schedule
-        if automatic_checks >= len(schedule):
+        if automatic_checks > len(schedule):
             return None
-        return self._clock.now() + schedule[automatic_checks]
+        return self._clock.now() + schedule[max(automatic_checks - 1, 0)]
 
     def _observe(
         self, marketplace_account_id: str, listing_identity: str, trigger: ReconcileTrigger

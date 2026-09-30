@@ -257,8 +257,22 @@ def test_only_an_exact_storefarm_code_is_a_candidate() -> None:
             [page([], total_pages=2, total=0), page([], number=2, total_pages=3, total=0)],
             "SEARCH_RESPONSE_INCONSISTENT",
         ),
+        (
+            # Drift: product 1 shifted onto page 2 as well, so another product was never read.
+            [
+                page([item(1, channel(1, 2))], total_pages=2, total=2),
+                page([item(1, channel(1, 2))], number=2, total_pages=2, total=2),
+            ],
+            "SEARCH_RESPONSE_INCONSISTENT",
+        ),
     ],
-    ids=["page-answers-as-another", "last-page-unread", "count-disagrees", "totals-moved"],
+    ids=[
+        "page-answers-as-another",
+        "last-page-unread",
+        "count-disagrees",
+        "totals-moved",
+        "product-read-twice",
+    ],
 )
 def test_an_inconsistent_enumeration_is_never_a_count(
     pages: list[dict[str, Any]], code: str
@@ -356,3 +370,12 @@ def test_the_search_is_never_duplicate_absence_evidence() -> None:
     assert duplicate.available() is False
     with pytest.raises(lookup.DuplicateLookupUnavailableError):
         duplicate.evidence(marketplace_account_id="mpa-1", listing_identity=IDENTITY)
+
+
+def test_a_product_repeated_across_pages_is_never_a_unique_candidate() -> None:
+    # Pagination drift must not turn one exact candidate seen twice into a unique positive result.
+    first = page([item(11, channel(11, 21))], total_pages=2, total=2)
+    second = page([item(11, channel(11, 21))], number=2, total_pages=2, total=2)
+    found = find(Provider(ok(first), ok(second)))
+    assert found["status"] == "ERROR" and found["candidates"] == []
+    assert found["code"] == "SEARCH_RESPONSE_INCONSISTENT"
