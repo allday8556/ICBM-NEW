@@ -8,7 +8,8 @@ The files column counts the tracked files under each path; `tests/contracts/test
 (`test_the_repository_map_counts_match_the_tree`) checks every count against `git ls-files`.
 Note: until PR #157 the map under-counted `integrations/` and `integrations/marketplaces/` by one,
 because `integrations/marketplaces/base.py` was restored after the counts were taken; with that file
-removed by PR #157, the listed 35 and 15 are the tree's counts.
+removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #158) added
+`integrations/marketplaces/smartstore/create.py` and its unit suite, so the table now lists 36 and 16.
 
 | path | files | role |
 | --- | --- | --- |
