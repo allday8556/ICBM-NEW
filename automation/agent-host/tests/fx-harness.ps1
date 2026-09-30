@@ -1269,6 +1269,8 @@ $orchestratorExpect = @{
 if ($orchestratorExpect.ContainsKey($Scenario)) {
     $e = $orchestratorExpect[$Scenario]
     $logText = Get-Content $transcript -Raw
+    # the recorded class is one of exactly two, whatever the status: an exhausted technical hold is a TECHNICAL_HOLD
+    $wantClass = switch ("$($runtime.status)") { "HUMAN_DECISION_REQUIRED" { "HUMAN_DECISION_REQUIRED" } "TECHNICAL_HOLD" { "TECHNICAL_HOLD" } "TECHNICAL_HOLD_EXHAUSTED" { "TECHNICAL_HOLD" } default { "NONE" } }
     $actual = @{
         status = "$($runtime.status)"
         action = "$($runtime.action)"
@@ -1292,6 +1294,7 @@ if ($orchestratorExpect.ContainsKey($Scenario)) {
     if (@($global:FxCalls | Where-Object { $_ -like "FORBIDDEN*" -or $_ -like "UNHANDLED*" }).Count -gt 0) { $failed.Add("forbidden_or_unhandled_gh_call") }
     if (($before | ConvertTo-Json) -ne ($after | ConvertTo-Json)) { $failed.Add("user_repo_changed") }
     if ($logText -match '(?m)^HUMAN_HOLD=') { $failed.Add("legacy_HUMAN_HOLD_line") }
+    if ("$($runtime.hold_class)" -ne $wantClass) { $failed.Add("hold_class=$($runtime.hold_class)(want $wantClass)") }
     $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ";") }
     Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
 }

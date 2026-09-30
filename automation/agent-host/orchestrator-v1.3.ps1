@@ -106,7 +106,9 @@ function Save-RuntimeState {
         detail = $Detail
         auto_merge = $autoMerge
         auto_next = $autoNext
-        hold_class = $(if ($Status -in @("HUMAN_DECISION_REQUIRED", "TECHNICAL_HOLD", "TECHNICAL_HOLD_EXHAUSTED")) { $Status } else { "NONE" })
+        # exactly two classes (protocol §5.1). An exhausted technical hold is still a TECHNICAL_HOLD: the status says
+        # the circuit breaker ended the run, the class does not change.
+        hold_class = $(if ($Status -eq "HUMAN_DECISION_REQUIRED") { "HUMAN_DECISION_REQUIRED" } elseif ($Status -in @("TECHNICAL_HOLD", "TECHNICAL_HOLD_EXHAUSTED")) { "TECHNICAL_HOLD" } else { "NONE" })
         toolset_sha256 = $toolsetSha
         updated_at = (Get-Date).ToString("o")
     }

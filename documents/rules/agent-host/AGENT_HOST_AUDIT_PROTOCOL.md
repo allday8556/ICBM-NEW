@@ -287,9 +287,14 @@ Its inputs are **content-bound source identities**:
 - the PR's changed files and their complete diff;
 - slice specification path and blob SHA, and the scope allow-list source, when the Host selected
   the slice;
-- the slice declaration itself: the PR body, as a required source, by its locator and the SHA-256
-  of its body. It is read once per generation, and the citations are taken from that same read;
-- the durable evidence the slice declaration cites (§3);
+- the slice declaration itself (§3):
+  - the PR body, as a required source, by its locator and the SHA-256 of its body. It is read once
+    per generation;
+  - the Host's slice specification or remediation authorization, when one exists, by the identity
+    listed above;
+- the durable evidence the declaration cites (§3). Citations are read from the whole declaration:
+  the PR body as it was read for the packet, and the slice specification or remediation
+  authorization when one exists;
 - the scanned-stream list, and the source watermark as scan provenance only, outside the canonical
   packet bytes (§3, §4.2).
 
@@ -317,8 +322,9 @@ used to build it.
 Hard completeness checks:
 
 - the PR body is readable and is present in the packet, once, as a required source;
-- every citation of the declaration resolves to a source a scanned stream holds, and that source
-  is present in the packet, once, with its body;
+- every citation of the declaration — the PR body and, when one exists, the slice specification or
+  remediation authorization — resolves to a source a scanned stream holds, and that source is
+  present in the packet, once, with its body;
 - every source in every scanned stream is re-scanned in full at its current body (§3);
 - every changed file of the PR is in the packet, complete;
 - packet HEAD and base match the candidate being audited.
@@ -399,6 +405,8 @@ TECHNICAL_HOLD            everything else. The Host recovers or retries by itsel
 
 - The class comes from the **category** of the reason, never from how often something failed, and
   never from the words `HUMAN_DECISION_REQUIRED` alone.
+- There is no third class. A run the circuit breaker ended has the status
+  `TECHNICAL_HOLD_EXHAUSTED` and the class `TECHNICAL_HOLD`.
 - The human categories are a closed list in the Host: `NEW_PRODUCT_FEATURE`,
   `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`, `PROVIDER_CALL`, `CANARY`,
   `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`, `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`,

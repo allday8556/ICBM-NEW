@@ -84,7 +84,7 @@ identity.
 | file | role | sha256 |
 | --- | --- | --- |
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
-| `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `20be4f6abef49c7fa271ebbc07f11f0af1c5fd365b6332014669e1c38819e083` |
+| `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `4febbf3b7e405b220199cdb3c8ed6340e41fda55a2883b1525747e64754f97c4` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f556d9fef16cd6b85ab468ca94bc13acfd84bff5dd4d0c42fceec843dbaddb6d` |
 | `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `a5ff7bde46db348ca677647c6542bcbcb3722b0eb421bd289b00694e845f0dc8` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
@@ -92,7 +92,7 @@ identity.
 | `run-lookahead-main-v1.ps1` | next-slice selector | `6e07b517ea2d425609db4767421f2e3f6d575272a1ac0b8da6c9350aa41329c9` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `21f512c5338b388b08cc0f6061d1b7ac2c31c3bc256c67173dced75c92407816` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `3e63724715f586fe5662d042266df28afe9f5be66ec33cfe16c1c47003f3d050` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `d6bdac1a09b04cdf078d351f99ac92a693f6843b32f3d409b1a11cecc2d7180c` |
 
