@@ -130,8 +130,10 @@ CANONICAL_TABLES = (
     "registration_reconcile_checks",
     # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428).
     "registration_authoring_revisions",
+    # The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106).
+    "canary_eligibility_records",
 )
-HEAD = "0032_m5_registration_authoring_revisions"
+HEAD = "0033_m5_canary_eligibility"
 
 
 def _url(path: Path) -> str:

@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.capabilities.live_safety.eligibility import asset_unit_ref, binding_of
 from app.capabilities.live_safety.model import (
     ARTIFACT_NOT_GRANTED,
     CONTENT_DIGEST_MISMATCH,
@@ -371,6 +372,13 @@ class PreparationCandidateGate:
             # The same verdict the ASSET grant was issued on: READY and an upload permitted.
             ready=result.status is ReadinessStatus.READY and result.upload_permitted,
             fingerprint=result.candidate_fingerprint,
+            # §5.1: the eligibility lineage of this same evaluation. Only the current revision
+            # has one: an evaluation is always of what is authored now.
+            eligibility=binding_of(
+                result if current else None,
+                preparation_revision_id,
+                unit_ref=asset_unit_ref(preparation_revision_id),
+            ),
         )
 
 

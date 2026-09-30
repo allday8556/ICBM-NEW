@@ -1042,13 +1042,13 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Four are still missing at this main —
-    a production ASSET sender, the durable canary-eligibility owner, an executable
-    committed-session read-back and a comparison that proves published state, the two halves of
-    ADR-0014 §11's success proof — and none is authorized by ADR-0020. A fifth, the ADR-0014 §27
-    authoring-revision owners without which neither stage's own preflight gate could be met, was
-    closed by its own slice under the architect resolution 5907626428 (ADR-0014 §27.1), and the
-    order records it as closed rather than dropping it."""
+    order may never omit a mandatory pre-canary prerequisite. Three are still missing at this main
+    — a production ASSET sender, an executable committed-session read-back and a comparison that
+    proves published state, the two halves of ADR-0014 §11's success proof — and none is
+    authorized by ADR-0020. Two were closed by their own slices, each under its own architect
+    resolution, and the order records them as closed rather than dropping them: the ADR-0014 §27
+    authoring-revision owners (5907626428, ADR-0014 §27.1) and the durable canary-eligibility
+    owner (5910018106, ADR-0018 §5.1)."""
     from app.capabilities.live_safety.assets import UnwiredAssetSender
     from app.capabilities.live_safety.proofs import DurableStageProofs
     from app.stages.register.authoring_revisions import AuthoringRevisionKind
@@ -1066,9 +1066,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "This ADR authorizes none of them, and none may be skipped",
         "the **production ASSET sender**",
         "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
-        "the **durable canary-eligibility owner** (ADR-0018 §5)",
+        "~~the **durable canary-eligibility owner** (ADR-0018 §5)~~ — **closed by its own slice**"
+        " (ADR-0018 §5.1; Issue #89 architect resolution `5910018106`; migration `0033`)",
         "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
-        "the eligibility record's data model is explicitly undecided (ADR-0018 §13)",
+        "an operator assertion is never it",
+        "still unproven for every lineage that has no current `PROVEN_OUTSIDE` record",
+        "the eligibility record's data model was explicitly undecided (ADR-0018 §13)",
         "~~the **authoring-revision owners** for the category mapping and the detail composition"
         " (ADR-0014 §27)~~ — **closed by its own slice** (ADR-0014 §27.1; Issue #89 architect"
         " resolution `5907626428`; migration `0032`)",
@@ -1095,14 +1098,18 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "Four prerequisites are still",
         "note grants none of them",
         "Closing that row makes no unit `READY` by itself",
+        "**Amendment note (canary-eligibility owner slice; Issue #89 `5910018106`).**",
+        "Three prerequisites",
+        "Closing that row proves no lineage by itself",
     ):
         assert element in flat, element
     # The prerequisites carry no numbered position, so the order above never contradicts the
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 4
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 3
     assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
+    assert len(re.findall(r"^\| ~~the \*\*durable canary-eligibility owner\*\*", order, re.M)) == 1
     # The remaining user-decision steps are still listed, and now after those prerequisites.
     assert flat.index("production ASSET sender") < flat.index("the residual-risk acceptance, the")
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
@@ -1111,6 +1118,7 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     for element in (
         "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
         "the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1",
+        "the durable canary-eligibility owner by its own, ADR-0018 §5.1",
         "the executable committed-session read-back",
         "a read-back comparison that proves published state",
         "are still missing, are not authorized here",
@@ -1129,9 +1137,7 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     for element in (
         "the standing authorization does **not** cover any of them",
         "production ASSET sender",
-        "**durable canary-eligibility owner** of ADR-0018 §5",
         "not provider-zero",
-        "ADR-0018 §13 leaves its data model undecided",
         "**executable committed-session read-back**",
         "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
@@ -1153,24 +1159,38 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     ):
         assert element in ordering, element
     assert "authoring-revision owners** of ADR-0014 §27 for" not in ordering
+    for element in (
+        "**Pre-canary prerequisite closed — the canary-eligibility owner** (ADR-0018 §5.1;",
+        "architect resolution `5910018106`; migration `0033`",
+        "`CANARY_NON_REGULATED` is proven only for the exact lineage whose current record is"
+        " `PROVEN_OUTSIDE`",
+        "an operator assertion is never evidence",
+        "It is never a `COMPLIANCE PASS`, adds nothing to `CategoryMetadata` and implements no"
+        " ComplianceGate",
+    ):
+        assert element in ordering, element
+    assert "canary-eligibility owner** of ADR-0018 §5 (" not in ordering
     preconditions = " ".join(_section(roadmap, r"^14\.2 Preconditions").split())
     for element in (
         "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
         "`UnwiredAssetSender` declares the adopted wire endpoint and refuses every send",
-        "proving `CANARY_NON_REGULATED`",
+        "The **durable canary-eligibility owner** (ADR-0018 §5) is closed by its own slice"
+        " (ADR-0018 §5.1)",
+        "`CANARY_NON_REGULATED` still has to be proven for the exact canary lineage by a current"
+        " `PROVEN_OUTSIDE` record",
         "**owners for the category-mapping and detail-composition authoring revisions** — is"
         " closed by its own slice (ADR-0014 §27.1)",
         "still has to be `READY` on every other rule",
-        "none is authorized by the ADR-0020 standing authorization",
+        "which is not authorized by the ADR-0020 standing authorization",
         "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
         "an **executable committed-session read-back**",
         "a **comparison that proves published state**",
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
-    # The runtime facts that make them prerequisites still hold: no sender and no eligibility
-    # owner. The authoring-revision owner exists and is wired; a client still names neither
-    # revision.
+    # The runtime fact that makes it a prerequisite still holds: no sender. The
+    # authoring-revision owner exists and is wired; a client still names neither revision. The
+    # eligibility owner exists and is the only thing the durable proof source reads.
     sender = UnwiredAssetSender(
         marketplace_key="smartstore",
         wire=("POST", "host", "/path"),
@@ -1178,7 +1198,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         adopted=True,
     )
     assert sender.available() is False
-    assert "return False" in inspect.getsource(DurableStageProofs.canary_non_regulated)
+    assert (
+        inspect.getsource(DurableStageProofs.canary_non_regulated)
+        .rstrip()
+        .endswith("return self._eligibility.proven(stage, unit_ref, binding)")
+    )
+    assert "CanaryEligibilityService(" in _read(REPO_ROOT / "app" / "container.py")
     assert "UnwiredAssetSender(" in _read(REPO_ROOT / "app" / "container.py")
     assert AUTHORING_REVISIONS_UNOWNED == "AUTHORING_REVISIONS_UNOWNED"
     assert SERVER_OWNED_AUTHORING_REVISIONS == (
@@ -1326,7 +1351,8 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     assert isinstance(mode, ast.Name) and mode.id == "execution_mode"
     # Area 2: the restore and retention proofs are durable owners. Area 3: visual acceptance is the
     # reviewed record of exactly the running code (its digest, taken once at composition) at the
-    # current head. Eligibility (§5) has no owner yet, so the durable proof source answers False.
+    # current head. Eligibility (§5.1) is the durable owner's answer for the exact lineage the
+    # stack derived, never a constant.
     assert isinstance(proofs, ast.Name) and proofs.id == "stage_proofs"
     (durable,) = _calls(tree, "DurableStageProofs")
     visual = _keyword(durable, "visual")
@@ -1340,8 +1366,10 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     (sha,) = _calls(tree, "running_checkout_sha")
     assert ast.unparse(sha) == "running_checkout_sha()"
     source = importlib.import_module("app.capabilities.live_safety.proofs").DurableStageProofs
-    never = inspect.getsource(source.canary_non_regulated)
-    assert never.rstrip().endswith("return False")
+    eligibility = _keyword(durable, "eligibility")
+    assert isinstance(eligibility, ast.Name) and eligibility.id == "canary_eligibility"
+    proven = inspect.getsource(source.canary_non_regulated)
+    assert proven.rstrip().endswith("return self._eligibility.proven(stage, unit_ref, binding)")
     recorded = inspect.getsource(source.visual_acceptance_recorded)
     assert recorded.rstrip().endswith("return self._visual.recorded()")
     owner = inspect.getsource(
@@ -3064,6 +3092,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428): the append-only
         # category-mapping and detail-composition profile revisions.
         "registration_authoring_revisions",
+        # The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106): the append-only
+        # eligibility record of one exact canary lineage; never a COMPLIANCE PASS.
+        "canary_eligibility_records",
     }
     offenders = [
         path

@@ -153,6 +153,8 @@ class CreateAuthority(Protocol):
         truth_fence: int,
         actor: str,
         correlation_id: str,
+        send_gate: PreflightResult | None = None,
+        preparation_revision_id: str | None = None,
     ) -> Any: ...
 
     def truth_fence(self) -> int:
@@ -712,6 +714,9 @@ class RegistrationExecutionService:
         truth_fence = self._authority.truth_fence()
         fresh = self._gate(intent, snapshot, request, prepared, generation)
         sanitized_request = self._sanitized_request(snapshot, fresh)
+        # ADR-0018 §5.1: the authored revision that froze this Snapshot. With the send gate above
+        # it is the exact lineage canary eligibility is proven for; read before the unit.
+        provenance = self._registrations.snapshot_preparation(snapshot.registration_snapshot_id)
         try:
             with self._registrations.transaction() as unit:
                 attempts = unit.attempts(intent.intent_id)
@@ -733,6 +738,10 @@ class RegistrationExecutionService:
                     truth_fence=truth_fence,
                     actor=self._actor,
                     correlation_id=correlation_id,
+                    send_gate=fresh,
+                    preparation_revision_id=(
+                        None if provenance is None else provenance.preparation_revision_id
+                    ),
                 )
                 attempt = unit.start_attempt(
                     intent.intent_id,

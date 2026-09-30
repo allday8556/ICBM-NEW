@@ -47,6 +47,11 @@ from typing import Any, Protocol
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.capabilities.live_safety.eligibility import (
+    EligibilityBinding,
+    binding_of,
+    create_unit_ref,
+)
 from app.capabilities.live_safety.model import (
     ARTIFACT_NOT_GRANTED,
     ATTEMPT_OWNER_UNREADABLE,
@@ -87,6 +92,7 @@ from app.capabilities.live_safety.store import (
 )
 from app.platform.core.execution import ExecutionMode
 from app.stages.register.model import ExecutionScopeState
+from app.stages.register.preparation import PreflightResult
 from app.stages.register.store import IntentRecord, ScopeRecord
 
 # A second selection of the same outbound bytes in one unit: one upload may serve it only through
@@ -146,7 +152,9 @@ class ModeReader(Protocol):
 class StageProofs(Protocol):
     """The proven prerequisites of §5, §6.1, §7, §8 and §9 that the stack reads, never decides."""
 
-    def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool: ...
+    def canary_non_regulated(
+        self, stage: MutationStage, unit_ref: str, binding: EligibilityBinding | None
+    ) -> bool: ...
 
     def residual_risk_accepted(self) -> bool: ...
 
@@ -166,6 +174,9 @@ class CandidateState:
     current: bool
     ready: bool
     fingerprint: str | None
+    # §5.1: the eligibility lineage of this exact candidate, derived with it; ``None`` when no
+    # review packet can be built, so canary eligibility is unproven.
+    eligibility: EligibilityBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +185,8 @@ class StageGate:
 
     ready: bool
     reasons: tuple[str, ...] = ()
+    # §5.1: the eligibility lineage of the final preflight that reproduces the Intent's Snapshot.
+    eligibility: EligibilityBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -216,8 +229,16 @@ class SafetyStack:
         truth_fence: int,
         actor: str,
         correlation_id: str,
+        send_gate: PreflightResult | None = None,
+        preparation_revision_id: str | None = None,
     ) -> GrantRecord:
         """Admit one CREATE attempt inside the unit that opens it, and spend its grant.
+
+        ``send_gate`` is the final preflight the caller re-evaluated just before this unit, and
+        ``preparation_revision_id`` the authored revision that froze the Snapshot: together they
+        are the exact lineage canary eligibility is proven for (§5.1). The binding is computed
+        from them here without reading anything; ``truth_fence`` proves they are still current.
+        Without them eligibility is unproven.
 
         The grant must name this exact Snapshot, Intent, idempotency key **and attempt number**:
         after a ``NOT_APPLIED_PROVEN`` attempt the next attempt needs a new grant (G3-27). ``scope``
@@ -234,12 +255,14 @@ class SafetyStack:
         # evaluated, while the write coordinator now keeps every other writer out (§4.3).
         truth_held = unit.owner_writes() == truth_fence
         grant = self._create_grant(unit, intent, attempt_no)
+        unit_ref = create_unit_ref(intent.intent_id)
         layers = self._common(
             unit,
             MutationStage.CREATE,
-            unit_ref=f"registration_intent:{intent.intent_id}",
+            unit_ref=unit_ref,
             target_digest=_create_digest(intent, attempt_no, scope),
             endpoint_adopted=endpoint_adopted,
+            eligibility=binding_of(send_gate, preparation_revision_id, unit_ref=unit_ref),
         )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
         layers.append(_reconcile_layer(reconcile_path_adopted))
@@ -264,9 +287,10 @@ class SafetyStack:
             layers = self._common(
                 unit,
                 MutationStage.CREATE,
-                unit_ref=f"registration_intent:{intent.intent_id}",
+                unit_ref=create_unit_ref(intent.intent_id),
                 target_digest=_create_digest(intent, attempt_no, scope),
                 endpoint_adopted=endpoint_adopted,
+                eligibility=stage_gate.eligibility,
             )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
         # §10: the CREATE endpoint-adoption row is CREATE **and** the positive-only reconcile path.
@@ -474,6 +498,7 @@ class SafetyStack:
             unit_ref=f"preparation_revision:{target.candidate.preparation_revision_id}",
             target_digest=target_digest,
             endpoint_adopted=target.endpoint_adopted,
+            eligibility=target.candidate.eligibility,
         )
         layers.insert(2, _layer(Layer.GRANT, matching, GRANT_MISSING))
         layers.insert(
@@ -526,6 +551,7 @@ class SafetyStack:
         unit_ref: str,
         target_digest: str,
         endpoint_adopted: bool,
+        eligibility: EligibilityBinding | None,
     ) -> list[LayerView]:
         state = self._mode.state()
         live = bool(state.live_writes_permitted) and state.mode is ExecutionMode.LIVE
@@ -553,7 +579,7 @@ class SafetyStack:
             ),
             _layer(
                 Layer.CANARY_NON_REGULATED,
-                proofs.canary_non_regulated(stage, unit_ref),
+                proofs.canary_non_regulated(stage, unit_ref, eligibility),
                 ELIGIBILITY_UNPROVEN,
             ),
             _layer(
