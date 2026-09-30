@@ -390,6 +390,7 @@ def test_the_unaccepted_residual_risk_alone_refuses_the_create_and_spends_nothin
             store=LiveAuthorityStore(container.db, container.clock, container.audit),
             retention=container.retention,
             visual=container.visual_acceptance,
+            eligibility=container.canary_eligibility,
             schema_head=lambda: "head",
         ).residual_risk_accepted()
         is False

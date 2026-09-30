@@ -55,6 +55,7 @@ from app.capabilities.live_safety.model import (
 )
 from app.capabilities.live_safety.models import (
     AssetUploadAttempt,
+    CanaryEligibilityRecord,
     LiveGrant,
     ProtectedWriteBrake,
     RestoreDrill,
@@ -966,6 +967,93 @@ class LiveUnit:
             }
             for row in rows
         )
+
+    # ------------------------------------------------------------------ canary eligibility (§5.1)
+
+    def record_eligibility(
+        self,
+        *,
+        binding: Mapping[str, str],
+        checks: Mapping[str, Any],
+        verdict: str,
+        actor: str,
+        correlation_id: str,
+    ) -> CanaryEligibilityRecord:
+        """Append one eligibility record. The only writer of ``canary_eligibility_records``.
+
+        ``binding`` is the server-derived lineage (``eligibility._scope``); ``seq`` is the next of
+        its exact scope, so the newest record is the current one and none is ever rewritten."""
+        if not actor.strip() or not correlation_id.strip():
+            raise _invalid("an eligibility record names who recorded it")
+        require_clean(dict(checks))
+        current = self.current_eligibility(binding)
+        row = CanaryEligibilityRecord(
+            eligibility_id=str(uuid.uuid4()),
+            marketplace_key=binding["marketplace_key"],
+            marketplace_account_id=binding["marketplace_account_id"],
+            preparation_revision_id=binding["preparation_revision_id"],
+            candidate_fingerprint=binding["candidate_fingerprint"],
+            taxonomy_revision=binding["taxonomy_revision"],
+            category_id=binding["category_id"],
+            category_metadata_revision=binding["category_metadata_revision"],
+            scope_version=binding["scope_version"],
+            seq=1 if current is None else current.seq + 1,
+            review_packet_digest=binding["review_packet_digest"],
+            checks_json=json.dumps(dict(checks), sort_keys=True),
+            verdict=verdict,
+            recorded_by=actor,
+            recorded_at=self._clock.now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._event(
+            AuditEventType.CANARY_ELIGIBILITY_RECORDED,
+            "record_canary_eligibility",
+            actor,
+            correlation_id,
+            f"canary_eligibility:{row.eligibility_id}",
+            before=None if current is None else {"eligibility_id": current.eligibility_id},
+            after={
+                "eligibility_id": row.eligibility_id,
+                "seq": row.seq,
+                "verdict": row.verdict,
+                "review_packet_digest": row.review_packet_digest,
+            },
+            details={
+                "marketplace_key": row.marketplace_key,
+                "marketplace_account_id": row.marketplace_account_id,
+                "preparation_revision_id": row.preparation_revision_id,
+                "candidate_fingerprint": row.candidate_fingerprint,
+                "scope_version": row.scope_version,
+            },
+        )
+        return row
+
+    def eligibility_records(
+        self, binding: Mapping[str, str]
+    ) -> tuple[CanaryEligibilityRecord, ...]:
+        """Every record of exactly this scope, oldest first."""
+        return tuple(
+            self.session.scalars(
+                select(CanaryEligibilityRecord)
+                .where(
+                    CanaryEligibilityRecord.marketplace_key == binding["marketplace_key"],
+                    CanaryEligibilityRecord.marketplace_account_id
+                    == binding["marketplace_account_id"],
+                    CanaryEligibilityRecord.preparation_revision_id
+                    == binding["preparation_revision_id"],
+                    CanaryEligibilityRecord.candidate_fingerprint
+                    == binding["candidate_fingerprint"],
+                    CanaryEligibilityRecord.scope_version == binding["scope_version"],
+                )
+                .order_by(CanaryEligibilityRecord.seq)
+            ).all()
+        )
+
+    def current_eligibility(self, binding: Mapping[str, str]) -> CanaryEligibilityRecord | None:
+        """The current record of exactly this scope: its highest ``seq``, or none."""
+        records = self.eligibility_records(binding)
+        return records[-1] if records else None
 
     # ------------------------------------------------------------------ audit
 

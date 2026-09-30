@@ -20,6 +20,7 @@ from app.capabilities.live_safety.assets import (
 )
 from app.capabilities.live_safety.authority import LiveAuthorityService
 from app.capabilities.live_safety.drill import DrillPaths, RestoreDrillService
+from app.capabilities.live_safety.eligibility import CanaryEligibilityService
 from app.capabilities.live_safety.gates import CanaryStageReadiness
 from app.capabilities.live_safety.model import WireHostPolicy
 from app.capabilities.live_safety.proofs import DurableStageProofs
@@ -180,6 +181,7 @@ class Container:
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
     live_authority: LiveAuthorityService
+    canary_eligibility: CanaryEligibilityService
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
     restore_drills: RestoreDrillService
@@ -481,7 +483,7 @@ def build_container(
     # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the
     # commit this process runs at and its running code digest (both taken once at composition), at
     # the current schema head.
-    # Eligibility (§5) still has no owner, so it stays false.
+    # Eligibility (§5.1) is its own durable owner, wired below; no record exists for any lineage.
     retention = RetentionProofService(
         db=db,
         store=live_store,
@@ -497,10 +499,16 @@ def build_container(
         code_identity=lambda: code_identity,
         schema_head=head_revision,
     )
+    # ADR-0018 §5.1 (Issue #89 5910018106): the canary-eligibility owner. A record proves
+    # CANARY_NON_REGULATED only for the exact lineage the stack re-derives at each stage.
+    canary_eligibility = CanaryEligibilityService(
+        store=live_store, registrations=registrations, preparations=registration_preparations
+    )
     stage_proofs = DurableStageProofs(
         store=live_store,
         retention=retention,
         visual=visual_acceptance,
+        eligibility=canary_eligibility,
         schema_head=head_revision,
     )
     safety_stack = SafetyStack(
@@ -688,6 +696,7 @@ def build_container(
         registration_builder=registration_builder,
         registration_execution=registration_execution,
         live_authority=live_authority,
+        canary_eligibility=canary_eligibility,
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
         restore_drills=restore_drills,

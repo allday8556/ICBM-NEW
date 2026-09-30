@@ -159,6 +159,9 @@ M5_HEAD = "0020_g1_registration_category_metadata"
 M5_RECONCILE = "0031_m5_registration_reconcile"
 # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428), authorized as 0032.
 M5_AUTHORING = "0032_m5_registration_authoring_revisions"
+# The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106), authorized as 0033. Its
+# table is live-safety evidence, not registration state.
+M5_ELIGIBILITY = "0033_m5_canary_eligibility"
 M5_MIGRATIONS = (
     M5_FOUNDATION,
     M5_EXECUTION_SCOPE,
@@ -188,7 +191,7 @@ ADAPTIVE_C1_PREP0 = "0028_phase_c_read_accounting"
 G3_AREA2 = "0029_g3_restore_retention"
 # Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record, never registration state.
 G3_AREA3 = "0030_g3_visual_acceptance"
-SCHEMA_HEAD = M5_AUTHORING
+SCHEMA_HEAD = M5_ELIGIBILITY
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -202,6 +205,7 @@ AFTER_M5 = (
     G3_AREA3,
     M5_RECONCILE,
     M5_AUTHORING,
+    M5_ELIGIBILITY,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

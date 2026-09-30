@@ -155,6 +155,7 @@ def proofs(container: Container) -> DurableStageProofs:
         store=live(container),
         retention=container.retention,
         visual=container.visual_acceptance,
+        eligibility=container.canary_eligibility,
         schema_head=head_revision,
     )
 
@@ -214,6 +215,7 @@ def test_an_asset_drill_restores_the_exact_pre_upload_chain_into_a_fresh_root(
         store=live(container),
         retention=container.retention,
         visual=container.visual_acceptance,
+        eligibility=container.canary_eligibility,
         schema_head=lambda: "other-head",
     )
     assert not other_head.restore_proof(MutationStage.ASSET, result.target_digest)
@@ -344,8 +346,19 @@ def test_a_lost_artifact_or_a_missing_required_element_fails_the_drill(
 # ---------------------------------------------------------------- the CREATE drill
 
 
-def frozen_unit(api: TestClient, container: Container, config: AppConfig) -> tuple[Any, dict]:
+def frozen_unit(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    *,
+    duplicate_proof: bool = True,
+    before_freeze: Any = None,
+) -> tuple[Any, dict]:
     """One frozen unit with its Intent, authored through the application's own preparation owner.
+
+    ``duplicate_proof`` is the target policy's ``duplicate_proof_required``; without it the unit
+    is frozen with no duplicate evidence. ``before_freeze`` is called with the preparation id
+    once it is authored, before anything is frozen.
 
     The served preflight reads the test's static sources — pointed at **real durable revision
     rows**, so the policy and metadata revisions a CREATE drill proves are owner rows, not labels.
@@ -386,7 +399,13 @@ def frozen_unit(api: TestClient, container: Container, config: AppConfig) -> tup
     )  # fmt: skip
     served = container.registration_preflight
     served._policies = StaticRegistrationPolicy(
-        (target(account, policy_revision=policy.policy_revision),)
+        (
+            target(
+                account,
+                policy_revision=policy.policy_revision,
+                duplicate_proof_required=duplicate_proof,
+            ),
+        )
     )
     served._metadata = StaticRegistrationMetadata(
         (metadata(metadata_revision=category.metadata_revision),), marketplace_key=UNIT_MARKET
@@ -405,7 +424,9 @@ def frozen_unit(api: TestClient, container: Container, config: AppConfig) -> tup
     assert created.status_code == 200, created.text
     preparation_id = created.json()["preparation_id"]
     authoring = container.registration_preparations
-    evidence = no_match(authoring.evaluate(preparation_id))
+    if before_freeze is not None:
+        before_freeze(preparation_id)
+    evidence = no_match(authoring.evaluate(preparation_id)) if duplicate_proof else None
     ready = authoring.evaluate(preparation_id, duplicate_evidence=evidence)
     assert ready.status.value == "READY", ready.codes
     frozen = authoring.freeze(

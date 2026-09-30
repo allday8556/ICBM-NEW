@@ -498,6 +498,7 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "visual_acceptances",
         "registration_reconcile_checks",
         "registration_authoring_revisions",
+        "canary_eligibility_records",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
