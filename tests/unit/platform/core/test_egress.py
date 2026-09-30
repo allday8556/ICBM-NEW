@@ -71,3 +71,29 @@ print(json.dumps(results))
     )
     results = json.loads(completed.stdout.strip().splitlines()[-1])
     assert results == {"dns": "blocked", "connect": "blocked", "loopback": "allowed", "attempts": 2}
+
+
+# ---------------------------------------------------------------- test isolation of the one guard
+
+_SEEN: dict[str, int] = {}
+
+
+def test_a_blocked_attempt_is_counted_inside_the_test_that_made_it() -> None:
+    from app.platform.core.egress import EGRESS
+
+    before = EGRESS.external_attempts
+    with pytest.raises(EgressBlockedError):
+        EGRESS._hook("socket.connect", (None, ("203.0.113.7", 443)))
+    # The production guard counts it, as always: nothing about the guard itself is relaxed.
+    assert EGRESS.external_attempts == before + 1
+    assert EGRESS.snapshot()["recent"][-1]["destination"] == "203.0.113.7"
+    _SEEN["before"] = before
+
+
+def test_the_next_test_starts_from_the_count_the_previous_one_found() -> None:
+    """The process-global guard never leaks one test's deliberate attempt into another test
+    (``tests/conftest.py::egress_count_is_per_test``). This runs right after the test above."""
+    from app.platform.core.egress import EGRESS
+
+    assert EGRESS.external_attempts == _SEEN["before"]
+    assert all(entry["destination"] != "203.0.113.7" for entry in EGRESS.snapshot()["recent"])

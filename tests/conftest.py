@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.config import AppConfig, database_path
 from app.container import Container, build_container
 from app.main import create_app
+from app.platform.core.egress import EGRESS
 from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
 from app.platform.db.migrate import upgrade_to_head
@@ -15,6 +16,26 @@ from tests.support.jobs_support import TEST_JOBS, FakeClock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL = "http://127.0.0.1"
+
+
+@pytest.fixture(autouse=True)
+def egress_count_is_per_test() -> Iterator[None]:
+    """Keep one test's blocked egress attempts out of the next test's readiness.
+
+    The egress guard is one process-global object and its audit hook can never be removed
+    (``app.platform.core.egress``). A test that makes a blocked external attempt on purpose would
+    therefore leave ``external_attempts`` raised for every later test of the same process, and a
+    readiness check that reads it would fail for a reason that is not its own. Each test leaves
+    the count and the recent attempts as it found them. The production guard is untouched: it is
+    never disabled and never reset, and a test still sees every attempt it made itself.
+    """
+    with EGRESS._lock:
+        attempts, recent = EGRESS._attempts, tuple(EGRESS._recent)
+    yield
+    with EGRESS._lock:
+        EGRESS._attempts = attempts
+        EGRESS._recent.clear()
+        EGRESS._recent.extend(recent)
 
 
 @pytest.fixture(scope="session")
