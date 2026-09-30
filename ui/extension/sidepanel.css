@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, "Malgun Gothic", sans-serif;
+  font-size: 13px;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: 12px;
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 13px;
+  margin: 16px 0 8px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+}
+
+dt {
+  opacity: 0.7;
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hint {
+  opacity: 0.7;
+}

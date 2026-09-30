@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>ICBM Capture</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main>
+      <h1>ICBM 수집</h1>
+
+      <section aria-labelledby="connection-title">
+        <h2 id="connection-title">연결</h2>
+        <dl>
+          <dt>확장 ID</dt>
+          <dd><code data-role="extension-id"></code></dd>
+          <dt>페어링</dt>
+          <dd data-role="pairing-state">확인 중</dd>
+          <dt>ICBM</dt>
+          <dd data-role="icbm-state">확인 전</dd>
+          <dt>공급처 페이지</dt>
+          <dd data-role="supplier-state">확인 중</dd>
+        </dl>
+        <button type="button" data-action="check" disabled>연결 확인</button>
+        <form data-role="pairing-form">
+          <label for="pairing-code">페어링 코드</label>
+          <textarea id="pairing-code" rows="3" autocomplete="off" spellcheck="false"></textarea>
+          <div class="row">
+            <button type="submit">페어링</button>
+            <button type="button" data-action="unpair">페어링 해제</button>
+          </div>
+          <p class="hint">
+            ICBM에서 <code>icbm extension pair --extension-id</code> 명령으로 발급한 코드를 한 번
+            붙여 넣습니다.
+          </p>
+        </form>
+      </section>
+
+      <section aria-labelledby="capture-title">
+        <h2 id="capture-title">이 상품 수집</h2>
+        <button type="button" data-action="capture" disabled>이 상품 수집</button>
+        <dl>
+          <dt>전송 상태</dt>
+          <dd data-role="transport-state">대기</dd>
+          <dt>실행 결과</dt>
+          <dd data-role="run-outcome">—</dd>
+          <dt>코드</dt>
+          <dd data-role="run-code">—</dd>
+          <dt>실행 ID</dt>
+          <dd><code data-role="run-id">—</code></dd>
+        </dl>
+        <p class="hint">
+          실행 결과는 ICBM이 확인해 준 값만 표시합니다. 수집 이력과 상세는 ICBM 수집관리에서
+          확인합니다.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
