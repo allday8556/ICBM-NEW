@@ -2643,9 +2643,10 @@ def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
     run.lookup.found = complete()
     with store.transaction() as unit:
         unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.AUTO)
-    with pytest.raises(RegistrationConflictError) as busy:
-        run.service.reconcile(ready.intent_id, correlation_id=CID)
-    assert busy.value.code == "REGISTER_RECONCILE_IN_FLIGHT"
+    # A trigger while the check is in flight coalesces into it: nothing is read or started.
+    coalesced = run.service.reconcile(ready.intent_id, correlation_id=CID)
+    assert coalesced.action == "RECONCILE_IN_FLIGHT"
+    assert run.lookup.calls == 0 and len(store.reconcile_checks(ready.intent_id)) == 1
     container.clock.advance(int(ExecutionPolicy().reconcile_check_timeout.total_seconds()) + 1)
     with pytest.raises(ExecutionRefused) as refused:
         run.service.reconcile(ready.intent_id, correlation_id=CID)

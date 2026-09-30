@@ -968,6 +968,16 @@ class RegistrationExecutionService:
         snapshot = self._registrations.snapshot(intent.registration_snapshot_id)
         assert snapshot is not None
         checks = self._registrations.reconcile_checks(intent_id)
+        stale = self._clock.now() - self._policy.reconcile_check_timeout
+        if checks and checks[-1].in_flight and checks[-1].started_at >= stale:
+            # §28.4 single-flight: a trigger while a check is in flight coalesces into it and
+            # reads nothing. (The store refuses a second open check as well, for a race.)
+            return ExecutionResult(
+                intent_id,
+                "RECONCILE_IN_FLIGHT",
+                IntentState.UNKNOWN,
+                details={"seq": checks[-1].seq},
+            )
         due = checks[-1].next_due_at if checks else None
         if due is not None and self._clock.now() < due:
             # §28.4: a repeated trigger before the next due time coalesces into the pending one;
