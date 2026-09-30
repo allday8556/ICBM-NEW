@@ -20,6 +20,7 @@ import json
 import re
 import sqlite3
 import tempfile
+import threading
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,9 +157,24 @@ def digest_of(objects: Iterable[SchemaObject]) -> str:
     return hashlib.sha256(f"{MANIFEST_VERSION}\n{encoded}".encode()).hexdigest()
 
 
-@functools.cache
+# Alembic keeps the running migration in one module-global context, so two migrations running in
+# the same process at once corrupt each other: a run reads the other's configuration, targets the
+# other's database or fails outright. Two requests that both ask for the contract before it is
+# cached would do exactly that, so the derivation is serialized; the cache then answers every
+# later call without migrating at all.
+_DERIVATION = threading.Lock()
+
+
 def expected_manifest(head: str) -> SchemaManifest:
-    """The schema the shipped migrations build at ``head``: derived, never read from a live root."""
+    """The schema the shipped migrations build at ``head``: derived, never read from a live root.
+
+    Derived at most once per process and head, and never by two threads at the same time."""
+    with _DERIVATION:
+        return _derive(head)
+
+
+@functools.cache
+def _derive(head: str) -> SchemaManifest:
     with tempfile.TemporaryDirectory(
         prefix="icbm-schema-contract-", ignore_cleanup_errors=True
     ) as directory:
