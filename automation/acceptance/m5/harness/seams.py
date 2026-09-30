@@ -76,6 +76,8 @@ class HarnessAuthority:
         truth_fence: int,
         actor: str,
         correlation_id: str,
+        send_gate: Any = None,
+        preparation_revision_id: str | None = None,
     ) -> None:
         self.admitted.append((intent.intent_id, attempt_no))
 

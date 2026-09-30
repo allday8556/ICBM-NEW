@@ -110,6 +110,10 @@ class AuditEventType(StrEnum):
     RETENTION_PROOF_RECORDED = "RETENTION_PROOF_RECORDED"
     # Gate 3 area 3 (ADR-0018 §9): every reviewed populated visual acceptance recorded.
     VISUAL_ACCEPTANCE_RECORDED = "VISUAL_ACCEPTANCE_RECORDED"
+    # ADR-0018 §5.1 (Issue #89 5910018106): one canary-eligibility record appended for one exact
+    # lineage. Identifiers, sequence, verdict and the packet digest only — never a check's
+    # evidence reference, which lives in the record row.
+    CANARY_ELIGIBILITY_RECORDED = "CANARY_ELIGIBILITY_RECORDED"
 
 
 class AuditOutcome(StrEnum):

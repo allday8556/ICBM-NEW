@@ -11,6 +11,7 @@ import sqlite3
 from datetime import timedelta
 from typing import Any
 
+import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
@@ -40,10 +41,13 @@ from app.capabilities.live_safety.stack import (
 from app.capabilities.live_safety.store import ArtifactRef, LiveAuthorityStore, LiveUnit
 from app.config import AppConfig
 from app.container import Container
+from app.platform.core.egress import EGRESS
 from app.platform.core.errors import InputValidationError, PolicyBlockedError
 from app.platform.core.execution import ExecutionMode
 from app.platform.system.execution_mode import ExecutionModeState
 from app.stages.products.image_model import ImageAssetKind
+from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
+from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from tests.support.live_safety_support import (
     FixedCandidates,
     PermittedMode,
@@ -980,3 +984,116 @@ def test_an_unreadable_attempt_owner_yields_no_restore_target(
     reasons = {layer["reason"] for layer in refusal.details["layers"]}
     assert live_model.ATTEMPT_OWNER_UNREADABLE in reasons
     assert proofs.restore_targets == [] and sender.calls == []
+
+
+# ---------------------------------------------------------------- the production SmartStore sender
+
+
+class _Provider:
+    """A fake transport endpoint: it records each request and answers from a script."""
+
+    def __init__(self, *responses: httpx.Response) -> None:
+        self.responses = list(responses)
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, sent: httpx.Request) -> httpx.Response:
+        self.requests.append(sent)
+        return self.responses.pop(0)
+
+
+class _Session:
+    access_token = "fixture-access-token-Qx7"
+    credential_generation = 3
+    session_generation = 7
+
+
+SMARTSTORE_HOSTS = WireHostPolicy({"smartstore": "api.commerce.naver.com"})
+
+
+def _smartstore_sender(provider: _Provider, *, session: Any = _Session) -> SmartStoreAssetSender:
+    return SmartStoreAssetSender(
+        SmartStoreEndpointCaller(transport=httpx.MockTransport(provider)),
+        bearer=lambda: session,
+    )
+
+
+def test_production_wires_the_smartstore_sender_with_no_session(
+    container: Container, smartstore: str
+) -> None:
+    sender = container.asset_uploads._sender
+    assert isinstance(sender, SmartStoreAssetSender)
+    attempts_before = EGRESS.snapshot()["external_attempts"]
+    # The endpoint is adopted and the wire identity is real; only the session is missing, so the
+    # sender is unavailable and the stack's sender layer refuses.
+    assert sender.endpoint_adopted() is True and sender.available() is False
+    grant_id = grant(container, smartstore, [DERIVED_A], market="smartstore")
+    readiness = container.asset_uploads.readiness(grant_id)
+    assert live_model.SENDER_NOT_WIRED in readiness.missing
+    with pytest.raises(TransmissionPrecluded):
+        sender.send(content=BYTES_A, file_name="a.png", media_type="image/png")
+    assert EGRESS.snapshot()["external_attempts"] == attempts_before
+
+
+def test_the_smartstore_sender_is_applied_through_the_attempt_owner(
+    container: Container, smartstore: str
+) -> None:
+    provider = _Provider(httpx.Response(200, json={"images": [{"url": REF}]}))
+    grant_id = grant(container, smartstore, [DERIVED_A], market="smartstore", budget=1)
+    release(container)
+    service, _ = uploads(
+        container,
+        sender=_smartstore_sender(provider),  # type: ignore[arg-type]
+        hosts=SMARTSTORE_HOSTS,
+    )
+    result = service.upload(request(grant_id, DERIVED_A))
+    assert result.attempt.state is UploadAttemptState.APPLIED_PROVEN
+    assert result.prepared is not None and result.prepared.provider_asset_ref == REF
+    assert len(provider.requests) == 1
+    (attempt,) = store_of(container).attempts(result.attempt.replay_key)
+    assert (attempt.wire_method, attempt.wire_host, attempt.wire_path) == (
+        "POST",
+        "api.commerce.naver.com",
+        "/external/v1/product-images/upload",
+    )
+    # The same bytes are never sent again: the replay fence refuses before the sender is called.
+    second = grant(container, smartstore, [DERIVED_A], market="smartstore")
+    refused(
+        live_model.REPLAY_APPLIED_REUSE_NOT_ADOPTED,
+        lambda: service.upload(request(second, DERIVED_A)),
+    )
+    assert len(provider.requests) == 1
+
+
+def test_an_unknown_smartstore_upload_is_fenced_and_never_resent(
+    container: Container, smartstore: str
+) -> None:
+    provider = _Provider(httpx.Response(500, json={"code": "INTERNAL_SERVER_ERROR"}))
+    grant_id = grant(container, smartstore, [DERIVED_A], market="smartstore")
+    release(container)
+    service, _ = uploads(
+        container,
+        sender=_smartstore_sender(provider),  # type: ignore[arg-type]
+        hosts=SMARTSTORE_HOSTS,
+    )
+    result = service.upload(request(grant_id, DERIVED_A))
+    assert result.attempt.state is UploadAttemptState.UPLOAD_UNKNOWN and result.prepared is None
+    refused(live_model.REPLAY_UNRESOLVED, lambda: service.upload(request(grant_id, DERIVED_A)))
+    assert len(provider.requests) == 1
+
+
+def test_a_sessionless_smartstore_sender_is_refused_before_any_attempt(
+    container: Container, smartstore: str
+) -> None:
+    # Every other layer permitted: the sender layer alone refuses, before an attempt is recorded
+    # and before the sender is ever called.
+    provider = _Provider()
+    sender = _smartstore_sender(provider, session=None)
+    assert sender.available() is False
+    grant_id = grant(container, smartstore, [DERIVED_A], market="smartstore")
+    release(container)
+    service, _ = uploads(container, sender=sender, hosts=SMARTSTORE_HOSTS)  # type: ignore[arg-type]
+    refusal = refused(
+        live_model.SENDER_NOT_WIRED, lambda: service.upload(request(grant_id, DERIVED_A))
+    )
+    assert refusal.code == live_model.SENDER_NOT_WIRED
+    assert provider.requests == [] and count(container.config, "asset_upload_attempts") == 0

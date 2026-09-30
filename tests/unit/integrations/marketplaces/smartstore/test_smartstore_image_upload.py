@@ -5,13 +5,23 @@ from typing import Any
 import httpx
 import pytest
 
+from app.capabilities.live_safety.assets import TransmissionPrecluded
+from app.capabilities.live_safety.model import UploadAttemptState
 from app.stages.products.image_model import ImageAssetKind
-from integrations.marketplaces.smartstore.assets import ImageUploadAdapter, upload_request
+from integrations.marketplaces.smartstore.assets import (
+    ImageUploadAdapter,
+    SmartStoreAssetSender,
+    upload_request,
+)
 from integrations.marketplaces.smartstore.caller import (
     SmartStoreCallError,
     SmartStoreEndpointCaller,
 )
-from integrations.marketplaces.smartstore.registry import EndpointId
+from integrations.marketplaces.smartstore.registry import (
+    SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+    EndpointId,
+    wire_identity,
+)
 
 BEARER = "fixture-access-token-Qx7"
 BASE = "https://api.commerce.naver.com/external"
@@ -145,3 +155,132 @@ def test_search_and_create_are_separate_contracts_from_the_upload() -> None:
         "multipart/form-data",
         "application/json",
     )
+
+
+# ---------------------------------------------------------------- the production ASSET sender
+
+
+class Session:
+    access_token = BEARER
+    credential_generation = 3
+    session_generation = 7
+
+
+def sender(provider: Provider, *, session: Any = Session) -> SmartStoreAssetSender:
+    return SmartStoreAssetSender(
+        SmartStoreEndpointCaller(transport=httpx.MockTransport(provider)),
+        bearer=lambda: session,
+    )
+
+
+def send(provider: Provider, **changes: Any) -> Any:
+    values: dict[str, Any] = {
+        "content": b"exact-artifact-bytes",
+        "file_name": "artifact.jpg",
+        "media_type": "image/jpeg",
+    }
+    values.update(changes)
+    return sender(provider).send(**values)
+
+
+def test_the_sender_declares_the_adopted_wire_endpoint_and_nothing_else() -> None:
+    declared = sender(Provider(httpx.Response(200, json={"images": [{"url": REF}]})))
+    assert declared.marketplace_key == "smartstore"
+    assert declared.endpoint_adopted() is True
+    assert declared.wire() == wire_identity(EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD)
+    assert declared.wire() == (
+        "POST",
+        "api.commerce.naver.com",
+        "/external/v1/product-images/upload",
+    )
+    assert declared.contract_label() == SMARTSTORE_ENDPOINT_MAPPING_REVISION
+
+
+def test_without_a_committed_session_the_sender_is_unavailable_and_sends_nothing() -> None:
+    provider = Provider(httpx.Response(200, json={"images": [{"url": REF}]}))
+    unwired = sender(provider, session=None)
+    assert unwired.available() is False
+    # The endpoint stays adopted: only the session is missing.
+    assert unwired.endpoint_adopted() is True
+    with pytest.raises(TransmissionPrecluded, match="SMARTSTORE_SESSION_UNAVAILABLE"):
+        unwired.send(content=b"bytes", file_name="a.jpg", media_type="image/jpeg")
+    assert provider.requests == []
+
+
+def test_a_proven_upload_is_applied_with_exactly_one_request_and_clean_evidence() -> None:
+    provider = Provider(
+        httpx.Response(200, json={"images": [{"url": REF, "token": "drop"}], "traceId": "drop"})
+    )
+    assert sender(provider).available() is True
+    result = send(provider)
+    assert result.state is UploadAttemptState.APPLIED_PROVEN
+    assert result.provider_asset_ref == REF and result.outcome_reason is None
+    assert result.evidence == {
+        "outcome_version": "smartstore-image-upload-outcome/v1",
+        "contract_label": SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+        "http_status": 200,
+    }
+    assert BEARER not in repr(result) and "drop" not in repr(result)
+    (sent,) = provider.requests
+    assert (sent.method, str(sent.url)) == ("POST", f"{BASE}/v1/product-images/upload")
+    assert sent.headers["authorization"] == f"Bearer {BEARER}"
+    assert sent.content.count(b'name="imageFiles"') == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        ({"images": []}, "UPLOAD_NO_REFERENCE_RETURNED"),
+        ({"images": [{"url": REF}, {"url": REF}]}, "UPLOAD_REFERENCE_NOT_UNIQUE"),
+        ({"images": [{"url": REF}, {"url": REF + "2"}]}, "UPLOAD_REFERENCE_NOT_UNIQUE"),
+        ({"images": [{"url": REF + "?token=abc"}]}, "UPLOAD_REFERENCE_UNSAFE"),
+    ],
+    ids=["no-reference", "two-equal", "two-different", "unsafe-reference"],
+)
+def test_an_ambiguous_success_is_unknown_never_applied(body: dict[str, Any], reason: str) -> None:
+    provider = Provider(httpx.Response(200, json=body))
+    result = send(provider)
+    assert (result.state, result.provider_asset_ref, result.outcome_reason) == (
+        UploadAttemptState.UPLOAD_UNKNOWN,
+        None,
+        reason,
+    )
+    assert len(provider.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(500, json={"code": "INTERNAL_SERVER_ERROR"}),
+        httpx.Response(400, json={"code": "BAD_REQUEST"}),
+        httpx.Response(429, json={"code": "GW.RATE_LIMIT"}),
+        httpx.Response(200, content=b"not json"),
+        httpx.ReadTimeout("timed out"),
+    ],
+    ids=["500", "400", "429", "unparseable-200", "read-timeout"],
+)
+def test_a_possibly_transmitted_failure_is_unknown_and_never_retried(
+    response: httpx.Response | Exception,
+) -> None:
+    provider = Provider(response)
+    result = send(provider)
+    assert result.state is UploadAttemptState.UPLOAD_UNKNOWN and result.provider_asset_ref is None
+    assert result.outcome_reason
+    # One call: the sender owns no retry, and an UNKNOWN is never re-sent by it.
+    assert len(provider.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"file_name": "../artifact.jpg"},
+        {"media_type": "application/octet-stream"},
+        {"content": b""},
+    ],
+    ids=["unsafe-name", "not-an-image", "empty"],
+)
+def test_a_local_refusal_proves_nothing_left_the_process(change: dict[str, Any]) -> None:
+    provider = Provider(httpx.Response(200, json={"images": [{"url": REF}]}))
+    with pytest.raises(TransmissionPrecluded):
+        send(provider, **change)
+    assert provider.requests == []

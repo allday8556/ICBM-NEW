@@ -333,6 +333,59 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 - A production ComplianceGate owner is still required before any regulated-category automation, under
   its own contract and authorization.
 
+#### 5.1 The canary-eligibility owner (architect resolution `5910018106`)
+
+The eligibility evidence of §5 has one durable owner, in the live-safety capability
+(`app/capabilities/live_safety/eligibility.py`; table `canary_eligibility_records`, migration
+`0033`). It is canary-local and read by no other owner. It adds no compliance or regulation truth
+to `CategoryMetadata`, and it is not a ComplianceGate.
+
+- **What counts as proof.** A bare operator assertion, checkbox or free-form statement never is.
+  The server builds a deterministic **eligibility review packet** for one exact canary preparation
+  from the canonical owners, holding only sanitized review material: the marketplace and account,
+  the exact preparation revision and its current candidate fingerprint, the taxonomy revision, the
+  category, the current `CategoryMetadata` revision with the facts that it is current,
+  operator-reviewed, leaf and registrable, the publication-facing text of that preparation, the
+  scope version and the closed checklist. The server computes the lowercase SHA-256 of the
+  canonical packet; a record stores that digest and never a client-invented packet identity.
+- **The v1 regulated scope** is `smartstore-canary-nonregulated/v1`, a closed checklist of exactly
+  five keys: `HEALTH_FUNCTIONAL_FOOD`, `KC_CERTIFICATION_REQUIRED`, `MFDS_NOTICE_OR_APPROVAL`,
+  `PROHIBITED_OR_RESTRICTED_WORDING` and `OTHER_REGULATED_OR_RESTRICTED_CATEGORY`. The fifth keeps
+  the four named ones from becoming an accidental exhaustive legal taxonomy.
+- **`PROVEN_OUTSIDE` needs every key** recorded `OUTSIDE_SCOPE` with an admissible evidence kind
+  and a non-empty sanitized reference. A missing, unknown, ambiguous, unsupported or `IN_SCOPE` key
+  is `UNPROVEN`. The admissible kinds are `CATEGORY_METADATA` (exactly the metadata revision the
+  packet names), `OFFICIAL_RULE` (a stable reviewed reference) and `LISTING_REVIEW_PACKET` (exactly
+  the packet, by its digest). `OPERATOR_ASSERTION` is not an evidence kind and is refused.
+- **Append-only, with no pointer.** A record is never updated or deleted and nothing is backfilled.
+  `seq` is positive and monotonic within the exact scope `marketplace_key × marketplace_account_id
+  × preparation_revision_id × candidate_fingerprint × scope_version`; the current record of a scope
+  is its highest `seq`, and a re-review or a rollback is another appended record.
+- **Exact lineage, automatic staleness.** `CANARY_NON_REGULATED` is proven only when the stage is
+  resolved back to the same exact lineage and the packet binding is re-proven: the current record
+  is `PROVEN_OUTSIDE` and its account, preparation revision, candidate fingerprint, taxonomy,
+  category, metadata revision, scope version and packet digest all equal what the server derives
+  now. The ASSET stage derives them from the preparation's current candidate; the CREATE stage from
+  the Intent's Snapshot, the authored revision that froze it and the final preflight that
+  reproduces it. A proof of one lineage never proves another, any drift makes an earlier proof
+  unusable with no operator action reviving it, and an unreadable, missing or ambiguous owner
+  state is unproven.
+- **The lineage is derived before the mutation-start unit** and the owner-write fence of §4.3
+  proves it is still current inside it; inside the unit only the record and the immutable lineage
+  rows are read.
+- **Recording** is a server-owned protected operator action over the exact server-built packet. It
+  rebuilds the packet immediately before the write, refuses a packet that moved since it was
+  reviewed, validates the closed checklist and the evidence kinds, and appends one record and its
+  audit event in one unit. The client submits review decisions and evidence references only: every
+  canonical identity, the candidate fingerprint, the metadata revision and the digest are the
+  server's. No general compliance editor exists.
+- **What it changes, and nothing else.** No eligibility record changes Product truth, category
+  metadata, target policy, preparation, Snapshot, Intent, provider truth, grant truth or
+  ComplianceGate truth, and none is ever serialized or displayed as a `COMPLIANCE PASS`.
+- **It authorizes nothing.** No provider or category API call, automatic or AI legal
+  classification, LIVE, grant use, ASSET upload, CREATE transmission, real canary, residual-risk
+  acceptance, published-state proof, committed provider session or second marketplace.
+
 ### 6. Provider evidence is an independent hard blocker (D3)
 
 - `SMARTSTORE_PRODUCT_CREATE_V2` stays **`NOT_ADOPTED`**. *(Amendment note: it was adopted by its
@@ -537,6 +590,18 @@ at send time. Each requirement is proven from its own durable evidence, never as
 - **`ASSET_MUTATION_READY` is `BLOCKED` at this main.** The durable upload-attempt owner of §3.4
   exists (area 1), so it is not what blocks: the execution policy is still `M0_DRY_RUN_ONLY`, no
   ASSET sender is wired, and canary eligibility (§5) has no owner, each of which refuses on its own.
+  *(Amendment note: the eligibility owner exists now — §5.1. No record exists for any lineage, so
+  the layer still refuses; the other two refuse unchanged.)*
+  *(Amendment note — the production ASSET sender.)* The ASSET sender is wired now: the adopted
+  SmartStore image upload behind the §3.4 attempt owner
+  (`integrations/marketplaces/smartstore/assets.py`, `SmartStoreAssetSender`). It is **available
+  only with a committed provider session**, and production wires none, so the sender layer still
+  refuses (`LIVE_SENDER_NOT_WIRED`) and nothing is sent. Its outcomes are the §3.4 ones and no
+  other: applied only on exactly one sanitized reference from a passed success predicate; not
+  applied only when transmission was provably precluded (no session, a local refusal, an egress
+  refusal, or a new connection that failed before any request byte); everything else
+  `UPLOAD_UNKNOWN`, never retried. The replay fence, the budget and the started-before-transmission
+  rule are the attempt owner's, unchanged.
   It also stays `BLOCKED` whenever the §3.4 owner is absent, unreadable, stale or unable to persist
   the required evidence.
 - **The ASSET readiness queries the whole replay-conflict scope**, never only the attempts of the
@@ -607,6 +672,14 @@ expected areas, none authorized by this ADR:
 > still unrecorded, and both stage readinesses and the canary stay **`BLOCKED`**. It weakens no
 > refusal: a lookup is positive evidence only, zero results never prove absence (G3-15), no
 > `UNKNOWN` is ever resent (G3-07), and the verdict stays `INSUFFICIENT`.
+>
+> **Amendment note (pre-canary prerequisite slices).** Two statements of the notes above are
+> superseded, and nothing else in them is: the canary-eligibility owner exists (§5.1), and the
+> ASSET sender is wired (§10). Neither is readiness. No eligibility record exists for any
+> lineage, and the sender is unavailable while no committed session exists, so the eligibility
+> layer and the sender layer both still refuse; `M0_DRY_RUN_ONLY`, the residual-risk acceptance
+> and every other requirement refuse as before, and both stage readinesses and the canary stay
+> **`BLOCKED`**.
 
 ### 13. What this ADR does not decide
 
@@ -619,6 +692,10 @@ expected areas, none authorized by this ADR:
 - a deletion policy after M5 acceptance (§8);
 - the final viewport set beyond the two established sizes (§9);
 - the ComplianceGate contract, CREATE/SEARCH adoption, and anything M6 or M6.5.
+
+> **Amendment note (canary-eligibility owner; Issue #89 resolution `5910018106`).** The eligibility
+> record's data model, left to its slice above, is decided and implemented as §5.1 (migration
+> `0033`). Nothing else in this list is decided by that slice.
 
 ---
 
@@ -669,7 +746,10 @@ G3-31  the registration read state and its status card and detail panel are surf
   readiness (§3.1, §7, §10). Neither stage can be `READY` at this main: the execution policy is
   `M0_DRY_RUN_ONLY`, no ASSET sender is wired, canary eligibility has no owner, and CREATE/SEARCH
   adoption and the residual-risk acceptance (§6.1) are missing independently, so the canary is
-  `BLOCKED` for several independent reasons at once.
+  `BLOCKED` for several independent reasons at once. *(Amendment note: CREATE and SEARCH were
+  adopted by their own slices — §12 — and the eligibility owner exists — §5.1; the eligibility
+  layer is proven only per exact reviewed lineage, and every other reason still refuses. The ASSET
+  sender is wired as well — §10 — and stays unavailable while no committed session exists.)*
 - The grant and the protected-write brake were implemented, with the ASSET upload-attempt owner, by
   the separately authorized Gate 3 area 1 slice, which added migration `0026_g3_live_authority`
   under its own authorization.

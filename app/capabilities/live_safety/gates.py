@@ -16,6 +16,11 @@ grant is consumed, no proof is recorded, and even ``READY`` is never permission 
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from app.capabilities.live_safety.eligibility import (
+    EligibilityBinding,
+    binding_of,
+    create_unit_ref,
+)
 from app.capabilities.live_safety.model import MutationStage
 from app.capabilities.live_safety.stack import SafetyStack, StageGate, StageReadiness, Verdict
 from app.capabilities.live_safety.store import LiveAuthorityStore
@@ -43,6 +48,7 @@ def create_stage_gate(
     if registrations.conflicting_intents(intent.registration_snapshot_id):
         reasons.append("REGISTER_UNRESOLVED_CONFLICT")
     snapshot = registrations.snapshot(intent.registration_snapshot_id)
+    eligibility: EligibilityBinding | None = None
     try:
         copy = preparations.execution_copy(intent.registration_snapshot_id)
     except AppError as refused:
@@ -52,7 +58,15 @@ def create_stage_gate(
             reasons.append("REGISTER_SEND_PREFLIGHT_NOT_READY")
         if snapshot is None or copy.final.dependency_fingerprint != snapshot.preflight_fingerprint:
             reasons.append("REGISTER_SEND_FINGERPRINT_DRIFT")
-    return StageGate(ready=not reasons, reasons=tuple(reasons))
+        # §5.1: the eligibility lineage is the one this same final preflight resolves, under the
+        # authored revision that froze the Snapshot — never a later revision.
+        provenance = registrations.snapshot_preparation(intent.registration_snapshot_id)
+        eligibility = binding_of(
+            copy.final,
+            None if provenance is None else provenance.preparation_revision_id,
+            unit_ref=create_unit_ref(intent.intent_id),
+        )
+    return StageGate(ready=not reasons, reasons=tuple(reasons), eligibility=eligibility)
 
 
 class AssetReadinessSource(Protocol):

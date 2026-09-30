@@ -496,6 +496,7 @@ ADAPTIVE_TABLES = (
     "visual_acceptances",
     "registration_reconcile_checks",
     "registration_authoring_revisions",
+    "canary_eligibility_records",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

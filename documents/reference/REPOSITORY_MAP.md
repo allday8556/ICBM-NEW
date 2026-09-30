@@ -12,7 +12,8 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 `integrations/marketplaces/smartstore/create.py` and its unit suite (36 and 16), and the SEARCH
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
 and migration `0031` (37 and 17). The authoring-revision owners slice added
-`app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite.
+`app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite. The canary-eligibility owner slice added
+`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite.
 The Agent Host operating-authority correction (ADR-0022) added `documents/rules/14-operating-authority.md`,
 the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` and the fixture test under
 `tests/harness/agent_host/`. No file moved.
@@ -21,10 +22,10 @@ the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` 
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 237 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
+| `app/` | 239 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 41 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 19 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 62 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 63 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 111 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -47,11 +48,11 @@ the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` 
 | `integrations/` | 37 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 218 | tests |
+| `tests/` | 219 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 81 | integration tests by runtime owner |
+| `tests/integration/` | 82 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
 | `tests/unit/` | 76 | unit tests by runtime owner |
 | `ui/` | 44 |  |

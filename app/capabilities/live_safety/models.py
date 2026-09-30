@@ -11,6 +11,10 @@
   ``STARTED``, ``UPLOAD_UNKNOWN`` or ``APPLIED_PROVEN``, whatever grant, preparation, candidate,
   derivation, kind, file name or MIME it was started under (G3-28, G3-29).
 
+- ``canary_eligibility_records`` (ADR-0018 §5.1; migration 0033): the canary-local eligibility
+  evidence of one exact lineage. Append-only: never updated, never deleted; the current record of
+  a scope is its highest ``seq``.
+
 Every table is append-oriented: a delete is refused by a trigger, and an update may only move the
 state machine forward.
 """
@@ -401,3 +405,103 @@ class VisualAcceptance(Base):
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
     actor: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
+
+
+ELIGIBILITY_SCOPE_KEYS = (
+    "HEALTH_FUNCTIONAL_FOOD",
+    "KC_CERTIFICATION_REQUIRED",
+    "MFDS_NOTICE_OR_APPROVAL",
+    "PROHIBITED_OR_RESTRICTED_WORDING",
+    "OTHER_REGULATED_OR_RESTRICTED_CATEGORY",
+)
+
+
+def _eligibility_check(key: str) -> str:
+    """One v1 check is well-formed: a known finding, and evidence that is either absent or an
+    admitted kind with a non-empty reference. NULL-safe: a missing member fails, never passes."""
+    path = f"json_extract(checks_json, '$.{key}"
+    return (
+        f"json_type(checks_json, '$.{key}') IS 'object'"
+        f" AND {path}.finding') IS NOT NULL"
+        f" AND {path}.finding') IN ('OUTSIDE_SCOPE', 'IN_SCOPE', 'UNKNOWN')"
+        f" AND ({path}.evidence_kind') IS NULL) = ({path}.evidence_ref') IS NULL)"
+        f" AND ({path}.evidence_kind') IS NULL OR ("
+        f"{path}.evidence_kind') IN ('CATEGORY_METADATA', 'OFFICIAL_RULE', 'LISTING_REVIEW_PACKET')"
+        f" AND json_type(checks_json, '$.{key}.evidence_ref') IS 'text'"
+        f" AND length({path}.evidence_ref')) > 0))"
+    )
+
+
+def _eligibility_excluded(key: str) -> str:
+    path = f"json_extract(checks_json, '$.{key}"
+    return f"({path}.finding') IS 'OUTSIDE_SCOPE' AND {path}.evidence_kind') IS NOT NULL)"
+
+
+ELIGIBILITY_CHECKS_WELL_FORMED = " AND ".join(
+    f"({_eligibility_check(key)})" for key in ELIGIBILITY_SCOPE_KEYS
+)
+# PROVEN_OUTSIDE exactly when every key is excluded with evidence: never on a missing, unknown or
+# in-scope key, and never withheld when all five are excluded.
+ELIGIBILITY_VERDICT_AGREES = (
+    "(verdict = 'PROVEN_OUTSIDE') = ("
+    + " AND ".join(_eligibility_excluded(key) for key in ELIGIBILITY_SCOPE_KEYS)
+    + ")"
+)
+
+
+class CanaryEligibilityRecord(Base):
+    """One canary-eligibility review of one exact lineage (ADR-0018 §5.1).
+
+    Append-only. It is evidence for the first-canary restriction only: never a ``COMPLIANCE
+    PASS``, and it changes no Product, category metadata, policy, preparation, Snapshot, Intent,
+    provider, grant or ComplianceGate truth.
+    """
+
+    __tablename__ = "canary_eligibility_records"
+    __table_args__ = (
+        _account(),
+        CheckConstraint("verdict IN ('PROVEN_OUTSIDE', 'UNPROVEN')", name="verdict_valid"),
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        CheckConstraint(_hex64("candidate_fingerprint"), name="candidate_fingerprint_hex"),
+        CheckConstraint(_hex64("review_packet_digest"), name="review_packet_digest_hex"),
+        CheckConstraint(
+            "taxonomy_revision <> '' AND category_id <> '' AND category_metadata_revision <> ''"
+            " AND scope_version <> '' AND recorded_by <> ''",
+            name="identity_present",
+        ),
+        CheckConstraint(
+            "json_valid(checks_json) AND json_type(checks_json) = 'object'",
+            name="checks_is_object",
+        ),
+        CheckConstraint(ELIGIBILITY_CHECKS_WELL_FORMED, name="checks_well_formed"),
+        CheckConstraint(ELIGIBILITY_VERDICT_AGREES, name="verdict_agrees_with_checks"),
+        Index(
+            "ux_canary_eligibility_records_scope_seq",
+            "marketplace_key",
+            "marketplace_account_id",
+            "preparation_revision_id",
+            "candidate_fingerprint",
+            "scope_version",
+            "seq",
+            unique=True,
+        ),
+    )
+
+    eligibility_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
+    preparation_revision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("registration_preparation_revisions.preparation_revision_id")
+    )
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64))
+    taxonomy_revision: Mapped[str] = mapped_column(String(64))
+    category_id: Mapped[str] = mapped_column(String(64))
+    category_metadata_revision: Mapped[str] = mapped_column(String(64))
+    scope_version: Mapped[str] = mapped_column(String(64))
+    seq: Mapped[int] = mapped_column(Integer)
+    # SHA-256 of the sanitized canonical review packet the server built.
+    review_packet_digest: Mapped[str] = mapped_column(String(64))
+    checks_json: Mapped[str] = mapped_column(Text)
+    verdict: Mapped[str] = mapped_column(String(16))
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)

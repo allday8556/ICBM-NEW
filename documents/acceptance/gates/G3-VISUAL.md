@@ -44,7 +44,10 @@ or assert one; a repository rule keeps it so.
 
 A recorded acceptance is a **proof, never permission**. Even with it, the execution mode stays
 `M0_DRY_RUN_ONLY` and CREATE/SEARCH stay `NOT_ADOPTED`. Eligibility is unproven and no ASSET sender
-is wired, so every stage stays `BLOCKED`.
+is wired, so every stage stays `BLOCKED`. *(Amendment note: CREATE and SEARCH were adopted by their
+own slices, the eligibility owner exists with no record for any lineage, and the ASSET sender is
+wired with no committed session. Every stage still stays `BLOCKED`, and a recorded acceptance is
+still never permission.)*
 
 ## 2. The contract (`app/live/visual.py`)
 
