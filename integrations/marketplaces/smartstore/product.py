@@ -417,6 +417,33 @@ def create_document(listing_identity: str, body: Mapping[str, Any]) -> CreateDoc
     )
 
 
+def verified(document: object) -> CreateDocument:
+    """The same document, re-proven to be a validated projection output — or a refusal.
+
+    :class:`CreateDocument` is a plain frozen dataclass, so its constructor alone proves nothing: a
+    document built directly, or handed over by an injected projector, could carry any JSON. The wire
+    boundary therefore re-runs the whole adopted-contract validation over the document's own body
+    and identity and requires the canonical text to be exactly what :func:`create_document` would
+    freeze. Only a document that survives that is ever encoded onto the wire.
+    """
+    if not isinstance(document, CreateDocument):
+        raise WireContractError("WIRE_DOCUMENT_NOT_FROZEN", "the request is not a CREATE document")
+    if document.encoding_version != WIRE_ENCODING_VERSION:
+        raise WireContractError("WIRE_DOCUMENT_VERSION", document.encoding_version)
+    try:
+        body = json.loads(document.canonical_json)
+    except (TypeError, ValueError) as exc:
+        raise WireContractError("WIRE_DOCUMENT_MALFORMED", "the request is not JSON") from exc
+    if not isinstance(body, dict):
+        raise WireContractError("WIRE_DOCUMENT_MALFORMED", "the request is not an object")
+    again = create_document(document.listing_identity, body)
+    if again != document:
+        raise WireContractError(
+            "WIRE_DOCUMENT_NOT_CANONICAL", "the request text is not its validated canonical form"
+        )
+    return document
+
+
 @dataclass(frozen=True)
 class WireProjection:
     """The adopted CREATE request of one frozen Snapshot, plus every gap that keeps it unsendable.

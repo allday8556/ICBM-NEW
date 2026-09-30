@@ -32,7 +32,7 @@ from app.platform.core.safe_payload import safe_payload
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
-from integrations.marketplaces.smartstore.product import CreateDocument
+from integrations.marketplaces.smartstore.product import CreateDocument, WireContractError, verified
 from integrations.marketplaces.smartstore.registry import (
     BASE_URL,
     PROVIDER_HOST,
@@ -336,6 +336,12 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
             request.document, CreateDocument
         ):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        # The type alone is no proof: the document is re-validated against the adopted contract
+        # here, at the one wire boundary, so a directly built or injected document never passes.
+        try:
+            verified(request.document)
+        except WireContractError as refused:
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from refused
         _bearer(
             headers, request.access_token, request.credential_generation, request.session_generation
         )

@@ -202,15 +202,17 @@ class SmartStoreCreateSender:
                 ),
                 None,
             )
-        document = projection.document
-        if not isinstance(document, product.CreateDocument):
+        try:
             # Only the wire projection may build a request, and only through the validated, frozen
-            # document type. Anything else is a broken projector, not a half-checked request.
+            # document type — re-proven here, because the type's constructor proves nothing and the
+            # projector is injectable. Anything else is a broken projector, not a request.
+            document = product.verified(projection.document)
+        except product.WireContractError:
             return (
                 _local_refusal(
                     "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION",
                     {},
-                    reason="the projection produced no frozen CREATE document",
+                    reason="the projection produced no validated, frozen CREATE document",
                 ),
                 None,
             )

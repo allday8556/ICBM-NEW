@@ -1,10 +1,14 @@
-"""The adopted SmartStore CREATE response contract and its outcome classification
-(ADR-0014 §9–§11, §28; ADR-0018 §6.1; CREATE adoption slice, ADR-0020 §4 order 1).
+"""The adopted SmartStore CREATE response contract, and the outcome-classification rules its sender
+applies (ADR-0014 §9–§11, §28; ADR-0018 §6.1; CREATE adoption slice, ADR-0020 §4 order 1).
 
-Two things live here, and they are deliberately independent axes (ADR-0014 §9):
+Two things are recorded here, and they are deliberately independent axes (ADR-0014 §9):
 
-* **the response contract** — what a successful CREATE response yields ICBM;
-* **the outcome classification** — whether the marketplace mutation happened.
+* **the response contract** — what a successful CREATE response yields ICBM. It is implemented
+  here, by :func:`read`, and nowhere else;
+* **the outcome classification** — whether the marketplace mutation happened. This module does not
+  classify: :class:`~integrations.marketplaces.smartstore.execution.SmartStoreCreateSender` applies
+  the rules below, from :func:`read` and the endpoint caller's own transmission evidence
+  (``transmission.py``), and this docstring is the rule it is held to.
 
 **The response.** The official evidence (``documents/evidence/marketplace-apis/PRODUCT_CREATE.md``
 § SmartStore) proves HTTP ``200`` and ``application/json;charset=UTF-8``, and the value-level packet
@@ -53,8 +57,9 @@ The classification therefore separates exactly three things:
     unreadable success is not a failure: the product may well exist.
 
 An ``UNKNOWN`` is never resent (ADR-0014 §28, M5-08, G3-07). Nothing in this module retries,
-schedules or reopens anything: it classifies one handoff and hands the verdict to the REGISTER
-execution owner, which keeps the Intent ``UNKNOWN`` with its conflict scope closed.
+schedules or reopens anything: it reads one response. The sender classifies the handoff and hands
+the verdict to the REGISTER execution owner, which keeps the Intent ``UNKNOWN`` with its conflict
+scope closed.
 """
 
 from collections.abc import Mapping

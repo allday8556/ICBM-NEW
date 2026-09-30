@@ -209,6 +209,65 @@ def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport(
     assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
 
 
+def _forged(canonical_json: str, **fields: str) -> product.CreateDocument:
+    """A CreateDocument built directly, never through the validating projection."""
+    return product.CreateDocument(
+        encoding_version=fields.get("encoding_version", product.WIRE_ENCODING_VERSION),
+        listing_identity=fields.get("listing_identity", IDENTITY),
+        canonical_json=canonical_json,
+    )
+
+
+_FORGERIES = [
+    # A path the adopted contract does not record, smuggled past the validation.
+    _forged(json.dumps({"originProduct": {"evil": 1}})),
+    # A valid body whose text is not its validated canonical form.
+    _forged(json.dumps(DOCUMENT, indent=2, ensure_ascii=False)),
+    # A valid body under a seller code that is not this identity's projection.
+    _forged(FROZEN.canonical_json, listing_identity="icbm-" + "f" * 32),
+    # Another encoding version.
+    _forged(FROZEN.canonical_json, encoding_version="smartstore-register-wire/v0"),
+    # Not JSON at all.
+    _forged("not json"),
+]
+
+
+@pytest.mark.parametrize("forged", _FORGERIES)
+def test_a_directly_built_document_never_reaches_the_wire(forged: product.CreateDocument) -> None:
+    # The type's constructor proves nothing, so the one wire boundary re-validates the whole
+    # document: a forged or injected CreateDocument is refused before any byte is written.
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    with pytest.raises(SmartStoreCallError) as refused:
+        _caller(provider).call(
+            EndpointId.SMARTSTORE_PRODUCT_CREATE_V2, ProductCreateRequest(BEARER, 3, 7, forged)
+        )
+    assert refused.value.code == "SMARTSTORE_REQUEST_CONTRACT_VIOLATION"
+    assert refused.value.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert provider.requests == []
+
+    class Injected:
+        sendable = True
+        document = forged
+        gaps: tuple[str, ...] = ()
+
+    sender = SmartStoreCreateSender(
+        caller=_caller(provider), bearer=lambda: Bearer(), projector=lambda payload: Injected()
+    )
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=forged.listing_identity)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
+def test_the_validated_projection_document_survives_the_wire_check() -> None:
+    assert product.verified(FROZEN) is FROZEN
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    _caller(provider).call(
+        EndpointId.SMARTSTORE_PRODUCT_CREATE_V2, ProductCreateRequest(BEARER, 3, 7, FROZEN)
+    )
+    assert len(provider.requests) == 1
+
+
 @pytest.mark.parametrize(
     ("body", "code"),
     [
