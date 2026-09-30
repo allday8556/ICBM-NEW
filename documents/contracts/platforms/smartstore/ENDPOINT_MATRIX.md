@@ -250,9 +250,10 @@ Request projection, from the immutable `RegistrationSnapshot` only: `originProdu
 `salePrice`, `detailAttribute.sellerCodeInfo.sellerManagementCode`, the combination-form
 `optionInfo` for an option listing, and `leafCategoryId`, which the endpoint requires on
 registration (`5862400626`) and which is the operator-reviewed category the Snapshot froze. The provider-required
-`smartstoreChannelProduct` is **not** emitted at this adoption: neither of its required fields has
-an ICBM-owned value, and a half-built required structure would be an invented request, so it stays
-a named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
+`smartstoreChannelProduct` is emitted with the one member ICBM owns,
+`channelProductDisplayStatusType = ON` (amendment note, Issue #89 architect resolution
+`5915900049` D1); its other required member, `naverShoppingRegistration`, has no ICBM-owned value,
+so it stays a named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
 never emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
 document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
 outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
