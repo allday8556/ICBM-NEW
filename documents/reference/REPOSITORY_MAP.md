@@ -48,7 +48,7 @@ the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` 
 | `integrations/` | 37 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 219 | tests |
+| `tests/` | 221 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
