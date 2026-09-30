@@ -490,4 +490,9 @@ def declared_projection_sender(*, caller: Any, bearer: Any, projection: Any) -> 
         def _projection(self, payload: Any) -> object:
             return projection(payload)
 
+        def _completeness(self, document: Any) -> tuple[str, ...]:
+            # Declared complete by the test, like the projection above; the production sender
+            # recomputes this from the document body and refuses every CREATE at this adoption.
+            return ()
+
     return DeclaredProjectionSender(caller=caller, bearer=bearer)

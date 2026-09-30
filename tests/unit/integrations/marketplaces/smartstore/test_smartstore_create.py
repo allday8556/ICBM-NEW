@@ -821,3 +821,19 @@ def test_completeness_is_read_from_the_body_not_declared() -> None:
     # The schema still refuses that body, so it never reaches the wire either way.
     with pytest.raises(product.WireContractError):
         product.verified(forged)
+
+
+def test_the_sender_recomputes_completeness_from_the_document() -> None:
+    # Even a projection that declares no gap cannot make the sender hand over an incomplete body:
+    # the sender reads completeness from the document itself, before any session or transport.
+    class GapFreeProjection(SmartStoreCreateSender):
+        def _projection(self, payload: Any) -> object:
+            return declared(FROZEN)
+
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    sender = GapFreeProjection(caller=_caller(provider), bearer=lambda: Bearer())
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert set(handoff.details["gaps"]) == set(product.completeness_gaps(FROZEN))

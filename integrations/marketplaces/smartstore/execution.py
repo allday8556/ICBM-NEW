@@ -179,6 +179,11 @@ class SmartStoreCreateSender:
         """
         return product.project(payload)
 
+    def _completeness(self, document: product.CreateDocument) -> tuple[str, ...]:
+        """The provider-required registration parts the document body lacks
+        (``product.completeness_gaps``) — recomputed here, never trusted from the projection."""
+        return product.completeness_gaps(document)
+
     def _document(
         self, payload: Mapping[str, Any], listing_identity: str
     ) -> tuple[CreateHandoff | None, product.CreateDocument | None]:
@@ -226,6 +231,19 @@ class SmartStoreCreateSender:
                     "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION",
                     {},
                     reason="the projection produced no validated, frozen CREATE document",
+                ),
+                None,
+            )
+        missing = self._completeness(document)
+        if missing:
+            # Completeness is read from the document body itself, not taken from the projection:
+            # a CREATE lacking a part the provider requires on registration never leaves here.
+            return (
+                _local_refusal(
+                    "SMARTSTORE_CREATE_WIRE_NOT_SENDABLE",
+                    {},
+                    reason="the CREATE document lacks a part the provider requires on registration",
+                    gaps=list(missing)[:4],
                 ),
                 None,
             )
