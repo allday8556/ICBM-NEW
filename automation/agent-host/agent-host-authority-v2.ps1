@@ -186,7 +186,10 @@ function Invoke-GhWrite {
 #   <CATEGORY>                                    a category by itself
 #   NEXT_HOLD_<CATEGORY>                          the selector's stop
 #   <WHO>_HUMAN_DECISION_REQUIRED_<CATEGORY>      an auditor's, a fixer's or an implementer's stop (<WHO> is [A-Z_]+)
-#   PR_ON_OWNER_HOLD, GUARD_PR_ON_OWNER_HOLD      the owner's own hold file
+#   PR_ON_OWNER_HOLD, GUARD_PR_ON_OWNER_HOLD      the owner's own hold file, which the orchestrator has just read
+# OWNER_HOLD is never taken from the first three forms: only the two owner-hold reasons, which the orchestrator writes
+# after it found the hold file, carry it. OWNER_HOLD, NEXT_HOLD_OWNER_HOLD or X_HUMAN_DECISION_REQUIRED_OWNER_HOLD from
+# any other producer is technical.
 # A category word inside any other reason decides nothing: NO_LIVE_ACTION, NEXT_HOLD_NOT_LIVE and LIVE_CHECK_FAILED are
 # technical. The words "HUMAN_DECISION_REQUIRED" alone decide nothing either.
 # -------------------------------------------------
@@ -218,7 +221,7 @@ function Get-HoldClass {
     # the whole reason, case-sensitively: nothing before the form and nothing after the category
     $m = [regex]::Match($r, '^(?:NEXT_HOLD_|[A-Z][A-Z_]*_HUMAN_DECISION_REQUIRED_)?([A-Z_]+)$')
 
-    if ($m.Success -and $m.Groups[1].Value -cin $script:HumanDecisionCategories) {
+    if ($m.Success -and $m.Groups[1].Value -cne "OWNER_HOLD" -and $m.Groups[1].Value -cin $script:HumanDecisionCategories) {
         return "HUMAN_DECISION_REQUIRED"
     }
 

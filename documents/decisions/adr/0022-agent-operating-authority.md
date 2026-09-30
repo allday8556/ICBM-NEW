@@ -111,7 +111,8 @@ report. It asks for no decision.
 
 The marker-and-classification gate is removed from the packet.
 
-- A slice declares its evidence by citing it in its PR body. The packet's sources are the
+- A slice declares its evidence by citing it in its declaration: its PR body, and the Host's
+  slice specification or remediation authorization when one exists. The packet's sources are the
   comments, reviews and review comments the declaration cites, read at their current body and bound
   by their SHA-256.
 - A citation names the kind of its source as well as its id, and resolves only to a source of
@@ -206,7 +207,8 @@ OA-10  Tracks are separate: their own branch, worktree, PR, packet, audit identi
   spend audit and repair cycles on a problem a person would have resolved with one answer. The
   circuit breaker of §4 bounds that cost.
 - The audit input of a slice is its diff, its PR body, which is always a required source, the
-  Host's baseline canon at the audited base, and the evidence and canonical documents that body
+  Host's slice specification or remediation authorization when one exists, the Host's baseline
+  canon at the audited base, and the evidence and canonical documents the whole declaration
   cites. Choosing what to cite is the agent's work,
   and it cannot make an audit easier: an auditor that needs evidence or canon the packet does not
   carry returns `INSUFFICIENT`, never a PASS on the diff alone.

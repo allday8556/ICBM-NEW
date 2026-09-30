@@ -582,10 +582,10 @@ Mitigations in this protocol:
 head (`expected_head_sha`); it has no parameter that binds the base. What binds the base atomically
 is the repository ruleset's strict required-status-check policy ("require branches to be up to date
 before merging"): GitHub then refuses the merge mutation itself when the base moved. On this
-repository that policy is off (`strict_required_status_checks_policy: false`). Changing a
-repository ruleset is a change of standing configuration, which is the user's (rule §7), so the
-Host never changes it and never asks for it as a condition of a merge. Until it is on, the window
-is bounded and detected as above; once it is on, GitHub closes it.
+repository that policy is off (`strict_required_status_checks_policy: false`). The Host has no
+repository-settings write at all — its GitHub writes are comments, PR bodies, update-branch and the
+merge — and this protocol does not make one a condition of a merge. Until the policy is on, the
+window is bounded and detected as above; once it is on, GitHub closes it.
 
 **Cut-off:** a cited source edited after that final re-scan is outside this merge's audited
 input and binds the next audit, not this merge.

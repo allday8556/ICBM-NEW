@@ -96,14 +96,14 @@ identity.
 | --- | --- | --- |
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
-| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f82004a80ad607e3d72a5dd38ef672c5e93af4195385fac58168dab32534e42c` |
+| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `44b67f7357ee5c41ff222ac785b5e4668af3903e04f882cde016a8a8aabe4667` |
 | `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `50eae876d85792b93777a53e0b670d744311eac915fe5813591c6b2429ea3651` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
 | `run-full-audit-v1.ps1` | post-merge main audit | `7c6c9cfecfd4d810dbf346e1a988ea4008a989c21e3fe68a49f82027d6738c37` |
 | `run-lookahead-main-v1.ps1` | next-slice selector | `6e07b517ea2d425609db4767421f2e3f6d575272a1ac0b8da6c9350aa41329c9` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `0d249880a2e559514e0490b77eafcc5ef7b7f112701458d7a06dfd58aa2e499f` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `e6eda588070d3777cd3c004d76a171b2afe48b15f58d519d767130e2d0ec4cee` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 
