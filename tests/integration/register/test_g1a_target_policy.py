@@ -9,9 +9,9 @@ What this proves, from the outside in:
 - one policy per marketplace × canonical account, with strict isolation between accounts;
 - the policy survives a restart exactly;
 - the production preflight reads this owner: it leaves `REGISTER_TARGET_POLICY_MISSING` only for a
-  valid current policy, a new revision stales an earlier candidate, and while the policy's two
-  authoring revisions have no owner nothing is READY and no Snapshot is frozen (decision
-  5800619183).
+  valid current policy, a new revision stales an earlier candidate, and a request whose authoring
+  revisions are not exactly the ones the policy holds is never READY and freezes no Snapshot
+  (decisions 5800619183, 5801915996).
 
 No provider is reached: a target policy is local configuration.
 """
@@ -35,6 +35,7 @@ from app.platform.core.errors import InputValidationError, PolicyBlockedError
 from app.platform.db.database import create_sqlite_engine
 from app.platform.db.migrate import alembic_config, current_revision, upgrade_to_head
 from app.stages.products.model import ReadinessStatus
+from app.stages.register.authoring_revisions import AuthoringRevisionKind
 from app.stages.register.builder import RegistrationSnapshotBuilder
 from app.stages.register.model import RegistrationConflictError
 from app.stages.register.policy import StaticRegistrationMetadata
@@ -85,6 +86,16 @@ def account(container: Container, config: AppConfig) -> str:
     return establish(container, config, MARKET, "uid-market-a-1")
 
 
+REFERENCES = ("category_mapping_revision", "detail_composition_revision")
+
+
+def authored(view_inputs: dict[str, Any]) -> dict[str, Any]:
+    """The inputs a stored revision answers with, as they were authored: the two authoring
+    revisions are the server's stamp (ADR-0014 §27.1), never an authored value."""
+    assert all(isinstance(view_inputs[name], str) and view_inputs[name] for name in REFERENCES)
+    return {**view_inputs, **dict.fromkeys(REFERENCES)}
+
+
 def inputs(**overrides: Any) -> dict[str, Any]:
     """The supported surface, fully authored: the same policy `register_support.target()` holds."""
     values: dict[str, Any] = {
@@ -112,7 +123,7 @@ def inputs(**overrides: Any) -> dict[str, Any]:
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],
-        # Server-owned references with no owner yet: only an explicit null is valid.
+        # Server-owned references: only an explicit null is valid; the server stamps them.
         "category_mapping_revision": None,
         "detail_composition_revision": None,
     }
@@ -172,7 +183,7 @@ def test_a_first_save_creates_the_policy_its_revision_and_its_current_pointer(
     assert current["revision_no"] == 1 and current["current"] is True
     assert len(current["content_fingerprint"]) == 64
     assert current["authored_by"] == OPERATOR
-    assert body["inputs"] == inputs()
+    assert authored(body["inputs"]) == inputs()
     assert [entry["policy_revision"] for entry in body["history"]] == [current["policy_revision"]]
     assert counts(config) == {POLICIES: 1, REVISIONS: 1, CURRENT: 1}
 
@@ -197,7 +208,7 @@ def test_a_save_appends_a_revision_and_never_rewrites_the_one_before(
     second = save(api, account, changed, expected=first["policy_revision"]).json()
 
     assert second["current"]["revision_no"] == 2
-    assert second["inputs"] == changed
+    assert authored(second["inputs"]) == changed
     history = second["history"]
     assert [entry["revision_no"] for entry in history] == [2, 1]
     assert [entry["current"] for entry in history] == [True, False]
@@ -349,8 +360,8 @@ def test_an_invalid_save_is_refused_whole_and_writes_nothing(
 def test_an_invented_authoring_revision_reference_is_refused_and_writes_nothing(
     api: TestClient, container: Container, config: AppConfig, account: str, reference: str
 ) -> None:
-    # ADR-0015 §2: server-owned references. No owner of either exists, so a client cannot name
-    # one — however plausible the label — and only an explicit null is accepted.
+    # ADR-0015 §2: server-owned references. A client cannot name one — however plausible the
+    # label — and only an explicit null is accepted; the server stamps the owner's revisions.
     invented = save(api, account, inputs(**{reference: "mapping-test-1"}))
     assert invented.status_code == 422
     error = invented.json()["error"]
@@ -361,17 +372,28 @@ def test_an_invented_authoring_revision_reference_is_refused_and_writes_nothing(
 
     first = save(api, account, inputs())
     assert first.status_code == 200
-    assert first.json()["inputs"][reference] is None
+    assert first.json()["inputs"][reference] not in (None, "mapping-test-1")
     current = first.json()["current"]["policy_revision"]
     again = save(api, account, inputs(**{reference: "detail-test-1"}), expected=current)
     assert again.status_code == 422
     assert again.json()["error"]["code"] == "TARGET_POLICY_AUTHORING_REVISION_UNOWNED"
     assert counts(config) == {POLICIES: 1, REVISIONS: 1, CURRENT: 1}
     assert len(policy_events(container)) == 1
-    # The production preflight's policy carries no invented reference either.
+    # The production preflight's policy carries no invented reference either: only the two
+    # revisions the authoring-revision owner holds.
     target = container.registration_preflight.target_policy(MARKET, account)
     assert target is not None
-    assert (target.category_mapping_revision, target.detail_composition_revision) == (None, None)
+    mapping = container.authoring_revisions.current(
+        AuthoringRevisionKind.CATEGORY_MAPPING, MARKET, target.taxonomy_revision
+    )
+    composition = container.authoring_revisions.current(
+        AuthoringRevisionKind.DETAIL_COMPOSITION, MARKET
+    )
+    assert mapping is not None and composition is not None
+    assert (target.category_mapping_revision, target.detail_composition_revision) == (
+        mapping.revision_id,
+        composition.revision_id,
+    )
 
 
 def test_a_save_against_a_moved_or_identical_policy_is_refused(
@@ -475,6 +497,7 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "retention_proofs",
         "visual_acceptances",
         "registration_reconcile_checks",
+        "registration_authoring_revisions",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before
@@ -565,8 +588,8 @@ def test_a_new_policy_revision_stales_an_earlier_candidate(
     )
     req = replace(req, duplicate_evidence=no_match(preflight.candidate(req)))
     candidate = preflight.candidate(req)
-    # Every rule passes except the one no durable policy can satisfy yet: the two authoring
-    # revisions have no owner (decision 5800619183), so nothing here is ever READY.
+    # Every rule passes except one: the request carries authoring revisions no owner issued,
+    # not the ones the policy holds (decision 5801915996), so it is never READY.
     assert candidate.status is ReadinessStatus.REVIEW_REQUIRED
     assert candidate.codes == (AUTHORING_REVISIONS_UNOWNED,)
     assets = prepared(candidate)
@@ -587,7 +610,7 @@ def test_a_new_policy_revision_stales_an_earlier_candidate(
 def test_a_durable_policy_without_owned_authoring_revisions_freezes_nothing(
     api: TestClient, container: Container, config: AppConfig, account: str
 ) -> None:
-    """The durable policy holds both authoring revisions as null (decision 5800619183). A request
+    """The durable policy holds the owner's two authoring revisions (ADR-0014 §27.1). A request
     carrying revisions of its own — which no owner issued — is still unowned: the evaluation
     records the policy revision it read, and no Snapshot is frozen, by any path."""
     preflight = _served_preflight(container)

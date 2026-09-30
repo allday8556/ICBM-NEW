@@ -129,9 +129,11 @@ OPTION_VALUES_NOT_DISTINCT: Final = "OPTION_VALUES_NOT_DISTINCT"
 POLICY_TEMPLATE_MISSING: Final = "POLICY_TEMPLATE_MISSING"
 DETAIL_COMPOSITION_MISSING: Final = "DETAIL_COMPOSITION_MISSING"
 DETAIL_BODY_EMPTY: Final = "DETAIL_BODY_EMPTY"
-# No owner exists yet for the category-mapping and detail-composition authoring revisions (G1-A
-# holds both as null; architect decision 5800619183). Authoring and the candidate still run; the
-# unit is never READY, so nothing can be frozen until real owners supply both revisions.
+# The category-mapping and detail-composition authoring revisions are owner-held only when the
+# target policy holds the authoring-revision owner's revisions and the authored ones are exactly
+# those (decisions 5800619183, 5801915996; ADR-0014 §27.1). A policy revision appended before the
+# owner existed holds both as null. Authoring and the candidate still run; such a unit is never
+# READY, so nothing can be frozen from it.
 AUTHORING_REVISIONS_UNOWNED: Final = "AUTHORING_REVISIONS_UNOWNED"
 PUBLICATION_ASSETS_MISSING: Final = "PUBLICATION_ASSETS_MISSING"
 PUBLICATION_ASSET_COUNT_EXCEEDED: Final = "PUBLICATION_ASSET_COUNT_EXCEEDED"
@@ -279,7 +281,9 @@ class CategoryConfirmation(StrEnum):
 @dataclass(frozen=True)
 class CategorySelection:
     """``mapping_revision`` is the target's category-mapping revision, exactly as its owner holds
-    it: ``None`` while no owner exists (decision 5800619183). It is never defaulted or invented."""
+    it: a revision of the authoring-revision owner (ADR-0014 §27.1), or ``None`` under a policy
+    revision appended before that owner existed (decision 5800619183). It is never defaulted or
+    invented."""
 
     category_id: str
     mapping_revision: str | None
@@ -291,8 +295,10 @@ class CategorySelection:
 class DetailComposition:
     """``product body → detail composition → marketplace payload`` (Issue #61, ADR-0014 §19).
     The first vertical composes the body only; later guidance adds sections here, never in the
-    payload builder. ``composition_revision`` is ``None`` while its owner does not exist: a body
-    may still be authored, and the unit reports ``AUTHORING_REVISIONS_UNOWNED``."""
+    payload builder. ``composition_revision`` is the target's detail-composition revision exactly
+    as its owner holds it (ADR-0014 §27.1), or ``None`` under a policy revision appended before
+    that owner existed: a body may still be authored, and the unit reports
+    ``AUTHORING_REVISIONS_UNOWNED``."""
 
     composition_revision: str | None
     body: str
@@ -1001,7 +1007,8 @@ def _detail_reasons(request: PreflightRequest) -> list[Reason]:
 def _authoring_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
     """Whether both authoring revisions are owner-held (decisions 5800619183, 5801915996).
 
-    The revisions are server-owned: the target policy holds them, ``None`` while no owner exists.
+    The revisions are server-owned: the target policy holds the authoring-revision owner's
+    revisions (ADR-0014 §27.1), or ``None`` when it was appended before that owner existed.
     An authored selection or composition is owner-held only when the target holds a revision and
     the authored one is **exactly** it. A ``None`` on either side, or any other value — however it
     was written — is unowned: a client-supplied revision never makes a unit READY. This is neither

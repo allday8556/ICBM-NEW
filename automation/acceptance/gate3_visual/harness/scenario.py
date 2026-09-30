@@ -18,10 +18,11 @@ owners and routes, exactly as production does, over a dedicated root the run own
 - ``connect_binding``: the committed M2 account binding — a real SmartStore call produces it, which
   this run may not make (as in the M5 harness);
 - ``live_grants``: an ACTIVE and a REVOKED ASSET grant of the preparation's current revision. The
-  grant service issues one only for a READY candidate, and under a durable policy no candidate can
-  be READY at this main (its authoring revisions have no owner, decision 5800619183), so the rows
-  are recorded directly by the LIVE owner's store. They are display state for this acceptance only;
-  every readiness they show is still the server's own derivation, and it is BLOCKED.
+  grant service issues one only for a READY candidate, and under the production sources this
+  candidate is not READY at this main (its preflight still reports the reasons the screen shows),
+  so the rows are recorded directly by the LIVE owner's store. They are display state for this
+  acceptance only; every readiness they show is still the server's own derivation, and it is
+  BLOCKED.
 """
 
 import uuid
@@ -327,7 +328,8 @@ def populate(container: Container, api: TestClient) -> Populated:
             "inputs": {
                 "category": {
                     "category_id": CATEGORY,
-                    "mapping_revision": None,
+                    # The server's own revisions, sent back exactly (ADR-0014 §27.1).
+                    "mapping_revision": policy.category_mapping_revision,
                     "taxonomy_revision": TAXONOMY,
                     "confirmation": "OPERATOR_CONFIRMED",
                 },
@@ -339,7 +341,7 @@ def populate(container: Container, api: TestClient) -> Populated:
                     "origin": {"detail_page_reference": True},
                 },
                 "options": {},
-                "detail_composition_revision": None,
+                "detail_composition_revision": policy.detail_composition_revision,
                 "detail_body": "invented body text",
                 "detail_sections": ["BODY"],
             },

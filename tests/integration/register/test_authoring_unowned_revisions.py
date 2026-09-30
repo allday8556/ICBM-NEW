@@ -1,8 +1,10 @@
 """Authoring with unowned authoring revisions (Issue #89 architect decision 5800619183).
 
-G1-A holds a durable target policy's ``category_mapping_revision`` and
-``detail_composition_revision`` as ``null``: no owner exists for them yet. This proves the
-compatibility the decision requires, through the real application on a migrated database:
+A target-policy revision appended **before the authoring-revision owners existed** holds
+``category_mapping_revision`` and ``detail_composition_revision`` as ``null``, and nothing
+backfills it (Issue #89 ``5907626428`` D3; ``save_unowned_policy`` writes exactly such a
+revision). This proves the compatibility the decision requires for such an account, through the
+real application on a migrated database:
 - the authoring metadata of a reviewed G1-B category answers 200 with both revisions ``null``;
 - a BODY-only preparation is saved with both ``null`` exactly, and a reload and a restart return
   the same ``null``, body and fingerprint; the fingerprint moves with authored content;
@@ -42,7 +44,7 @@ from tests.support.gate1_support import (
     OPERATOR,
     TAXONOMY,
     record_reviewed_metadata,
-    save_policy,
+    save_unowned_policy,
 )
 from tests.support.product_support import Collections, product, raw
 from tests.support.register_support import establish
@@ -77,7 +79,7 @@ def draft(api: TestClient, container: Container, config: AppConfig) -> tuple[str
     """A Draft of one M4 Item under a durable G1-A policy and reviewed G1-B metadata; the Draft
     and the Item."""
     account = establish(container, config, MARKET, "provider-account-1")
-    save_policy(api, account)
+    save_unowned_policy(container, account)
     record_reviewed_metadata(api)
     run_id, _ = Collections.of(container, config).collect(product(), source_product_id="1234")
     result = container.materializer.materialize_run(run_id)
@@ -375,7 +377,7 @@ def test_the_builder_refuses_an_unowned_revision_even_when_handed_ready(
     assert counts(config) == dict.fromkeys(FROZEN_ROWS, 0)
 
 
-# ---------------------------------------------------------------- G1-A is unchanged
+# ---------------------------------------------------------------- G1-A still refuses a client
 
 
 def test_g1a_still_refuses_a_client_supplied_authoring_revision(

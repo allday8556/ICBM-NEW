@@ -64,6 +64,7 @@ from tests.support.gate1_support import (
     TAXONOMY,
     record_reviewed_metadata,
     save_policy,
+    save_unowned_policy,
 )
 from tests.support.product_support import Collections, product
 from tests.support.register_support import establish
@@ -76,11 +77,15 @@ REPO = Path(__file__).resolve().parents[3]
 UNOWNED = ("REGISTRATION_ERROR", "authoring", "AUTHORING_REVISIONS_UNOWNED")
 
 
-def authored_inputs(body: str = "상세 본문") -> dict[str, Any]:
+def authored_inputs(
+    body: str = "상세 본문", *, revisions: tuple[str | None, str | None] = (None, None)
+) -> dict[str, Any]:
+    """``revisions`` are the account's server-owned ``(category mapping, detail composition)``
+    revisions, sent back exactly: ``null`` under a policy appended before their owners existed."""
     return {
         "category": {
             "category_id": CATEGORY,
-            "mapping_revision": None,
+            "mapping_revision": revisions[0],
             "taxonomy_revision": TAXONOMY,
             "confirmation": "OPERATOR_CONFIRMED",
         },
@@ -92,7 +97,7 @@ def authored_inputs(body: str = "상세 본문") -> dict[str, Any]:
             "origin": {"detail_page_reference": True},
         },
         "options": {},
-        "detail_composition_revision": None,
+        "detail_composition_revision": revisions[1],
         "detail_body": body,
         "detail_sections": ["BODY"],
     }
@@ -100,9 +105,11 @@ def authored_inputs(body: str = "상세 본문") -> dict[str, Any]:
 
 def prepared(api: TestClient, container: Container, config: AppConfig) -> dict[str, str]:
     """One durable preparation of one priced M4 Item, under a durable G1-A policy and reviewed
-    G1-B metadata, authored through the application: its account, Draft, Item and preparation."""
+    G1-B metadata, authored through the application: its account, Draft, Item and preparation.
+    The policy is one appended before the authoring-revision owners existed, so the candidate
+    carries the ``AUTHORING_REVISIONS_UNOWNED`` review condition these tests index."""
     account = establish(container, config, MARKET, f"provider-{uuid.uuid4().hex[:8]}")
-    save_policy(api, account)
+    save_unowned_policy(container, account)
     record_reviewed_metadata(api)
     run_id, _ = Collections.of(container, config).collect(product(), source_product_id="1234")
     result = container.materializer.materialize_run(run_id)

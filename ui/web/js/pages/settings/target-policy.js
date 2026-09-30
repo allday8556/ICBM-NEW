@@ -67,13 +67,14 @@ function whole(text) {
   return /^\d+$/.test(text.trim()) ? Number(text.trim()) : text;
 }
 
-// A server-owned revision reference with no owner yet: shown, never authorable here.
-function unowned(label, value, name) {
+// A server-owned revision reference: shown, never authorable here. The server stamps the
+// owner's current revision into each revision it saves; an earlier revision holds none.
+function serverOwned(label, value, name) {
   return h(
     'div',
     { class: 'kv', 'data-policy-reference': name },
     h('span', {}, label),
-    h('span', { class: 'chip' }, value ?? '없음 · 서버 소유 리비전이 아직 없어 입력할 수 없습니다'),
+    h('span', { class: 'chip' }, value ?? '없음 · 서버 소유 리비전입니다. 정책을 새로 저장하면 서버가 기록합니다'),
   );
 }
 
@@ -179,7 +180,7 @@ function editor(view, onSaved) {
           templates: templatesOf(templates.value),
           duplicate_proof_required: proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
-          // Server-owned references with no owner yet: never authored here (ADR-0015 §2).
+          // Server-owned references: never authored here; the server stamps them (ADR-0015 §2).
           category_mapping_revision: null,
           detail_composition_revision: null,
         },
@@ -205,8 +206,8 @@ function editor(view, onSaved) {
     ),
     h('div', { class: 'kv' }, h('span', {}, '리비전 이력'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}개`)),
     taxonomy.row,
-    unowned('카테고리 매핑 리비전', inputs?.category_mapping_revision, 'category_mapping_revision'),
-    unowned('상세 구성 리비전', inputs?.detail_composition_revision, 'detail_composition_revision'),
+    serverOwned('카테고리 매핑 리비전', inputs?.category_mapping_revision, 'category_mapping_revision'),
+    serverOwned('상세 구성 리비전', inputs?.detail_composition_revision, 'detail_composition_revision'),
     sanitizer.row,
     feeTable.row,
     pricingPolicy.row,

@@ -80,6 +80,10 @@ class AuditEventType(StrEnum):
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.
     REGISTRATION_CATEGORY_METADATA_RECORDED = "REGISTRATION_CATEGORY_METADATA_RECORDED"
+    # ADR-0014 §27.1 (Issue #89 5907626428): a server-owned authoring profile revision — category
+    # mapping or detail composition — appended by the server. Kind, scope, identifiers, sequence
+    # and the content fingerprint only.
+    REGISTRATION_AUTHORING_REVISION_APPENDED = "REGISTRATION_AUTHORING_REVISION_APPENDED"
     # Gate 2 G2-A (ADR-0016 §9): one transition of a ReviewItem, or one human resolution of it.
     # Item identifiers, states, generation, review key, basis, successor and disposition only —
     # never a note, which lives in the event row, and never an owner value.

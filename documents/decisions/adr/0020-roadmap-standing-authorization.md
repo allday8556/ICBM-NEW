@@ -99,7 +99,7 @@ order among them — each refuses on its own — so they take no numbered positi
 | --- | --- | --- |
 | the **production ASSET sender** — `app/container.py` wires `UnwiredAssetSender`, which declares the adopted wire endpoint and refuses every send (`LIVE_SENDER_NOT_WIRED`) | `ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19) and stays `BLOCKED` while no ASSET sender is wired (ADR-0018 §10, Consequences) | a sender that transmits to the provider is not provider-zero and no canonical contract decides its boundary, so §2.3 is not met and §3 stops it for the user |
 | the **durable canary-eligibility owner** (ADR-0018 §5) — `CANARY_NON_REGULATED`; `app/capabilities/live_safety/proofs.py` has no owner and answers unproven | both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it | the eligibility record's data model is explicitly undecided (ADR-0018 §13), so §2.5 is not met and §3 stops it for the user |
-| the **authoring-revision owners** for the category mapping and the detail composition (ADR-0014 §27) — the durable target policy holds both as `null` (ADR-0015 §2), so the candidate preflight answers `AUTHORING_REVISIONS_UNOWNED` (`app/stages/register/preparation.py`) | each stage's own gate is a mandatory requirement (ADR-0018 §10): the ASSET stage needs a candidate preflight `READY`, the CREATE stage a final preflight `READY` and a `PREPARED` Intent. While either revision is unowned no unit is ever `READY`, freezing stays fail-closed, and no Snapshot and no Intent can exist — so both stages stay `BLOCKED` on this alone | ADR-0014 §27 records real owners for both revisions as "a later, separately authorized decision" and no canonical contract decides their data model, so §2.3 and §2.5 are not met and §3 stops it for the user |
+| ~~the **authoring-revision owners** for the category mapping and the detail composition (ADR-0014 §27)~~ — **closed by its own slice** (ADR-0014 §27.1; Issue #89 architect resolution `5907626428`; migration `0032`): the durable owner exists and the server stamps its current revisions into every target-policy revision it appends | it was mandatory because each stage's own gate is a mandatory requirement (ADR-0018 §10) and, while either revision was unowned, the candidate preflight answered `AUTHORING_REVISIONS_UNOWNED`, no unit was ever `READY` and no Snapshot and no Intent could exist. A target-policy revision appended before the owner existed still answers it until a new revision is appended: nothing is backfilled | it was outside this ADR because ADR-0014 §27 recorded real owners for both revisions as "a later, separately authorized decision" with no canonical data model; that decision is the architect resolution above, never this standing authorization |
 | the **executable committed-session read-back** (ADR-0014 §11) — `app/container.py` passes `bearer=lambda: None`, so `SmartStoreReadback.available()` is `False` and `verify` refuses; the canary readiness reports `READBACK_EXECUTABLE` with `READBACK_SESSION_NOT_WIRED` | read-back is the success proof (ADR-0014 §11): a CREATE that cannot be read back is never `CONFIRMED`, so a canary run without it could only end `UNKNOWN` or unverified — and `documents/acceptance/milestones/M5.md` §6 records it as not proven | a committed provider session that actually reads back is not provider-zero, so §2.3 is not met and §3 stops it for the user |
 | a **read-back comparison that proves published state** (ADR-0014 §11) — the adopted normalizer's canonical form carries no published state, so `proves_published_state()` is `False` and execution refuses with `REGISTER_PUBLISHED_STATE_UNPROVEN`; the canary readiness reports `PUBLISHED_STATE_PROVABLE` as unproven | published state is an `EXACT` comparison class of ADR-0014 §11, so without it no critical-field comparison can pass and no canary can be confirmed rather than invented | no canonical contract decides which endpoint content proves the field; it becomes `True` only through a separately authorized adoption slice that proves it, so §2.3 and §2.5 are not met and §3 stops it for the user |
 
@@ -137,6 +137,14 @@ and leaving `M0_DRY_RUN_ONLY` — keeps its own condition and its own decision.
 > nothing: both rows record prerequisites that are still missing and are user decisions (§3, SA-10),
 > they close no gap, and they change no invariant of ADR-0014 or ADR-0018.
 
+> **Amendment note (authoring-revision owners slice; Issue #89 `5907626428`).** The second table's
+> third row is closed: the architect resolution decided the owners' data model, and the slice
+> implemented it provider-zero (ADR-0014 §27.1, migration `0032`). Four prerequisites are still
+> missing — the production ASSET sender, the durable canary-eligibility owner, the executable
+> committed-session read-back and a read-back comparison that proves published state — and this
+> note grants none of them. Closing that row makes no unit `READY` by itself: every other preflight
+> rule and every other ADR-0018 §10 requirement keeps its own condition.
+
 An adoption slice updates the adoption status of **its own endpoint only** — in
 `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md`, `documents/acceptance/milestones/M5.md` and the invariant text and
 contract-test pins that record that endpoint as `NOT_ADOPTED` — by amendment note, never by silent
@@ -156,7 +164,7 @@ SA-06  schema or migration is authorized here only where a canonical contract al
 SA-07  LIVE, a real canary, the residual-risk acceptance, new architecture or policy, conflicting canon, unclear scope, undecided data model and scope expansion always stop for the user
 SA-08  each slice passes CI, the GPT exact-head audit and the independent Claude cross-audit, merges only under the exact-HEAD/main guard, and the new main is audited before the next selection
 SA-09  CREATE adoption and SEARCH positive-only reconcile adoption are two separate slices, CREATE first
-SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11; the production ASSET sender, the durable canary-eligibility owner, the ADR-0014 §27 authoring-revision owners, the executable committed-session read-back and a read-back comparison that proves published state are still missing, are not authorized here, and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11 success proof is green
+SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11; the production ASSET sender, the durable canary-eligibility owner, the executable committed-session read-back and a read-back comparison that proves published state are still missing, are not authorized here (the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1), and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11 success proof is green
 ```
 
 ## Consequences
@@ -174,6 +182,6 @@ SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisit
 - `documents/roadmap/ROADMAP.md` §12, §14, §14.1, §14.2
 - `CLAUDE.md` §1, §7.2, §11
 - ADR-0014 §17.2, §27, §28 (amendment note at §28.8)
-- ADR-0015 §2 (the target policy holds both authoring revisions as `null`)
+- ADR-0015 §2 (the target policy's two authoring revision references; `null` in a revision appended before the ADR-0014 §27.1 owners)
 - ADR-0018 §6, §6.1, §10, §12 (amendment note at §12)
 - `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md`, `documents/acceptance/milestones/M5.md` §9
