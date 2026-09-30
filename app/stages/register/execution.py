@@ -1070,9 +1070,13 @@ class RegistrationExecutionService:
         for intent_id in self._registrations.unknown_intents():
             if len(outcomes) >= self._policy.reconcile_batch:
                 break
-            checks = self._registrations.reconcile_checks(intent_id)
             stale = self._clock.now() - self._policy.reconcile_check_timeout
-            if checks and checks[-1].in_flight and checks[-1].started_at >= stale:
+            # A check a crashed process left in flight is closed first, whatever the schedule
+            # says, so an exhausted schedule can never leave it open for good.
+            with self._registrations.transaction() as unit:
+                unit.abandon_stale_check(intent_id, older_than=stale)
+            checks = self._registrations.reconcile_checks(intent_id)
+            if checks and checks[-1].in_flight:
                 continue
             if sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) >= limit:
                 continue

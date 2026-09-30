@@ -181,8 +181,21 @@ def test_a_search_outside_the_documented_request_never_reaches_the_wire(
         {**page([]), "last": 1},
         {k: v for k, v in page([]).items() if k != "totalPages"},
         {**page([]), "contents": [1]},
+        page([{"originProductNo": 1}]),
+        page([item(1, {**channel(1, 2), "sellerManagementCode": None})]),
+        page([item(1, {k: v for k, v in channel(1, 2).items() if k != "channelServiceType"})]),
     ],
-    ids=["contents-text", "page-text", "total-bool", "last-int", "no-total-pages", "item-scalar"],
+    ids=[
+        "contents-text",
+        "page-text",
+        "total-bool",
+        "last-int",
+        "no-total-pages",
+        "item-scalar",
+        "no-channel-products",
+        "null-code",
+        "no-service-type",
+    ],
 )
 def test_a_page_outside_the_documented_envelope_fails_the_predicate(body: dict[str, Any]) -> None:
     assert product_search_succeeded(200, body) is False
@@ -206,6 +219,7 @@ def test_retention_keeps_the_identities_the_code_and_the_envelope_only() -> None
         lambda b: b["contents"][0]["channelProducts"][0].update(originProductNo=99),
         lambda b: b["contents"][0]["channelProducts"][0].update(channelServiceType="OTHER"),
         lambda b: b["contents"][0]["channelProducts"][0].update(sellerManagementCode=5),
+        lambda b: b["contents"][0]["channelProducts"][0].pop("sellerManagementCode"),
         lambda b: b.update(page=0),
         lambda b: b.update(size=501),
     ],
@@ -216,6 +230,7 @@ def test_retention_keeps_the_identities_the_code_and_the_envelope_only() -> None
         "channel-names-other-origin",
         "undocumented-channel",
         "code-number",
+        "code-missing",
         "page-zero",
         "size-over-max",
     ],
@@ -239,7 +254,7 @@ def test_only_an_exact_storefarm_code_is_a_candidate() -> None:
                 item(11, channel(11, 21), channel(11, 22, service="WINDOW")),
                 item(12, channel(12, 23, code=CODE[:-1])),  # a partial match
                 item(13, channel(13, 24, code=CODE + "0")),  # a similar match
-                item(14, channel(14, 25, code=None)),  # no code at all
+                item(14, channel(14, 25, code="")),  # an empty code
                 item(15, channel(15, 26, code=CODE, service="AFFILIATE")),
             ]
         )

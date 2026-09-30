@@ -97,7 +97,7 @@ class ChannelEntry:
     origin_product_no: int
     channel_product_no: int
     channel_service_type: str
-    seller_management_code: str | None
+    seller_management_code: str
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ def _channel(value: object, path: str, origin: int) -> ChannelEntry:
             "SEARCH_RESPONSE_MALFORMED", f"{path}.channelServiceType is not documented"
         )
     code = value.get(FIELD_SELLER_MANAGEMENT_CODE)
-    if code is not None and not isinstance(code, str):
+    if not isinstance(code, str):
         raise SearchContractError(
             "SEARCH_RESPONSE_MALFORMED", f"{path}.sellerManagementCode is not a string"
         )
@@ -152,8 +152,9 @@ def read_page(retained: Mapping[str, Any]) -> SearchPage:
     if not isinstance(retained, Mapping):
         raise SearchContractError("SEARCH_RESPONSE_MALFORMED", "the page is not an object")
     contents = retained.get(FIELD_CONTENTS, [])
-    # Retention drops an empty array, so an absent ``contents`` is an empty page; any other type
-    # is a shape the evidence does not describe.
+    # The endpoint predicate proved every documented member on the raw page (``registry.py``);
+    # retention then drops an empty array, so an absent ``contents`` or ``channelProducts`` here is
+    # an empty one. Any other type is a shape the evidence does not describe.
     if not isinstance(contents, Sequence) or isinstance(contents, str | bytes):
         raise SearchContractError("SEARCH_RESPONSE_MALFORMED", "contents is not an array")
     items: list[SearchItem] = []

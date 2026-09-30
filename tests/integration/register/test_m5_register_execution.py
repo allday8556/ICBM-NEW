@@ -2697,3 +2697,25 @@ def test_a_finished_check_names_a_count_that_agrees_with_its_result(
         connection.commit()
     (check,) = store.reconcile_checks(ready.intent_id)
     assert check.result is ReconcileResult.LOOKUP_UNAVAILABLE and check.candidate_count is None
+
+
+def test_an_exhausted_schedule_never_leaves_its_last_check_open(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # The automatic pass closes a stale in-flight check before it looks at the schedule, so an
+    # Intent whose last automatic check was abandoned by a crash is never left with it open.
+    ready = prepare(container, sources, store, account, prep)
+    run = _unknown(container, store, prep, ready)
+    policy = ExecutionPolicy(reconcile_schedule=())
+    auto = execution(container, prep, lookup=run.lookup, policy=policy)
+    with store.transaction() as unit:
+        unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.AUTO)
+    container.clock.advance(int(policy.reconcile_check_timeout.total_seconds()) + 1)
+    auto.service.reconcile_due(correlation_id=CID)
+    (check,) = store.reconcile_checks(ready.intent_id)
+    assert not check.in_flight and check.result is ReconcileResult.ERROR
+    assert run.lookup.calls == 0

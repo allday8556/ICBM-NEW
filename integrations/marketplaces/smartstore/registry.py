@@ -160,21 +160,40 @@ def _int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def product_search_succeeded(status: int, body: object) -> bool:
-    """HTTP 200 AND a JSON object carrying the documented pagination envelope (S2): ``contents``
-    an array of objects, ``page``/``size``/``totalElements``/``totalPages`` integers and
-    ``first``/``last`` booleans.
+def _search_channel(entry: object) -> bool:
+    return (
+        isinstance(entry, dict)
+        and _int(entry.get("originProductNo"))
+        and _int(entry.get("channelProductNo"))
+        and isinstance(entry.get("channelServiceType"), str)
+        and isinstance(entry.get("sellerManagementCode"), str)
+    )
 
-    The predicate proves only that a page arrived. The items are read, at their documented
-    positions and types, by the search contract (``search.py``), and nothing a page says is ever
-    remote absence or a CREATE authorization (ADR-0014 §17.2, §28.2).
+
+def product_search_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND a JSON object carrying every documented S2 member on the raw page:
+    ``contents`` an array of objects, each with an integer ``originProductNo`` and a
+    ``channelProducts`` array whose entries each carry integer ``originProductNo`` and
+    ``channelProductNo`` and string ``channelServiceType`` and ``sellerManagementCode``; and
+    ``page``/``size``/``totalElements``/``totalPages`` integers and ``first``/``last`` booleans.
+
+    It is checked here, on the raw body, because retention drops an empty array and a null — a
+    missing member must never read as an empty one. Values, ranges and consistency are read by the
+    search contract (``search.py``); nothing a page says is ever remote absence or a CREATE
+    authorization (ADR-0014 §17.2, §28.2).
     """
     if status != 200 or not isinstance(body, dict):
         return False
     contents = body.get("contents")
     return (
         isinstance(contents, list)
-        and all(isinstance(item, dict) for item in contents)
+        and all(
+            isinstance(item, dict)
+            and _int(item.get("originProductNo"))
+            and isinstance(item.get("channelProducts"), list)
+            and all(_search_channel(entry) for entry in item["channelProducts"])
+            for item in contents
+        )
         and all(_int(body.get(key)) for key in ("page", "size", "totalElements", "totalPages"))
         and all(isinstance(body.get(key), bool) for key in ("first", "last"))
     )
