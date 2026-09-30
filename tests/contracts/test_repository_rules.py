@@ -1296,6 +1296,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "`SmartStoreReadback.available()` is `False` and `verify` refuses",
         "a **read-back comparison that proves published state** (ADR-0014 §11)",
         "`proves_published_state()` is `False`",
+        "nothing states the display status a unit is registered with, so no explicit expectation"
+        " exists",
+        "no canonical contract decides the expected published state",
+        "**Amendment note (published-state read).**",
         "a CREATE that cannot be read back is never `CONFIRMED`",
         "Neither contract fixes an order among them",
         "all of them precede any canary",
@@ -1368,6 +1372,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         " (`LIVE_SENDER_NOT_WIRED`)",
         "anything possibly transmitted is `UPLOAD_UNKNOWN` and is never resent",
         "**It closes no prerequisite**",
+        "**Pre-canary groundwork, prerequisite still open — the published-state read**",
+        "the display status ICBM registers (`ON` or `SUSPENSION`) has no owner, so none is stated"
+        " and nothing can be confirmed",
     ):
         assert element in ordering, element
     assert "`app/container.py` wires `UnwiredAssetSender`" not in ordering
@@ -1449,6 +1456,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # adopted comparison proves no published state.
     assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
     assert smartstore_readback.proves_published_state() is False
+    # The read half exists; the expectation does not, which is what keeps the row open.
+    assert smartstore_readback.reads_published_state() is True
+    assert smartstore_readback.expected_published_state({}).display_status is None
 
 
 # ---------------------------------------------------------------- Gate 3 area 1 (ADR-0018 §12)

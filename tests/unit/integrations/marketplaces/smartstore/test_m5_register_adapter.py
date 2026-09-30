@@ -30,6 +30,7 @@ KEY_B = "rik1-" + "b" * 32
 REF_MAIN = "https://shop-phinf.example/a/main.jpg"
 REF_DETAIL = "https://shop-phinf.example/a/detail.jpg"
 ORIGIN_READ = EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2
+CHANNEL_READ = EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2
 
 
 def _asset(role: str, sha: str, reference: str | None) -> dict[str, Any]:
@@ -408,10 +409,136 @@ def _compare(**kwargs: Any) -> readback.Comparison:
 def test_an_exact_read_back_matches_the_snapshot() -> None:
     result = _compare()
     assert (result.verdict, result.reasons) == (readback.ReadbackVerdict.MATCH, ())
-    assert result.comparison_contract_version == "smartstore-readback-comparison/v1"
-    assert result.normalizer_version == "smartstore-readback-normalizer/v1"
+    assert result.comparison_contract_version == "smartstore-readback-comparison/v2"
+    assert result.normalizer_version == "smartstore-readback-normalizer/v2"
     # The read-back is compared against the projected provider code, exactly (R1).
     assert result.normalized["seller_management_code"] == SELLER_CODE
+
+
+# ---------------------------------------------------------------- the published state (§11)
+
+
+def _origin_read(*, sale: Any = "SALE", display: Any = "ON", **kwargs: Any) -> dict[str, Any]:
+    """The documented origin-read envelope (Issue #89 5911962320): the sale status under
+    ``originProduct``, the SmartStore display status under ``smartstoreChannelProduct``."""
+    body = _provider_body(**kwargs)
+    if sale is not None:
+        body["originProduct"]["statusType"] = sale
+    if display is not None:
+        body["smartstoreChannelProduct"] = {"channelProductDisplayStatusType": display}
+    return body
+
+
+def _compare_origin(**kwargs: Any) -> readback.Comparison:
+    return readback.compare(payload(), retain(resolve(ORIGIN_READ), _origin_read(**kwargs)))
+
+
+def _expect(monkeypatch: pytest.MonkeyPatch, sale: str | None, display: str | None) -> None:
+    """Give the comparison an explicit expectation, as an owner of the display status would."""
+    monkeypatch.setattr(
+        readback,
+        "expected_published_state",
+        lambda _payload: readback.ExpectedPublishedState(sale, display),
+    )
+
+
+def test_the_origin_read_keeps_the_two_status_leaves_and_the_channel_read_does_not() -> None:
+    body = _origin_read()
+    kept = retain(resolve(ORIGIN_READ), body)
+    assert kept["originProduct"]["statusType"] == "SALE"
+    assert kept["smartstoreChannelProduct"] == {"channelProductDisplayStatusType": "ON"}
+    # The channel-product read response is not captured: nothing of it is claimed.
+    channel = retain(resolve(CHANNEL_READ), body)
+    assert "statusType" not in channel["originProduct"]
+    assert "smartstoreChannelProduct" not in channel
+
+
+def test_both_halves_are_read_at_their_documented_paths_only() -> None:
+    contract = resolve(ORIGIN_READ)
+    listing = readback.normalize(retain(contract, _origin_read(sale="SALE", display="ON")))
+    assert (listing.sale_status, listing.display_status) == ("SALE", "ON")
+    assert listing.canonical()["sale_status"] == "SALE"
+    assert listing.canonical()["display_status"] == "ON"
+    # A status that sits anywhere else is never taken for the documented member: the window
+    # channel's display status, a status nested deeper, or an envelope around the product.
+    elsewhere = _origin_read(sale=None, display=None)
+    elsewhere["windowChannelProduct"] = {"channelProductDisplayStatusType": "ON"}
+    elsewhere["groupProduct"] = {"statusType": "SALE"}
+    elsewhere["originProduct"]["detail"] = {"statusType": "SALE"}
+    listing = readback.normalize(retain(contract, elsewhere))
+    assert (listing.sale_status, listing.display_status) == (None, None)
+    wrapped = readback.normalize(retain(contract, {"result": _origin_read()}))
+    assert (wrapped.sale_status, wrapped.display_status) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("sale", "display"),
+    [("ON_SALE", "DISPLAYED"), ("sale", "on"), (1, True), ("", "")],
+)
+def test_a_value_outside_the_documented_enumerations_is_unreadable(sale: Any, display: Any) -> None:
+    listing = readback.normalize(
+        retain(resolve(ORIGIN_READ), _origin_read(sale=sale, display=display))
+    )
+    assert (listing.sale_status, listing.display_status) == (None, None)
+
+
+def test_no_published_state_is_stated_while_the_display_status_has_no_owner() -> None:
+    # The sale status ICBM registers is SALE; which display status it registers has no owner.
+    expected = readback.expected_published_state(payload())
+    assert (expected.sale_status, expected.display_status, expected.complete) == (
+        "SALE",
+        None,
+        False,
+    )
+    assert readback.reads_published_state() is True
+    assert readback.proves_published_state() is False
+    # Both halves read back, everything else matching: still no published state is stated, so
+    # the execution owner refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
+    for display in ("ON", "SUSPENSION", "WAIT"):
+        result = _compare_origin(display=display)
+        assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
+        assert "published_state" not in result.normalized
+        assert (result.normalized["sale_status"], result.normalized["display_status"]) == (
+            "SALE",
+            display,
+        )
+
+
+@pytest.mark.parametrize("sale", ["OUTOFSTOCK", "WAIT", "SUSPENSION", "PROHIBITION", "DELETE"])
+def test_a_sale_status_other_than_the_registered_one_is_a_mismatch(sale: str) -> None:
+    result = _compare_origin(sale=sale)
+    assert result.verdict is readback.ReadbackVerdict.MISMATCH
+    assert result.reasons == ("SALE_STATUS_MISMATCH",)
+    assert "published_state" not in result.normalized
+
+
+def test_a_published_state_is_stated_only_when_both_halves_equal_an_explicit_expectation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _expect(monkeypatch, "SALE", "ON")
+    proven = _compare_origin()
+    assert proven.verdict is readback.ReadbackVerdict.MATCH
+    assert proven.normalized["published_state"] == "SALE/ON"
+    # The display status differs from the expected one: a mismatch of the listing.
+    hidden = _compare_origin(display="SUSPENSION")
+    assert hidden.reasons == ("DISPLAY_STATUS_MISMATCH",)
+    assert "published_state" not in hidden.normalized
+    # A half that did not come back is not a mismatch, and no state is stated.
+    for missing in ({"sale": None}, {"display": None}, {"sale": None, "display": None}):
+        unread = _compare_origin(**missing)
+        assert unread.verdict is readback.ReadbackVerdict.MATCH, missing
+        assert "published_state" not in unread.normalized
+    # Any other mismatch never carries a published state either.
+    renamed = _compare_origin(name="another name")
+    assert renamed.verdict is readback.ReadbackVerdict.MISMATCH
+    assert "published_state" not in renamed.normalized
+    # Another expectation is proven by exactly its own state.
+    _expect(monkeypatch, "SALE", "SUSPENSION")
+    assert _compare_origin(display="SUSPENSION").normalized["published_state"] == "SALE/SUSPENSION"
+    assert _compare_origin(display="ON").reasons == ("DISPLAY_STATUS_MISMATCH",)
+    # An expectation that names only one half proves nothing.
+    _expect(monkeypatch, "SALE", None)
+    assert "published_state" not in _compare_origin().normalized
 
 
 def test_normalization_is_deterministic_across_envelopes_and_orderings() -> None:

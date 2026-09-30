@@ -250,6 +250,11 @@ _PATH_PARAM = re.compile(r"\{([A-Za-z][A-Za-z0-9]*)\}")
 _PRODUCT_READ_FIELDS = frozenset(
     {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
 )
+# The origin-product read additionally keeps the two published-state leaves its documented 200
+# response carries (Commerce API 2.90.0; Issue #89 5911962320): ``originProduct.statusType`` and
+# ``smartstoreChannelProduct.channelProductDisplayStatusType``. The channel-product read response
+# is not captured, so it keeps the narrower set.
+_ORIGIN_READ_FIELDS = _PRODUCT_READ_FIELDS | {"statusType", "channelProductDisplayStatusType"}
 _IMAGE_UPLOAD_FIELDS = frozenset({"url"})
 # The CREATE success response: the provider identifiers the official evidence names, plus the same
 # safe product leaves a read-back may keep — the response echoes ``originProduct``, the product
@@ -324,7 +329,7 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         mutating=False,
         success_predicate=product_read_succeeded,
         predicate_revision="m5d-origin-read-r1",
-        retained_response_fields=_PRODUCT_READ_FIELDS,
+        retained_response_fields=_ORIGIN_READ_FIELDS,
     ),
     EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2,
@@ -468,7 +473,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-search-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-published-state-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -492,6 +497,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # The SEARCH positive-only reconcile slice adopts POST /v1/products/search and its retention
     # profile (Issue #89 5904349289).
     "m5-search-r1": "0d5934ab1430543016b3c31a8948635d11124711cf058c77e2eb74335bd9a73b",
+    # The published-state read slice: the origin-product read retains the two documented status
+    # leaves (Issue #89 5911962320). No endpoint is adopted or re-adopted by it.
+    "m5-published-state-r1": "c20e9369999e1c38db61df874d47ea354670f41f6180cec7bce0dc36e8ced138",
 }
 
 

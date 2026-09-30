@@ -16,8 +16,10 @@ not readiness: every other requirement still refuses, so the verdict stays `BLOC
 **Adoption is not the whole proof of a seam**, and this result never lets one stand in for the
 other (post-merge audit of main `a10e4b79dbd3`). The origin-product read-back is adopted (PR-D),
 yet a real CREATE could still not be confirmed through it: production wires no committed session
-to read with, and the adopted contract proves no published state, which ADR-0014 §11 compares
-exactly and `app.stages.register.execution` refuses to invent. Both are named as their own
+to read with, and the comparison proves no published state, which ADR-0014 §11 compares
+exactly and `app.stages.register.execution` refuses to invent: the adopted origin read carries
+both of its halves, but nothing states the display status a unit is registered with, so there is
+no explicit expectation to compare against. Both are named as their own
 requirements,
 so the enumeration covers every proof the result claims to cover.
 
