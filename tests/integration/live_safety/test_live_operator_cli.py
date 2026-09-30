@@ -24,10 +24,13 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.capabilities.live_safety import model as live_model
 from app.capabilities.live_safety.assets import PreparationCandidateGate
+from app.capabilities.live_safety.model import MutationRefused
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.interface import cli
+from app.stages.register.execution import CREATE_ENDPOINT_GROUP
 from tests.integration.live_safety.test_canary_eligibility import proven_checks
 from tests.integration.live_safety.test_g3b_restore_retention import (  # noqa: F401 - fixtures
     api,
@@ -403,3 +406,39 @@ def test_the_grants_are_issued_by_the_authority_and_the_stack_still_refuses(
     listed = {grant["grant_id"] for grant in shown["live"]["grants"]}
     assert {granted["grant_id"], create["grant_id"]} <= listed
     assert shown["canary"]["verdict"] == "BLOCKED"
+    # With the CREATE grant issued and the brake released through the commands, the production
+    # send-time stack still refuses the CREATE under M0 — and spends nothing.
+    code, released, err = _run(
+        capsys,
+        "release-brake",
+        "--actor",
+        OPERATOR,
+        "--reason-code",
+        "CANARY_WINDOW",
+        "--authorization-ref",
+        APPROVAL,
+    )
+    assert code == 0 and released["state"] == "RELEASED", err
+    intent = frozen.intent
+    copy = served.registration_preparations.execution_copy(intent.registration_snapshot_id)
+    fence = served.safety_stack.truth_fence()
+    with served.registrations.transaction() as unit, pytest.raises(MutationRefused) as refused:
+        served.safety_stack.admit_create(
+            unit.session,
+            intent=intent,
+            attempt_no=1,
+            endpoint_adopted=True,
+            reconcile_path_adopted=True,
+            scope=unit.execution_scope(
+                intent.marketplace_key, intent.marketplace_account_id, CREATE_ENDPOINT_GROUP
+            ),
+            truth_fence=fence,
+            actor=OPERATOR,
+            correlation_id="corr-live-cli",
+            send_gate=copy.final,
+            preparation_revision_id=frozen.preparation_revision_id,
+        )
+    assert refused.value.code == live_model.MODE_NOT_LIVE
+    spent = served.live_authority.grant_record(create["grant_id"])
+    assert spent is not None and spent.budget_used == 0
+    assert served.registrations.attempts(intent.intent_id) == ()
