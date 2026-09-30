@@ -26,6 +26,9 @@ identity.
   - A citation is a source id of 9–12 digits in a code span, in the form of its kind: `` `<id>` ``
     a conversation comment, `` `review:<id>` `` a review, `` `review-comment:<id>` `` a review
     comment. It resolves only to a source of that kind, which is then a required source.
+  - `` `canon:<path>` `` cites a canonical document: the file at the audited HEAD is a required
+    source, bound by its git blob SHA. An auditor that needs canon the packet does not carry
+    returns INSUFFICIENT.
   - A citation no scanned stream holds is a TECHNICAL_HOLD (`CITED_SOURCE_UNRESOLVED`): declared
     evidence never disappears from a packet silently.
 - **Markers are provenance.** A source is marked only when its first non-empty line, trimmed, is
@@ -91,14 +94,14 @@ identity.
 | --- | --- | --- |
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
-| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `a3509e0cef22aa0f20184dc73b24e8821b014504c3becf810002fad8723bca76` |
-| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `acee78bc90917327995679f44589658186d0d4ad2451093760ee59fe81eb6e62` |
+| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `e9dc7c96532601d055cd1b9d4dcd374c1d15503c36cdb6549ce015fb94645628` |
+| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `add67687c1eacafc52f30b381b9684d6c9ea76b13643b37369657cc793045a20` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
 | `run-full-audit-v1.ps1` | post-merge main audit | `7c6c9cfecfd4d810dbf346e1a988ea4008a989c21e3fe68a49f82027d6738c37` |
 | `run-lookahead-main-v1.ps1` | next-slice selector | `6e07b517ea2d425609db4767421f2e3f6d575272a1ac0b8da6c9350aa41329c9` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `db3e68915a40dfb5b9dbc856b0a2b7e3b1a66e83ef6686d11c3b43670b0a1028` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `4cbe0c0a71e54b19852e59a5ca3d21e39d3d519180b3b002461af0e6d057760f` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 

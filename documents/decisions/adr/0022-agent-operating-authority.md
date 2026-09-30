@@ -116,6 +116,10 @@ The marker-and-classification gate is removed from the packet.
   by their SHA-256.
 - A citation names the kind of its source as well as its id, and resolves only to a source of
   that kind.
+- The declaration also cites the canonical documents the slice is judged against, and the packet
+  carries them as they are at the audited HEAD. An auditor that needs canon the packet does not
+  carry returns `INSUFFICIENT`; it never passes on a diff alone, so citing less never helps a
+  slice pass.
 - A citation that cannot be read is a technical hold, never a smaller packet: declared evidence
   does not disappear silently.
 - A marker is provenance. It never makes a source a packet input and never holds a packet.

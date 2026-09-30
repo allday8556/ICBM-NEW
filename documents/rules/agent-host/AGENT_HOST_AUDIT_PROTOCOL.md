@@ -108,6 +108,25 @@ therefore bounded as follows.
   every slice uses the packet flow of §1–§8. **No slice other than #147 and PR-A may use this
   exception**, including PR-B and PR-C.
 
+### 0.1.1 V3 transition (the PR that delivers V3 only)
+
+The V2 generator cannot audit the change that removes its own gate: it puts a source into a packet
+only through a human classification record, and it does not carry the PR body. The owner's
+instruction that ADR-0022 records forbids asking for such a record. So the one PR that delivers V3
+is audited with the generator of **its own exact HEAD**:
+
+- the Host scripts of that HEAD are copied, unchanged, to a staging Host directory outside the
+  repository, and each copy's SHA-256 equals the hash the README pins for that HEAD;
+- everything mechanical applies unchanged, in the V3 form of §1–§8: the exact HEAD, the generated
+  packet and its digest, one identity for GPT and Claude, `evidence_seen` coverage, the PASS-only
+  cache, DUAL PASS before READY, FULL CI after READY, the packet regeneration before the merge,
+  MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY;
+- the scripts that produce the packet are themselves in the audited diff, so both auditors read
+  the generator they are given a packet by.
+
+No other slice uses this. From that merge on, the runtime Host runs the merged scripts, and a
+Host script that differs from the merged main is not used.
+
 ### 0.2 Operating authority (ADR-0022)
 
 **Who decides what.**
@@ -232,12 +251,17 @@ inferred.
   - `` `review-comment:<id>` `` — a review comment of the PR.
 
   A number outside a code span, such as a CI run id, is not a citation.
+- A **canonical document citation** is `` `canon:<repository path>` `` in a code span. It puts that
+  file, as it is at the audited HEAD, into the packet as a required source bound by its git blob
+  SHA. The declaration cites the canonical documents the slice implements or is judged against
+  (rule §8.3: which contract it implements), so the auditors read that canon in the packet.
 - A **packet source** is a comment, review or review comment in a scanned stream that the
   declaration cites **by its kind and its id**. A source of another kind that carries the same id
   never resolves the citation. Every packet source is `required`: both auditors must report it in
   `evidence_seen`.
 - **Declared evidence never disappears silently.** A citation that no scanned stream holds — a
-  wrong id, a source on an issue the declaration does not name, a source deleted since — cannot be
+  wrong id, a source on an issue the declaration does not name, a source deleted since — or a
+  canonical document that is not at the audited HEAD cannot be
   read. That is a **TECHNICAL_HOLD** (`CITED_SOURCE_UNRESOLVED`), which the agent clears by
   correcting the declaration. It is never dropped from the packet.
 - **The declaration chooses evidence, never authority.** A user's product decision binds through
@@ -247,6 +271,11 @@ inferred.
   cite is therefore missing evidence at most, never a removed decision: a diff that goes beyond
   the canon is `HUMAN_DECISION_REQUIRED` (§0.2) whatever its declaration cites or omits. The
   user's own stop on a PR is the owner's hold file, which no declaration can affect.
+- **An audit is never blind to the canon.** The packet carries the canonical documents the diff
+  changes and the ones the declaration cites. An auditor that needs a canonical document the
+  packet does not carry returns `INSUFFICIENT` and names its path; it never assumes what an unseen
+  document says, and it never passes on a diff alone. The agent then cites that document and the
+  new packet is audited. A declaration cannot make an audit pass by citing less.
 
 **The scan is full and edit-aware.** Every packet generation, including the pre-merge regeneration
 of §7.1, reads every source of every scanned stream in full (all pages) at its current body. It
@@ -309,6 +338,8 @@ Its inputs are **content-bound source identities**:
     per generation;
   - the Host's slice specification or remediation authorization, when one exists, by the identity
     listed above;
+- the canonical documents the declaration cites (§3), each by its path and git blob SHA at the
+  audited HEAD;
 - the durable evidence the declaration cites (§3). Citations are read from the whole declaration:
   the PR body as it was read for the packet, and the slice specification or remediation
   authorization when one exists;

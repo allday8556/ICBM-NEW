@@ -296,7 +296,7 @@ function global:Fx-Record {
     return $body
 }
 
-$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``review:100009101``.`nNot a citation (no code span): CI run 36699770595.`n"
+$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``review:100009101``.`nContract: ``canon:docs/contract.md``.`nNot a citation (no code span): CI run 36699770595.`n"
 
 if ($Scenario -like "packet-*") {
     Fx-C 100009001 "  [ARCHITECT-INSTRUCTION]  `r`n`r`nArchitect: keep the contract rule; clarify wording only.`r`n"
@@ -323,6 +323,8 @@ if ($Scenario -like "packet-*") {
     # the declaration cites a source no scanned stream holds: declared evidence is missing, so nothing is audited or merged
     if ($Scenario -eq "packet-source-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also relies on ``100009998``.`n" }
     # the declaration cites a CONVERSATION COMMENT by an id only a REVIEW carries: the review never stands in for it
+    # the declaration cites a canonical document that is not at the audited HEAD
+    if ($Scenario -eq "packet-canon-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "And ``canon:docs/no-such-contract.md``.`n" }
     if ($Scenario -eq "packet-citation-kind") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also the comment ``100009101``.`n" }
     if ($Scenario -eq "packet-stream-page-fail") { $global:FxStreamFail["issue:89"] = "page" }
     if ($Scenario -eq "packet-stream-perm") { $global:FxStreamFail["reviews:1"] = "perm" }
@@ -832,7 +834,7 @@ try {
         # the declaration cites one more source → it becomes a fourth required source, new digest
         $global:FxIssueBodies["1"] = $global:FxPrBody + "Also: background ``100009004``.`n"
         $r9 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 5)
+        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 6)
         $global:FxIssueBodies["1"] = $global:FxPrBody
         # an optional host manifest that designates a stream the body already names changes no source
         $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $mfPath
@@ -843,10 +845,10 @@ try {
         $expected = [ordered]@{
             complete_1 = "True"; hold_reasons_1 = ""; same_inputs_twice_same_digest = $true; write_1_2 = "WRITTEN/EXISTING_BYTE_IDENTICAL"
             digest_is_sha256_of_packet_bytes = $true; no_bom_no_cr = $true; no_abs_path = $true; no_watermark_or_updated_at_in_packet = $true
-            source_locators = "github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
+            source_locators = "git_blob:HEAD:docs/contract.md github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
             each_section_once = $true; legacy_record_not_in_packet = $true; uncited_marker_not_in_packet = $true
-            manifest_json_sources = "required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
-            manifest_json_required_count = 4; packet_format = "icbm-audit-packet-v3"
+            manifest_json_sources = "required:CANON:referenced,required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
+            manifest_json_required_count = 5; packet_format = "icbm-audit-packet-v3"
             scanned_streams = "issue_comments:1,issue_comments:89,pr_body:1,pr_review_comments:1,pr_reviews:1"
             scan_unresolved = ""; scan_marked_not_cited = "100009300,100009004"
             provenance_only_change_same_digest = $true; tampered_rebuild = "PACKET_IMMUTABILITY_VIOLATION"
@@ -965,7 +967,7 @@ try {
             e2_deleted_cited_source_holds = "CITED_SOURCE_UNRESOLVED:100009002/HOLD_CLASS=TECHNICAL_HOLD"
             f_streams_without_issue_reference = "issue_comments:1,pr_body:1,pr_review_comments:1,pr_reviews:1"
             f_unnamed_issue_citation_holds = "CITED_SOURCE_UNRESOLVED:100009002"
-            f2_bare_numbers_are_not_citations = "True/True/4"
+            f2_bare_numbers_are_not_citations = "True/True/5"
             g_stream_page_fail = "STREAM_UNREADABLE:issue_comments:89/HOLD_CLASS=TECHNICAL_HOLD"
             h_stream_truncated = "STREAM_TRUNCATED:issue_comments:1/HOLD_CLASS=TECHNICAL_HOLD"; ai_prompts = 0
         }
@@ -1052,6 +1054,8 @@ try {
         # a citation names its kind; the key a source must match is "<kind>:<id>", never the id alone
         $typed = Get-EvidenceReferences "``100009001``, ``review:100009101``, ``review-comment:100009201``, ``Review:100009102``, ``review:12345678``, ``comment:100009003``, review:100009104 bare."
         $global:FxChecks.citation_keys = $typed.Keys -join ','
+        $canon = Get-EvidenceReferences "``canon:documents/decisions/adr/0019-x.md``, ``canon:CLAUDE.md``, ``canon:../secret``, ``canon:a/../b``, ``canon:/abs``, ``canon:dir/``, ``canon:a b.md``, ``Canon:docs/x.md``, canon:docs/bare.md, ``documents/plain.md``."
+        $global:FxChecks.citation_canon = $canon.Canon -join ','
         $global:FxChecks.category_at_start = (@("NEW_PRODUCT_FEATURE: x", "[LIVE] y", "COST", "  PROVIDER_CALL - z") | ForEach-Object { Get-HumanDecisionCategory $_ }) -join ','
         $global:FxChecks.category_absent = (@("the diff needs a decision", "maybe LIVE later", "OWNER_HOLD: not an auditor's", "new_product_feature: lower", "") | ForEach-Object { "[$(Get-HumanDecisionCategory $_)]" }) -join ''
         $expected = [ordered]@{
@@ -1059,6 +1063,7 @@ try {
             guard_allowed_sent = $true; local_draft_written = $true; taxonomy_human_all = ""; taxonomy_technical_all = ""
             citation_issues = "89,126"; citation_ids = "5906290729,5907009512"
             citation_keys = "github_issue_comment:100009001,github_pr_review:100009101,github_pr_review_comment:100009201"
+            citation_canon = "CLAUDE.md,documents/decisions/adr/0019-x.md"
             category_at_start = "NEW_PRODUCT_FEATURE,LIVE,COST,PROVIDER_CALL"; category_absent = "[][][][][]"
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
@@ -1264,6 +1269,7 @@ $orchestratorExpect = @{
     "packet-evwrong"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-evidence-idonly"  = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-source-missing"   = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-canon-missing"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:canon:docs/no-such-contract.md"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-citation-kind"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009101"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-guard-digest"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
     "packet-stream-perm"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:pr_reviews:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }

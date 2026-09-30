@@ -450,6 +450,9 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
     # a citation names its kind and resolves only to a source of that kind, never by the id alone
     assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
     assert "$citedIds" not in audit
+    # the canon the slice is judged against is in the packet, and an auditor never passes without it
+    assert "foreach ($cp in $evidenceRefs.Canon)" in audit and 'Kind = "CANON"' in audit
+    assert audit.count("never assume what an unseen document says") == 2
     assert "(review:|review-comment:)?([1-9][0-9]{8,11})" in _host_script(
         "agent-host-authority-v2.ps1"
     )

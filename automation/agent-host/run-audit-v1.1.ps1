@@ -1017,13 +1017,50 @@ foreach ($it in $streamItems) {
     })
 }
 
+# Canonical documents the declaration cites (`canon:<path>`): the file at the audited HEAD, read from the host-owned
+# exact-HEAD audit worktree. Its identity is content-bound by the git blob SHA, so a changed document is a new packet.
+$unresolvedCanon = New-Object System.Collections.Generic.List[string]
+
+foreach ($cp in $evidenceRefs.Canon) {
+    $blobSha = "$(Invoke-Git @('-C', $auditWorktree, 'rev-parse', '--verify', '--quiet', "HEAD:$cp"))".Trim()
+    $kind = if ($blobSha -match '^[0-9a-f]{40}$') { "$(Invoke-Git @('-C', $auditWorktree, 'cat-file', '-t', $blobSha))".Trim() } else { "" }
+    $full = Join-Path $auditWorktree ($cp -replace '/', '\')
+
+    if ($kind -ne "blob" -or -not (Test-Path -LiteralPath $full -PathType Leaf)) {
+        $unresolvedCanon.Add("canon:$cp")
+        continue
+    }
+
+    $canonText = ConvertTo-LfText ([System.IO.File]::ReadAllText($full, (New-Object System.Text.UTF8Encoding($false))))
+    $locator = "git_blob:HEAD:$cp"
+
+    if (-not $seenLocators.Add($locator)) {
+        continue
+    }
+
+    $packetSources.Add([pscustomobject]@{
+        Identity = "$locator@$blobSha"
+        Locator = $locator
+        Digest = $blobSha
+        Kind = "CANON"
+        Class = "required"
+        Required = $true
+        Origin = "referenced"
+        Record = "pr-body"
+        Text = $canonText
+        TextSha = Get-Sha256Hex $canonText
+        Bytes = $utf8Out.GetByteCount($canonText)
+        UpdatedAt = ""
+    })
+}
+
 # A citation is declared evidence. One that no scanned stream holds (a wrong id, an issue the declaration does not
 # name, a source deleted since) cannot be read: hard completeness fails, as a TECHNICAL_HOLD. It is never dropped.
-$unresolvedRefs = @($evidenceRefs.Keys | Where-Object { -not $resolvedKeys.Contains($_) } | ForEach-Object { $evidenceRefs.Labels[$_] })
+$unresolvedRefs = @(@($evidenceRefs.Keys | Where-Object { -not $resolvedKeys.Contains($_) } | ForEach-Object { $evidenceRefs.Labels[$_] }) + @($unresolvedCanon))
 
 if ($packetHoldReasons.Count -eq 0) {
     foreach ($label in $unresolvedRefs) {
-        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and no scanned stream holds a source of that kind with that id"
+        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and it cannot be read: no scanned stream holds a source of that kind with that id, or no such file is at the audited HEAD"
     }
 }
 
@@ -2001,6 +2038,7 @@ IMPORTANT:
 $multiCallNote
 - Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
 - Do not trust commit messages as proof.
+- The canonical documents this slice is judged against are in the packet: the kind=CANON sources (files at the audited HEAD the declaration cites) and the documents the diff itself changes. Judge the diff against them. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not enough to decide safely, return INSUFFICIENT.
 - PASS only if this packet contains enough evidence and no blocker is visible.
 
@@ -2147,6 +2185,7 @@ IMPORTANT:
 - If the evidence packet contains multiple audit segments, treat them as one evidence set and verify consistency across the segments.
 $multiCallNote
 - Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
+- The canonical documents this slice is judged against are in the packet: the kind=CANON sources (files at the audited HEAD the declaration cites) and the documents the diff itself changes. Judge the diff against them. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not sufficient to decide safely, return INSUFFICIENT.
 - PASS only when this packet provides sufficient evidence and no blocker is visible.
 

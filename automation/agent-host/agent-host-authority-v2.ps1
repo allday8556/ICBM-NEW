@@ -256,6 +256,10 @@ function Get-HumanDecisionCategory {
 #       `review-comment:<id>`   -> the PR review comment with that id
 # GitHub numbers the three kinds separately, so an id alone does not identify a source. A citation resolves only to a
 # source of its own kind: a review that happens to carry the id of a cited comment never stands in for it.
+#   a canonical document citation, in a code span:
+#       `canon:<repository path>`  -> that file at the audited HEAD, as a git blob source
+# It is how the declaration puts the canonical text the slice is judged against into the packet, so an audit never
+# depends on canon the auditors cannot read. The path is a plain repository path: no "..", no leading "/", no space.
 # A citation is a claim that the source is evidence. One that no scanned stream holds cannot be read, so it is a
 # TECHNICAL_HOLD (CITED_SOURCE_UNRESOLVED): declared evidence never silently disappears from a packet. A number that is
 # not in a code span (a CI run id, a line count) is not a citation.
@@ -285,6 +289,18 @@ function Get-EvidenceReferences {
         }
     }
 
+    $canon = New-Object "System.Collections.Generic.SortedSet[string]" ([System.StringComparer]::Ordinal)
+
+    if ($Text) {
+        foreach ($m in [regex]::Matches($Text, '(?<!`)`canon:([A-Za-z0-9_][A-Za-z0-9_./-]*)`(?!`)')) {
+            $p = $m.Groups[1].Value
+
+            if ($p -notmatch '(^|/)\.\.?(/|$)' -and $p -notmatch '//' -and -not $p.EndsWith("/")) {
+                [void]$canon.Add($p)
+            }
+        }
+    }
+
     # Keys: "<source kind>:<id>", the kind being the locator kind of the stream item that may resolve the citation.
     # Labels: the citation as the declaration wrote it, for a hold reason.
     $keys = New-Object System.Collections.Generic.List[string]
@@ -301,5 +317,6 @@ function Get-EvidenceReferences {
         ReviewComments = @($reviewComments | ForEach-Object { [string]$_ })
         Keys = @($keys)
         Labels = $labels
+        Canon = @($canon)
     }
 }
