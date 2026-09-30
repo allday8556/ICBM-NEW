@@ -55,6 +55,7 @@ SCENARIOS = {
     # 12-13: identity
     "guard-head-moved": "a HEAD that moved after the audit is audited again",
     "packet-clsedit": "a cited source edited just before the merge: no merge, a re-audit",
+    "packet-source-missing": "a citation no stream holds: nothing is audited or merged",
     "packet-cite-added": "a changed declaration just before the merge: no merge, a re-audit",
     # the mechanical checks V3 keeps or adds
     "behind-base": "a PR HEAD behind main is brought up to date before it is audited",

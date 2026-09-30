@@ -320,6 +320,8 @@ if ($Scenario -like "packet-*") {
     Fx-C 100009300 (Fx-Record)
     if ($Scenario -eq "packet-no-record") { $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"] | Where-Object { $_ -ne 100009300 }) }
     if ($Scenario -eq "packet-unclassified") { Fx-C 100009005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009005 }
+    # the declaration cites a source no scanned stream holds: declared evidence is missing, so nothing is audited or merged
+    if ($Scenario -eq "packet-source-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also relies on ``100009998``.`n" }
     if ($Scenario -eq "packet-stream-page-fail") { $global:FxStreamFail["issue:89"] = "page" }
     if ($Scenario -eq "packet-stream-perm") { $global:FxStreamFail["reviews:1"] = "perm" }
     if ($Scenario -eq "packet-stream-truncated") { $global:FxStreamFail["issue:1"] = "truncate" }
@@ -1255,7 +1257,7 @@ $orchestratorExpect = @{
     "packet-omit-claude"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "CLAUDE_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-evwrong"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-evidence-idonly"  = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
-    "packet-source-missing"   = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "packet-source-missing"   = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-guard-digest"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
     "packet-stream-perm"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:pr_reviews:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-stream-truncated" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_TRUNCATED:issue_comments:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }

@@ -287,11 +287,13 @@ Its inputs are **content-bound source identities**:
 - the PR's changed files and their complete diff;
 - slice specification path and blob SHA, and the scope allow-list source, when the Host selected
   the slice;
+- the slice declaration itself: the PR body, as a required source, by its locator and the SHA-256
+  of its body. It is read once per generation, and the citations are taken from that same read;
 - the durable evidence the slice declaration cites (§3);
 - the scanned-stream list, and the source watermark as scan provenance only, outside the canonical
   packet bytes (§3, §4.2).
 
-Each cited source is identified as below.
+The PR body and each cited source are identified as below.
 
 **Content-bound identity.** A git object (a commit SHA, or a path with its blob SHA) already names
 its content. A GitHub comment ID, review ID or issue/PR number does not. It is a stable locator
@@ -314,6 +316,7 @@ used to build it.
 
 Hard completeness checks:
 
+- the PR body is readable and is present in the packet, once, as a required source;
 - every citation of the declaration resolves to a source a scanned stream holds, and that source
   is present in the packet, once, with its body;
 - every source in every scanned stream is re-scanned in full at its current body (§3);

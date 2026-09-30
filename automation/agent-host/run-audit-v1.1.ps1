@@ -835,7 +835,8 @@ foreach ($type in @("issue_comments", "pr_body", "pr_reviews", "pr_review_commen
     Add-ScannedStream -Type $type -Number ([int64]$PrNumber)
 }
 
-# the slice declaration: the PR body (read now, at its current text) + the host slice spec / remediation authorization
+# the slice declaration: the PR body (read ONCE, here; the pr_body stream below reuses this read) + the host slice
+# spec / remediation authorization
 $declarationText = ""
 $prBodyResp = Invoke-GhJson "repos/$repoSlug/pulls/$PrNumber"
 
@@ -863,7 +864,9 @@ if ($packetHoldReasons.Count -eq 0) {
 
         switch ($ds.Type) {
             "pr_body" {
-                $r = Invoke-GhJson "repos/$repoSlug/pulls/$($ds.Number)"
+                # This PR's body was read once, above, as the declaration. The packet source is that same read:
+                # the citations and the body the auditors see can never come from two different versions.
+                $r = if ("$($ds.Number)" -eq "$PrNumber" -and $prBodyResp.Ok) { $prBodyResp } else { Invoke-GhJson "repos/$repoSlug/pulls/$($ds.Number)" }
 
                 if (-not $r.Ok -or -not $r.Data -or "$($r.Data.number)" -ne "$($ds.Number)") {
                     Add-PacketHold "STREAM_UNREADABLE:$sk"

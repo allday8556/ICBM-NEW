@@ -5,9 +5,18 @@
 # runtime directory to test a deployed copy instead.
 $sp = $PSScriptRoot
 # Fixture output never lands in the repository: a fixture repository holds files that repository-wide scans would read.
-$outDir = Join-Path ([System.IO.Path]::GetTempPath()) "icbm-agent-host-fx"
+# Every run gets a directory of its own, created here and empty: a result.json read below can only have been written by
+# this run, never by an earlier or a concurrent one.
+$outDir = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) "icbm-agent-host-fx") ("run-" + [guid]::NewGuid().ToString("N"))
 $root = Join-Path $outDir $RootName
+
+if (Test-Path -LiteralPath $outDir) {
+    "FX_RUN=FAIL (the run directory already exists: $outDir)"
+    exit 1
+}
+
 New-Item -ItemType Directory -Force -Path $root | Out-Null
+"FX_RUN_DIR=$outDir"
 
 $jobs = foreach ($s in $Scenarios) {
     Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$sp\fx-harness.ps1`"", "-Scenario", $s, "-Root", "`"$root`"", "-SrcHost", "`"$SrcHost`"") `
