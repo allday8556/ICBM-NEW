@@ -819,13 +819,17 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
     return smartstore_product.create_document(
         listing_identity,
         {
-            "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
+            "smartstoreChannelProduct": {
+                "channelProductDisplayStatusType": "ON",
+                "naverShoppingRegistration": True,
+            },
             "originProduct": {
                 "statusType": "SALE",
                 "name": "테스트",
                 "detailContent": "본문",
                 "images": {"representativeImage": {"url": "https://shop-phinf.example/a/main.jpg"}},
                 "salePrice": 19900,
+                "stockQuantity": 1,
                 "leafCategoryId": "cat-1",
                 "detailAttribute": {
                     "sellerCodeInfo": {

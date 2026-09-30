@@ -18,7 +18,7 @@
 
 - **Captured (NAVER Commerce API 2.89.0; `NAVER-P0-PACKET-289` 5746489554, `NAVER-P0-FIELDS-CREATE-289` 5861477977, `NAVER-P0-REQUIRED-CREATE-289` 5861933729, `NAVER-P0-REGISTRATION-CREATE-289` 5862400626):** in the product body, `originProduct.stockQuantity` is **required on product registration**, at least 1 and at most 99,999,999 (5862400626); `optionInfo.optionCombinations[].stockQuantity` is not required, defaults to 0, at most 99,999,999 ([PRODUCT_CREATE § Request structure](PRODUCT_CREATE.md#request-structure)). The adopted read-backs retain `stockQuantity` ([PRODUCT_READ](PRODUCT_READ.md#smartstore)).
 - **Missing:** the relation between product-level and combination-level stock; a standalone stock-change endpoint (method/path/request/response); errors and idempotency.
-- **ICBM:** stock is written only through CREATE, which is adopted as a contract only and never called (`ENDPOINT_MATRIX.md` §4.1.1), and whose required registration `stockQuantity` has no ICBM owner, so it is a named fail-closed gap; no stock-change endpoint is registered (`ENDPOINT_MATRIX.md` §4). Runtime `UNVERIFIED`.
+- **ICBM:** stock is written only through CREATE, which is adopted as a contract only and never called (`ENDPOINT_MATRIX.md` §4.1.1), and whose required registration `stockQuantity` is the ICBM registration seed `1` (Issue #89 architect resolution `5915900049` D2.2) — not a supplier quantity, compared exactly on read-back — while no production stock-sync owner exists; no stock-change endpoint is registered (`ENDPOINT_MATRIX.md` §4). Runtime `UNVERIFIED`.
 
 ## Coupang
 
