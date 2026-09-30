@@ -758,6 +758,8 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
     )
 
 
+# ``Mapping`` and ``Any`` below are this module's own top-of-file imports
+# (``from collections.abc import Mapping, Sequence``; ``from typing import Any``).
 def _sendable(payload: Mapping[str, Any]) -> smartstore_product.WireProjection:
     """A declared gap-free projection of a real, validated document the adopted contract builds.
 
