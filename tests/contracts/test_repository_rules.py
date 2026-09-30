@@ -652,15 +652,25 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0019" in _read(canonical) or TRANSPORT_ADR.name in _read(canonical), canonical
     collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
     assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
-    # Issue #89 5847528940: the architecture states that EXTENSION is the target contract only;
-    # E0 is contract-only and runtime-zero, and DIRECT_URL is the current runnable path.
+    # Issue #89 5847528940 asked the architecture to state the implementation status beside the
+    # target contract. E1 (Issue #126 5906290729, owner amendment 5907095955) moved that status:
+    # one click, compare only, nothing appended; DIRECT_URL is still the only revision writer.
     for element in (
         "`EXTENSION`-primary is the accepted ADR-0019 **target contract**",
-        "**E0 only: contract, runtime zero**",
-        "`DIRECT_URL` is the **current runnable path**",
-        "E1 and every later slice (ADR-0019 §10) are separately authorized",
+        "**E1 is implemented: one click, compare only**",
+        "**appends nothing**: it ends `NO_REVISION` or `FAILED`, never `RECORDED`",
+        "`DIRECT_URL` is still the **only path that writes a revision**",
+        "E2 and every later slice (ADR-0019 §10) are separately authorized",
+        "The application gains no CORS",
+        "pairing replaces none",
+        "A refusal before that point creates no run",
+        "never written to the database, a job payload, the filesystem or a log",
+        "answers `NO_BUNDLE` unless the supplier's shadow switch has a bundle enabled",
+        "never backfilled, never an identity input",
+        "**No server supplier request** is sent for an extension run in E1",
     ):
         assert element in collect_section, element
+    assert "E0 only: contract, runtime zero" not in collect_section
     # ADR-0010 and ADR-0017 are amended by notes at exactly the named sections, text preserved.
     (collect_adr,) = (REPO_ROOT / "documents" / "decisions" / "adr").glob(
         "0010-supplier-generic-collect*.md"
@@ -730,10 +740,12 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     ui = _section(adr, r"^12\. UI ownership and state semantics")
     assert "`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR" in ui
     assert "`REVIEW` is not a run outcome, and `AUTH` is not a field state" in ui
-    # The code facts the contract relies on still hold (F2): EXTENSION is not yet a transport.
+    # ADR-0019 §10 (AC-17): admitting EXTENSION belonged to E1, which did it. The policed gateway
+    # still sends for an HTTP profile only, and the server-side BROWSER is still not a collection
+    # transport.
     from integrations.suppliers.base import SupplierTransport
 
-    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER"}
+    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER", "EXTENSION"}
 
 
 def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
@@ -2412,6 +2424,10 @@ ADAPTIVE_IMPORTERS = {
         "app.stages.collect.adaptive.phase_c_capture",
     },
     "app/container.py": {
+        # ADR-0019 E1: the capture owner's sanitizer and final scan, handed to the extension
+        # ingest as a plain function, and the zero-write dry run, handed in as its seam.
+        "app.stages.collect.adaptive.engine.capture",
+        "app.stages.collect.adaptive.shadow.dry_run",
         "app.stages.collect.adaptive.engine.hooks",
         "app.stages.collect.adaptive.phase_c_capture.accounting",
         "app.stages.collect.adaptive.phase_c_capture.commands",

@@ -12,16 +12,20 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 `integrations/marketplaces/smartstore/create.py` and its unit suite (36 and 16), and the SEARCH
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
 and migration `0031` (37 and 17).
+The extension capture transport, slice E1 (ADR-0019; Issue #126), added the client under
+`ui/extension/`, the ingest owner under `app/stages/collect/extension/`, its router, the KM
+capture policy beside the KM collect package, migration `0032` and their tests. No file moved,
+so `PATH_MIGRATION_MAP` is unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 235 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 245 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 19 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 61 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 110 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 62 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 118 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 93 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -29,8 +33,8 @@ and migration `0031` (37 and 17).
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 3 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 3 |  |
-| `documents/` | 153 | all canonical and historical documents |
-| `documents/acceptance/` | 63 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 154 | all canonical and historical documents |
+| `documents/acceptance/` | 64 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
@@ -40,15 +44,16 @@ and migration `0031` (37 and 17).
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 13 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 37 | adapters: suppliers and marketplaces |
+| `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
-| `integrations/suppliers/` | 19 |  |
-| `tests/` | 215 | tests |
-| `tests/contracts/` | 7 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
+| `integrations/suppliers/` | 20 |  |
+| `tests/` | 228 | tests |
+| `tests/contracts/` | 8 | repository-rule and document-contract tests |
+| `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
-| `tests/integration/` | 80 | integration tests by runtime owner |
-| `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 76 | unit tests by runtime owner |
-| `ui/` | 44 |  |
+| `tests/integration/` | 86 | integration tests by runtime owner |
+| `tests/support/` | 13 | shared test support |
+| `tests/unit/` | 80 | unit tests by runtime owner |
+| `ui/` | 52 | operator clients: the served web client and the capture extension |
+| `ui/extension/` | 8 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 44 | the served web client |
