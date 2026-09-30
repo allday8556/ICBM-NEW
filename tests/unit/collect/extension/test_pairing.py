@@ -277,24 +277,29 @@ def test_the_cache_is_memory_only_and_a_restart_empties_it(clock: FakeClock) -> 
         NonceCache(clock, capacity=0)
 
 
-class _SlowClock:
-    """A clock that takes a moment to answer: it holds every caller inside ``consume`` between
-    the start of the check and the insert, which is the window an unsynchronized cache loses."""
+class _SlowSeen(dict[str, datetime]):
+    """The nonces one pairing has used, slowed down exactly inside the race window: every caller
+    that finds the nonce absent waits before it goes on to insert it. Without the lock, every
+    thread that arrives in that wait is accepted."""
 
-    def __init__(self, clock: FakeClock) -> None:
-        self._clock = clock
+    def __contains__(self, key: object) -> bool:
+        found = super().__contains__(key)
+        if not found:
+            time.sleep(0.02)
+        return found
 
-    def now(self) -> datetime:
-        time.sleep(0.01)
-        return self._clock.now()
+
+def _slowed(cache: NonceCache, pairing_id: str) -> NonceCache:
+    cache._seen[pairing_id] = _SlowSeen()
+    return cache
 
 
 def test_one_nonce_presented_by_many_threads_is_accepted_exactly_once(clock: FakeClock) -> None:
     # GPT audit 5365019650 B-3: the policy route runs in a thread pool, so the same signed
     # request can arrive twice at once. Exactly one is accepted; every other is a replay.
     threads = 16
-    for round_number in range(5):
-        cache = NonceCache(_SlowClock(clock))  # type: ignore[arg-type]
+    for round_number in range(3):
+        cache = _slowed(NonceCache(clock), "p")
         gate = threading.Barrier(threads)
         outcomes: list[str] = []
 
@@ -320,9 +325,41 @@ def test_one_nonce_presented_by_many_threads_is_accepted_exactly_once(clock: Fak
         assert cache.size("p") == 1
 
 
+def test_the_slowed_check_really_loses_without_the_lock(clock: FakeClock) -> None:
+    # The test above can fail: the same cache with its lock replaced by one that excludes nobody
+    # accepts the nonce more than once. So the lock is what makes it pass.
+    class _NoLock:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    cache = _slowed(NonceCache(clock), "p")
+    cache._lock = _NoLock()  # type: ignore[assignment]
+    threads = 8
+    gate = threading.Barrier(threads)
+    accepted: list[int] = []
+
+    def present(index: int) -> None:
+        gate.wait()
+        try:
+            cache.consume("p", "same-nonce")
+        except NonceReplayed:
+            return
+        accepted.append(index)
+
+    workers = [threading.Thread(target=present, args=(i,)) for i in range(threads)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert len(accepted) > 1
+
+
 def test_many_threads_never_take_the_cache_over_its_bound(clock: FakeClock) -> None:
     capacity, threads = 4, 16
-    cache = NonceCache(_SlowClock(clock), capacity=capacity)  # type: ignore[arg-type]
+    cache = _slowed(NonceCache(clock, capacity=capacity), "p")
     gate = threading.Barrier(threads)
     accepted: list[int] = []
 

@@ -22,11 +22,11 @@ capture policy beside the KM collect package, migration `0033`, the test-browser
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 247 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 248 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 40 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 63 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 119 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 120 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 93 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |

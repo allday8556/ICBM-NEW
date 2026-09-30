@@ -44,9 +44,14 @@ def test_every_launch_starts_with_the_network_block() -> None:
 
 @pytest.mark.parametrize(
     "argument",
-    ["--host-resolver-rules=MAP * 127.0.0.1", "--host-rules=MAP example.invalid 10.0.0.1"],
+    [
+        "--host-resolver-rules=MAP * 127.0.0.1",
+        "--host-rules=MAP example.invalid 10.0.0.1",
+        "--proxy-server=http://127.0.0.1:3128",
+        "--proxy-pac-url=http://127.0.0.1/proxy.pac",
+    ],
 )
-def test_a_caller_cannot_bring_its_own_host_resolution(argument: str) -> None:
+def test_a_caller_cannot_bring_its_own_network_reach(argument: str) -> None:
     playwright = _Playwright()
     with pytest.raises(ValueError):
         launch_browser(playwright, args=[argument])  # type: ignore[arg-type]

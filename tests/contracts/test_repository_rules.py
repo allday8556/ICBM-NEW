@@ -3195,26 +3195,53 @@ def test_only_the_phase_c_harness_persists_adaptive_profiles() -> None:
 # ---------------------------------------------------------------- test browsers stay on loopback
 
 BROWSER_OWNER = "tests/support/browser.py"
-# Any spelling of a Playwright launch — ``launch``, ``launch_persistent_context``,
-# ``launch_server`` — and attaching to a browser the test did not launch.
-_BROWSER_START = re.compile(r"\.(launch\w*|connect_over_cdp)\(")
+# Any spelling of a browser start: ``launch``, ``launch_persistent_context``, ``launch_server``,
+# attaching to a browser the test did not launch, an engine other than Chromium, or the async API.
+_BROWSER_START = re.compile(
+    r"\.(launch\w*|connect_over_cdp)\(|\bchromium\.connect\(|\.(firefox|webkit)\b|\basync_playwright\b"
+)
+# The launches production and acceptance code make for a real operator. No test may reach them:
+# they are not the loopback-only owner's.
+_REAL_LAUNCHERS = (
+    "automation/acceptance/gate3_visual/harness/harness.py",
+    "automation/acceptance/m0/visual_check.py",
+    "integrations/suppliers/transport/gateway.py",
+)
 
 
 def test_every_test_browser_is_launched_by_the_one_loopback_only_owner() -> None:
     """Issue #126 ``5909188774`` F-1 and owner amendment ``5909645067`` §3: a repository test
-    launches a browser only through ``tests/support/browser.py``, which always applies the
-    loopback-only resolver rule. The scan reads text, so a launch written inside a child-process
-    script is found as well. There is no exception list."""
+    starts a browser only through ``tests/support/browser.py``, which always applies the
+    loopback-only resolver rule. The scan reads every test file as text, so a start written inside
+    a child-process script, behind an alias or in a helper that never says "playwright" is found
+    as well. There is no exception list."""
     starters: dict[str, list[str]] = {}
     for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
         relative = path.relative_to(REPO_ROOT).as_posix()
-        text = path.read_text("utf-8")
-        if "playwright" not in text:
-            continue
-        found = _BROWSER_START.findall(text)
+        if relative == "tests/contracts/test_repository_rules.py":
+            continue  # this rule's own pattern and names
+        found = sorted(
+            {match.group(0) for match in _BROWSER_START.finditer(path.read_text("utf-8"))}
+        )
         if found:
-            starters[relative] = sorted(set(found))
-    assert starters == {BROWSER_OWNER: ["launch", "launch_persistent_context"]}, starters
+            starters[relative] = found
+    assert starters == {BROWSER_OWNER: [".launch(", ".launch_persistent_context("]}, starters
+    # No test module imports or calls a real launcher of production or acceptance code.
+    real = {
+        path: sorted(set(_BROWSER_START.findall((REPO_ROOT / path).read_text("utf-8"))))
+        for path in _REAL_LAUNCHERS
+    }
+    assert all(real.values()), real
+    reached = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if re.search(
+            r"visual_check\.(main|run|capture)\(|harness\.run\(|\._browse\(|PlaywrightLogin",
+            path.read_text("utf-8"),
+        )
+        and path.name != "test_repository_rules.py"
+    ]
+    assert reached == [], reached
 
     owner = (REPO_ROOT / BROWSER_OWNER).read_text("utf-8")
     assert 'NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"' in owner
@@ -3222,6 +3249,8 @@ def test_every_test_browser_is_launched_by_the_one_loopback_only_owner() -> None
     # refuses a caller's own resolver rule.
     assert owner.count("args=_arguments(") == 2 == owner.count(".launch")
     assert "return [NETWORK_BLOCK, *extra]" in owner
+    assert '_OWNED_ARGUMENTS = ("--host-resolver-rules", "--host-rules", "--proxy")' in owner
+    assert "**options" not in owner
     # The block is defined once: nothing else in the test tree spells a resolver rule.
     spelled = [
         path.relative_to(REPO_ROOT).as_posix()

@@ -412,6 +412,13 @@ def test_the_test_browser_can_reach_nothing_but_the_loopback(
         )
         with pytest.raises(PlaywrightError, match="ERR_NAME_NOT_RESOLVED"):
             page.goto("https://shop.blocked.invalid/hop")
+        page.unroute("**/*")
+        # A literal address is a host like any other: only 127.0.0.1 itself is reachable. Both
+        # of these stay on this machine whatever the browser does with them.
+        port = local_shop.rsplit(":", 1)[1]
+        for literal in (f"http://127.0.0.2:{port}/final", f"http://[::1]:{port}/final"):
+            with pytest.raises(PlaywrightError, match="ERR_NAME_NOT_RESOLVED"):
+                page.goto(literal)
     finally:
         page.close()
 

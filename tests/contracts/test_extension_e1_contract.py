@@ -200,6 +200,7 @@ def test_the_ingest_owner_appends_nothing_and_reaches_no_network() -> None:
         "__init__.py",
         "buffer.py",
         "capture.py",
+        "gate.py",
         "nonces.py",
         "pairing.py",
         "policy.py",

@@ -15,19 +15,21 @@ No test calls Playwright's ``launch`` or ``launch_persistent_context`` itself:
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from playwright.sync_api import Browser, BrowserContext, Playwright
 
 NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+# What a caller may never pass: another resolution, or a proxy. A loopback proxy is excluded from
+# the block and would forward anywhere.
+_OWNED_ARGUMENTS = ("--host-resolver-rules", "--host-rules", "--proxy")
 BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 
 
 def _arguments(extra: Sequence[str]) -> list[str]:
     # A caller can add arguments and can never replace or re-map the resolver rule.
     for argument in extra:
-        if argument.startswith("--host-resolver-rules") or argument.startswith("--host-rules"):
-            raise ValueError("a test browser's host resolution is owned by tests.support.browser")
+        if argument.startswith(_OWNED_ARGUMENTS):
+            raise ValueError("a test browser's network reach is owned by tests.support.browser")
     return [NETWORK_BLOCK, *extra]
 
 
@@ -44,9 +46,11 @@ def launch_extension_context(
     *,
     extension_root: Path,
     channel: str = BROWSER_CHANNEL,
-    **options: Any,
 ) -> BrowserContext:
-    """A persistent context with one unpacked extension loaded, and the same network block."""
+    """A persistent context with one unpacked extension loaded, and the same network block.
+
+    It takes no other option: a proxy or another executable is not a caller's to choose.
+    """
     return playwright.chromium.launch_persistent_context(
         str(user_data_dir),
         channel=channel,
@@ -58,5 +62,4 @@ def launch_extension_context(
                 f"--load-extension={extension_root}",
             )
         ),
-        **options,
     )

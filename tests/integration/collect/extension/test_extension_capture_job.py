@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -415,6 +416,38 @@ def test_an_enabled_bundle_is_compared_in_memory_and_nothing_is_written(
 
 def _boom(*_: Any, **__: Any) -> Any:
     raise RuntimeError("synthetic evaluation failure")
+
+
+def test_an_unclassified_failure_never_carries_its_own_text(
+    config: AppConfig, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The extractor holds captured page content, so whatever it raises is reduced to a fixed code
+    # and its type before it reaches the run, the job's stored error or a log.
+    secret_text = "synthetic page text 010-0000-0000"
+
+    def leak(*_: Any, **__: Any) -> Any:
+        raise ValueError(secret_text)
+
+    with _process(config, clock) as app:
+        run_id = _accept(app)
+        registered = app.extension_capture._collections["kmretail"]
+        monkeypatch.setitem(
+            app.extension_capture._collections,
+            "kmretail",
+            replace(registered, collection=replace(registered.collection, fields=leak)),
+        )
+        result = app.runner.run_next()
+        assert result is not None and result.state is JobState.DEAD
+        assert result.error_code == "EXTENSION_PROCESSING_FAILED"
+        run = app.collection.run(run_id)
+        assert (run.outcome, run.detail) == (
+            CollectionOutcome.FAILED,
+            "EXTENSION_PROCESSING_FAILED",
+        )
+        assert _job(config, run_id)[1] == "DEAD"
+    for path in Path(config.data_dir).rglob("*"):
+        if path.is_file():
+            assert secret_text.encode() not in path.read_bytes(), path.name
 
 
 @pytest.mark.parametrize("where", ["inside-the-comparer", "escaped-from-the-step"])

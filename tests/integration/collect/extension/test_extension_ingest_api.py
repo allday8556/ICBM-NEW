@@ -236,16 +236,128 @@ def test_the_final_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
     private = gate(frame(body=BODY + '<div class="member-benefit"><p>회원 전용 안내</p></div>'))
     assert private == ("SANITIZER_EXCLUDED:PRIVATE@div#.member-benefit",)
     removed = gate(frame(body=BODY + '<img src="/a.jpg?session=synthetic-value">'))
-    assert removed == ("SANITIZER_REMOVED:URL_QUERY:src@img#.",)
+    assert removed == ("IMAGE_REFERENCE_QUERY:src@img#.",)
     residual = gate(frame(body=BODY + "<p>문의 010-0000-0000</p>"))
     assert len(residual) == 1 and residual[0].startswith("residual secret or private material")
-    for findings in (private, removed, residual):
+    handler = gate(frame(body=BODY + '<p onclick="synthetic-value">x</p>'))
+    assert handler == ("SANITIZER_REMOVED:EVENT_HANDLER:onclick@p#.",)
+    for findings in (private, removed, residual, handler):
         assert all(
             "회원" not in f and "synthetic-value" not in f and "010-" not in f for f in findings
         )
-    # A navigation or non-authoritative region is not private material: the sanitizer sets it
-    # aside, and that is not a finding.
+
+
+def test_the_gate_scans_inside_every_region_the_sanitizer_sets_aside() -> None:
+    # The sanitizer drops a navigation or non-authoritative region whole and looks no further,
+    # but the extractor receives the whole capture. So the gate opens each one and scans it too.
+    gate = _server_final_scan
+    # Clean regions of those kinds are not findings.
     assert gate(frame(body=BODY + '<div class="banner"><p>안내</p></div><nav>메뉴</nav>')) == ()
+    # What sits inside them is judged exactly like the rest of the capture.
+    for region in (
+        '<div class="banner"><p>a@synthetic.invalid</p></div>',
+        "<footer><p>문의 010-0000-0000</p></footer>",
+        '<div class="related"><div class="recent"><p>b@synthetic.invalid</p></div></div>',
+    ):
+        findings = gate(frame(body=BODY + region))
+        assert len(findings) == 1, region
+        assert findings[0].startswith("residual secret or private material"), region
+        assert "synthetic.invalid" not in findings[0] and "010-" not in findings[0]
+    # A private region nested inside one is found as well.
+    nested = gate(
+        frame(body=BODY + '<div class="related"><div class="member-note"><p>안내</p></div></div>')
+    )
+    assert nested == ("SANITIZER_EXCLUDED:PRIVATE@div#.member-note",)
+
+
+def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
+    # Suppliers name uploaded images with long hashes. A reference is a plain locator or a finding;
+    # a generic secret pattern never decides it.
+    gate = _server_final_scan
+    hashed = "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d"
+    for clean in (
+        f'<img src="//kmretail.co.kr/web/product/big/202409/{hashed}.jpg">',
+        f'<img ec-data-src="/web/upload/{hashed}{hashed}.png" data-original="/web/{hashed}.jpg">',
+        '<img srcset=" /a.jpg 1x, /b.jpg 2x">',
+        '<img srcset="/a.jpg 480w,/b.jpg 800w" src="https://kmretail.co.kr/c.jpg">',
+    ):
+        assert gate(frame(body=BODY + clean)) == (), clean
+    for bad, kind in (
+        ('<img src="/a.jpg?v=1">', "QUERY"),
+        ('<img src="/a.jpg#frag">', "FRAGMENT"),
+        ('<img src="https://user:pw@kmretail.co.kr/a.jpg">', "CREDENTIALS"),
+        ('<img src="data:image/png;base64,AAAA">', "SCHEME"),
+        ('<img src="javascript:void(0)">', "SCHEME"),
+        ('<img src="/a b.jpg">', "NOT_A_LOCATOR"),
+        ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR"),
+        ('<img src="/eyJhbGciOiJIUzI1NiJ9abc.jpg">', "TOKEN_SHAPED"),
+        ('<img data-src="/a.jpg?token=synthetic-value">', "QUERY"),
+    ):
+        findings = gate(frame(body=BODY + bad))
+        assert len(findings) == 1 and findings[0].startswith(f"IMAGE_REFERENCE_{kind}:"), bad
+        assert "synthetic-value" not in findings[0] and "pw@" not in findings[0]
+    # The mask is for image references only: the same value anywhere else is still the scan's.
+    assert gate(frame(body=BODY + f'<p class="{hashed}">x</p>')) != ()
+
+
+def test_a_hash_named_image_is_accepted_end_to_end(
+    client: TestClient, config: AppConfig, paired: PairingRecord
+) -> None:
+    hashed = "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    body = BODY.replace("synthetic-9001.jpg", f"{hashed}.jpg")
+    assert body != BODY
+    response = post_capture(client, paired, envelope(frame(body=body)))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
+
+
+@pytest.mark.parametrize(
+    ("html", "violation"),
+    [
+        (frame(body=BODY + "<![CDATA[<p>a@synthetic.invalid</p>]]>"), "DECLARATION"),
+        (
+            "<!doctype html>" + frame().removeprefix("<!doctype html>") + "<!doctype html>",
+            "DECLARATION",
+        ),
+        (frame().replace("<!doctype html>", "<!DOCTYPE svg>"), "DECLARATION"),
+        (frame(body=BODY + "<div>" * 120 + "</div>" * 120), "DEPTH_EXCEEDED"),
+        (
+            frame(body=BODY + '<div class="xans-product-review"><p>후기</p></div>'),
+            "REGION_EXCLUDED:div",
+        ),
+    ],
+    ids=["cdata", "second-doctype", "other-doctype", "depth", "excluded-region"],
+)
+def test_the_structure_check_refuses_what_the_extension_never_writes(
+    client: TestClient, config: AppConfig, paired: PairingRecord, html: str, violation: str
+) -> None:
+    from app.stages.collect.extension.capture import policy_violations
+
+    policy = _container(client).extension_capture.policy(SUPPLIER)
+    assert violation in policy_violations(html, policy)
+    before = table_counts(config)
+    response = post_capture(client, paired, envelope(html))
+    assert response.status_code == 202
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_CAPTURE_POLICY_VIOLATION")
+    assert untouched(before, table_counts(config)) == {}
+
+
+def test_an_extension_request_from_a_non_loopback_host_is_refused_before_anything(
+    client: TestClient, config: AppConfig, paired: PairingRecord
+) -> None:
+    # The loopback host is required together with everything else (TrustedHostMiddleware): a
+    # correctly signed request that names another host opens no run and consumes no nonce.
+    before = table_counts(config)
+    for host in ("icbm.example.invalid", "192.168.0.10:8790", "localhost.evil.invalid"):
+        response = post_capture(client, paired, envelope(), overrides={"host": host})
+        assert response.status_code == 400, host
+        policy = client.get(
+            POLICY, headers=signed(paired, method="GET", path=POLICY, overrides={"host": host})
+        )
+        assert policy.status_code == 400, host
+    assert table_counts(config) == before
+    assert _container(client).collection.recent_runs() == ()
 
 
 def test_a_capture_the_policy_does_not_allow_fails_the_run(

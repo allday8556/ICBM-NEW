@@ -29,7 +29,8 @@ applies the ceilings, opens a canonical collection run, final-scans exactly what
 the same `DocumentView`, runs the canonical KM extractor in memory and the Adaptive dry run, and
 settles the run.
 
-**E1 appends nothing.** A successful run is `NO_REVISION` with the code `EXTENSION_COMPARE_ONLY`;
+**E1 appends nothing.** A successful run is `NO_REVISION`, with the code `EXTENSION_COMPARE_ONLY`
+when the identity resolves and the parser's own reason when it does not;
 a failure after the run is opened is `FAILED`; `RECORDED` is unreachable.
 
 ## 2. What E1 is not
@@ -67,8 +68,10 @@ loopback, and `tests/contracts/test_repository_rules.py` refuses a launch anywhe
 | the in-process buffer and the non-idempotent job: the five tests of ruling N-1 | `tests/integration/collect/extension/test_extension_capture_job.py` |
 | `NO_BUNDLE`, and an enabled bundle compared in memory with nothing written | the same file |
 | a dry run that cannot evaluate or compare its bundle settles the run `FAILED` with `EXTENSION_ADAPTIVE_COMPARE_FAILED`, never `NO_REVISION` | the same file |
-| the final gate: a private region, a removed query or a residual inside the product scope fails the run, and the findings name kinds and boundaries only | `tests/integration/collect/extension/test_extension_ingest_api.py` |
-| one nonce presented by many threads at once is accepted exactly once | `tests/unit/collect/extension/test_pairing.py` |
+| the final gate: a private region, a removed query or a residual inside the product scope fails the run; regions the sanitizer sets aside are scanned too; a hash-named image is accepted; the findings name kinds and boundaries only | `tests/integration/collect/extension/test_extension_ingest_api.py` |
+| the structure check refuses a declaration, an excluded region and nesting past the depth ceiling; a non-loopback `Host` is refused before anything | the same file |
+| an unclassified processing failure settles `FAILED` with a fixed code and never stores its own text | `tests/integration/collect/extension/test_extension_capture_job.py` |
+| one nonce presented by many threads at once is accepted exactly once, and the same test loses without the lock | `tests/unit/collect/extension/test_pairing.py` |
 | every test browser is loopback-only, from one owner | `tests/unit/test_browser_support.py`, `tests/contracts/test_repository_rules.py` |
 | migration 0033: additive, triggers intact, no backfill, provenance never identity | `tests/integration/collect/extension/test_transport_provenance.py` |
 | the C1 regression pair, the policy cut, the same facts on both transports, the preconditions and the bounds, in a real browser | `tests/integration/collect/extension/test_extension_capture_browser.py` |
@@ -78,12 +81,16 @@ loopback, and `tests/contracts/test_repository_rules.py` refuses a launch anywhe
 
 Three facts a reader needs:
 
-- **The final gate never substitutes a sanitized body.** The server runs the capture owner's
-  sanitizer and final scan, unchanged, over exactly what arrived, and the pipeline goes on with
-  the capture as it arrived. So the sanitized candidate is evidence only: a residual finding,
-  anything the sanitizer removed, or a private region it excluded fails the run
-  (`EXTENSION_FINAL_SCAN_REFUSED`). A navigation or non-authoritative region the sanitizer sets
-  aside is not private material and is not a finding; the capture policy is what cuts those.
+- **The final gate never substitutes a sanitized body** (`app/stages/collect/extension/gate.py`).
+  The server runs the capture owner's sanitizer and final scan, unchanged, over exactly what
+  arrived, and the pipeline goes on with the capture as it arrived. So the sanitized candidate is
+  evidence only: a residual finding, anything the sanitizer removed, or a private region it
+  excluded fails the run (`EXTENSION_FINAL_SCAN_REFUSED`).
+  - A navigation or non-authoritative region the sanitizer sets aside is not a finding by itself,
+    but the extractor receives it, so the gate opens each one and scans its content the same way.
+  - An image reference is judged as a locator — plain `http(s)` or relative, no credentials, no
+    query, no fragment — and not by a generic secret pattern: suppliers name uploads with long
+    hashes. A reference that is not such a locator is a finding.
 
 - **The two transports quote different evidence for the same facts.** The KM capture policy keeps
   only three `<head>` elements (ruling B-10), so an extension `DocumentView` has no `og:title`,
