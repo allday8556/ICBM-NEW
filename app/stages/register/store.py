@@ -2018,23 +2018,30 @@ class RegistrationUnit:
         self.session.flush()
         return _check_record(row)
 
-    def abandon_stale_check(self, intent_id: str, *, older_than: datetime) -> bool:
-        """Finish, as ``ERROR``, an in-flight check that started before ``older_than``.
+    def settle_interrupted_checks(self) -> int:
+        """Finish, as ``ERROR``, every check an earlier process left in flight (§28.4).
 
-        A check left open by a process that died mid-check would otherwise block every later
-        check of its Intent forever (single-flight). Abandoning it records only that nothing was
-        observed — it never moves the Intent and proves nothing (§28.4).
+        Called once at startup, before anything reconciles. One ICBM process owns a data directory
+        (ADR-0006) and a check is in flight only while its synchronous reconcile runs, so at
+        startup no worker can still hold one: each open check was abandoned by a process that
+        died mid-check, and closing it can never race a live check. Without this, single-flight
+        would block its Intent forever. It records only that nothing was observed — it never
+        moves an Intent and proves nothing.
         """
-        row = self._open_check(intent_id)
-        if row is None or row.started_at >= older_than:
-            return False
-        row.finished_at = self._clock.now()
-        row.result = ReconcileResult.ERROR.value
-        row.candidate_count = None
-        row.evidence_digest = sanitized_digest({"code": "REGISTER_RECONCILE_CHECK_ABANDONED"})
-        row.next_due_at = None
+        rows = self.session.scalars(
+            select(RegistrationReconcileCheck).where(
+                RegistrationReconcileCheck.finished_at.is_(None)
+            )
+        ).all()
+        digest = sanitized_digest({"code": "REGISTER_RECONCILE_CHECK_INTERRUPTED"})
+        for row in rows:
+            row.finished_at = self._clock.now()
+            row.result = ReconcileResult.ERROR.value
+            row.candidate_count = None
+            row.evidence_digest = digest
+            row.next_due_at = None
         self.session.flush()
-        return True
+        return len(rows)
 
     def reconcile_checks(self, intent_id: str) -> tuple[ReconcileCheckRecord, ...]:
         rows = self.session.scalars(

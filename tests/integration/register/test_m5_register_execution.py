@@ -2627,7 +2627,7 @@ def test_an_exhausted_intent_never_starves_a_newer_one(
     assert run.lookup.calls == 2
 
 
-def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
+def test_a_check_an_earlier_process_left_open_is_settled_at_startup(
     container: Container,
     sources: Collections,
     store: RegistrationStore,
@@ -2635,8 +2635,9 @@ def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
     prep: Preparation,
 ) -> None:
     # §28.4 single-flight, with liveness: a process that died mid-check leaves the check open.
-    # Within the timeout nothing else may start; after it, the next check finishes the abandoned
-    # one as ERROR — proving nothing, moving nothing — and runs.
+    # While it is open every trigger coalesces into it and nothing is read. The next process
+    # finishes it as ERROR at startup — proving nothing, moving nothing — before anything
+    # reconciles, and the Intent can be reconciled again.
     ready = prepare(container, sources, store, account, prep)
     run = _unknown(container, store, prep, ready)
     run.lookup.is_available = True
@@ -2647,12 +2648,13 @@ def test_a_check_abandoned_mid_flight_never_blocks_its_intent_forever(
     coalesced = run.service.reconcile(ready.intent_id, correlation_id=CID)
     assert coalesced.action == "RECONCILE_IN_FLIGHT"
     assert run.lookup.calls == 0 and len(store.reconcile_checks(ready.intent_id)) == 1
-    container.clock.advance(int(ExecutionPolicy().reconcile_check_timeout.total_seconds()) + 1)
+    assert run.service.settle_interrupted_checks() == 1
+    assert run.service.settle_interrupted_checks() == 0
     with pytest.raises(ExecutionRefused) as refused:
         run.service.reconcile(ready.intent_id, correlation_id=CID)
     assert refused.value.code == "REGISTER_RECONCILE_ZERO"
-    abandoned, current = store.reconcile_checks(ready.intent_id)
-    assert abandoned.result is ReconcileResult.ERROR and abandoned.next_due_at is None
+    interrupted, current = store.reconcile_checks(ready.intent_id)
+    assert interrupted.result is ReconcileResult.ERROR and interrupted.next_due_at is None
     assert current.result is ReconcileResult.ZERO and not current.in_flight
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
@@ -2706,16 +2708,17 @@ def test_an_exhausted_schedule_never_leaves_its_last_check_open(
     account: str,
     prep: Preparation,
 ) -> None:
-    # The automatic pass closes a stale in-flight check before it looks at the schedule, so an
-    # Intent whose last automatic check was abandoned by a crash is never left with it open.
+    # The startup settlement closes an interrupted check whatever the schedule says, so an Intent
+    # whose last automatic check was abandoned by a crash is never left with it open.
     ready = prepare(container, sources, store, account, prep)
     run = _unknown(container, store, prep, ready)
     policy = ExecutionPolicy(reconcile_schedule=())
     auto = execution(container, prep, lookup=run.lookup, policy=policy)
     with store.transaction() as unit:
         unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.AUTO)
-    container.clock.advance(int(policy.reconcile_check_timeout.total_seconds()) + 1)
     auto.service.reconcile_due(correlation_id=CID)
+    assert store.reconcile_checks(ready.intent_id)[0].in_flight
+    auto.service.settle_interrupted_checks()
     (check,) = store.reconcile_checks(ready.intent_id)
     assert not check.in_flight and check.result is ReconcileResult.ERROR
     assert run.lookup.calls == 0
@@ -2744,3 +2747,15 @@ def test_an_unknown_intent_never_carries_a_provider_identity(
     intent = store.intent(ready.intent_id)
     assert intent is not None and intent.state is IntentState.UNKNOWN
     assert intent.marketplace_product_id is None
+
+
+def test_the_application_settles_interrupted_checks_before_it_serves() -> None:
+    # §28.4 liveness: the startup pass that settles an interrupted ASSET upload also closes every
+    # reconcile check an earlier process left in flight, before the worker or any route runs.
+    import inspect
+
+    from app import main
+
+    source = inspect.getsource(main)
+    settle = source.index("services.registration_execution.settle_interrupted_checks()")
+    assert settle < source.index("await services.worker.start()")

@@ -47,7 +47,12 @@ from integrations.marketplaces.smartstore.registry import (
     resolve,
 )
 from integrations.marketplaces.smartstore.retention import retain
-from integrations.marketplaces.smartstore.search import FIRST_PAGE, MAX_PAGE_SIZE, request_body
+from integrations.marketplaces.smartstore.search import (
+    FIRST_PAGE,
+    INT32_MAX,
+    MAX_PAGE_SIZE,
+    request_body,
+)
 from integrations.marketplaces.smartstore.signing import (
     TOKEN_FORM_FIELDS,
     ApplicationCredentials,
@@ -401,7 +406,7 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
             or not _SEARCH_CODE.fullmatch(request.seller_management_code)
             or isinstance(request.page, bool)
             or not isinstance(request.page, int)
-            or request.page < FIRST_PAGE
+            or not FIRST_PAGE <= request.page <= INT32_MAX
             or isinstance(request.size, bool)
             or not isinstance(request.size, int)
             or not 1 <= request.size <= MAX_PAGE_SIZE

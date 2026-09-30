@@ -481,10 +481,6 @@ class ExecutionPolicy:
     )
     # The most Intents one automatic pass reconciles: its provider-read budget (§28.4).
     reconcile_batch: int = 10
-    # A check still in flight this long after it started was abandoned by a process that died
-    # mid-check; it is finished as ERROR so single-flight never blocks its Intent forever. Longer
-    # than any bounded check can take (at most four search pages and one read-back).
-    reconcile_check_timeout: timedelta = timedelta(minutes=10)
 
     def __post_init__(self) -> None:
         # M5 sends one operation, CREATE, to one endpoint group, and the budget it counts is that
@@ -974,10 +970,10 @@ class RegistrationExecutionService:
         snapshot = self._registrations.snapshot(intent.registration_snapshot_id)
         assert snapshot is not None
         checks = self._registrations.reconcile_checks(intent_id)
-        stale = self._clock.now() - self._policy.reconcile_check_timeout
-        if checks and checks[-1].in_flight and checks[-1].started_at >= stale:
+        if checks and checks[-1].in_flight:
             # §28.4 single-flight: a trigger while a check is in flight coalesces into it and
-            # reads nothing. (The store refuses a second open check as well, for a race.)
+            # reads nothing. (The store refuses a second open check as well, for a race.) A check
+            # an earlier process left open is closed at startup (``settle_interrupted_checks``).
             return ExecutionResult(
                 intent_id,
                 "RECONCILE_IN_FLIGHT",
@@ -995,9 +991,6 @@ class RegistrationExecutionService:
                 details={"next_due_at": due.isoformat()},
             )
         with self._registrations.transaction() as unit:
-            unit.abandon_stale_check(
-                intent_id, older_than=self._clock.now() - self._policy.reconcile_check_timeout
-            )
             check = unit.start_reconcile_check(intent_id, trigger=trigger)
         automatic = sum(1 for c in checks if c.trigger is ReconcileTrigger.AUTO) + (
             1 if trigger is ReconcileTrigger.AUTO else 0
@@ -1076,11 +1069,6 @@ class RegistrationExecutionService:
         for intent_id in self._registrations.unknown_intents():
             if len(outcomes) >= self._policy.reconcile_batch:
                 break
-            stale = self._clock.now() - self._policy.reconcile_check_timeout
-            # A check a crashed process left in flight is closed first, whatever the schedule
-            # says, so an exhausted schedule can never leave it open for good.
-            with self._registrations.transaction() as unit:
-                unit.abandon_stale_check(intent_id, older_than=stale)
             checks = self._registrations.reconcile_checks(intent_id)
             if checks and checks[-1].in_flight:
                 continue
@@ -1098,6 +1086,11 @@ class RegistrationExecutionService:
             except AppError as unresolved:
                 outcomes.append(unresolved.code)
         return tuple(outcomes)
+
+    def settle_interrupted_checks(self) -> int:
+        """Close every reconcile check an earlier process left in flight (§28.4), at startup."""
+        with self._registrations.transaction() as unit:
+            return unit.settle_interrupted_checks()
 
     def _next_due(self, automatic_checks: int) -> datetime | None:
         """When the next check is due after one that brings an Intent to ``automatic_checks``
