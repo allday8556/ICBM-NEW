@@ -450,8 +450,8 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
 
 
 def test_the_agent_host_readme_pins_the_committed_script_bytes() -> None:
-    """The Agent Host scripts are identified byte for byte: every sha256 in the README's table is the
-    hash of the committed file, and every script is in the table."""
+    """The Agent Host scripts are identified byte for byte: every sha256 in the README's table is
+    the hash of the committed file, and every script is in the table."""
     readme = (AGENT_HOST_DIR / "README.md").read_text("utf-8")
     rows = dict(re.findall(r"^\| `([^`]+)` \| [^|]+ \| `([0-9a-f]{64})` \|\r?$", readme, re.M))
     scripts = {
