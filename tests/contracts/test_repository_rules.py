@@ -1043,13 +1043,13 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
     order may never omit a mandatory pre-canary prerequisite. Three are still missing at this main
-    — a production ASSET sender, an executable committed-session read-back and a comparison that
-    proves published state, the two halves of ADR-0014 §11's success proof — and none is
-    authorized by ADR-0020. Two were closed by their own slices, each under its own architect
-    resolution, and the order records them as closed rather than dropping them: the ADR-0014 §27
+    — a production ASSET sender that can transmit (the adapter is wired with no committed session
+    and sends nothing), an executable committed-session read-back and a comparison that proves
+    published state, the two halves of ADR-0014 §11's success proof — and none is authorized by
+    ADR-0020. Two were closed by their own slices, each under its own architect resolution, and
+    the order records them as closed rather than dropping them: the ADR-0014 §27
     authoring-revision owners (5907626428, ADR-0014 §27.1) and the durable canary-eligibility
     owner (5910018106, ADR-0018 §5.1)."""
-    from app.capabilities.live_safety.assets import UnwiredAssetSender
     from app.capabilities.live_safety.proofs import DurableStageProofs
     from app.stages.register.authoring_revisions import AuthoringRevisionKind
     from app.stages.register.preparation import AUTHORING_REVISIONS_UNOWNED
@@ -1064,8 +1064,15 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the mutation-stage prerequisites of ADR-0018 §10 and the read-back success proof of"
         " ADR-0014 §11",
         "This ADR authorizes none of them, and none may be skipped",
-        "the **production ASSET sender**",
+        "the **production ASSET sender** — `app/container.py` wires `SmartStoreAssetSender`",
+        "**with no committed session**: it is unavailable and refuses every send"
+        " (`LIVE_SENDER_NOT_WIRED`)",
         "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
+        "a sender that transmits to the provider is not provider-zero",
+        "The wired adapter transmits nothing; giving it a committed session is that user decision",
+        "**Amendment note (production ASSET sender adapter).**",
+        "**not closed**",
+        "Three prerequisites are therefore still missing",
         "~~the **durable canary-eligibility owner** (ADR-0018 §5)~~ — **closed by its own slice**"
         " (ADR-0018 §5.1; Issue #89 architect resolution `5910018106`; migration `0033`)",
         "both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13)",
@@ -1137,7 +1144,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     for element in (
         "the standing authorization does **not** cover any of them",
         "production ASSET sender",
-        "not provider-zero",
+        "`app/container.py` wires `SmartStoreAssetSender` with no committed session",
+        "the sender and the committed session because a real provider transport is not"
+        " provider-zero",
         "**executable committed-session read-back**",
         "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
@@ -1148,6 +1157,22 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
     assert later in ordering
     assert ordering.index("ASSET sender") < ordering.index(later)
+    # The adapter is recorded as groundwork, never as a closed prerequisite.
+    for element in (
+        "**Pre-canary groundwork, prerequisite still open — the production ASSET sender adapter**"
+        " (ADR-0018 §10 amendment note)",
+        "With no committed session it is unavailable, the sender layer refuses"
+        " (`LIVE_SENDER_NOT_WIRED`)",
+        "anything possibly transmitted is `UPLOAD_UNKNOWN` and is never resent",
+        "**It closes no prerequisite**",
+    ):
+        assert element in ordering, element
+    assert "`app/container.py` wires `UnwiredAssetSender`" not in ordering
+    assert "Pre-canary prerequisite closed — the production ASSET sender" not in ordering
+    # "After those two" still refers to the two adoption slices: every recorded slice follows it.
+    assert ordering.index("After those two, the mandatory") < ordering.index(
+        "**Pre-canary prerequisite closed"
+    )
     # The closed prerequisite is recorded as closed, with what it does not grant.
     for element in (
         "**Pre-canary prerequisite closed — the authoring-revision owners** (ADR-0014 §27.1;",
@@ -1173,7 +1198,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     preconditions = " ".join(_section(roadmap, r"^14\.2 Preconditions").split())
     for element in (
         "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
-        "`UnwiredAssetSender` declares the adopted wire endpoint and refuses every send",
+        "a **production ASSET sender** for the ASSET stage that can transmit"
+        " (`SmartStoreAssetSender`",
+        "is wired with no committed session and refuses every send with `LIVE_SENDER_NOT_WIRED`",
+        "which is not authorized by the ADR-0020 standing authorization",
         "The **durable canary-eligibility owner** (ADR-0018 §5) is closed by its own slice"
         " (ADR-0018 §5.1)",
         "`CANARY_NON_REGULATED` still has to be proven for the exact canary lineage by a current"
@@ -1181,30 +1209,29 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**owners for the category-mapping and detail-composition authoring revisions** — is"
         " closed by its own slice (ADR-0014 §27.1)",
         "still has to be `READY` on every other rule",
-        "which is not authorized by the ADR-0020 standing authorization",
         "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
         "an **executable committed-session read-back**",
         "a **comparison that proves published state**",
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
-    # The runtime fact that makes it a prerequisite still holds: no sender. The
-    # authoring-revision owner exists and is wired; a client still names neither revision. The
-    # eligibility owner exists and is the only thing the durable proof source reads.
-    sender = UnwiredAssetSender(
-        marketplace_key="smartstore",
-        wire=("POST", "host", "/path"),
-        contract_label="x",
-        adopted=True,
-    )
-    assert sender.available() is False
+    # The runtime facts behind the rows. The ASSET sender is the adopted upload with no committed
+    # session, so it is unavailable and its prerequisite — a sender that transmits — stays open.
+    # The authoring-revision owner exists and is wired;
+    # a client still names neither revision. The eligibility owner exists and is the only thing
+    # the durable proof source reads.
+    from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
+    from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+
+    sender = SmartStoreAssetSender(SmartStoreEndpointCaller(), bearer=lambda: None)
+    assert sender.endpoint_adopted() is True and sender.available() is False
     assert (
         inspect.getsource(DurableStageProofs.canary_non_regulated)
         .rstrip()
         .endswith("return self._eligibility.proven(stage, unit_ref, binding)")
     )
     assert "CanaryEligibilityService(" in _read(REPO_ROOT / "app" / "container.py")
-    assert "UnwiredAssetSender(" in _read(REPO_ROOT / "app" / "container.py")
+    assert "SmartStoreAssetSender(" in _read(REPO_ROOT / "app" / "container.py")
     assert AUTHORING_REVISIONS_UNOWNED == "AUTHORING_REVISIONS_UNOWNED"
     assert SERVER_OWNED_AUTHORING_REVISIONS == (
         "category_mapping_revision",
@@ -1342,9 +1369,10 @@ def test_the_live_owners_reach_no_provider() -> None:
             assert any(name == a or name.startswith(f"{a}.") for a in allowed), f"{path}: {name}"
 
 
-def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
+def test_the_container_wires_the_deny_by_default_stack_and_a_sessionless_sender() -> None:
     """At this main the stack reads the M0 execution-mode owner and no proof exists; the CREATE
-    owner is wired to that stack, and the ASSET path to a sender that sends nothing."""
+    owner is wired to that stack, and the ASSET path to the adopted sender with no committed
+    session, which sends nothing."""
     tree = ast.parse((REPO_ROOT / "app/container.py").read_text("utf-8"))
     (stack,) = _calls(tree, "SafetyStack")
     mode, proofs = _keyword(stack, "mode"), _keyword(stack, "proofs")
@@ -1382,7 +1410,10 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
     assert isinstance(authority, ast.Name) and authority.id == "safety_stack"
     (uploads,) = _calls(tree, "AssetUploadService")
     sender = _keyword(uploads, "sender")
-    assert isinstance(sender, ast.Call) and _callee(sender) == "UnwiredAssetSender"
+    assert isinstance(sender, ast.Call) and _callee(sender) == "SmartStoreAssetSender"
+    # Like every provider seam production wires, it is given no session.
+    bearer = _keyword(sender, "bearer")
+    assert isinstance(bearer, ast.Lambda) and ast.unparse(bearer.body) == "None"
     # No production module can build a permitting mode, a proven proof or an admitting authority.
     for path, module in _production_modules().items():
         defined = {n.name for n in ast.walk(module) if isinstance(n, ast.ClassDef)}
@@ -1399,15 +1430,24 @@ def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
                 for f in n.body
             )
         ]
-        assert senders in ([], ["UnwiredAssetSender"]), (path, senders)
-    unwired = inspect.getsource(
-        importlib.import_module("app.capabilities.live_safety.assets").UnwiredAssetSender
+        # The one production sender is the SmartStore adapter's; the capability defines none.
+        expected = (
+            ["SmartStoreAssetSender"]
+            if path == "integrations/marketplaces/smartstore/assets.py"
+            else []
+        )
+        assert senders == expected, (path, senders)
+    wired = inspect.getsource(
+        importlib.import_module("integrations.marketplaces.smartstore.assets").SmartStoreAssetSender
     )
-    assert "return False" in unwired and "raise TransmissionPrecluded" in unwired
+    # Without a session it is unavailable and proves that nothing left the process.
+    assert "return self.endpoint_adopted() and self._bearer() is not None" in wired
+    assert "raise TransmissionPrecluded(SESSION_UNAVAILABLE)" in wired
 
 
 def test_no_application_module_constructs_the_image_upload_adapter() -> None:
-    """The adopted upload caller is reachable only through a wired ASSET sender, and none is."""
+    """The one-artifact adapter is constructed by no application module: the upload endpoint is
+    reached only through the production ASSET sender, behind the attempt owner and the stack."""
     users = {
         path for path, tree in _production_modules().items() if _calls(tree, "ImageUploadAdapter")
     }

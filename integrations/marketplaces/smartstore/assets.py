@@ -14,12 +14,21 @@ Gate 3 area 1) — never this adapter, which owns no state.
   value never becomes durable;
 * anything else is **ambiguous**: an ambiguous outcome yields no asset identity, never a guess,
   and the artifact stays unprepared (ADR-0014 R2's spirit for uploads).
+
+:class:`SmartStoreAssetSender` is the production side of the ASSET upload path (ADR-0018 §3.4,
+§10): the ``AssetUploadSender`` the durable attempt owner hands one artifact to. It uses only the
+adopted upload contract, through the registry-gated caller, once per send. Without a committed
+session it is unavailable and proves that nothing left the process; production wires none, so at
+this main it sends nothing.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from app.capabilities.live_safety.assets import TransmissionPrecluded, UploadSendResult
+from app.capabilities.live_safety.model import UploadAttemptState
+from app.stages.connect.marketplace.capability import RemoteOutcome
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.register.preparation import PreparedAsset
 from app.stages.register.sanitize import safe_provider_reference
@@ -29,7 +38,12 @@ from integrations.marketplaces.smartstore.caller import (
     SmartStoreCallError,
     SmartStoreEndpointCaller,
 )
-from integrations.marketplaces.smartstore.registry import EndpointId
+from integrations.marketplaces.smartstore.registry import (
+    ADOPTED,
+    SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+    EndpointId,
+    wire_identity,
+)
 
 UPLOAD_OUTCOME_VERSION: Final = "smartstore-image-upload-outcome/v1"
 _URL_FIELD: Final = "url"
@@ -122,6 +136,23 @@ def _references(retained: Mapping[str, Any]) -> list[str]:
     return found
 
 
+def single_reference(retained: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """The one provider asset reference a retained upload response proves, or why it proves none.
+
+    Exactly one reference for exactly one artifact: none, several — two equal ones included,
+    because the upload then proved two — or one that fails sanitation is ambiguous.
+    """
+    references = _references(retained)
+    if not references:
+        return None, "UPLOAD_NO_REFERENCE_RETURNED"
+    if len(references) != 1:
+        return None, "UPLOAD_REFERENCE_NOT_UNIQUE"
+    reference = references[0]
+    if not safe_provider_reference(reference):
+        return None, "UPLOAD_REFERENCE_UNSAFE"
+    return reference, None
+
+
 def promote(
     retained: Mapping[str, Any],
     *,
@@ -137,16 +168,9 @@ def promote(
     references included** — or a reference that fails sanitation, proves nothing about which
     provider asset now exists.
     """
-    references = _references(retained)
-    if not references:
-        return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_NO_REFERENCE_RETURNED")
-    # Exactly one reference for exactly one artifact: two references are ambiguous even when
-    # they happen to carry the same string, because the upload proved two, not one.
-    if len(references) != 1:
-        return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_REFERENCE_NOT_UNIQUE")
-    reference = references[0]
-    if not safe_provider_reference(reference):
-        return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, "UPLOAD_REFERENCE_UNSAFE")
+    reference, ambiguous = single_reference(retained)
+    if reference is None:
+        return UploadOutcome(UPLOAD_OUTCOME_VERSION, None, ambiguous)
     return UploadOutcome(
         UPLOAD_OUTCOME_VERSION,
         PreparedAsset(
@@ -159,3 +183,95 @@ def promote(
         ),
         None,
     )
+
+
+# ---------------------------------------------------------------- the production ASSET sender
+
+BearerSource = Callable[[], Any]
+SESSION_UNAVAILABLE: Final = "SMARTSTORE_SESSION_UNAVAILABLE"
+
+
+class SmartStoreAssetSender:
+    """The adopted image upload as the ASSET upload path's sender (ADR-0018 §3.4, §10).
+
+    It owns no ledger, cache, retry or durable state: the ASSET upload-attempt owner records the
+    attempt before calling :meth:`send` and terminalizes it from the result, and the send-time
+    safety stack admits or refuses before that. One ``send`` is at most one provider call.
+
+    - **No committed session, nothing sent.** ``available`` is false and ``send`` raises
+      :class:`TransmissionPrecluded` before any transport — the honest proof that no byte left.
+    - **Applied** only when the adopted success predicate passed and the retained response proves
+      exactly one sanitized reference.
+    - **Not applied** only on the caller's transmission-precluded whitelist (a local preflight
+      rejection, an egress refusal, or a new connection that failed before any request byte).
+    - **Everything else is ``UPLOAD_UNKNOWN``** — a provider error response, a timeout, a dropped
+      or reused connection, an ambiguous success — and is never retried here or anywhere.
+    """
+
+    marketplace_key = "smartstore"
+
+    def __init__(self, caller: SmartStoreEndpointCaller, bearer: BearerSource) -> None:
+        self._caller = caller
+        self._bearer = bearer
+
+    def available(self) -> bool:
+        """Whether an upload could be handed off at all: the endpoint is adopted **and** a
+        committed session exists. ``False`` keeps the stack's sender layer refusing."""
+        return self.endpoint_adopted() and self._bearer() is not None
+
+    def endpoint_adopted(self) -> bool:
+        return EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD in ADOPTED
+
+    def wire(self) -> tuple[str, str, str]:
+        return wire_identity(EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD)
+
+    def contract_label(self) -> str:
+        return SMARTSTORE_ENDPOINT_MAPPING_REVISION
+
+    def send(self, *, content: bytes, file_name: str, media_type: str) -> UploadSendResult:
+        bearer = self._bearer()
+        if bearer is None:
+            raise TransmissionPrecluded(SESSION_UNAVAILABLE)
+        try:
+            response = self._caller.call(
+                EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
+                upload_request(
+                    access_token=bearer.access_token,
+                    credential_generation=bearer.credential_generation,
+                    session_generation=bearer.session_generation,
+                    filename=file_name,
+                    media_type=media_type,
+                    content=content,
+                ),
+            )
+        except SmartStoreCallError as exc:
+            if exc.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN:
+                # The caller's own whitelist: this request provably never reached the provider.
+                raise TransmissionPrecluded(exc.code) from exc
+            return UploadSendResult(
+                UploadAttemptState.UPLOAD_UNKNOWN,
+                outcome_reason=exc.code,
+                evidence=_evidence(None),
+            )
+        assert isinstance(response, ImageUploadResponse)
+        reference, ambiguous = single_reference(response.retained)
+        if reference is None:
+            return UploadSendResult(
+                UploadAttemptState.UPLOAD_UNKNOWN,
+                outcome_reason=ambiguous,
+                evidence=_evidence(response.http_status),
+            )
+        return UploadSendResult(
+            UploadAttemptState.APPLIED_PROVEN,
+            provider_asset_ref=reference,
+            evidence=_evidence(response.http_status),
+        )
+
+
+def _evidence(http_status: int | None) -> dict[str, Any]:
+    """Sanitized facts only: versions and the status, never a header, a body or a token."""
+    return {
+        "outcome_version": UPLOAD_OUTCOME_VERSION,
+        "contract_label": SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+        "http_status": http_status,
+    }
