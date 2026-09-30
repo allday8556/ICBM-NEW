@@ -6,6 +6,7 @@ comment 5746489554). Nothing here performs I/O: the adapter is pure, and the tra
 the adopted read-backs is pinned separately in ``test_smartstore_product_reads.py``.
 """
 
+import hashlib
 import json
 from copy import deepcopy
 from typing import Any
@@ -18,6 +19,11 @@ from integrations.marketplaces.smartstore.registry import ADOPTED, EndpointId, r
 from integrations.marketplaces.smartstore.retention import retain, retained_query
 
 IDENTITY = "icbm-0123456789abcdef0123456789abcdef"
+# The smartstore-seller-management-code/v1 projection of IDENTITY (architect ruling R1): the first
+# 30 lowercase hex characters of SHA-256("smartstore-seller-management-code/v1\0" + identity).
+SELLER_CODE = hashlib.sha256(
+    b"smartstore-seller-management-code/v1\0" + IDENTITY.encode("utf-8")
+).hexdigest()[:30]
 KEY_A = "rik1-" + "a" * 32
 KEY_B = "rik1-" + "b" * 32
 REF_MAIN = "https://shop-phinf.example/a/main.jpg"
@@ -92,8 +98,14 @@ def payload(**overrides: Any) -> dict[str, Any]:
 
 
 def test_seller_codes_come_from_stable_identities_never_from_a_label() -> None:
+    # R1: the provider code is the deterministic 30-hex projection of the listing identity, which
+    # itself is unchanged and stays ICBM's local spine (ADR-0014 §7).
     codes = product.seller_codes(payload())
-    assert codes.seller_management_code == IDENTITY
+    assert codes.seller_management_code == SELLER_CODE
+    assert len(SELLER_CODE) == 30 and SELLER_CODE.lower() == SELLER_CODE
+    assert all(character in "0123456789abcdef" for character in SELLER_CODE)
+    assert codes.listing_identity == IDENTITY
+    assert codes.projection_version == "smartstore-seller-management-code/v1"
     assert codes.option_codes == (KEY_A,)
     # A mutable display value changes nothing: not the name, not the tags, not an option label.
     renamed = payload(
@@ -102,40 +114,127 @@ def test_seller_codes_come_from_stable_identities_never_from_a_label() -> None:
     assert product.seller_codes(renamed) == codes
 
 
-def test_the_codes_travel_verbatim_because_no_length_rule_is_proven() -> None:
-    # Kickoff §8: no truncation and no hashing rule may be invented; the packet proves no length
-    # or charset bound for either seller-code field, and both identities are already short ASCII.
+def test_the_option_codes_travel_verbatim_because_no_length_rule_is_captured() -> None:
+    # The official evidence proves no length or charset bound for sellerManagerCode, so no
+    # truncation or hashing rule is invented for it; the registration_item_key travels as it is.
+    # Only sellerManagementCode has a documented 30-character bound, which R1's projection meets.
     codes = product.seller_codes(payload(items=[_item(KEY_A, 19900), _item(KEY_B, 19900)]))
     assert codes.option_codes == (KEY_A, KEY_B)
     assert all(code.isascii() and code.strip() == code for code in codes.option_codes)
 
 
+def test_the_seller_management_code_projection_is_deterministic_and_versioned() -> None:
+    other = "icbm-" + "f" * 32
+    assert product.seller_management_code(IDENTITY) == SELLER_CODE
+    assert product.seller_management_code(other) != SELLER_CODE
+    # It is a projection, never a replacement: the identity is not recoverable from the code.
+    assert IDENTITY not in SELLER_CODE
+
+
 # ---------------------------------------------------------------- the wire projection (§3)
 
 
-def test_the_projection_states_only_proven_fields_and_names_its_gaps() -> None:
+def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v1"
-    assert projected.proven == {
-        "name": "테스트 상품",
-        "detailContent": "본문",
-        "salePrice": 19900,
-        "sellerCodeInfo": {"sellerManagementCode": IDENTITY},
-        # Only the reviewed notice field the operator actually supplied; the one left to the
-        # product detail stays out, and nothing is added to "complete" the notice.
-        "productInfoProvidedNotice": {"material": "면 100%"},
+    assert projected.encoding_version == "smartstore-register-wire/v2"
+    assert projected.document.mapping() == {
+        "originProduct": {
+            # E2 (Issue #89 `5868542027`): on registration the CREATE endpoint accepts only SALE.
+            "statusType": "SALE",
+            "name": "테스트 상품",
+            "detailContent": "본문",
+            "images": {
+                "representativeImage": {"url": REF_MAIN},
+                "optionalImages": [{"url": REF_DETAIL}],
+            },
+            "salePrice": 19900,
+            # Required on registration (packet 5862400626); the value is the operator-reviewed
+            # category id the Snapshot froze, emitted verbatim.
+            "leafCategoryId": "cat-1",
+            "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
+        }
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
-    # The document is not sendable: the packet proves neither the image container nor the media
-    # type of POST /v2/products, and the endpoint stays NOT_ADOPTED.
+    # The reviewed notice the Snapshot owns is carried as evidence, never emitted: no notice type
+    # child is captured, so nothing of it may be placed on the wire.
+    assert projected.notice_type == "Wear2023"
+    assert projected.notice_fields == {"material": "면 100%"}
+    # The request is not sendable: no ICBM owner decides the naverShoppingRegistration boolean,
+    # the channel display status or the registration stock quantity, and the official evidence
+    # captures no notice child. None of them is ever invented.
     assert not projected.sendable
-    assert any("images" in gap for gap in projected.gaps)
-    assert any("media type" in gap for gap in projected.gaps)
+    assert set(projected.gaps) == {
+        product.GAP_NOTICE_TYPE_CHILD,
+        product.GAP_SHOPPING_REGISTRATION,
+        product.GAP_CHANNEL_DISPLAY_STATUS,
+        product.GAP_REGISTRATION_STOCK_QUANTITY,
+    }
+
+
+def test_the_registration_stock_quantity_is_a_named_gap_never_a_guess() -> None:
+    # Packet 5862400626: stockQuantity is required on registration and must be at least 1. The
+    # Snapshot owns no registration stock, so the field is never emitted — neither the documented
+    # option default 0 nor an invented 1 — and the named gap keeps every projection unsendable.
+    for items in (
+        None,
+        [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})],
+    ):
+        projected = product.project(payload() if items is None else payload(items=items))
+        assert product.GAP_REGISTRATION_STOCK_QUANTITY in projected.gaps
+        assert "stockQuantity" not in projected.document.mapping()["originProduct"]
+        assert '"stockQuantity"' not in projected.document.canonical_json
+        assert projected.sendable is False
+    assert "at least 1" in product.GAP_REGISTRATION_STOCK_QUANTITY
+    assert "5862400626" in product.GAP_REGISTRATION_STOCK_QUANTITY
+
+
+def test_the_value_packet_alone_does_not_make_the_request_sendable() -> None:
+    # F1/F2 (Issue #89 `5868542027`, `5868656082`): E1 closes the *type* of
+    # naverShoppingRegistration (a required JSON boolean) and nothing else. Which boolean ICBM
+    # publishes with has no ICBM-owned source, so the closed type gap is replaced by a value-source
+    # gap — and the projection stays unsendable, with neither boolean guessed onto the wire.
+    projected = product.project(payload())
+    assert projected.sendable is False
+    assert product.GAP_SHOPPING_REGISTRATION in projected.gaps
+    assert "boolean" in product.GAP_SHOPPING_REGISTRATION
+    assert "value source" in product.GAP_SHOPPING_REGISTRATION
+    assert "value type is not captured" not in product.GAP_SHOPPING_REGISTRATION
+    assert product.NAVER_SHOPPING_REGISTRATION_VALUES == (True, False)
+    # E2 closes the statusType gap: it is projected, and no gap names it any more.
+    assert projected.document.mapping()["originProduct"]["statusType"] == "SALE"
+    assert not any("statusType" in gap for gap in projected.gaps)
+    assert not hasattr(product, "GAP_STATUS_TYPE")
+    # The unrelated gaps are unchanged by the packet (F3).
+    assert product.GAP_CHANNEL_DISPLAY_STATUS in projected.gaps
+    assert product.GAP_REGISTRATION_STOCK_QUANTITY in projected.gaps
+    assert product.GAP_NOTICE_TYPE_CHILD in projected.gaps
+    items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
+    options = product.project(payload(items=items))
+    assert product.GAP_OPTION_PRICE_SEMANTICS in options.gaps
+    assert options.sendable is False
+
+
+def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
+    text = product.project(payload()).document.canonical_json
+    for never in (
+        "naverShoppingRegistration",
+        "channelProductDisplayStatusType",
+        "smartstoreChannelProduct",
+        # A separate Shopping Window channel structure, out of the SmartStore-only scope.
+        "windowChannelProduct",
+        "productInfoProvidedNotice",
+        # Unowned optional structures are omitted rather than defaulted (delivery, stock, A/S).
+        "deliveryInfo",
+        "stockQuantity",
+        "afterServiceInfo",
+        "originAreaInfo",
+    ):
+        assert never not in text
 
 
 def test_the_projection_is_deterministic_for_the_same_snapshot() -> None:
     first, second = product.project(payload()), product.project(deepcopy(payload()))
-    assert json.dumps(first.proven, sort_keys=True) == json.dumps(second.proven, sort_keys=True)
+    assert first.document.canonical_json == second.document.canonical_json
     assert (first.codes, first.image_references) == (second.codes, second.image_references)
 
 
@@ -211,8 +310,21 @@ def test_a_single_listing_with_options_keeps_every_item_and_bounds_its_dimension
     items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
     projected = product.project(payload(listing_shape="SINGLE_LISTING_WITH_OPTIONS", items=items))
     assert projected.codes.option_codes == (KEY_A, KEY_B)
-    # The combination container and its option-name fields are not proven, so that part is a gap.
-    assert any("option combinations" in gap for gap in projected.gaps)
+    # The combination form's own keys are captured, so the structure is projected; the identity of
+    # each row is its seller code, never a display label.
+    document = projected.document.mapping()
+    option_info = document["originProduct"]["detailAttribute"]["optionInfo"]
+    assert option_info == {
+        "optionCombinationGroupNames": {"optionGroupName1": "색상"},
+        "optionCombinations": [
+            {"optionName1": "빨강", "sellerManagerCode": KEY_A},
+            {"optionName1": "파랑", "sellerManagerCode": KEY_B},
+        ],
+    }
+    # Whether a combination price is absolute or a difference is not captured, so neither the
+    # value nor the documented default may be relied on: it stays a gap.
+    assert product.GAP_OPTION_PRICE_SEMANTICS in projected.gaps
+    assert "price" not in json.dumps(option_info)
     four = [
         _item(KEY_A, 19900, {"a": "1", "b": "2", "c": "3", "d": "4"}),
         _item(KEY_B, 19900, {"a": "1", "b": "2", "c": "3", "d": "5"}),
@@ -240,7 +352,7 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
             "salePrice": 19900,
             "detailContent": "<p>본문</p>",  # not on the allow-list
             "images": [{"url": REF_MAIN, "order": 1}],
-            "sellerCodeInfo": {"sellerManagementCode": IDENTITY, "sellerBarcode": "880123"},
+            "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE, "sellerBarcode": "880123"},
         },
         "traceId": "t-1",
         "accessToken": "Bearer abcdefghijklmnop",
@@ -250,7 +362,7 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
     assert "detailContent" not in text and "본문" not in text
     assert "sellerBarcode" not in text and "880123" not in text
     assert "accessToken" not in text and "Bearer" not in text and "traceId" not in text
-    assert kept["originProduct"]["sellerCodeInfo"] == {"sellerManagementCode": IDENTITY}
+    assert kept["originProduct"]["sellerCodeInfo"] == {"sellerManagementCode": SELLER_CODE}
     assert kept["originProduct"]["images"] == [{"url": REF_MAIN}]
 
 
@@ -271,7 +383,7 @@ def _provider_body(
     price: int = 19900,
     codes: tuple[str, ...] = (KEY_A,),
     url: str = REF_MAIN,
-    management: str | None = IDENTITY,
+    management: str | None = SELLER_CODE,
 ) -> dict[str, Any]:
     """A provider read-back shaped as an envelope the packet does not prove, so the normalizer
     must recognize the proven leaves wherever they sit."""
@@ -297,7 +409,8 @@ def test_an_exact_read_back_matches_the_snapshot() -> None:
     assert (result.verdict, result.reasons) == (readback.ReadbackVerdict.MATCH, ())
     assert result.comparison_contract_version == "smartstore-readback-comparison/v1"
     assert result.normalizer_version == "smartstore-readback-normalizer/v1"
-    assert result.normalized["seller_management_code"] == IDENTITY
+    # The read-back is compared against the projected provider code, exactly (R1).
+    assert result.normalized["seller_management_code"] == SELLER_CODE
 
 
 def test_normalization_is_deterministic_across_envelopes_and_orderings() -> None:

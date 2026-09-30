@@ -149,7 +149,6 @@ def test_a_passed_preflight_without_approval_sends_nothing(tmp_path: Path) -> No
         ("POST", f"{TOKEN_URL}?grant_type=client_credentials"),
         ("GET", TOKEN_URL),
         ("POST", ACCOUNT_URL),
-        ("POST", f"{BASE_URL}/v2/products"),
         ("GET", f"{ACCOUNT_URL}/../../oauth2/token"),
     ],
 )
@@ -163,6 +162,25 @@ def test_a_forbidden_target_never_reaches_a_transport(
     assert resolve_target(httpx.Request(method, url)) == UNRECOGNIZED
     with pytest.raises(BudgetGateRefused) as caught:
         gate.handle_request(httpx.Request(method, url))
+    assert caught.value.reason == "FORBIDDEN_TARGET"
+    assert spy.received == []
+    assert ledger.counts() == {TOKEN: 0, SELLER: 0}
+    assert ledger.campaign().state is State.BUDGET_EXHAUSTED
+
+
+def test_an_m2_campaign_can_never_send_an_adopted_m5_mutation(tmp_path: Path) -> None:
+    # The CREATE adoption slice made POST /v2/products an adopted endpoint, so the gate now
+    # recognizes it by name instead of calling it unrecognized. Its M2 cap is still 0 — the
+    # campaign ledger budgets the two CONNECT endpoints and nothing else — so it is refused before
+    # any transport, exactly as before, and the campaign becomes BUDGET_EXHAUSTED.
+    ledger = _ledger(tmp_path)
+    ledger.open_phase(Phase.BASELINE_CONNECT)
+    spy = Spy(ledger)
+    gate = BudgetedTransport(ledger, phases=ALL, inner=lambda label: spy)
+    request = httpx.Request("POST", f"{BASE_URL}/v2/products")
+    assert resolve_target(request) == "SMARTSTORE_PRODUCT_CREATE_V2"
+    with pytest.raises(BudgetGateRefused) as caught:
+        gate.handle_request(request)
     assert caught.value.reason == "FORBIDDEN_TARGET"
     assert spy.received == []
     assert ledger.counts() == {TOKEN: 0, SELLER: 0}

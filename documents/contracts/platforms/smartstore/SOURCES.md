@@ -270,11 +270,12 @@ is not applicable evidence for ICBM's own-store application (§11.4 — unknown 
 This is the single ledger entry for the sources of the `POST /v2/products` contract evidence. It
 combines the architect's official evidence reviews **5768199984** and **5768247290**, the
 field-level packet **5861477977**, the required/conditional-field packet **5861933729** and the
-registration-requirement and value-level packet **5862400626** (all retrieved 2026-09-28) with
+registration-requirement and value-level packet **5862400626** (all retrieved 2026-09-28), the
+success-identifier and value-level packet **5868542027** with
 packet 5746489554 (§5.1), all read against the current `(v2) 상품 등록`
 reference and the `원상품 정보 구조체` and `스마트스토어 채널상품 정보 구조체` schemas of release **2.89.0
 (2026-09-15)**. The reviews closed `INSUFFICIENT` for idempotent replay and remote-absence proof
-(ADR-0014 §17.2); that verdict is unchanged.
+(ADR-0014 §17.2); that verdict is unchanged, and the value-level packets do not overturn it.
 
 | Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
 | --- | --- | --- | --- | --- |
@@ -282,6 +283,7 @@ reference and the `원상품 정보 구조체` and `스마트스토어 채널상
 | `NAVER-P0-FIELDS-CREATE-289` | Issue #89 comment 5861477977 (architect-reviewed field-level extract of the 2.89.0 CREATE reference and the `원상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | CREATE top-level objects, nested request keys, success `Content-Type`, documented statuses | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 | `NAVER-P0-REQUIRED-CREATE-289` | Issue #89 comment 5861933729 (architect-reviewed required/optional/conditional-field extract of the 2.89.0 CREATE reference, the `원상품 정보 구조체` schema and the `스마트스토어 채널상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4-%EC%B1%84%EB%84%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4) | schema-marked required `originProduct` fields, M5-relevant conditional rules (options, notice, delivery, after-service, origin area, unit price), channel-product required fields, `windowChannelProduct` scope. Superseded by `NAVER-P0-REGISTRATION-CREATE-289` for the registration requirement of `leafCategoryId` and top-level `stockQuantity` | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 | `NAVER-P0-REGISTRATION-CREATE-289` | Issue #89 comment 5862400626 (architect-reviewed second pass of the 2.89.0 CREATE reference, the `원상품 정보 구조체` schema, the origin-product update reference and the `스마트스토어 채널상품 정보 구조체` schema, re-read 2026-09-28) | the endpoint-specific registration requirements (`leafCategoryId`; top-level `stockQuantity` ≥ 1), which override a conclusion drawn only from generic schema badges; the value-level contract of `statusType` (registration value `SALE`), `deliveryType`, `deliveryAttributeType`, `deliveryFee`, `claimDeliveryInfo`, `optionCombinationSortType`, `skuYn`, `naverShoppingRegistration` and `channelProductDisplayStatusType` | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.2; the CREATE adoption slice (ADR-0020 §4) | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
+| `NAVER-P0-VALUES-CREATE-289` | Issue #89 comment 5868542027 (architect-supplied value-level evidence packet of the 2.89.0 `(v2) 상품 등록` reference https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, the `원상품 정보 구조체` schema and the `스마트스토어 채널상품 정보 구조체` schema) | E1: `smartstoreChannelProduct.naverShoppingRegistration` is a required JSON **boolean** (its type only; a non-advertiser seller's value is stored as `false`); E2: on registration the CREATE endpoint accepts only **`SALE`** as `originProduct.statusType`; E3: the HTTP 200 success object carries `originProductNo`, `smartstoreChannelProductNo` and `windowChannelProductNo` as **top-level** `integer<int64>` members | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.1.1; `integrations/marketplaces/smartstore/{product,create,execution}.py` | Commerce API version changes from `2.89.0`, or the host becomes reachable again for direct re-read |
 
 Summary, limited to what these sources state: `POST /v2/products` takes an `application/json` body
 whose required top-level objects are `originProduct` and `smartstoreChannelProduct`; the
@@ -292,9 +294,10 @@ whose required top-level objects are `originProduct` and `smartstoreChannelProdu
 and further structures carry documented conditional rules; `windowChannelProduct` is a separate
 Shopping Window channel structure outside the SmartStore-only scope. Success is HTTP `200`,
 `application/json;charset=UTF-8`, returning `originProductNo`, `smartstoreChannelProductNo`,
-`windowChannelProductNo` (which may be absent for a SmartStore-only CREATE) and the stored
-`originProduct`; the documented statuses are `200`, `308`,
-`400`, `401`, `403`, `404` and `500`; the reference contains no idempotency key,
+`windowChannelProductNo` (which may be absent for a SmartStore-only CREATE) as top-level
+`integer<int64>` members, and the stored `originProduct`; on registration `statusType` accepts only
+`SALE`, and `naverShoppingRegistration` is a required boolean; the documented statuses are `200`,
+`308`, `400`, `401`, `403`, `404` and `500`; the reference contains no idempotency key,
 request-correlation key, replay rule or duplicate-prevention guarantee. The field-by-field contract
 (nested keys, required/optional/conditional rules, limits, defaults) is recorded once, in
 `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore, with a per-field source column;
@@ -311,7 +314,10 @@ Not proven, so fail-closed:
   RegistrationSnapshot/preparation and required by the selected product/channel conditions may be
   sent; an unsupported category/feature condition stays fail-closed / `REVIEW_REQUIRED` (5861477977
   §F, 5861933729);
-- an enumerated value these sources do not list; none may be invented;
+- an enumerated value these sources do not list; none may be invented. The CREATE `statusType`
+  input is listed (`SALE` only, 5862400626, 5868542027 E2);
+- which boolean ICBM sends as `naverShoppingRegistration`. The sources give its type (5862400626,
+  5868542027 E1), not ICBM's value: that is an ICBM ownership decision, and no value is guessed;
 - an ICBM projection for the simple, custom or standard option structures. The evidence selects no
   new option policy: only an option shape the canonical ICBM contracts already allow may be
   projected (5861477977 §C);
@@ -323,11 +329,12 @@ from `invalidInputs` together with `message` (§10.1), then `UNAUTHORIZED`, `FOR
 and `INTERNAL_SERVER_ERROR` (§10.2–§10.5), and `308/PERMANENT_REDIRECT` is never followed for a
 mutation (§10.6, §17).
 
-This evidence adopts nothing and authorizes no call. `SMARTSTORE_PRODUCT_CREATE_V2` stays
-`NOT_ADOPTED` until its own adoption slice (ADR-0020 §4) freezes the success predicate, timeout,
-redirect, error classification and the typed request projection against these facts. The code-side
-gap text (`integrations/marketplaces/smartstore/registry.py` `ADOPTION_GAPS`, `product.py`) changes
-with that slice, not with this evidence record.
+This evidence adopts nothing and authorizes no call. `SMARTSTORE_PRODUCT_CREATE_V2` is adopted by
+its own adoption slice (ADR-0020 §4 order 1; `ENDPOINT_MATRIX.md` §4.1.1), which froze the success
+predicate, timeout, redirect, error classification and the typed request projection against these
+facts; the code-side contract (`integrations/marketplaces/smartstore/registry.py`, `product.py`,
+`create.py`) changed with that slice, not with this evidence record. Adoption is a contract, never a
+call: execution stays `DRY_RUN` and the provider-evidence verdict above is unchanged.
 
 ---
 

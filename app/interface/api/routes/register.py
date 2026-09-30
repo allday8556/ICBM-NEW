@@ -10,7 +10,8 @@ The preparation routes are the operator's authoring path (§27): they record the
 provider-listing unit is prepared from, evaluate them against current truth through the preflight
 owner, and freeze a Snapshot only through the owners that already decide READY and freshness.
 
-No route here can reach a marketplace mutation: CREATE stays NOT_ADOPTED, and the canary readiness
+No route here can reach a marketplace mutation: the adopted CREATE contract is never a call
+(execution stays DRY_RUN and production wires no committed session), and the canary readiness
 result is derived and read-only — it authorizes nothing.
 """
 

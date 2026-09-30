@@ -454,7 +454,10 @@ possibly transmitted CREATE whose ambiguity no admissible evidence resolves stay
 conflict scope closed, and is never blindly replayed.
 
 `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` therefore stay `NOT_ADOPTED`, and
-`product_registration.write` stays `UNVERIFIED` (§16). New official evidence overturning this verdict
+`product_registration.write` stays `UNVERIFIED` (§16). *(Amendment note: `SMARTSTORE_PRODUCT_CREATE_V2`
+is `ADOPTED` since the CREATE adoption slice — see §17.3. The verdict this subsection records is
+unchanged, `SMARTSTORE_PRODUCT_SEARCH` is unchanged, and `product_registration.write` stays
+`UNVERIFIED`.)* New official evidence overturning this verdict
 is **not** the adoption condition: each endpoint is adopted only in its own separately authorized
 adoption slice under §28 and ADR-0018 §6.1 — CREATE bound to §28's never-resend rule, SEARCH for
 positive-only reconcile only. This subsection records a verdict. It relaxes no rule of §7, §10 or
@@ -467,6 +470,60 @@ it adopts a strategy that never needs remote absence. The verdict itself stands 
 seller-side code, grant, proof or approval ever becomes remote-absence evidence for SmartStore.** For CREATE,
 §17's "idempotency and read-back behaviour" adoption requirement is met by recording the provider's actual
 (absent) idempotency and binding the endpoint to §28's never-resend rule — never by assuming idempotency.
+
+#### 17.3 CREATE adoption amendment (ADR-0020 §4 order 1)
+
+**Amendment note, not a rewrite.** `SMARTSTORE_PRODUCT_CREATE_V2` alone is `ADOPTED`, from the
+official Commerce API 2.89.0 contract recorded field by field in
+`documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore. The adopted transport, success
+predicate, retention profile, request projection and outcome classification are frozen in
+`documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md` §4.1.1, with the endpoint-mapping revision
+`m5-create-r1` and its fingerprint in the same change. Its reconciliation to the value-level
+evidence packet (Issue #89 `5868542027`, E1–E3) moved the revision to `m5-create-r2`.
+
+This amendment **relaxes nothing**:
+
+- §17's "idempotency and read-back behaviour" requirement is met the way §17.2 says it must be —
+  by recording the provider's actual (absent) idempotency and binding the endpoint to §28's
+  never-resend rule, never by assuming idempotency. No idempotency, correlation or replay header
+  is invented or sent.
+- The evidence verdict of §17.2 stays `INSUFFICIENT` and is not overturned; overturning it was
+  never the adoption condition.
+- `NOT_APPLIED_PROVEN` stays whitelist-only. An ordinary post-handoff `4xx`, a `5xx`, a timeout, a
+  lost response, an unsafe redirect and a malformed success are all `UNKNOWN` (architect ruling
+  R2, Issue #89 `5861607665`).
+- A CREATE response is read exactly as E3 of `5868542027` documents it and no wider: the
+  top-level `originProductNo` and `smartstoreChannelProductNo` (and `windowChannelProductNo` when
+  present), each a JSON integer in the signed 64-bit range. Nothing nested is searched, and a
+  boolean, a numeric string or any other type is refused. A readable success is `APPLIED_PROVEN`
+  and hands `originProductNo` on as the read-back identity; a success whose identifiers are missing
+  or malformed is `UNKNOWN`, never `NOT_APPLIED_PROVEN` (§11; `ENDPOINT_MATRIX.md` §4.1.1). This
+  softens nothing: the adopted request is still not sendable, because the ICBM-owned value of
+  `naverShoppingRegistration` (whose boolean type E1 closes), the channel display status, the
+  registration `stockQuantity` (required, at least 1, by `5862400626`, but owned by no Snapshot)
+  and the notice type child remain gaps.
+- The request is the immutable Snapshot's typed projection and only that: it is validated against
+  the adopted request contract as a whole — deny-by-default over every path, the documented bounds,
+  and the `sellerManagementCode` that must be this listing identity's projection — and then frozen
+  as canonical JSON, which is what the caller accepts. No unchecked mapping, and no mapping changed
+  after the Snapshot was projected, can reach the wire or the durable digest (§15, B4).
+- An `UNKNOWN` is never resent, keeps its conflict scope closed and is never `등록실패`
+  (§10, §28, M5-08, M5-09, M5-33, M5-36).
+- The seller-side listing identity stays ICBM's own correlation identity (§7). The provider
+  `sellerManagementCode` is its `smartstore-seller-management-code/v1` projection (ruling R1) —
+  30 lowercase hex characters of `SHA-256("smartstore-seller-management-code/v1\0" + listing_identity)`
+  — which is deterministic and compared exactly on read-back, and is **not** a provider uniqueness
+  proof.
+- Read-back stays the success proof (§11): a 200 that carries a readable provider identity is
+  `APPLIED_PROVEN` — provider-side application evidence — and never a confirmation; read-back and
+  Snapshot comparison remain separate.
+
+It **authorizes nothing else**: no real upload or CREATE, no LIVE change, no area-5 opening, no
+canary and no residual-risk acceptance (§28.7). Execution remains `DRY_RUN` / `M0_DRY_RUN_ONLY`
+and provider-zero, no application route sends a CREATE, `SMARTSTORE_PRODUCT_SEARCH` remains
+`NOT_ADOPTED` (its positive-only reconcile adoption is a separate later slice, ADR-0020 SA-09),
+`product_registration.write` remains `UNVERIFIED`, the canary remains `BLOCKED`, and M5 remains
+`PENDING`.
 
 ### 18. AI is optional
 
@@ -604,8 +661,8 @@ lookup unavailable, error or quota refusal         nothing is proven; the Intent
 - **An exact search candidate is only a presence candidate. It becomes a presence proof only when all of these hold:**
   - the listing identity is ICBM-generated (§7);
   - its local uniqueness and non-reuse invariant is proven;
-  - the provider returns exactly one product whose `sellerManagementCode` is exactly equal to it — equality checked locally, never the provider's similar or partial match;
-  - that candidate is read back by its provider product number and carries the same code.
+  - the provider returns exactly one product whose `sellerManagementCode` is exactly equal to the SmartStore projection of it — `smartstore-seller-management-code/v1` (architect ruling R1, Issue #89 `5861607665`), never the 37-character internal identity itself — equality checked locally, never the provider's similar or partial match;
+  - that candidate is read back by its provider product number and carries the same code — that exact projected code.
 
   Presence proves the CREATE applied (`APPLIED_PROVEN`, resolved by the lookup and the read-back) and that the recovered identity belongs to this Intent. **It does not prove registration success.**
 - **Success is still §11 and only §11.** The recovered identity is read back and compared with the immutable `RegistrationSnapshot`. Only a comparison PASS makes the Intent `CONFIRMED` and writes `MarketplaceRegistration`.
@@ -617,7 +674,7 @@ lookup unavailable, error or quota refusal         nothing is proven; the Intent
 #### 28.3 How an `UNKNOWN` may end, and what may never follow it
 
 - **`UNKNOWN → SENT`** (towards `CONFIRMED` or a read-back mismatch) happens only through the positive reconcile of §28.2, or through a read-back by an already known provider identity.
-- **`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application: transmission-precluded evidence, or another explicitly reviewed machine proof (§10's table). An ordinary definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its own Attempt directly; it never passes through `UNKNOWN`.
+- **`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application: transmission-precluded evidence, or another explicitly reviewed machine proof (§10's table). A definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its own Attempt directly; it never passes through `UNKNOWN`. Definitive means an endpoint-specific rejection whose reviewed official or measured contract explicitly proves non-application (architect ruling R2, Issue #89 `5861607665`); a status or provider error code alone never is. At the current SmartStore CREATE evidence no received response qualifies: an ordinary `4xx` after transport handoff keeps `remote_outcome` `UNKNOWN`, and `NOT_APPLIED_PROVEN` stays the whitelist of `ERRORS.md` §15.
 - **No CREATE follows an unresolved `UNKNOWN`:**
   - `UNKNOWN` cannot open a CREATE Attempt; a CREATE requested for it is refused, for example as `REGISTER_UNKNOWN_REQUIRES_RECONCILE`;
   - the reconcile path cannot import or call the CREATE sender;
@@ -701,7 +758,7 @@ The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 co
   - the automatic schedule and quota values;
   - the verification deadline value;
   - the routes and the card's implementation.
-- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile.
+- **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile. *(Amendment note: CREATE was later adopted by its own separately authorized slice under ADR-0020 §4 — see §17.3. This amendment still authorizes nothing by itself, SEARCH is still `NOT_ADOPTED`, and every rule of §28 is unchanged.)*
 
 > **Amendment note (ADR-0020 §2, §4).** This amendment still authorizes nothing by itself. The CREATE adoption slice and, after it, the positive-only reconcile SEARCH adoption slice are each authorized by the ROADMAP standing authorization of ADR-0020, as separate PRs, when they meet all of its conditions — provider-zero, adoption in code only, and any schema of §28.4 only where a canonical contract has concretely decided it. No provider call, LIVE change, area-5 opening, canary or residual-risk acceptance (§28.7) is authorized by it.
 
@@ -740,9 +797,9 @@ M5-27  the failure budget counts attempts only after the scope's latest accepted
 M5-28  a scope's budget is counted from that scope's own operation history, and a budget the current policy has spent becomes a durable FAILURE_BUDGET pause before the send is refused
 M5-29  a brake reason is recorded only with the measured class that caused it
 M5-30  the registration preparation stores the operator's authored inputs only, append-only, and a Snapshot proves which exact revision froze it; a job payload is an execution copy and never the authoring source
-M5-31  for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the provider identity recovered only when that candidate is read back by its provider product number and carries the same ICBM sellerManagementCode; zero, several or no lookup result never proves presence or absence and never authorizes a CREATE
+M5-31  for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the provider identity recovered only when that candidate is read back by its provider product number and carries the exact SmartStore sellerManagementCode projection of the ICBM listing identity (ruling R1); zero, several or no lookup result never proves presence or absence and never authorizes a CREATE
 M5-32  presence is not success: a recovered provider identity is read back and compared with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider identity ends the seller-code search
-M5-33  an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity or later machine proof of non-application; an ordinary definitive rejection is NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN
+M5-33  an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity or later machine proof of non-application; a definitive rejection, one whose reviewed endpoint contract explicitly proves non-application (ruling R2; no ordinary post-handoff 4xx qualifies), is NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN
 M5-34  every reconcile check is recorded append-only, single-flight per Intent, bounded in schedule and provider-read quota, and retained while its ambiguity is unresolved; a quota refusal never fails an Intent
 M5-35  the read states 등록중, 등록성공, 재확인필요 and 등록실패 are one total, disjoint server-side partition of durable per-Intent state, derived and never stored; a batch's four counts sum to its Intents
 M5-36  a timeout, a lost response, an unknown outcome or a zero-result search is never 등록실패; a real canary under §28 needs an explicit user and architect acceptance of its residual risk

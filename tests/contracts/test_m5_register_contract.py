@@ -65,17 +65,19 @@ def _code() -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- endpoints (ADR-0014 §17)
 
 M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
-# M5 PR-D adopts these two reads (packet 5746489554); nothing else, and nothing mutating.
+# M5 PR-D adopts the two product reads (packet 5746489554), the IMAGE UPLOAD amendment the
+# one-artifact upload, and the CREATE adoption slice (ADR-0020 §4 order 1) POST /v2/products.
+# Nothing else, and no third mutation.
 M5_ADOPTED = frozenset(
     {
         "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
         "SMARTSTORE_CHANNEL_PRODUCT_READ_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
+        "SMARTSTORE_PRODUCT_CREATE_V2",
     }
 )
 M5_UNPROVEN = frozenset(
     {
-        "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
@@ -86,15 +88,15 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-image-upload-r1"
+M5_MAPPING_REVISION = "m5-create-r2"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
-    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the M5 PR-D read-backs."""
+    """An adopted SmartStore endpoint beyond the M2 CONNECT pair and the adopted M5 contracts."""
     return sorted(set(adopted) - M2_ENDPOINTS - M5_ADOPTED)
 
 
-def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
+def test_only_the_adopted_m5_contracts_resolve_and_the_rest_fail_locally() -> None:
     from integrations.marketplaces.smartstore import registry
 
     assert adoption_problems(e.value for e in registry.ADOPTED) == []
@@ -107,18 +109,35 @@ def test_only_the_read_backs_are_adopted_and_the_rest_fail_locally() -> None:
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_only_image_upload_is_an_adopted_mutating_contract() -> None:
+def test_the_image_upload_and_the_create_are_the_only_adopted_mutating_contracts() -> None:
     from integrations.marketplaces.smartstore import registry
 
-    assert [c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating] == [
-        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
+    assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
-    assert "SMARTSTORE_PRODUCT_CREATE_V2" in {e.value for e in registry.NOT_ADOPTED}
+    # SEARCH is the separate later slice (ADR-0020 §4 order 2, ADR-0014 §28.2-§28.4).
+    assert "SMARTSTORE_PRODUCT_SEARCH" in {e.value for e in registry.NOT_ADOPTED}
+
+
+def test_adopting_create_never_adopts_the_reconcile_lookup_with_it() -> None:
+    # ADR-0020 SA-09: CREATE and the positive-only reconcile are two separate slices, CREATE
+    # first. The CREATE seam is real; the lookup seam still refuses locally, so an UNKNOWN stays
+    # unresolved rather than being fabricated into an absence (ADR-0014 §10, §28.2).
+    from integrations.marketplaces.smartstore.execution import (
+        ReconcileLookupNotAdoptedError,
+        SmartStoreReconcileLookup,
+    )
+
+    lookup = SmartStoreReconcileLookup()
+    assert lookup.available() is False
+    with pytest.raises(ReconcileLookupNotAdoptedError):
+        lookup.find(marketplace_account_id="mpa-1", listing_identity="icbm-x")
 
 
 def test_the_adoption_detector_fires() -> None:
-    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_CREATE_V2"]
-    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_CREATE_V2"]
+    adopted = [*M2_ENDPOINTS, "SMARTSTORE_PRODUCT_SEARCH"]
+    assert adoption_problems(adopted) == ["SMARTSTORE_PRODUCT_SEARCH"]
 
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
@@ -925,14 +944,16 @@ EXPECTED_INVARIANTS = {
     "M5-31": "for SmartStore a lookup is positive evidence only: exactly one exact ICBM-identity"
     " candidate is only a presence candidate, and presence (APPLIED_PROVEN) is proven and the"
     " provider identity recovered only when that candidate is read back by its provider product"
-    " number and carries the same ICBM sellerManagementCode; zero, several or no lookup result"
+    " number and carries the exact SmartStore sellerManagementCode projection of the ICBM"
+    " listing identity (ruling R1); zero, several or no lookup result"
     " never proves presence or absence and never authorizes a CREATE",
     "M5-32": "presence is not success: a recovered provider identity is read back and compared"
     " with the immutable Snapshot, only a comparison PASS is CONFIRMED, and a known provider"
     " identity ends the seller-code search",
     "M5-33": "an UNKNOWN ends only on positive reconcile, a read-back by a known provider identity"
-    " or later machine proof of non-application; an ordinary definitive rejection is"
-    " NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN",
+    " or later machine proof of non-application; a definitive rejection, one whose reviewed"
+    " endpoint contract explicitly proves non-application (ruling R2; no ordinary post-handoff"
+    " 4xx qualifies), is NOT_APPLIED_PROVEN on its own Attempt and never passes through UNKNOWN",
     "M5-34": "every reconcile check is recorded append-only, single-flight per Intent, bounded in"
     " schedule and provider-read quota, and retained while its ambiguity is unresolved; a quota"
     " refusal never fails an Intent",
@@ -1259,8 +1280,9 @@ RULES["S28 positive-only reconcile, presence is not success, one total read stat
         "**A recovered provider identity ends the search.**",
         "**The operator's number is never the evidence**",
         "**`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application",
-        "An ordinary definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its"
-        " own Attempt directly; it never passes through `UNKNOWN`.",
+        "A definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its own Attempt"
+        " directly; it never passes through `UNKNOWN`.",
+        "an ordinary `4xx` after transport handoff keeps `remote_outcome` `UNKNOWN`",
         "**Single-flight per Intent.**",
         "It never converts the Intent to a failure and never ends its ambiguity.",
         "**one server-side partition**",

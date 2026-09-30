@@ -20,7 +20,7 @@
 - **Standard-option metadata:** `GET /v1/options/standard-options`; bearer; API group `상품`.
 - **Option structure in the product body:** `originProduct.detailAttribute.optionInfo` (not globally required; simple and combination forms cannot be mixed). The combination form's keys, required/optional rules, defaults and limits (`NAVER-P0-REQUIRED-CREATE-289`, Issue #89 comment 5861933729, among others) are recorded once in [PRODUCT_CREATE § Request structure](PRODUCT_CREATE.md#request-structure); this file does not repeat them.
 - **Missing:** the category query key of the standard-option read and its response fields; the keys of the simple, custom and standard option structures; errors; rate limit.
-- **ICBM:** `SMARTSTORE_STANDARD_OPTIONS` is `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4.1: category query key not named); the option body is part of the `NOT_ADOPTED` CREATE; only an option shape the canonical ICBM contracts already allow may be projected (Issue #89 comment 5861477977 §C). Runtime `UNVERIFIED`.
+- **ICBM:** `SMARTSTORE_STANDARD_OPTIONS` is `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4.1: category query key not named); the option body is part of the CREATE request, adopted as a contract only (`ENDPOINT_MATRIX.md` §4.1.1); only an option shape the canonical ICBM contracts already allow may be projected (Issue #89 comment 5861477977 §C). Runtime `UNVERIFIED`.
 
 ## Coupang
 

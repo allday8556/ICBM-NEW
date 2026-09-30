@@ -40,10 +40,12 @@ The only SmartStore endpoints currently `ADOPTED` for M2 execution are:
 
 The exact endpoint contract and base-path rules are defined in `ENDPOINT_MATRIX.md`.
 
-Since M2, M5 adopted three more endpoints, all on the REGISTER path, which stays `DRY_RUN`: the two
+Since M2, M5 adopted four more endpoints, all on the REGISTER path, which stays `DRY_RUN`: the two
 product read-backs `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` and `SMARTSTORE_CHANNEL_PRODUCT_READ_V2`
-(PR-D) and `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` (the IMAGE UPLOAD amendment). `ENDPOINT_MATRIX.md` §4
-owns the adopted set. Every other SmartStore endpoint, including product CREATE and SEARCH, remains:
+(PR-D), `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` (the IMAGE UPLOAD amendment) and product CREATE
+`SMARTSTORE_PRODUCT_CREATE_V2` (the CREATE adoption slice, `ENDPOINT_MATRIX.md` §4.1.1; a contract,
+never a call). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint,
+including product SEARCH, remains:
 
 `NOT_ADOPTED`
 
@@ -111,7 +113,8 @@ Before any product write can become `READY`, M5 must separately review and adopt
 Until that happens:
 
 ```text
-product CREATE / SEARCH = NOT_ADOPTED   (ENDPOINT_MATRIX.md §4)
+product CREATE          = ADOPTED as a contract only, never a call (ENDPOINT_MATRIX.md §4.1.1)
+product SEARCH          = NOT_ADOPTED   (ENDPOINT_MATRIX.md §4)
 product write           = UNVERIFIED
 ```
 

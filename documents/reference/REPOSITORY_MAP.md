@@ -37,15 +37,15 @@ removed by PR #157, the listed 35 and 15 are the tree's counts.
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 13 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 35 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 15 |  |
+| `integrations/` | 36 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 16 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 213 | tests |
+| `tests/` | 214 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
 | `tests/integration/` | 80 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 74 | unit tests by runtime owner |
+| `tests/unit/` | 75 | unit tests by runtime owner |
 | `ui/` | 44 |  |
 | `ui/web/` | 44 | the served web client |

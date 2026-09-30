@@ -3,7 +3,7 @@
 Everything durable here is real — the registration store and its triggers, the Job/JobAttempt
 tables, the runner with its RetryPolicy, and a real frozen Snapshot from the PR-C path. Only the
 provider seams are fakes, which is what lets the whole state machine be exercised while the
-production CREATE stays NOT_ADOPTED and **no marketplace mutation is reachable** (kickoff §12).
+production execution stays DRY_RUN and **no marketplace mutation is reachable** (kickoff §12).
 
 The numbered comments name the kickoff §13 behaviours each test pins.
 """
@@ -14,8 +14,9 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
+import httpx
 import pytest
 
 from app.capabilities.jobs.models import JobState
@@ -59,9 +60,10 @@ from app.stages.register.preparation import (
 )
 from app.stages.register.provider import CreateHandoff
 from app.stages.register.store import RegistrationStore, RegistrationUnit, ScopeRecord
+from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
+from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.execution import (
-    CreateNotAdoptedError,
     ReconcileLookupNotAdoptedError,
     SmartStoreCreateSender,
     SmartStoreReconcileLookup,
@@ -713,6 +715,208 @@ def test_an_unknown_outcome_is_never_retried_and_never_resent(
         run.service.run(context(ready, attempt_no=2))
     assert refused.value.code == "REGISTER_UNKNOWN_REQUIRES_RECONCILE"
     assert len(run.sender.calls) == 1
+
+
+# ------------------------------------------- the adopted CREATE seam, over a fake transport
+
+
+class _Bearer:
+    """A committed session, as CONNECT would hand one over. Production wires none."""
+
+    access_token = "fixture-access-token-Qx7"
+    credential_generation = 3
+    session_generation = 7
+
+
+_WIRE_IDENTITY = "icbm-" + "0" * 32
+_WIRE_DOCUMENT = smartstore_product.create_document(
+    _WIRE_IDENTITY,
+    {
+        "originProduct": {
+            "statusType": "SALE",
+            "name": "테스트",
+            "detailContent": "본문",
+            "images": {"representativeImage": {"url": "https://shop-phinf.example/a/main.jpg"}},
+            "salePrice": 19900,
+            "leafCategoryId": "cat-1",
+            "detailAttribute": {
+                "sellerCodeInfo": {
+                    "sellerManagementCode": smartstore_product.seller_management_code(
+                        _WIRE_IDENTITY
+                    )
+                }
+            },
+        }
+    },
+)
+
+
+class _Sendable:
+    """A declared-sendable projection of a real, validated document the adopted contract builds.
+
+    The document is a genuine :class:`CreateDocument`: the caller accepts nothing else, so even a
+    test cannot hand the wire an unchecked mapping. The real projection refuses every unit at this
+    adoption — required values stay uncaptured or unowned and none of them is ever invented
+    (`smartstore.product`) — and that refusal is pinned in the adapter suites. Declaring
+    it sendable here is what lets the **domain owner's** behaviour be exercised against the real
+    sender and the real registry-gated caller.
+    """
+
+    sendable = True
+    gaps: tuple[str, ...] = ()
+    document: ClassVar[smartstore_product.CreateDocument] = _WIRE_DOCUMENT
+
+
+def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    sender = SmartStoreCreateSender(
+        caller=SmartStoreEndpointCaller(transport=httpx.MockTransport(transport)),
+        bearer=_Bearer,
+        projector=lambda payload: _Sendable(),
+    )
+    return sender, seen
+
+
+def test_the_adopted_create_seam_never_confirms_from_a_response_body(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # 11 / F5: a readable success (E3 — top-level integer<int64> identifiers) is APPLIED_PROVEN,
+    # which is provider-side application evidence and hands on the read-back identity. It is never
+    # a confirmation: only the read-back and the Snapshot comparison may confirm (ADR-0014 §11),
+    # so an unreadable read-back leaves the Intent unconfirmed — and never CREATEs again.
+    ready = prepare(container, sources, store, account, prep)
+    sender, seen = _adopted_sender(
+        httpx.Response(200, json={"originProductNo": 9900112233, "smartstoreChannelProductNo": 55})
+    )
+    run = execution(
+        container,
+        prep,
+        sender=sender,
+        comparator=FakeComparator(verdict=smartstore_readback.ReadbackVerdict.UNREADABLE),
+    )
+    with pytest.raises(AttemptFailed) as failed:
+        run.service.run(context(ready))
+    assert failed.value.code == "REGISTER_READBACK_MISMATCH"
+    assert len(seen) == 1 and str(seen[0].url).endswith("/v2/products")
+    intent = store.intent(ready.intent_id)
+    assert intent is not None
+    assert intent.remote_outcome is RemoteOutcome.APPLIED_PROVEN
+    assert intent.marketplace_product_id == "9900112233"
+    assert intent.state is not IntentState.CONFIRMED
+    assert run.readback.calls == 1
+    assert count(container.config, "marketplace_registrations") == 0
+    # The next run reads back only; the CREATE count stays one.
+    run.comparator.verdict = smartstore_readback.ReadbackVerdict.MATCH
+    run.service.run(context(ready, attempt_no=2))
+    assert len(seen) == 1 and run.readback.calls == 2
+    confirmed = store.intent(ready.intent_id)
+    assert confirmed is not None and confirmed.state is IntentState.CONFIRMED
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(500, json={"code": "INTERNAL_SERVER_ERROR"}),
+        httpx.Response(400, json={"code": "BAD_REQUEST", "message": "no"}),
+        httpx.Response(308, headers={"location": "https://elsewhere.invalid"}),
+        httpx.Response(200, json={}),
+        httpx.Response(200, json={"originProductNo": 9900112233}),
+        httpx.Response(
+            200, json={"originProductNo": "9900112233", "smartstoreChannelProductNo": 55}
+        ),
+        httpx.Response(
+            200, json={"result": {"originProductNo": 9900112233, "smartstoreChannelProductNo": 55}}
+        ),
+        httpx.ReadTimeout("no response"),
+    ],
+    ids=[
+        "5xx",
+        "ordinary-4xx",
+        "redirect",
+        "empty-success",
+        "unreadable-success",
+        "string-identifier-success",
+        "nested-identifier-success",
+        "timeout",
+    ],
+)
+def test_the_adopted_create_seam_never_resends_an_unknown(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+    answer: httpx.Response | Exception,
+) -> None:
+    # ADR-0014 §10, §28.3 / M5-08 / ADR-0018 G3-07. Every outcome a possibly transmitted CREATE
+    # can end in is UNKNOWN — ruling R2 keeps an ordinary post-handoff 4xx there too — and an
+    # UNKNOWN is reconciled, never replayed. Exactly one request leaves, whatever happened.
+    ready = prepare(container, sources, store, account, prep)
+    sender, seen = _adopted_sender(answer)
+    run = execution(container, prep, sender=sender)
+    with pytest.raises(AttemptFailed) as failed:
+        run.service.run(context(ready))
+    assert failed.value.code == "REGISTER_OUTCOME_UNKNOWN"
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+    assert intent.marketplace_product_id is None
+    # A second run refuses before anything, and no second request ever leaves.
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready, attempt_no=2))
+    assert refused.value.code == "REGISTER_UNKNOWN_REQUIRES_RECONCILE"
+    assert len(seen) == 1
+
+
+def test_the_adopted_create_seam_keeps_its_evidence_sanitized(
+    container: Container,
+    config: AppConfig,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # §15 / B4: every durable digest is over the sanitized canonical representation, and the
+    # bearer exists only transiently on the wire — never in a row, a digest or a log.
+    ready = prepare(container, sources, store, account, prep)
+    sender, seen = _adopted_sender(
+        httpx.Response(
+            200,
+            json={
+                "originProductNo": 9900112233,
+                "traceId": "trace-1",
+                "accessToken": "Bearer abcdefghijklmnop",
+            },
+        )
+    )
+    run = execution(container, prep, sender=sender)
+    with pytest.raises(AttemptFailed):
+        # Unreadable, so UNKNOWN — and the evidence of that attempt is still durable and sanitized.
+        run.service.run(context(ready))
+    # The bearer is on the wire and nowhere else.
+    assert seen[0].headers["authorization"] == f"Bearer {_Bearer.access_token}"
+    with contextlib.closing(raw(config)) as connection:
+        rows = list(
+            connection.execute(
+                "SELECT request_payload_hash, response_digest FROM registration_attempts"
+            )
+        )
+        payloads = [row[0] for row in connection.execute("SELECT payload_json FROM jobs")]
+    text = json.dumps([list(row) for row in rows]) + json.dumps(payloads)
+    for leaked in ("Bearer", "accessToken", "trace-1", _Bearer.access_token, "authorization"):
+        assert leaked.lower() not in text.lower()
+    # Every durable digest is a digest of the sanitized canonical representation, not wire bytes.
+    assert rows and all(len(row[0]) == 64 for row in rows)
 
 
 # ---------------------------------------------------------------- reconcile (13, 14)
@@ -2022,12 +2226,18 @@ def test_no_durable_hash_carries_forbidden_material(
 def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
     container: Container,
 ) -> None:
-    # 4 + 25: the container's own CREATE seam is the SmartStore one, and it is unavailable; the
-    # reconcile lookup likewise. Neither can be made to send by any caller.
-    sender = SmartStoreCreateSender()
-    assert not sender.available()
-    with pytest.raises(CreateNotAdoptedError):
-        sender.send(payload={}, idempotency_key="k", listing_identity="icbm-x")
+    # 4 + 25: the container's own CREATE seam is the SmartStore one. Its contract is adopted, so
+    # it reports the endpoint adopted — and it still cannot reach a marketplace, because
+    # production wires no committed session and every request is refused before a transport
+    # exists. A local refusal is transmission-precluded, so it is NOT_APPLIED_PROVEN and FATAL:
+    # nothing was applied and nothing is automatically retried (ERRORS.md §15.1, ADR-0014 §9).
+    sender = SmartStoreCreateSender(caller=SmartStoreEndpointCaller(), bearer=lambda: None)
+    assert sender.available()
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity="icbm-x")
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert handoff.error_class is ErrorClass.FATAL
+    assert handoff.marketplace_product_id is None
+    assert handoff.details["transmission_phase"] == "LOCAL_PREFLIGHT"
     lookup = SmartStoreReconcileLookup()
     assert not lookup.available()
     with pytest.raises(ReconcileLookupNotAdoptedError):

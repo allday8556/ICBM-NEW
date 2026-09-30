@@ -4,11 +4,11 @@ It drives the accepted M5 acceptance-plan cases through the **real production ow
 dedicated root, and records what it observed. Every case is a check: a failure is a recorded
 problem, never a crash and never a silent pass.
 
-The run is offline and provider-zero. CREATE and product search are NOT_ADOPTED; image upload is
-ADOPTED but has no application route and its transport module is forbidden in this run. Provider
-seams are local fakes (`seams.py`). The guards refuse every HTTP client, browser, AI, OCR
-and supplier transport for the life of the run, and the report states the measured counters,
-including a marketplace mutation count of zero.
+The run is offline and provider-zero. Product search is NOT_ADOPTED; CREATE and image upload are
+ADOPTED as contracts but no provider call is made: image upload has no application route, and its
+transport module is forbidden in this run. Provider seams are local fakes (`seams.py`). The guards
+refuse every HTTP client, browser, AI, OCR and supplier transport for the life of the run, and the
+report states the measured counters, including a marketplace mutation count of zero.
 
 A PASS here is offline evidence for one commit. It is **not** M5 acceptance, and it authorizes no
 real write: the bounded canary readiness result it records is `BLOCKED` while the contracts it
@@ -115,7 +115,10 @@ PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
 M0_REFUSES_LIVE = "M0_EXECUTION_POLICY_REFUSES_LIVE"
 
 DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
-    "CREATE_HANDOFF": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_CREATE_V2"),
+    # The CREATE contract is adopted (ADR-0020 §4 order 1), so this seam is declared for the only
+    # reason left: a provider-zero run has no provider to answer it, and the production sender
+    # holds the transport-owning caller this run may not even load.
+    "CREATE_HANDOFF": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_CREATE_V2"),
     "RECONCILE_LOOKUP": (ENDPOINT_NOT_ADOPTED, "SMARTSTORE_PRODUCT_SEARCH"),
     "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
     "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
@@ -378,7 +381,12 @@ def _retained(unit: Unit, payload: Mapping[str, Any], *, reverse: bool = False) 
             "name": payload["name"]["value"],
             "salePrice": items[0]["sale_price_krw"],
             "stockQuantity": len(items),
-            "sellerManagementCode": unit.listing_identity,
+            # What the provider would carry back: the projected provider code of this unit's
+            # listing identity (architect ruling R1), which is exactly what the CREATE would have
+            # sent and what the read-back comparison checks.
+            "sellerManagementCode": smartstore_product.seller_management_code(
+                unit.listing_identity
+            ),
             "detailAttribute": {"optionInfo": {"optionCombinations": options}},
         },
         "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
@@ -939,17 +947,35 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
-    # PR-D's real wire projection is not sendable while the CREATE contract is unproven: the
-    # scenarios above declared one so the state machine could be exercised at all.
+    # The adopted CREATE request still refuses this unit: required values stay uncaptured or
+    # unowned (the naverShoppingRegistration value source, the channel display status, the
+    # registration stock quantity, the notice type child), and none is ever invented. The
+    # scenarios above declared a sendable projection so the state machine could be exercised at
+    # all; the real one is asked here and still names its gaps.
     unsent = smartstore_product.project(_any_payload(owners))
     checks.check(
         "boundary.real_wire_projection_refuses",
         not unsent.sendable and bool(unsent.gaps),
         gaps=len(unsent.gaps),
     )
-    adoption = _registration_adoption()
+    # The value-level evidence packet (Issue #89 `5868542027`, E1-E3) does not by itself make the
+    # request sendable: it projects statusType SALE (E2) and closes only the *type* of
+    # naverShoppingRegistration (E1), whose value still has no ICBM-owned source — so that gap
+    # stands, no boolean is guessed onto the wire, and the projection stays unsendable.
+    projected_origin = unsent.document.mapping().get("originProduct", {})
     checks.check(
-        "boundary.create_not_adopted", adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is False
+        "boundary.value_packet_alone_leaves_create_unsendable",
+        not unsent.sendable
+        and smartstore_product.GAP_SHOPPING_REGISTRATION in unsent.gaps
+        and projected_origin.get("statusType") == smartstore_product.CREATE_STATUS_TYPE
+        and "naverShoppingRegistration" not in unsent.document.canonical_json,
+        gaps=len(unsent.gaps),
+    )
+    adoption = _registration_adoption()
+    # Adoption is a contract, never a call: this run's measured marketplace mutation count is 0.
+    checks.check(
+        "boundary.create_adopted_but_unreachable",
+        adoption.get("SMARTSTORE_PRODUCT_CREATE_V2") is True,
     )
     checks.check(
         "boundary.upload_adopted_but_unreachable",
