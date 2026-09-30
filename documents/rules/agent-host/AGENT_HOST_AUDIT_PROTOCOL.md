@@ -468,9 +468,11 @@ TECHNICAL_HOLD            everything else. The Host recovers or retries by itsel
 - The class comes from the **category** of the reason, never from how often something failed, and
   never from the words `HUMAN_DECISION_REQUIRED` alone.
 - A reason is the user's only when the whole reason is a form the Host composes after it validated
-  the category: the category by itself, `NEXT_HOLD_<CATEGORY>`,
-  `<WHO>_HUMAN_DECISION_REQUIRED_<CATEGORY>`, or the owner-hold reasons. A category word inside any
-  other reason decides nothing: `NO_LIVE_ACTION` is technical.
+  the category: the category by itself, `NEXT_HOLD_<CATEGORY>` or
+  `<WHO>_HUMAN_DECISION_REQUIRED_<CATEGORY>` for every category except `OWNER_HOLD`, or one of the
+  two owner-hold reasons (`PR_ON_OWNER_HOLD`, `GUARD_PR_ON_OWNER_HOLD`), which the orchestrator
+  writes only after it has read the owner's hold file. `OWNER_HOLD` in any other form is technical,
+  and so is a category word inside any other reason: `NO_LIVE_ACTION` is technical.
 - There is no third class. A run the circuit breaker ended has the status
   `TECHNICAL_HOLD_EXHAUSTED` and the class `TECHNICAL_HOLD`.
 - The human categories are a closed list in the Host, and they are exactly the entries of §0.2:
