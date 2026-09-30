@@ -47,13 +47,13 @@ so `PATH_MIGRATION_MAP` is unchanged.
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 228 | tests |
+| `tests/` | 230 | tests |
 | `tests/contracts/` | 8 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
 | `tests/integration/` | 86 | integration tests by runtime owner |
-| `tests/support/` | 13 | shared test support |
-| `tests/unit/` | 80 | unit tests by runtime owner |
+| `tests/support/` | 14 | shared test support |
+| `tests/unit/` | 81 | unit tests by runtime owner |
 | `ui/` | 52 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 8 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 44 | the served web client |

@@ -3160,3 +3160,49 @@ def test_only_the_phase_c_harness_persists_adaptive_profiles() -> None:
         if reached:
             callers[path] = reached
     assert callers == {f"{PHASE_C_HARNESS}harness.py": {"save_template", "save_draft"}}, callers
+
+
+# ---------------------------------------------------------------- test browsers stay on loopback
+
+BROWSER_OWNER = "tests/support/browser.py"
+# Any spelling of a Playwright launch — ``launch``, ``launch_persistent_context``,
+# ``launch_server`` — and attaching to a browser the test did not launch.
+_BROWSER_START = re.compile(r"\.(launch\w*|connect_over_cdp)\(")
+
+
+def test_every_test_browser_is_launched_by_the_one_loopback_only_owner() -> None:
+    """Issue #126 ``5909188774`` F-1 and owner amendment ``5909645067`` §3: a repository test
+    launches a browser only through ``tests/support/browser.py``, which always applies the
+    loopback-only resolver rule. The scan reads text, so a launch written inside a child-process
+    script is found as well. There is no exception list."""
+    starters: dict[str, list[str]] = {}
+    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text("utf-8")
+        if "playwright" not in text:
+            continue
+        found = _BROWSER_START.findall(text)
+        if found:
+            starters[relative] = sorted(set(found))
+    assert starters == {BROWSER_OWNER: ["launch", "launch_persistent_context"]}, starters
+
+    owner = (REPO_ROOT / BROWSER_OWNER).read_text("utf-8")
+    assert 'NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"' in owner
+    # Both launches take their arguments from the one function that puts the block first and
+    # refuses a caller's own resolver rule.
+    assert owner.count("args=_arguments(") == 2 == owner.count(".launch")
+    assert "return [NETWORK_BLOCK, *extra]" in owner
+    # The block is defined once: nothing else in the test tree spells a resolver rule.
+    spelled = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if "--host-resolver-rules=" in path.read_text("utf-8")
+        and path.relative_to(REPO_ROOT).as_posix()
+        not in {
+            BROWSER_OWNER,
+            "tests/contracts/test_repository_rules.py",
+            # The owner's own unit test, which proves a caller's rule is refused.
+            "tests/unit/test_browser_support.py",
+        }
+    ]
+    assert spelled == [], spelled

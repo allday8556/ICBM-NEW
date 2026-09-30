@@ -45,10 +45,11 @@ def _imports(path: Path) -> set[str]:
 
 def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     manifest = json.loads(_read(EXTENSION / "manifest.json"))
-    # E1 specification §11.3: the literal, because PerformanceResourceTiming.responseStatus exists
-    # from Chrome 109 and a capture is refused without it.
-    assert manifest["minimum_chrome_version"] == "109"
-    assert '"minimum_chrome_version": "109"' in _read(EXTENSION / "manifest.json")
+    # Owner amendment 5909645067 §2, replacing the 109 of E1 specification §11.3: the literal.
+    # PerformanceResourceTiming.responseStatus needs Chrome 109 and chrome.sidePanel Chrome 114,
+    # so 114 is the lowest version that meets the whole contract. There is no older fallback.
+    assert manifest["minimum_chrome_version"] == "114"
+    assert '"minimum_chrome_version": "114"' in _read(EXTENSION / "manifest.json")
     assert manifest["manifest_version"] == 3
     # Ruling B-11: the reviewed supplier host and the loopback, and nothing else.
     assert manifest["host_permissions"] == ["https://kmretail.co.kr/*", "http://127.0.0.1/*"]
@@ -122,10 +123,18 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
     client = _read(EXTENSION / "lib" / "client.js")
     assert client.count("fetch(") == client.count('credentials: "omit"') == 2
     assert client.count('redirect: "error"') == 2
-    # The only thing the extension stores is its pairing.
+    # The only thing the extension stores is its pairing (ruling B-2; owner amendment 5909645067
+    # §2): one storage area, one key, in every file of the extension. There is no session storage
+    # and no window the side panel falls back to.
     worker = _read(EXTENSION / "service_worker.js")
-    assert set(re.findall(r"chrome\.storage\.(\w+)\.set\(", worker)) <= {"local", "session"}
+    everything = "\n".join(_read(path) for path in sorted(EXTENSION.rglob("*.js")))
+    assert set(re.findall(r"chrome\.storage\.(\w+)", everything)) == {"local"}
+    assert re.findall(r"chrome\.storage\.local\.(\w+)\(", everything) == ["get", "set", "remove"]
     assert re.findall(r"chrome\.storage\.local\.set\(\{ \[(\w+)\]", worker) == ["PAIRING_KEY"]
+    assert "chrome.storage.local.get(PAIRING_KEY)" in worker
+    assert "chrome.storage.local.remove(PAIRING_KEY)" in worker
+    for gone in ("chrome.windows", "TARGET_TAB", "if (chrome.sidePanel)"):
+        assert gone not in everything, gone
 
 
 def test_the_side_panel_keeps_the_three_axes_apart() -> None:
@@ -283,8 +292,25 @@ def test_the_glossary_names_what_e1_introduced() -> None:
 def test_the_acceptance_record_is_pending_and_hides_nothing() -> None:
     record = _read(DOCUMENTS / "acceptance" / "adaptive" / "EXTENSION-E1.md")
     assert record.splitlines()[2].startswith("- Status: **PENDING")
-    for source in ("5906290729", "5906712259", "5907095955", "5907009512"):
+    for source in (
+        "5906290729",
+        "5906712259",
+        "5907095955",
+        "5907009512",
+        "5909645067",
+        "5909188774",
+    ):
         assert source in record, source
+    # Owner amendment 5909645067 §4: the incident is never retroactively authorized, is never
+    # acceptance evidence, and no document claims a zero-request history.
+    for phrase in (
+        "are not retroactively authorized",
+        "are not acceptance evidence",
+        "do not consume, replace or widen the future acceptance grant",
+        "No document may say that the whole implementation history made zero supplier requests",
+        "the implementation **history** is\n  not",
+    ):
+        assert phrase in record, phrase
     assert "bb9906ccd61cac270908ad64de50be98a645bbec74313be5c3e5d577bed2fcf4" in record
     # The real acceptance is not authorized here, and the operator's preconditions are stated.
     assert "not authorized" in record and "Claude never browses the supplier" in record
@@ -299,25 +325,17 @@ def test_the_acceptance_record_is_pending_and_hides_nothing() -> None:
 
 
 def test_no_extension_browser_test_can_leave_the_loopback() -> None:
-    # Every browser launch of the extension tests resolves no host name. A launch without the
-    # block is how a routed redirect once reached the supplier's host (EXTENSION-E1.md §6).
-    launches = 0
+    # Every browser a repository test launches comes from ``tests/support/browser.py`` and
+    # resolves no host name (``test_repository_rules``: the repository-wide rule). A launch
+    # without the block is how a routed redirect once reached the supplier's host
+    # (EXTENSION-E1.md §6). The extension tests launch nothing themselves.
     for path in sorted(EXTENSION_TESTS.glob("test_*.py")):
-        for call in ast.walk(ast.parse(_read(path))):
-            if not (
-                isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr in {"launch", "launch_persistent_context"}
-            ):
-                continue
-            launches += 1
-            arguments = next((k.value for k in call.keywords if k.arg == "args"), None)
-            assert arguments is not None, f"{path.name}:{call.lineno} launches without args"
-            named = {node.id for node in ast.walk(arguments) if isinstance(node, ast.Name)}
-            if "NETWORK_BLOCK" not in named:
-                # ``args=arguments``: the list is built beside the launch and must start with it.
-                assert "arguments = [\n        NETWORK_BLOCK," in _read(path), path.name
-    assert launches == 2
+        text = _read(path)
+        assert ".launch" not in text and "host-resolver-rules" not in text, path.name
+    assert "launch_browser(playwright)" in _read(
+        EXTENSION_TESTS / "test_extension_capture_browser.py"
+    )
+    assert "launch_extension_context(" in _read(EXTENSION_TESTS / "test_extension_e2e.py")
     # A redirect is never answered from a route, because its follow-up request is not routed.
     # The one routed 302 is the test that proves the block: it points at a name that cannot
     # resolve.
@@ -327,5 +345,3 @@ def test_no_extension_browser_test_can_leave_the_loopback() -> None:
     assert {name: count for name, count in routed.items() if count} == {
         "test_extension_capture_browser.py": 1
     }
-    support = _read(REPO_ROOT / "tests" / "support" / "extension_support.py")
-    assert 'NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"' in support

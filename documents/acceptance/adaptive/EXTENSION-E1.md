@@ -1,14 +1,22 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented provider-zero; the one real KM통상 acceptance is not run and is
-  not authorized** (§5). A green PR, a green CI or a synthetic test run accepts nothing.
+- Status: **PENDING — implemented; the one real KM통상 acceptance is not run and is not
+  authorized** (§5). A green PR, a green CI or a synthetic test run accepts nothing. The
+  implementation and its tests are provider-zero as corrected; the implementation **history** is
+  not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
   (E1 of §10).
 - Authority (Issue #126 comments):
   - the architect ruling `5906290729` (B-1 … B-11);
   - the architect ruling `5906712259` (N-1 … N-3);
   - the owner amendment `5907095955`, which approves the E1 specification `5907009512` in full,
-    by its body SHA-256 `bb9906ccd61cac270908ad64de50be98a645bbec74313be5c3e5d577bed2fcf4`.
+    by its body SHA-256 `bb9906ccd61cac270908ad64de50be98a645bbec74313be5c3e5d577bed2fcf4`;
+  - the owner amendment `5909645067` (audit remediation), which changes that specification in
+    two places and decides the incident of §6:
+    - the final gate: a capture the capture owner's sanitizer had to take anything private or
+      secret out of fails its run (§4);
+    - the minimum Chrome version is **114**, not 109, and there is no older fallback (§3);
+  - the architect disposition `5909188774` (F-1 and F-2).
 - Start condition met: PR #159 merged as main `4d913bb9268ee2d2760d0d7e334f54c7a3b9b3ef`, its
   POST_MERGE_VERIFY passed (PR #159 comment `5906920106`), and no other core slice was
   open.
@@ -37,7 +45,7 @@ a failure after the run is opened is `FAILED`; `RECORDED` is unreachable.
 
 | concern | owner |
 | --- | --- |
-| client | `ui/extension/` — MV3, plain ES modules, no build step, no dependency |
+| client | `ui/extension/` — MV3, plain ES modules, no build step, no dependency; `"minimum_chrome_version": "114"`, the side panel as its only surface, the pairing as the only thing it stores |
 | ingest, pairing, replay cache, buffer, policy loader | `app/stages/collect/extension/` |
 | routes | `app/interface/api/routes/collect_extension.py` |
 | KM capture policy | `integrations/suppliers/kmretail/browser_capture_policy.json` |
@@ -47,7 +55,9 @@ a failure after the run is opened is `FAILED`; `RECORDED` is unreachable.
 
 ## 4. What is verified provider-zero
 
-Every item below is a test in the repository. None of them contacts a supplier.
+Every item below is a test in the repository. None of them contacts a supplier: every browser
+a repository test launches comes from `tests/support/browser.py` and resolves no host but the
+loopback, and `tests/contracts/test_repository_rules.py` refuses a launch anywhere else.
 
 | claim | where |
 | --- | --- |
@@ -56,13 +66,24 @@ Every item below is a test in the repository. None of them contacts a supplier.
 | ceilings are checked after authentication and before a run exists | the same file |
 | the in-process buffer and the non-idempotent job: the five tests of ruling N-1 | `tests/integration/collect/extension/test_extension_capture_job.py` |
 | `NO_BUNDLE`, and an enabled bundle compared in memory with nothing written | the same file |
+| a dry run that cannot evaluate or compare its bundle settles the run `FAILED` with `EXTENSION_ADAPTIVE_COMPARE_FAILED`, never `NO_REVISION` | the same file |
+| the final gate: a private region, a removed query or a residual inside the product scope fails the run, and the findings name kinds and boundaries only | `tests/integration/collect/extension/test_extension_ingest_api.py` |
+| one nonce presented by many threads at once is accepted exactly once | `tests/unit/collect/extension/test_pairing.py` |
+| every test browser is loopback-only, from one owner | `tests/unit/test_browser_support.py`, `tests/contracts/test_repository_rules.py` |
 | migration 0032: additive, triggers intact, no backfill, provenance never identity | `tests/integration/collect/extension/test_transport_provenance.py` |
 | the C1 regression pair, the policy cut, the same facts on both transports, the preconditions and the bounds, in a real browser | `tests/integration/collect/extension/test_extension_capture_browser.py` |
 | the unpacked extension end to end against the real application | `tests/integration/collect/extension/test_extension_e2e.py` |
 | the policy owner, the pairing, the replay cache, the capture structure | `tests/unit/collect/extension/` |
 | the contract pins | `tests/contracts/test_extension_e1_contract.py`, `tests/contracts/test_repository_rules.py` |
 
-Two facts a reader needs:
+Three facts a reader needs:
+
+- **The final gate never substitutes a sanitized body.** The server runs the capture owner's
+  sanitizer and final scan, unchanged, over exactly what arrived, and the pipeline goes on with
+  the capture as it arrived. So the sanitized candidate is evidence only: a residual finding,
+  anything the sanitizer removed, or a private region it excluded fails the run
+  (`EXTENSION_FINAL_SCAN_REFUSED`). A navigation or non-authoritative region the sanitizer sets
+  aside is not private material and is not a finding; the capture policy is what cuts those.
 
 - **The two transports quote different evidence for the same facts.** The KM capture policy keeps
   only three `<head>` elements (ruling B-10), so an extension `DocumentView` has no `og:title`,
@@ -80,6 +101,7 @@ grant (ruling B-9). The grant names:
 
 - the exact product URL and identity;
 - the exact E1 HEAD;
+- the incident of §6, stated as outside the new acceptance and unusable as its evidence;
 - a new acceptance root and campaign id under `%USERPROFILE%\\ICBM-acceptance\\`;
 - exactly one operator page and one click;
 - zero automated supplier reads;
@@ -125,3 +147,22 @@ On 2026-09-30, while the browser tests were being written, **two HTTP requests r
   test refuses a browser launch in these tests without it.
 - These two requests are outside the E1 zero counts of §5, which describe the acceptance run; they
   are recorded here so that they are never mistaken for it or hidden by it.
+
+**Disposition** (owner amendment `5909645067` §4; architect disposition `5909188774` F-2). The two
+requests are unauthorized implementation incidents and stay disclosed permanently. They:
+
+- are not retroactively authorized;
+- are not Phase C accounted reads: they happened before any grant, outside a campaign binding and
+  data root, and without a send reservation;
+- are not acceptance evidence, and neither are nor satisfy the real KM통상 acceptance of §5;
+- do not consume, replace or widen the future acceptance grant or any campaign budget.
+
+No document may say that the whole implementation history made zero supplier requests.
+"Provider-zero" describes the implementation and its test execution as corrected, with this
+incident disclosed beside it. The future grant of §5 cites this incident, and its "zero automated
+supplier reads" counts from that grant's own acceptance root onward.
+
+**The correction was then widened** (F-1). The block no longer depends on a scan of one test
+directory: `tests/support/browser.py` is the only place a repository test launches a browser, it
+always puts the resolver rule first and refuses a caller's own, and the repository rule test
+refuses a launch anywhere else in the test tree, with no exception list.
