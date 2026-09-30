@@ -1,6 +1,6 @@
 {
     "version": "1.3",
-    "note": "Fixture host configuration (automation/agent-host/tests/fx-harness.ps1). The harness replaces repository and repo_path. It mirrors the operating defaults of AGENT_HOST_AUDIT_PROTOCOL 0.2: auto_merge and auto_next are on. The retry ceiling is small so that a fixture ends quickly.",
+    "note": "Fixture host configuration (automation/agent-host/tests/fx-harness.ps1). The harness replaces repository and repo_path. It mirrors the operating defaults of AGENT_HOST_AUDIT_PROTOCOL 0.2: auto_merge and auto_next are on. technical_hold.max_same_state_retries is the only retry ceiling, and it is small so that a fixture ends quickly. repair_loop.max_cycles is not a ceiling and ends nothing: it is the number of repair attempts after which the fixer switches to independent re-analysis (protocol 5.1). A run is bounded by the orchestrator's own deadline.",
     "repository": "fixture/icbm",
     "repo_path": "",
     "auto_merge": true,

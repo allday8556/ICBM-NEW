@@ -57,9 +57,12 @@ Only these stop a loop for the user:
 - **D.** a real external action:
   - a LIVE provider mutation, a real provider or marketplace call, a real canary;
   - a real supplier or provider read whose acceptance needs its own grant;
+  - accepting the residual risk of such an action;
   - a payment or a cost;
   - sending real data to an external service;
-  - a destructive operation, a force-push, a branch deletion.
+  - a destructive operation, a force-push, a branch deletion;
+- **E.** a hold the user placed on a PR themselves (the owner's hold file). It is the user's own
+  stop, so only the user lifts it.
 
 The Host calls this `HUMAN_DECISION_REQUIRED`. A technical choice is never one of them, and a stop
 that names none of these categories is not the user's, whatever it calls itself.
@@ -90,7 +93,7 @@ Those choices are verified, not approved: GPT and Claude audit every one of them
 
 A stop is one of two classes, decided by its category and never by a count.
 
-- **`HUMAN_DECISION_REQUIRED`** — §2, and the owner's own hold file on a PR. The run waits.
+- **`HUMAN_DECISION_REQUIRED`** — exactly the list of §2. The run waits.
 - **`TECHNICAL_HOLD`** — everything else: a stale main, a packet that could not be built, an
   unreadable source, a CI infrastructure failure, mergeability, a migration collision, source
   bookkeeping. The Host recovers or retries by itself.

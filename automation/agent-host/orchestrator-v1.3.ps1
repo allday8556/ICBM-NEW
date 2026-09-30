@@ -1986,10 +1986,13 @@ while ($true) {
 #   TECHNICAL_HOLD           → wait, then run the pass again from the live GitHub state. Nobody is asked.
 #                              The same (PR, HEAD, main, reason) is retried technical_hold.max_same_state_retries times
 #                              with a doubling wait; then the run ends TECHNICAL_HOLD_EXHAUSTED (a cost circuit breaker,
-#                              reported, not a request for a decision). A different state starts a new count.
+#                              reported, not a request for a decision). The count is of CONSECUTIVE holds in one
+#                              state: any different state in between starts it again, so a state that comes back
+#                              later is retried in full.
 # -------------------------------------------------
 
-$technicalCounts = @{}
+$technicalKey = $null
+$technicalCount = 0
 
 while ($true) {
     $script:lastHold = $null
@@ -2013,8 +2016,14 @@ while ($true) {
     }
 
     $key = "$CurrentPr|$($hold.PrHead)|$($hold.MainHead)|$($hold.Reason)"
-    $technicalCounts[$key] = 1 + [int]$technicalCounts[$key]
-    $n = [int]$technicalCounts[$key]
+
+    if ($key -ne $technicalKey) {
+        $technicalKey = $key
+        $technicalCount = 0
+    }
+
+    $technicalCount = $technicalCount + 1
+    $n = $technicalCount
 
     if ($n -gt $technicalMaxRetries) {
         Save-RuntimeState `

@@ -50,8 +50,10 @@ No `[OWNER-AMENDMENT]` and no classification comment is requested. Existing ones
   text decides;
 - a change beyond the user's existing requirements;
 - a real external action: a LIVE provider mutation, a real provider or marketplace call, a real
-  canary, a real supplier or provider read whose acceptance needs its own grant, a cost, a transfer
-  of real data to an external service, a destructive operation, a force-push, a branch deletion.
+  canary, a real supplier or provider read whose acceptance needs its own grant, the acceptance of
+  the residual risk of such an action, a cost, a transfer of real data to an external service, a
+  destructive operation, a force-push, a branch deletion;
+- a hold the user placed on a PR themselves.
 
 Do not widen the product to avoid a question: work that needs a feature or policy outside the
 canonical documents is not built.

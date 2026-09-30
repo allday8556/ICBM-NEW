@@ -146,10 +146,14 @@ to post anything on GitHub:
 - a real external action:
   - a LIVE provider mutation, a real provider or marketplace call, a real canary;
   - a real supplier or provider read whose acceptance needs its own grant;
+  - accepting the residual risk of such an action;
   - a payment or a cost, a transfer of real data to an external service;
-  - a destructive operation, a force-push, a branch deletion.
+  - a destructive operation, a force-push, a branch deletion;
+- a hold the user placed on a PR themselves (the owner's hold file): the user's own stop, which
+  only the user lifts.
 
-An implementation choice is never in that list.
+An implementation choice is never in that list. §5.1 names the same list as the Host's closed
+categories, one category per entry, and adds none.
 
 **No self-authorization.** Removing the per-step approval does not let an agent widen the product.
 An agent that finds the work needs a product feature or a product policy outside the canonical
@@ -407,18 +411,20 @@ TECHNICAL_HOLD            everything else. The Host recovers or retries by itsel
   never from the words `HUMAN_DECISION_REQUIRED` alone.
 - There is no third class. A run the circuit breaker ended has the status
   `TECHNICAL_HOLD_EXHAUSTED` and the class `TECHNICAL_HOLD`.
-- The human categories are a closed list in the Host: `NEW_PRODUCT_FEATURE`,
-  `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`, `PROVIDER_CALL`, `CANARY`,
-  `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`, `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`,
-  and the owner's own hold file on a PR. A reason that names none of them is technical.
+- The human categories are a closed list in the Host, and they are exactly the entries of §0.2:
+  `NEW_PRODUCT_FEATURE`, `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`,
+  `PROVIDER_CALL`, `CANARY`, `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`,
+  `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`, and `OWNER_HOLD` for the user's own hold file on a PR.
+  A reason that names none of them is technical.
 - Examples of a TECHNICAL_HOLD: a stale main, a packet that could not be generated, an unreadable
   stream, a CI infrastructure failure, a mergeability problem, a migration collision, source
   bookkeeping, an auditor that returned nothing readable.
 
 **A TECHNICAL_HOLD is retried.** The same state (PR, HEAD, main, reason) is run again with a
-doubling wait. After the configured number of retries of that same state the run ends
+doubling wait. After the configured number of consecutive retries of that same state the run ends
 `TECHNICAL_HOLD_EXHAUSTED`. That is a cost circuit breaker and a report. It is not a request for a
-decision, and a changed state starts a new count.
+decision. The count is of consecutive holds in one state: any different state in between starts it
+again, so a state that returns later is retried in full.
 
 **A repeated BLOCKER is never handed to the user.** After the configured number of repair cycles
 the fixer stops repeating itself: every later attempt is an independent re-analysis, given the

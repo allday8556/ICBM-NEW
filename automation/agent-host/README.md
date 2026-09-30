@@ -43,11 +43,13 @@ identity.
     user's. An auditor's `HUMAN_DECISION_REQUIRED` without such a category is audited again.
   - `HUMAN_DECISION_REQUIRED`: a closed list — a new product feature, an undecided product
     direction, a change beyond the user's requirement, a real external action (LIVE, provider call,
-    canary, real external read, residual risk, cost, real data transfer, destructive operation),
-    and the owner's own hold file on a PR. The run waits for the user.
+    canary, real external read, accepting its residual risk, cost, real data transfer, destructive
+    operation), and a hold the user placed on a PR themselves (the owner's hold file). It is
+    exactly the list of protocol §0.2. The run waits for the user.
   - `TECHNICAL_HOLD`: everything else. The supervisor in `orchestrator-v1.3.ps1` retries the same
     state with a doubling wait, and ends `TECHNICAL_HOLD_EXHAUSTED` after
-    `technical_hold.max_same_state_retries`. That is a cost circuit breaker, not a question.
+    `technical_hold.max_same_state_retries` consecutive retries of it; a different state in
+    between starts the count again. That is a cost circuit breaker, not a question.
 - **Repair.** A BLOCKER is repaired and re-audited. After `repair_loop.max_cycles` attempts every
   later attempt is an independent re-analysis; a count never stops the loop. A fix that needs a
   file outside the PR, a migration or a removed file is reported (`SCOPE_WIDENED`,
@@ -84,7 +86,7 @@ identity.
 | file | role | sha256 |
 | --- | --- | --- |
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
-| `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `4febbf3b7e405b220199cdb3c8ed6340e41fda55a2883b1525747e64754f97c4` |
+| `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f556d9fef16cd6b85ab468ca94bc13acfd84bff5dd4d0c42fceec843dbaddb6d` |
 | `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `a5ff7bde46db348ca677647c6542bcbcb3722b0eb421bd289b00694e845f0dc8` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
@@ -94,7 +96,7 @@ identity.
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
 | `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `3e63724715f586fe5662d042266df28afe9f5be66ec33cfe16c1c47003f3d050` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
-| `tests/fx-config.json` | fixture host configuration | `d6bdac1a09b04cdf078d351f99ac92a693f6843b32f3d409b1a11cecc2d7180c` |
+| `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 
 The table is checked mechanically, so a reader does not recompute it:
 `tests/contracts/test_repository_rules.py::test_the_agent_host_readme_pins_the_committed_script_bytes`
