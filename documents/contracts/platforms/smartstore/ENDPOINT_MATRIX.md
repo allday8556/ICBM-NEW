@@ -239,7 +239,10 @@ never emitted. That list is also the request-side allow-list, checked **deny-by-
 document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
 outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
 `sellerManagementCode` that is not this listing identity's projection is refused, never trimmed
-into shape — including a `statusType` other than `SALE`. Every value the official evidence does
+into shape — including a `statusType` other than `SALE`. The frozen document is bound to its
+Snapshot's listing identity, and the sender refuses, before any transport, a document whose
+identity is not the executing Intent's (`SMARTSTORE_CREATE_IDENTITY_MISMATCH`, `NOT_APPLIED_PROVEN`
+as a local pre-handoff refusal). Every value the official evidence does
 not carry, or that no ICBM owner decides, stays **fail-closed** as a named gap, so the request is
 not sendable and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`: the ICBM-owned value source of
 the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision

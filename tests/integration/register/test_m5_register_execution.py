@@ -9,12 +9,13 @@ The numbered comments name the kickoff §13 behaviours each test pins.
 """
 
 import contextlib
+import hashlib
 import json
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
-from typing import Any, ClassVar
+from typing import Any
 
 import httpx
 import pytest
@@ -51,6 +52,7 @@ from app.stages.register.model import (
     ResolvedBy,
     ScopePauseReason,
     VerificationState,
+    sanitized_digest,
 )
 from app.stages.register.preparation import (
     FieldValue,
@@ -60,6 +62,7 @@ from app.stages.register.preparation import (
 )
 from app.stages.register.provider import CreateHandoff
 from app.stages.register.store import RegistrationStore, RegistrationUnit, ScopeRecord
+from integrations.marketplaces.smartstore import create as create_response
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
@@ -728,27 +731,28 @@ class _Bearer:
     session_generation = 7
 
 
-_WIRE_IDENTITY = "icbm-" + "0" * 32
-_WIRE_DOCUMENT = smartstore_product.create_document(
-    _WIRE_IDENTITY,
-    {
-        "originProduct": {
-            "statusType": "SALE",
-            "name": "테스트",
-            "detailContent": "본문",
-            "images": {"representativeImage": {"url": "https://shop-phinf.example/a/main.jpg"}},
-            "salePrice": 19900,
-            "leafCategoryId": "cat-1",
-            "detailAttribute": {
-                "sellerCodeInfo": {
-                    "sellerManagementCode": smartstore_product.seller_management_code(
-                        _WIRE_IDENTITY
-                    )
-                }
-            },
-        }
-    },
-)
+def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
+    """A real, validated CREATE document of one listing identity (the Snapshot's own)."""
+    return smartstore_product.create_document(
+        listing_identity,
+        {
+            "originProduct": {
+                "statusType": "SALE",
+                "name": "테스트",
+                "detailContent": "본문",
+                "images": {"representativeImage": {"url": "https://shop-phinf.example/a/main.jpg"}},
+                "salePrice": 19900,
+                "leafCategoryId": "cat-1",
+                "detailAttribute": {
+                    "sellerCodeInfo": {
+                        "sellerManagementCode": smartstore_product.seller_management_code(
+                            listing_identity
+                        )
+                    }
+                },
+            }
+        },
+    )
 
 
 class _Sendable:
@@ -764,7 +768,11 @@ class _Sendable:
 
     sendable = True
     gaps: tuple[str, ...] = ()
-    document: ClassVar[smartstore_product.CreateDocument] = _WIRE_DOCUMENT
+
+    def __init__(self, payload: Mapping[str, Any]) -> None:
+        # Bound to the frozen Snapshot's own listing identity, as the real projection is: the
+        # sender refuses a document of any other identity before a transport exists.
+        self.document = _wire_document(str(payload["listing_identity"]))
 
 
 def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx.Request]]:
@@ -779,7 +787,7 @@ def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx
     sender = SmartStoreCreateSender(
         caller=SmartStoreEndpointCaller(transport=httpx.MockTransport(transport)),
         bearer=_Bearer,
-        projector=lambda payload: _Sendable(),
+        projector=_Sendable,
     )
     return sender, seen
 
@@ -885,10 +893,20 @@ def test_the_adopted_create_seam_keeps_its_evidence_sanitized(
     store: RegistrationStore,
     account: str,
     prep: Preparation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # §15 / B4: every durable digest is over the sanitized canonical representation, and the
     # bearer exists only transiently on the wire — never in a row, a digest or a log.
     ready = prepare(container, sources, store, account, prep)
+    # The representation the execution owner hands the attempt owner, captured as it is handed.
+    handed: list[Mapping[str, Any]] = []
+    start_attempt = RegistrationUnit.start_attempt
+
+    def capture(self: RegistrationUnit, intent_id: str, **kwargs: Any) -> Any:
+        handed.append(dict(kwargs["sanitized_request"]))
+        return start_attempt(self, intent_id, **kwargs)
+
+    monkeypatch.setattr(RegistrationUnit, "start_attempt", capture)
     sender, seen = _adopted_sender(
         httpx.Response(
             200,
@@ -915,8 +933,20 @@ def test_the_adopted_create_seam_keeps_its_evidence_sanitized(
     text = json.dumps([list(row) for row in rows]) + json.dumps(payloads)
     for leaked in ("Bearer", "accessToken", "trace-1", _Bearer.access_token, "authorization"):
         assert leaked.lower() not in text.lower()
-    # Every durable digest is a digest of the sanitized canonical representation, not wire bytes.
-    assert rows and all(len(row[0]) == 64 for row in rows)
+    # Every durable digest is a digest of the sanitized canonical representation, not wire bytes:
+    # the request hash is exactly the digest of the sanitized representation the execution owner
+    # handed over — identities, digests and versions, no bearer and no wire byte — never a digest
+    # of the raw request bytes, and the response digest is exactly the digest of the sanitized
+    # retained response (the unretained traceId and the secret-bearing field are not in it).
+    assert len(handed) == len(rows) == 1
+    assert rows[0][0] == sanitized_digest(handed[0])
+    assert _Bearer.access_token not in json.dumps(handed[0])
+    assert rows[0][0] != hashlib.sha256(seen[0].content).hexdigest()
+    retained = {"originProductNo": 9900112233}
+    expected_response = sanitized_digest(
+        {"retained": retained, "response_contract": create_response.read(retained).canonical()}
+    )
+    assert all(row[1] == expected_response for row in rows)
 
 
 # ---------------------------------------------------------------- reconcile (13, 14)

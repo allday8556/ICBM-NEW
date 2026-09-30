@@ -337,6 +337,23 @@ def test_a_request_carrying_secret_material_never_reaches_the_transport() -> Non
     assert handoff.error_code == "SMARTSTORE_CREATE_REQUEST_UNSANITIZED"
 
 
+def test_a_document_of_another_listing_identity_never_reaches_the_transport() -> None:
+    # The frozen document is bound to the listing identity its Snapshot projected. The execution
+    # owner hands the Intent's own identity, and a document of any other identity is refused
+    # locally, before a session is even asked for: nothing is sent under the wrong Intent.
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    other = "icbm-" + "f" * 32
+    assert other != IDENTITY
+    handoff = _sender(provider).send(payload={}, idempotency_key="k", listing_identity=other)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_IDENTITY_MISMATCH"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert handoff.marketplace_product_id is None
+    # The same document under its own identity is the one that is sent.
+    _sender(provider).send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert len(provider.requests) == 1
+
+
 def test_an_unsendable_projection_never_reaches_the_transport() -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 

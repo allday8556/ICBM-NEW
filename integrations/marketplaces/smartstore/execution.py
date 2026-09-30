@@ -103,7 +103,7 @@ class SmartStoreCreateSender:
         inventing a header for one would claim a guarantee the provider does not give
         (ADR-0014 §17.2, §28).
         """
-        refusal, document = self._document(payload)
+        refusal, document = self._document(payload, listing_identity)
         if refusal is not None:
             return refusal
         assert document is not None
@@ -176,7 +176,7 @@ class SmartStoreCreateSender:
         )
 
     def _document(
-        self, payload: Mapping[str, Any]
+        self, payload: Mapping[str, Any], listing_identity: str
     ) -> tuple[CreateHandoff | None, product.CreateDocument | None]:
         """The typed CREATE request of this Snapshot, or the local refusal that replaces it."""
         try:
@@ -211,6 +211,18 @@ class SmartStoreCreateSender:
                     "SMARTSTORE_CREATE_WIRE_CONTRACT_VIOLATION",
                     {},
                     reason="the projection produced no frozen CREATE document",
+                ),
+                None,
+            )
+        if document.listing_identity != listing_identity:
+            # The frozen document is bound to the listing identity its Snapshot projected; the
+            # execution owner hands the Intent's own identity. A document of another listing is
+            # never sent under this Intent, whatever its body says (ADR-0014 §7, §15).
+            return (
+                _local_refusal(
+                    "SMARTSTORE_CREATE_IDENTITY_MISMATCH",
+                    {},
+                    reason="the projected CREATE document belongs to another listing identity",
                 ),
                 None,
             )
