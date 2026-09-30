@@ -325,7 +325,7 @@ if ($Scenario -like "packet-*") {
     # the declaration cites a source no scanned stream holds: declared evidence is missing, so nothing is audited or merged
     if ($Scenario -eq "packet-source-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also relies on ``100009998``.`n" }
     # the declaration cites a CONVERSATION COMMENT by an id only a REVIEW carries: the review never stands in for it
-    # the declaration cites a canonical document that is not at the audited HEAD
+    # the declaration cites a canonical document that is not at the audited base
     if ($Scenario -eq "packet-canon-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "And ``canon:docs/no-such-contract.md``.`n" }
     if ($Scenario -eq "packet-citation-kind") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also the comment ``100009101``.`n" }
     if ($Scenario -eq "packet-stream-page-fail") { $global:FxStreamFail["issue:89"] = "page" }

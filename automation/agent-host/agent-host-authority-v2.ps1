@@ -250,8 +250,8 @@ function Get-HumanDecisionCategory {
 # -------------------------------------------------
 # Referenced evidence (AGENT_HOST_AUDIT_PROTOCOL §3, §4; ADR-0022 §5)
 #
-# A slice declares its evidence by citing it. The declaration is the PR body (and the host slice specification when one
-# exists). Two deterministic reference forms are read from it, nothing is inferred:
+# A slice declares its evidence by citing it. The declaration is the PR body, plus the host slice specification or the
+# remediation authorization when one exists. Deterministic reference forms are read from it, nothing is inferred:
 #   an issue reference  "Issue #<n>"              -> that issue's comments are a scanned stream of this packet
 #   a citation, in a code span, of a number of 9-12 digits. The form names the KIND of the source:
 #       `<id>`                  -> the issue / PR conversation comment with that id
