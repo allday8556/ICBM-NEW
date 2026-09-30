@@ -670,6 +670,8 @@ def _option_dimensions(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     """The option-name dimensions of a multi-Item listing: the same dimensions for every Item, at
     most the three an ordinary combination option allows. The Snapshot's option values are display
     values; the identity is the seller code."""
+    if not all(isinstance(item.get("options") or {}, Mapping) for item in items):
+        raise WireContractError("WIRE_PAYLOAD_MALFORMED", "an Item's options are not a mapping")
     dimensions = {tuple(sorted(item.get("options") or {})) for item in items}
     if len(dimensions) != 1:
         raise WireContractError(
@@ -741,7 +743,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     origin_product: dict[str, Any] = {
         # E2: the only status the CREATE endpoint accepts on registration.
         FIELD_STATUS_TYPE: CREATE_STATUS_TYPE,
-        FIELD_NAME: _text(payload["name"], "name"),
+        FIELD_NAME: _text(payload.get("name"), "name"),
         FIELD_DETAIL: _detail_content(payload),
         FIELD_IMAGES: _images(references),
         FIELD_SALE_PRICE: _sale_price(items),

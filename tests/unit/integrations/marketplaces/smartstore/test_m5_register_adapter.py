@@ -6,6 +6,7 @@ comment 5746489554). Nothing here performs I/O: the adapter is pure, and the tra
 the adopted read-backs is pinned separately in ``test_smartstore_product_reads.py``.
 """
 
+import contextlib
 import hashlib
 import json
 from copy import deepcopy
@@ -557,3 +558,45 @@ def test_the_upload_request_names_one_artifact_only() -> None:
         "image/png",
         b"png",
     )
+
+
+def _malformed_payloads() -> list[tuple[str, dict[str, Any]]]:
+    """Every top-level key of a frozen payload, and of its Items, removed or given another type."""
+    cases: list[tuple[str, dict[str, Any]]] = []
+    base = payload()
+    for key in base:
+        for label, value in (
+            ("missing", ...),
+            ("none", None),
+            ("list", []),
+            ("text", "x"),
+            ("int", 1),
+        ):
+            broken = deepcopy(base)
+            if value is ...:
+                del broken[key]
+            else:
+                broken[key] = value
+            cases.append((f"{key}:{label}", broken))
+    option_items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
+    for key in option_items[0]:
+        for label, value in (("missing", ...), ("none", None), ("list", ["x"]), ("text", "x")):
+            broken = payload(items=deepcopy(option_items))
+            if value is ...:
+                del broken["items"][0][key]
+            else:
+                broken["items"][0][key] = value
+            cases.append((f"items[0].{key}:{label}", broken))
+    return cases
+
+
+@pytest.mark.parametrize(("case", "broken"), _malformed_payloads(), ids=lambda v: str(v)[:40])
+def test_a_malformed_snapshot_is_only_ever_a_wire_contract_refusal(
+    case: str, broken: dict[str, Any]
+) -> None:
+    # The sender turns a WireContractError into one local, transmission-precluded refusal. Any
+    # other exception would escape that path, so a malformed Snapshot — a key missing or of another
+    # type, at the top level or in an Item — may only ever project, or refuse as a wire-contract
+    # error; never a KeyError, TypeError or AttributeError.
+    with contextlib.suppress(product.WireContractError):
+        product.project(broken)
