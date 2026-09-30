@@ -42,7 +42,8 @@ from tests.support.register_support import FakeDuplicateLookup
 pytestmark = pytest.mark.integration
 
 CID = "corr-asset-duplicate-evidence"
-APPROVAL = "5915900049"
+# A synthetic approval reference of the owners' comment-id form; no real approval is implied.
+APPROVAL = "1000000001"
 
 
 def _artifacts(candidate: Any) -> list[ArtifactRef]:

@@ -39,7 +39,10 @@ from tests.support.gate1_support import OPERATOR
 
 pytestmark = pytest.mark.integration
 
-APPROVAL = "5915900049"
+# A synthetic approval reference of the owners' comment-id form. It stands for the separate,
+# per-action approval rule §7.2 requires; no real approval exists or is implied by these tests,
+# and the resolution that decided the command surface (5915900049 D3) grants none.
+APPROVAL = "1000000001"
 
 
 def _window() -> list[str]:
