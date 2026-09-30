@@ -1,12 +1,13 @@
 # Agent Host Audit and Merge Protocol
 
-Status: **V2 — canonical.** PR #147 merged this file into main as `a0643e4642a759c93acc4204b3ff138ad4580e9a`,
-so it has been the Agent Host's canonical protocol since that commit, under the bootstrap transition
-of §0.1. The bootstrap ended on main `0919c2ae77f7d2f0162fbacdbd0d8274f34ea6f8` (PR #150 merged,
-POST_MERGE_VERIFY Issue #89 `5882586622`, owner acceptance Issue #151 `5882336231`); every slice
-since uses §1–§8. Before the merge, the #146 trial instruction (`5870526033`) cited the pre-refresh
-text at `9cc4939a` as its protocol source.
-Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`
+Status: **V3 — canonical.** V2 became canonical when PR #147 merged this file into main as
+`a0643e4642a759c93acc4204b3ff138ad4580e9a`; its bootstrap ended on main
+`0919c2ae77f7d2f0162fbacdbd0d8274f34ea6f8` (PR #150). V3 is the operating-authority correction of
+`documents/decisions/adr/0022-agent-operating-authority.md`: no human classification gates a packet,
+a stop is either a user decision or a technical hold the Host recovers from by itself, and
+auto-merge and auto-next are the default mode. Every mechanical check of V2 is kept (§0.2).
+Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`;
+V3 on 2026-09-30.
 Scope: ICBM-NEW Agent Host audit, CI, merge, and post-merge verification workflow.
 
 This document records the operating protocol agreed after PR #146 exposed three distinct failure
@@ -48,15 +49,19 @@ supersede or relax:
 
 Those stay binding until their own ADR or canonical process supersedes them.
 
-A DUAL PASS, a GREEN FULL CI and a passed MERGE_GUARD authorize a merge only. Whether a slice may
-adopt an endpoint in code or change a schema is decided by the canonical contracts (ADR-0020), not
+A DUAL PASS, a GREEN FULL CI and a passed MERGE_GUARD authorize a merge only. What a slice may
+build is decided by the canonical documents and by the operating authority of ADR-0022 (§0.2), not
 by this protocol. The protocol never authorizes:
 - a provider call, LIVE or a canary;
 - the residual-risk acceptance;
 - any action `CLAUDE.md` §7.2 reserves for the user, such as a force-push, a branch deletion or a
   destructive operation.
 
-### 0.1 Bootstrap transition
+### 0.1 Bootstrap transition (historical)
+
+The bootstrap ended with PR #150. This section is kept as the record of how #147 and PR-A were
+audited; nothing in it applies to a later slice. Where it speaks of a classification record, read
+the V2 text of §3 that PR #147 merged: V3 has none.
 
 This protocol's packet-dependent steps need the packet generator that PR-A delivers (§9). They are
 therefore bounded as follows.
@@ -103,6 +108,64 @@ therefore bounded as follows.
   every slice uses the packet flow of §1–§8. **No slice other than #147 and PR-A may use this
   exception**, including PR-B and PR-C.
 
+### 0.2 Operating authority (ADR-0022)
+
+**Who decides what.**
+
+| decides | what |
+| --- | --- |
+| the user | product features, product behaviour, real external actions |
+| the implementing agent | how canonically defined work is built: design, schema, endpoint shape, tests, migrations, numbering, base freshness, conflict resolution |
+| GPT and Claude | whether that work is correct, safe and inside the canonical scope |
+
+The user authorized continuous execution of the work the canonical documents define. The user is
+not a per-step approver. The default mode is:
+
+```text
+auto_merge = true
+auto_next  = true
+```
+
+**Never a question for the user.** None of these stops a loop for a person, and none asks the user
+to post anything on GitHub:
+- implementation, refactoring and internal design;
+- schema, migration and endpoint design for an already-approved feature;
+- tests, lint, types, imports, paths, repository rules;
+- migration numbering, a merge of the current main, a mechanical conflict;
+- a BLOCKER and its repair, however often it takes;
+- packet generation, source discovery, evidence bookkeeping, digests;
+- CI, a stale HEAD, a re-audit of the same HEAD, FULL CI, MERGE_GUARD;
+- the merge, POST_MERGE_VERIFY and the start of the next canonical slice.
+
+**The user's decisions.** A loop stops for the user only for one of these, as
+`HUMAN_DECISION_REQUIRED` (§5.1):
+- a product feature the canonical requirements do not contain;
+- a user-visible behaviour, UX or policy with several real product directions that no canonical
+  text decides;
+- a change beyond what the user asked for;
+- a real external action:
+  - a LIVE provider mutation, a real provider or marketplace call, a real canary;
+  - a real supplier or provider read whose acceptance needs its own grant;
+  - a payment or a cost, a transfer of real data to an external service;
+  - a destructive operation, a force-push, a branch deletion.
+
+An implementation choice is never in that list.
+
+**No self-authorization.** Removing the per-step approval does not let an agent widen the product.
+An agent that finds the work needs a product feature or a product policy outside the canonical
+documents does not build it: it stops with `HUMAN_DECISION_REQUIRED`. The auditors return the same
+verdict when a diff does that.
+
+**What V3 keeps from V2, unchanged.** None of these is relaxed:
+- the exact-HEAD audit and the generated Audit Packet;
+- the packet digest and the two-part audit identity (HEAD, packet digest);
+- the GPT audit, the independent Claude audit and the same-identity DUAL PASS;
+- `evidence_seen` coverage and the PASS-only cache;
+- FULL CI after READY;
+- the pre-merge packet regeneration and the current-base check;
+- MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY;
+- every provider, LIVE and destructive-operation gate.
+
 ## 1. Flow
 
 ```text
@@ -115,14 +178,15 @@ DRAFT implementation
 → READY
 → FULL CI
 → GREEN
-→ pre-merge packet regeneration and authority re-scan (§7.1)
+→ pre-merge packet regeneration and full re-scan (§7.1)
 → MERGE_GUARD
 → merge with expected_head_sha
 → POST_MERGE_VERIFY
+→ fresh main: the next canonical slice of this Host's track (auto_next)
 ```
 
-No implementation change is made while an audit result is merely a specification/evidence/authority
-conflict. Resolve the audit input first.
+A BLOCKER from either auditor returns to the top on a new HEAD: repair, new packet, both audits
+again. The loop ends on a DUAL PASS or on a real `HUMAN_DECISION_REQUIRED`, never on a count.
 
 ## 2. Identity
 
@@ -141,12 +205,32 @@ Rules:
 - HEAD and packet digest unchanged → an eligible cached PASS may be reused.
 - READY is meaningful only for the current HEAD and current accepted audit identity.
 
-## 3. Authoritative-source markers
+## 3. Packet sources and markers
 
-Authority is declared when a durable GitHub source is written; it is not inferred later from the
-GitHub account that posted it.
+**A slice declares its evidence by citing it.** No one classifies a source, and nothing is
+inferred.
 
-The recognized markers are:
+- The **declaration** is the PR body, together with the Host's slice specification or remediation
+  authorization when one exists.
+- The **scanned streams** are:
+  - the PR's own four streams: conversation comments, body, reviews, review comments;
+  - the comments of every issue the declaration names as `Issue #<n>`;
+  - any stream an optional Host manifest designates. The manifest only designates streams.
+- A **packet source** is a comment, review or review comment in a scanned stream whose id the
+  declaration cites. An id is a bare number of 9 to 12 digits. Every packet source is `required`:
+  both auditors must report it in `evidence_seen`.
+- A cited id that no scanned stream holds is recorded as scan provenance. It is not a source and
+  not a hold.
+
+**The scan is full and edit-aware.** Every packet generation, including the pre-merge regeneration
+of §7.1, reads every source of every scanned stream in full (all pages) at its current body. It
+never skips a source because of its creation order, its locator or an earlier scan. The **source
+watermark** is scan provenance only, never a boundary below which sources are skipped.
+
+A stream or a declaration that cannot be read completely is a **TECHNICAL_HOLD** (§5.1), never a
+partial scan: a failed page, a permission refusal, a truncated listing.
+
+**Markers are provenance.** Three tokens are recognized:
 
 ```text
 [ARCHITECT-INSTRUCTION]
@@ -154,95 +238,33 @@ The recognized markers are:
 [OWNER-AMENDMENT]
 ```
 
-Only marked sources participate in automatic authoritative-source discovery. Unmarked ordinary PR
-discussion, implementation summaries, audit results, and status comments do not become authority
-merely because the repository owner posted them.
+A source **carries a marker** only when the first non-empty line of its body, with surrounding
+whitespace and a trailing CR removed, equals exactly one of the tokens. The match is
+case-sensitive, and nothing else may be on that line. Marker text anywhere else is ordinary text:
+on a later line, inside prose, in a quote, in inline code, in a code block, after other text on the
+first line, or in another case.
 
-**Recognition grammar.** Recognition is deterministic.
+- A marker names what kind of record a source is. The packet records it as the source's `kind`.
+- A marked source is a packet source when the declaration cites it, exactly like an unmarked one.
+- **A marked source never holds a packet.** A marked source the declaration does not cite is
+  history. It is listed in the scan provenance and is otherwise ignored.
+- **No classification record is read.** A `scope: PR #<N>` record with `required:`,
+  `evidence-only:` and `excluded:` sections was V2's human classification. Existing ones, such as
+  the #147 bootstrap record `5876525801` and the owner amendments `5907095955` and `5909645067`,
+  stay in GitHub as history and are never edited or deleted. None is required, none is parsed, and
+  no new one is asked for.
 
-A source **carries a marker** only when **the first non-empty line of its body, with surrounding
-whitespace and a trailing CR removed, equals exactly one of the three tokens above**. The match is
-case-sensitive, and nothing else may be on that line.
+**Authority write guard.** Kept from V2, unchanged: **no automated actor creates or edits a
+marker-first body.** An automated actor is the Agent Host, Claude Code, GPT or any other one. The
+ban covers comments, reviews, review comments, and issue or PR bodies, and applies to creation and
+to any edit alike. Every Host GitHub write is checked before it is sent, and a marker-first body is
+refused before the write. A draft of the same text written to a local file is not refused.
+Authorship is not machine-provable here, so the protocol never claims that a GitHub account
+identity proves authorship.
 
-Marker text anywhere else is **not** a marker. It is ordinary text:
-- on a later line;
-- inside prose;
-- in a quote (`> [ARCHITECT-INSTRUCTION]`);
-- in inline code;
-- in a code block, where the first line is the fence;
-- after other text on the first line (`[ARCHITECT-INSTRUCTION] see below`);
-- in another case (`[architect-instruction]`).
-
-An audit or status comment that merely mentions a token stays unmarked. For example, the existing
-#146 instruction `5870526033`, whose first line is exactly `[ARCHITECT-INSTRUCTION]`, is marked.
-
-**Classification authority.** The Host never classifies a source on its own judgement. It cannot
-clear its own HOLD.
-
-A classification says whether a marked source is `required`, excluded with a reason, or
-evidence-only. It is supplied only by a **durable, content-bound classification record under user
-or architect authority**, which is one of:
-- a marked `[ARCHITECT-INSTRUCTION]` or `[OWNER-AMENDMENT]` source in a designated stream that
-  states the mapping;
-- a canonical slice specification (a git blob) that the user or architect explicitly authorized to
-  carry it.
-
-A marked record is authority by its own marker and needs no further classification of itself.
-
-**Authority write guard.** A marker only means authority if no automation can write one. So:
-
-1. **No automated actor creates or edits a marker-first body.** An automated actor is the Agent
-   Host, Claude Code, GPT or any other one. A marker-first body is a GitHub body whose first
-   non-empty line, under the grammar above, is a recognized marker token. The ban covers comments,
-   reviews, review comments, and issue or PR bodies, and applies to creation and to any edit
-   alike.
-2. **Marked authority sources are posted and edited only by the user or the architect**, as an
-   explicit human authority action. Automation may prepare a **draft** of such a body. It never
-   publishes or edits the marked body itself.
-3. **Authorship is not machine-provable here.** The user, the Host, Claude Code and GPT can all
-   write under the same GitHub account. The protocol therefore **never claims that GitHub account
-   identity proves authorship**.
-
-   The boundary is an operating discipline together with a **Host-enforced write guard**: every
-   Host GitHub write is checked before it is sent, and a marker-first body is refused before the
-   write. An automated actor that bypasses the guard breaks the discipline. The marked body it
-   produced is not a valid authority source.
-4. This does not invalidate authority records that the user or architect posted directly, such as
-   the #147 bootstrap classification record `5876525801`. Their content-bound identity stands.
-
-The mapping names each source by its content-bound identity (locator and body digest). The Host only
-applies that exact declared mapping. It never invents, infers or reinterprets one. A marked source
-with no matching authorized classification stays **HOLD**, and so does a source whose body digest no
-longer matches its mapping. The classification record is itself a content-bound, required source of
-the manifest and of `evidence_seen`.
-
-**Discovery is a full re-scan and is edit-aware.** The manifest names the **designated authoritative
-streams** of the slice, for example:
-- the comments of a named issue;
-- a PR's conversation comments, reviews and review comments;
-- a named issue or PR body.
-
-Every packet generation, including the pre-merge regeneration of §7.1, reads **every source in
-every designated stream in full** (all pages) at its **current** body. It then checks each source
-that currently carries a recognized marker against the authorized classification (above), whenever
-that source was created or edited.
-
-The scan never skips a source because of its creation order, its locator or an earlier scan. A
-source created before an earlier scan and edited in place to add a marker is therefore found like a
-new one.
-
-The **source watermark** is recorded as scan provenance only (what was scanned, and when). It is
-never a boundary below which sources are skipped.
-
-A source that currently carries a recognized marker and has no matching authorized classification
-prevents a clean packet from being issued until an authorized classification record covers it. Such a source is **HOLD**, whether it is
-new or an old source edited in place, for example a formerly unmarked comment that now carries
-`[ARCHITECT-INSTRUCTION]`. The generator does not guess whether it should be ignored.
-
-A stream that cannot be read completely is **HOLD**, never a partial scan. Examples:
-- a failed page;
-- a permission refusal;
-- a truncated listing.
+**Edits still bind.** A packet source enters the packet by its locator and the SHA-256 of its
+current body (§4). An edited body, a new citation and a removed citation each change the packet
+digest, so each invalidates an audit PASS (§2, §7.1).
 
 ## 4. Audit Packet
 
@@ -251,17 +273,16 @@ The Audit Packet is a **generated artifact, never a hand-edited audit record**.
 Its inputs are **content-bound source identities**:
 
 - exact HEAD SHA;
-- audited base SHA;
-- slice specification path and blob SHA;
-- owner amendments;
-- architect instructions;
-- evidence packets;
-- scope allow-list source;
-- binding prior decisions required by the slice;
-- authoritative-source manifest (designated streams and classifications) and source watermark
-  (scan provenance only, outside the canonical packet bytes, §3, §4.2).
+- audited base SHA, which fixes the canonical ROADMAP, ADRs, architecture and contracts the slice
+  is judged against;
+- the PR's changed files and their complete diff;
+- slice specification path and blob SHA, and the scope allow-list source, when the Host selected
+  the slice;
+- the durable evidence the slice declaration cites (§3);
+- the scanned-stream list, and the source watermark as scan provenance only, outside the canonical
+  packet bytes (§3, §4.2).
 
-The last five inputs are each identified as below.
+Each cited source is identified as below.
 
 **Content-bound identity.** A git object (a commit SHA, or a path with its blob SHA) already names
 its content. A GitHub comment ID, review ID or issue/PR number does not. It is a stable locator
@@ -284,17 +305,13 @@ used to build it.
 
 Hard completeness checks:
 
-- every source declared `required` by the manifest is present in the packet;
-- every source in every designated stream is re-scanned in full at its current body (§3). Every
-  source that currently carries a recognized marker, including an older source edited in place to
-  add one, is covered by an authorized classification (§3) before the packet is accepted. A stream that cannot be read completely is
-  HOLD;
-- every source is re-read at generation time. A git source resolves to its exact object. A
-  mutable GitHub source must be readable, and its current canonical body digest is what the packet
-  records. A source that cannot be read is HOLD;
+- every cited source a scanned stream holds is present in the packet, once, with its body;
+- every source in every scanned stream is re-scanned in full at its current body (§3);
+- every changed file of the PR is in the packet, complete;
 - packet HEAD and base match the candidate being audited.
 
-Failure of a hard completeness check is **HOLD**, not a code BLOCKER.
+Failure of a hard completeness check is a **TECHNICAL_HOLD** (§5.1), not a code BLOCKER: the Host
+retries it. No completeness check depends on a human record.
 
 ### 4.2 Reproducibility
 
@@ -341,19 +358,46 @@ Claude.evidence_seen ⊇ packet.manifest.required
 Coverage compares content-bound identities. An entry whose body digest differs from the manifest's
 does not cover that source.
 
-### 5.1 Verdicts
+### 5.1 Verdicts and holds
 
-Only three control-flow verdicts exist:
+An audit returns one of:
 
 - **PASS** — audit satisfied for this audit identity.
-- **BLOCKER** — code or contract defect that can be fixed by changing the implementation.
-- **HOLD** — human decision, missing/ambiguous authority or evidence, permission refusal, or another
-  condition that automation must not resolve by editing code.
+- **BLOCKER** — a code, test or contract defect. It is repaired automatically: new HEAD, new
+  packet, both audits again.
+- **HUMAN_DECISION_REQUIRED** — the diff itself needs one of the user's decisions (§0.2). The
+  auditor names the category.
+- **INSUFFICIENT**, or a verdict the Host turns into **HOLD** because a required source is missing
+  from `evidence_seen` — a technical hold: the audit is run again.
 
-Only a CODE/CONTRACT BLOCKER consumes the automatic-fix counter.
+A loop pass stops in exactly one of two classes:
 
-A repeated materially identical BLOCKER after an attempted fix escalates to HOLD; the Host must not
-loop on the same misunderstanding.
+```text
+HUMAN_DECISION_REQUIRED   the closed list of §0.2. The run ends and waits for the user.
+TECHNICAL_HOLD            everything else. The Host recovers or retries by itself.
+```
+
+- The class comes from the **category** of the reason, never from how often something failed.
+- The human categories are a closed list in the Host: `NEW_PRODUCT_FEATURE`,
+  `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`, `PROVIDER_CALL`, `CANARY`,
+  `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`, `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`,
+  and the owner's own hold file on a PR. A reason that names none of them is technical.
+- Examples of a TECHNICAL_HOLD: a stale main, a packet that could not be generated, an unreadable
+  stream, a CI infrastructure failure, a mergeability problem, a migration collision, source
+  bookkeeping, an auditor that returned nothing readable.
+
+**A TECHNICAL_HOLD is retried.** The same state (PR, HEAD, main, reason) is run again with a
+doubling wait. After the configured number of retries of that same state the run ends
+`TECHNICAL_HOLD_EXHAUSTED`. That is a cost circuit breaker and a report. It is not a request for a
+decision, and a changed state starts a new count.
+
+**A repeated BLOCKER is never handed to the user.** After the configured number of repair cycles
+the fixer stops repeating itself: every later attempt is an independent re-analysis, given the
+blockers the earlier attempts left and told to take another approach.
+
+**Scope reports are not holds.** A fix or an implementation that needs a file outside the slice's
+listed paths, a migration or a removed file is reported in the run output and in the PR body, and
+the auditors judge it. An explicit architect ruling's file list is still enforced.
 
 ### 5.2 Audit cache
 
@@ -362,7 +406,7 @@ loop on the same misunderstanding.
 - A packet-digest change invalidates audit PASS without invalidating same-HEAD CI.
 
 The Host never imports an external audit as though the Host performed it. External audit evidence
-may be an authoritative input when explicitly classified, but authorship/provenance is preserved.
+is a packet source when the declaration cites it, and its provenance is preserved.
 
 ## 6. CI
 
@@ -404,8 +448,8 @@ environmental/timing evidence, such as:
 Prior success alone is not sufficient evidence of INFRA_FAILURE.
 
 Retry permission is not an INFRA verdict. If the failure is reproducible in code/tests, it is a
-BLOCKER. A repeated unresolved environment-shaped failure becomes HOLD rather than an unlimited
-rerun loop.
+BLOCKER. A repeated unresolved environment-shaped failure becomes a TECHNICAL_HOLD (§5.1) rather
+than an unlimited rerun loop. Nobody is asked whether CI should be handled.
 
 ## 7. MERGE_GUARD
 
@@ -418,7 +462,7 @@ Merge is allowed only when all of the following are true:
 4. GPT and Claude `evidence_seen` each cover the regenerated `packet.manifest.required`, by
    content-bound identity (§4).
 5. FULL CI is GREEN for the exact HEAD.
-6. No HOLD is active.
+6. No hold is active, the owner's own hold file on the PR included.
 7. `audited_base_sha == current_base_sha`.
 8. The PR HEAD contains the current base: `merge_base(PR_HEAD, current_base_sha) ==
    current_base_sha`. Equivalently, the HEAD is `behind_by == 0` against the current base. This is
@@ -435,31 +479,34 @@ Mitigations in this protocol:
 - conditions 7 and 8 and §7.1 are re-evaluated **immediately before** the merge call;
 - POST_MERGE_VERIFY's tree equality detects a base that moved in the window (HOLD).
 
-**Cut-off:** an authority source edited after that final re-scan is outside this merge's audited
+**Cut-off:** a cited source edited after that final re-scan is outside this merge's audited
 input and binds the next audit, not this merge.
+
+**Base freshness is the Host's work.** A PR HEAD that does not contain the current base is brought
+up to date before it is audited, with GitHub's own update-branch (no force), and the new HEAD is
+audited from scratch. A conflict GitHub cannot merge is a TECHNICAL_HOLD for the repair path.
 
 A stronger atomic mitigation is assigned to PR-C (§9).
 
-### 7.1 Pre-merge packet regeneration and authority re-scan
+### 7.1 Pre-merge packet regeneration and full re-scan
 
 Immediately before MERGE_GUARD is evaluated, the Host regenerates the Audit Packet for the same HEAD
-and base. It **fully re-scans every designated authoritative stream** at current bodies, with no
-watermark skipping (§3), and re-reads every content-bound source (§4).
+and base. It **fully re-scans every scanned stream** at current bodies, with no watermark skipping
+(§3), and re-reads the declaration.
 
 - **Unchanged:** the regenerated canonical bytes, `audit_packet_digest` and manifest equal the
   audited packet. Only then may MERGE_GUARD proceed.
-- **Unclassified marker:** a source that currently carries a recognized marker and has no
-  matching authorized classification is **HOLD** (§3). It may be new, or an older, previously unmarked
-  source edited in place after the DUAL PASS. An incompletely read stream is HOLD too.
-- **Any other difference** invalidates the DUAL PASS. The Host returns to audit under the new
-  audit identity. Examples:
-  - a changed body digest;
-  - a new classified source;
+- **Any difference** invalidates the DUAL PASS. The Host returns to audit under the new audit
+  identity. Examples:
+  - a cited source's body changed;
+  - the declaration cites one more source, or one fewer;
   - a changed manifest, bytes or digest.
 
   The same-HEAD FULL CI stays valid (§2).
-- **A source that cannot be re-read** is HOLD, for example one that was deleted or is
-  inaccessible.
+- **A marker is never a difference.** A source edited to carry a marker, a new marked source and an
+  edited legacy classification record change nothing unless the declaration cites them.
+- **A stream or declaration that cannot be re-read** is a TECHNICAL_HOLD, for example one that was
+  deleted or is inaccessible.
 
 MERGE_GUARD does not proceed on the packet generated before the audit.
 
@@ -479,7 +526,15 @@ The Host verifies the merge result:
 With the audited-base equality guard, the tree equality is the cheap final proof that the result
 placed on main is the tree that was audited, regardless of merge/squash commit metadata.
 
-Tree mismatch is HOLD and requires investigation; it is not silently accepted.
+Tree mismatch is a TECHNICAL_HOLD and requires investigation; it is not silently accepted, and the
+next slice does not start. The check reads GitHub's own record of the merge on every pass that finds
+the PR merged, so a restart cannot skip it.
+
+**After a verified merge** the Host audits the merged main and, with `auto_next`, reads the
+canonical ROADMAP on that fresh main and starts the next canonical slice of its track. One Host runs
+one track; parallel tracks run as separate Host directories, each with its own state, worktrees,
+PR, packet, audit identity and merge. A track whose next step is one of the user's decisions stops
+with `HUMAN_DECISION_REQUIRED`; the other tracks go on.
 
 **A merge moves main, so it changes the accepted code SHA.** Every exact-main proof bound to the
 previous main is stale for the new one, among them the Gate 3 visual acceptance (ADR-0018 G3-31).
@@ -506,41 +561,42 @@ Must land as one safe unit:
 
 Do not deploy packet unification without completeness and reproducibility in the same slice.
 
-Required discovery tests (PR-A):
-- an existing **unmarked old comment**, created before the previous scan and not in the manifest,
-  is **edited in place to add a recognized marker** → the next generation, and the pre-merge
-  regeneration of §7.1 after a DUAL PASS, report it as an **unclassified marker → HOLD**; no clean
-  packet is issued;
-- a new marked source that is not classified → HOLD;
-- a stream page that cannot be read, or a truncated listing → HOLD, never a partial scan;
-- an edited body of a classified source → its body digest and the packet digest change (§4, §7.1).
-- marker grammar (§3), positive: a body whose first non-empty line is exactly one token (with
-  surrounding whitespace or a trailing CR) is marked, for example the form of `5870526033`;
-- marker grammar, negative: an audit or status comment that merely mentions the tokens in prose
-  stays **unmarked**, as does a token on a later line, in a quote, in inline code or a code block,
-  followed by other text on the first line, or in another case;
-- classification authority (§3): a marked source with no matching classification from an authorized
-  record → HOLD; the Host cannot clear it by itself; a classified source whose body digest changed
-  no longer matches → HOLD;
-- authority write guard (§3): an automated create or edit of any GitHub body (comment, review,
-  review comment, issue or PR body) whose first non-empty line is a recognized marker is
-  **refused before the GitHub write**. This covers a new body and an edit that turns an unmarked
-  body into a marked one. No write request is sent. A draft of the same text written to a local file
-  is not refused.
+Required discovery tests (V3; `automation/agent-host/tests/`, pinned by the fixture test):
+- a packet is complete with no `[OWNER-AMENDMENT]` and no classification record anywhere;
+- a legacy `[OWNER-AMENDMENT]` in a scanned stream, classified or not, never produces a hold;
+- no `scope: PR #<N>` record is needed for a canonical slice packet;
+- audit bookkeeping never produces `HUMAN_DECISION_REQUIRED`;
+- a stream page that cannot be read, or a truncated listing → TECHNICAL_HOLD, never a partial scan;
+- an edited body of a cited source, and a changed citation, each change the packet digest (§4, §7.1);
+- an uncited source edited in place to add a marker changes nothing;
+- marker grammar (§3), positive and negative, as in V2;
+- authority write guard (§3): an automated create or edit of any GitHub body whose first non-empty
+  line is a recognized marker is **refused before the GitHub write**. A draft of the same text
+  written to a local file is not refused.
+
+Required control-loop tests (V3, same place):
+- BLOCKER → repair → new HEAD → new packet → re-audit;
+- GPT PASS + Claude PASS → DUAL PASS;
+- DUAL PASS + FULL CI GREEN + MERGE_GUARD PASS → merge with `expected_head_sha`, and
+  POST_MERGE_VERIFY;
+- after POST_MERGE_VERIFY the next canonical slice is selected and, with `auto_next`, started;
+- a step that needs a new product feature → `HUMAN_DECISION_REQUIRED`;
+- a real LIVE, provider or supplier action → `HUMAN_DECISION_REQUIRED`;
+- a changed HEAD or packet digest → no earlier PASS is reused;
+- a packet that changed just before the merge → no merge, a re-audit.
 
 ### PR-B — Audit result/control-flow cleanup
 
-- PASS / BLOCKER / HOLD only;
+- PASS / BLOCKER / the two hold classes of §5.1;
 - PASS-only cache;
-- CODE/CONTRACT BLOCKER-only fix counter;
-- repeated same BLOCKER → HOLD;
+- repeated BLOCKER → independent re-analysis, never a hand-off (§5.1);
 - separate observable session/execution identity where enforceable.
 
 ### PR-C — Canonical CI and merge state
 
 - exact-HEAD CI state;
 - skipped/duplicate/retry handling;
-- pre-merge packet regeneration and authority re-scan (§7.1);
+- pre-merge packet regeneration and full re-scan (§7.1);
 - MERGE_GUARD;
 - base containment before merge (§7 condition 8);
 - expected_head_sha merge;
@@ -548,7 +604,9 @@ Required discovery tests (PR-A):
 - the stronger atomic mitigation of the final-check window (§7 residual): binding the base and the
   audited authority snapshot to the merge mutation, or re-verifying them atomically with it.
 
-## 10. PR #146 trial
+## 10. PR #146 trial (historical)
+
+PR #146 was closed as superseded by PR #158. This section is the record of the V2 trial plan.
 
 PR #146 is the first trial candidate for this protocol.
 

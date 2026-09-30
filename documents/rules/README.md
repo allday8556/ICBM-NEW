@@ -32,6 +32,7 @@ Section numbers are kept, so an existing reference to `CLAUDE.md §N` resolves t
 | §11 Current milestone | `documents/roadmap/CURRENT-MILESTONE.md` (roadmap content, not a rule) |
 | §12 First vertical | `documents/rules/12-first-vertical.md` |
 | §13 Canonical file index and read order | this file, below |
+| §14 Operating authority (ADR-0022; not a former section) | `documents/rules/14-operating-authority.md` |
 | intro (enforcement layer) | this file, above |
 
 ---
