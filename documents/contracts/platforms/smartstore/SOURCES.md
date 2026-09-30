@@ -366,7 +366,8 @@ implementing environment, so the page was read through GPT (`codex`, web access)
 recorded verbatim in the locator comment. It is a reading of `P0` documentation, not an architect
 resolution and not runtime evidence, and nothing here is `R0`. It is no longer single-reader: the
 architect independently re-read the 2.90.0 reference and confirmed this packet in Issue #89
-resolution `5915900049`. It agrees with the enumerations already recorded for the same two structures by §5.2's
+resolution `5915900049` ("This independently confirms the facts recorded in research packet
+`5911962320`. The packet is no longer single-reader evidence for these members."). It agrees with the enumerations already recorded for the same two structures by §5.2's
 packets. The channel-product read response was not accessible to that reader and nothing about it
 is recorded. The reference states no read-after-write consistency and does not state that `SALE`
 with `ON` guarantees a buyer can see and purchase the listing.
