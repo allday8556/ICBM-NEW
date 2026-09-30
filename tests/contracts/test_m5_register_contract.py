@@ -159,6 +159,9 @@ M5_HEAD = "0020_g1_registration_category_metadata"
 M5_RECONCILE = "0031_m5_registration_reconcile"
 # The authoring-revision owners (ADR-0014 §27.1; Issue #89 5907626428), authorized as 0032.
 M5_AUTHORING = "0032_m5_registration_authoring_revisions"
+# The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106), authorized as 0033. Its
+# table is live-safety evidence, not registration state.
+M5_ELIGIBILITY = "0033_m5_canary_eligibility"
 M5_MIGRATIONS = (
     M5_FOUNDATION,
     M5_EXECUTION_SCOPE,
@@ -190,7 +193,7 @@ G3_AREA2 = "0029_g3_restore_retention"
 G3_AREA3 = "0030_g3_visual_acceptance"
 # ADR-0019 E1 (Issue #126 5906290729 B-6, 5906712259 N-2): the COLLECT transport provenance columns
 # on the run and the revision. It adds no table and holds no registration state.
-COLLECT_TRANSPORT = "0033_collect_transport_provenance"
+COLLECT_TRANSPORT = "0034_collect_transport_provenance"
 SCHEMA_HEAD = COLLECT_TRANSPORT
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -205,6 +208,7 @@ AFTER_M5 = (
     G3_AREA3,
     M5_RECONCILE,
     M5_AUTHORING,
+    M5_ELIGIBILITY,
     COLLECT_TRANSPORT,
 )
 REGISTRATION_STATE = re.compile(

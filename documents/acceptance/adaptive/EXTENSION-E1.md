@@ -51,7 +51,7 @@ a failure after the run is opened is `FAILED`; `RECORDED` is unreachable.
 | routes | `app/interface/api/routes/collect_extension.py` |
 | KM capture policy | `integrations/suppliers/kmretail/browser_capture_policy.json` |
 | Adaptive dry run | `app/stages/collect/adaptive/shadow/dry_run.py` |
-| provenance | migration `0033_collect_transport_provenance` |
+| provenance | migration `0034_collect_transport_provenance` |
 | pairing commands | `icbm extension pair | rotate | revoke` |
 
 ## 4. What is verified provider-zero
@@ -73,7 +73,7 @@ loopback, and `tests/contracts/test_repository_rules.py` refuses a launch anywhe
 | an unclassified processing failure settles `FAILED` with a fixed code and never stores its own text | `tests/integration/collect/extension/test_extension_capture_job.py` |
 | one nonce presented by many threads at once is accepted exactly once, and the same test loses without the lock | `tests/unit/collect/extension/test_pairing.py` |
 | every test browser is loopback-only, from one owner | `tests/unit/test_browser_support.py`, `tests/contracts/test_repository_rules.py` |
-| migration 0033: additive, triggers intact, no backfill, provenance never identity | `tests/integration/collect/extension/test_transport_provenance.py` |
+| migration 0034: additive, triggers intact, no backfill, provenance never identity | `tests/integration/collect/extension/test_transport_provenance.py` |
 | the C1 regression pair, the policy cut, the same facts on both transports, the preconditions and the bounds, in a real browser | `tests/integration/collect/extension/test_extension_capture_browser.py` |
 | the unpacked extension end to end against the real application | `tests/integration/collect/extension/test_extension_e2e.py` |
 | the policy owner, the pairing, the replay cache, the capture structure | `tests/unit/collect/extension/` |

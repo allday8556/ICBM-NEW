@@ -511,7 +511,7 @@ def test_0028_is_additive_and_its_downgrade_never_destroys_accounting(
     before = schema()
     upgrade_to_head(url)
     after = schema()
-    # Migration 0031 adds the provider channel identity column to the first two, and 0033 the
+    # Migration 0031 adds the provider channel identity column to the first two, and 0034 the
     # transport provenance columns to the run and the revision; nothing else moves.
     assert {name for name in before if before[name] != after[name]} == {
         "registration_intents",

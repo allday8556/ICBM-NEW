@@ -30,6 +30,8 @@ class AdmittingAuthority:
     def __init__(self) -> None:
         self.admitted: list[tuple[str, int]] = []
         self.refusals: list[str] = []
+        # The eligibility lineage the CREATE path handed over (ADR-0018 §5.1).
+        self.lineages: list[tuple[Any, str | None]] = []
 
     def admit_create(
         self,
@@ -43,8 +45,11 @@ class AdmittingAuthority:
         truth_fence: int,
         actor: str,
         correlation_id: str,
+        send_gate: Any = None,
+        preparation_revision_id: str | None = None,
     ) -> None:
         self.admitted.append((intent.intent_id, attempt_no))
+        self.lineages.append((send_gate, preparation_revision_id))
 
     def truth_fence(self) -> int:
         return 0
@@ -81,7 +86,7 @@ class ProvenProofs:
         self.accept = accept
         self.restore_targets: list[str] = []
 
-    def canary_non_regulated(self, stage: MutationStage, unit_ref: str) -> bool:
+    def canary_non_regulated(self, stage: MutationStage, unit_ref: str, binding: Any) -> bool:
         return "eligibility" not in self.missing
 
     def residual_risk_accepted(self) -> bool:

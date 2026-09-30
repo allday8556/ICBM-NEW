@@ -100,7 +100,7 @@ class ProductFactsRevision(Base):
     collection_run_id: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     facts_status: Mapped[str] = mapped_column(String(20))
-    # ADR-0019 §4 (migration 0033): the transport of the run that produced this revision, copied
+    # ADR-0019 §4 (migration 0034): the transport of the run that produced this revision, copied
     # from that run, and for ``EXTENSION`` the capture policy it was cut with. NULL on a revision
     # that predates the columns; never backfilled and never an identity input.
     transport_kind: Mapped[str | None] = mapped_column(String(10))
@@ -333,7 +333,7 @@ class CollectionRun(Base):
     # run first read before the seam existed; such a run is never captured, and none is backfilled.
     capture_decision: Mapped[str | None] = mapped_column(String(10))
     capture_request_id: Mapped[str | None] = mapped_column(String(36))
-    # ADR-0019 §4 (migration 0033): how this run's document was acquired, written once when the
+    # ADR-0019 §4 (migration 0034): how this run's document was acquired, written once when the
     # run is opened, and for ``EXTENSION`` the ``BrowserCapturePolicy`` revision and digest the
     # capture was cut with. NULL on a run that predates the columns; never backfilled.
     transport_kind: Mapped[str | None] = mapped_column(String(10))

@@ -745,7 +745,7 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-# Migration 0033 (ADR-0019 E1) appends the transport provenance to the revision: nullable and
+# Migration 0034 (ADR-0019 E1) appends the transport provenance to the revision: nullable and
 # never backfilled. Rows compare across revisions on what each revision holds.
 LATER_COLUMNS = frozenset({"transport_kind", "capture_policy_revision", "capture_policy_digest"})
 
@@ -770,7 +770,7 @@ def test_0011_to_0012_preserves_m3_source_truth_and_backfills_only_identity(
 ) -> None:
     database = tmp_path / "icbm.db"
     url = _url(database)
-    # The store writes the head schema (migration 0033 appended the provenance columns), so it
+    # The store writes the head schema (migration 0034 appended the provenance columns), so it
     # runs at head, and the database then steps down through the fail-closed downgrades, which
     # keep every M3 row.
     upgrade_to_head(url)
