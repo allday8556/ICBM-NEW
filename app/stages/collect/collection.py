@@ -54,6 +54,7 @@ from app.stages.collect.facts import (
 from app.stages.collect.models import CollectionOutcome
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import (
+    DIRECT_URL,
     CollectionRunRecord,
     CollectionRunStore,
     PacingKey,
@@ -382,6 +383,8 @@ class ProductCollectionService:
                 correlation_id=job.correlation_id,
                 supplier_key=supplier_key,
                 source_url=product_url,
+                # The operator's URL, read by the server gateway (ADR-0019 §1, §4).
+                provenance=DIRECT_URL,
             )
         self._jobs.notify_worker()
         logger.info(
@@ -602,7 +605,10 @@ class ProductCollectionService:
             fields=collection.fields(document),
             images=images,
         )
-        stored = self._revisions.append(collected, url_policy=url_policy_of(profile))
+        # Every run this service opens is a direct-URL run, and so is its revision (ADR-0019 §4).
+        stored = self._revisions.append(
+            collected, url_policy=url_policy_of(profile), provenance=DIRECT_URL
+        )
         logger.info(
             "collect.recorded",
             extra={

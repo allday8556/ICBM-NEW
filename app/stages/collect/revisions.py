@@ -51,6 +51,7 @@ from app.stages.collect.models import (
     ProductFactsRevision,
     SourceAsset,
 )
+from app.stages.collect.runs import RunProvenance
 from app.stages.collect.urls import STRICT_URL_POLICY, UrlPolicy
 
 _FIELD_ORDER = {key: index for index, key in enumerate(FIELD_REGISTRY)}
@@ -91,6 +92,11 @@ class StoredRevision:
     facts_status: FactsStatus
     fields: Mapping[str, StoredField]  # registry order
     images: tuple[ImageReference, ...]  # representative first, then source order
+    # ADR-0019 §4: provenance copied from the run; NULL before migration 0032. Never an input of
+    # ``fingerprints_intact`` or of any other digest.
+    transport_kind: str | None = None
+    capture_policy_revision: str | None = None
+    capture_policy_digest: str | None = None
 
     def fingerprints_intact(self) -> bool:
         """Recompute every evidence digest and fingerprint from the stored content alone."""
@@ -113,12 +119,20 @@ class ProductFactsRevisionStore:
         self._clock = clock
 
     def append(
-        self, collected: CollectedFacts, *, url_policy: UrlPolicy = STRICT_URL_POLICY
+        self,
+        collected: CollectedFacts,
+        *,
+        url_policy: UrlPolicy = STRICT_URL_POLICY,
+        provenance: RunProvenance | None = None,
     ) -> StoredRevision:
         """Validate, evaluate and append one revision; return it as read back.
 
         ``url_policy`` is the supplier profile's explicit safe query keys; the default keeps none,
         so no URL with a query can be stored until a profile allowlists its keys.
+
+        ``provenance`` is how the run that produced these facts acquired its document (ADR-0019
+        §4). It is stored beside the revision and takes no part in the evaluation: no digest and
+        no fingerprint is computed from it. A revision appended without one states none.
         """
         evaluated = evaluate(collected, url_policy)
         revision_id = str(uuid.uuid4())
@@ -146,6 +160,15 @@ class ProductFactsRevisionStore:
                     collection_run_id=collected.collection_run_id,
                     correlation_id=collected.correlation_id,
                     facts_status=evaluated.facts_status.value,
+                    **(
+                        {}
+                        if provenance is None
+                        else {
+                            "transport_kind": provenance.transport_kind.value,
+                            "capture_policy_revision": provenance.capture_policy_revision,
+                            "capture_policy_digest": provenance.capture_policy_digest,
+                        }
+                    ),
                 )
             )
             session.flush()
@@ -410,4 +433,7 @@ class ProductFactsRevisionStore:
             facts_status=FactsStatus(row.facts_status),
             fields=fields,
             images=images,
+            transport_kind=row.transport_kind,
+            capture_policy_revision=row.capture_policy_revision,
+            capture_policy_digest=row.capture_policy_digest,
         )

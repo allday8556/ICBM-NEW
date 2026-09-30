@@ -129,7 +129,7 @@ CANONICAL_TABLES = (
     # The SEARCH positive-only reconcile slice (ADR-0014 §28.4): the reconcile-check owner.
     "registration_reconcile_checks",
 )
-HEAD = "0031_m5_registration_reconcile"
+HEAD = "0032_collect_transport_provenance"
 
 
 def _url(path: Path) -> str:

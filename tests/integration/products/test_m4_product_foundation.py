@@ -745,12 +745,19 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
+# Migration 0032 (ADR-0019 E1) appends the transport provenance to the revision: nullable and
+# never backfilled. Rows compare across revisions on what each revision holds.
+LATER_COLUMNS = frozenset({"transport_kind", "capture_policy_revision", "capture_policy_digest"})
+
+
 def _m3_rows(database: Path) -> dict[str, list[tuple[object, ...]]]:
     with contextlib.closing(sqlite3.connect(database)) as raw:
-        return {
-            table: raw.execute(f"SELECT * FROM {table} ORDER BY 1, 2").fetchall()
-            for table in M3_TABLES
-        }
+        found = {}
+        for table in M3_TABLES:
+            names = [row[1] for row in raw.execute(f"PRAGMA table_info({table})")]
+            columns = ", ".join(name for name in names if name not in LATER_COLUMNS)
+            found[table] = raw.execute(f"SELECT {columns} FROM {table} ORDER BY 1, 2").fetchall()
+        return found
 
 
 def _count(database: Path, table: str) -> int:
@@ -763,7 +770,10 @@ def test_0011_to_0012_preserves_m3_source_truth_and_backfills_only_identity(
 ) -> None:
     database = tmp_path / "icbm.db"
     url = _url(database)
-    command.upgrade(alembic_config(url), "0011_m3_image_reference_diagnostics")
+    # The store writes the head schema (migration 0032 appended the provenance columns), so it
+    # runs at head, and the database then steps down through the fail-closed downgrades, which
+    # keep every M3 row.
+    upgrade_to_head(url)
     db = Database(url)
     try:
         assets = SourceAssetStore(tmp_path / "source-assets", db, FakeDecoder(), FakeClock())
@@ -773,6 +783,7 @@ def test_0011_to_0012_preserves_m3_source_truth_and_backfills_only_identity(
             revisions.append(collected(images=images, source_product_id=product))
     finally:
         db.dispose()
+    command.downgrade(alembic_config(url), "0011_m3_image_reference_diagnostics")
     before = _m3_rows(database)
     upgrade_to_head(url)
     engine = create_sqlite_engine(url)
@@ -794,7 +805,8 @@ def test_0011_to_0012_preserves_m3_source_truth_and_backfills_only_identity(
 def test_downgrade_drops_only_the_re_derivable_backfill(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = _url(database)
-    command.upgrade(alembic_config(url), "0011_m3_image_reference_diagnostics")
+    # Written at head, then stepped down, for the same reason as above.
+    upgrade_to_head(url)
     db = Database(url)
     try:
         assets = SourceAssetStore(tmp_path / "source-assets", db, FakeDecoder(), FakeClock())
@@ -802,6 +814,7 @@ def test_downgrade_drops_only_the_re_derivable_backfill(tmp_path: Path) -> None:
         ProductFactsRevisionStore(db, FakeClock()).append(collected(images=images))
     finally:
         db.dispose()
+    command.downgrade(alembic_config(url), "0011_m3_image_reference_diagnostics")
     before = _m3_rows(database)
     upgrade_to_head(url)
     command.downgrade(alembic_config(url), "0011_m3_image_reference_diagnostics")

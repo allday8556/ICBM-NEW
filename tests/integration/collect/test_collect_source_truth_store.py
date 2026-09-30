@@ -203,7 +203,7 @@ def test_the_database_refuses_forbidden_rows_even_without_the_domain(
         "ck_product_facts_revisions_currency_krw": (
             "INSERT INTO product_facts_revisions VALUES ('r2', 'kmretail', '1234', 9, "
             f"'https://shop.example/p', {at}, {at}, 'USD', 'r1', '{'b' * 64}', '{'c' * 64}', "
-            "'run', 'cid', 'CONFIRMED')"
+            "'run', 'cid', 'CONFIRMED', NULL, NULL, NULL)"
         ),
         "ck_product_facts_fields_value_is_json": (
             f"INSERT INTO product_facts_fields VALUES ('{revision}', 'extra', 'COVERAGE', "
