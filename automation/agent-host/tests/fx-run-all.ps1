@@ -1,12 +1,14 @@
-﻿param([string[]]$Scenarios = @("gpt-loop", "claude-loop", "big-pr", "scope-expansion", "max-cycles", "post-merge-remediation", "remediation-migration-hold", "remediation-open-pr-guard"), [string]$RootName = "fx", [string]$SrcHost = "C:\Users\user\ICBM-Agent-Host")
+﻿param([string[]]$Scenarios = @("gpt-loop", "claude-loop", "big-pr", "scope-expansion", "max-cycles", "post-merge-remediation", "remediation-migration-hold", "remediation-open-pr-guard"), [string]$RootName = "fx", [string]$SrcHost = (Split-Path $PSScriptRoot -Parent))
 
 $sp = $PSScriptRoot
-$root = Join-Path $sp $RootName
+# Fixture output never lands in the repository: a fixture repository holds files that repository-wide scans would read.
+$outDir = Join-Path ([System.IO.Path]::GetTempPath()) "icbm-agent-host-fx"
+$root = Join-Path $outDir $RootName
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 $jobs = foreach ($s in $Scenarios) {
     Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$sp\fx-harness.ps1`"", "-Scenario", $s, "-Root", "`"$root`"", "-SrcHost", "`"$SrcHost`"") `
-        -RedirectStandardOutput (Join-Path $sp "$RootName-$s.out.txt") -RedirectStandardError (Join-Path $sp "$RootName-$s.err.txt") -NoNewWindow -PassThru
+        -RedirectStandardOutput (Join-Path $outDir "$RootName-$s.out.txt") -RedirectStandardError (Join-Path $outDir "$RootName-$s.err.txt") -NoNewWindow -PassThru
 }
 
 $jobs | Wait-Process -Timeout 1200
@@ -30,8 +32,9 @@ foreach ($s in $Scenarios) {
         "    holds: $(@($r.hold_files) -join ' || ')  legacy_named: $(@($r.legacy_named_verdicts) -join ',')"
         "    key: $(@($r.key_lines) -join ' | ')"
         "    checks: $(if ($r.checks) { ($r.checks.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value) -join ';')" }) -join ' | ' })"
+        "    EXPECT {0} = {1}" -f $s, $(if ($r.checks -and $r.checks.expect) { $r.checks.expect } else { "NOT_PINNED" })
     }
     else {
-        "{0,-28} NO RESULT (see fx-$s.out.txt / .err.txt)" -f $s
+        "{0,-28} NO RESULT (see $outDir\$RootName-$s.out.txt / .err.txt)" -f $s
     }
 }
