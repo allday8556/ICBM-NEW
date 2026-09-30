@@ -32,7 +32,12 @@ from app.platform.core.safe_payload import safe_payload
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
-from integrations.marketplaces.smartstore.product import CreateDocument, WireContractError, verified
+from integrations.marketplaces.smartstore.product import (
+    CreateDocument,
+    WireContractError,
+    completeness_gaps,
+    verified,
+)
 from integrations.marketplaces.smartstore.registry import (
     BASE_URL,
     PROVIDER_HOST,
@@ -491,6 +496,8 @@ class SmartStoreEndpointCaller:
         try:
             contract = resolve(endpoint_id)
             wire = _compose(contract, request)
+            if contract.endpoint_id is _PRODUCT_CREATE:
+                self._require_complete(request)
         except EndpointNotAdoptedError as exc:
             error = self._local(endpoint, "SMARTSTORE_ENDPOINT_NOT_ADOPTED", exc)
         except _Preflight as exc:
@@ -559,6 +566,19 @@ class SmartStoreEndpointCaller:
             raise error
         assert result is not None
         return result
+
+    def _require_complete(self, request: object) -> None:
+        """Refuse a CREATE whose validated document lacks a part the provider requires on
+        registration (``product.completeness_gaps``).
+
+        This is the last gate before wire bytes exist, and it reads the document itself: no
+        projection, sender or caller of this method can declare a request complete. At this
+        adoption every CREATE document has gaps, so every CREATE is refused here, locally and
+        before any transport — ``NOT_APPLIED_PROVEN`` by the pre-handoff whitelist.
+        """
+        document = getattr(request, "document", None)
+        if not isinstance(document, CreateDocument) or completeness_gaps(document):
+            raise _Preflight("SMARTSTORE_CREATE_REQUEST_INCOMPLETE")
 
     @staticmethod
     def _local(endpoint: str, code: str, cause: Exception) -> SmartStoreCallError:

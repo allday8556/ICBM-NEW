@@ -31,7 +31,11 @@ from integrations.marketplaces.smartstore.caller import (
 from integrations.marketplaces.smartstore.execution import SmartStoreCreateSender
 from integrations.marketplaces.smartstore.registry import EndpointId, resolve
 from integrations.marketplaces.smartstore.retention import retain
-from tests.support.smartstore_create_support import DeclaredProjectionSender, declared
+from tests.support.register_support import (
+    declared,
+    declared_complete_caller,
+    declared_projection_sender,
+)
 
 BEARER = "fixture-access-token-Qx7"
 BASE = "https://api.commerce.naver.com/external"
@@ -88,7 +92,11 @@ def _origin(**changes: Any) -> dict[str, Any]:
 
 
 def _caller(provider: Provider) -> SmartStoreEndpointCaller:
-    return SmartStoreEndpointCaller(transport=httpx.MockTransport(provider))
+    """The registry-gated caller with its CREATE completeness gate declared passed, so the wire
+    path after it can be exercised. The production caller refuses every CREATE document at this
+    adoption; that is pinned by the tests at the end of this module."""
+    caller: SmartStoreEndpointCaller = declared_complete_caller(httpx.MockTransport(provider))
+    return caller
 
 
 def _sender(provider: Provider, *, bearer: object = Bearer()) -> SmartStoreCreateSender:
@@ -98,7 +106,7 @@ def _sender(provider: Provider, *, bearer: object = Bearer()) -> SmartStoreCreat
     values uncaptured), and that refusal is pinned separately below and in the adapter suite.
     """
 
-    return DeclaredProjectionSender(
+    return declared_projection_sender(
         caller=_caller(provider), bearer=lambda: bearer, projection=lambda payload: declared(FROZEN)
     )
 
@@ -196,7 +204,7 @@ def test_a_projection_that_is_not_a_frozen_document_never_reaches_the_transport(
         document: ClassVar[dict[str, Any]] = DOCUMENT
         gaps: tuple[str, ...] = ()
 
-    sender = DeclaredProjectionSender(
+    sender = declared_projection_sender(
         caller=_caller(provider), bearer=lambda: Bearer(), projection=lambda payload: Raw()
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
@@ -241,7 +249,7 @@ def test_a_directly_built_document_never_reaches_the_wire(forged: product.Create
     assert refused.value.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
     assert provider.requests == []
 
-    sender = DeclaredProjectionSender(
+    sender = declared_projection_sender(
         caller=_caller(provider),
         bearer=lambda: Bearer(),
         projection=lambda payload: declared(forged),
@@ -376,7 +384,7 @@ def test_a_request_carrying_secret_material_never_reaches_the_transport() -> Non
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 
     leaky = product.create_document(IDENTITY, _origin(name="Bearer abcdefghijklmnop"))
-    sender = DeclaredProjectionSender(
+    sender = declared_projection_sender(
         caller=_caller(provider),
         bearer=lambda: Bearer(),
         projection=lambda payload: declared(leaky),
@@ -408,7 +416,7 @@ def test_an_unsendable_projection_never_reaches_the_transport() -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 
     unsendable = declared(FROZEN, gaps=(product.GAP_SHOPPING_REGISTRATION,))
-    sender = DeclaredProjectionSender(
+    sender = declared_projection_sender(
         caller=_caller(provider), bearer=lambda: Bearer(), projection=lambda payload: unsendable
     )
     handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
@@ -766,3 +774,50 @@ def test_the_production_sender_takes_no_projection() -> None:
     assert parameters == ["self", "caller", "bearer"]
     source = inspect.getsource(SmartStoreCreateSender._projection)
     assert "product.project(payload)" in source
+
+
+def test_the_production_caller_refuses_every_create_document_as_incomplete() -> None:
+    # The wire boundary reads completeness from the document body itself. The adopted request
+    # schema admits none of the parts the provider requires on registration beyond originProduct's
+    # projectable fields, so even the validated projection document is refused — locally, before
+    # any byte is written — whoever built it and whatever a projection declared.
+    assert set(product.completeness_gaps(FROZEN)) == {
+        product.GAP_SHOPPING_REGISTRATION,
+        product.GAP_CHANNEL_DISPLAY_STATUS,
+        product.GAP_REGISTRATION_STOCK_QUANTITY,
+        product.GAP_NOTICE_TYPE_CHILD,
+    }
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    production = SmartStoreEndpointCaller(transport=httpx.MockTransport(provider))
+    with pytest.raises(SmartStoreCallError) as refused:
+        production.call(
+            EndpointId.SMARTSTORE_PRODUCT_CREATE_V2, ProductCreateRequest(BEARER, 3, 7, FROZEN)
+        )
+    assert refused.value.code == "SMARTSTORE_CREATE_REQUEST_INCOMPLETE"
+    assert refused.value.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert provider.requests == []
+    # And the production sender over the production caller, even with a projection declared
+    # gap-free, still cannot reach the transport.
+    sender = declared_projection_sender(
+        caller=production, bearer=lambda: Bearer(), projection=lambda payload: declared(FROZEN)
+    )
+    handoff = sender.send(payload={}, idempotency_key="k", listing_identity=IDENTITY)
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_CREATE_REQUEST_INCOMPLETE"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+
+
+def test_completeness_is_read_from_the_body_not_declared() -> None:
+    # A body that carries a required part no longer names that part's gap: the gate is a function
+    # of the document, so it can only ever close when the adopted schema admits the part.
+    body = json.loads(FROZEN.canonical_json)
+    body["originProduct"]["stockQuantity"] = 1
+    forged = product.CreateDocument(
+        encoding_version=product.WIRE_ENCODING_VERSION,
+        listing_identity=IDENTITY,
+        canonical_json=json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":")),
+    )
+    assert product.GAP_REGISTRATION_STOCK_QUANTITY not in product.completeness_gaps(forged)
+    # The schema still refuses that body, so it never reaches the wire either way.
+    with pytest.raises(product.WireContractError):
+        product.verified(forged)

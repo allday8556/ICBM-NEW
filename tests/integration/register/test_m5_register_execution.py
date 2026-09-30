@@ -78,6 +78,9 @@ from tests.support.register_support import (
     MARKET,
     OPERATOR,
     Preparation,
+    declared,
+    declared_complete_caller,
+    declared_projection_sender,
     draft,
     establish,
     preparation,
@@ -86,7 +89,6 @@ from tests.support.register_support import (
     ready_item,
     request,
 )
-from tests.support.smartstore_create_support import DeclaredProjectionSender, declared
 
 pytestmark = pytest.mark.integration
 
@@ -778,8 +780,8 @@ def _adopted_sender(answer: httpx.Response | Exception) -> tuple[Any, list[httpx
             raise answer
         return answer
 
-    sender = DeclaredProjectionSender(
-        caller=SmartStoreEndpointCaller(transport=httpx.MockTransport(transport)),
+    sender = declared_projection_sender(
+        caller=declared_complete_caller(httpx.MockTransport(transport)),
         bearer=_Bearer,
         projection=_sendable,
     )

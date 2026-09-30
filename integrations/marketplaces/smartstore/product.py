@@ -444,6 +444,36 @@ def verified(document: object) -> CreateDocument:
     return document
 
 
+# The request parts the provider requires on registration, each with the named gap that stands while
+# it is absent from a document (packets 5861477977, 5861933729, 5862400626, 5868542027). They are
+# read from the document body itself, so completeness never depends on who built the document.
+_REQUIRED_ON_REGISTRATION: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
+    ((FIELD_CHANNEL_PRODUCT, FIELD_NAVER_SHOPPING_REGISTRATION), GAP_SHOPPING_REGISTRATION),
+    ((FIELD_CHANNEL_PRODUCT, FIELD_CHANNEL_DISPLAY_STATUS), GAP_CHANNEL_DISPLAY_STATUS),
+    ((FIELD_ORIGIN_PRODUCT, FIELD_STOCK_QUANTITY), GAP_REGISTRATION_STOCK_QUANTITY),
+    ((FIELD_ORIGIN_PRODUCT, FIELD_DETAIL_ATTRIBUTE, FIELD_NOTICE), GAP_NOTICE_TYPE_CHILD),
+)
+
+
+def completeness_gaps(document: CreateDocument) -> tuple[str, ...]:
+    """The provider-required registration parts a validated document does not carry.
+
+    Computed from the document body alone — never from a projection's or a caller's claim — so the
+    wire boundary can refuse an incomplete CREATE whoever built it. The adopted request schema
+    admits none of these parts at this adoption, so every document has gaps and no CREATE can
+    leave the machine; a later slice that gives them an ICBM owner is what can close them.
+    """
+    body = document.mapping()
+    gaps: list[str] = []
+    for path, gap in _REQUIRED_ON_REGISTRATION:
+        node: Any = body
+        for key in path:
+            node = node.get(key) if isinstance(node, Mapping) else None
+        if node is None:
+            gaps.append(gap)
+    return tuple(gaps)
+
+
 @dataclass(frozen=True)
 class WireProjection:
     """The adopted CREATE request of one frozen Snapshot, plus every gap that keeps it unsendable.
