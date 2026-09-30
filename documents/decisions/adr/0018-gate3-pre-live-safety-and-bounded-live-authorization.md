@@ -297,6 +297,20 @@ independently of any UI state and of any grant.
   resurrect an expired, revoked or exhausted grant**, and does not widen any grant.
 - **It survives restart.** A restart never releases it.
 
+> **Amendment note (protected operator surface; Issue #89 architect resolution `5915900049` D3).**
+> The first canary's protected actions are run through the existing `icbm live` command family,
+> never a new screen or route: `icbm live inspect` (the brake, every grant and its readiness, and
+> the canary readiness — read-only), `eligibility-packet` and `record-eligibility` (§5.1),
+> `issue-asset-grant` and `issue-create-grant` (§3.2), and `release-brake` / `engage-brake` (§4.1).
+> Each is an owning command that holds the data directory (ADR-0006) and calls exactly one
+> existing owner — `CanaryEligibilityService`, `LiveAuthorityService`, `LiveStatusService` or the
+> REGISTER canary readiness — and prints that owner's answer or refusal code. The commands own no
+> truth: no duplicate eligibility, grant or brake model exists, every value given is only an
+> expectation the owner checks, releasing still needs an authorization reference, and nothing here
+> changes the execution mode — the send-time stack still refuses every mutation under
+> `M0_DRY_RUN_ONLY`. Running one is itself a protected action and needs its own approval (rule
+> §7.2); this note grants none.
+
 #### 4.2 What the brake never does
 
 - It never deletes, edits or re-classifies an Intent, Attempt, read-back or evidence record.

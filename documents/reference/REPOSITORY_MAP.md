@@ -13,7 +13,7 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
 and migration `0031` (37 and 17). The authoring-revision owners slice added
 `app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite. The canary-eligibility owner slice added
-`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite.
+`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite. The protected operator commands (D3) added one integration suite.
 
 | path | files | role |
 | --- | --- | --- |
@@ -45,11 +45,11 @@ and migration `0031` (37 and 17). The authoring-revision owners slice added
 | `integrations/` | 37 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 19 |  |
-| `tests/` | 218 | tests |
+| `tests/` | 219 | tests |
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 28 | tests of the acceptance harnesses |
-| `tests/integration/` | 83 | integration tests by runtime owner |
+| `tests/integration/` | 84 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
 | `tests/unit/` | 76 | unit tests by runtime owner |
 | `ui/` | 44 |  |
