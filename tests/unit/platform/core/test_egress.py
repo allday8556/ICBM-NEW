@@ -75,25 +75,49 @@ print(json.dumps(results))
 
 # ---------------------------------------------------------------- test isolation of the one guard
 
-_SEEN: dict[str, int] = {}
 
-
-def test_a_blocked_attempt_is_counted_inside_the_test_that_made_it() -> None:
+def _attempt() -> None:
     from app.platform.core.egress import EGRESS
 
-    before = EGRESS.external_attempts
     with pytest.raises(EgressBlockedError):
         EGRESS._hook("socket.connect", (None, ("203.0.113.7", 443)))
-    # The production guard counts it, as always: nothing about the guard itself is relaxed.
-    assert EGRESS.external_attempts == before + 1
-    assert EGRESS.snapshot()["recent"][-1]["destination"] == "203.0.113.7"
-    _SEEN["before"] = before
 
 
-def test_the_next_test_starts_from_the_count_the_previous_one_found() -> None:
-    """The process-global guard never leaks one test's deliberate attempt into another test
-    (``tests/conftest.py::egress_count_is_per_test``). This runs right after the test above."""
+def test_a_deliberate_attempt_is_counted_inside_its_block_and_gone_after_it() -> None:
     from app.platform.core.egress import EGRESS
+    from tests.conftest import deliberate_egress_attempts
 
-    assert EGRESS.external_attempts == _SEEN["before"]
-    assert all(entry["destination"] != "203.0.113.7" for entry in EGRESS.snapshot()["recent"])
+    before = EGRESS.snapshot()
+    with deliberate_egress_attempts():
+        _attempt()
+        # Inside the block the production guard counts it, as always.
+        inside = EGRESS.snapshot()
+        assert inside["external_attempts"] == before["external_attempts"] + 1
+        assert inside["recent"][-1]["destination"] == "203.0.113.7"
+    assert EGRESS.snapshot() == before
+
+
+def test_the_restore_also_happens_when_the_test_body_fails() -> None:
+    from app.platform.core.egress import EGRESS
+    from tests.conftest import deliberate_egress_attempts
+
+    before = EGRESS.snapshot()
+    with pytest.raises(RuntimeError, match="the test failed"), deliberate_egress_attempts():
+        _attempt()
+        raise RuntimeError("the test failed")
+    assert EGRESS.snapshot() == before
+
+
+def test_an_attempt_outside_the_block_stays_counted() -> None:
+    """The isolation is opt-in: an attempt no test declared is never rewound, so a later
+    readiness check still exposes it. (This test declares its own to clean up after itself.)"""
+    from app.platform.core.egress import EGRESS
+    from tests.conftest import deliberate_egress_attempts
+
+    with deliberate_egress_attempts():
+        before = EGRESS.external_attempts
+        _attempt()
+        with deliberate_egress_attempts():
+            _attempt()
+        # The inner block rewound only its own attempt; the outer one is still counted.
+        assert EGRESS.external_attempts == before + 1

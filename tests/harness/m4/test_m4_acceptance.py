@@ -502,10 +502,11 @@ def _failing_run(
 
 
 def test_an_external_network_attempt_fails_the_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, deliberate_egress: None
 ) -> None:
     # Kickoff §C, §Q 35: an attempt is counted, and the provider counters become unknown rather
-    # than an invented zero.
+    # than an invented zero. The attempt is this test's own, made on purpose, so it is kept out
+    # of the process-global guard count later tests read (``deliberate_egress``).
     def act(_run: harness.Run) -> None:
         with contextlib.suppress(OSError):
             socket.create_connection(("203.0.113.7", 443), timeout=0.05)
