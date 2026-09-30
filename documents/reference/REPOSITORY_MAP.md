@@ -13,7 +13,7 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
 and migration `0031` (37 and 17). The authoring-revision owners slice added
 `app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite. The canary-eligibility owner slice added
-`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite.
+`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite. The protected operator commands (D3) added one integration suite.
 The Agent Host operating-authority correction (ADR-0022) added `documents/rules/14-operating-authority.md`,
 the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` and the fixture test under
 `tests/harness/agent_host/`. No file moved.
@@ -52,7 +52,7 @@ the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` 
 | `tests/contracts/` | 7 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 82 | integration tests by runtime owner |
+| `tests/integration/` | 84 | integration tests by runtime owner |
 | `tests/support/` | 12 | shared test support |
 | `tests/unit/` | 76 | unit tests by runtime owner |
 | `ui/` | 44 |  |

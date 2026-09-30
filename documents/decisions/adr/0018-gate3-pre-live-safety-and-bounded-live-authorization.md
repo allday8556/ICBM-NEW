@@ -130,6 +130,17 @@ proof (§7) and its own send-time readiness (§10). **A grant, proof or readines
 covers, widens into or automatically authorizes the other.** A unit that needs no provider asset has
 no ASSET stage; the CREATE stage is then the first mutation, and nothing of it is relaxed.
 
+> **Amendment note (one candidate for both stages; Issue #89 architect resolution `5915900049`
+> D4).** The candidate the ASSET stage binds — its candidate gate, its grant (§3.2) and its
+> eligibility review packet (§5.1) — is evaluated exactly as the CREATE path evaluates it: when
+> the target policy requires duplicate proof, with the same admissible evidence of the
+> provider-neutral duplicate-evidence owner seam that the final preflight and the first CREATE copy
+> consume (`RegistrationPreparationService.stage_candidate`). Both stages therefore derive the
+> same candidate fingerprint for the same canonical candidate. Missing evidence keeps the ASSET
+> stage fail-closed (`REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE`): no grant, no eligibility packet,
+> no upload. The fingerprint definition is unchanged, no second fingerprint exists, no duplicate
+> lookup endpoint is adopted, and the positive-only reconcile SEARCH is never duplicate evidence.
+
 #### 3.2 What a grant binds, and every field is exact
 
 **Every grant names one stage and one exact unit of that stage. No unit-less grant and no
@@ -285,6 +296,21 @@ independently of any UI state and of any grant.
 - **Releasing** requires a new explicit authorization and is audited. **Releasing the brake does not
   resurrect an expired, revoked or exhausted grant**, and does not widen any grant.
 - **It survives restart.** A restart never releases it.
+
+> **Amendment note (protected operator surface; Issue #89 architect resolution `5915900049` D3).**
+> The first canary's protected actions are run through the existing `icbm live` command family,
+> never a new screen or route: `icbm live inspect` (the brake, every grant and its readiness, and
+> the canary readiness — read-only), `eligibility-packet` and `record-eligibility` (§5.1),
+> `issue-asset-grant` and `issue-create-grant` (§3.2), and `release-brake` / `engage-brake` (§4.1).
+> Each is an owning command that holds the data directory (ADR-0006). Each protected action calls
+> exactly one existing owner method, of `CanaryEligibilityService` or `LiveAuthorityService`;
+> `inspect` writes nothing and reads the two existing read-only projections, `LiveStatusService`
+> and the REGISTER canary readiness. Each prints the owners' answer or refusal code. The commands own no
+> truth: no duplicate eligibility, grant or brake model exists, every value given is only an
+> expectation the owner checks, releasing still needs an authorization reference, and nothing here
+> changes the execution mode — the send-time stack still refuses every mutation under
+> `M0_DRY_RUN_ONLY`. Running one is itself a protected action and needs its own approval (rule
+> §7.2); this note grants none.
 
 #### 4.2 What the brake never does
 

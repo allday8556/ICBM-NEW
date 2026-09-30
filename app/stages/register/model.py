@@ -323,6 +323,11 @@ def uncovered_single_listing(open_items: Mapping[str, str], sent_items: Mapping[
     return dict(open_items) != dict(sent_items)
 
 
+# No admissible duplicate evidence can be read where the target policy requires it: the first
+# CREATE copy and every mutation-stage candidate refuse (Issue #89 resolution 5915900049 D4).
+DUPLICATE_EVIDENCE_UNAVAILABLE = "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"
+
+
 class RegistrationConflictError(AppError):
     """A registration write the contract forbids in the current state (ADR-0014 §8, §10)."""
 
