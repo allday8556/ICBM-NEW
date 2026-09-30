@@ -1356,7 +1356,7 @@ def test_the_live_owners_reach_no_provider() -> None:
             assert any(name == a or name.startswith(f"{a}.") for a in allowed), f"{path}: {name}"
 
 
-def test_the_container_wires_the_deny_by_default_stack_and_no_sender() -> None:
+def test_the_container_wires_the_deny_by_default_stack_and_a_sessionless_sender() -> None:
     """At this main the stack reads the M0 execution-mode owner and no proof exists; the CREATE
     owner is wired to that stack, and the ASSET path to the adopted sender with no committed
     session, which sends nothing."""

@@ -672,6 +672,14 @@ expected areas, none authorized by this ADR:
 > still unrecorded, and both stage readinesses and the canary stay **`BLOCKED`**. It weakens no
 > refusal: a lookup is positive evidence only, zero results never prove absence (G3-15), no
 > `UNKNOWN` is ever resent (G3-07), and the verdict stays `INSUFFICIENT`.
+>
+> **Amendment note (pre-canary prerequisite slices).** Two statements of the notes above are
+> superseded, and nothing else in them is: the canary-eligibility owner exists (§5.1), and the
+> ASSET sender is wired (§10). Neither is readiness. No eligibility record exists for any
+> lineage, and the sender is unavailable while no committed session exists, so the eligibility
+> layer and the sender layer both still refuse; `M0_DRY_RUN_ONLY`, the residual-risk acceptance
+> and every other requirement refuse as before, and both stage readinesses and the canary stay
+> **`BLOCKED`**.
 
 ### 13. What this ADR does not decide
 
