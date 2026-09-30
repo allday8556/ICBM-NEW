@@ -656,6 +656,8 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
     fields = notice.get("fields")
     if not isinstance(fields, Mapping) or not fields:
         raise WireContractError("WIRE_NOTICE_MISSING", "the notice carries no reviewed field")
+    if not all(isinstance(key, str) and key.strip() for key in fields):
+        raise WireContractError("WIRE_VALUE_NOT_TEXT", "a notice field name is not text")
     reviewed: dict[str, str] = {}
     for key, value in sorted(fields.items()):
         if not isinstance(value, Mapping):
@@ -663,7 +665,7 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
         if value.get("detail_page_reference"):
             # "미입력 시 상품상세 참조": the value is left out, never filled with a placeholder.
             continue
-        reviewed[str(key)] = _text(value, f"notice.{key}")
+        reviewed[key] = _text(value, f"notice.{key}")
     if not reviewed:
         raise WireContractError("WIRE_NOTICE_MISSING", "every notice field was left to the detail")
     return notice_type, reviewed
@@ -673,8 +675,17 @@ def _option_dimensions(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     """The option-name dimensions of a multi-Item listing: the same dimensions for every Item, at
     most the three an ordinary combination option allows. The Snapshot's option values are display
     values; the identity is the seller code."""
-    if not all(isinstance(item.get("options") or {}, Mapping) for item in items):
-        raise WireContractError("WIRE_PAYLOAD_MALFORMED", "an Item's options are not a mapping")
+    for item in items:
+        options = item.get("options") or {}
+        if not isinstance(options, Mapping):
+            raise WireContractError("WIRE_PAYLOAD_MALFORMED", "an Item's options are not a mapping")
+        for name, value in options.items():
+            # Option names and values are the operator's authored text, carried verbatim: a
+            # non-text or empty one is a broken Snapshot, never coerced into a display value.
+            if not isinstance(name, str) or not name.strip():
+                raise WireContractError("WIRE_VALUE_NOT_TEXT", "an option name is not text")
+            if not isinstance(value, str) or not value.strip():
+                raise WireContractError("WIRE_VALUE_NOT_TEXT", f"option {name} is not text")
     dimensions = {tuple(sorted(item.get("options") or {})) for item in items}
     if len(dimensions) != 1:
         raise WireContractError(
@@ -709,8 +720,7 @@ def _option_info(
     for item, code in zip(items, codes, strict=True):
         options = item.get("options") or {}
         row: dict[str, Any] = {
-            key: str(options[name])
-            for key, name in zip(_OPTION_NAME_KEYS, dimensions, strict=False)
+            key: options[name] for key, name in zip(_OPTION_NAME_KEYS, dimensions, strict=False)
         }
         row[FIELD_OPTION_SELLER_CODE] = code
         combinations.append(row)

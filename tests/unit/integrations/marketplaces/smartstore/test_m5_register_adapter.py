@@ -587,7 +587,40 @@ def _malformed_payloads() -> list[tuple[str, dict[str, Any]]]:
             else:
                 broken["items"][0][key] = value
             cases.append((f"items[0].{key}:{label}", broken))
+    # Nested values the projection reads: option names and values, notice field names and values.
+    for label, options in (
+        ("option-value-int", {"색상": 5}),
+        ("option-value-empty", {"색상": " "}),
+        ("option-value-mapping", {"색상": {"value": "빨강"}}),
+        ("option-name-int", {1: "빨강"}),
+    ):
+        items = deepcopy(option_items)
+        items[0]["options"] = options
+        cases.append((f"items[0].options:{label}", payload(items=items)))
+    for label, fields in (
+        ("notice-field-name-int", {1: {"value": "면", "provenance": "SOURCE_FACT"}}),
+        ("notice-field-value-int", {"material": {"value": 5, "provenance": "SOURCE_FACT"}}),
+        ("notice-field-text", {"material": "면"}),
+    ):
+        broken = deepcopy(base)
+        broken["notice"]["fields"] = fields
+        cases.append((f"notice.fields:{label}", broken))
     return cases
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"색상": 5}, {"색상": " "}, {"색상": {"value": "빨강"}}, {1: "빨강"}],
+    ids=["int", "blank", "mapping", "int-name"],
+)
+def test_a_non_text_option_is_refused_never_coerced(options: dict[Any, Any]) -> None:
+    # Option names and values are authored text carried verbatim; str() would turn a broken
+    # Snapshot into a plausible display value on the wire.
+    items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
+    items[0]["options"] = options
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(payload(items=items))
+    assert refused.value.code == "WIRE_VALUE_NOT_TEXT"
 
 
 @pytest.mark.parametrize(("case", "broken"), _malformed_payloads(), ids=lambda v: str(v)[:40])
