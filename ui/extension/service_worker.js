@@ -15,6 +15,8 @@ const SUPPLIERS = { "kmretail.co.kr": "kmretail" };
 const PAIRING_KEY = "pairing";
 const RUN_POLL_MS = 1000;
 const RUN_POLL_LIMIT = 60;
+// The one run state this extension knows by name: not settled yet.
+const PENDING = "PENDING";
 
 // The capture UX is the side panel, which exists from Chrome 114: the manifest's minimum. There is
 // no other surface, and the pairing is the only thing this extension stores.
@@ -47,11 +49,18 @@ async function activeSupplierTab() {
 
 // One capture, from the click to the canonical run's own outcome. `progress` is told each
 // transport state as it is reached; an outcome is only ever the one ICBM read back.
+//
+// Three things are kept apart, and what is not known is never shown as known:
+//   REFUSED / REFUSED_DISCONNECTED  nothing was accepted: ICBM answered a refusal, or nothing left.
+//   SENT_UNKNOWN                    the capture may have reached ICBM and no answer was read.
+//   PROCESSING / READ_BACK          ICBM accepted it; the run exists, settled or not.
 async function capture(progress) {
   const paired = await pairing();
   if (!paired) return { state: "REFUSED", code: "EXTENSION_NOT_PAIRED" };
   const target = await activeSupplierTab();
   if (!target) return { state: "REFUSED", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
+  let accepted;
+  let sending = false;
   try {
     // The policy first: a page is never read or cut without the reviewed policy in hand.
     const { policy, revision, digest } = await fetchPolicy(
@@ -70,31 +79,58 @@ async function capture(progress) {
       // Refused before anything was sent: nothing left the tab, and no run exists.
       return { state: "REFUSED", code: (cut && cut.code) || "CAPTURE_UNAVAILABLE" };
     }
-    const accepted = await sendCapture(paired, chrome.runtime.id, {
+    sending = true;
+    accepted = await sendCapture(paired, chrome.runtime.id, {
       supplierKey: target.supplierKey,
       revision,
       digest,
       capture: cut,
     });
-    progress("SENT");
-    progress("PROCESSING");
-    for (let attempt = 0; attempt < RUN_POLL_LIMIT; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, RUN_POLL_MS));
-      const run = await readRun(paired, accepted.collection_run_id);
-      if (run.outcome !== "PENDING") {
-        return {
-          state: "READ_BACK",
-          collection_run_id: run.collection_run_id,
-          outcome: run.outcome,
-          detail: run.detail,
-        };
-      }
-    }
-    return { state: "PROCESSING", collection_run_id: accepted.collection_run_id };
   } catch (error) {
     const code = error instanceof IcbmRefused ? error.code : "CAPTURE_UNAVAILABLE";
+    // A request that failed on the wire, or whose acceptance could not be read, may have been
+    // accepted: that is unknown, never "not saved".
+    if (sending && (code === "ICBM_DISCONNECTED" || code === "ICBM_ACCEPTED_UNREADABLE")) {
+      return { state: "SENT_UNKNOWN", code };
+    }
     return { state: code === "ICBM_DISCONNECTED" ? "REFUSED_DISCONNECTED" : "REFUSED", code };
   }
+  const runId = accepted && accepted.collection_run_id;
+  if (typeof runId !== "string" || !runId) {
+    return { state: "SENT_UNKNOWN", code: "ICBM_ACCEPTED_UNREADABLE" };
+  }
+  // From here the run exists. A failed read-back never turns it into a refusal.
+  progress("SENT", runId);
+  let code = null;
+  for (let attempt = 0; attempt < RUN_POLL_LIMIT; attempt += 1) {
+    // One message per poll: the panel learns the run, and the worker stays alive.
+    progress("PROCESSING", runId);
+    await new Promise((resolve) => setTimeout(resolve, RUN_POLL_MS));
+    let run;
+    try {
+      run = await readRun(paired, runId);
+    } catch (error) {
+      code = error instanceof IcbmRefused ? error.code : "RUN_READ_BACK_UNAVAILABLE";
+      continue;
+    }
+    if (!run || run.collection_run_id !== runId) {
+      code = "RUN_READ_BACK_UNREADABLE";
+      continue;
+    }
+    // An outcome is whatever word ICBM returned for this very run, and only a word. This extension
+    // names no outcome itself, so it can neither invent one nor restate one.
+    const settled = typeof run.outcome === "string" && run.outcome !== "" && run.outcome !== PENDING;
+    if (settled) {
+      return {
+        state: "READ_BACK",
+        collection_run_id: runId,
+        outcome: run.outcome,
+        detail: typeof run.detail === "string" ? run.detail : null,
+      };
+    }
+    code = run.outcome === PENDING ? null : "RUN_READ_BACK_UNREADABLE";
+  }
+  return { state: "PROCESSING", collection_run_id: runId, code };
 }
 
 // What the side panel shows of the connection. Only a `probe` asks ICBM: every signed request
@@ -123,8 +159,18 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "capture") return;
   port.onMessage.addListener(async (message) => {
     if (message.type !== "capture") return;
-    const result = await capture((state) => port.postMessage({ type: "progress", state }));
-    port.postMessage({ type: "result", result });
+    // The panel may be closed while the capture runs: a message to a closed port is dropped.
+    const tell = (message) => {
+      try {
+        port.postMessage(message);
+      } catch {
+        // The panel is gone. The capture still finishes; the run is in ICBM either way.
+      }
+    };
+    const result = await capture((state, runId) =>
+      tell({ type: "progress", state, collection_run_id: runId || null }),
+    );
+    tell({ type: "result", result });
   });
 });
 

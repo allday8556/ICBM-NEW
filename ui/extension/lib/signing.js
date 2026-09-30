@@ -72,20 +72,24 @@ export async function signedHeaders({ method, path, extensionId, pairing, body }
 export function parsePairingCode(code) {
   let document;
   try {
-    document = JSON.parse(new TextDecoder().decode(base64UrlBytes(code.trim())));
+    document = JSON.parse(new TextDecoder().decode(base64UrlBytes(String(code).trim())));
   } catch {
     return null;
   }
+  if (document === null || typeof document !== "object" || Array.isArray(document)) return null;
   const origin = typeof document.origin === "string" ? document.origin : "";
-  const loopback = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/.test(origin);
+  const port = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(origin);
   if (
     document.v !== 1 ||
-    !loopback ||
+    !port ||
+    Number(port[1]) > 65535 ||
     typeof document.pairing_id !== "string" ||
+    !document.pairing_id ||
     !Number.isInteger(document.generation) ||
     document.generation < 1 ||
     typeof document.secret !== "string" ||
-    document.secret.length < 40
+    // The secret is 32 random bytes, base64url without padding: exactly what the signer decodes.
+    !/^[A-Za-z0-9_-]{43}$/.test(document.secret)
   ) {
     return null;
   }

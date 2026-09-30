@@ -33,6 +33,8 @@ export function captureInPage(policy) {
   if (location.protocol !== "https:" || location.hostname !== policy.host) {
     return refuse("HOST_NOT_REVIEWED");
   }
+  // The server's target check refuses a port or a fragment; nothing is cut for a page it refuses.
+  if (location.port !== "" || location.hash !== "") return refuse("TARGET_NOT_PLAIN_PRODUCT_URL");
 
   // ---- 2. scope ---------------------------------------------------------------------------
   const VOID = new Set([
@@ -43,7 +45,7 @@ export function captureInPage(policy) {
   const allowed = policy.allowed_attributes;
   const everywhere = new Set(allowed["*"] || []);
   const keeps = (tag, name) =>
-    everywhere.has(name) || (allowed[tag] !== undefined && allowed[tag].includes(name));
+    everywhere.has(name) || (Object.hasOwn(allowed, tag) && allowed[tag].includes(name));
   const carries = (element, region) =>
     region.by === "id" ? element.id === region.token : element.classList.contains(region.token);
   const matching = (region) =>
@@ -64,6 +66,14 @@ export function captureInPage(policy) {
   // Document order, and no region twice: a region inside another kept region is already cut.
   scope.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
   const outer = scope.filter((region) => !scope.some((other) => other !== region && other.contains(region)));
+  // A kept region that is an excluded region, or sits inside one, is not product scope at all.
+  const excludedAbove = (node) => {
+    for (let at = node; at && at.nodeType === Node.ELEMENT_NODE; at = at.parentElement) {
+      if (policy.excluded_regions.some((region) => carries(at, region))) return true;
+    }
+    return false;
+  };
+  if (outer.some(excludedAbove)) return refuse("SCOPE_INSIDE_EXCLUDED_REGION");
 
   // ---- 3. the cut -------------------------------------------------------------------------
   const bounds = policy.bounds;
@@ -107,15 +117,18 @@ export function captureInPage(policy) {
   };
 
   let head = "";
-  for (const rule of policy.head_allowance) {
-    for (const candidate of Array.from(document.head.children)) {
-      if (candidate.localName !== rule.tag) continue;
+  // In document order, and each element once, even when two rules name it.
+  for (const candidate of Array.from(document.head.children)) {
+    const named = policy.head_allowance.some((rule) => {
+      if (candidate.localName !== rule.tag) return false;
       const stated = (candidate.getAttribute(rule.attribute) || "").toLowerCase().split(/\s+/);
-      if (stated.includes(rule.value.toLowerCase())) head += element(candidate, true);
-    }
+      return stated.includes(rule.value.toLowerCase());
+    });
+    if (named) head += element(candidate, true);
   }
   let body = "";
   for (const region of outer) body += element(region, false);
+  if (!over && body === "") return refuse("PRODUCT_SCOPE_EMPTY");
   if (over) return refuse(over);
   if (imageRefs > bounds.max_image_refs) return refuse("CEILING_IMAGE_REFS");
 

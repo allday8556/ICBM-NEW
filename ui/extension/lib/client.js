@@ -78,7 +78,12 @@ export async function sendCapture(pairing, extensionId, { supplierKey, revision,
   });
   const response = await request(pairing, extensionId, { method: "POST", path: CAPTURE_PATH, body });
   if (response.status !== 202) throw await refusal(response);
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    // Accepted, and the answer could not be read: the run exists and its identity is unknown.
+    throw new IcbmRefused("ICBM_ACCEPTED_UNREADABLE");
+  }
 }
 
 // The canonical run, exactly as ICBM holds it.
@@ -94,5 +99,9 @@ export async function readRun(pairing, runId) {
     throw new IcbmRefused("ICBM_DISCONNECTED");
   }
   if (!response.ok) throw await refusal(response);
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new IcbmRefused("RUN_READ_BACK_UNREADABLE");
+  }
 }

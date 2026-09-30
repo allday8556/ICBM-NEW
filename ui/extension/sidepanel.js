@@ -11,12 +11,17 @@ const TRANSPORT_LABELS = {
   SENT: "전송됨",
   PROCESSING: "처리 중",
   READ_BACK: "ICBM에 전달됨",
+  SENT_UNKNOWN: "전송 결과 확인 불가 · ICBM 수집관리에서 확인",
   REFUSED: "수집하지 않음",
   REFUSED_DISCONNECTED: "ICBM 연결 안 됨 · 저장하지 않음",
 };
 
 const role = (name) => document.querySelector(`[data-role="${name}"]`);
 const action = (name) => document.querySelector(`[data-action="${name}"]`);
+
+// The one capture this panel is waiting for, or null. While it is set the capture button stays
+// disabled whatever the tabs do, and a message from any other port is ignored.
+let inFlight = null;
 
 function showTransport(state) {
   role("transport-state").textContent = TRANSPORT_LABELS[state] || state;
@@ -50,17 +55,23 @@ async function refresh(probe = false) {
             ? "확인 전"
             : `거부됨 · ${status.icbm}`;
   }
-  action("capture").disabled = !(status.paired && status.supplier_key);
+  action("capture").disabled = Boolean(inFlight) || !(status.paired && status.supplier_key);
   action("check").disabled = !(status.paired && status.supplier_key);
 }
 
 role("pairing-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const field = document.getElementById("pairing-code");
-  const answer = await chrome.runtime.sendMessage({ type: "pair", code: field.value });
-  // The code is a secret: it is cleared from the field whether or not it was accepted.
-  field.value = "";
-  if (!answer.ok) role("pairing-state").textContent = "페어링 코드가 올바르지 않음";
+  let answer = null;
+  try {
+    answer = await chrome.runtime.sendMessage({ type: "pair", code: field.value });
+  } catch {
+    answer = null;
+  } finally {
+    // The code is a secret: it is cleared from the field whatever happened to it.
+    field.value = "";
+  }
+  if (!answer || !answer.ok) role("pairing-state").textContent = "페어링 코드가 올바르지 않음";
   else await refresh(true);
 });
 
@@ -72,17 +83,43 @@ action("unpair").addEventListener("click", async () => {
 });
 
 action("capture").addEventListener("click", () => {
+  if (inFlight) return;
   const button = action("capture");
   button.disabled = true;
   showResult({ state: "IDLE" });
   const port = chrome.runtime.connect({ name: "capture" });
+  const flight = { port, runId: null };
+  inFlight = flight;
+  const finish = () => {
+    if (inFlight !== flight) return false;
+    inFlight = null;
+    refresh();
+    return true;
+  };
   port.onMessage.addListener((message) => {
-    if (message.type === "progress") showTransport(message.state);
+    if (inFlight !== flight) return;
+    if (message.type === "progress") {
+      if (message.collection_run_id) {
+        flight.runId = message.collection_run_id;
+        role("run-id").textContent = flight.runId;
+      }
+      showTransport(message.state);
+    }
     if (message.type === "result") {
       showResult(message.result);
+      finish();
       port.disconnect();
-      button.disabled = false;
     }
+  });
+  // The worker ended before it answered. Whatever was accepted is in ICBM; nothing is claimed
+  // about it here beyond the run this panel was already told of.
+  port.onDisconnect.addListener(() => {
+    if (!finish()) return;
+    showResult(
+      flight.runId
+        ? { state: "PROCESSING", collection_run_id: flight.runId, code: "EXTENSION_WORKER_ENDED" }
+        : { state: "SENT_UNKNOWN", code: "EXTENSION_WORKER_ENDED" },
+    );
   });
   port.postMessage({ type: "capture" });
 });
