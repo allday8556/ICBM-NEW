@@ -28,8 +28,11 @@ limits and defaults. Two rules bound every projection:
 * a value the official evidence does not carry — an enumeration, a value type, a notice type
   child — is **never invented**, and neither is a value whose type the evidence does carry but
   which no ICBM owner decides. It is recorded as a named *gap*, the projection is not
-  ``sendable``, and the execution owner refuses with ``REGISTER_WIRE_NOT_SENDABLE`` before any
-  transport exists.
+  ``sendable``. The REGISTER execution owner refuses such a projection with
+  ``REGISTER_WIRE_NOT_SENDABLE`` before it opens an Attempt, and the SmartStore CREATE sender —
+  which re-projects the Snapshot itself — refuses it again with its own adapter-level code
+  ``SMARTSTORE_CREATE_WIRE_NOT_SENDABLE``; neither lets a transport exist. The two codes name the
+  same condition at two layers, each owned by its layer.
 
 Both rules would be worth little if an arbitrary mapping could still be handed to the wire, so the
 request is checked as a whole and then frozen: :func:`create_document` refuses any path the

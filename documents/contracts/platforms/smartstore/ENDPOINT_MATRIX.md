@@ -244,7 +244,9 @@ Snapshot's listing identity, and the sender refuses, before any transport, a doc
 identity is not the executing Intent's (`SMARTSTORE_CREATE_IDENTITY_MISMATCH`, `NOT_APPLIED_PROVEN`
 as a local pre-handoff refusal). Every value the official evidence does
 not carry, or that no ICBM owner decides, stays **fail-closed** as a named gap, so the request is
-not sendable and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`: the ICBM-owned value source of
+not sendable — the REGISTER execution owner refuses with `REGISTER_WIRE_NOT_SENDABLE` before it
+opens an Attempt, and the SmartStore sender, re-projecting the Snapshot itself, refuses again with
+its adapter-level `SMARTSTORE_CREATE_WIRE_NOT_SENDABLE` — for: the ICBM-owned value source of
 the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision
 behind `channelProductDisplayStatusType`; the registration `originProduct.stockQuantity` (required,
 at least 1, but owned by no Snapshot — never the option default 0 and never an invented 1); the
