@@ -146,7 +146,7 @@ def _read(body: dict[str, Any]) -> Any:
 
 
 def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-search-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-published-state-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
     # The CREATE adoption slice adds the second adopted mutation and no third. Adoption is never
     # LIVE authority: execution stays DRY_RUN and the send-time stack refuses every mutation.
@@ -314,8 +314,8 @@ def test_the_comparison_evidence_is_sanitized_and_versioned(
     comparison = readback.compare(payload, _read(_readback_body(payload, images=[{"url": signed}])))
     evidence = json.dumps(comparison.canonical(), ensure_ascii=False)
     assert signed not in evidence and "X-Signature" not in evidence
-    assert comparison.comparison_contract_version == "smartstore-readback-comparison/v1"
-    assert comparison.normalizer_version == "smartstore-readback-normalizer/v1"
+    assert comparison.comparison_contract_version == "smartstore-readback-comparison/v2"
+    assert comparison.normalizer_version == "smartstore-readback-normalizer/v2"
     assert "IMAGE_REFERENCE_UNSAFE" in comparison.reasons
 
 

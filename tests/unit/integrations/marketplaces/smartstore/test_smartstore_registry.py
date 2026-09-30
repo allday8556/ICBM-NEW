@@ -237,9 +237,20 @@ def test_the_adopted_read_backs_carry_exactly_the_packet_contract(
     assert contract.path_params == frozenset({placeholder})
     # Deny-by-default: neither read-back may send any query key at all.
     assert contract.safe_query_keys == frozenset()
-    # Only leaves the packet proves may be retained from a read-back.
+    # Only leaves the evidence proves may be retained from a read-back. The origin read also
+    # keeps the two published-state leaves its documented 200 response carries (Issue #89
+    # 5911962320); the channel read response is not captured, so it keeps none of them.
+    packet = {
+        "name",
+        "salePrice",
+        "stockQuantity",
+        "sellerManagementCode",
+        "sellerManagerCode",
+        "url",
+    }
+    published = {"statusType", "channelProductDisplayStatusType"}
     assert contract.retained_response_fields == frozenset(
-        {"name", "salePrice", "stockQuantity", "sellerManagementCode", "sellerManagerCode", "url"}
+        packet | published if endpoint is ORIGIN_READ else packet
     )
 
 
@@ -345,7 +356,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-search-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-published-state-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -354,6 +365,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-create-r1",
         "m5-create-r2",
         "m5-search-r1",
+        "m5-published-state-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

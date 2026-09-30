@@ -15,6 +15,20 @@ unit is an object carrying ``sellerManagerCode`` — and if the required leaves 
 returns ``UNREADABLE`` instead of guessing a shape. A 2xx read that cannot be normalized is never
 a confirmation.
 
+**The published state is read at its documented paths, not recognized.** The origin-product read
+documents its 200 response envelope (Commerce API 2.90.0; Issue #89 ``5911962320``): the sale
+status is ``originProduct.statusType`` and the SmartStore display status is
+``smartstoreChannelProduct.channelProductDisplayStatusType``. Both are read there and nowhere else
+— a ``windowChannelProduct`` display status or a status nested elsewhere is never taken for them —
+and a value outside the documented enumerations is unreadable.
+
+**A published state is proven only against an explicit expectation** (ADR-0014 §11). The sale
+status ICBM registers is ``SALE``, the only CREATE input. Which display status ICBM registers —
+``ON`` or ``SUSPENSION`` — has no owner yet: it is one of the unowned CREATE request members. So
+the comparison reads both, refuses a sale status that is not the expected one, and states a
+``published_state`` only when both halves are expected and equal. Until the display status has an
+owner it states none, and the execution owner refuses with ``REGISTER_PUBLISHED_STATE_UNPROVEN``.
+
 Only retained, sanitized values reach this module (``retention.py``), so nothing it returns can
 carry credential, session or signed material into a durable comparison digest.
 """
@@ -26,17 +40,38 @@ from typing import Any, Final
 
 from app.stages.register.sanitize import safe_provider_reference
 from integrations.marketplaces.smartstore.product import (
+    CREATE_STATUS_TYPE,
+    FIELD_CHANNEL_DISPLAY_STATUS,
+    FIELD_CHANNEL_PRODUCT,
     FIELD_NAME,
     FIELD_OPTION_SELLER_CODE,
+    FIELD_ORIGIN_PRODUCT,
     FIELD_SALE_PRICE,
     FIELD_SELLER_MANAGEMENT_CODE,
+    FIELD_STATUS_TYPE,
     MAX_SALE_PRICE,
     MAX_STOCK_QUANTITY,
     seller_codes,
 )
 
-NORMALIZER_VERSION: Final = "smartstore-readback-normalizer/v1"
-COMPARISON_CONTRACT_VERSION: Final = "smartstore-readback-comparison/v1"
+NORMALIZER_VERSION: Final = "smartstore-readback-normalizer/v2"
+COMPARISON_CONTRACT_VERSION: Final = "smartstore-readback-comparison/v2"
+
+# The documented enumerations of the two published-state members (Issue #89 5911962320).
+SALE_STATUSES: Final = frozenset(
+    {
+        "WAIT",
+        "SALE",
+        "OUTOFSTOCK",
+        "UNADMISSION",
+        "REJECTION",
+        "SUSPENSION",
+        "CLOSE",
+        "PROHIBITION",
+        "DELETE",
+    }
+)
+DISPLAY_STATUSES: Final = frozenset({"WAIT", "ON", "SUSPENSION"})
 
 _URL_FIELD: Final = "url"
 _STOCK_FIELD: Final = "stockQuantity"
@@ -61,9 +96,13 @@ class NormalizedListing:
     option_codes: tuple[str, ...]
     image_references: tuple[str, ...]
     unsafe_image_references: int
+    # The two halves of the published state, each read at its documented path, or ``None``.
+    sale_status: str | None = None
+    display_status: str | None = None
 
     def canonical(self) -> dict[str, Any]:
-        """The durable, sanitized representation a comparison digest is taken over."""
+        """The durable, sanitized representation a comparison digest is taken over. It carries
+        what was read; ``published_state`` is added by the comparison, only when it is proven."""
         return {
             "normalizer_version": self.normalizer_version,
             "seller_management_code": self.seller_management_code,
@@ -73,6 +112,8 @@ class NormalizedListing:
             "option_codes": list(self.option_codes),
             "image_references": list(self.image_references),
             "unsafe_image_references": self.unsafe_image_references,
+            "sale_status": self.sale_status,
+            "display_status": self.display_status,
         }
 
     @property
@@ -128,6 +169,13 @@ def _first(nodes: Sequence[Mapping[str, Any]], key: str, kind: type) -> Any | No
     return None
 
 
+def _at(retained: Mapping[str, Any], container: str, leaf: str, allowed: frozenset[str]) -> Any:
+    """The documented enumeration value at exactly ``container.leaf``, or ``None``."""
+    node = retained.get(container)
+    value = node.get(leaf) if isinstance(node, Mapping) else None
+    return value if isinstance(value, str) and value in allowed else None
+
+
 def normalize(retained: Mapping[str, Any]) -> NormalizedListing:
     """Recognize one provider listing in a retained read-back response."""
     nodes = _walk(retained)
@@ -162,7 +210,52 @@ def normalize(retained: Mapping[str, Any]) -> NormalizedListing:
         option_codes=tuple(codes),
         image_references=tuple(references),
         unsafe_image_references=unsafe,
+        sale_status=_at(retained, FIELD_ORIGIN_PRODUCT, FIELD_STATUS_TYPE, SALE_STATUSES),
+        display_status=_at(
+            retained, FIELD_CHANNEL_PRODUCT, FIELD_CHANNEL_DISPLAY_STATUS, DISPLAY_STATUSES
+        ),
     )
+
+
+@dataclass(frozen=True)
+class ExpectedPublishedState:
+    """The published state a Snapshot explicitly expects (ADR-0014 §11). A half that no owner
+    states is ``None``: it is never assumed."""
+
+    sale_status: str | None
+    display_status: str | None
+
+    @property
+    def complete(self) -> bool:
+        return self.sale_status is not None and self.display_status is not None
+
+
+def expected_published_state(snapshot_payload: Mapping[str, Any]) -> ExpectedPublishedState:
+    """What this Snapshot expects the listing's published state to be.
+
+    The sale status is the one ICBM registers with: ``SALE``, the only CREATE input. The display
+    status has no owner — no Snapshot value, policy or ruling says whether a unit is registered
+    ``ON`` or ``SUSPENSION`` (``product.GAP_CHANNEL_DISPLAY_STATUS``) — so none is expected, and
+    no published state can be proven until one is.
+    """
+    return ExpectedPublishedState(sale_status=CREATE_STATUS_TYPE, display_status=None)
+
+
+def published_state(listing: NormalizedListing, expected: ExpectedPublishedState) -> str | None:
+    """The proven published state, ``<sale status>/<display status>``, or ``None``.
+
+    It exists only when both halves were read at their documented paths, both are explicitly
+    expected, and each equals its expectation.
+    """
+    if (
+        not expected.complete
+        or listing.sale_status is None
+        or listing.display_status is None
+        or (listing.sale_status, listing.display_status)
+        != (expected.sale_status, expected.display_status)
+    ):
+        return None
+    return f"{listing.sale_status}/{listing.display_status}"
 
 
 def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) -> Comparison:
@@ -200,6 +293,23 @@ def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) ->
     if listing.unsafe_image_references:
         # Proof that cannot survive sanitation is not proof (ADR-0014 §15).
         reasons.append("IMAGE_REFERENCE_UNSAFE")
+    # §11 "published state: EXACT against the explicitly expected state". A half that was read and
+    # differs from its explicit expectation is a mismatch of the listing. A half that was not read,
+    # or that nothing expects, is not a mismatch: no published state is stated, and the execution
+    # owner refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
+    state = expected_published_state(snapshot_payload)
+    if (
+        state.sale_status is not None
+        and listing.sale_status is not None
+        and listing.sale_status != state.sale_status
+    ):
+        reasons.append("SALE_STATUS_MISMATCH")
+    if (
+        state.display_status is not None
+        and listing.display_status is not None
+        and listing.display_status != state.display_status
+    ):
+        reasons.append("DISPLAY_STATUS_MISMATCH")
     missing: tuple[str, ...] = ()
     unexpected: tuple[str, ...] = ()
     if len(expected.option_codes) > 1 or listing.option_codes:
@@ -211,6 +321,10 @@ def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) ->
         if unexpected:
             reasons.append("OPTION_UNITS_UNEXPECTED")
     verdict = ReadbackVerdict.MISMATCH if reasons else ReadbackVerdict.MATCH
+    normalized = listing.canonical()
+    proven = published_state(listing, state)
+    if verdict is ReadbackVerdict.MATCH and proven is not None:
+        normalized["published_state"] = proven
     return Comparison(
         COMPARISON_CONTRACT_VERSION,
         NORMALIZER_VERSION,
@@ -218,17 +332,26 @@ def compare(snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) ->
         reasons=tuple(sorted(reasons)),
         missing_option_codes=missing,
         unexpected_option_codes=unexpected,
-        normalized=listing.canonical(),
+        normalized=normalized,
     )
 
 
-def proves_published_state() -> bool:
-    """Whether this normalizer's canonical form can carry a published state (ADR-0014 §11).
+def reads_published_state() -> bool:
+    """Whether the adopted origin read can carry both halves of a published state: yes — they are
+    retained and read at their documented paths."""
+    return True
 
-    It cannot: :meth:`NormalizedListing.canonical` has a fixed key set, and no leaf of the adopted
-    origin-product read contract proves whether the listing is actually on sale. The execution
-    owner therefore refuses to confirm (``REGISTER_PUBLISHED_STATE_UNPROVEN``) rather than invent
-    the field, and the canary readiness names it as a proof that is still missing. This becomes
-    ``True`` only through an adoption slice that proves the field, never by declaring it.
+
+def proves_published_state() -> bool:
+    """Whether a read-back comparison can prove a published state at all (ADR-0014 §11).
+
+    Proving needs two things: reading the state, and an explicit expectation to compare it with.
+    The adopted origin read supplies the first (:func:`reads_published_state`). The second is
+    incomplete: the sale status ICBM registers is known (``SALE``), but no owner states the
+    display status a unit is registered with, so :func:`expected_published_state` expects none and
+    :func:`published_state` can never be stated. The execution owner therefore still refuses to
+    confirm (``REGISTER_PUBLISHED_STATE_UNPROVEN``), and the canary readiness still names the
+    proof as missing. This becomes ``True`` only when that expectation has an owner, never by
+    declaring it.
     """
-    return False
+    return expected_published_state({}).complete

@@ -352,6 +352,28 @@ CREATE authorization, are `ENDPOINT_MATRIX.md` §4.1.2 and ADR-0014 §28.2–§2
 
 ---
 
+### 5.4 M5 origin-read status evidence (`2.90.0`)
+
+This is the single ledger entry for the source of the two published-state members the origin
+read-back retains.
+
+| Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-READ-STATUS-290` | Issue #89 comment 5911962320 (research packet of the 2.90.0 `(v2) 원상품 조회` reference, https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product, read 2026-09-30) | the 200 response's top-level members (`groupProduct`, `originProduct`, `windowChannelProduct`, `smartstoreChannelProduct`); `originProduct.statusType` (string; `WAIT`, `SALE`, `OUTOFSTOCK`, `UNADMISSION`, `REJECTION`, `SUSPENSION`, `CLOSE`, `PROHIBITION`, `DELETE`); `smartstoreChannelProduct.channelProductDisplayStatusType` (string; `WAIT` 전시 대기, `ON` 전시 중, `SUSPENSION` 전시 중지) | `documents/evidence/marketplace-apis/PRODUCT_READ.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.1; `integrations/marketplaces/smartstore/readback.py` | any change of the origin-read response schema or of either enumeration |
+
+**How it was read, and what that limits.** The official reference is not reachable from the
+implementing environment, so the page was read through GPT (`codex`, web access) and the result is
+recorded verbatim in the locator comment. It is a reading of `P0` documentation, not an architect
+resolution and not runtime evidence: it has not been reviewed by a second reader, and nothing here
+is `R0`. It agrees with the enumerations already recorded for the same two structures by §5.2's
+packets. The channel-product read response was not accessible to that reader and nothing about it
+is recorded. The reference states no read-after-write consistency and does not state that `SALE`
+with `ON` guarantees a buyer can see and purchase the listing.
+
+This evidence adopts nothing and authorizes no call.
+
+---
+
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.
