@@ -296,7 +296,7 @@ function global:Fx-Record {
     return $body
 }
 
-$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``100009101``.`nNot a citation (no code span): CI run 36699770595.`n"
+$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``review:100009101``.`nNot a citation (no code span): CI run 36699770595.`n"
 
 if ($Scenario -like "packet-*") {
     Fx-C 100009001 "  [ARCHITECT-INSTRUCTION]  `r`n`r`nArchitect: keep the contract rule; clarify wording only.`r`n"
@@ -322,6 +322,8 @@ if ($Scenario -like "packet-*") {
     if ($Scenario -eq "packet-unclassified") { Fx-C 100009005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009005 }
     # the declaration cites a source no scanned stream holds: declared evidence is missing, so nothing is audited or merged
     if ($Scenario -eq "packet-source-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also relies on ``100009998``.`n" }
+    # the declaration cites a CONVERSATION COMMENT by an id only a REVIEW carries: the review never stands in for it
+    if ($Scenario -eq "packet-citation-kind") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also the comment ``100009101``.`n" }
     if ($Scenario -eq "packet-stream-page-fail") { $global:FxStreamFail["issue:89"] = "page" }
     if ($Scenario -eq "packet-stream-perm") { $global:FxStreamFail["reviews:1"] = "perm" }
     if ($Scenario -eq "packet-stream-truncated") { $global:FxStreamFail["issue:1"] = "truncate" }
@@ -936,7 +938,7 @@ try {
         $global:FxStreams["issue:89"] = $kept
         # f) the declaration cites evidence of an issue it does not name → that stream is not scanned, the citation
         #    is unresolved and holds; naming the issue is what makes it readable
-        $global:FxIssueBodies["1"] = "fixture PR body`n`nSources: ``100009001``, ``100009002``, ``100009101``.`n"
+        $global:FxIssueBodies["1"] = "fixture PR body`n`nSources: ``100009001``, ``100009002``, ``review:100009101``.`n"
         $rf = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
         $global:FxChecks.f_streams_without_issue_reference = (@($rf | Where-Object { $_ -match 'SCANNED_STREAM' } | ForEach-Object { ([regex]::Match($_, 'SCANNED_STREAM\s*:\s*(\S+)')).Groups[1].Value }) -join ',')
         $global:FxChecks.f_unnamed_issue_citation_holds = Fx-Reason $rf
@@ -1038,8 +1040,8 @@ try {
         $global:FxChecks.guard_allowed_sent = (@($allowedOk | Where-Object { $_ -notmatch 'refused:False/requests_sent:1$' }).Count -eq 0)
         $global:FxChecks.local_draft_written = (Test-Path $draft) -and ([System.IO.File]::ReadAllText($draft).Contains("[OWNER-AMENDMENT]"))
         # hold taxonomy (§5.1): the class comes from the category, and only the closed list is the user's
-        $human = @("GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE", "CLAUDE_HUMAN_DECISION_REQUIRED_COST", "NEXT_HOLD_NEW_PRODUCT_FEATURE", "NEXT_HOLD_PRODUCT_DIRECTION_UNDECIDED", "NEXT_HOLD_BEYOND_USER_REQUIREMENT", "NEXT_HOLD_LIVE", "NEXT_HOLD_PROVIDER_CALL", "NEXT_HOLD_CANARY", "NEXT_HOLD_REAL_EXTERNAL_READ", "NEXT_HOLD_RESIDUAL_RISK_APPROVAL", "NEXT_HOLD_COST", "NEXT_HOLD_EXTERNAL_DATA_TRANSFER", "NEXT_HOLD_DESTRUCTIVE", "PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_LIVE")
-        $technical = @("GPT_HUMAN_DECISION_REQUIRED", "HUMAN_DECISION_REQUIRED", "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY", "REPAIR_FIXER_DECLINED_WITHOUT_A_HUMAN_CATEGORY", "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998", "AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "")
+        $human = @("GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE", "CLAUDE_HUMAN_DECISION_REQUIRED_COST", "NEXT_HOLD_NEW_PRODUCT_FEATURE", "NEXT_HOLD_PRODUCT_DIRECTION_UNDECIDED", "NEXT_HOLD_BEYOND_USER_REQUIREMENT", "NEXT_HOLD_LIVE", "NEXT_HOLD_PROVIDER_CALL", "NEXT_HOLD_CANARY", "NEXT_HOLD_REAL_EXTERNAL_READ", "NEXT_HOLD_RESIDUAL_RISK_APPROVAL", "NEXT_HOLD_COST", "NEXT_HOLD_EXTERNAL_DATA_TRANSFER", "NEXT_HOLD_DESTRUCTIVE", "PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_LIVE", "REPAIR_IMPLEMENTER_HUMAN_DECISION_REQUIRED_DESTRUCTIVE", "LIVE", "OWNER_HOLD")
+        $technical = @("GPT_HUMAN_DECISION_REQUIRED", "HUMAN_DECISION_REQUIRED", "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY", "REPAIR_FIXER_DECLINED_WITHOUT_A_HUMAN_CATEGORY", "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998", "AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "NO_LIVE_ACTION", "NEXT_HOLD_NOT_LIVE", "NEXT_HOLD_NO_PROVIDER_CALL", "LIVE_CHECK_FAILED", "COST_ESTIMATE_UNREADABLE", "AUDIT_BLOCKED_STREAM_UNREADABLE:LIVE", "GPT_HUMAN_DECISION_REQUIRED_LIVE_MAYBE", "next_hold_live", "PR_ON_OWNER_HOLD_CLEARED", "X PR_ON_OWNER_HOLD", "LIVE ", "")
         $global:FxChecks.taxonomy_human_all = (@($human | Where-Object { (Get-HoldClass $_) -ne "HUMAN_DECISION_REQUIRED" }) -join ',')
         $global:FxChecks.taxonomy_technical_all = (@($technical | Where-Object { (Get-HoldClass $_) -ne "TECHNICAL_HOLD" }) -join ',')
         # citation grammar: "Issue #n" names a stream; a citation is a 9-12 digit id INSIDE a code span. A bare id, a CI
@@ -1047,12 +1049,16 @@ try {
         $refs = Get-EvidenceReferences "Authority (Issue #126, Issue #89): ``5906290729``, ``5907009512`` and bare 5909188774. PR #160, issue #7 lower-case, run 36699770595, ``36699770595x``, ``12345678``, ``1234567890123``, ``bb9906ccd61c``, ````5906712259````."
         $global:FxChecks.citation_issues = $refs.Issues -join ','
         $global:FxChecks.citation_ids = $refs.Ids -join ','
+        # a citation names its kind; the key a source must match is "<kind>:<id>", never the id alone
+        $typed = Get-EvidenceReferences "``100009001``, ``review:100009101``, ``review-comment:100009201``, ``Review:100009102``, ``review:12345678``, ``comment:100009003``, review:100009104 bare."
+        $global:FxChecks.citation_keys = $typed.Keys -join ','
         $global:FxChecks.category_at_start = (@("NEW_PRODUCT_FEATURE: x", "[LIVE] y", "COST", "  PROVIDER_CALL - z") | ForEach-Object { Get-HumanDecisionCategory $_ }) -join ','
         $global:FxChecks.category_absent = (@("the diff needs a decision", "maybe LIVE later", "OWNER_HOLD: not an auditor's", "new_product_feature: lower", "") | ForEach-Object { "[$(Get-HumanDecisionCategory $_)]" }) -join ''
         $expected = [ordered]@{
             grammar_positive_all_marked = $true; grammar_negative_all_unmarked = $true; guard_all_refused_zero_requests = $true
             guard_allowed_sent = $true; local_draft_written = $true; taxonomy_human_all = ""; taxonomy_technical_all = ""
             citation_issues = "89,126"; citation_ids = "5906290729,5907009512"
+            citation_keys = "github_issue_comment:100009001,github_pr_review:100009101,github_pr_review_comment:100009201"
             category_at_start = "NEW_PRODUCT_FEATURE,LIVE,COST,PROVIDER_CALL"; category_absent = "[][][][][]"
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
@@ -1258,6 +1264,7 @@ $orchestratorExpect = @{
     "packet-evwrong"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-evidence-idonly"  = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
     "packet-source-missing"   = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-citation-kind"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009101"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-guard-digest"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
     "packet-stream-perm"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:pr_reviews:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
     "packet-stream-truncated" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_TRUNCATED:issue_comments:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }

@@ -404,9 +404,14 @@ def test_the_host_stops_for_the_user_only_on_the_closed_category_list() -> None:
     protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
     for category in HUMAN_DECISION_CATEGORIES[:-1]:
         assert f"`{category}`" in protocol, category
-    # the class word alone decides nothing: only a category of the list makes a stop the user's
-    assert '.Replace("HUMAN_DECISION_REQUIRED", "")' in authority
+    # the class word alone decides nothing, and neither does a category word inside another reason:
+    # only a whole reason in a form the Host composes makes a stop the user's
+    assert (
+        "'^(?:NEXT_HOLD_|[A-Z][A-Z_]*_HUMAN_DECISION_REQUIRED_)?([A-Z_]+)$'" in authority
+        and "$m.Groups[1].Value -cin $script:HumanDecisionCategories" in authority
+    )
     assert '$r.Contains("HUMAN_DECISION_REQUIRED")' not in authority
+    assert '"(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)"' not in authority
     audit = _host_script("run-audit-v1.1.ps1")
     assert "-not (Get-HumanDecisionCategory $r.Summary)" in audit
     assert "HUMAN_DECISION_WITHOUT_CATEGORY" in audit
@@ -441,7 +446,13 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
         assert gone not in audit, gone
     assert "Get-EvidenceReferences $declarationText" in audit
     # declared evidence never silently disappears: a citation nothing holds is a technical hold
-    assert 'Add-PacketHold "CITED_SOURCE_UNRESOLVED:$id"' in audit
+    assert 'Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label"' in audit
+    # a citation names its kind and resolves only to a source of that kind, never by the id alone
+    assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
+    assert "$citedIds" not in audit
+    assert "(review:|review-comment:)?([1-9][0-9]{8,11})" in _host_script(
+        "agent-host-authority-v2.ps1"
+    )
     assert 'Origin = "referenced"' in audit
     assert 'Write-Output "HOLD_CLASS=TECHNICAL_HOLD"' in audit
     # what V3 keeps in the generator

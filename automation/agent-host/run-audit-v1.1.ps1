@@ -956,14 +956,15 @@ if ($packetHoldReasons.Count -eq 0) {
 # A scanned source is a packet source when, and only when, the slice declaration cites its id. The Host applies that rule
 # mechanically: it never judges relevance, never reads a "scope: PR #<N>" record, and never asks anyone to classify.
 # Every packet source is required: both auditors must report it in EVIDENCE_SEEN by its content-bound identity.
-$citableKinds = @("github_issue_comment", "github_pr_review", "github_pr_review_comment")
-$citedIds = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
+# A citation names its kind (`<id>` a conversation comment, `review:<id>`, `review-comment:<id>`), and resolves only to a
+# source of that kind: the key is "<locator kind>:<id>", never the id alone.
+$citedKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
-foreach ($id in $evidenceRefs.Ids) {
-    [void]$citedIds.Add($id)
+foreach ($k in $evidenceRefs.Keys) {
+    [void]$citedKeys.Add($k)
 }
 
-$resolvedIds = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
+$resolvedKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 $seenLocators = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
 # The declaration is audit input itself: what the slice says it does, does not do and relies on. The PR body is always a
@@ -987,11 +988,13 @@ foreach ($it in @($streamItems | Where-Object { $_.Locator -eq "github_pr_body:$
 }
 
 foreach ($it in $streamItems) {
-    if (($it.Locator -split ":", 2)[0] -notin $citableKinds -or -not $citedIds.Contains($it.Id)) {
+    $citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"
+
+    if (-not $citedKeys.Contains($citeKey)) {
         continue
     }
 
-    [void]$resolvedIds.Add($it.Id)
+    [void]$resolvedKeys.Add($citeKey)
 
     # the same source can sit in two scanned streams (a manifest stream and an issue the declaration names)
     if (-not $seenLocators.Add($it.Locator)) {
@@ -1016,11 +1019,11 @@ foreach ($it in $streamItems) {
 
 # A citation is declared evidence. One that no scanned stream holds (a wrong id, an issue the declaration does not
 # name, a source deleted since) cannot be read: hard completeness fails, as a TECHNICAL_HOLD. It is never dropped.
-$unresolvedRefs = @($evidenceRefs.Ids | Where-Object { -not $resolvedIds.Contains($_) })
+$unresolvedRefs = @($evidenceRefs.Keys | Where-Object { -not $resolvedKeys.Contains($_) } | ForEach-Object { $evidenceRefs.Labels[$_] })
 
 if ($packetHoldReasons.Count -eq 0) {
-    foreach ($id in $unresolvedRefs) {
-        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$id" "the declaration cites $id and no scanned stream holds it"
+    foreach ($label in $unresolvedRefs) {
+        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and no scanned stream holds a source of that kind with that id"
     }
 }
 

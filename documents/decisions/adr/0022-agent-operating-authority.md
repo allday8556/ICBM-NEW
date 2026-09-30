@@ -112,6 +112,8 @@ The marker-and-classification gate is removed from the packet.
 - A slice declares its evidence by citing it in its PR body. The packet's sources are the
   comments, reviews and review comments the declaration cites, read at their current body and bound
   by their SHA-256.
+- A citation names the kind of its source as well as its id, and resolves only to a source of
+  that kind.
 - A citation that cannot be read is a technical hold, never a smaller packet: declared evidence
   does not disappear silently.
 - A marker is provenance. It never makes a source a packet input and never holds a packet.

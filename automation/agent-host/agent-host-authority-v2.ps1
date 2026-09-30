@@ -182,8 +182,13 @@ function Invoke-GhWrite {
 #   TECHNICAL_HOLD          : everything else. The Host recovers or retries by itself and never asks the user.
 #
 # The class is decided by the category, never by how often something failed. A hold reason is HUMAN_DECISION_REQUIRED
-# only when it names one of these categories as a whole "_"-separated token sequence. The words
-# "HUMAN_DECISION_REQUIRED" alone decide nothing: a stop that names no category of the closed list is technical.
+# only when the WHOLE reason is one of the forms the Host itself composes after it validated the category:
+#   <CATEGORY>                                    a category by itself
+#   NEXT_HOLD_<CATEGORY>                          the selector's stop
+#   <WHO>_HUMAN_DECISION_REQUIRED_<CATEGORY>      an auditor's, a fixer's or an implementer's stop (<WHO> is [A-Z_]+)
+#   PR_ON_OWNER_HOLD, GUARD_PR_ON_OWNER_HOLD      the owner's own hold file
+# A category word inside any other reason decides nothing: NO_LIVE_ACTION, NEXT_HOLD_NOT_LIVE and LIVE_CHECK_FAILED are
+# technical. The words "HUMAN_DECISION_REQUIRED" alone decide nothing either.
 # -------------------------------------------------
 
 $script:HumanDecisionCategories = @(
@@ -204,13 +209,17 @@ $script:HumanDecisionCategories = @(
 function Get-HoldClass {
     param([AllowNull()][string]$Reason)
 
-    # the class word itself is not a category
-    $r = "$Reason".ToUpperInvariant().Replace("HUMAN_DECISION_REQUIRED", "")
+    $r = "$Reason"
 
-    foreach ($cat in $script:HumanDecisionCategories) {
-        if ($r -match "(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)") {
-            return "HUMAN_DECISION_REQUIRED"
-        }
+    if ($r -cin @("PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD")) {
+        return "HUMAN_DECISION_REQUIRED"
+    }
+
+    # the whole reason, case-sensitively: nothing before the form and nothing after the category
+    $m = [regex]::Match($r, '^(?:NEXT_HOLD_|[A-Z][A-Z_]*_HUMAN_DECISION_REQUIRED_)?([A-Z_]+)$')
+
+    if ($m.Success -and $m.Groups[1].Value -cin $script:HumanDecisionCategories) {
+        return "HUMAN_DECISION_REQUIRED"
     }
 
     return "TECHNICAL_HOLD"
@@ -241,8 +250,12 @@ function Get-HumanDecisionCategory {
 # A slice declares its evidence by citing it. The declaration is the PR body (and the host slice specification when one
 # exists). Two deterministic reference forms are read from it, nothing is inferred:
 #   an issue reference  "Issue #<n>"              -> that issue's comments are a scanned stream of this packet
-#   a citation          `<id>` : a bare number of 9-12 digits in a code span
-#                                                  -> the comment / review / review comment with that id
+#   a citation, in a code span, of a number of 9-12 digits. The form names the KIND of the source:
+#       `<id>`                  -> the issue / PR conversation comment with that id
+#       `review:<id>`           -> the PR review with that id
+#       `review-comment:<id>`   -> the PR review comment with that id
+# GitHub numbers the three kinds separately, so an id alone does not identify a source. A citation resolves only to a
+# source of its own kind: a review that happens to carry the id of a cited comment never stands in for it.
 # A citation is a claim that the source is evidence. One that no scanned stream holds cannot be read, so it is a
 # TECHNICAL_HOLD (CITED_SOURCE_UNRESOLVED): declared evidence never silently disappears from a packet. A number that is
 # not in a code span (a CI run id, a line count) is not a citation.
@@ -253,19 +266,40 @@ function Get-EvidenceReferences {
 
     $issues = New-Object "System.Collections.Generic.SortedSet[long]"
     $ids = New-Object "System.Collections.Generic.SortedSet[long]"
+    $reviews = New-Object "System.Collections.Generic.SortedSet[long]"
+    $reviewComments = New-Object "System.Collections.Generic.SortedSet[long]"
 
     if ($Text) {
         foreach ($m in [regex]::Matches($Text, '(?<![A-Za-z0-9])Issue #([1-9][0-9]{0,6})(?![0-9])')) {
             [void]$issues.Add([long]$m.Groups[1].Value)
         }
 
-        foreach ($m in [regex]::Matches($Text, '(?<!`)`([1-9][0-9]{8,11})`(?!`)')) {
-            [void]$ids.Add([long]$m.Groups[1].Value)
+        foreach ($m in [regex]::Matches($Text, '(?<!`)`(review:|review-comment:)?([1-9][0-9]{8,11})`(?!`)')) {
+            $n = [long]$m.Groups[2].Value
+
+            switch -CaseSensitive ($m.Groups[1].Value) {
+                "review:" { [void]$reviews.Add($n) }
+                "review-comment:" { [void]$reviewComments.Add($n) }
+                default { [void]$ids.Add($n) }
+            }
         }
     }
+
+    # Keys: "<source kind>:<id>", the kind being the locator kind of the stream item that may resolve the citation.
+    # Labels: the citation as the declaration wrote it, for a hold reason.
+    $keys = New-Object System.Collections.Generic.List[string]
+    $labels = @{}
+
+    foreach ($n in $ids) { $k = "github_issue_comment:$n"; $keys.Add($k); $labels[$k] = "$n" }
+    foreach ($n in $reviews) { $k = "github_pr_review:$n"; $keys.Add($k); $labels[$k] = "review:$n" }
+    foreach ($n in $reviewComments) { $k = "github_pr_review_comment:$n"; $keys.Add($k); $labels[$k] = "review-comment:$n" }
 
     return [pscustomobject]@{
         Issues = @($issues | ForEach-Object { [string]$_ })
         Ids = @($ids | ForEach-Object { [string]$_ })
+        Reviews = @($reviews | ForEach-Object { [string]$_ })
+        ReviewComments = @($reviewComments | ForEach-Object { [string]$_ })
+        Keys = @($keys)
+        Labels = $labels
     }
 }
