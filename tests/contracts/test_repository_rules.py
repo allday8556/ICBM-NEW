@@ -1430,14 +1430,14 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Three are still missing at this main
+    order may never omit a mandatory pre-canary prerequisite. Two are still missing at this main
     — a production ASSET sender that can transmit (the adapter is wired with no committed session
-    and sends nothing), an executable committed-session read-back and a comparison that proves
-    published state, the two halves of ADR-0014 §11's success proof — and none is authorized by
-    ADR-0020. Two were closed by their own slices, each under its own architect resolution, and
-    the order records them as closed rather than dropping them: the ADR-0014 §27
-    authoring-revision owners (5907626428, ADR-0014 §27.1) and the durable canary-eligibility
-    owner (5910018106, ADR-0018 §5.1)."""
+    and sends nothing) and an executable committed-session read-back, the open half of ADR-0014
+    §11's success proof — and neither is authorized by ADR-0020. Three were closed by their own
+    slices, each under its own architect resolution, and the order records them as closed rather
+    than dropping them: the ADR-0014 §27 authoring-revision owners (5907626428, ADR-0014 §27.1),
+    the durable canary-eligibility owner (5910018106, ADR-0018 §5.1) and the comparison that
+    proves published state (5915900049 D1, ADR-0014 §11 amendment note)."""
     from app.capabilities.live_safety.proofs import DurableStageProofs
     from app.stages.register.authoring_revisions import AuthoringRevisionKind
     from app.stages.register.preparation import AUTHORING_REVISIONS_UNOWNED
@@ -1479,12 +1479,20 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "never this standing authorization",
         "the **executable committed-session read-back** (ADR-0014 §11)",
         "`SmartStoreReadback.available()` is `False` and `verify` refuses",
-        "a **read-back comparison that proves published state** (ADR-0014 §11)",
-        "`proves_published_state()` is `False`",
-        "nothing states the display status a unit is registered with, so no explicit expectation"
-        " exists",
-        "no canonical contract decides the expected published state",
+        "~~a **read-back comparison that proves published state** (ADR-0014 §11)~~ — **closed by"
+        " its own slice** (ADR-0014 §11 amendment note; Issue #89 architect resolution"
+        " `5915900049` D1)",
+        "`channelProductDisplayStatusType = ON`",
+        "the expected published state `SALE/ON` (`expected_published_state`),"
+        " `proves_published_state()` is `True`",
+        "`SALE` with `SUSPENSION`, any other sale status and a missing or unreadable half still"
+        " prove nothing",
+        "which display status ICBM registers was a product decision with no owner",
+        "Being provable confirms no registration by itself",
         "**Amendment note (published-state read).**",
+        "**Amendment note (published-state proof; Issue #89 `5915900049` D1).**",
+        "Two prerequisites are still missing",
+        "Closing that row confirms no registration by itself",
         "a CREATE that cannot be read back is never `CONFIRMED`",
         "Neither contract fixes an order among them",
         "all of them precede any canary",
@@ -1506,7 +1514,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 3
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 2
+    assert len(re.findall(r"^\| ~~a \*\*read-back comparison that proves", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*durable canary-eligibility owner\*\*", order, re.M)) == 1
     # The remaining user-decision steps are still listed, and now after those prerequisites.
@@ -1518,9 +1527,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
         "the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1",
         "the durable canary-eligibility owner by its own, ADR-0018 §5.1",
-        "the executable committed-session read-back",
-        "a read-back comparison that proves published state",
-        "are still missing, are not authorized here",
+        "the production ASSET sender and the executable committed-session read-back are still"
+        " missing, are not authorized here",
+        "a read-back comparison that proves published state by its own, the ADR-0014 §11"
+        " amendment note",
         "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11"
         " success proof is green",
     ):
@@ -1540,10 +1550,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the sender and the committed session because a real provider transport is not"
         " provider-zero",
         "**executable committed-session read-back**",
-        "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
-        "`PUBLISHED_STATE_PROVABLE` stays unproven",
-        "ADR-0014 §11's own success proof",
+        "The read-back is the remaining half of ADR-0014 §11's own success proof",
+        "a comparison that proves published state, is closed by its own slice below",
     ):
         assert element in ordering, element
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
@@ -1557,11 +1566,18 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         " (`LIVE_SENDER_NOT_WIRED`)",
         "anything possibly transmitted is `UPLOAD_UNKNOWN` and is never resent",
         "**It closes no prerequisite**",
-        "**Pre-canary groundwork, prerequisite still open — the published-state read**",
-        "the display status ICBM registers (`ON` or `SUSPENSION`) has no owner, so none is stated"
-        " and nothing can be confirmed",
+        "**Pre-canary prerequisite closed — the published-state proof** (ADR-0014 §11 amendment"
+        " note; Issue #89 architect resolution `5915900049` D1;",
+        "every CREATE projection registers the SmartStore channel with"
+        " `channelProductDisplayStatusType = ON`",
+        "Only `SALE/ON` read back states a published state",
+        "never buyer visibility or read-after-write timing",
+        "the executable read-back and every other prerequisite still refuse",
     ):
         assert element in ordering, element
+    assert "**read-back comparison that proves published state**" not in ordering
+    assert "`PUBLISHED_STATE_PROVABLE` stays unproven" not in ordering
+    assert "prerequisite still open — the published-state read" not in ordering
     assert "`app/container.py` wires `UnwiredAssetSender`" not in ordering
     assert "Pre-canary prerequisite closed — the production ASSET sender" not in ordering
     # "After those two" still refers to the two adoption slices: every recorded slice follows it.
@@ -1604,9 +1620,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**owners for the category-mapping and detail-composition authoring revisions** — is"
         " closed by its own slice (ADR-0014 §27.1)",
         "still has to be `READY` on every other rule",
-        "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
+        "the **read-back success proof of ADR-0014 §11**, of which one half is still open",
         "an **executable committed-session read-back**",
-        "a **comparison that proves published state**",
+        "a **comparison that proves published state**, is closed by its own slice (ADR-0014 §11"
+        " amendment note; architect resolution `5915900049` D1)",
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
@@ -1637,12 +1654,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "DETAIL_COMPOSITION",
     ]
     assert "AuthoringRevisionStore(db, clock, audit)" in _read(REPO_ROOT / "app" / "container.py")
-    # And ADR-0014 §11's two halves: production wires no session to read back with, and the
-    # adopted comparison proves no published state.
+    # And ADR-0014 §11's two halves: production wires no session to read back with, which keeps
+    # that row open, while the comparison can prove the published state (5915900049 D1).
     assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
-    assert smartstore_readback.proves_published_state() is False
-    # The read half exists; the expectation does not, which is what keeps the row open.
+    assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
+    # A Snapshot that cannot be projected still expects nothing, so nothing is proven for it.
     assert smartstore_readback.expected_published_state({}).display_status is None
 
 

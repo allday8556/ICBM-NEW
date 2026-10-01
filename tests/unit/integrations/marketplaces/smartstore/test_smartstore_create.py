@@ -79,7 +79,9 @@ ORIGIN: dict[str, Any] = {
     "leafCategoryId": "cat-1",
     "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
 }
-DOCUMENT: dict[str, Any] = {"originProduct": ORIGIN}
+# The one channel field ICBM owns (architect resolution 5915900049 D1): the listing is displayed.
+CHANNEL: dict[str, Any] = {"channelProductDisplayStatusType": "ON"}
+DOCUMENT: dict[str, Any] = {"originProduct": ORIGIN, "smartstoreChannelProduct": CHANNEL}
 # The only form a request may reach the caller in: checked against the adopted request contract and
 # frozen with its provenance by the wire projection.
 FROZEN = product.create_document(IDENTITY, DOCUMENT)
@@ -88,7 +90,10 @@ FROZEN = product.create_document(IDENTITY, DOCUMENT)
 def _origin(**changes: Any) -> dict[str, Any]:
     """One request body with the named origin-product fields replaced or removed."""
     origin = {**deepcopy(ORIGIN), **changes}
-    return {"originProduct": {key: value for key, value in origin.items() if value is not None}}
+    return {
+        "originProduct": {key: value for key, value in origin.items() if value is not None},
+        "smartstoreChannelProduct": deepcopy(CHANNEL),
+    }
 
 
 def _caller(provider: Provider) -> SmartStoreEndpointCaller:
@@ -785,7 +790,6 @@ def test_the_production_caller_refuses_every_create_document_as_incomplete() -> 
     # any byte is written — whoever built it and whatever a projection declared.
     assert set(product.completeness_gaps(FROZEN)) == {
         product.GAP_SHOPPING_REGISTRATION,
-        product.GAP_CHANNEL_DISPLAY_STATUS,
         product.GAP_REGISTRATION_STOCK_QUANTITY,
         product.GAP_NOTICE_TYPE_CHILD,
     }
@@ -862,3 +866,44 @@ def test_no_body_is_encoded_for_an_incomplete_create(monkeypatch: pytest.MonkeyP
         )
     assert refused.value.code == "SMARTSTORE_CREATE_REQUEST_INCOMPLETE"
     assert encoded == [] and provider.requests == []
+
+
+@pytest.mark.parametrize(
+    ("channel", "code"),
+    [
+        (None, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({"channelProductDisplayStatusType": "SUSPENSION"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({"channelProductDisplayStatusType": "WAIT"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({"channelProductDisplayStatusType": "on"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        (
+            {"channelProductDisplayStatusType": "ON", "naverShoppingRegistration": True},
+            "WIRE_DOCUMENT_FIELD_UNKNOWN",
+        ),
+        ({"channelProductDisplayStatusType": "ON", "bbsSeq": 1}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+    ],
+    ids=[
+        "no-channel",
+        "empty-channel",
+        "suspension",
+        "wait",
+        "lowercase",
+        "unowned-shopping-registration",
+        "unowned-optional",
+    ],
+)
+def test_the_channel_carries_exactly_the_owned_display_status(
+    channel: dict[str, Any] | None, code: str
+) -> None:
+    """Architect resolution 5915900049 D1: every CREATE document registers the SmartStore channel
+    as displayed (ON). No other display value, and no channel field ICBM does not own, is ever
+    encodable."""
+    body: dict[str, Any] = {"originProduct": deepcopy(ORIGIN)}
+    if channel is not None:
+        body["smartstoreChannelProduct"] = channel
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == code
+    assert product.create_document(IDENTITY, DOCUMENT).mapping()["smartstoreChannelProduct"] == {
+        "channelProductDisplayStatusType": "ON"
+    }

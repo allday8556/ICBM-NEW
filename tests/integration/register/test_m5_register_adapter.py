@@ -314,7 +314,7 @@ def test_the_comparison_evidence_is_sanitized_and_versioned(
     comparison = readback.compare(payload, _read(_readback_body(payload, images=[{"url": signed}])))
     evidence = json.dumps(comparison.canonical(), ensure_ascii=False)
     assert signed not in evidence and "X-Signature" not in evidence
-    assert comparison.comparison_contract_version == "smartstore-readback-comparison/v2"
+    assert comparison.comparison_contract_version == "smartstore-readback-comparison/v3"
     assert comparison.normalizer_version == "smartstore-readback-normalizer/v2"
     assert "IMAGE_REFERENCE_UNSAFE" in comparison.reasons
 

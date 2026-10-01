@@ -101,14 +101,13 @@ def _registration_adoption() -> dict[str, bool]:
 #   sent through it at all;
 # - `OFFLINE_SYNTHETIC_PROVIDER_RESPONSE`: the contract **is** adopted, and the declaration exists
 #   only because a provider-zero run has no provider to answer it;
-# - `WIRE_CONTRACT_UNPROVEN`: PR-D's real wire projection cannot prove this unit sendable;
-# - `PUBLISHED_STATE_UNPROVEN`: the adopted read-back carries no published state — a field of the
-#   comparison, never an endpoint.
+# - `WIRE_CONTRACT_UNPROVEN`: PR-D's real wire projection cannot prove this unit sendable.
+# The published state is no seam: the adopted comparison proves it against the Snapshot's own
+# projection, SALE/ON (architect resolution 5915900049 D1), from the synthetic read-back.
 # The endpoint-adoption snapshot stays the authoritative adoption fact; these name the reason.
 ENDPOINT_NOT_ADOPTED = "ENDPOINT_NOT_ADOPTED"
 OFFLINE_PROVIDER_RESPONSE = "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
 WIRE_CONTRACT_UNPROVEN = "WIRE_CONTRACT_UNPROVEN"
-PUBLISHED_STATE_UNPROVEN = "PUBLISHED_STATE_UNPROVEN"
 # - `M0_EXECUTION_POLICY_REFUSES_LIVE`: the ADR-0018 send-time safety stack the production owners
 #   wire refuses every CREATE while `M0_DRY_RUN_ONLY` holds (Gate 3 area 1), so the run drives the
 #   REGISTER state machine behind a harness authority that admits and counts (`seams.py`).
@@ -124,7 +123,6 @@ DECLARED_SEAMS: Mapping[str, tuple[str, str | None]] = {
     "RECONCILE_LOOKUP": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_PRODUCT_SEARCH"),
     "READ_BACK": (OFFLINE_PROVIDER_RESPONSE, "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"),
     "WIRE_PROJECTION": (WIRE_CONTRACT_UNPROVEN, None),
-    "PUBLISHED_STATE": (PUBLISHED_STATE_UNPROVEN, None),
     "ACCOUNT_BINDING": (OFFLINE_PROVIDER_RESPONSE, None),
     "LIVE_AUTHORITY": (M0_REFUSES_LIVE, None),
 }
@@ -390,6 +388,8 @@ def _retained(unit: Unit, payload: Mapping[str, Any], *, reverse: bool = False) 
                 unit.listing_identity
             ),
             "detailAttribute": {"optionInfo": {"optionCombinations": options}},
+            # The published state the Snapshot's projection registers (5915900049 D1).
+            "statusType": "SALE",
         },
         "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
     }
@@ -719,6 +719,13 @@ def scenario_absence(run: Run, confirmed_intent: str) -> dict[str, object]:
     )
     checks.require("s7.registration_exists", registration is not None)
     assert registration is not None
+    # ADR-0014 §11: the durable result carries the published state the adopted comparison proved
+    # against the Snapshot's projection (architect resolution 5915900049 D1), never a declaration.
+    checks.check(
+        "s7.registration_published_state_proven",
+        registration.published_state == "SALE/ON",
+        published_state=registration.published_state,
+    )
     from app.stages.register.model import AbsenceEvidence
 
     kinds = {kind.value for kind in AbsenceEvidence}
@@ -958,8 +965,8 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
     # The adopted CREATE request still refuses this unit: required values stay uncaptured or
-    # unowned (the naverShoppingRegistration value source, the channel display status, the
-    # registration stock quantity, the notice type child), and none is ever invented. The
+    # unowned (the naverShoppingRegistration value source, the registration stock quantity, the
+    # notice type child), and none is ever invented. The
     # scenarios above declared a sendable projection so the state machine could be exercised at
     # all; the real one is asked here and still names its gaps.
     unsent = smartstore_product.project(_any_payload(owners))
@@ -1076,8 +1083,8 @@ def canary(run: Run) -> dict[str, object]:
         # One named unit is one unit, however many this run holds.
         units_selected=1 if unit is not None else len(units),
         # The plan is about a **real** canary, so the read-back's two facts are the production
-        # ones, never this run's declared seams (`READ_BACK`, `PUBLISHED_STATE`): a provider-zero
-        # run has no committed session, and PR-D's adopted contract proves no published state.
+        # ones, never this run's declared `READ_BACK` seam: a provider-zero run has no committed
+        # session. The adopted comparison can prove the published state (5915900049 D1).
         readback_executable=False,
         published_state_provable=smartstore_readback.proves_published_state(),
         # The same reason for ADR-0018 §10's two stage readinesses: `M0_DRY_RUN_ONLY` refuses every
