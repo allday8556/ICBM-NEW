@@ -64,6 +64,16 @@ function show(name, visible) {
 
 const withoutScheme = (url) => (typeof url === "string" ? url.replace(/^https?:\/\//, "") : "—");
 
+// A locator as a person reads it: the same URL, its percent-escapes shown as the characters they are.
+function readable(url) {
+  const bare = withoutScheme(url);
+  try {
+    return decodeURI(bare);
+  } catch {
+    return bare;
+  }
+}
+
 function parsed(json) {
   if (typeof json !== "string") return null;
   try {
@@ -117,12 +127,16 @@ function fieldRow(field) {
 function imageRow(image) {
   const row = element("div", "image");
   row.dataset.status = image.status;
+  // A reference the server did not fetch has no locator; ICBM names its host and why it refused it.
+  const reference = image.locator
+    ? readable(image.locator)
+    : [image.host, image.target_refusal || image.issue].filter(Boolean).join(" · ") || "—";
   row.append(
     element("span", "image-role", IMAGE_ROLES[image.role] || image.role),
     element("span", "image-ordinal", String(image.ordinal)),
-    element("span", "image-ref", withoutScheme(image.locator)),
+    element("span", "image-ref", reference),
   );
-  row.title = image.locator || "";
+  row.title = image.locator || reference;
   return row;
 }
 
@@ -166,7 +180,7 @@ function showResult(result) {
   if (result.state === "REFUSED_DISCONNECTED") showIcbm({ icbm: "DISCONNECTED" });
   if (result.state === "READ_BACK") {
     role("supplier-key").textContent = result.supplier_key || role("supplier-key").textContent;
-    role("source-url").textContent = withoutScheme(result.source_url);
+    role("source-url").textContent = readable(result.source_url);
     role("source-url").title = result.source_url || "";
   }
   showRevision(result.state === "READ_BACK" ? result.revision : null);
