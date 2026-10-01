@@ -40,6 +40,26 @@ class DuplicateLookupSource(Protocol):
 
 
 @runtime_checkable
+class PreparedAssetSource(Protocol):
+    """The provider assets already prepared for one exact authored unit.
+
+    Read from the durable ASSET upload-attempt owner: only ``APPLIED_PROVEN`` uploads of exactly
+    this preparation revision under exactly this candidate fingerprint. Nothing is produced,
+    promoted or looked up here, and an absent asset is simply absent (Issue #89 architect
+    follow-up 5919917893 §3).
+    """
+
+    def prepared_assets(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        preparation_revision_id: str,
+        candidate_fingerprint: str,
+    ) -> tuple[PreparedAsset, ...]: ...
+
+
+@runtime_checkable
 class ProviderAssetSource(Protocol):
     """Promotion of one upload outcome to the provider asset identity of one exact artifact."""
 
@@ -193,6 +213,7 @@ __all__ = [
     "DuplicateLookupSource",
     "LookupStatus",
     "PreparedAsset",
+    "PreparedAssetSource",
     "ProviderAssetSource",
     "ReadbackComparator",
     "ReadbackSource",

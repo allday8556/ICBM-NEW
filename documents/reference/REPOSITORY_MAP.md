@@ -13,7 +13,7 @@ removed by PR #157, 35 and 15 were the tree's counts. The CREATE adoption (PR #1
 positive-only reconcile slice added `integrations/marketplaces/smartstore/search.py`, its unit suite
 and migration `0031` (37 and 17). The authoring-revision owners slice added
 `app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite. The canary-eligibility owner slice added
-`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite. The protected operator commands (D3) added one integration suite.
+`app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite. The protected operator commands (D3) added one integration suite. The application-freeze inputs fix (Issue #89 follow-up `5919917893` §3) added one integration suite.
 The Agent Host operating-authority correction (ADR-0022) added `documents/rules/14-operating-authority.md`,
 the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` and the fixture test under
 `tests/harness/agent_host/`. No file moved.
@@ -52,11 +52,11 @@ capture policy beside the KM collect package, migration `0034`, the test-browser
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 236 | tests |
+| `tests/` | 237 | tests |
 | `tests/contracts/` | 8 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 90 | integration tests by runtime owner |
+| `tests/integration/` | 91 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 81 | unit tests by runtime owner |
 | `ui/` | 52 | operator clients: the served web client and the capture extension |

@@ -232,6 +232,12 @@ class LiveAuthorityStore:
         with self.reading() as unit:
             return unit.attempt(attempt_id)
 
+    def applied_uploads(
+        self, preparation_revision_id: str, candidate_fingerprint: str
+    ) -> tuple[UploadAttemptRecord, ...]:
+        with self.reading() as unit:
+            return unit.applied_uploads(preparation_revision_id, candidate_fingerprint)
+
 
 class LiveUnit:
     """The pre-LIVE owners' writes and reads over one caller-owned session. It never commits."""
@@ -560,6 +566,21 @@ class LiveUnit:
     def attempt(self, attempt_id: str) -> UploadAttemptRecord | None:
         row = self.session.get(AssetUploadAttempt, attempt_id)
         return None if row is None else _attempt_record(row)
+
+    def applied_uploads(
+        self, preparation_revision_id: str, candidate_fingerprint: str
+    ) -> tuple[UploadAttemptRecord, ...]:
+        """Every ``APPLIED_PROVEN`` upload of exactly this revision under exactly this candidate."""
+        rows = self.session.scalars(
+            select(AssetUploadAttempt)
+            .where(
+                AssetUploadAttempt.preparation_revision_id == preparation_revision_id,
+                AssetUploadAttempt.candidate_fingerprint == candidate_fingerprint,
+                AssetUploadAttempt.state == UploadAttemptState.APPLIED_PROVEN.value,
+            )
+            .order_by(AssetUploadAttempt.started_at, AssetUploadAttempt.attempt_id)
+        )
+        return tuple(_attempt_record(row) for row in rows)
 
     def fence(self, key: ReplayKey) -> str | None:
         """Why a fresh upload with this key is blocked, if it is: from the owner's rows (G3-29).
