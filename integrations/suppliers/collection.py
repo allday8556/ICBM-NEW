@@ -95,9 +95,11 @@ class CollectionProfile:
         hosts = set(self.image_hosts) | set(self.safe_query_keys)
         if any(not _HOST.fullmatch(host) for host in hosts):
             raise ValueError("hosts are explicit lowercase host names, never wildcards")
-        if self.transport is not SupplierTransport.HTTP:
-            # Browser collection exists only once reconnaissance proves rendering is required.
-            raise ValueError("collection over HTTP only")
+        if self.transport not in (SupplierTransport.HTTP, SupplierTransport.EXTENSION):
+            # Server-side browser collection exists only once reconnaissance proves rendering is
+            # required. ``EXTENSION`` is the operator's own browser (ADR-0019 §10): the envelope a
+            # capture is judged under, which the policed gateway never sends a request for.
+            raise ValueError("collection over HTTP or the reviewed extension transport only")
 
     @property
     def storefront_host(self) -> str:

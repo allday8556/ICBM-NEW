@@ -1273,6 +1273,10 @@ LATER_COLUMNS = frozenset(
         "settled_by_recovery",
         "capture_decision",
         "capture_request_id",
+        # 0034 (ADR-0019 E1): the transport provenance on the run and the revision.
+        "transport_kind",
+        "capture_policy_revision",
+        "capture_policy_digest",
     }
 )
 
