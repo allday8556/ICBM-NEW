@@ -39,9 +39,9 @@ SENDABLE = (IntentState.PREPARED, IntentState.FAILED)
 
 
 class CandidateEvaluator(Protocol):
-    """The preparation owner's candidate evaluation (``RegistrationPreparationService``)."""
+    """The preparation owner's mutation-stage candidate (``RegistrationPreparationService``)."""
 
-    def evaluate(self, preparation_id: str) -> PreflightResult: ...
+    def stage_candidate(self, preparation_id: str) -> PreflightResult: ...
 
 
 def _grant_refusal(code: str, message: str, **details: object) -> InputValidationError:
@@ -95,7 +95,9 @@ class LiveAuthorityService:
                 "LIVE_GRANT_PREPARATION_NOT_CURRENT",
                 "an ASSET grant binds the preparation's current revision only",
             )
-        candidate = self._preparations.evaluate(preparation.preparation_id)
+        # The candidate the CREATE path binds, duplicate evidence included (5915900049 D4); with
+        # no admissible evidence the owner refuses and no grant is recorded.
+        candidate = self._preparations.stage_candidate(preparation.preparation_id)
         if candidate.status is not ReadinessStatus.READY or not candidate.upload_permitted:
             raise _grant_refusal(
                 "LIVE_GRANT_CANDIDATE_NOT_READY",

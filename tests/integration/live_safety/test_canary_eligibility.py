@@ -181,7 +181,8 @@ def test_the_server_builds_a_deterministic_packet_from_the_owners(
     preparation = container.registrations.preparation(unit["preparation_id"])
     assert preparation is not None
     revision_id = preparation.current.preparation_revision_id
-    candidate = container.registration_preparations.evaluate(unit["preparation_id"])
+    # The candidate both stages bind, duplicate evidence included (5915900049 D4).
+    candidate = container.registration_preparations.stage_candidate(unit["preparation_id"])
     metadata = candidate.resolved.metadata
     assert metadata is not None
     packet = first.packet

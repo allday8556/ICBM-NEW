@@ -1,11 +1,15 @@
 ﻿param(
     [Parameter(Mandatory=$true)][string]$Scenario,
     [Parameter(Mandatory=$true)][string]$Root,
-    [string]$SrcHost = "C:\Users\user\ICBM-Agent-Host"
+    # the directory that holds the host scripts under test; default: this repository's own copy
+    [string]$SrcHost = ""
 )
 
 # Fixture harness: local bare origin + dirty user clone on main + mocked gh/codex/claude.
 # Real GitHub, real ICBM-NEW repo and real Agent Host state are never touched.
+# The host configuration is the tracked fixture tests\fx-config.json, never a runtime's own.
+
+if (-not $SrcHost) { $SrcHost = Split-Path $PSScriptRoot -Parent }
 
 $ErrorActionPreference = "Continue"
 $srcHost = $SrcHost
@@ -39,6 +43,8 @@ function W { param([string]$Rel, [string]$Text, [string]$Base = $seed)
 W "README.md" "fixture repo`n"
 W "docs/contract.md" "# Contract`nrule: never resend CREATE`n"
 W "docs/stale.md" "# Stale`nok`n"
+# one baseline canon document at the base; the other three are absent, and the packet must say so
+W "documents/roadmap/ROADMAP.md" "# Fixture roadmap`nM5: build what the fixture PR builds`n"
 W "app/x.py" "def x():`n    return 1`n"
 W "app/__init__.py" "MILESTONE = ""M5""`n"
 W "app/unrelated.py" "def u():`n    return 0`n"
@@ -134,7 +140,7 @@ switch ($Scenario) {
         }
         [void](Add-FxPr "feat/big")
     }
-    { $_ -like "auto-next*" -or $_ -in @("ci-flaky", "ci-hard-fail", "automerge-success", "guard-head-moved", "guard-main-moved", "guard-ci-pending", "guard-ci-failed", "gpt-insufficient", "merge-sha-mismatch", "draft-pr", "unmergeable") } {
+    { $_ -like "auto-next*" -or $_ -like "config-*" -or $_ -in @("ci-flaky", "ci-hard-fail", "automerge-success", "guard-head-moved", "guard-main-moved", "guard-ci-pending", "guard-ci-failed", "gpt-insufficient", "gpt-human", "gpt-human-uncategorised", "merge-sha-mismatch", "draft-pr", "unmergeable", "behind-base", "owner-hold", "post-merge-tree-mismatch") } {
         New-PrBranch "feat/clean" { W "docs/contract.md" "# Contract`nrule: never resend CREATE`nclarified`n" }
         $n = Add-FxPr "feat/clean"
         $pushBranch = {
@@ -154,6 +160,8 @@ switch ($Scenario) {
             "guard-ci-failed"  { $global:FxGuardHook = { param($n) $global:FxCiFail[(Get-FxHead $n)] = $true } }
             "merge-sha-mismatch" { $global:FxBeforeMerge = { param($n) & $global:FxPushBranch "feat/clean" "docs/contract.md" "race commit during merge" } }
             "draft-pr" { $global:FxPrs["$n"].isDraft = $true }
+            # main moves before the first pass: the PR HEAD is behind the base and is brought up to date first
+            "behind-base" { & $global:FxPushBranch "main" "README.md" "main moved before the audit" }
             "unmergeable" { $global:FxPrs["$n"].mergeable = "CONFLICTING" }
             { $_ -in @("ci-flaky", "ci-hard-fail") } { $global:FxCiFail["$(G @("--git-dir=$origin", "rev-parse", "refs/heads/feat/clean"))".Trim()] = $true }
         }
@@ -185,7 +193,7 @@ switch ($Scenario) {
         $n = Add-FxPr "feat/packet"
         if ($Scenario -eq "packet-guard-digest") { $global:FxPrs["$n"].isDraft = $true }
     }
-    "claude-blocker-hold" {
+    { $_ -in @("claude-blocker-hold", "fixer-human") } {
         New-PrBranch "feat/claudehold" { W "docs/contract.md" "# Contract`nBUG_MARKER_CLAUDE`n" }
         [void](Add-FxPr "feat/claudehold")
     }
@@ -257,26 +265,30 @@ foreach ($f in "orchestrator-v1.3.ps1", "orchestrator-v1.2.ps1", "run-audit-v1.1
     if (Test-Path (Join-Path $srcHost $f)) { Copy-Item (Join-Path $srcHost $f) (Join-Path $hostDir $f) }
 }
 
-$cfg = Get-Content (Join-Path $srcHost "state\orchestrator-config.json") -Raw -Encoding utf8 | ConvertFrom-Json
+$cfg = Get-Content (Join-Path $PSScriptRoot "fx-config.json") -Raw -Encoding utf8 | ConvertFrom-Json
 $cfg.repository = "fixture/icbm"
 $cfg.repo_path = $user
+if ($Scenario -eq "config-no-automerge") { $cfg.auto_merge = $false }
+if ($Scenario -eq "config-no-autonext") { $cfg.auto_next.enabled = $false }
+if ($Scenario -eq "auto-next-track") { $cfg | Add-Member -NotePropertyName track -NotePropertyValue ([pscustomobject]@{ name = "fixture-track"; scope = "fixture feature work only" }) }
 $cfg | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $hostDir "state\orchestrator-config.json")
 
-# ---------------- V2 packet sources (packet-* scenarios; canonical V2 at main a0643e4) ----------------
-# Designated streams: issue #1 comments/body, PR #1 reviews/review comments, issue #89 comments.
-# Classification comes ONLY from the marked [OWNER-AMENDMENT] record 9300 (preamble names PR #1).
+# ---------------- packet sources (packet-* scenarios; AGENT_HOST_AUDIT_PROTOCOL sections 3-4, ADR-0022) ----------------
+# The slice declaration is the body of PR #1. It names "Issue #89" and cites three source ids, so those three sources
+# are the packet's required sources. Nothing is classified by anyone: the legacy record 100009300 (a pre-ADR-0022 human
+# classification record) and every other marked source are history, never a hold.
 function global:Fx-D { param([string]$Body) $t = $Body.Replace("`r`n", "`n").Replace("`r", "`n"); $s = [System.Security.Cryptography.SHA256]::Create(); return (([BitConverter]::ToString($s.ComputeHash((New-Object System.Text.UTF8Encoding($false)).GetBytes($t)))) -replace '-', '').ToLower() }
 function global:Fx-C { param($Id, $Body, $Issue = 1, $UpdatedAt = "2026-09-28T00:00:00Z") $global:FxComments["$Id"] = @{ id = [int64]$Id; user = @{ login = "fixture" }; html_url = "https://github.com/fixture/icbm/issues/$Issue#issuecomment-$Id"; issue_url = "https://api.github.com/repos/fixture/icbm/issues/$Issue"; body = $Body; created_at = "2026-09-28T00:00:00Z"; updated_at = $UpdatedAt; submitted_at = $UpdatedAt } }
 function global:Fx-Record {
     param([string]$Preamble = "Fixture classification record (designated streams: #1, #89)", [string]$Extra = "", [string]$ClassOf9004 = "evidence-only", [string]$ScopeLine = "scope: PR #1", [string]$GitLine = "")
     $blob = "$(& git --git-dir=$global:FxOrigin rev-parse "$(Get-FxHead 1):docs/contract.md" 2>$null)".Trim()
     $req = @(
-        "- issue-comment 9001 sha256 $(Fx-D $global:FxComments['9001'].body) — architect instruction"
-        "- issue-comment 9002 sha256 $(Fx-D $global:FxComments['9002'].body) — official evidence E1 (unmarked, on #89)"
-        "- pr-review 1/9101 sha256 $(Fx-D $global:FxComments['9101'].body)"
+        "- issue-comment 100009001 sha256 $(Fx-D $global:FxComments['100009001'].body) — architect instruction"
+        "- issue-comment 100009002 sha256 $(Fx-D $global:FxComments['100009002'].body) — official evidence E1 (unmarked, on #89)"
+        "- pr-review 1/100009101 sha256 $(Fx-D $global:FxComments['100009101'].body)"
         $(if ($GitLine) { $GitLine } else { "- git-blob HEAD:docs/contract.md $blob" })
     )
-    $ev = @("- issue-comment 9004 sha256 $(Fx-D $global:FxComments['9004'].body) — background")
+    $ev = @("- issue-comment 100009004 sha256 $(Fx-D $global:FxComments['100009004'].body) — background")
     $scope = if ($ScopeLine) { "$ScopeLine`n" } else { "" }
     $body = "[OWNER-AMENDMENT]`n`n$Preamble`n$scope`nrequired:`n$($req -join "`n")`n"
     if ($ClassOf9004 -eq "required") { $body += "$($ev -join "`n")`n" }
@@ -286,55 +298,66 @@ function global:Fx-Record {
     return $body
 }
 
+$global:FxPrBody = "fixture PR body (unmarked)`n`nAuthority (Issue #89): architect instruction ``100009001``, official evidence ``100009002``, review ``review:100009101``.`nContract: ``canon:docs/contract.md``.`nNot a citation (no code span): CI run 36699770595.`n"
+
 if ($Scenario -like "packet-*") {
-    Fx-C 9001 "  [ARCHITECT-INSTRUCTION]  `r`n`r`nArchitect: keep the contract rule; clarify wording only.`r`n"
-    Fx-C 9002 "Evidence E1 (unmarked; classified by record 9300): the contract rule is official.`n" 89
-    Fx-C 9003 "status: the host reads ``[ARCHITECT-INSTRUCTION]`` sources (inline code, prose mention; not authority)`n"
-    Fx-C 9004 "[EVIDENCE-PACKET]`nOptional background evidence.`n" 89
-    Fx-C 9050 "old ordinary comment, created before any scan`n"
-    Fx-C 9061 "> [ARCHITECT-INSTRUCTION]`nquoted, not a marker`n"
-    Fx-C 9062 "``````text`n[ARCHITECT-INSTRUCTION]`n```````n"
-    Fx-C 9063 "[ARCHITECT-INSTRUCTION] see below`n"
-    Fx-C 9064 "[architect-instruction]`nother case`n"
-    Fx-C 9065 "note first`n[EVIDENCE-PACKET]`ntoken on a later line`n"
-    Fx-C 9101 "[EVIDENCE-PACKET]`nReview evidence: the diff matches E1.`n" 1
-    Fx-C 9200 "ordinary discussion`n"
-    $global:FxStreams["issue:1"] = @(9001, 9003, 9050, 9061, 9062, 9063, 9064, 9065, 9200, 9300)
-    $global:FxStreams["issue:89"] = @(9002, 9004)
-    $global:FxStreams["reviews:1"] = @(9101)
+    Fx-C 100009001 "  [ARCHITECT-INSTRUCTION]  `r`n`r`nArchitect: keep the contract rule; clarify wording only.`r`n"
+    Fx-C 100009002 "Evidence E1 (unmarked; cited by the PR body): the contract rule is official.`n" 89
+    Fx-C 100009003 "status: the host reads ``[ARCHITECT-INSTRUCTION]`` sources (inline code, prose mention; not authority)`n"
+    Fx-C 100009004 "[EVIDENCE-PACKET]`nOptional background evidence (marked, not cited).`n" 89
+    Fx-C 100009050 "old ordinary comment, created before any scan`n"
+    Fx-C 100009061 "> [ARCHITECT-INSTRUCTION]`nquoted, not a marker`n"
+    Fx-C 100009062 "``````text`n[ARCHITECT-INSTRUCTION]`n```````n"
+    Fx-C 100009063 "[ARCHITECT-INSTRUCTION] see below`n"
+    Fx-C 100009064 "[architect-instruction]`nother case`n"
+    Fx-C 100009065 "note first`n[EVIDENCE-PACKET]`ntoken on a later line`n"
+    Fx-C 100009101 "[EVIDENCE-PACKET]`nReview evidence: the diff matches E1.`n" 1
+    Fx-C 100009200 "ordinary discussion`n"
+    $global:FxStreams["issue:1"] = @(100009001, 100009003, 100009050, 100009061, 100009062, 100009063, 100009064, 100009065, 100009200, 100009300)
+    $global:FxStreams["issue:89"] = @(100009002, 100009004)
+    $global:FxStreams["reviews:1"] = @(100009101)
     $global:FxStreams["rc:1"] = @()
-    $global:FxIssueBodies["1"] = "fixture PR body (unmarked)`n"
-    Fx-C 9300 (Fx-Record)
-    if ($Scenario -eq "packet-unclassified") { Fx-C 9005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 9005 }
-    if ($Scenario -eq "packet-source-missing") { Fx-C 9300 ((Fx-Record) + "") ; $global:FxComments["9300"].body = $global:FxComments["9300"].body.Replace("- pr-review 1/9101", "- issue-comment 9999 sha256 $('cd' * 32) — missing source`n- pr-review 1/9101") }
+    $global:FxIssueBodies["1"] = $global:FxPrBody
+    # a legacy human classification record: history only, never read as a mapping and never a hold
+    Fx-C 100009300 (Fx-Record)
+    if ($Scenario -eq "packet-no-record") { $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"] | Where-Object { $_ -ne 100009300 }) }
+    if ($Scenario -eq "packet-unclassified") { Fx-C 100009005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009005 }
+    # the declaration cites a source no scanned stream holds: declared evidence is missing, so nothing is audited or merged
+    if ($Scenario -eq "packet-source-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also relies on ``100009998``.`n" }
+    # the declaration cites a CONVERSATION COMMENT by an id only a REVIEW carries: the review never stands in for it
+    # the declaration cites a canonical document that is not at the audited base
+    if ($Scenario -eq "packet-canon-missing") { $global:FxIssueBodies["1"] = $global:FxPrBody + "And ``canon:docs/no-such-contract.md``.`n" }
+    if ($Scenario -eq "packet-citation-kind") { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also the comment ``100009101``.`n" }
     if ($Scenario -eq "packet-stream-page-fail") { $global:FxStreamFail["issue:89"] = "page" }
     if ($Scenario -eq "packet-stream-perm") { $global:FxStreamFail["reviews:1"] = "perm" }
     if ($Scenario -eq "packet-stream-truncated") { $global:FxStreamFail["issue:1"] = "truncate" }
 
+    # an optional host manifest (designation only); by default there is none and issue #89 comes from the PR body
     $global:FxManifest = [ordered]@{
         pr = 1
         note = "designation only"
         designated_streams = @(
-            [ordered]@{ type = "issue_comments"; issue = 1 }
-            [ordered]@{ type = "pr_body"; pr = 1 }
-            [ordered]@{ type = "pr_reviews"; pr = 1 }
-            [ordered]@{ type = "pr_review_comments"; pr = 1 }
             [ordered]@{ type = "issue_comments"; issue = 89; watermark = 0 }
         )
     }
-    $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $hostDir "state\audit-sources-pr-1.json")
 
-    if ($Scenario -in @("packet-edit-to-marker", "packet-clsedit", "packet-record-edit-guard")) { $global:FxPrs["1"].isDraft = $true }
+    if ($Scenario -in @("packet-edit-to-marker", "packet-clsedit", "packet-record-edit-guard", "packet-cite-added", "packet-unclassified", "packet-no-record")) { $global:FxPrs["1"].isDraft = $true }
     if ($Scenario -eq "packet-edit-to-marker") {
-        # DUAL PASS 후 ready 시점: 스캔 이전부터 있던 unmarked 9050 을 in-place 로 marker-first 로 편집 → §7.1 재생성이 HOLD 해야 한다
-        $global:FxReadyHook = { $global:FxComments["9050"].body = "[ARCHITECT-INSTRUCTION]`nold comment edited in place to add a marker`n"; $global:FxComments["9050"].updated_at = "2026-09-29T00:00:00Z"; $global:FxCalls.Add("OLD_UNMARKED_EDITED_TO_MARKER 9050") }
+        # DUAL PASS 후 ready 시점: 스캔 이전부터 있던 unmarked 100009050 을 in-place 로 marker-first 로 편집.
+        # It is not cited, so it is provenance: no hold, the same digest, the merge goes on.
+        $global:FxReadyHook = { $global:FxComments["100009050"].body = "[ARCHITECT-INSTRUCTION]`nold comment edited in place to add a marker`n"; $global:FxComments["100009050"].updated_at = "2026-09-29T00:00:00Z"; $global:FxCalls.Add("OLD_UNMARKED_EDITED_TO_MARKER 100009050") }
     }
     if ($Scenario -eq "packet-clsedit") {
-        $global:FxReadyHook = { $global:FxComments["9002"].body = "Evidence E1 EDITED after the audit.`n"; $global:FxCalls.Add("CLASSIFIED_SOURCE_EDITED 9002") }
+        # a CITED source edited after the audit → its digest and the packet digest change → DUAL PASS invalid → re-audit (§7.1)
+        $global:FxReadyHook = { $global:FxComments["100009002"].body = "Evidence E1 EDITED after the audit.`n"; $global:FxCalls.Add("CITED_SOURCE_EDITED 100009002") }
     }
     if ($Scenario -eq "packet-record-edit-guard") {
-        # architect 가 record 자체를 (유효하게) 편집 → digest 변경 → DUAL PASS 무효 → 새 identity 로 재감사 (§7.1)
-        $global:FxReadyHook = { $global:FxComments["9300"].body = (Fx-Record -Preamble "PR #1 fixture classification record, revised by the architect"); $global:FxCalls.Add("RECORD_EDITED 9300") }
+        # the legacy record edited after the audit: it is not a packet input, so nothing changes
+        $global:FxReadyHook = { $global:FxComments["100009300"].body = (Fx-Record -Preamble "PR #1 fixture classification record, revised"); $global:FxCalls.Add("LEGACY_RECORD_EDITED 100009300") }
+    }
+    if ($Scenario -eq "packet-cite-added") {
+        # the declaration itself changes after the audit (a new citation) → new packet digest → re-audit
+        $global:FxReadyHook = { $global:FxIssueBodies["1"] = $global:FxPrBody + "Also: background ``100009004``.`n"; $global:FxCalls.Add("PR_BODY_CITES_ONE_MORE 100009004") }
     }
 }
 
@@ -371,8 +394,8 @@ function global:gh {
             "view" {
                 $n = $pos[2]; $p = $global:FxPrs["$n"]
                 if (-not $p) { $global:LASTEXITCODE = 1; return }
-                if ("$($opt['--json'])" -like "*isDraft*" -and $global:FxGuardHook -and $p.state -eq "OPEN") {
-                    # MERGE_GUARD 조회 시점에 한 번만 외부 변화 주입
+                if ("$($opt['--json'])" -like "*mergeable*" -and $global:FxGuardHook -and $p.state -eq "OPEN") {
+                    # MERGE_GUARD 조회 시점 (mergeable 을 묻는 유일한 조회) 에 한 번만 외부 변화 주입
                     $hook = $global:FxGuardHook; $global:FxGuardHook = $null
                     & $hook $n
                     $global:FxCalls.Add("GUARD_HOOK_FIRED")
@@ -424,6 +447,35 @@ function global:gh {
             $mergeSha = Merge-FxPr ([int]$n)
             return (@{ sha = $mergeSha; merged = $true; message = "Pull Request successfully merged" } | ConvertTo-Json -Compress)
         }
+        if ($opt["-X"] -eq "PUT" -and $path -match '/pulls/(\d+)/update-branch$') {
+            # GitHub "update branch": merge the current base into the PR head (no force)
+            $n = $Matches[1]; $p = $global:FxPrs["$n"]; $cur = Get-FxHead $n
+            $global:FxCalls.Add("UPDATE_BRANCH pr=$n expected=$($fields['expected_head_sha']) remote_head=$cur")
+            if ($fields["expected_head_sha"] -ne $cur -or $global:FxScenario -eq "behind-base-conflict") { Write-Error "gh: merge conflict (HTTP 422)"; $global:LASTEXITCODE = 1; return }
+            G @("-C", $global:FxSeed, "fetch", "-q", "origin") | Out-Null
+            G @("-C", $global:FxSeed, "checkout", "-q", "-B", "tmp-sync", "origin/$($p.headRefName)") | Out-Null
+            G @("-C", $global:FxSeed, "merge", "-q", "--no-ff", "-m", "merge main into $($p.headRefName)", "origin/main") | Out-Null
+            G @("-C", $global:FxSeed, "push", "-q", "origin", "HEAD:refs/heads/$($p.headRefName)") | Out-Null
+            G @("-C", $global:FxSeed, "checkout", "-q", "main") | Out-Null
+            return (@{ message = "Updating pull request branch." } | ConvertTo-Json -Compress)
+        }
+        if ($path -match '/compare/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$') {
+            $behind = "$(& git --git-dir=$global:FxOrigin rev-list --count "$($Matches[2])..$($Matches[1])" 2>$null)".Trim()
+            if ($behind -notmatch '^\d+$') { $global:LASTEXITCODE = 1; return }
+            $global:LASTEXITCODE = 0
+            if ($opt["--jq"] -eq ".behind_by") { return $behind }
+            return (@{ behind_by = [int]$behind } | ConvertTo-Json -Compress)
+        }
+        if ($path -match '/git/commits/([0-9a-f]{40})$') {
+            $commitSha = $Matches[1]
+            $tree = "$(& git --git-dir=$global:FxOrigin rev-parse "$commitSha^{tree}" 2>$null)".Trim()
+            if ($tree.Length -ne 40) { $global:LASTEXITCODE = 1; return }
+            # the merged main reports another tree than the audited HEAD: POST_MERGE_VERIFY must not pass
+            if ($global:FxScenario -eq "post-merge-tree-mismatch" -and $commitSha -eq (Get-FxMain)) { $tree = "0" * 40 }
+            $global:LASTEXITCODE = 0
+            if ($opt["--jq"] -eq ".tree.sha") { return $tree }
+            return (@{ sha = $commitSha; tree = @{ sha = $tree } } | ConvertTo-Json -Compress)
+        }
         if ($opt["-X"] -in @("POST", "PATCH") -or ($fields.Count -gt 0 -and $opt["-X"] -ne "PUT") -or $opt["--input"]) {
             if ($global:FxScenario -eq "authority-unit") { $global:FxCalls.Add("WRITE_SENT gh api $($opt['-X']) $path"); return "{}" }
             $global:FxCalls.Add("FORBIDDEN gh api write $path"); $global:LASTEXITCODE = 1; return
@@ -458,7 +510,7 @@ function global:gh {
         }
         if ($path -match '/actions/runs$') {
             $anyFail = @($global:FxCiFail.Values | Where-Object { $_ }).Count -gt 0
-            $wr = @(@{ id = 9001; check_suite_id = 9101; created_at = "2020-01-01T00:00:00Z"; status = "completed"; conclusion = $(if ($anyFail) { "failure" } else { "success" }) })
+            $wr = @(@{ id = 100009001; check_suite_id = 100009101; created_at = "2020-01-01T00:00:00Z"; status = "completed"; conclusion = $(if ($anyFail) { "failure" } else { "success" }) })
             return (@{ workflow_runs = $wr } | ConvertTo-Json -Depth 5 -Compress)
         }
         if ($path -match '/commits/main$') { return (Get-FxMain) }
@@ -554,10 +606,10 @@ function global:Fx-EvidenceLine { param($Who, $Prompt)
     $ids = @([regex]::Matches($Prompt, '(?m)^\[SOURCE identity=(\S+) ') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
     $sc = $global:FxScenario
     if (($sc -eq "packet-evidence-omit" -and $Who -eq "gpt") -or ($sc -eq "packet-omit-claude" -and $Who -eq "claude")) {
-        $ids = @($ids | Where-Object { $_ -notlike "github_issue_comment:9001@*" })
+        $ids = @($ids | Where-Object { $_ -notlike "github_issue_comment:100009001@*" })
     }
     if ($sc -eq "packet-evwrong" -and $Who -eq "gpt") {
-        $ids = @($ids | ForEach-Object { if ($_ -like "github_issue_comment:9001@*") { "github_issue_comment:9001@$('ab' * 32)" } else { $_ } })
+        $ids = @($ids | ForEach-Object { if ($_ -like "github_issue_comment:100009001@*") { "github_issue_comment:100009001@$('ab' * 32)" } else { $_ } })
     }
     if ($sc -eq "packet-evidence-idonly" -and $Who -eq "gpt") {
         $ids = @($ids | ForEach-Object { ($_ -split '@')[0] -replace '^[a-z_]+:', '' })
@@ -584,6 +636,10 @@ $global:FxAi = {
     switch ($role) {
         "gpt-next" {
             $nm = [regex]::Match($prompt, '(?m)^NEXT_MAIN=([0-9a-f]{40})').Groups[1].Value
+            if ($sc -in @("auto-next-human", "auto-next-live")) {
+                $cat = if ($sc -eq "auto-next-live") { "LIVE" } else { "NEW_PRODUCT_FEATURE" }
+                return "NEXT_MAIN=$nm`nDECISION=HOLD`nSLICE_ID=fixture-decision`nSLICE_TITLE=needs the user`nHOLD_CATEGORY=$cat`nHOLD_REASON=fixture: this step is the user's decision`nCANONICAL_SOURCES=ROADMAP.md 14`nALLOWED_PATHS=NONE`nSCHEMA_CHANGE=NONE`nACCEPTANCE=NONE`nFORBIDDEN=NONE`n`nSPEC:`nNONE`n"
+            }
             if ($sc -eq "auto-next-hold") {
                 return "NEXT_MAIN=$nm`nDECISION=HOLD`nSLICE_ID=m5-create-adoption`nSLICE_TITLE=CREATE adoption`nHOLD_CATEGORY=SEPARATE_AUTHORIZATION_REQUIRED`nHOLD_REASON=ROADMAP.md 14: each later slice needs its own authorization`nCANONICAL_SOURCES=ROADMAP.md 14`nALLOWED_PATHS=NONE`nSCHEMA_CHANGE=NONE`nACCEPTANCE=NONE`nFORBIDDEN=NONE`n`nSPEC:`nNONE`n"
             }
@@ -609,7 +665,11 @@ $global:FxAi = {
             if ($sc -eq "packet-blocker-no-cache" -and $global:FxGptPrCount -eq 1) { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "first-run blocker that must never be reused as cache") }
             if ($sc -like "remediation-authorized*" -and $prompt -notmatch 'AUTHORIZATION EVIDENCE') { return (Fx-Verdict "AUDIT_HEAD" $h "INSUFFICIENT" "no authorization evidence in packet") }
             if ($sc -eq "gpt-insufficient") { return (Fx-Verdict "AUDIT_HEAD" $h "INSUFFICIENT" "packet not enough") }
-            if ($sc -eq "max-cycles") { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "always blocked") }
+            if ($sc -eq "gpt-human") { return (Fx-Verdict "AUDIT_HEAD" $h "HUMAN_DECISION_REQUIRED" "NEW_PRODUCT_FEATURE: the diff adds a feature no canonical requirement contains") }
+            # an auditor that asks for the user without naming a category of the closed list has decided nothing
+            if ($sc -eq "gpt-human-uncategorised") { return (Fx-Verdict "AUDIT_HEAD" $h "HUMAN_DECISION_REQUIRED" "someone should look at this architecture choice") }
+            # blocked until a repair re-analyses the problem (the marker only an INDEPENDENT RE-ANALYSIS writes)
+            if ($sc -eq "max-cycles" -and $prompt -notmatch '\+REANALYSED_ROOT_CAUSE') { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "still blocked") }
             if ($prompt -match '\+BUG_MARKER_GPT') { return (Fx-Verdict "AUDIT_HEAD" $h "BLOCKER" "BUG_MARKER_GPT contradicts contract") }
             return (Fx-Verdict "AUDIT_HEAD" $h "PASS" "gpt ok")
         }
@@ -632,8 +692,16 @@ $global:FxAi = {
         "fixer-pr" {
             Fx-TryPush $cwd
             if ($sc -eq "claude-blocker-hold") { return "FIXER_RESULT=HUMAN_HOLD`nFIXER_REASON=needs policy decision" }
-            if ($sc -eq "scope-expansion") { Fx-Replace $cwd "app/unrelated.py" "return 0" "return 99"; return "FIXER_RESULT=READY`nFIXER_SUMMARY=touched unrelated" }
-            if ($sc -eq "max-cycles") { Add-Content (Join-Path $cwd "docs/contract.md") "attempt $(Get-Random)"; return "FIXER_RESULT=READY`nFIXER_SUMMARY=attempt" }
+            if ($sc -eq "fixer-human") { return "FIXER_RESULT=HUMAN_DECISION_REQUIRED`nFIXER_CATEGORY=PRODUCT_DIRECTION_UNDECIDED`nFIXER_REASON=two product directions, no canonical text decides" }
+            if ($sc -eq "scope-expansion") {
+                Fx-Replace $cwd "app/unrelated.py" "return 0" "return 99"
+                Fx-Replace $cwd "docs/contract.md" "BUG_MARKER_GPT" "fixed-by-fixer"
+                return "FIXER_RESULT=READY`nFIXER_SUMMARY=fixed the marker; the fix also needed app/unrelated.py"
+            }
+            if ($sc -eq "max-cycles") {
+                if ($prompt -match 'INDEPENDENT RE-ANALYSIS') { Add-Content (Join-Path $cwd "docs/contract.md") "REANALYSED_ROOT_CAUSE"; return "FIXER_RESULT=READY`nFIXER_SUMMARY=re-analysed and fixed the root cause" }
+                Add-Content (Join-Path $cwd "docs/contract.md") "attempt $(Get-Random)"; return "FIXER_RESULT=READY`nFIXER_SUMMARY=attempt"
+            }
             Fx-Replace $cwd "docs/contract.md" "BUG_MARKER_GPT" "fixed-by-fixer"
             Fx-Replace $cwd "docs/contract.md" "BUG_MARKER_CLAUDE" "fixed-by-fixer"
             return "done`nFIXER_RESULT=READY`nFIXER_SUMMARY=removed marker"
@@ -648,7 +716,8 @@ $global:FxAi = {
                 $p = Join-Path $cwd "app/db/migrations/versions/0099_fix.py"
                 New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent) | Out-Null
                 Set-Content $p "rev = '0099'"
-                return "FIXER_RESULT=READY`nFIXER_SUMMARY=added migration"
+                Fx-Replace $cwd "docs/stale.md" "STALE_DOC_MARKER: endpoint adoption waits for new evidence" "adoption needs its own authorization"
+                return "FIXER_RESULT=READY`nFIXER_SUMMARY=fixed the stale condition; the fix needed a migration"
             }
             Fx-Replace $cwd "docs/stale.md" "STALE_DOC_MARKER: endpoint adoption waits for new evidence" "adoption needs its own authorization"
             Fx-Replace $cwd "docs/stale.md" "CLAUDE_ONLY_STALE ui ruling" "ui ruling aligned"
@@ -672,6 +741,10 @@ if ($Scenario -like "remediation-auth*") {
     $global:FxComments["777"] = @{ id = 777; user = @{ login = $login }; html_url = "https://github.com/fixture/icbm/issues/89#issuecomment-777"; body = "## Architect ruling`n**Exact canonical main:** ``$(Get-FxMain)```nR1 - fix docs/stale.md adoption wording only." }
     @{ main = (Get-FxMain); comment_id = 777; items = @("R1"); allowed_files = @("docs/stale.md") } |
         ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $hostDir "state\remediation-authorization.json")
+}
+
+if ($Scenario -eq "owner-hold") {
+    @{ reason = "owner placed a hold on this PR" } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $hostDir "state\merge-hold-pr-1.json")
 }
 
 $originMainBefore = Get-FxMain
@@ -698,6 +771,7 @@ try {
     $mfPath = Join-Path $hostDir "state\audit-sources-pr-1.json"
 
     if ($Scenario -eq "packet-reproducible") {
+        # Cited evidence only, deterministic, edit-aware, and never held by a marker or a missing classification.
         $skipOrch = $true
         $pkDir = Join-Path $hostDir "state\packets"
         $r1 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
@@ -708,65 +782,87 @@ try {
         $ptext = (New-Object System.Text.UTF8Encoding($false)).GetString($bytes)
         $idents = @([regex]::Matches($ptext, '(?m)^SOURCE=(\S+) ') | ForEach-Object { $_.Groups[1].Value })
         $global:FxChecks.complete_1 = Fx-Line $r1 "PACKET_COMPLETE"
-        $global:FxChecks.digest_1 = $d1
+        $global:FxChecks.hold_reasons_1 = Fx-Reason $r1
         $global:FxChecks.same_inputs_twice_same_digest = ($d1 -and $d1 -eq $d2)
         $global:FxChecks.write_1_2 = "$(Fx-Line $r1 'PACKET_WRITE')/$(Fx-Line $r2 'PACKET_WRITE')"
-        $global:FxChecks.packet_files_after_2_builds = $pk.Count
         $global:FxChecks.digest_is_sha256_of_packet_bytes = ((Fx-Sha $bytes) -eq $d1)
         $global:FxChecks.no_bom_no_cr = ($bytes[0] -ne 0xEF) -and (-not ($bytes -contains 13))
         $global:FxChecks.no_abs_path = (-not $ptext.Contains($hostDir)) -and (-not $ptext.Contains("C:\"))
         $global:FxChecks.no_watermark_or_updated_at_in_packet = (-not ($ptext -match 'watermark|updated_at|2026-09-28T00:00:00Z'))
-        $global:FxChecks.source_identities = $idents -join ' '
-        $global:FxChecks.each_section_once = (@($idents | Where-Object { ([regex]::Matches($ptext, [regex]::Escape("[SOURCE identity=$_ "))).Count -ne 1 -or ([regex]::Matches($ptext, [regex]::Escape("[/SOURCE identity=$_]"))).Count -ne 1 }).Count -eq 0) -and $idents.Count -eq 6
-        $global:FxChecks.required_line = ([regex]::Match($ptext, '(?m)^REQUIRED_SOURCES=.*$')).Value
-        $calls = @(Get-ChildItem (Join-Path $hostDir "logs") -Filter "pr-1-packet-call*-*.txt")
-        $global:FxChecks.call_files_have_digest_and_all_sources = ($calls.Count -gt 0) -and (@($calls | Where-Object { $ct = [System.IO.File]::ReadAllText($_.FullName); -not $ct.Contains("PACKET_DIGEST=$d1") -or @($idents | Where-Object { -not $ct.Contains("[SOURCE identity=$_ ") }).Count -gt 0 }).Count -eq 0)
+        # exactly the three cited sources, each once, all required; the legacy record and the uncited marker are not in it
+        $global:FxChecks.source_locators = (@($idents | ForEach-Object { ($_ -split '@')[0] }) -join ' ')
+        $global:FxChecks.each_section_once = (@($idents | Where-Object { ([regex]::Matches($ptext, [regex]::Escape("[SOURCE identity=$_ "))).Count -ne 1 -or ([regex]::Matches($ptext, [regex]::Escape("[/SOURCE identity=$_]"))).Count -ne 1 }).Count -eq 0)
+        $global:FxChecks.legacy_record_not_in_packet = (-not $ptext.Contains("100009300")) -and (-not $ptext.Contains("scope: PR #1"))
+        $global:FxChecks.uncited_marker_not_in_packet = (-not $ptext.Contains("100009004"))
+        # the baseline canon is the Host's: present at the base -> a source; absent -> named, never skipped
+        $global:FxChecks.baseline_absent_named = $ptext.Contains("BASELINE_CANON_ABSENT_AT_BASE=documents/roadmap/CURRENT-MILESTONE.md,documents/rules/07-execution-safety.md,documents/rules/14-operating-authority.md`n")
+        $pm = Get-Content (Get-ChildItem $pkDir -Filter "*$($d1.Substring(0,12)).manifest.json")[0].FullName -Raw | ConvertFrom-Json
+        $global:FxChecks.manifest_json_sources = @($pm.sources | ForEach-Object { "$($_.class):$($_.kind):$($_.origin)" }) -join ","
+        $global:FxChecks.manifest_json_required_count = @($pm.required).Count
+        $global:FxChecks.packet_format = $pm.packet_format
         $scan = Get-Content (Join-Path $pkDir "pr-1-head-$((Get-FxHead 1).Substring(0,12)).scan.json") -Raw | ConvertFrom-Json
-        $global:FxChecks.scan_provenance = (@($scan.streams | ForEach-Object { "$($_.stream)#$($_.items)@wm$($_.watermark_max_id)" }) -join ',')
-        $global:FxChecks.scan_has_updated_at = (@($scan.sources | Where-Object { $_.updated_at }).Count -gt 0)
-        # provenance-only changes: updated_at of a source, stream order and watermark in the manifest → same digest
-        $global:FxComments["9004"].updated_at = "2026-09-29T11:11:11Z"
-        $m2 = $global:FxManifest; $m2.designated_streams = @($m2.designated_streams[4], $m2.designated_streams[3], $m2.designated_streams[2], $m2.designated_streams[1], $m2.designated_streams[0]); $m2.designated_streams[0].watermark = 99999
-        $m2 | ConvertTo-Json -Depth 10 -Compress | Set-Content -Encoding utf8 $mfPath
+        $global:FxChecks.scanned_streams = (@($scan.streams | ForEach-Object { $_.stream }) -join ',')
+        $global:FxChecks.scan_unresolved = (@($scan.unresolved_references) -join ',')
+        $global:FxChecks.scan_marked_not_cited = (@($scan.marked_not_cited | ForEach-Object { $_.locator -replace '^github_issue_comment:', '' }) -join ',')
+        # provenance-only change: updated_at of a source → same digest
+        $global:FxComments["100009002"].updated_at = "2026-09-29T11:11:11Z"
         $r3 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.provenance_only_changes_same_digest = ((Fx-Line $r3 "PACKET_DIGEST") -eq $d1)
+        $global:FxChecks.provenance_only_change_same_digest = ((Fx-Line $r3 "PACKET_DIGEST") -eq $d1)
         # immutability: tamper → PACKET_IMMUTABILITY_VIOLATION
         [System.IO.File]::WriteAllBytes($pk[0].FullName, [byte[]]($bytes + [byte]0x78))
         $r4 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
         $global:FxChecks.tampered_rebuild = Fx-Line $r4 "AUDIT_BLOCKED"
         [System.IO.File]::WriteAllBytes($pk[0].FullName, $bytes)
-        # classified body edited (record not updated) → mapping no longer matches → HOLD
-        $orig9004 = $global:FxComments["9004"].body
-        Fx-SetBody 9004 "[EVIDENCE-PACKET]`nOptional background evidence (EDITED).`n"
+        # a CITED body edited → complete, NEW digest (no hold, nobody re-classifies anything)
+        $orig9002 = $global:FxComments["100009002"].body
+        Fx-SetBody 100009002 "Evidence E1 (EDITED).`n"
         $r5 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.classified_body_edit_hold = Fx-Reason $r5
-        # architect re-issues the record with the new body digest → clean packet with a NEW digest
-        $origRecord = $global:FxComments["9300"].body
-        Fx-SetBody 9300 (Fx-Record)
+        $d5 = Fx-Line $r5 "PACKET_DIGEST"
+        $global:FxChecks.cited_body_edit_new_digest = ((Fx-Line $r5 "PACKET_COMPLETE") -eq "True" -and $d5 -and $d5 -ne $d1 -and -not (Fx-Reason $r5))
+        Fx-SetBody 100009002 $orig9002
         $r6 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $d6 = Fx-Line $r6 "PACKET_DIGEST"
-        $global:FxChecks.reclassified_edit_new_digest = ((Fx-Line $r6 "PACKET_COMPLETE") -eq "True" -and $d6 -and $d6 -ne $d1)
-        # the classification record's own body edited (still valid) → record digest and packet digest change, no HOLD
-        Fx-SetBody 9300 (Fx-Record -Preamble "PR #1 fixture classification record (wording revised)")
+        $global:FxChecks.reverted_digest_equals_first = ((Fx-Line $r6 "PACKET_DIGEST") -eq $d1)
+        $global:FxChecks.reverted_write = Fx-Line $r6 "PACKET_WRITE"
+        # an UNCITED marked source edited, an old unmarked comment edited into a marker, a brand-new OWNER-AMENDMENT,
+        # the legacy record edited and then removed: all provenance → complete, the SAME digest, no hold
+        Fx-SetBody 100009004 "[EVIDENCE-PACKET]`nOptional background evidence (EDITED).`n"
+        Fx-SetBody 100009050 "[ARCHITECT-INSTRUCTION]`nold comment edited in place to add a marker`n"
+        Fx-C 100009005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009005
+        Fx-SetBody 100009300 (Fx-Record -Preamble "legacy record, edited" -ScopeLine "scope: PR #7")
         $r7 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $d7 = Fx-Line $r7 "PACKET_DIGEST"
-        $global:FxChecks.record_body_edit_new_digest = ((Fx-Line $r7 "PACKET_COMPLETE") -eq "True" -and $d7 -and $d7 -ne $d6 -and $d7 -ne $d1)
-        # revert everything → original digest, byte-identical existing packet
-        Fx-SetBody 9004 $orig9004; Fx-SetBody 9300 $origRecord
+        $global:FxChecks.markers_and_legacy_record_are_provenance = ((Fx-Line $r7 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r7 "PACKET_DIGEST") -eq $d1 -and -not (Fx-Reason $r7))
+        $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"] | Where-Object { $_ -ne 100009300 })
         $r8 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.reverted_digest_equals_first = ((Fx-Line $r8 "PACKET_DIGEST") -eq $d1)
-        $global:FxChecks.reverted_write = Fx-Line $r8 "PACKET_WRITE"
-        # old UNMARKED comment 9050 (created before every earlier scan) edited in place to add a marker → next generation HOLD
-        Fx-SetBody 9050 "[ARCHITECT-INSTRUCTION]`nold comment edited in place to add a marker`n"
+        $global:FxChecks.no_record_at_all_same_digest = ((Fx-Line $r8 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r8 "PACKET_DIGEST") -eq $d1)
+        $global:FxChecks.pointer_present = (Test-Path (Join-Path $pkDir "pr-1-head-$((Get-FxHead 1).Substring(0,12)).current"))
+        # the declaration cites one more source → it becomes a fourth required source, new digest
+        $global:FxIssueBodies["1"] = $global:FxPrBody + "Also: background ``100009004``.`n"
         $r9 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.old_unmarked_edited_to_marker = Fx-Reason $r9
-        $global:FxChecks.no_current_pointer_after_hold = (-not (Test-Path (Join-Path $pkDir "pr-1-head-$((Get-FxHead 1).Substring(0,12)).current")))
-        Fx-SetBody 9050 "old ordinary comment, created before any scan`n"
-        $global:FxChecks.packet_files_final = @(Get-ChildItem $pkDir -Filter "*.packet.txt").Count
-        $pm = Get-Content (Get-ChildItem $pkDir -Filter "*$($d1.Substring(0,12)).manifest.json")[0].FullName -Raw | ConvertFrom-Json
-        $global:FxChecks.manifest_json_sources = @($pm.sources | ForEach-Object { "$($_.class):$($_.kind):$($_.origin)" }) -join ","
-        $global:FxChecks.manifest_json_required_count = @($pm.required).Count
+        $global:FxChecks.new_citation_new_source = ((Fx-Line $r9 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r9 "PACKET_DIGEST") -ne $d1 -and @($r9 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count -eq 7)
+        $global:FxIssueBodies["1"] = $global:FxPrBody
+        # an optional host manifest that designates a stream the body already names changes no source
+        $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $mfPath
+        $r10 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.optional_manifest_same_sources = ((Fx-Line $r10 "PACKET_COMPLETE") -eq "True" -and (Fx-Line $r10 "PACKET_SOURCES_REQUIRED") -eq (Fx-Line $r1 "PACKET_SOURCES_REQUIRED"))
+        Remove-Item $mfPath -Force
         $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
+        $expected = [ordered]@{
+            complete_1 = "True"; hold_reasons_1 = ""; same_inputs_twice_same_digest = $true; write_1_2 = "WRITTEN/EXISTING_BYTE_IDENTICAL"
+            digest_is_sha256_of_packet_bytes = $true; no_bom_no_cr = $true; no_abs_path = $true; no_watermark_or_updated_at_in_packet = $true
+            source_locators = "git_blob:base:docs/contract.md git_blob:base:documents/roadmap/ROADMAP.md github_issue_comment:100009001 github_issue_comment:100009002 github_pr_body:1 github_pr_review:1/100009101"
+            each_section_once = $true; legacy_record_not_in_packet = $true; uncited_marker_not_in_packet = $true; baseline_absent_named = $true
+            manifest_json_sources = "required:CANON:referenced,required:CANON:baseline,required:ARCHITECT-INSTRUCTION:referenced,required:UNMARKED:referenced,required:UNMARKED:declaration,required:EVIDENCE-PACKET:referenced"
+            manifest_json_required_count = 6; packet_format = "icbm-audit-packet-v3"
+            scanned_streams = "issue_comments:1,issue_comments:89,pr_body:1,pr_review_comments:1,pr_reviews:1"
+            scan_unresolved = ""; scan_marked_not_cited = "100009300,100009004"
+            provenance_only_change_same_digest = $true; tampered_rebuild = "PACKET_IMMUTABILITY_VIOLATION"
+            cited_body_edit_new_digest = $true; reverted_digest_equals_first = $true; reverted_write = "EXISTING_BYTE_IDENTICAL"
+            markers_and_legacy_record_are_provenance = $true; no_record_at_all_same_digest = $true; pointer_present = $true
+            new_citation_new_source = $true; optional_manifest_same_sources = $true; ai_prompts = 0
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
     }
     if ($Scenario -eq "packet-many-files") {
         # Segmented packet: the full manifest sits once in the canonical packet; every audit call stays within the
@@ -812,66 +908,76 @@ try {
     }
 
     if ($Scenario -eq "packet-authority") {
+        # What can still stop a packet is technical only: an unreadable declaration or stream, a bad host manifest.
         $skipOrch = $true
-        $origRecord = $global:FxComments["9300"].body
-        function Fx-Try { param([string]$Body) Fx-SetBody 9300 $Body; $o = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }; Fx-SetBody 9300 $origRecord; $r = Fx-Reason $o; if (-not $r) { $r = "COMPLETE=$(Fx-Line $o 'PACKET_COMPLETE') digest=$((Fx-Line $o 'PACKET_DIGEST').Substring(0, [Math]::Min(12, (Fx-Line $o 'PACKET_DIGEST').Length)))" }; return $r }
-        $headSha = Get-FxHead 1
-        $blob = "$(& git --git-dir=$global:FxOrigin rev-parse "$($headSha):docs/contract.md" 2>$null)".Trim()
+        function Fx-Class { param($Out) return (@($Out | Where-Object { $_ -match '^HOLD_CLASS=' } | Select-Object -Unique) -join ';') }
         $base = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.a0_clean_with_grammar_negatives_in_stream = Fx-Line $base "PACKET_COMPLETE"
-        # a) host manifest may not classify
-        '{"pr":1,"designated_streams":[{"type":"issue_comments","issue":1}],"sources":[{"id":"x","kind":"EVIDENCE-PACKET","locator":{"type":"github_issue_comment","id":9005},"required":true}]}' | Set-Content -Encoding utf8 $mfPath
-        $global:FxChecks.a_host_manifest_classifies = Fx-Reason (Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true })
-        $global:FxManifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $mfPath
-        # b) new marked source without classification → HOLD; unchanged rerun → still HOLD (host cannot clear it)
-        Fx-C 9005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 9005
-        $global:FxChecks.b_unclassified = Fx-Reason (Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true })
-        $global:FxChecks.b_rerun_still_hold = Fx-Reason (Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true })
-        $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"] | Where-Object { $_ -ne 9005 })
-        # c) conflicting classifications across two records → HOLD
-        Fx-C 9301 ("[ARCHITECT-INSTRUCTION]`n`nsecond record`nscope: PR #1`n`nrequired:`n- issue-comment 9004 sha256 $(Fx-D $global:FxComments['9004'].body) — architect wants it required`n")
-        $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 9301
-        $global:FxChecks.c_conflict = Fx-Reason (Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true })
-        $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"] | Where-Object { $_ -ne 9301 })
-        # d) classified (unmarked) source body changed → digest mismatch → HOLD
-        $o9002 = $global:FxComments["9002"].body; Fx-SetBody 9002 "Evidence E1 silently edited.`n"
-        $global:FxChecks.d_classified_digest_changed = Fx-Reason (Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true })
-        Fx-SetBody 9002 $o9002
-        # e) required source that cannot be read → HOLD
-        $global:FxChecks.e_required_unreadable = Fx-Try ($origRecord.Replace("- pr-review 1/9101", "- issue-comment 9999 sha256 $('cd' * 32) — gone`n- pr-review 1/9101"))
-        # f) excluded entry without a reason → HOLD
-        $global:FxChecks.f_excluded_without_reason = Fx-Try ($origRecord.Replace("excluded: none. Any other marked source → HOLD.", "excluded:`n- issue-comment 9063 sha256 $(Fx-D $global:FxComments['9063'].body)"))
-        # --- B1: git sources are path-bound ---
-        $global:FxChecks.b1_path_bound_head_ok = Fx-Try (Fx-Record)
-        $global:FxChecks.b1_path_bound_commit_sha_ref_ok = Fx-Try (Fx-Record -GitLine "- git-blob $($headSha):docs/contract.md $blob")
-        $global:FxChecks.b1_wrong_path = Fx-Try (Fx-Record -GitLine "- git-blob HEAD:docs/no-such-file.md $blob")
-        $global:FxChecks.b1_blob_elsewhere_in_tree = Fx-Try (Fx-Record -GitLine "- git-blob HEAD:README.md $blob")
-        $global:FxChecks.b1_shorthand_at_base = Fx-Try (Fx-Record -GitLine "- git blobs at HEAD: contract.md $blob")
-        $global:FxChecks.b1_space_form = Fx-Try (Fx-Record -GitLine "- git blob HEAD:docs/contract.md $blob")
-        $global:FxChecks.b1_dotdot_path = Fx-Try (Fx-Record -GitLine "- git-blob HEAD:docs/../docs/contract.md $blob")
-        # --- B2: explicit scope line ---
-        $global:FxChecks.b2_scope_present = Fx-Try (Fx-Record)
-        $global:FxChecks.b2_scope_absent = Fx-Try (Fx-Record -ScopeLine "" -Preamble "PR #1 fixture classification record")
-        $global:FxChecks.b2_scope_other_pr = Fx-Try (Fx-Record -ScopeLine "scope: PR #7")
-        $global:FxChecks.b2_scope_two_lines = Fx-Try (Fx-Record -ScopeLine "scope: PR #1`nscope: PR #1")
-        $global:FxChecks.b2_scope_wrong_case = Fx-Try (Fx-Record -ScopeLine "Scope: PR #1")
-        $global:FxChecks.b2_scope_trailing_text = Fx-Try (Fx-Record -ScopeLine "scope: PR #1 and #2")
-        $global:FxChecks.b2_scope_after_sections = Fx-Try ((Fx-Record -ScopeLine "") + "scope: PR #1`n")
-        # --- B2: canonical typed entries only ---
-        $d9004 = Fx-D $global:FxComments['9004'].body
-        $global:FxChecks.b2_typed_issue_comment_ok = Fx-Try (Fx-Record)
-        $global:FxChecks.b2_untyped_id_hex = Fx-Try ($origRecord.Replace("- issue-comment 9004 sha256 $d9004 — background", "- 9004 $d9004 (background)"))
-        $global:FxChecks.b2_review_findings = Fx-Try ($origRecord.Replace("- issue-comment 9004 sha256 $d9004 — background", "- review findings 9004 $d9004"))
-        $global:FxChecks.b2_legacy_annotated_issue_comment = Fx-Try ($origRecord.Replace("- issue-comment 9004 sha256", "- issue-comment 9004 (#89) sha256"))
-        $global:FxChecks.b2_legacy_review_kind = Fx-Try ($origRecord.Replace("- pr-review 1/9101", "- review 1/9101"))
-        $global:FxChecks.b2_free_text_entry = Fx-Try (Fx-Record -Extra "- maybe also the design doc, probably")
-        $global:FxChecks.b2_pr_body_typed_ok = Fx-Try (Fx-Record -Extra "- pr-body 1 sha256 $(Fx-D $global:FxIssueBodies['1']) — PR description")
-        # j) no host manifest → the PR's own 4 streams are designated; typed issue-comments on #89 are read directly by locator
+        $global:FxChecks.a0_clean_with_grammar_negatives_and_markers_in_stream = Fx-Line $base "PACKET_COMPLETE"
+        # a) a host manifest that tries to classify → invalid manifest, a TECHNICAL_HOLD (never a classification)
+        '{"pr":1,"designated_streams":[{"type":"issue_comments","issue":1}],"sources":[{"id":"x","required":true}]}' | Set-Content -Encoding utf8 $mfPath
+        $ra = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.a_host_manifest_with_unknown_key = Fx-Reason $ra
+        $global:FxChecks.a_hold_class = Fx-Class $ra
         Remove-Item $mfPath -Force
-        $rj = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
-        $global:FxChecks.j_default_streams = (@($rj | Where-Object { $_ -match '^SCANNED_STREAM' }) -join ' | ')
-        $global:FxChecks.j_default_complete = Fx-Line $rj "PACKET_COMPLETE"
+        # b) a marked source nobody classified → no hold; unchanged rerun → the same clean digest
+        Fx-C 100009005 "[OWNER-AMENDMENT]`nnew amendment nobody classified`n"; $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009005
+        $rb = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.b_unclassified_marker_no_hold = "$(Fx-Line $rb 'PACKET_COMPLETE')/$(Fx-Reason $rb)/$((Fx-Line $rb 'PACKET_DIGEST') -eq (Fx-Line $base 'PACKET_DIGEST'))"
+        # c) a second legacy record that "conflicts" with the first → both are history, no hold
+        Fx-C 100009301 ("[ARCHITECT-INSTRUCTION]`n`nsecond record`nscope: PR #1`n`nrequired:`n- issue-comment 100009004 sha256 $(Fx-D $global:FxComments['100009004'].body) — architect wants it required`n")
+        $global:FxStreams["issue:1"] = @($global:FxStreams["issue:1"]) + 100009301
+        $rc = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.c_conflicting_legacy_records_no_hold = "$(Fx-Line $rc 'PACKET_COMPLETE')/$(Fx-Reason $rc)/$((Fx-Line $rc 'PACKET_DIGEST') -eq (Fx-Line $base 'PACKET_DIGEST'))"
+        # d) an unparseable legacy record → history, no hold
+        Fx-SetBody 100009300 "[OWNER-AMENDMENT]`nscope: PR #1`nrequired:`n- 100009004 deadbeef (untyped)`n- git blobs at base: CLAUDE.md abc`n"
+        $rd = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.d_unparseable_legacy_record_no_hold = "$(Fx-Line $rd 'PACKET_COMPLETE')/$(Fx-Reason $rd)"
+        # e) the declaration cites an id no scanned stream holds → declared evidence cannot be read: TECHNICAL_HOLD
+        $global:FxIssueBodies["1"] = $global:FxPrBody + "gone ``100009998``.`n"
+        $re = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.e_unresolved_citation_holds = "$(Fx-Reason $re)/$(Fx-Class $re)/digest=$(Fx-Line $re 'PACKET_DIGEST')"
+        # e2) a cited source deleted after it was cited → the same hold, never a silently smaller packet
+        $global:FxIssueBodies["1"] = $global:FxPrBody
+        $kept = $global:FxStreams["issue:89"]; $global:FxStreams["issue:89"] = @($kept | Where-Object { $_ -ne 100009002 })
+        $re2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.e2_deleted_cited_source_holds = "$(Fx-Reason $re2)/$(Fx-Class $re2)"
+        $global:FxStreams["issue:89"] = $kept
+        # f) the declaration cites evidence of an issue it does not name → that stream is not scanned, the citation
+        #    is unresolved and holds; naming the issue is what makes it readable
+        $global:FxIssueBodies["1"] = "fixture PR body`n`nSources: ``100009001``, ``100009002``, ``review:100009101``.`n"
+        $rf = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.f_streams_without_issue_reference = (@($rf | Where-Object { $_ -match 'SCANNED_STREAM' } | ForEach-Object { ([regex]::Match($_, 'SCANNED_STREAM\s*:\s*(\S+)')).Groups[1].Value }) -join ',')
+        $global:FxChecks.f_unnamed_issue_citation_holds = Fx-Reason $rf
+        # f2) numbers outside a code span are not citations
+        $global:FxIssueBodies["1"] = $global:FxPrBody + "run 100009998 and 36699770595, 100009004 too.`n"
+        $rf2 = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.f2_bare_numbers_are_not_citations = "$(Fx-Line $rf2 'PACKET_COMPLETE')/$((Fx-Line $rf2 'PACKET_DIGEST') -ne (Fx-Line $base 'PACKET_DIGEST'))/$(@($rf2 | Where-Object { $_ -match '^PACKET_SOURCE=' }).Count)"
+        $global:FxIssueBodies["1"] = $global:FxPrBody
+        # g) unreadable / truncated streams → TECHNICAL_HOLD, never a partial scan
+        $global:FxStreamFail["issue:89"] = "page"
+        $rg = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.g_stream_page_fail = "$(Fx-Reason $rg)/$(Fx-Class $rg)"
+        $global:FxStreamFail.Remove("issue:89"); $global:FxStreamFail["issue:1"] = "truncate"
+        $rh = Fx-RunAudit @{ PrNumber = 1; PacketOnly = $true }
+        $global:FxChecks.h_stream_truncated = "$(Fx-Reason $rh)/$(Fx-Class $rh)"
+        $global:FxStreamFail.Remove("issue:1")
         $global:FxChecks.ai_prompts = @(Get-ChildItem $promptDir).Count
+        $expected = [ordered]@{
+            a0_clean_with_grammar_negatives_and_markers_in_stream = "True"
+            a_host_manifest_with_unknown_key = "SOURCE_MANIFEST_INVALID:UNKNOWN_KEY:sources"; a_hold_class = "HOLD_CLASS=TECHNICAL_HOLD"
+            b_unclassified_marker_no_hold = "True//True"; c_conflicting_legacy_records_no_hold = "True//True"
+            d_unparseable_legacy_record_no_hold = "True/"
+            e_unresolved_citation_holds = "CITED_SOURCE_UNRESOLVED:100009998/HOLD_CLASS=TECHNICAL_HOLD/digest="
+            e2_deleted_cited_source_holds = "CITED_SOURCE_UNRESOLVED:100009002/HOLD_CLASS=TECHNICAL_HOLD"
+            f_streams_without_issue_reference = "issue_comments:1,pr_body:1,pr_review_comments:1,pr_reviews:1"
+            f_unnamed_issue_citation_holds = "CITED_SOURCE_UNRESOLVED:100009002"
+            f2_bare_numbers_are_not_citations = "True/True/6"
+            g_stream_page_fail = "STREAM_UNREADABLE:issue_comments:89/HOLD_CLASS=TECHNICAL_HOLD"
+            h_stream_truncated = "STREAM_TRUNCATED:issue_comments:1/HOLD_CLASS=TECHNICAL_HOLD"; ai_prompts = 0
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
     }
     if ($Scenario -eq "authority-unit") {
         $skipOrch = $true
@@ -907,7 +1013,7 @@ try {
         $cases = [ordered]@{
             pr_comment_new_marked = @("pr", "comment", "1", "--repo", "fixture/icbm", "--body", "[ARCHITECT-INSTRUCTION]`nnew")
             issue_comment_body_file_marked = @("issue", "comment", "1", "--repo", "fixture/icbm", "--body-file", $draft)
-            api_patch_edit_unmarked_to_marked = @("api", "-X", "PATCH", "repos/fixture/icbm/issues/comments/9050", "-f", "body=[ARCHITECT-INSTRUCTION]`nedited")
+            api_patch_edit_unmarked_to_marked = @("api", "-X", "PATCH", "repos/fixture/icbm/issues/comments/100009050", "-f", "body=[ARCHITECT-INSTRUCTION]`nedited")
             pr_edit_body_marked = @("pr", "edit", "1", "--repo", "fixture/icbm", "--body-file", $draft)
             pr_create_marked = @("pr", "create", "--repo", "fixture/icbm", "--base", "main", "--head", "x", "--title", "t", "--body-file", $draft)
             api_review_field_file = @("api", "-X", "POST", "repos/fixture/icbm/pulls/1/reviews", "-F", "body=@$draft")
@@ -917,7 +1023,7 @@ try {
         }
         $allowed = [ordered]@{
             pr_comment_unmarked = @("pr", "comment", "1", "--repo", "fixture/icbm", "--body-file", $unmarked)
-            api_patch_unmarked = @("api", "-X", "PATCH", "repos/fixture/icbm/issues/comments/9050", "-f", "body=plain status update")
+            api_patch_unmarked = @("api", "-X", "PATCH", "repos/fixture/icbm/issues/comments/100009050", "-f", "body=plain status update")
             pr_ready_no_body = @("pr", "ready", "1", "--repo", "fixture/icbm")
         }
         $refusedOk = New-Object System.Collections.Generic.List[string]
@@ -939,6 +1045,36 @@ try {
         $global:FxChecks.guard_allowed = $allowedOk -join ' | '
         $global:FxChecks.guard_allowed_sent = (@($allowedOk | Where-Object { $_ -notmatch 'refused:False/requests_sent:1$' }).Count -eq 0)
         $global:FxChecks.local_draft_written = (Test-Path $draft) -and ([System.IO.File]::ReadAllText($draft).Contains("[OWNER-AMENDMENT]"))
+        # hold taxonomy (§5.1): the class comes from the category, and only the closed list is the user's
+        $human = @("GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE", "CLAUDE_HUMAN_DECISION_REQUIRED_COST", "NEXT_HOLD_NEW_PRODUCT_FEATURE", "NEXT_HOLD_PRODUCT_DIRECTION_UNDECIDED", "NEXT_HOLD_BEYOND_USER_REQUIREMENT", "NEXT_HOLD_LIVE", "NEXT_HOLD_SUPPLIER_ORDER", "NEXT_HOLD_RESIDUAL_RISK_APPROVAL", "NEXT_HOLD_COST", "NEXT_HOLD_EXTERNAL_DATA_TRANSFER", "NEXT_HOLD_DESTRUCTIVE", "PR_ON_OWNER_HOLD", "GUARD_PR_ON_OWNER_HOLD", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_LIVE", "REPAIR_IMPLEMENTER_HUMAN_DECISION_REQUIRED_DESTRUCTIVE", "LIVE")
+        $technical = @("GPT_HUMAN_DECISION_REQUIRED", "HUMAN_DECISION_REQUIRED", "CLAUDE_HUMAN_DECISION_WITHOUT_CATEGORY", "REPAIR_FIXER_DECLINED_WITHOUT_A_HUMAN_CATEGORY", "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998", "AUDIT_BLOCKED_UNCLASSIFIED_MARKED_SOURCE:1", "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:1", "GPT_INSUFFICIENT", "GPT_HOLD", "CLAUDE_HOLD", "REPAIR_MAX_REPAIR_CYCLES", "REPAIR_SCOPE_EXPANSION_REQUIRED", "REPAIR_NEW_SCHEMA_OR_MIGRATION_REQUIRED", "REPAIR_MAIN_MOVED_DURING_FIX", "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED", "NEXT_HOLD_ARCHITECTURE_OR_POLICY", "NEXT_HOLD_NEXT_UNCLEAR", "NEXT_HOLD_ROADMAP_ADR_CONFLICT", "NEXT_HOLD_USER_JUDGMENT", "NEXT_HOLD_PROVIDER_CALL", "NEXT_HOLD_CANARY", "NEXT_HOLD_REAL_EXTERNAL_READ", "CI_FAILED", "BASE_SYNC_FAILED", "GUARD_NOT_MERGEABLE_CONFLICTING", "POST_MERGE_TREE_MISMATCH", "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD", "DELIVERY_FAILED", "OLIVE_BRANCH", "MAX_WAIT_TIME_REACHED", "NO_LIVE_ACTION", "NEXT_HOLD_NOT_LIVE", "NEXT_HOLD_NO_PROVIDER_CALL", "LIVE_CHECK_FAILED", "COST_ESTIMATE_UNREADABLE", "AUDIT_BLOCKED_STREAM_UNREADABLE:LIVE", "GPT_HUMAN_DECISION_REQUIRED_LIVE_MAYBE", "next_hold_live", "PR_ON_OWNER_HOLD_CLEARED", "X PR_ON_OWNER_HOLD", "LIVE ", "OWNER_HOLD", "NEXT_HOLD_OWNER_HOLD", "GPT_HUMAN_DECISION_REQUIRED_OWNER_HOLD", "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_OWNER_HOLD", "")
+        $global:FxChecks.taxonomy_human_all = (@($human | Where-Object { (Get-HoldClass $_) -ne "HUMAN_DECISION_REQUIRED" }) -join ',')
+        $global:FxChecks.taxonomy_technical_all = (@($technical | Where-Object { (Get-HoldClass $_) -ne "TECHNICAL_HOLD" }) -join ',')
+        # citation grammar: "Issue #n" names a stream; a citation is a 9-12 digit id INSIDE a code span. A bare id, a CI
+        # run number, a hash, a shorter or longer number, a doubled code span and a lower-case "issue" are not citations.
+        $refs = Get-EvidenceReferences "Authority (Issue #126, Issue #89): ``5906290729``, ``5907009512`` and bare 5909188774. PR #160, issue #7 lower-case, run 36699770595, ``36699770595x``, ``12345678``, ``1234567890123``, ``bb9906ccd61c``, ````5906712259````."
+        $global:FxChecks.citation_issues = $refs.Issues -join ','
+        $global:FxChecks.citation_ids = $refs.Ids -join ','
+        # a citation names its kind; the key a source must match is "<kind>:<id>", never the id alone
+        $typed = Get-EvidenceReferences "``100009001``, ``review:100009101``, ``review-comment:100009201``, ``Review:100009102``, ``review:12345678``, ``comment:100009003``, review:100009104 bare."
+        $global:FxChecks.citation_keys = $typed.Keys -join ','
+        $canon = Get-EvidenceReferences "``canon:documents/decisions/adr/0019-x.md``, ``canon:CLAUDE.md``, ``canon:../secret``, ``canon:a/../b``, ``canon:/abs``, ``canon:dir/``, ``canon:a b.md``, ``Canon:docs/x.md``, canon:docs/bare.md, ``documents/plain.md``."
+        $global:FxChecks.citation_canon = $canon.Canon -join ','
+        $global:FxChecks.baseline_canon = (Get-BaselineCanon) -join ','
+        $global:FxChecks.category_at_start = (@("NEW_PRODUCT_FEATURE: x", "[LIVE] y", "SUPPLIER_ORDER: z", "COST", "  PROVIDER_CALL - z") | ForEach-Object { Get-HumanDecisionCategory $_ }) -join ','
+        $global:FxChecks.category_absent = (@("the diff needs a decision", "maybe LIVE later", "OWNER_HOLD: not an auditor's", "new_product_feature: lower", "") | ForEach-Object { "[$(Get-HumanDecisionCategory $_)]" }) -join ''
+        $expected = [ordered]@{
+            grammar_positive_all_marked = $true; grammar_negative_all_unmarked = $true; guard_all_refused_zero_requests = $true
+            guard_allowed_sent = $true; local_draft_written = $true; taxonomy_human_all = ""; taxonomy_technical_all = ""
+            citation_issues = "89,126"; citation_ids = "5906290729,5907009512"
+            citation_keys = "github_issue_comment:100009001,github_pr_review:100009101,github_pr_review_comment:100009201"
+            citation_canon = "CLAUDE.md,documents/decisions/adr/0019-x.md"
+            baseline_canon = "documents/roadmap/ROADMAP.md,documents/roadmap/CURRENT-MILESTONE.md,documents/rules/07-execution-safety.md,documents/rules/14-operating-authority.md"
+            category_at_start = "NEW_PRODUCT_FEATURE,LIVE,SUPPLIER_ORDER,COST,"; category_absent = "[][][][][]"
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
     }
     if ($Scenario -eq "packet-blocker-no-cache") {
         $b1 = Fx-RunAudit @{ PrNumber = 1; SkipCiGate = $true }
@@ -999,16 +1135,33 @@ try {
             $p1.labels = @(); $p1.state = "CLOSED"
             $global:FxChecks.v7_closed_same_slice_inactive_proceeds = Fx-Hold (Fx-Repair @{ ImplementNext = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            $dup = "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#1"
+            $expected = [ordered]@{
+                v1_branch_and_body_older_main = $dup; v1_implementer_prompts = 0; v2_body_only = $dup; v3_registry_only = $dup
+                v4_same_slice_other_base = "REPAIR_HOLD=SAME_SLICE_PR_OTHER_BASE:#1"; v5_open_pr_list_unreadable = "REPAIR_HOLD=OPEN_PR_LIST_UNREADABLE"
+                pr_creates_before_superseded = 0; v6_superseded_label_still_active = $dup; pr_creates_after_label = 0
+                v7_closed_same_slice_inactive_proceeds = "NEXT_PR=3"; pr_creates_total = 1
+            }
+            $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+            $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
         if ($Scenario -eq "i2-dup-legacy") {
             # same fixture against the frozen pre-alignment host: shows the real #142 → #146 duplicate
             $global:FxChecks.v1_branch_and_body_older_main = Fx-Hold (Fx-Repair @{ ImplementNext = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            # against this host the duplicate is refused; the frozen pre-alignment host is given with -SrcHost
+            $ok = ($global:FxChecks.v1_branch_and_body_older_main -eq "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#1" -and $global:FxChecks.pr_creates_total -eq 0)
+            $global:FxChecks.expect = if ($ok) { "PASS" } else { "FAIL:v1_branch_and_body_older_main" }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
         if ($Scenario -eq "i2-remediation") {
             [ordered]@{ main = $newMain; status = "BLOCKED"; policy = "full-audit-fx"; mode = "FULL" } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $hostDir "state\full-audit-state.json")
             $global:FxChecks.remediation_open_on_older_main = Fx-Hold (Fx-Repair @{ RemediateMain = $true })
             $global:FxChecks.pr_creates_total = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+            $ok = ($global:FxChecks.remediation_open_on_older_main -eq "REPAIR_HOLD=DUPLICATE_ACTIVE_SLICE_PR:#2" -and $global:FxChecks.pr_creates_total -eq 0)
+            $global:FxChecks.expect = if ($ok) { "PASS" } else { "FAIL:remediation_open_on_older_main" }
+            Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
         }
     }
     if ($skipOrch) {
@@ -1059,6 +1212,112 @@ $runtimePath = Join-Path $hostDir "state\orchestrator-runtime.json"
 $runtime = if (Test-Path $runtimePath) { Get-Content $runtimePath -Raw -Encoding utf8 | ConvertFrom-Json } else { [pscustomobject]@{ status = "NONE"; action = "NONE"; current_pr = 0; auto_merge = $null; detail = "" } }
 $stDir = Join-Path $hostDir "state"
 
+# Pinned expectations (protocol §9 regression scenarios). A scenario listed here must end exactly like this.
+#   status / action : the runtime state the run ended in          merged : merged PRs
+#   human           : whether the run ended waiting for the user   gpt    : GPT exact-head audit prompts
+#   fixer / created / sync / merge_calls : counts of those calls   lines  : transcript lines that must exist
+$orchestratorExpect = @{
+    "automerge-success"       = @{ status = "COMPLETE"; action = "ROADMAP_COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1; lines = @("POST_MERGE_VERIFY=PASS", "MERGE_GUARD=MERGE (ALL_CHECKS_PASSED)", "GUARD_BEHIND_BY=0") }
+    "gpt-loop"                = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; fixer = 1; merge_calls = 1 }
+    "claude-loop"             = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; fixer = 1; merge_calls = 1 }
+    "max-cycles"              = @{ status = "COMPLETE"; merged = 1; human = $false; fixer = 4; merge_calls = 1; lines = @("REPAIR_MODE=INDEPENDENT_REANALYSIS") }
+    "auto-next"               = @{ status = "COMPLETE"; action = "ROADMAP_COMPLETE"; merged = 2; human = $false; created = 1; merge_calls = 2 }
+    "auto-next-track"         = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1 }
+    "auto-next-human"         = @{ status = "HUMAN_DECISION_REQUIRED"; action = "NEXT_HOLD_NEW_PRODUCT_FEATURE"; merged = 1; human = $true; created = 0 }
+    "auto-next-live"          = @{ status = "HUMAN_DECISION_REQUIRED"; action = "NEXT_HOLD_LIVE"; merged = 1; human = $true; created = 0 }
+    "auto-next-hold"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "NEXT_HOLD_SEPARATE_AUTHORIZATION_REQUIRED"; merged = 1; human = $false; created = 0 }
+    "gpt-human"               = @{ status = "HUMAN_DECISION_REQUIRED"; action = "GPT_HUMAN_DECISION_REQUIRED_NEW_PRODUCT_FEATURE"; merged = 0; human = $true; fixer = 0; merge_calls = 0 }
+    "gpt-human-uncategorised" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; fixer = 0; merge_calls = 0 }
+    "fixer-human"             = @{ status = "HUMAN_DECISION_REQUIRED"; action = "REPAIR_FIXER_HUMAN_DECISION_REQUIRED_PRODUCT_DIRECTION_UNDECIDED"; merged = 0; human = $true; merge_calls = 0 }
+    "claude-blocker-hold"     = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REPAIR_FIXER_DECLINED_LEGACY_HUMAN_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "gpt-insufficient"        = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_INSUFFICIENT"; merged = 0; human = $false; gpt = 3; merge_calls = 0 }
+    "owner-hold"              = @{ status = "HUMAN_DECISION_REQUIRED"; action = "PR_ON_OWNER_HOLD"; merged = 0; human = $true; gpt = 0; merge_calls = 0 }
+    "guard-head-moved"        = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; merge_calls = 1; lines = @("MERGE_GUARD=RELOOP (HEAD_MOVED_AFTER_AUDIT)") }
+    "guard-main-moved"        = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; sync = 1; merge_calls = 1; lines = @("MERGE_GUARD=RELOOP (MAIN_MOVED_AFTER_AUDIT)") }
+    "behind-base"             = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; sync = 1; merge_calls = 1; lines = @("BASE_SYNC=PR_HEAD_BEHIND_MAIN_BY_1") }
+    "merge-sha-mismatch"      = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; merge_calls = 2 }
+    "packet-unclassified"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-no-record"        = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-edit-to-marker"   = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-record-edit-guard" = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-clsedit"          = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; merge_calls = 1; lines = @("MERGE_GUARD=RELOOP (PACKET_DIGEST_CHANGED_AFTER_AUDIT)") }
+    "packet-cite-added"       = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 2; merge_calls = 1; lines = @("MERGE_GUARD=RELOOP (PACKET_DIGEST_CHANGED_AFTER_AUDIT)") }
+    "packet-stream-page-fail" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:issue_comments:89"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "post-merge-remediation"  = @{ status = "COMPLETE"; human = $false; created = 1 }
+    "ci-flaky"                = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "ci-hard-fail"            = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "CI_FAILED"; merged = 0; human = $false; merge_calls = 0 }
+    "guard-ci-pending"        = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "unmergeable"             = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GUARD_NOT_MERGEABLE_CONFLICTING"; merged = 0; human = $false; merge_calls = 0 }
+    "post-merge-tree-mismatch" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "POST_MERGE_TREE_MISMATCH"; human = $false; lines = @("POST_MERGE_VERIFY=FAIL") }
+    "scope-expansion"         = @{ status = "COMPLETE"; merged = 1; human = $false; fixer = 1; merge_calls = 1; lines = @("SCOPE_WIDENED=app/unrelated.py") }
+    "remediation-migration-hold" = @{ status = "COMPLETE"; human = $false; created = 1; lines = @("SCHEMA_OR_MIGRATION=app/db/migrations/versions/0099_fix.py") }
+    "big-pr"                  = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "draft-pr"                = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "two-merges-adr"          = @{ status = "COMPLETE"; merged = 2; human = $false }
+    "packet-legacy-cache"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-blocker-no-cache" = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "auto-next-scope"         = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1; lines = @("SCOPE_WIDENED=app/unrelated.py") }
+    "remediation-open-pr-guard" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_OPEN_PR_ALREADY_EXISTS"; merged = 1; human = $false; created = 0 }
+    "remediation-authorized"  = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1 }
+    "remediation-authorized-scope" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_SCOPE_OUTSIDE_THE_RULING"; merged = 1; human = $false; created = 0; lines = @("OUT_OF_AUTHORIZATION=app/unrelated.py") }
+    "remediation-auth-invalid" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "REMEDIATION_REMEDIATION_AUTHORIZATION_INVALID"; merged = 1; human = $false; created = 0 }
+    "remediation-claude-only" = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1 }
+    "remediation-fallback"    = @{ status = "COMPLETE"; merged = 2; human = $false; created = 1; lines = @("(REMEDIATION_REGISTRY)") }
+    "auto-next-disputed"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "NEXT_HOLD_NEXT_SELECTION_DISPUTED"; merged = 1; human = $false; created = 0 }
+    "two-merges"              = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("AUDIT_MODE=DELTA") }
+    "two-merges-milestone"    = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=MILESTONE_BOUNDARY:M5->M6") }
+    "two-merges-periodic"     = @{ status = "COMPLETE"; merged = 2; human = $false }
+    "two-merges-escalate"     = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=ESCALATED:GPT_DELTA_CROSS_CUTTING") }
+    "two-merges-insufficient" = @{ status = "COMPLETE"; merged = 2; human = $false; lines = @("FULL_AUDIT_REASON=ESCALATED:GPT_DELTA_INSUFFICIENT") }
+    "guard-ci-failed"         = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "packet-evidence-omit"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-omit-claude"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "CLAUDE_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-evwrong"          = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-evidence-idonly"  = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "GPT_HOLD"; merged = 0; human = $false; merge_calls = 0 }
+    "packet-source-missing"   = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009998"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-canon-missing"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:canon:docs/no-such-contract.md"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-citation-kind"    = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_CITED_SOURCE_UNRESOLVED:100009101"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-guard-digest"     = @{ status = "COMPLETE"; merged = 1; human = $false; gpt = 1; merge_calls = 1 }
+    "packet-stream-perm"      = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_UNREADABLE:pr_reviews:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-stream-truncated" = @{ status = "TECHNICAL_HOLD_EXHAUSTED"; action = "AUDIT_BLOCKED_STREAM_TRUNCATED:issue_comments:1"; merged = 0; human = $false; gpt = 0; merge_calls = 0 }
+    "packet-big"              = @{ status = "COMPLETE"; merged = 1; human = $false; merge_calls = 1 }
+    "config-no-automerge"     = @{ status = "WAITING_FOR_MERGE_BY_CONFIG"; action = "DUAL_PASS_COMPLETE"; merged = 0; human = $false; merge_calls = 0 }
+    "config-no-autonext"      = @{ status = "IDLE"; action = "AUTO_NEXT_DISABLED_BY_CONFIG"; merged = 1; human = $false; created = 0 }
+}
+
+if ($orchestratorExpect.ContainsKey($Scenario)) {
+    $e = $orchestratorExpect[$Scenario]
+    $logText = Get-Content $transcript -Raw
+    # the recorded class is one of exactly two, whatever the status: an exhausted technical hold is a TECHNICAL_HOLD
+    $wantClass = switch ("$($runtime.status)") { "HUMAN_DECISION_REQUIRED" { "HUMAN_DECISION_REQUIRED" } "TECHNICAL_HOLD" { "TECHNICAL_HOLD" } "TECHNICAL_HOLD_EXHAUSTED" { "TECHNICAL_HOLD" } default { "NONE" } }
+    $actual = @{
+        status = "$($runtime.status)"
+        action = "$($runtime.action)"
+        merged = @($global:FxPrs.Values | Where-Object { $_.state -eq "MERGED" }).Count
+        human = ("$($runtime.status)" -eq "HUMAN_DECISION_REQUIRED")
+        gpt = @(Get-ChildItem $promptDir -Filter "*-gpt-pr.txt").Count
+        fixer = @(Get-ChildItem $promptDir -Filter "*-fixer-pr.txt").Count
+        created = @($global:FxCalls | Where-Object { $_ -like "PR_CREATE*" }).Count
+        sync = @($global:FxCalls | Where-Object { $_ -like "UPDATE_BRANCH*" }).Count
+        merge_calls = @($global:FxCalls | Where-Object { $_ -like "MERGE_CALL*" }).Count
+    }
+    $failed = New-Object System.Collections.Generic.List[string]
+    foreach ($k in $e.Keys) {
+        if ($k -eq "lines") {
+            foreach ($l in $e.lines) { if (-not $logText.Contains($l)) { $failed.Add("line:$l") } }
+        }
+        elseif ("$($actual[$k])" -ne "$($e[$k])") { $failed.Add("$k=$($actual[$k])(want $($e[$k]))") }
+    }
+    # invariants of every control-loop scenario: no forbidden GitHub write, the user's repository untouched,
+    # and a run never waits for the user unless the scenario says so
+    if (@($global:FxCalls | Where-Object { $_ -like "FORBIDDEN*" -or $_ -like "UNHANDLED*" }).Count -gt 0) { $failed.Add("forbidden_or_unhandled_gh_call") }
+    if (($before | ConvertTo-Json) -ne ($after | ConvertTo-Json)) { $failed.Add("user_repo_changed") }
+    if ($logText -match '(?m)^HUMAN_HOLD=') { $failed.Add("legacy_HUMAN_HOLD_line") }
+    if ("$($runtime.hold_class)" -ne $wantClass) { $failed.Add("hold_class=$($runtime.hold_class)(want $wantClass)") }
+    $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ";") }
+    Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
+}
+
 $result = [ordered]@{
     scenario = $Scenario
     runtime_status = $runtime.status
@@ -1090,7 +1349,7 @@ $result = [ordered]@{
     verdict_files = @(Get-ChildItem $stDir -Filter "*-pkt-*" | Where-Object { $_.Name -notmatch '-call\d+\.txt$' } | ForEach-Object { "$($_.Name): " + (@(Select-String -Path $_.FullName -Pattern '^(VERDICT|PACKET_DIGEST|EVIDENCE_SEEN|EVIDENCE_COVERED)=' | ForEach-Object { $_.Line }) -join ' ') })
     hold_files = @(Get-ChildItem $stDir -Filter "*packet-hold*" | ForEach-Object { "$($_.Name): " + (@(Select-String -Path $_.FullName -Pattern '^(VERDICT|SUMMARY)=' | ForEach-Object { $_.Line }) -join ' ') })
     legacy_named_verdicts = @(Get-ChildItem $stDir -Filter "packet-v*-head-*" | Where-Object { $_.Name -notmatch '-pkt-' } | ForEach-Object { $_.Name })
-    key_lines = @(Select-String -Path $transcript -Pattern '^(AUDIT_BLOCKED|AUDIT_HOLD|HUMAN_HOLD|MERGE_GUARD|GUARD_PACKET_DIGEST|GUARD_CURRENT_PACKET_DIGEST|AUDIT_CACHE|GPT_CACHE|CLAUDE_CACHE|PACKET_DIGEST|AUDIT_IDENTITY|GPT_EVIDENCE_SEEN|CLAUDE_EVIDENCE_SEEN|PACKET_HOLD_REASON)=' | ForEach-Object { $_.Line } | Select-Object -Unique)
+    key_lines = @(Select-String -Path $transcript -Pattern '^(AUDIT_BLOCKED|AUDIT_HOLD|HOLD_CLASS|HUMAN_DECISION_REQUIRED|TECHNICAL_HOLD|SUPERVISOR|BASE_SYNC|POST_MERGE_VERIFY|MERGE_GUARD|GUARD_PACKET_DIGEST|GUARD_CURRENT_PACKET_DIGEST|AUDIT_CACHE|GPT_CACHE|CLAUDE_CACHE|PACKET_DIGEST|AUDIT_IDENTITY|GPT_EVIDENCE_SEEN|CLAUDE_EVIDENCE_SEEN|PACKET_HOLD_REASON)=' | ForEach-Object { $_.Line } | Select-Object -Unique)
     prompt_source_sections = @(Get-ChildItem $promptDir -Filter "*-pr.txt" | ForEach-Object { $pt = [System.IO.File]::ReadAllText($_.FullName); "$($_.Name):sections=$([regex]::Matches($pt, '(?m)^\[(ARCHITECT-INSTRUCTION|EVIDENCE-PACKET|OWNER-AMENDMENT) id=').Count):closers=$([regex]::Matches($pt, '(?m)^\[/(ARCHITECT-INSTRUCTION|EVIDENCE-PACKET|OWNER-AMENDMENT)\]').Count):call=$([regex]::Match($pt, '(?m)^AUDIT_CALL=(\S+)').Groups[1].Value)" })
     checks = $global:FxChecks
     log = $transcript

@@ -77,6 +77,11 @@ def durable_unit(api: TestClient, container: Container, config: AppConfig) -> di
     """One authored preparation of one priced, image-selected M4 Item under durable owners."""
     account = establish(container, config, MARKET, f"provider-{uuid.uuid4().hex[:8]}")
     save_policy(api, account)
+    # The saved policy requires duplicate proof, so the mutation-stage candidate reads the
+    # provider-neutral duplicate-evidence seam (5915900049 D4); no provider lookup is adopted.
+    from tests.support.register_support import FakeDuplicateLookup
+
+    container.registration_preparations._duplicate_lookup = FakeDuplicateLookup()
     record_reviewed_metadata(api)
     run_id, revision = Collections.of(container, config).collect(
         product(), source_product_id="1234"
@@ -122,7 +127,7 @@ def live(container: Container) -> LiveAuthorityStore:
 
 def asset_grant(container: Container, unit: dict[str, str]) -> tuple[str, Any]:
     """An ASSET grant bound to the unit's current candidate, recorded directly by the owner."""
-    candidate = container.registration_preparations.evaluate(unit["preparation_id"])
+    candidate = container.registration_preparations.stage_candidate(unit["preparation_id"])
     preparation = container.registrations.preparation(unit["preparation_id"])
     assert preparation is not None
     artifacts = [
@@ -466,7 +471,7 @@ def test_a_create_drill_proves_the_register_chain_after_the_freeze(
     assert preparation is not None
     now = container.clock.now()
     with live(container).transaction() as store:
-        candidate = container.registration_preparations.evaluate(unit["preparation_id"])
+        candidate = container.registration_preparations.stage_candidate(unit["preparation_id"])
         late = store.issue_asset_grant(
             marketplace_key=unit["market"],
             marketplace_account_id=unit["account"],
