@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 from app.capabilities.live_safety import model as live_model
 from app.capabilities.live_safety.assets import PreparationCandidateGate
-from app.capabilities.live_safety.model import MutationRefused
+from app.capabilities.live_safety.model import MutationRefused, MutationStage
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.interface import cli
@@ -37,6 +37,7 @@ from tests.integration.live_safety.test_g3b_restore_retention import (  # noqa: 
     container,
     durable_unit,
     frozen_unit,
+    proofs,
 )
 from tests.support.gate1_support import OPERATOR
 
@@ -100,6 +101,9 @@ def test_every_operator_command_is_an_owning_live_command() -> None:
         ("live", "issue-create-grant"),
         ("live", "release-brake"),
         ("live", "engage-brake"),
+        ("live", "restore-drill-asset"),
+        ("live", "restore-drill-create"),
+        ("live", "prove-retention"),
     }
     # They hold the data directory like every other writer; none is classified read-only.
     assert commands <= set(cli.OWNING_COMMANDS)
@@ -442,3 +446,106 @@ def test_the_grants_are_issued_by_the_authority_and_the_stack_still_refuses(
     spent = served.live_authority.grant_record(create["grant_id"])
     assert spent is not None and spent.budget_used == 0
     assert served.registrations.attempts(intent.intent_id) == ()
+
+
+# ---------------------------------------------------------------- the two local proofs (§7, §8)
+
+
+def test_the_retention_proof_is_recorded_by_its_owner_and_inspect_reads_it(
+    fresh: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, shown, _ = _run(capsys, "inspect")
+    assert code == 0 and shown["live"]["proofs"]["evidence_retention_ready"] is False
+    code, proved, err = _run(capsys, "prove-retention", "--actor", OPERATOR)
+    assert code == 0, err
+    # The owner ran the checks on this data directory and recorded its own verdict.
+    assert proved["verdict"] == "PASSED" and proved["proof_id"]
+    assert _rows(fresh, "retention_proofs") == 1
+    code, shown, _ = _run(capsys, "inspect")
+    assert shown["live"]["proofs"]["evidence_retention_ready"] is True
+    # A proof is one layer: the canary is still blocked.
+    assert shown["canary"]["verdict"] == "BLOCKED"
+
+
+def test_a_drill_refusal_is_the_owners_own_and_records_nothing(
+    fresh: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    code = cli.main(
+        [
+            "live",
+            "restore-drill-asset",
+            "--grant-id",
+            "g-1",
+            "--restore-root",
+            "relative/root",
+            "--actor",
+            OPERATOR,
+        ]
+    )
+    assert code == 1 and "DRILL_RESTORE_ROOT_INVALID" in capsys.readouterr().err
+    code = cli.main(
+        [
+            "live",
+            "restore-drill-asset",
+            "--grant-id",
+            "no-such-grant",
+            "--restore-root",
+            str(tmp_path / "root-a"),
+            "--actor",
+            OPERATOR,
+        ]
+    )
+    assert code == 1 and "DRILL_GRANT_NOT_FOUND" in capsys.readouterr().err
+    code = cli.main(
+        [
+            "live",
+            "restore-drill-create",
+            "--intent-id",
+            "no-such-intent",
+            "--restore-root",
+            str(tmp_path / "root-c"),
+            "--actor",
+            OPERATOR,
+        ]
+    )
+    assert code == 1 and "DRILL_INTENT_NOT_FOUND" in capsys.readouterr().err
+    assert _rows(fresh, "restore_drills") == 0
+
+
+def test_the_create_drill_runs_through_the_drill_owner_for_one_intent(
+    api: TestClient,  # noqa: F811
+    served: Container,
+    config: AppConfig,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    frozen, _ = frozen_unit(api, served, config)
+    root = tmp_path_factory.mktemp("restore-cli-create")
+    code, drilled, err = _run(
+        capsys,
+        "restore-drill-create",
+        "--intent-id",
+        frozen.intent.intent_id,
+        "--restore-root",
+        str(root),
+        "--actor",
+        OPERATOR,
+    )
+    assert code == 0, err
+    assert (drilled["verdict"], drilled["failure_code"]) == ("PASSED", None)
+    # The proof is the owner's, for exactly the target it computed.
+    stage_proofs = proofs(served)
+    assert stage_proofs.restore_proof(MutationStage.CREATE, drilled["target_digest"])
+    assert not stage_proofs.restore_proof(MutationStage.ASSET, drilled["target_digest"])
+    # The same root again is not fresh: the owner refuses and records nothing more.
+    code, _, err = _run(
+        capsys,
+        "restore-drill-create",
+        "--intent-id",
+        frozen.intent.intent_id,
+        "--restore-root",
+        str(root),
+        "--actor",
+        OPERATOR,
+    )
+    assert code == 1 and "DRILL_RESTORE_ROOT_INVALID" in err

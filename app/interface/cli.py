@@ -15,6 +15,13 @@ given. Nothing here reaches a
 provider, changes the execution mode or makes a mutation permitted: a grant and a released brake
 are two layers of the send-time stack, which still refuses under ``M0_DRY_RUN_ONLY``.
 
+**The two local proofs** (ADR-0018 §7, §8) run the same way: ``restore-drill-asset`` and
+``restore-drill-create`` call ``RestoreDrillService.drill_asset`` / ``drill_create`` for one
+exact ASSET grant or Intent into a fresh restore root the operator names, and
+``prove-retention`` calls ``RetentionProofService.prove``. Each owner records its own PASSED or
+FAILED proof of the state as it is; nothing here decides a verdict, and a proof proves only
+itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
+
 Data-directory ownership (ADR-0006) is the default: every command acquires the exclusive
 data-directory lock before it does anything, unless it is listed in ``READ_ONLY_COMMANDS``.
 A new command therefore owns the directory unless someone deliberately classifies it as
@@ -75,6 +82,9 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "issue-create-grant",
     "release-brake",
     "engage-brake",
+    "restore-drill-asset",
+    "restore-drill-create",
+    "prove-retention",
 )
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
@@ -175,6 +185,26 @@ def _add_operator_commands(live_commands: Any) -> None:
     )
     engage.add_argument("--actor", required=True)
     engage.add_argument("--reason-code", required=True)
+    drill_asset = live_commands.add_parser(
+        "restore-drill-asset", help="run the ASSET restore drill of one grant (ADR-0018 §7)"
+    )
+    drill_asset.add_argument("--grant-id", required=True)
+    drill_create = live_commands.add_parser(
+        "restore-drill-create", help="run the CREATE restore drill of one Intent (ADR-0018 §7)"
+    )
+    drill_create.add_argument("--intent-id", required=True)
+    for drill in (drill_asset, drill_create):
+        drill.add_argument(
+            "--restore-root",
+            required=True,
+            type=Path,
+            help="a new or empty absolute directory outside the data directory",
+        )
+        drill.add_argument("--actor", required=True)
+    retention = live_commands.add_parser(
+        "prove-retention", help="record the evidence-retention proof as it is now (ADR-0018 §8)"
+    )
+    retention.add_argument("--actor", required=True)
 
 
 def _add_window(command: argparse.ArgumentParser) -> None:
@@ -450,6 +480,29 @@ def _engage_brake(container: Any, args: argparse.Namespace, correlation_id: str)
     )
 
 
+def _restore_drill_asset(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    return container.restore_drills.drill_asset(
+        args.grant_id,
+        restore_root=args.restore_root,
+        actor=args.actor,
+        correlation_id=correlation_id,
+    )
+
+
+def _restore_drill_create(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    return container.restore_drills.drill_create(
+        args.intent_id,
+        restore_root=args.restore_root,
+        actor=args.actor,
+        correlation_id=correlation_id,
+    )
+
+
+def _prove_retention(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    proof_id, verdict = container.retention.prove(actor=args.actor, correlation_id=correlation_id)
+    return {"proof_id": proof_id, "verdict": verdict}
+
+
 _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "inspect": _inspect,
     "eligibility-packet": _eligibility_packet,
@@ -458,6 +511,9 @@ _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "issue-create-grant": _issue_create_grant,
     "release-brake": _release_brake,
     "engage-brake": _engage_brake,
+    "restore-drill-asset": _restore_drill_asset,
+    "restore-drill-create": _restore_drill_create,
+    "prove-retention": _prove_retention,
 }
 
 
