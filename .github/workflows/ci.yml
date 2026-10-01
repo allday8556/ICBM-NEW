@@ -1,15 +1,14 @@
 name: CI
 
-# CI scheduling policy (Issue #143). The full suite runs once per merge-candidate exact HEAD,
-# never on work-in-progress:
-# - push to main and workflow_dispatch: always the full suite;
-# - a ready (non-draft) PR: the full suite on every new HEAD, since a new commit makes any earlier
-#   green run stale (check runs belong to one exact commit and are never inherited);
-# - a draft PR (WIP preservation): lint/format/type only, and no "CI gate" result at all;
-# - a ready PR that touches only Markdown in the upstream research/evidence catalog
-#   (documents/evidence/): lint/format/type plus the unit and doc-contract suites,
-#   not the Windows/Ubuntu runtime and acceptance suites. That allowlist is the whole exemption;
-#   every other path, Markdown included, takes the full suite.
+# Risk-scoped CI policy (rule §14.2):
+# - basic: docs/control-plane/simple internal changes; quality plus unit/contract/harness checks;
+# - provider_zero: feature/integration code with no real external side effect, including read-only
+#   provider paths; functional tests, migrations and the provider-zero acceptance harness;
+# - full: high-risk changes selected by protected paths or the risk:high label;
+# - workflow_dispatch: final-LIVE verification on final main, including visual evidence;
+# - wip: draft PR quality only, with no CI gate.
+# A mixed change takes the highest tier. The high-risk path allowlist below is fail-closed for the
+# safety-critical owners; adding another such owner requires adding it here in the same PR.
 # Branch pushes without a PR run nothing. "CI gate" is the single merge-readiness result.
 #
 # Exact-HEAD invariant: on a pull_request event actions/checkout defaults to the ephemeral
@@ -41,22 +40,28 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      final_live: ${{ steps.scope.outputs.final_live }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - id: scope
-        name: Classify this run (full | docs | wip)
+        name: Classify this run (basic | provider_zero | full | wip)
         env:
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HIGH_RISK_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'risk:high') }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" != "pull_request" ]; then
+          final_live=false
+          if [ "$EVENT" = "workflow_dispatch" ]; then
             mode=full
+            final_live=true
+          elif [ "$EVENT" != "pull_request" ]; then
+            mode=provider_zero
           elif [ "$DRAFT" = "true" ]; then
             mode=wip
           else
@@ -64,25 +69,33 @@ jobs:
             # the base commit as a parent, so make both endpoints present before comparing them.
             git fetch --no-tags --quiet origin "$BASE_SHA" "$HEAD_SHA"
             files="$(git diff --name-only --no-renames "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA")"
-            mode=docs
+            mode=basic
             if [ -z "$files" ]; then
-              mode=full
+              mode=provider_zero
             fi
+            high=false
             while IFS= read -r f; do
               [ -z "$f" ] && continue
-              # Allowlist, not a denylist: only the upstream research/evidence catalog under
-              # documents/evidence/ is light, and only its Markdown. Everything else takes the full
-              # gate - canonical policy, contracts, acceptance evidence, prose anywhere else,
-              # code, data, CI itself - including any Markdown path added later, which is
-              # unlisted here by default and therefore never bypasses the gate.
+              # These owners directly control a side-effecting send, UNKNOWN/replay identity,
+              # credentials, or a core safety gate. Safety-owning directories are fail-closed:
+              # only the exact provider-zero/read-only files named below stay out of HIGH_RISK.
               case "$f" in
-                documents/evidence/*.md) ;;
-                *) mode=full ;;
+                app/stages/register/authoring.py|app/stages/register/authoring_revisions.py|app/stages/register/builder.py|app/stages/register/category_metadata.py|app/stages/register/category_metadata_models.py|app/stages/register/contracts.py|app/stages/register/drafting.py|app/stages/register/payload.py|app/stages/register/preparation.py|app/stages/register/sanitize.py|app/stages/register/target_policy.py|app/stages/register/target_policy_models.py|integrations/marketplaces/smartstore/__init__.py|integrations/marketplaces/smartstore/lookup.py|integrations/marketplaces/smartstore/product.py|integrations/marketplaces/smartstore/readback.py|integrations/marketplaces/smartstore/search.py) ;;
+                .github/workflows/*|automation/agent-host/*.ps1|app/capabilities/live_safety/*|app/container.py|app/platform/core/*|app/platform/system/execution_mode.py|app/platform/system/secret_scan.py|app/stages/register/*|app/stages/connect/accounts.py|app/stages/connect/account_models.py|app/stages/connect/credentials.py|app/stages/connect/service.py|app/stages/connect/sessions.py|app/stages/connect/smartstore/credentials.py|app/stages/connect/smartstore/models.py|app/stages/connect/smartstore/service.py|app/platform/db/migrations/versions/0006_m2_marketplace_connections.py|app/platform/db/migrations/versions/0016_m5_registration_foundation.py|app/platform/db/migrations/versions/0017_m5_registration_execution_scope.py|app/platform/db/migrations/versions/0026_g3_live_authority.py|app/platform/db/migrations/versions/0029_g3_restore_retention.py|app/platform/db/migrations/versions/0030_g3_visual_acceptance.py|app/platform/db/migrations/versions/0031_m5_registration_reconcile.py|app/platform/db/migrations/versions/0033_m5_canary_eligibility.py|integrations/marketplaces/*|documents/rules/06-immutable-domain-rules.md|documents/rules/07-execution-safety.md|documents/rules/14-operating-authority.md|documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md|documents/decisions/adr/0014-*|documents/decisions/adr/0018-*|documents/decisions/adr/0020-*|documents/decisions/adr/0022-*) high=true ;;
+              esac
+              # BASIC is an allowlist. Anything else is at least PROVIDER_ZERO.
+              case "$f" in
+                *.md|automation/agent-host/*|tests/harness/agent_host/*|tests/contracts/test_repository_rules.py) ;;
+                *) [ "$mode" = basic ] && mode=provider_zero ;;
               esac
             done <<< "$files"
+            if [ "$HIGH_RISK_LABEL" = "true" ] || [ "$high" = "true" ]; then
+              mode=full
+            fi
             printf '%s\n' "$files"
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "final_live=$final_live" >> "$GITHUB_OUTPUT"
           echo "CI scope: $mode"
 
   quality:
@@ -101,10 +114,10 @@ jobs:
       - run: ruff format --check .
       - run: mypy
 
-  docs-validation:
-    name: Docs validation (unit and doc-contract tests)
+  basic-validation:
+    name: Basic validation (unit, contract and harness tests)
     needs: [scope]
-    if: needs.scope.outputs.mode == 'docs'
+    if: needs.scope.outputs.mode == 'basic'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -123,7 +136,7 @@ jobs:
   tests:
     name: Tests (${{ matrix.os }})
     needs: [scope]
-    if: needs.scope.outputs.mode == 'full'
+    if: needs.scope.outputs.mode == 'provider_zero' || needs.scope.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -142,7 +155,7 @@ jobs:
   migrations:
     name: Migration check
     needs: [scope]
-    if: needs.scope.outputs.mode == 'full'
+    if: needs.scope.outputs.mode == 'provider_zero' || needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -166,7 +179,7 @@ jobs:
   m5-offline-acceptance:
     name: M5 offline acceptance (provider-zero, clean checkout)
     needs: [scope, quality, tests, migrations]
-    if: needs.scope.outputs.mode == 'full'
+    if: needs.scope.outputs.mode == 'provider_zero' || needs.scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -228,7 +241,7 @@ jobs:
   g3-visual-acceptance:
     name: Gate 3 populated visual acceptance (Windows, clean checkout)
     needs: [scope, quality, tests, migrations]
-    if: needs.scope.outputs.mode == 'full'
+    if: needs.scope.outputs.final_live == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -260,7 +273,7 @@ jobs:
     needs:
       - scope
       - quality
-      - docs-validation
+      - basic-validation
       - tests
       - migrations
       - m5-offline-acceptance
@@ -275,17 +288,22 @@ jobs:
           MODE: ${{ needs.scope.outputs.mode }}
           SCOPE: ${{ needs.scope.result }}
           QUALITY: ${{ needs.quality.result }}
-          DOCS: ${{ needs.docs-validation.result }}
+          BASIC: ${{ needs.basic-validation.result }}
           TESTS: ${{ needs.tests.result }}
           MIGRATIONS: ${{ needs.migrations.result }}
           M5: ${{ needs.m5-offline-acceptance.result }}
           M0: ${{ needs.acceptance.result }}
           G3: ${{ needs.g3-visual-acceptance.result }}
+          FINAL_LIVE: ${{ needs.scope.outputs.final_live }}
         run: |
           set -u
           case "$MODE" in
-            full) required="SCOPE QUALITY TESTS MIGRATIONS M5 M0 G3" ;;
-            docs) required="SCOPE QUALITY DOCS" ;;
+            basic) required="SCOPE QUALITY BASIC" ;;
+            provider_zero) required="SCOPE QUALITY TESTS MIGRATIONS M5" ;;
+            full)
+              required="SCOPE QUALITY TESTS MIGRATIONS M5 M0"
+              if [ "$FINAL_LIVE" = "true" ]; then required="$required G3"; fi
+              ;;
             *) echo "unknown CI scope '$MODE'"; exit 1 ;;
           esac
           fail=0

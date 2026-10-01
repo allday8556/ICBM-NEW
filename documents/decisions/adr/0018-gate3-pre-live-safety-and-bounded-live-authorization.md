@@ -33,6 +33,11 @@ change, LIVE grant, kill switch, backup or restore code, retention runtime, visu
 provider adapter, endpoint adoption, provider call, LIVE execution, canary, ComplianceGate owner, M6
 or M6.5 work. `M0_DRY_RUN_ONLY` / `M0_LIVE_FORBIDDEN` stays the only execution policy at this main.
 
+Governance scope clarification, 2026-10-01: this ADR gates the side-effecting ASSET/CREATE mutations
+it defines. It is not a generic approval gate for a routine read-only provider call, read-back,
+health check or lookup. Its visual, restore and retention proofs are components of one final
+mutation-readiness check on final main, not separate user approvals and not per-PR ceremonies.
+
 Decision owner: Architect (ChatGPT). Sources:
 - the Gate 3 kickoff `5821078540` (D1–D7, the G3-0 scope and the expected later areas);
 - `documents/roadmap/ROADMAP.md` §14.1 (the LIVE-authorization and ComplianceGate gaps) and §14.2 (the preconditions
@@ -590,6 +595,9 @@ This is UI acceptance only. It authorizes no provider mutation.
 detail panel — joins the required surfaces and state selectors of this acceptance, or their
 successor, when it is implemented. It is proven inside the harness, never re-recorded outside it.
 Any merged commit is a new accepted code SHA, so an earlier visual acceptance never covers it.
+That staleness rule is a send-time coverage rule, not an instruction to re-run acceptance after
+every provider-zero merge. The reviewed record is created on the final main immediately before the
+bounded LIVE action; until then no record is current and the readiness layer remains blocked.
 
 ### 10. Mutation-stage readiness
 

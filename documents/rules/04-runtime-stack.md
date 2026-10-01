@@ -19,4 +19,8 @@ The authoritative stack is `documents/architecture/ARCHITECTURE.md` §2. Current
 | Test framework | pytest + contract/integration/E2E gates |
 | CI | GitHub Actions |
 
-No major stack component may be changed casually. A change requires an architect-approved ADR before implementation.
+Replacing a canonical stack component or changing the product deployment/runtime model is a product
+decision: it requires explicit user approval and an accepted ADR before implementation. Compatible
+dependency updates, implementation libraries and internal code organization inside the pinned stack
+are implementation decisions under §14; record them in the PR, without creating an ADR unless they
+also change the canonical stack or externally visible product behaviour.
