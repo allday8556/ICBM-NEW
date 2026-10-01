@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from app.capabilities.jobs.models import JobState
 from app.config import AppConfig
 from app.container import Container, build_container
+from app.main import create_app
 from app.platform.core.errors import AppError
 from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
@@ -39,6 +40,7 @@ from app.stages.collect.facts import FactsStatus
 from app.stages.collect.models import CollectionOutcome, TransportKind
 from automation.acceptance.m3.rehearsal import fake_shop
 from automation.acceptance.m3.rehearsal.fake_shop import FakeGateway, StubSessions
+from tests.conftest import LOCAL
 from tests.support.extension_support import (
     BODY,
     envelope,
@@ -194,15 +196,25 @@ def test_3b_an_attempt_that_appended_and_died_is_finished_from_its_revision(
 
 
 def test_4_the_capture_never_reaches_a_job_payload_or_a_log(
-    client: TestClient, config: AppConfig, caplog: pytest.LogCaptureFixture
+    config: AppConfig, gateway: FakeGateway, caplog: pytest.LogCaptureFixture
 ) -> None:
-    app: Container = client.app.state.container  # type: ignore[attr-defined]
-    record = pair(app)
     marked = frame(body=BODY + f'<div id="extra"><p>{MARKER}</p></div>')
-    with caplog.at_level(logging.DEBUG):
+    application = create_app(
+        config,
+        extra_jobs=TEST_JOBS,
+        collection_gateway=gateway,
+        collection_sessions=StubSessions(),
+    )
+    # The application runs only for the capture. The byte scan below starts once it has stopped:
+    # a RECORDED run is handed on to work that keeps writing the database, and Windows refuses to
+    # read a byte range of a file another live connection has locked.
+    with caplog.at_level(logging.DEBUG), TestClient(application, base_url=LOCAL) as client:
+        app: Container = client.app.state.container  # type: ignore[attr-defined]
+        record = pair(app)
         response = post_capture(client, record, envelope(marked))
         assert response.status_code == 202
         run = wait_for_outcome(client, response.json()["collection_run_id"])
+        assert app.secrets.get("collect-extension-pairing") is not None
     assert run["outcome"] == "RECORDED"
     # The durable job payload holds identifiers and provenance only.
     payload = json.loads(_job(config, run["collection_run_id"])[5])
@@ -228,7 +240,6 @@ def test_4_the_capture_never_reaches_a_job_payload_or_a_log(
         content = path.read_bytes()
         for needle in needles:
             assert needle not in content, (path.name, needle[:12])
-    assert app.secrets.get("collect-extension-pairing") is not None
 
 
 def test_5_the_handoff_depends_on_the_in_process_worker(container: Container) -> None:
