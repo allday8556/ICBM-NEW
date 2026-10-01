@@ -1,7 +1,8 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented; the one real KM통상 acceptance is not run and is not
-  authorized** (§5). A green PR, a green CI or a synthetic test run accepts nothing. The
+- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). The first
+  granted attempt failed closed at the final gate without a recorded reason (§5.1). A green PR, a
+  green CI or a synthetic test run accepts nothing. The
   implementation and its tests are provider-zero as corrected; the implementation **history** is
   not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
@@ -101,7 +102,7 @@ Three facts a reader needs:
 - **The end-to-end test needs a browser that loads an unpacked extension.** It ran on the system
   Edge on the development machine. Where no such browser exists the three tests skip and say why.
 
-## 5. The one real acceptance — not authorized
+## 5. The one real acceptance — not authorized without a user grant
 
 E1 is accepted only by one real KM통상 capture on the exact merged main, under a separate user
 grant (ruling B-9). The grant names:
@@ -130,6 +131,26 @@ The operator opens the page and clicks. Claude never browses the supplier.
 Acceptance artifact (E1 specification §2.3): the `collection_run_id`, `NO_BUNDLE`, the canonical
 extractor result, the zero-write proof and the security and capture evidence. `NO_BUNDLE` is never
 worded as a comparison PASS or as `VALIDATED`.
+
+### 5.1 Granted attempts
+
+The user granted two acceptances on 2026-10-01 in the Track A session, one page and one click each:
+product 286 ("판매가 자율") and product 349 ("품절이지만 최저판매가 있음"). The grant record, both exact URLs,
+the bounds and the per-run data roots are in
+`%USERPROFILE%\ICBM-acceptance\e1-km-exact-main-7462736e\GRANT.md`, on exact main
+`7462736e4bc65b711c81ace368cc34321bca9452`.
+
+| campaign | run | outcome | what it shows |
+| --- | --- | --- | --- |
+| `e1-km-286-01` | `66737efe-365b-4a5f-9f1e-faceab04afd8` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | the capture was accepted (13 481 bytes, 242 nodes, 25 image references) and the final gate refused it; zero write held (one run, one job, one attempt, one dead-letter audit event, nothing else) |
+| `e1-km-349-01` | — | not yet run | held until a refusal names its findings |
+
+The refusal of `e1-km-286-01` is not an acceptance and not a defect of the gate: it failed closed as
+§4 requires. Its findings were not recorded: the job kept only their count, and the capture is gone
+with the job by design. So the run cannot say which kind of private or secret material the gate saw.
+The failure log now carries the gate's findings and the policy violations, as kinds and boundaries
+only (`collect.extension_failed`), so the next granted run names its reason. Product 286 is not
+captured again under this grant: its one click was consumed.
 
 ## 6. Incident during implementation: two unintended requests to the supplier host
 

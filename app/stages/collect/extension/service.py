@@ -108,6 +108,9 @@ EXTENSION_PROCESSING_FAILED = "EXTENSION_PROCESSING_FAILED"
 # failure of step 12 is a failure of the run; only ``NO_BUNDLE`` and a comparison are answers.
 EXTENSION_ADAPTIVE_COMPARE_FAILED = "EXTENSION_ADAPTIVE_COMPARE_FAILED"
 UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
+# The failure details a log line carries: the structural refusals' kinds and boundaries, which never
+# hold a captured text or attribute value. Other details (the dry run's summary) stay out of it.
+_LOGGED_DETAILS = ("finding_count", "findings", "violations")
 
 # The server's own final gate of a capture: the findings, as kinds and boundaries only. Empty
 # means the capture owner's sanitizer had nothing private or secret to take out of it and its
@@ -379,9 +382,15 @@ class ExtensionCaptureService:
                 ) from None
         except AppError as error:
             self._runs.failed(run_id, detail=error.code)
+            # The capture is gone once the job ends, so the log is the only place an operator can
+            # learn why a structural refusal happened: its kinds and boundaries, never a value.
             logger.warning(
                 "collect.extension_failed",
-                extra={"collection_run_id": run_id, "error_code": error.code},
+                extra={
+                    "collection_run_id": run_id,
+                    "error_code": error.code,
+                    **{key: error.details[key] for key in _LOGGED_DETAILS if key in error.details},
+                },
             )
             raise
         self._runs.no_revision(run_id, reason=report.detail)
@@ -432,7 +441,7 @@ class ExtensionCaptureService:
             raise ExtensionCaptureFailed(
                 EXTENSION_FINAL_SCAN_REFUSED,
                 "the server's sanitizer and final scan found secret or private material",
-                details={"findings": len(findings)},
+                details={"finding_count": len(findings), "findings": list(findings)[:20]},
             )
         # 10. The same DocumentView, from what the browser observed and nothing else.
         evidence = capture.evidence
