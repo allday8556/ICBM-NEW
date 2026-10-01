@@ -180,9 +180,10 @@ def test_one_click_captures_the_page_and_reads_the_canonical_run_back(
         policy_reads = len(_requests(caplog))
         assert _text(panel, "icbm-state") == "확인 전"
         panel.locator("[data-action='check']").dispatch_event("click")
-        expect(panel.locator(_role("icbm-state"))).to_contain_text(
-            policy_reference()["revision"], timeout=TIMEOUT_MS
+        expect(panel.locator(_role("icbm-state"))).to_have_attribute(
+            "data-policy", policy_reference()["revision"], timeout=TIMEOUT_MS
         )
+        assert _text(panel, "icbm-state") == "연결됨"
         assert len(_requests(caplog)) == policy_reads + 1
         panel.locator(CAPTURE).dispatch_event("click")
         expect(panel.locator(_role("run-outcome"))).not_to_have_text("—", timeout=TIMEOUT_MS)
@@ -199,6 +200,23 @@ def test_one_click_captures_the_page_and_reads_the_canonical_run_back(
         assert run.provenance.transport_kind is TransportKind.EXTENSION
         assert run.provenance.capture_policy_digest == policy_reference()["digest"]
         assert (run.source_url, run.source_product_id) == (PRODUCT_URL, PRODUCT_NUMBER)
+        # The preview is that revision as ICBM recorded it (ADR-0019 §12.1): the product it
+        # names, one row per recorded field with ICBM's own status, and its image references.
+        revision = app.revisions.get(run.revision_id)
+        assert revision is not None
+        assert _text(panel, "product-id") == PRODUCT_NUMBER
+        assert _text(panel, "product-name") == "합성 샘플 상품 1kg"
+        recorded = list(revision.fields.values())
+        rows = panel.locator("[data-role='fields'] .field")
+        assert rows.count() == len(recorded)
+        statuses = [rows.nth(i).get_attribute("data-status") for i in range(rows.count())]
+        assert statuses == [field.status.value for field in recorded]
+        for status in {field.status.value for field in recorded}:
+            card = panel.locator(f"[data-role='summary'] [data-status='{status}'] b")
+            assert card.inner_text() == str(statuses.count(status))
+        images = panel.locator("[data-role='images'] .image")
+        assert images.count() == len(revision.images) > 0
+        assert panel.locator("[data-action='open-icbm']").is_visible()
         # Exactly one run and its one revision, recorded as any collection is.
         after = table_counts(config)
         assert after["collection_runs"] == before["collection_runs"] + 1
@@ -215,13 +233,15 @@ def test_one_click_captures_the_page_and_reads_the_canonical_run_back(
         # scan accepted the capture, which it refuses for that anchor's text.
         assert "help@synthetic.invalid" in product.content()
         requests = _requests(caplog)
-    # The service worker spoke to ICBM only: the policy read, one capture, then the run read-back.
+    # The service worker spoke to ICBM only: the policy read, one capture, the run read-back, then
+    # the read-back of the revision that run names.
     paths = [path for _, path, _ in requests]
     assert f"/api/v1/collect/extension/capture-policies/{SUPPLIER}" in paths
     assert [r for r in requests if r[:2] == ("POST", "/api/v1/collect/extension/captures")] == [
         ("POST", "/api/v1/collect/extension/captures", 202)
     ]
     assert ("GET", f"/api/v1/collect/collections/{run_id}", 200) in requests
+    assert ("GET", f"/api/v1/collect/revisions/{run.revision_id}", 200) in requests
     # Whatever preflight Chromium chose to send was answered for exactly these paths and nowhere
     # else; a refused one would be a 403 here.
     assert all(status == 204 for method, _, status in requests if method == "OPTIONS")

@@ -22,6 +22,30 @@ v29 supersedes v28. v28 superseded v27.
 
 The uploaded v29 attachment and the repository copy were independently verified. The local uploaded file has SHA-256 `896ad87011b8615b8a6a9cd3e790ca04f52e908e4ff7b6a26ea4bf5372dfeb82`, size `323751` bytes, and Git blob SHA `2dea109fa819123601e23581d7b8b88e52507713`; the GitHub repository copy reports the same Git blob SHA. Therefore the repository copy is byte-identical to the approved attachment.
 
+## Extension Collector visual source
+
+The Chrome extension's side panel is a separate surface (ADR-0019 §12.1), not part of the v29
+application. Its approved visual prototype is:
+
+`design/prototypes/icbm_extension_collector.html`
+
+- Approved by the user as `ICBM 확장 수집기.html`, unchanged since approval (user instruction of
+  2026-10-02).
+- SHA-256: `5eec99911aca06a857ea5b5460c77ac25f0270a4384e7257a81b5466b6bdb879`
+- Size: `7949739` bytes
+- Git blob SHA: `16679dfbf730ba2948252d57bf2800c5dcc5ac02`
+- Repository copy: byte-identical to the approved file (same SHA-256 and size).
+- Scope:
+  - The side panel reproduces the boards `확장 — 상품 상세 수집`, `확장 — REVIEW 포함` and
+    `확장 — 예외와 AUTH 중단` structurally (ADR-0003).
+  - `확장 — 목록 발견과 대기열` is E3 and not authorized.
+  - The three `수집관리` boards depict the application's Collection Management, which this record
+    does not change.
+- Where a board shows what a canonical rule forbids, the rule wins:
+  - no resend of an unsent capture (ADR-0019 §12.6);
+  - no supplier-session state the extension does not know;
+  - no list queue before E3.
+
 ## Revision history
 
 | Revision | Fingerprint | Status | Note |
