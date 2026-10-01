@@ -29,8 +29,8 @@ from tests.support.extension_support import KM_POLICY, REPO_ROOT, SUPPLIER
 SUPPLIERS = REPO_ROOT / "integrations" / "suppliers"
 # The reviewed KM policy. A change of the file changes the digest; a change without a new revision
 # is what this pin refuses.
-KM_REVISION = "kmretail-capture-1"
-KM_DIGEST = "60e8bd11e257e1cfe96aa9392071383db7dbdcab814bb1dc1fa6aabb49a40754"
+KM_REVISION = "kmretail-capture-2"
+KM_DIGEST = "d5668653f1a235c8e24f941d262f74202a91f7d625268035e4f927c4aa7f8c0a"
 
 
 def _document() -> dict[str, Any]:
@@ -180,10 +180,10 @@ def test_the_policy_is_read_again_on_every_load(tmp_path: Path) -> None:
     (package / POLICY_FILE).write_bytes(_raw(document))
     source = CapturePolicySource(tmp_path)
     first = source.load(SUPPLIER)
-    document["revision"] = "kmretail-capture-2"
+    document["revision"] = "kmretail-capture-next"
     (package / POLICY_FILE).write_bytes(_raw(document))
     second = source.load(SUPPLIER)
-    assert (first.revision, second.revision) == (KM_REVISION, "kmretail-capture-2")
+    assert (first.revision, second.revision) == (KM_REVISION, "kmretail-capture-next")
     assert first.digest != second.digest
 
 

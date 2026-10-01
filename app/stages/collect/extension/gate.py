@@ -77,13 +77,20 @@ BoundaryOf = Callable[[Mapping[str, Any]], str]
 
 
 def _locator_problem(value: str) -> str | None:
-    """Why one image locator is not a plain one, or ``None``."""
-    if not value or _UNSAFE_IN_LOCATOR.search(value):
-        return "NOT_A_LOCATOR"
+    """Why one image locator is not a plain one, or ``None``.
+
+    A "not a locator" answer names its shape (empty, whitespace, another unsafe character,
+    unparseable, no path), never the value: a refused real capture is gone with its job, so the
+    kind is all an operator can learn from (EXTENSION-E1.md §5.1).
+    """
+    if not value:
+        return "NOT_A_LOCATOR_EMPTY"
+    if (unsafe := _UNSAFE_IN_LOCATOR.search(value)) is not None:
+        return "NOT_A_LOCATOR_WHITESPACE" if unsafe.group().isspace() else "NOT_A_LOCATOR_CHARACTER"
     try:
         parts = urlsplit(value)
     except ValueError:
-        return "NOT_A_LOCATOR"
+        return "NOT_A_LOCATOR_UNPARSEABLE"
     if parts.scheme not in {"", "http", "https"}:
         return "SCHEME"
     if "@" in parts.netloc:
@@ -93,7 +100,7 @@ def _locator_problem(value: str) -> str | None:
     if parts.fragment or "#" in value:
         return "FRAGMENT"
     if not parts.path and not parts.netloc:
-        return "NOT_A_LOCATOR"
+        return "NOT_A_LOCATOR_NO_PATH"
     if _TOKEN_SHAPED.search(value):
         return "TOKEN_SHAPED"
     return None
@@ -105,11 +112,11 @@ def _reference_problem(name: str, value: str) -> str | None:
         return _locator_problem(value.strip())
     entries = [entry.strip() for entry in value.split(",")]
     if not entries or any(not entry for entry in entries):
-        return "NOT_A_LOCATOR"
+        return "NOT_A_LOCATOR_SRCSET"
     for entry in entries:
         parts = entry.split()
         if len(parts) > 2 or (len(parts) == 2 and not _DESCRIPTOR.match(parts[1])):
-            return "NOT_A_LOCATOR"
+            return "NOT_A_LOCATOR_SRCSET"
         if (problem := _locator_problem(parts[0])) is not None:
             return problem
     return None

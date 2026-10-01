@@ -310,8 +310,11 @@ def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
         ('<img src="https://user:pw@kmretail.co.kr/a.jpg">', "CREDENTIALS"),
         ('<img src="data:image/png;base64,AAAA">', "SCHEME"),
         ('<img src="javascript:void(0)">', "SCHEME"),
-        ('<img src="/a b.jpg">', "NOT_A_LOCATOR"),
-        ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR"),
+        ('<img src="/a b.jpg">', "NOT_A_LOCATOR_WHITESPACE"),
+        ('<img src="/a|b.jpg">', "NOT_A_LOCATOR_CHARACTER"),
+        ('<img src="">', "NOT_A_LOCATOR_EMPTY"),
+        ('<img src="http://[::1">', "NOT_A_LOCATOR_UNPARSEABLE"),
+        ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR_SRCSET"),
         ('<img src="/eyJhbGciOiJIUzI1NiJ9abc.jpg">', "TOKEN_SHAPED"),
         ('<img data-src="/a.jpg?token=synthetic-value">', "QUERY"),
     ):

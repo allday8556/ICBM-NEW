@@ -26,7 +26,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
-from app.container import Container
+from app.container import Container, _server_final_scan
 from app.platform.core.clock import SystemClock
 from app.platform.core.secrets import MemorySecretStore
 from app.stages.collect.adaptive.engine.capture import CaptureRefused, capture_candidate
@@ -212,6 +212,25 @@ def test_the_cut_drops_every_excluded_region_tag_and_attribute(
         'scope="row"' if "scope" not in policy["allowed_attributes"].get("th", []) else "\u0000",
     ):
         assert excluded not in html, excluded
+
+
+def test_a_member_region_inside_the_scope_never_leaves_the_browser(
+    browser: Browser, policy: dict[str, Any], fixture_html: str
+) -> None:
+    # The first real KM통상 attempts (EXTENSION-E1.md §5.1) were refused by the server's final
+    # gate for a ``p.member`` inside the product scope: a private region by the capture owner's
+    # rule. Policy kmretail-capture-2 cuts it in the browser, with whatever it holds, so it is
+    # never sent; the server's gate is unchanged and still refuses one that arrives.
+    member = '<p class="member"><img src="/web/upload/grade icon.gif"> 합성 등급 안내</p>'
+    anchor = '<div class="xans-element- xans-product xans-product-action">'
+    assert fixture_html.count(anchor) == 1
+    page_html = fixture_html.replace(anchor, member + anchor)
+    html = _cut(browser, page_html, policy)["html"]
+    for gone in ('class="member"', "grade icon", "합성 등급 안내"):
+        assert gone not in html, gone
+    assert _server_final_scan(html) == ()
+    arrived = html.replace("</body>", member + "</body>")
+    assert "SANITIZER_EXCLUDED:PRIVATE@p#.member" in _server_final_scan(arrived)
 
 
 def test_the_cut_never_modifies_the_page(
