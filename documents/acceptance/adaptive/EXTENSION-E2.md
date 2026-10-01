@@ -1,7 +1,8 @@
 # Extension capture transport E2 — one click, recorded
 
-- Status: **PENDING — implemented; no real KM통상 acceptance is run**. A green PR, a green CI or a
-  synthetic test run accepts nothing.
+- Status: **ACCEPTED — the real KM통상 acceptance passed on exact main `b46105ab`** (§5; run
+  `edb03501-9561-4d9b-a2fd-4f858faa261d`, `RECORDED`). A green PR, a green CI or a synthetic test
+  run accepts nothing on its own.
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
   (E2 of §10: "the existing KM extractor consumes the extension's `DocumentView` as the revision
   writer").
@@ -67,11 +68,45 @@ script that sends nothing, and every test browser is loopback-only.
 | the ingest owner calls no store and no gateway: the recorder is its only way to a revision | `tests/contracts/test_extension_e1_contract.py` |
 | a production budget allows one product read, and only a captured run's allows none | `tests/contracts/test_repository_rules.py` |
 
-## 5. The real acceptance — not run
+## 5. The real acceptance
 
 One real KM통상 product page, captured by the operator's own click in their own Chrome and
 recorded. It is a real supplier read (the page in the operator's browser, and the image fetches by
 the server), so it needs the user's own decision and the user's physical click. Claude never
-browses the supplier. Nothing here authorizes it, and this record stays `PENDING` until it is run
-and its evidence — the `collection_run_id`, the revision, the provenance, the image reads and the
-fresh-session repeat — is recorded here.
+browses the supplier.
+
+The user granted it on 2026-10-02 for product 349 ("네, 349로"). Grant record, bounds and evidence:
+`%USERPROFILE%\ICBM-acceptance\e2-km-exact-main-b46105ab\` (`GRANT.md`, `e2-km-349-01\RESULT.md`,
+the data root, its counts and both sessions' read-back).
+
+- **Exact main** `b46105ab98342dcd3d75c3e6f6a95ef8a735f1b6`, `DRY_RUN`. Capture policy
+  `kmretail-capture-2` (digest `74670a991bf12686b837928436ebf6bae67cdb0516d5299c3eb22c1762707679`).
+  One page, one click, no retry.
+- **Run** `edb03501-9561-4d9b-a2fd-4f858faa261d`: `RECORDED`, `EXTENSION`, identity `349`. No server
+  product read (`product_read_at` empty, no product-page request in the log).
+- **Revision** `095dc872-e954-4218-8c3b-5114436327be`:
+  - sequence 1, extractor `kmretail-1`, facts status `REVIEW_REQUIRED`;
+  - provenance `EXTENSION` / `kmretail-capture-2` / the digest above;
+  - fingerprints intact.
+- **Fields:**
+  - CONFIRMED: `original_name`; `prices` (판매가 10 000); `stock` (`ON_SALE`); `shipping` (FIXED 3 000).
+  - REVIEW_REQUIRED: `images`, `minimum_sale_price`, `detail_description`.
+  - ABSENT: `options`, `quantity_tiers`, `brand`, `manufacturer`, `origin`, `notice`.
+  - Totals: 13 fields, 25 evidence rows.
+- **The image reads:**
+  - 10 server `IMAGE_REQUEST`s, all HTTP 200: `kmretail.co.kr` ×3, `onewbio.diskn.com` ×7. These are
+    only the KM profile's image hosts, under the 30-per-run cap. No egress was blocked.
+  - The 12 references (REPRESENTATIVE 3, DETAIL 9) gave 8 source assets.
+  - One representative reference was not fetched. It is an open review item
+    (`SOURCE_IMAGE_FETCH_FAILED`), never dropped.
+- **Handed on as a direct run is:**
+  - the source product, the current-source pointer and the Product group, item, binding and listing
+    composition;
+  - four open review items: the image fetch, `minimum_sale_price`, `detail_description` and
+    `IMAGE_SELECTION_MISSING`.
+- **Fresh-session repeat:** a second application composition on the same data root read back the
+  same run, revision and product. The product was `MATERIALIZED`, with this revision current. The
+  repeat made no supplier request; the log still holds 10. Rule 12's two fresh-session passes
+  belong to the first-vertical closeout, not to this slice.
+- **Security:** the signed-in member's name is in no file of the data root, the stored image bytes
+  included.

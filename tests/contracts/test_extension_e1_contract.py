@@ -348,14 +348,25 @@ def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     e1_line = roadmap.split("**E1 —", 1)[1].split("\n", 1)[0]
     assert "**E1 is accepted**" in e1_line and "`PENDING`" not in e1_line
     assert "**E2 — one click, recorded — is implemented provider-zero**" in roadmap
+    e2_line = roadmap.split("**E2 —", 1)[1].split("\n", 1)[0]
+    assert "**E2 is accepted**" in e2_line and "`PENDING`" not in e2_line
     assert "E3 and the extension-transport Phase C are later slices and are not implemented" in (
         roadmap
     )
 
 
-def test_the_e2_acceptance_record_is_pending() -> None:
+def test_the_e2_acceptance_record_is_accepted() -> None:
     record = _read(DOCUMENTS / "acceptance" / "adaptive" / "EXTENSION-E2.md")
-    assert record.splitlines()[2].startswith("- Status: **PENDING")
+    assert record.splitlines()[2].startswith("- Status: **ACCEPTED")
+    accepted = record.split("## 5. The real acceptance", 1)[1]
+    for fact in (
+        "b46105ab98342dcd3d75c3e6f6a95ef8a735f1b6",
+        "edb03501-9561-4d9b-a2fd-4f858faa261d",
+        "095dc872-e954-4218-8c3b-5114436327be",
+        "No server\n  product read",
+        "**Fresh-session repeat:**",
+    ):
+        assert fact in accepted, fact
     # The real acceptance is a real supplier read: the user's decision and the user's click.
     for phrase in (
         "Claude never\nbrowses the supplier",
