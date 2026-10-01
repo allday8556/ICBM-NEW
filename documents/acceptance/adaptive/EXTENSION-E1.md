@@ -1,8 +1,8 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). The first
-  granted attempt failed closed at the final gate without a recorded reason (§5.1). A green PR, a
-  green CI or a synthetic test run accepts nothing. The
+- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). Three granted
+  attempts failed closed at the final gate (§5.1). A green PR, a green CI or a synthetic test run
+  accepts nothing. The
   implementation and its tests are provider-zero as corrected; the implementation **history** is
   not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
@@ -143,14 +143,33 @@ the bounds and the per-run data roots are in
 | campaign | run | outcome | what it shows |
 | --- | --- | --- | --- |
 | `e1-km-286-01` | `66737efe-365b-4a5f-9f1e-faceab04afd8` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | the capture was accepted (13 481 bytes, 242 nodes, 25 image references) and the final gate refused it; zero write held (one run, one job, one attempt, one dead-letter audit event, nothing else) |
-| `e1-km-349-01` | — | not yet run | held until a refusal names its findings |
+| `e1-km-349-01` | `2cc9b341-9bcc-4d33-b52d-51654238d5fe` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `e07c3f2f` (PR #175); accepted (12 862 bytes, 229 nodes, 17 image references); findings `IMAGE_REFERENCE_NOT_A_LOCATOR:src@img#.` and `SANITIZER_EXCLUDED:PRIVATE@p#.member`; zero write held as above |
+| `e1-km-349-02` | `080145a9-23be-4e89-8392-4b276b8b11c6` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `25aac655` (PR #176, policy `kmretail-capture-2`); accepted (10 974 bytes, 194 nodes, 16 image references): the benefit box was cut; one finding `IMAGE_REFERENCE_NOT_A_LOCATOR_EMPTY:src@img#.`; zero write held as above |
 
 The refusal of `e1-km-286-01` is not an acceptance and not a defect of the gate: it failed closed as
 §4 requires. Its findings were not recorded: the job kept only their count, and the capture is gone
 with the job by design. So the run cannot say which kind of private or secret material the gate saw.
-The failure log now carries the gate's findings and the policy violations, as kinds and boundaries
-only (`collect.extension_failed`), so the next granted run names its reason. Product 286 is not
-captured again under this grant: its one click was consumed.
+PR #175 made the failure log carry the gate's findings and the policy violations, as kinds and
+boundaries only (`collect.extension_failed`), and `e1-km-349-01` was run on that main.
+
+`e1-km-349-01` named two findings. The user identified the element on the page: the signed-in
+member's benefit box inside the product scope, which shows the member's name and grade
+(`<p class="member">`) beside a profile image. The capture owner rightly classifies it as private.
+Capture policy `kmretail-capture-2` adds that box, Cafe24's `xans-myshop-asyncbenefit` module, to the
+excluded regions: the browser cuts it, with everything it holds, before anything is sent.
+
+Only that box is cut. The private-region rule reads class and id names, never the page's words: a
+`회원가` label is no finding. But an element elsewhere whose class or id begins with `member` (a
+supplier might mark a member price that way) is not cut silently. It is sent, the gate refuses the
+run and names it, so a price is never lost unnoticed. The server's gate is unchanged.
+
+PR #176 also made an image finding name its shape. `e1-km-349-02`, granted by the user for one more
+click on that main, confirmed the cut and left one finding: an `<img>` whose `src` is empty. That
+was a defect of the gate, not of the page. The supplier's image owner
+(`integrations/suppliers/kmretail/collect/images.py`) reads an empty value as no reference, and a
+Cafe24 lazy-load image leaves `src` empty and names its image in `ec-data-src`. The gate refused the
+same input. The gate now reads an empty value or `srcset` entry exactly as the image owner does: it
+names no image, so it is no reference. All three granted clicks are consumed.
 
 ## 6. Incident during implementation: two unintended requests to the supplier host
 

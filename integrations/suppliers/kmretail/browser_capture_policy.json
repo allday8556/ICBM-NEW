@@ -1,7 +1,7 @@
 {
   "schema": "icbm-browser-capture-policy/v1",
   "supplier_key": "kmretail",
-  "revision": "kmretail-capture-1",
+  "revision": "kmretail-capture-2",
   "host": "kmretail.co.kr",
   "product_root": {"by": "class", "token": "xans-product-detail"},
   "allowed_regions": [
@@ -10,7 +10,8 @@
   "excluded_regions": [
     {"by": "class", "token": "xans-product-review"},
     {"by": "class", "token": "xans-product-qna"},
-    {"by": "class", "token": "xans-product-relation"}
+    {"by": "class", "token": "xans-product-relation"},
+    {"by": "class", "token": "xans-myshop-asyncbenefit"}
   ],
   "excluded_tags": [
     "script",
