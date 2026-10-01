@@ -290,9 +290,20 @@ def test_the_glossary_names_what_e1_introduced() -> None:
     assert "**not** a comparison PASS" in row
 
 
-def test_the_acceptance_record_is_pending_and_hides_nothing() -> None:
+def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     record = _read(DOCUMENTS / "acceptance" / "adaptive" / "EXTENSION-E1.md")
-    assert record.splitlines()[2].startswith("- Status: **PENDING")
+    assert record.splitlines()[2].startswith("- Status: **ACCEPTED")
+    # The one real acceptance is named by its exact main and run, with compare-only truth.
+    accepted = record.split("### 5.2 The acceptance", 1)[1]
+    for fact in (
+        "28b59979dc856926a65d4ff6e3512d0d8a1725fe",
+        "02aa6058-9a44-4275-b45e-65e734b48c83",
+        "`NO_REVISION` / `EXTENSION_COMPARE_ONLY`",
+        "`NO_BUNDLE`",
+        "It is not a comparison PASS and\n  not `VALIDATED`",
+        "**Zero write:**",
+    ):
+        assert fact in accepted, fact
     for source in (
         "5906290729",
         "5906712259",
@@ -322,6 +333,8 @@ def test_the_acceptance_record_is_pending_and_hides_nothing() -> None:
     assert "two HTTP requests reached" in incident and "Neither was authorized" in incident
     roadmap = _read(DOCUMENTS / "roadmap" / "ROADMAP.md")
     assert "**E1 — one click, compare only — is implemented provider-zero**" in roadmap
+    e1_line = roadmap.split("**E1 —", 1)[1].split("\n", 1)[0]
+    assert "**E1 is accepted**" in e1_line and "`PENDING`" not in e1_line
     assert "E2, E3 and the extension-transport Phase C are not authorized" in roadmap
 
 
