@@ -49,6 +49,15 @@ def _hex64(column: str, *, nullable: bool = False) -> str:
     return f"{column} IS NULL OR ({clause})" if nullable else clause
 
 
+class TransportKind(StrEnum):
+    """How a collected document was acquired (ADR-0019 §4, AC-08). Provenance only: it enters no
+    evidence digest, field or source fingerprint, ``extraction_semantics_id`` or
+    ``comparability_key``, and a transport change alone is never drift."""
+
+    EXTENSION = "EXTENSION"
+    DIRECT_URL = "DIRECT_URL"
+
+
 class ProductFactsRevision(Base):
     """One immutable revision per successful collection, numbered per source identity."""
 
@@ -69,6 +78,12 @@ class ProductFactsRevision(Base):
         Index("ux_product_facts_revisions_collection_run", "collection_run_id", unique=True),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
         CheckConstraint(_in("facts_status", FactsStatus), name="facts_status_valid"),
+        CheckConstraint(
+            _in("transport_kind", TransportKind, nullable=True), name="transport_kind_valid"
+        ),
+        CheckConstraint(
+            _hex64("capture_policy_digest", nullable=True), name="capture_policy_digest_hex"
+        ),
     )
 
     revision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -85,6 +100,12 @@ class ProductFactsRevision(Base):
     collection_run_id: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     facts_status: Mapped[str] = mapped_column(String(20))
+    # ADR-0019 §4 (migration 0034): the transport of the run that produced this revision, copied
+    # from that run, and for ``EXTENSION`` the capture policy it was cut with. NULL on a revision
+    # that predates the columns; never backfilled and never an identity input.
+    transport_kind: Mapped[str | None] = mapped_column(String(10))
+    capture_policy_revision: Mapped[str | None] = mapped_column(String(64))
+    capture_policy_digest: Mapped[str | None] = mapped_column(String(64))
 
 
 class ProductFactsField(Base):
@@ -254,6 +275,12 @@ class CollectionRun(Base):
             "(outcome IN ('PENDING')) = (finished_at IS NULL)", name="finished_when_terminal"
         ),
         CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
+        CheckConstraint(
+            _in("transport_kind", TransportKind, nullable=True), name="transport_kind_valid"
+        ),
+        CheckConstraint(
+            _hex64("capture_policy_digest", nullable=True), name="capture_policy_digest_hex"
+        ),
         Index("ix_collection_runs_job_id", "job_id"),
         # Each capture request is consumed by at most one run (Phase C C0, migration 0027).
         Index("ix_collection_runs_capture_request_id", "capture_request_id", unique=True),
@@ -306,3 +333,9 @@ class CollectionRun(Base):
     # run first read before the seam existed; such a run is never captured, and none is backfilled.
     capture_decision: Mapped[str | None] = mapped_column(String(10))
     capture_request_id: Mapped[str | None] = mapped_column(String(36))
+    # ADR-0019 §4 (migration 0034): how this run's document was acquired, written once when the
+    # run is opened, and for ``EXTENSION`` the ``BrowserCapturePolicy`` revision and digest the
+    # capture was cut with. NULL on a run that predates the columns; never backfilled.
+    transport_kind: Mapped[str | None] = mapped_column(String(10))
+    capture_policy_revision: Mapped[str | None] = mapped_column(String(64))
+    capture_policy_digest: Mapped[str | None] = mapped_column(String(64))

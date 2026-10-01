@@ -1040,15 +1040,25 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0019" in _read(canonical) or TRANSPORT_ADR.name in _read(canonical), canonical
     collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
     assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
-    # Issue #89 5847528940: the architecture states that EXTENSION is the target contract only;
-    # E0 is contract-only and runtime-zero, and DIRECT_URL is the current runnable path.
+    # Issue #89 5847528940 asked the architecture to state the implementation status beside the
+    # target contract. E1 (Issue #126 5906290729, owner amendment 5907095955) moved that status:
+    # one click, compare only, nothing appended; DIRECT_URL is still the only revision writer.
     for element in (
         "`EXTENSION`-primary is the accepted ADR-0019 **target contract**",
-        "**E0 only: contract, runtime zero**",
-        "`DIRECT_URL` is the **current runnable path**",
-        "E1 and every later slice (ADR-0019 §10) are separately authorized",
+        "**E1 is implemented: one click, compare only**",
+        "**appends nothing**: it ends `NO_REVISION` or `FAILED`, never `RECORDED`",
+        "`DIRECT_URL` is still the **only path that writes a revision**",
+        "E2 and every later slice (ADR-0019 §10) are separately authorized",
+        "The application gains no CORS",
+        "pairing replaces none",
+        "A refusal before that point creates no run",
+        "never written to the database, a job payload, the filesystem or a log",
+        "answers `NO_BUNDLE` unless the supplier's shadow switch has a bundle enabled",
+        "never backfilled, never an identity input",
+        "**No server supplier request** is sent for an extension run in E1",
     ):
         assert element in collect_section, element
+    assert "E0 only: contract, runtime zero" not in collect_section
     # ADR-0010 and ADR-0017 are amended by notes at exactly the named sections, text preserved.
     (collect_adr,) = (REPO_ROOT / "documents" / "decisions" / "adr").glob(
         "0010-supplier-generic-collect*.md"
@@ -1118,10 +1128,12 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     ui = _section(adr, r"^12\. UI ownership and state semantics")
     assert "`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR" in ui
     assert "`REVIEW` is not a run outcome, and `AUTH` is not a field state" in ui
-    # The code facts the contract relies on still hold (F2): EXTENSION is not yet a transport.
+    # ADR-0019 §10 (AC-17): admitting EXTENSION belonged to E1, which did it. The policed gateway
+    # still sends for an HTTP profile only, and the server-side BROWSER is still not a collection
+    # transport.
     from integrations.suppliers.base import SupplierTransport
 
-    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER"}
+    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER", "EXTENSION"}
 
 
 def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
@@ -2922,6 +2934,10 @@ ADAPTIVE_IMPORTERS = {
         "app.stages.collect.adaptive.phase_c_capture",
     },
     "app/container.py": {
+        # ADR-0019 E1: the capture owner's sanitizer and final scan, handed to the extension
+        # ingest as a plain function, and the zero-write dry run, handed in as its seam.
+        "app.stages.collect.adaptive.engine.capture",
+        "app.stages.collect.adaptive.shadow.dry_run",
         "app.stages.collect.adaptive.engine.hooks",
         "app.stages.collect.adaptive.phase_c_capture.accounting",
         "app.stages.collect.adaptive.phase_c_capture.commands",
@@ -3660,3 +3676,78 @@ def test_only_the_phase_c_harness_persists_adaptive_profiles() -> None:
         if reached:
             callers[path] = reached
     assert callers == {f"{PHASE_C_HARNESS}harness.py": {"save_template", "save_draft"}}, callers
+
+
+# ---------------------------------------------------------------- test browsers stay on loopback
+
+BROWSER_OWNER = "tests/support/browser.py"
+# Any spelling of a browser start: ``launch``, ``launch_persistent_context``, ``launch_server``,
+# attaching to a browser the test did not launch, an engine other than Chromium, or the async API.
+_BROWSER_START = re.compile(
+    r"\.(launch\w*|connect_over_cdp)\(|\bchromium\.connect\(|\.(firefox|webkit)\b|\basync_playwright\b"
+)
+# The launches production and acceptance code make for a real operator. No test may reach them:
+# they are not the loopback-only owner's.
+_REAL_LAUNCHERS = (
+    "automation/acceptance/gate3_visual/harness/harness.py",
+    "automation/acceptance/m0/visual_check.py",
+    "integrations/suppliers/transport/gateway.py",
+)
+
+
+def test_every_test_browser_is_launched_by_the_one_loopback_only_owner() -> None:
+    """Issue #126 ``5909188774`` F-1 and owner amendment ``5909645067`` §3: a repository test
+    starts a browser only through ``tests/support/browser.py``, which always applies the
+    loopback-only resolver rule. The scan reads every test file as text, so a start written inside
+    a child-process script, behind an alias or in a helper that never says "playwright" is found
+    as well. There is no exception list."""
+    starters: dict[str, list[str]] = {}
+    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        if relative == "tests/contracts/test_repository_rules.py":
+            continue  # this rule's own pattern and names
+        found = sorted(
+            {match.group(0) for match in _BROWSER_START.finditer(path.read_text("utf-8"))}
+        )
+        if found:
+            starters[relative] = found
+    assert starters == {BROWSER_OWNER: [".launch(", ".launch_persistent_context("]}, starters
+    # No test module imports or calls a real launcher of production or acceptance code.
+    real = {
+        path: sorted(set(_BROWSER_START.findall((REPO_ROOT / path).read_text("utf-8"))))
+        for path in _REAL_LAUNCHERS
+    }
+    assert all(real.values()), real
+    reached = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if re.search(
+            r"visual_check\.(main|run|capture)\(|harness\.run\(|\._browse\(|PlaywrightLogin",
+            path.read_text("utf-8"),
+        )
+        and path.name != "test_repository_rules.py"
+    ]
+    assert reached == [], reached
+
+    owner = (REPO_ROOT / BROWSER_OWNER).read_text("utf-8")
+    assert 'NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"' in owner
+    # Both launches take their arguments from the one function that puts the block first and
+    # refuses a caller's own resolver rule.
+    assert owner.count("args=_arguments(") == 2 == owner.count(".launch")
+    assert "return [NETWORK_BLOCK, *extra]" in owner
+    assert '_OWNED_ARGUMENTS = ("--host-resolver-rules", "--host-rules", "--proxy")' in owner
+    assert "**options" not in owner
+    # The block is defined once: nothing else in the test tree spells a resolver rule.
+    spelled = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if "--host-resolver-rules=" in path.read_text("utf-8")
+        and path.relative_to(REPO_ROOT).as_posix()
+        not in {
+            BROWSER_OWNER,
+            "tests/contracts/test_repository_rules.py",
+            # The owner's own unit test, which proves a caller's rule is refused.
+            "tests/unit/test_browser_support.py",
+        }
+    ]
+    assert spelled == [], spelled

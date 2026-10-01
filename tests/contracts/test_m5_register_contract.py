@@ -191,7 +191,10 @@ ADAPTIVE_C1_PREP0 = "0028_phase_c_read_accounting"
 G3_AREA2 = "0029_g3_restore_retention"
 # Gate 3 area 3 (ADR-0018 §9): the reviewed visual acceptance record, never registration state.
 G3_AREA3 = "0030_g3_visual_acceptance"
-SCHEMA_HEAD = M5_ELIGIBILITY
+# ADR-0019 E1 (Issue #126 5906290729 B-6, 5906712259 N-2): the COLLECT transport provenance columns
+# on the run and the revision. It adds no table and holds no registration state.
+COLLECT_TRANSPORT = "0034_collect_transport_provenance"
+SCHEMA_HEAD = COLLECT_TRANSPORT
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -206,6 +209,7 @@ AFTER_M5 = (
     M5_RECONCILE,
     M5_AUTHORING,
     M5_ELIGIBILITY,
+    COLLECT_TRANSPORT,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

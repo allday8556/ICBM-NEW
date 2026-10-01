@@ -29,7 +29,7 @@ from app.platform.core.clock import Clock
 from app.platform.core.errors import NotFoundError, RateLimitedError
 from app.platform.db.database import Database
 from app.stages.collect.facts import FactsStatus
-from app.stages.collect.models import CollectionOutcome, CollectionRun
+from app.stages.collect.models import CollectionOutcome, CollectionRun, TransportKind
 from app.stages.collect.shadow import (
     CAPTURE_OFF,
     DISABLED,
@@ -80,6 +80,37 @@ class PacingKey:
 
 
 @dataclass(frozen=True)
+class RunProvenance:
+    """How a run's document was acquired (ADR-0019 §4): the transport, and for ``EXTENSION`` the
+    ``BrowserCapturePolicy`` revision and digest the capture was cut with.
+
+    It is provenance and nothing else: no digest, fingerprint or comparison key is computed from
+    it. The shape is enforced here, by the only writer: a capture policy names an extension run,
+    and an extension run always names one.
+    """
+
+    transport_kind: TransportKind
+    capture_policy_revision: str | None = None
+    capture_policy_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        named = (self.capture_policy_revision, self.capture_policy_digest)
+        if self.transport_kind is TransportKind.EXTENSION:
+            revision, digest = named
+            if not revision or not digest or not _is_hex64(digest):
+                raise ValueError("an EXTENSION run names its capture policy revision and digest")
+        elif any(value is not None for value in named):
+            raise ValueError("only an EXTENSION run names a capture policy")
+
+
+DIRECT_URL = RunProvenance(TransportKind.DIRECT_URL)
+
+
+def _is_hex64(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+@dataclass(frozen=True)
 class CollectionRunRecord:
     """One run, exactly as the database holds it."""
 
@@ -99,6 +130,8 @@ class CollectionRunRecord:
     finished_at: datetime | None
     frozen: FrozenRun | None = None
     settled_by_recovery: bool | None = None
+    # NULL on a run opened before the provenance columns existed (migration 0034).
+    provenance: RunProvenance | None = None
 
 
 class CollectionRunStore:
@@ -127,8 +160,15 @@ class CollectionRunStore:
         correlation_id: str,
         supplier_key: str,
         source_url: str,
+        provenance: RunProvenance = DIRECT_URL,
     ) -> str:
-        """Record a submitted collection in the caller's unit of work and return its identity."""
+        """Record a submitted collection in the caller's unit of work and return its identity.
+
+        ``provenance`` is how the run's document is acquired (ADR-0019 §4). It is written here,
+        once, and nothing later changes it. The default is the server gateway's own transport,
+        which is what every run was before the extension existed; the extension ingest always
+        names its own.
+        """
         run_id = str(uuid.uuid4())
         session.add(
             CollectionRun(
@@ -146,6 +186,9 @@ class CollectionRunStore:
                 pacing_key=None,
                 source_product_id=None,
                 finished_at=None,
+                transport_kind=provenance.transport_kind.value,
+                capture_policy_revision=provenance.capture_policy_revision,
+                capture_policy_digest=provenance.capture_policy_digest,
             )
         )
         session.flush()
@@ -338,6 +381,34 @@ class CollectionRunStore:
                 ).all()
             )
 
+    def transport_activity(
+        self, transport: TransportKind, *, session: Session | None = None
+    ) -> tuple[int, datetime | None]:
+        """How many runs of one transport are still ``PENDING``, and when the newest run of that
+        transport was requested. Read-only, and read from the canonical runs alone, so what it
+        answers survives a restart. With ``session`` it reads inside the caller's own unit."""
+
+        def read(unit: Session) -> tuple[int, datetime | None]:
+            pending = unit.scalar(
+                select(func.count())
+                .select_from(CollectionRun)
+                .where(
+                    CollectionRun.transport_kind == transport.value,
+                    CollectionRun.outcome == CollectionOutcome.PENDING,
+                )
+            )
+            newest = unit.scalar(
+                select(func.max(CollectionRun.requested_at)).where(
+                    CollectionRun.transport_kind == transport.value
+                )
+            )
+            return int(pending or 0), newest
+
+        if session is not None:
+            return read(session)
+        with self._db.read() as own:
+            return read(own)
+
     def for_job(self, job_id: str) -> CollectionRunRecord | None:
         with self._db.read() as session:
             row = session.scalars(
@@ -391,6 +462,15 @@ def _record(row: CollectionRun) -> CollectionRunRecord:
         finished_at=row.finished_at,
         frozen=_frozen(row),
         settled_by_recovery=row.settled_by_recovery,
+        provenance=(
+            None
+            if row.transport_kind is None
+            else RunProvenance(
+                TransportKind(row.transport_kind),
+                row.capture_policy_revision,
+                row.capture_policy_digest,
+            )
+        ),
     )
 
 

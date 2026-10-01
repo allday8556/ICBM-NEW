@@ -19,7 +19,6 @@ No supplier, marketplace or AI provider is reached.
 
 import contextlib
 import json
-import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -34,6 +33,7 @@ from playwright.sync_api import Error as PlaywrightError
 from app.config import AppConfig
 from app.container import Container
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_submit_support import (
     FAILED_ID,
     HELD_ID,
@@ -48,7 +48,6 @@ from tests.support.product_support import Collections, raw
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 JOBS = f"{LOCAL}/#/collect?view=jobs"
 RUNS = "/api/v1/collect/collections"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
@@ -73,7 +72,7 @@ NEVER_CREATED = (
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

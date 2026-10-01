@@ -14,7 +14,6 @@ under test, recorded, and a POST can be parked to replay a slow network. Proven 
 
 import contextlib
 import json
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -32,6 +31,7 @@ from app.stages.collect.facts import FieldFact, QuantityTier, QuantityTiersValue
 from app.stages.products.materialization import MaterializationStatus
 from app.stages.products.model import MoveReason
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_support import confirmed
 from tests.support.gate1_support import MARKET, save_policy
 from tests.support.product_support import SUPPLIER, Collections, product, raw
@@ -39,7 +39,6 @@ from tests.support.register_support import establish
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 DETAIL = "[data-role='product-detail']"
 DRAFTS = "/api/v1/register/drafts"
@@ -58,7 +57,7 @@ CHOICES = {
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

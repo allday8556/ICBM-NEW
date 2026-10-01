@@ -387,6 +387,41 @@ def test_profiles_refuse_wildcards_defaults_and_browser_collection() -> None:
         _profile(transport=SupplierTransport.BROWSER)
 
 
+def test_the_extension_envelope_is_a_profile_the_gateway_never_sends_for() -> None:
+    # ADR-0019 §10 (E1): EXTENSION is an admitted collection transport. It is the envelope a
+    # capture is judged under, and the policed gateway sends nothing for it: no document, no
+    # discovered policy, no image, no reservation and no request at all.
+    from integrations.suppliers.base import SupplierTransport
+
+    envelope = _profile(transport=SupplierTransport.EXTENSION)
+    assert envelope.transport is SupplierTransport.EXTENSION
+    # The envelope is judged by the same single fetch judge, with the same rules.
+    assert check_target(envelope, "https://supplier.test/products/1234", ReadKind.PRODUCT_READ)
+    with pytest.raises(CollectionTargetRefused):
+        check_target(envelope, "https://other.test/products/1234", ReadKind.PRODUCT_READ)
+    site, budget = Site(), Budget()
+    gateway = _gateway(site)
+    for read in (
+        lambda: gateway.read_document(
+            envelope,
+            "https://supplier.test/products/1234",
+            kind=ReadKind.PRODUCT_READ,
+            budget=budget,
+        ),
+        lambda: gateway.read_document(
+            envelope, "https://supplier.test/robots.txt", kind=ReadKind.POLICY_READ, budget=budget
+        ),
+        lambda: gateway.read_discovered_policy(
+            envelope, "https://supplier.test/policy.html", budget=budget
+        ),
+        lambda: gateway.read_image(envelope, "https://img.supplier.test/a.png", budget=budget),
+    ):
+        with pytest.raises(PolicyBlockedError) as refused:
+            read()
+        assert refused.value.code == "COLLECT_TRANSPORT_NOT_HTTP"
+    assert site.requests == [] and budget.reserved == []
+
+
 # ---------------------------------------------------------------- an image host's own robots
 # Issue #52 ruling 5699776908 §3: an image host is a distinct origin, so its own rules are read
 # before anything is requested from it — and that one document is all it ever answers for.

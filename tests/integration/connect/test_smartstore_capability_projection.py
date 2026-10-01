@@ -9,7 +9,6 @@ and the page makes read (GET) requests only.
 """
 
 import re
-import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -40,13 +39,13 @@ from app.stages.connect.marketplace.capability import (
 )
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 
 pytestmark = pytest.mark.integration
 
 KEY = "smartstore"
 ACTOR = "operator:test"
 # The channels test_ownership_children uses: the locally installed browser, nothing downloaded.
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 SECRET = "$2a$04$abcdefghijklmnopqrstuu"  # a fixture bcrypt salt, never a real credential
 CLIENT_ID = "fixture-client-id-pd01"
 UID = "uid-fixture-A"
@@ -79,7 +78,7 @@ Seed = Callable[[Container], None]
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:
