@@ -430,6 +430,16 @@ def test_validation_strength_is_risk_scoped_without_weakening_live_safety() -> N
         assert mode in ci
     assert "if: needs.scope.outputs.final_live == 'true'" in ci
     assert 'provider_zero) required="SCOPE QUALITY TESTS MIGRATIONS M5"' in ci
+    # The required "Tests (<os>)" checks exist in every merge-candidate scope: a matrix job skipped
+    # at job level reports one unexpanded name, so the tier gates its steps, never the job.
+    tests_job = ci.split("\n  tests:\n", 1)[1].split("\n  migrations:\n", 1)[0]
+    assert "if: needs.scope.outputs.mode != 'wip'" in tests_job
+    assert (
+        "RUN_SUITE: ${{ needs.scope.outputs.mode == 'provider_zero'"
+        " || needs.scope.outputs.mode == 'full' }}" in tests_job
+    )
+    assert tests_job.count("if: env.RUN_SUITE == 'true'") == 4
+    assert 'basic) required="SCOPE QUALITY BASIC"' in ci
     # These core owners can never be downgraded to BASIC by a Markdown or generic-code match.
     for protected in (
         "automation/agent-host/*.ps1",

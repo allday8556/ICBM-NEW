@@ -136,21 +136,34 @@ jobs:
   tests:
     name: Tests (${{ matrix.os }})
     needs: [scope]
-    if: needs.scope.outputs.mode == 'provider_zero' || needs.scope.outputs.mode == 'full'
+    # Not gated by tier at job level: a matrix job skipped by its own `if` reports one unexpanded
+    # "Tests (${{ matrix.os }})" check instead of the two required "Tests (<os>)" checks, so a basic
+    # PR could never merge. Outside a draft the matrix always expands; the steps run only where the
+    # scope requires the full suite, and in basic scope the job ends without running anything.
+    # "CI gate" stays the merge-readiness result: it requires TESTS only for provider_zero and full.
+    if: needs.scope.outputs.mode != 'wip'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      RUN_SUITE: ${{ needs.scope.outputs.mode == 'provider_zero' || needs.scope.outputs.mode == 'full' }}
     steps:
       - uses: actions/checkout@v5
+        if: env.RUN_SUITE == 'true'
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
+        if: env.RUN_SUITE == 'true'
         with:
           python-version: "3.12"
-      - run: python -m pip install -c constraints.txt -e ".[dev]"
-      - run: pytest -v
+      - if: env.RUN_SUITE == 'true'
+        run: python -m pip install -c constraints.txt -e ".[dev]"
+      - if: env.RUN_SUITE == 'true'
+        run: pytest -v
+      - if: env.RUN_SUITE != 'true'
+        run: echo "CI scope ${{ needs.scope.outputs.mode }} does not run the full suite"
 
   migrations:
     name: Migration check
