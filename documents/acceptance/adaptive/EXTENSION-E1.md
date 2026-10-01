@@ -7,6 +7,9 @@
   not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
   (E1 of §10).
+- Gate: this record describes the final gate E1 was built and accepted with (§4, §5). The current
+  rule is the security-only gate of ADR-0019 §6.1 (the user's decision of 2026-10-01), which
+  replaced it after E2; it does not change this acceptance.
 - Authority (Issue #126 comments):
   - the architect ruling `5906290729` (B-1 … B-11);
   - the architect ruling `5906712259` (N-1 … N-3);

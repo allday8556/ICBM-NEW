@@ -1135,7 +1135,8 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         in (invariants["AC-11"])
     )
     assert "a whole authenticated page is never sent or retained" in invariants["AC-12"]
-    assert "private material inside the product scope still refuses" in invariants["AC-13"]
+    assert "security material" in invariants["AC-13"]
+    assert "inside the product scope still refuses fail closed" in invariants["AC-13"]
     assert "a browser byte relay is not authorized" in invariants["AC-14"]
     assert "a missing cap refuses fail closed" in invariants["AC-15"]
     assert "No legacy ICBM extension code" in invariants["AC-16"]
@@ -2999,8 +3000,7 @@ ADAPTIVE_IMPORTERS = {
         "app.stages.collect.adaptive.phase_c_capture",
     },
     "app/container.py": {
-        # ADR-0019 E1: the capture owner's sanitizer and final scan, handed to the extension
-        # ingest as a plain function.
+        # ADR-0019 §6.1: the capture owner's boundary naming, used by the extension security gate.
         "app.stages.collect.adaptive.engine.capture",
         "app.stages.collect.adaptive.engine.hooks",
         "app.stages.collect.adaptive.phase_c_capture.accounting",

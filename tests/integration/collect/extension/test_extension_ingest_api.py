@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.container import Container, _server_final_scan
+from app.stages.collect.extension.gate import GateResult
 from app.stages.collect.extension.pairing import (
     BODY_DIGEST_HEADER,
     NONCE_HEADER,
@@ -191,52 +192,68 @@ def test_an_unresolved_identity_is_the_same_answer_it_is_on_the_direct_path(
     assert (run["outcome"], run["detail"]) == ("NO_REVISION", "the page declares no product number")
 
 
-def test_private_material_inside_the_scope_still_refuses(
-    client: TestClient, config: AppConfig, paired: PairingRecord
-) -> None:
-    # ADR-0019 §6, AC-13 (the C1 regression pair, second half): the server's own final scan
-    # refuses residual private material wherever it sits, the product scope included.
-    before = table_counts(config)
-    private = BODY + '<div id="extra"><p>문의 010-0000-0000</p></div>'
-    response = post_capture(client, paired, envelope(frame(body=private)))
-    assert response.status_code == 202
-    run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
-    assert (run["revision_id"], run["transport_kind"]) == (None, "EXTENSION")
-    assert untouched(before, table_counts(config)) == {}
-
-
 IN_SCOPE = '<div class="xans-product-action">'
+# What must never be collected (ADR-0019 §6.1, the user's decision of 2026-10-01), each inside the
+# product scope where the browser cut kept it.
+SECURITY_MATERIAL = {
+    "member-identity": '<p><span class="xans-member-var-name">합성회원</span> 님</p>',
+    "myshop-module": '<div class="xans-element- xans-myshop xans-myshop-mileage"><p>1</p></div>',
+    "mypage-region": '<div id="mypage-summary"><p>등급 안내</p></div>',
+    "login-region": '<div class="login-state"><p>안내</p></div>',
+    "session-text": "<p>session=synthetic-value-1234</p>",
+    "jwt-text": "<p>eyJhbGciOiJIUzI1NiJ9synthetic</p>",
+    "url-credentials": '<img src="https://user:synthetic-value@kmretail.co.kr/a.jpg">',
+    "url-secret-query": '<img src="/web/a.jpg?token=synthetic-value">',
+}
+# Product data that only looks private: it goes on as it arrived and leaves a note.
+PRODUCT_DATA = {
+    "member-named-price": '<p class="member_price">10,000원</p>',
+    "member-benefit-class": '<div class="member-benefit"><p>회원 전용 안내</p></div>',
+    "business-phone": "<p>A/S 문의 010-0000-0000</p>",
+    "business-email": "<p>문의 help@synthetic.invalid</p>",
+    "image-version-query": '<img src="/web/product/extra/synthetic-9001.jpg?v=20260930">',
+    "image-empty-src": '<img src="">',
+}
 
 
-@pytest.mark.parametrize(
-    "addition",
-    [
-        # GPT audit 5365019650 B-1: a private region with no phone, e-mail or token in it. The
-        # sanitizer takes it out and its final scan then finds nothing, so only the gate sees it.
-        '<div class="member-benefit"><p>회원 전용 안내</p></div>',
-        '<div id="mypage-summary"><p>등급 안내</p></div>',
-        # What the sanitizer removes rather than excludes: a query on a URL it would keep.
-        '<img src="/web/product/extra/synthetic-9001.jpg?v=20260930">',
-    ],
-    ids=["private-class-region", "private-id-region", "url-query"],
-)
-def test_a_capture_the_sanitizer_would_have_to_clean_fails_the_run(
+def _with(addition: str) -> dict[str, Any]:
+    assert BODY.count(IN_SCOPE) == 1
+    return envelope(frame(body=BODY.replace(IN_SCOPE, addition + IN_SCOPE)))
+
+
+@pytest.mark.parametrize("addition", SECURITY_MATERIAL.values(), ids=SECURITY_MATERIAL.keys())
+def test_security_material_inside_the_scope_still_refuses(
     client: TestClient, config: AppConfig, paired: PairingRecord, addition: str
 ) -> None:
-    # Owner amendment 5909645067 §1: the pipeline goes on with the capture as it arrived, so a
-    # capture the capture owner's sanitizer had to take anything private or secret out of never
-    # reaches the extractor. It sits inside the product scope, where the browser cut kept it.
-    assert BODY.count(IN_SCOPE) == 1
+    # ADR-0019 §6.1, AC-13 (the C1 regression pair, second half): a secret or the signed-in
+    # member's own account and identity refuses fail closed wherever it sits, the scope included.
     before = table_counts(config)
-    response = post_capture(
-        client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, addition + IN_SCOPE)))
-    )
+    response = post_capture(client, paired, _with(addition))
     assert response.status_code == 202
     run = wait_for_outcome(client, response.json()["collection_run_id"])
     assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
     assert (run["revision_id"], run["transport_kind"]) == (None, "EXTENSION")
     assert untouched(before, table_counts(config)) == {}
+
+
+@pytest.mark.parametrize("addition", PRODUCT_DATA.values(), ids=PRODUCT_DATA.keys())
+def test_product_data_that_only_looks_private_goes_on(
+    client: TestClient, config: AppConfig, paired: PairingRecord, addition: str
+) -> None:
+    # ADR-0019 §6.1: broad product capture. A business contact, a member price or an odd image
+    # reference is product data; the run compares as it arrived, and nothing is stored.
+    before = table_counts(config)
+    response = post_capture(client, paired, _with(addition))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
+    assert untouched(before, table_counts(config)) == {}
+
+
+def _logged(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(
+        json.dumps({k: repr(v) for k, v in vars(entry).items()}, ensure_ascii=False)
+        for entry in caplog.records
+    )
 
 
 def test_a_refused_run_logs_its_findings_and_never_a_value(
@@ -244,65 +261,71 @@ def test_a_refused_run_logs_its_findings_and_never_a_value(
 ) -> None:
     # The capture is gone once its job ends, so the failure log is the one place an operator learns
     # why a real capture was refused: the gate's kinds and boundaries, never a captured value.
-    addition = '<div class="member-benefit"><p>회원 전용 안내</p></div><p>문의 010-0000-0000</p>'
-    with caplog.at_level(logging.WARNING):
-        response = post_capture(
-            client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, addition + IN_SCOPE)))
-        )
+    addition = SECURITY_MATERIAL["member-identity"] + SECURITY_MATERIAL["session-text"]
+    with caplog.at_level(logging.INFO):
+        response = post_capture(client, paired, _with(addition))
         run = wait_for_outcome(client, response.json()["collection_run_id"])
     assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
     [failed] = [r for r in caplog.records if r.getMessage() == "collect.extension_failed"]
-    # The final scan's residual refusal ends the gate, so it is the one finding, with its boundary.
-    assert vars(failed)["finding_count"] == 1
-    assert vars(failed)["findings"] == ["residual secret or private material: ['TEXT@p#.']"]
-    for entry in caplog.records:
-        logged = json.dumps({k: repr(v) for k, v in vars(entry).items()}, ensure_ascii=False)
-        assert "회원" not in logged and "010-0000" not in logged
+    assert vars(failed)["findings"] == [
+        "MEMBER_IDENTITY@span#.xans-member-var-name",
+        "SECRET_TEXT@p#.",
+    ]
+    assert vars(failed)["finding_count"] == 2
+    logged = _logged(caplog)
+    assert "합성회원" not in logged and "synthetic-value" not in logged
 
 
-def test_the_final_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
+def test_a_noted_run_logs_its_notes_and_never_a_value(
+    client: TestClient, paired: PairingRecord, caplog: pytest.LogCaptureFixture
+) -> None:
+    addition = PRODUCT_DATA["business-phone"] + PRODUCT_DATA["member-named-price"]
+    with caplog.at_level(logging.INFO):
+        response = post_capture(client, paired, _with(addition))
+        run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
+    [noted] = [r for r in caplog.records if r.getMessage() == "collect.extension_gate_notes"]
+    assert vars(noted)["notes"] == ["CONTACT_TEXT@p#.", "MEMBER_NAMED@p#.member_price"]
+    assert "010-0000" not in _logged(caplog)
+
+
+def test_the_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
     gate = _server_final_scan
-    assert gate(frame()) == ()
-    private = gate(frame(body=BODY + '<div class="member-benefit"><p>회원 전용 안내</p></div>'))
-    assert private == ("SANITIZER_EXCLUDED:PRIVATE@div#.member-benefit",)
-    removed = gate(frame(body=BODY + '<img src="/a.jpg?session=synthetic-value">'))
-    assert removed == ("IMAGE_REFERENCE_QUERY:src@img#.",)
-    residual = gate(frame(body=BODY + "<p>문의 010-0000-0000</p>"))
-    assert len(residual) == 1 and residual[0].startswith("residual secret or private material")
-    handler = gate(frame(body=BODY + '<p onclick="synthetic-value">x</p>'))
-    assert handler == ("SANITIZER_REMOVED:EVENT_HANDLER:onclick@p#.",)
-    for findings in (private, removed, residual, handler):
-        assert all(
-            "회원" not in f and "synthetic-value" not in f and "010-" not in f for f in findings
-        )
+    assert gate(frame()) == GateResult()
+    for addition in (*SECURITY_MATERIAL.values(), *PRODUCT_DATA.values()):
+        result = gate(frame(body=BODY + addition))
+        assert result.blocking or result.notes, addition
+        for kind in (*result.blocking, *result.notes):
+            for value in ("합성회원", "synthetic-value", "synthetic.invalid", "010-", "10,000"):
+                assert value not in kind, (addition, kind)
+    # Every security kind blocks, and no product-data kind does.
+    for addition in SECURITY_MATERIAL.values():
+        assert gate(frame(body=BODY + addition)).blocking != (), addition
+    for addition in PRODUCT_DATA.values():
+        assert gate(frame(body=BODY + addition)).blocking == (), addition
 
 
-def test_the_gate_scans_inside_every_region_the_sanitizer_sets_aside() -> None:
-    # The sanitizer drops a navigation or non-authoritative region whole and looks no further,
-    # but the extractor receives the whole capture. So the gate opens each one and scans it too.
+def test_the_gate_reads_every_region_alike() -> None:
+    # One pass over every element: a navigation, banner or related-products region is read like
+    # the rest of the capture, so nothing hides a secret by sitting in one.
     gate = _server_final_scan
-    # Clean regions of those kinds are not findings.
-    assert gate(frame(body=BODY + '<div class="banner"><p>안내</p></div><nav>메뉴</nav>')) == ()
-    # What sits inside them is judged exactly like the rest of the capture.
-    for region in (
-        '<div class="banner"><p>a@synthetic.invalid</p></div>',
-        "<footer><p>문의 010-0000-0000</p></footer>",
-        '<div class="related"><div class="recent"><p>b@synthetic.invalid</p></div></div>',
-    ):
-        findings = gate(frame(body=BODY + region))
-        assert len(findings) == 1, region
-        assert findings[0].startswith("residual secret or private material"), region
-        assert "synthetic.invalid" not in findings[0] and "010-" not in findings[0]
-    # A private region nested inside one is found as well.
-    nested = gate(
-        frame(body=BODY + '<div class="related"><div class="member-note"><p>안내</p></div></div>')
+    assert gate(frame(body=BODY + '<div class="banner"><p>안내</p></div><nav>메뉴</nav>')) == (
+        GateResult()
     )
-    assert nested == ("SANITIZER_EXCLUDED:PRIVATE@div#.member-note",)
+    for region in (
+        '<div class="banner"><p>session=synthetic-value-1234</p></div>',
+        "<footer><p>eyJhbGciOiJIUzI1NiJ9synthetic</p></footer>",
+        '<div class="related"><div class="recent"><span class="xans-member-var-id">x</span>'
+        "</div></div>",
+    ):
+        assert gate(frame(body=BODY + region)).blocking != (), region
+    footer = gate(frame(body=BODY + "<footer><p>문의 010-0000-0000</p></footer>"))
+    assert footer == GateResult(notes=("CONTACT_TEXT@p#.",))
 
 
 def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
-    # Suppliers name uploaded images with long hashes. A reference is a plain locator or a finding;
-    # a generic secret pattern never decides it.
+    # Suppliers name uploaded images with long hashes. A reference is judged by what it is: only a
+    # credential, a secret query key or a token shape blocks; any other odd shape is a note.
     gate = _server_final_scan
     hashed = "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d"
     for clean in (
@@ -316,25 +339,31 @@ def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
         '<img src="  " ec-data-src="/web/upload/a.jpg">',
         '<img srcset="/a.jpg 1x, ">',
     ):
-        assert gate(frame(body=BODY + clean)) == (), clean
-    for bad, kind in (
+        assert gate(frame(body=BODY + clean)) == GateResult(), clean
+    for blocked, kind in (
+        ('<img src="https://user:pw@kmretail.co.kr/a.jpg">', "CREDENTIALS"),
+        ('<img src="/eyJhbGciOiJIUzI1NiJ9abc.jpg">', "TOKEN_SHAPED"),
+        ('<img data-src="/a.jpg?token=synthetic-value">', "SECRET_QUERY"),
+        ('<img src="/a.jpg?v=1&sig=synthetic-value">', "SECRET_QUERY"),
+    ):
+        result = gate(frame(body=BODY + blocked))
+        assert len(result.blocking) == 1, blocked
+        assert result.blocking[0].startswith(f"IMAGE_REFERENCE_{kind}:"), blocked
+        assert "synthetic-value" not in result.blocking[0] and "pw@" not in result.blocking[0]
+    for noted, kind in (
         ('<img src="/a.jpg?v=1">', "QUERY"),
         ('<img src="/a.jpg#frag">', "FRAGMENT"),
-        ('<img src="https://user:pw@kmretail.co.kr/a.jpg">', "CREDENTIALS"),
         ('<img src="data:image/png;base64,AAAA">', "SCHEME"),
-        ('<img src="javascript:void(0)">', "SCHEME"),
         ('<img src="/a b.jpg">', "NOT_A_LOCATOR_WHITESPACE"),
         ('<img src="/a|b.jpg">', "NOT_A_LOCATOR_CHARACTER"),
         ('<img src="http://[::1">', "NOT_A_LOCATOR_UNPARSEABLE"),
         ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR_SRCSET"),
-        ('<img src="/eyJhbGciOiJIUzI1NiJ9abc.jpg">', "TOKEN_SHAPED"),
-        ('<img data-src="/a.jpg?token=synthetic-value">', "QUERY"),
     ):
-        findings = gate(frame(body=BODY + bad))
-        assert len(findings) == 1 and findings[0].startswith(f"IMAGE_REFERENCE_{kind}:"), bad
-        assert "synthetic-value" not in findings[0] and "pw@" not in findings[0]
-    # The mask is for image references only: the same value anywhere else is still the scan's.
-    assert gate(frame(body=BODY + f'<p class="{hashed}">x</p>')) != ()
+        result = gate(frame(body=BODY + noted))
+        assert result.blocking == (), noted
+        assert len(result.notes) == 1 and result.notes[0].startswith(f"IMAGE_REFERENCE_{kind}:")
+    # The hash allowance is for image references only: the same value anywhere else is a secret.
+    assert gate(frame(body=BODY + f'<p class="{hashed}">x</p>')).blocking != ()
 
 
 def test_a_hash_named_image_is_accepted_end_to_end(

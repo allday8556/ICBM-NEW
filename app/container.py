@@ -52,11 +52,7 @@ from app.platform.db.migrate import head_revision
 from app.platform.system.diagnostics import DiagnosticsService
 from app.platform.system.execution_mode import ExecutionModeService
 from app.platform.system.readiness import ReadinessService
-from app.stages.collect.adaptive.engine.capture import (
-    CaptureRefused,
-    boundary_of,
-    capture_candidate,
-)
+from app.stages.collect.adaptive.engine.capture import boundary_of
 from app.stages.collect.adaptive.engine.hooks import HookManifest
 from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAccounting
 from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
@@ -79,7 +75,7 @@ from app.stages.collect.collection import (
     SessionProvider,
 )
 from app.stages.collect.extension.buffer import CaptureBuffer
-from app.stages.collect.extension.gate import Sanitized, final_gate
+from app.stages.collect.extension.gate import GateResult, security_gate
 from app.stages.collect.extension.nonces import NonceCache
 from app.stages.collect.extension.pairing import ExtensionPairing
 from app.stages.collect.extension.policy import CapturePolicySource
@@ -161,29 +157,11 @@ from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
 
 
-def _capture_owner_sanitizer(html: str) -> Sanitized:
-    """The capture owner's sanitizer and final scan, unchanged (ADR-0017 §7.3 note), as the
-    extension gate reads it: its refusal, what it removed and what it set aside. Kinds and
-    boundaries only, never a captured value."""
-    try:
-        candidate = capture_candidate(html)
-    except CaptureRefused as refused:
-        return Sanitized(refusal=str(refused))
-    except RecursionError:
-        # Deeper than the capture owner can walk: refused, never passed unscanned.
-        return Sanitized(refusal="the capture nests deeper than the final scan can read")
-    return Sanitized(
-        refusal=None,
-        removals=tuple((entry[0], entry[1]) for entry in candidate.removals),
-        excluded=tuple((entry[0], entry[1]) for entry in candidate.excluded),
-    )
-
-
-def _server_final_scan(html: str) -> tuple[str, ...]:
-    """The server's final gate over an extension capture (ADR-0019 §6; owner amendment
-    ``5909645067`` §1): ``app.stages.collect.extension.gate`` over the capture owner's own
-    sanitizer. Empty means the capture may go on as it arrived."""
-    return final_gate(html, sanitize=_capture_owner_sanitizer, boundary_of=boundary_of)
+def _server_final_scan(html: str) -> GateResult:
+    """The server's security gate over an extension capture (ADR-0019 §6.1, the user's decision of
+    2026-10-01): ``app.stages.collect.extension.gate``, naming each boundary as the capture owner
+    names it. Nothing blocking means the capture goes on as it arrived."""
+    return security_gate(html, boundary_of=boundary_of)
 
 
 @dataclass
