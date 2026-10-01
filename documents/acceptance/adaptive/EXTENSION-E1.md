@@ -1,8 +1,8 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). Three granted
-  attempts failed closed at the final gate (§5.1). A green PR, a green CI or a synthetic test run
-  accepts nothing. The
+- Status: **ACCEPTED — the one real KM통상 acceptance passed on exact main `28b59979`** (§5.2;
+  run `02aa6058-9a44-4275-b45e-65e734b48c83`, `NO_REVISION` / `EXTENSION_COMPARE_ONLY`, `NO_BUNDLE`).
+  Three earlier granted attempts failed closed and are kept in §5.1. The
   implementation and its tests are provider-zero as corrected; the implementation **history** is
   not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
@@ -145,6 +145,7 @@ the bounds and the per-run data roots are in
 | `e1-km-286-01` | `66737efe-365b-4a5f-9f1e-faceab04afd8` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | the capture was accepted (13 481 bytes, 242 nodes, 25 image references) and the final gate refused it; zero write held (one run, one job, one attempt, one dead-letter audit event, nothing else) |
 | `e1-km-349-01` | `2cc9b341-9bcc-4d33-b52d-51654238d5fe` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `e07c3f2f` (PR #175); accepted (12 862 bytes, 229 nodes, 17 image references); findings `IMAGE_REFERENCE_NOT_A_LOCATOR:src@img#.` and `SANITIZER_EXCLUDED:PRIVATE@p#.member`; zero write held as above |
 | `e1-km-349-02` | `080145a9-23be-4e89-8392-4b276b8b11c6` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `25aac655` (PR #176, policy `kmretail-capture-2`); accepted (10 974 bytes, 194 nodes, 16 image references): the benefit box was cut; one finding `IMAGE_REFERENCE_NOT_A_LOCATOR_EMPTY:src@img#.`; zero write held as above |
+| `e1-km-349-03` | `02aa6058-9a44-4275-b45e-65e734b48c83` | `NO_REVISION` / `EXTENSION_COMPARE_ONLY` | on main `28b59979` (PR #177); **the acceptance** (§5.2) |
 
 The refusal of `e1-km-286-01` is not an acceptance and not a defect of the gate: it failed closed as
 §4 requires. Its findings were not recorded: the job kept only their count, and the capture is gone
@@ -169,7 +170,41 @@ was a defect of the gate, not of the page. The supplier's image owner
 (`integrations/suppliers/kmretail/collect/images.py`) reads an empty value as no reference, and a
 Cafe24 lazy-load image leaves `src` empty and names its image in `ec-data-src`. The gate refused the
 same input. The gate now reads an empty value or `srcset` entry exactly as the image owner does: it
-names no image, so it is no reference. All three granted clicks are consumed.
+names no image, so it is no reference. PR #177 made that change.
+
+### 5.2 The acceptance
+
+The user granted one more acceptance of product 349 on 2026-10-02 ("아 349 확인하자"), on the main
+that carries PR #177. Grant record, bounds and evidence:
+`%USERPROFILE%\ICBM-acceptance\e1-km-exact-main-28b59979\` (`GRANT.md`,
+`e1-km-349-03\RESULT.md`, the data root and its counts before, ready and after).
+
+- **Exact main** `28b59979dc856926a65d4ff6e3512d0d8a1725fe`, execution `DRY_RUN`. The capture
+  policy was `kmretail-capture-2` (digest
+  `74670a991bf12686b837928436ebf6bae67cdb0516d5299c3eb22c1762707679`). The extension under
+  `ui/extension/` was byte-identical to this main.
+- **One page and one click** by the user; no retry. Zero automated supplier reads: Claude never
+  opened the supplier, and the server log records no supplier request.
+- **Run** `02aa6058-9a44-4275-b45e-65e734b48c83`:
+  - `NO_REVISION` / `EXTENSION_COMPARE_ONLY`, `transport_kind=EXTENSION`;
+  - identity resolved to `349`;
+  - `revision_id`, `facts_status` and `product_read_at` empty.
+- **Canonical KM extractor result**, in memory:
+  - `original_name`, `prices`, `stock`, `shipping`: CONFIRMED.
+  - `minimum_sale_price`, `detail_description`: REVIEW_REQUIRED. The page states a minimum-price row
+    whose value is not a plain won amount; it is held for review, never dropped.
+  - `options`, `quantity_tiers`, `brand`, `manufacturer`, `origin`, `notice`: ABSENT.
+  - Image roles: DETAIL 7, PRIMARY 3, THUMBNAIL 1, PRODUCT_AUX 1, UI_COMMON 4.
+- **Adaptive dry run:** `NO_BUNDLE`. There was no bundle to compare. It is not a comparison PASS and
+  not `VALIDATED`.
+- **Zero write:**
+  - one `collection_runs` row, one job and one attempt, and nothing else;
+  - every `product_facts_*` table, `source_assets`, `product_groups`, `product_items` and every
+    `adaptive_*` table stayed at 0.
+- **Security and capture evidence:**
+  - the gate passed with no finding;
+  - the member benefit box was cut in the browser;
+  - the signed-in member's name is in no file of the data root (byte scan).
 
 ## 6. Incident during implementation: two unintended requests to the supplier host
 
