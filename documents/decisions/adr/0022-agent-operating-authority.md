@@ -14,6 +14,14 @@ Decision owner: the user (repository owner — `CLAUDE.md` §1). The user gave t
 working session of 2026-09-30 and confirmed it there when asked. Recorded by Claude Code; this
 document is the durable record, and it is the last authority record of this kind the process needs.
 
+Scope calibration, 2026-10-01: the same decision owner limited BLOCKER to the five material defect
+classes recorded by PR #165 comment `5921331154` and selected the risk-based validation tiers now
+canonical in rule §14.2. PR #174's calibration added the separately sourced safety-gate-bypass class
+in §4.1. A later same-day proportionality pass narrowed HIGH_RISK and human approval to credible
+side-effecting or irreversible risk; a routine read-only provider operation is not one by name
+alone. These are small control-plane clarifications of this ADR, not a new architecture project or
+Agent Host V4.
+
 ---
 
 ## Context
@@ -56,18 +64,15 @@ Only these stop a loop for the user:
 - **B.** a user-visible behaviour, UX or policy that the existing requirements do not decide and
   that has several real product directions;
 - **C.** a change that goes beyond the user's existing requirements;
-- **D.** a real external action:
-  - a LIVE provider mutation, a real provider or marketplace call, a real canary;
-  - a real supplier or provider read whose acceptance needs its own grant;
-  - accepting the residual risk of such an action;
-  - a payment or a cost;
-  - sending real data to an external service;
-  - a destructive operation, a force-push, a branch deletion;
+- **D.** a protected execution action in the active list owned by rule §7.2;
 - **E.** a hold the user placed on a PR themselves (the owner's hold file). It is the user's own
   stop, so only the user lifts it.
 
-The Host calls this `HUMAN_DECISION_REQUIRED`. A technical choice is never one of them, and a stop
-that names none of these categories is not the user's, whatever it calls itself.
+Rule §14.4 is the active operational list; this ADR records why it exists. The Host calls a matching
+stop `HUMAN_DECISION_REQUIRED`. A routine read-only provider call, read-back, health
+check or already-approved lookup that has no external side effect, sensitive-data export or material
+new cost is not D and needs no separate user approval. A technical choice is never one of these
+categories, and a stop that names none of them is not the user's, whatever it calls itself.
 
 ### 3. What the agent decides and does
 
@@ -83,13 +88,11 @@ The agent is responsible for, and never asks the user about:
 - FULL CI, MERGE_GUARD, the merge, POST_MERGE_VERIFY;
 - starting the next canonical slice.
 
-Those choices are verified, not approved: GPT and Claude audit every one of them on the exact HEAD.
+Those choices are verified, not approved. The verification strength is selected by the canonical
+risk tiers in rule §14.2; only HIGH_RISK requires the exact-HEAD independent dual audit.
 
-| role | owner |
-| --- | --- |
-| product decision | the user |
-| implementation decision | the agent |
-| verification | GPT and Claude |
+The current operational assignment is stated once in rule §14.1. This decision record does not
+copy a second role table.
 
 ### 4. Holds
 
@@ -109,19 +112,28 @@ report. It asks for no decision.
 
 ### 4.1 What a BLOCKER is
 
-Decided by the user on 2026-10-01 (PR #165 comment `5921331154`). An audit BLOCKER is only:
+The first five classes were decided by the user on 2026-10-01 in PR #165 comment `5921331154`.
+The sixth was added separately by the PR #174 rules calibration; it is not attributed to that
+comment. An audit BLOCKER is only a material defect introduced or exposed by the changed code on a
+reachable path for the scoped operation:
 
 1. a real possibility of data damage;
 2. a real possibility of a duplicate registration or a wrong external transmission;
 3. a security hole or a credential leak;
 4. a core function that does not actually work;
-5. a test or CI failure caused by a real code defect.
+5. a test or CI failure caused by a real code defect;
+6. an actual bypass or disabling of a core safety gate required by that operation.
 
-None of these is a BLOCKER: a difference in document wording; the same meaning phrased differently
-across rule files; citation format; a non-essential difference in how the packet is built; a
-README, ADR or ROADMAP wording mismatch; a suggestion that something could be made more rigorous; a
-request to prove an already-decided product requirement in more detail. An auditor passes those and
-records them as notes. Notes are never repaired as blockers and never hold a merge.
+None of these is a BLOCKER: a hypothetical concern without a credible reachable path; a
+defence-in-depth improvement; an unrelated pre-existing issue the change does not worsen; a
+difference in document wording; the same meaning phrased differently across rule files; citation
+format; a non-essential difference in how the packet is built; a README, ADR or ROADMAP wording
+mismatch; a suggestion that something could be made more rigorous; a request to prove an
+already-decided product requirement in more detail. An auditor passes those and records them as
+notes. Notes are never repaired as blockers and never hold a merge.
+
+The six classes are exhaustive. A finding that names none of them is a NOTE or, when evidence is
+missing, a technical hold; it is not upgraded to BLOCKER because it repeated.
 
 ### 5. No human classification
 
@@ -165,21 +177,39 @@ Removing the per-step approval is not self-authorization, and it lowers no mecha
 
 - An agent that finds the work needs a product feature or policy outside the canonical documents
   does not build it. It stops with `HUMAN_DECISION_REQUIRED`.
-- Kept exactly: the exact-HEAD audit; the Audit Packet and its digest; the two-part audit identity;
-  the GPT audit and the independent Claude audit; the same-identity DUAL PASS; `evidence_seen`
-  coverage; the PASS-only cache; FULL CI; the pre-merge packet regeneration; the fresh-main check;
-  MERGE_GUARD; the merge with `expected_head_sha`; POST_MERGE_VERIFY.
+- Kept exactly for HIGH_RISK: the exact-HEAD audit; the Audit Packet and its digest; the two-part
+  audit identity; the GPT audit and the independent Claude audit; the same-identity DUAL PASS;
+  `evidence_seen` coverage; the PASS-only cache; FULL CI; the pre-merge packet regeneration; the
+  fresh-main check; MERGE_GUARD; the merge with `expected_head_sha`; POST_MERGE_VERIFY.
+- BASIC and PROVIDER_ZERO use rule §14.2. They do not claim that their lighter validation is a
+  HIGH_RISK audit. A mixed change uses its highest credible risk; uncertainty alone is not a tier.
+- Transitional V3 still requires a current-main `DUAL_PASS` baseline before auto-next. After a
+  lower-tier merge, `MAIN_NOT_DUAL_PASS_AUDITED` is a technical hold: a supervising agent, not the
+  Host itself, runs the existing standalone full-main auditor with its default DELTA/FULL
+  self-escalation and without `-ForceFull`, then resumes the Host only after DUAL PASS. This is not a
+  merge prerequisite or HIGH_RISK proof for the lower-tier PR. Without a supervising agent the Host
+  waits; BLOCKED, INSUFFICIENT, another technical hold or main movement starts no next work and uses
+  existing bounded recovery. A Host-managed HIGH_RISK merge already writes the current-main baseline
+  in its post-merge audit, so it needs no duplicate standalone audit before auto-next.
 - Kept exactly: the authority write guard. No automated actor writes a marker-first body.
-- Kept exactly: every provider, LIVE and destructive-operation gate — `CLAUDE.md` §7, ADR-0014
-  (the never-resend and positive-only reconcile rules among them), ADR-0018.
+- Kept exactly: the gates on side-effecting LIVE writes, `UNKNOWN`/replay, credential and identity
+  isolation, sensitive-data export and irreversible destructive operations — `CLAUDE.md` §7,
+  ADR-0014 (the never-resend and positive-only reconcile rules among them), ADR-0018.
+
+For a side-effecting mutation to which ADR-0018 applies, visual acceptance, restore and retention
+are one readiness check on the final main immediately before the bounded LIVE action, not separate
+user approvals. They are not mutation gates for a routine read-only operation and are not repeatedly
+re-recorded after ordinary provider-zero merges; before an applicable final closeout their state is
+simply not current for LIVE and therefore authorizes nothing (rule §14.5.1).
 
 ### 7. Relation to ADR-0020
 
 ADR-0020 gave one standing authorization, for provider-zero slices next in ROADMAP order, and left
 every other step to a new user decision. This ADR widens the standing authorization to every step
-that is not one of §2. ADR-0020's conditions that are safety conditions stay: a real provider call,
-LIVE, a real canary and the residual-risk acceptance are §2 D. Its condition that each slice is its
-own PR, audited by both auditors, stays.
+that is not one of §2. ADR-0020's conditions that are safety conditions stay for a side-effecting
+LIVE mutation or canary and its material residual-risk acceptance. A routine read-only provider
+operation is no longer promoted to §2 D only because it is a provider call. Its condition that each
+slice is its own PR stays; audit strength follows rule §14.2.
 
 Where ADR-0020, a roadmap line or a rule file says a step needs "its own authorization", read it
 with §1: the standing authority is that authorization unless the step is one of §2.
@@ -201,15 +231,15 @@ auto_next  = true
 ## Invariants
 
 ```text
-OA-01  The user decides product features, product behaviour and real external actions. Nothing else stops a loop for the user.
-OA-02  An implementation choice for canonically defined work is the agent's, and is verified by both auditors on the exact HEAD.
+OA-01  The user decides product features, product behaviour and protected side-effecting or irreversible actions. Nothing else stops a loop for the user.
+OA-02  An implementation choice for canonically defined work is the agent's, and is verified at the risk tier of rule §14.2.
 OA-03  A stop is HUMAN_DECISION_REQUIRED or TECHNICAL_HOLD, by category. A count never makes a stop human.
 OA-04  No packet depends on a human classification record. A marker is provenance and never a hold.
 OA-05  Existing authority records are history: never deleted, never edited. No new [OWNER-AMENDMENT] is created or requested.
 OA-06  No automated actor writes a marker-first body.
 OA-07  Work that needs a product feature or policy outside the canonical documents is not built: HUMAN_DECISION_REQUIRED.
-OA-08  The exact-HEAD audit, the packet digest, the same-identity DUAL PASS, evidence_seen, the PASS-only cache, FULL CI, the pre-merge regeneration, MERGE_GUARD, expected_head_sha and POST_MERGE_VERIFY are unchanged.
-OA-09  No provider, LIVE, canary, cost, real data transfer or destructive action is ever started by auto_merge or auto_next.
+OA-08  HIGH_RISK keeps the exact-HEAD audit, packet digest, same-identity DUAL PASS, evidence_seen, PASS-only cache, FULL CI, pre-merge regeneration, MERGE_GUARD, expected_head_sha and POST_MERGE_VERIFY; lower tiers never present themselves as that proof.
+OA-09  No protected execution action of rule §7.2 is ever started by auto_merge or auto_next.
 OA-10  Tracks are separate: their own branch, worktree, PR, packet, audit identity and merge. One track's hold never stops another.
 ```
 
@@ -218,7 +248,7 @@ OA-10  Tracks are separate: their own branch, worktree, PR, packet, audit identi
 - The user is asked only what §2 lists. The process no longer asks for amendments, classification
   comments, repair approvals, merge approvals or the start of the next slice.
 - An agent decides more by itself. What it decides is bounded by the canonical documents and
-  checked twice on every HEAD; what it may not decide is a closed list the Host enforces.
+  checked at the risk tier of rule §14.2; what it may not decide is a closed list the Host enforces.
 - A wrong implementation choice is caught by an audit, not by a question. A loop can therefore
   spend audit and repair cycles on a problem a person would have resolved with one answer. The
   circuit breaker of §4 bounds that cost.

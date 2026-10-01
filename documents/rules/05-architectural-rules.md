@@ -39,7 +39,11 @@ Core product logic stays platform-neutral. A supplier or marketplace implements 
 
 Site-specific extraction belongs inside that supplier adapter/profile. Marketplace payload specifics belong inside that marketplace adapter.
 
-**A new adapter may not change canonical Product / Pricing / Operation contracts merely to accommodate one site.** Contract changes require architecture review first.
+**A new adapter may not change canonical Product / Pricing / Operation contracts merely to
+accommodate one site.** Site-specific request fields, response fields and mappings stay inside the
+adapter and are implementation decisions when they preserve the approved canonical behaviour. A
+change to shared canonical behaviour or an externally consumed canonical contract is a product
+decision and requires the accepted ADR or canonical decision that authorizes it.
 
 ### 5.4 Facts vs enrichment
 

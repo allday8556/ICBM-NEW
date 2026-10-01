@@ -12,6 +12,10 @@ identity.
 
 ## What the Host does
 
+The scripts below are the HIGH_RISK strong path of rule §14.2. BASIC and PROVIDER_ZERO changes use
+the normal PR/CI path; they are not sent through this packet/dual-audit machinery merely because
+the Host is installed. This keeps V3 and narrows when it is invoked; it is not a V4 project.
+
 - **Generated, immutable Audit Packet.**
   - Built over content-bound source identities: the exact HEAD, the audited base, the PR's complete
     diff, and the durable evidence the slice declaration cites, each by locator + canonical body
@@ -49,18 +53,16 @@ identity.
   - The class word alone decides nothing; only a category of the closed list makes a stop the
     user's, and only when the whole reason is a form the Host composes (`NO_LIVE_ACTION` is
     technical). An auditor's `HUMAN_DECISION_REQUIRED` without such a category is audited again.
-  - The class word alone decides nothing; only a category of the closed list makes a stop the
-    user's. An auditor's `HUMAN_DECISION_REQUIRED` without such a category is audited again.
-  - `HUMAN_DECISION_REQUIRED`: a closed list — a new product feature, an undecided product
-    direction, a change beyond the user's requirement, a real external action (LIVE, provider call,
-    canary, real external read, accepting its residual risk, cost, real data transfer, destructive
-    operation), and a hold the user placed on a PR themselves (the owner's hold file). It is
-    exactly the list of protocol §0.2. The run waits for the user.
+  - `HUMAN_DECISION_REQUIRED`: the Host encoding of rule §14.4 and §7.2 — an undecided or
+    out-of-scope product decision, a protected execution action, or the user's own hold. Routine
+    read-only provider operations are not in the list. The run waits for the user.
   - `TECHNICAL_HOLD`: everything else. The supervisor in `orchestrator-v1.3.ps1` retries the same
     state with a doubling wait, and ends `TECHNICAL_HOLD_EXHAUSTED` after
     `technical_hold.max_same_state_retries` consecutive retries of it; a different state in
     between starts the count again. That is a cost circuit breaker, not a question.
-- **Repair.** A BLOCKER is repaired and re-audited. After `repair_loop.max_cycles` attempts every
+- **Repair.** Only the six material classes in ADR-0022 §4.1 are BLOCKERs, including a core
+  safety-gate bypass; everything else is a NOTE or a technical evidence hold. A BLOCKER is repaired
+  and re-audited. After `repair_loop.max_cycles` attempts every
   later attempt is an independent re-analysis; a count never stops the loop. A fix that needs a
   file outside the PR, a migration or a removed file is reported (`SCOPE_WIDENED`,
   `SCHEMA_OR_MIGRATION`, `REMOVED_FILE`) for the auditors, not held.
@@ -97,14 +99,14 @@ identity.
 | --- | --- | --- |
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
-| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `1ed00eb96c0a0514580e7cdd1dd88f9fe2b4d433a095db4cfb243a17840ca712` |
-| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `d1f7c572e10a06f68622a83712bda412d1447cec70b74e60ed881c810a2435a7` |
-| `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `bc8e0fa0f35992272adaf5dfc3ac4cfa8bb44aceb05c1457cbe776a16614cebf` |
-| `run-full-audit-v1.ps1` | post-merge main audit | `30896853101ad5d38d3fcf586243c227f5fd8bf46cdb45842482c759b67b6285` |
-| `run-lookahead-main-v1.ps1` | next-slice selector | `a8b7dac0bafb24358c891ed4aa0fd02cc24229c271c0717a9b7fa611e012142d` |
+| `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f56d9065edbefff894e9d4f84fed441740adda47709849b4501af2eb1aac1162` |
+| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `b7d9464857fee6ae8ecb5a17db37ea47baa8c0dd5a94289b474295560884353b` |
+| `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `c06283c96ec98be585e49f333e4fba6407ff35454c16b39481323f5e9fda79ba` |
+| `run-full-audit-v1.ps1` | strong/final-main audit | `992b2a5f2bdf727374ebb7b57871187a396c9923bc6307ef8cafcd980efa8896` |
+| `run-lookahead-main-v1.ps1` | next-slice selector | `2091ce4ff46d2827470bae26cc449baf474e3efb2736114ef32a9d5917fc4495` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `590afff2475162c83ef50d81b76f247419a9ec0fc47a325c8f50e9ed9ea37cd7` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `d8f827af9dbea16e246e15d128244acc34f7c14a76628f6fb11acfb513b9b770` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 
