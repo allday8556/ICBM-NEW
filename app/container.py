@@ -5,7 +5,9 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 
+import integrations.suppliers as supplier_packages
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -16,6 +18,7 @@ from app.capabilities.jobs.worker import JobWorker
 from app.capabilities.live_safety.assets import (
     AssetUploadService,
     PreparationCandidateGate,
+    PreparedUploadAssets,
 )
 from app.capabilities.live_safety.authority import LiveAuthorityService
 from app.capabilities.live_safety.drill import DrillPaths, RestoreDrillService
@@ -49,11 +52,17 @@ from app.platform.db.migrate import head_revision
 from app.platform.system.diagnostics import DiagnosticsService
 from app.platform.system.execution_mode import ExecutionModeService
 from app.platform.system.readiness import ReadinessService
+from app.stages.collect.adaptive.engine.capture import (
+    CaptureRefused,
+    boundary_of,
+    capture_candidate,
+)
 from app.stages.collect.adaptive.engine.hooks import HookManifest
 from app.stages.collect.adaptive.phase_c_capture.accounting import PhaseCReadAccounting
 from app.stages.collect.adaptive.phase_c_capture.commands import PhaseCCommandStore
 from app.stages.collect.adaptive.phase_c_capture.runner import CaptureRunner
 from app.stages.collect.adaptive.phase_c_capture.store import CaptureStore
+from app.stages.collect.adaptive.shadow.dry_run import DryRunComparer
 from app.stages.collect.adaptive.shadow.runner import ShadowRunner
 from app.stages.collect.adaptive.shadow.store import ADR_RETENTION, ShadowEvidenceStore
 from app.stages.collect.adaptive.shadow.switch import ShadowSwitch
@@ -70,6 +79,12 @@ from app.stages.collect.collection import (
     RegisteredCollection,
     SessionProvider,
 )
+from app.stages.collect.extension.buffer import CaptureBuffer
+from app.stages.collect.extension.gate import Sanitized, final_gate
+from app.stages.collect.extension.nonces import NonceCache
+from app.stages.collect.extension.pairing import ExtensionPairing
+from app.stages.collect.extension.policy import CapturePolicySource
+from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
@@ -143,6 +158,34 @@ from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
+# Where the supplier packages, and with them each reviewed capture policy, live.
+SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
+
+
+def _capture_owner_sanitizer(html: str) -> Sanitized:
+    """The capture owner's sanitizer and final scan, unchanged (ADR-0017 §7.3 note), as the
+    extension gate reads it: its refusal, what it removed and what it set aside. Kinds and
+    boundaries only, never a captured value."""
+    try:
+        candidate = capture_candidate(html)
+    except CaptureRefused as refused:
+        return Sanitized(refusal=str(refused))
+    except RecursionError:
+        # Deeper than the capture owner can walk: refused, never passed unscanned.
+        return Sanitized(refusal="the capture nests deeper than the final scan can read")
+    return Sanitized(
+        refusal=None,
+        removals=tuple((entry[0], entry[1]) for entry in candidate.removals),
+        excluded=tuple((entry[0], entry[1]) for entry in candidate.excluded),
+    )
+
+
+def _server_final_scan(html: str) -> tuple[str, ...]:
+    """The server's final gate over an extension capture (ADR-0019 §6; owner amendment
+    ``5909645067`` §1): ``app.stages.collect.extension.gate`` over the capture owner's own
+    sanitizer. Empty means the capture may go on as it arrived."""
+    return final_gate(html, sanitize=_capture_owner_sanitizer, boundary_of=boundary_of)
+
 
 @dataclass
 class Container:
@@ -165,6 +208,8 @@ class Container:
     revisions: ProductFactsRevisionStore
     source_truth: SourceTruthReadback
     collection: ProductCollectionService
+    extension_pairing: ExtensionPairing
+    extension_capture: ExtensionCaptureService
     product_store: ProductFoundationStore
     products: ProductsService
     materializer: ProductMaterializer
@@ -222,6 +267,8 @@ def build_container(
     smartstore_caller: SmartStoreEndpointCaller | None = None,
     adaptive_supplier_gate: SupplierGate | None = None,
     adaptive_hook_manifests: Mapping[str, HookManifest] | None = None,
+    capture_policy_root: Path | None = None,
+    extension_report_sink: ReportSink | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -400,6 +447,27 @@ def build_container(
     )
     registry.register(collection.job_definition())
 
+    # ADR-0019 E1: the extension capture transport. The pairing lives in the keyring only, the
+    # replay cache and the capture buffer in this process only, and the capture policy is read
+    # from the repository on every use. An accepted capture opens a canonical run and is compared
+    # in memory; nothing is appended, and no supplier request is ever sent for it.
+    extension_pairing = ExtensionPairing(secrets, clock, NonceCache(clock))
+    extension_capture = ExtensionCaptureService(
+        db=db,
+        clock=clock,
+        jobs=jobs,
+        runs=runs,
+        policies=CapturePolicySource(capture_policy_root or SUPPLIER_PACKAGES),
+        buffer=CaptureBuffer(),
+        final_scan=_server_final_scan,
+        # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
+        worker_in_process=worker.IN_PROCESS,
+        collections=registered_collections,
+        dry_run=DryRunComparer(db, shadow_switch, adaptive_profiles, hook_manifests),
+        report_sink=extension_report_sink,
+    )
+    registry.register(extension_capture.job_definition())
+
     products = ProductsService(product_store)
     # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
     # makes a registration candidate: that is M5's preflight.
@@ -466,11 +534,15 @@ def build_container(
     )
     # M5 PR-F (ADR-0014 §27, decision 5751540323): the durable operator-authored preparation. It
     # owns inputs only; the preflight still derives every verdict, and the builder still freezes.
+    # The durable ASSET upload-attempt owner (ADR-0018 §3.4) is read by the application freeze:
+    # the provider assets prepared for the exact candidate being frozen (5919917893 §3).
+    live_store = LiveAuthorityStore(db, clock, audit)
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
         duplicate_lookup=SmartStoreDuplicateLookup(),
+        prepared_assets=PreparedUploadAssets(live_store),
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
@@ -478,7 +550,6 @@ def build_container(
     # Gate 3 area 1 (ADR-0018 §3, §3.4, §4, §10): the pre-LIVE safety owners. The stack reads the
     # execution-mode owner, whose M0 policy refuses every LIVE write, and no eligibility, restore,
     # retention or visual proof exists yet, so every mutation it judges is refused at this main.
-    live_store = LiveAuthorityStore(db, clock, audit)
     # Gate 3 area 2 (ADR-0018 §7, §8): the restore-drill and evidence-retention proofs are durable
     # owners. Gate 3 area 3 (§9): the reviewed visual acceptance, current only for exactly the
     # commit this process runs at and its running code digest (both taken once at composition), at
@@ -675,6 +746,8 @@ def build_container(
         revisions=revisions,
         source_truth=SourceTruthReadback(revisions, source_assets),
         collection=collection,
+        extension_pairing=extension_pairing,
+        extension_capture=extension_capture,
         product_store=product_store,
         products=products,
         materializer=materializer,

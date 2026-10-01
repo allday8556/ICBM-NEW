@@ -40,6 +40,13 @@ def _run_view(run: CollectionRunRecord) -> CollectionRunView:
         detail=run.detail,
         requested_at=run.requested_at,
         finished_at=run.finished_at,
+        transport_kind=None if run.provenance is None else run.provenance.transport_kind,
+        capture_policy_revision=(
+            None if run.provenance is None else run.provenance.capture_policy_revision
+        ),
+        capture_policy_digest=(
+            None if run.provenance is None else run.provenance.capture_policy_digest
+        ),
     )
 
 

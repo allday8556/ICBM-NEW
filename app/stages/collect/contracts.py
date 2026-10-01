@@ -25,7 +25,7 @@ from app.stages.collect.facts import (
     ImageRole,
     LocatorForm,
 )
-from app.stages.collect.models import CollectionOutcome
+from app.stages.collect.models import CollectionOutcome, TransportKind
 
 
 class SourceAssetView(BaseModel):
@@ -135,8 +135,15 @@ class SubmittedCollectionView(BaseModel):
 class CollectionRunView(BaseModel):
     """One run's durable result.
 
-    ``NO_REVISION`` is a finished run with nothing to append, because the source stated no stable
-    identity; ``detail`` then holds the parser's reason. Only a ``RECORDED`` run names a revision.
+    ``NO_REVISION`` is a finished run with nothing to append: the source stated no stable
+    identity, and ``detail`` then holds the parser's reason; or the run was an extension capture
+    of slice E1, which compares in memory and appends nothing (``EXTENSION_COMPARE_ONLY``). Only a
+    ``RECORDED`` run names a revision.
+
+    ``transport_kind`` is how the run's document was acquired (ADR-0019 §4), and the capture
+    policy fields name the policy an ``EXTENSION`` capture was cut with. All three are ``None`` on
+    a run recorded before they were kept. They are provenance, on their own axis: never a run
+    outcome, a facts status or a failure class.
     """
 
     collection_run_id: str
@@ -150,6 +157,9 @@ class CollectionRunView(BaseModel):
     detail: str | None
     requested_at: datetime
     finished_at: datetime | None
+    transport_kind: TransportKind | None = None
+    capture_policy_revision: str | None = None
+    capture_policy_digest: str | None = None
 
 
 class CollectionRunListView(BaseModel):

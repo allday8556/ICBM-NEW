@@ -21,6 +21,9 @@ SUPPLIER_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 class SupplierTransport(StrEnum):
     HTTP = "HTTP"
     BROWSER = "BROWSER"
+    # ADR-0019 §10 (E1): the operator's own Chrome through the first-party extension. It is a
+    # capture envelope only: no gateway ever sends a request under it.
+    EXTENSION = "EXTENSION"
 
 
 class RequestKind(StrEnum):

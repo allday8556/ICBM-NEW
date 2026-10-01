@@ -6,7 +6,6 @@ truncated reason, a covered blocker, a hidden state, a horizontally clipped or o
 document that scrolls sideways, a missing help icon — fails exactly the check that names it.
 """
 
-import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -14,10 +13,10 @@ import pytest
 
 from app.capabilities.live_safety import visual
 from automation.acceptance.gate3_visual.harness.checker import MEASURE, judge
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 REGISTER = next(t for t in visual.REQUIRED_TARGETS if t.name == "register")
 NAV = "".join(
     f'<button class="nav-item" data-page="{key}"'
@@ -93,7 +92,7 @@ def browser() -> Iterator[Any]:
 
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except Exception as error:  # pragma: no cover - depends on the host
             pytest.skip(f"no {BROWSER_CHANNEL} browser: {error}")
         yield launched

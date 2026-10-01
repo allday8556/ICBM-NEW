@@ -111,6 +111,12 @@ Three different things are called a "profile". They are never one another (ADR-0
 | `TransportKind` | how a collected document was acquired, closed: `EXTENSION` (the operator's own Chrome through the first-party extension, the primary transport) or `DIRECT_URL` (Collection Management's fallback, through the server gateway). Provenance only: it enters no digest, fingerprint, semantic tuple or `comparability_key` and is never by itself a drift event | ADR-0019 §1, §4 |
 | `BrowserCapturePolicy` | a supplier-scoped, repository-reviewed, digested **capture topology**: product root, allowed and excluded DOM regions, allowed attributes, node and byte bounds. Separate from EPR/PTR and from `CollectionProfile` (which keeps host, path, query, pacing and transport); holds no source fact or extraction rule | ADR-0019 §5 |
 | direct-URL fallback | Collection Management's URL entry, the `DIRECT_URL` transport, for pages or sites the extension cannot capture reliably; not the default workflow | ADR-0019 §1 |
+| `transport_kind` | the stored provenance column of `TransportKind` on `collection_runs` and `product_facts_revisions`; nullable; NULL on rows that predate it; never an identity input | ADR-0019 §4, AC-08 |
+| `capture_policy_revision` | the explicit revision of the `BrowserCapturePolicy` an `EXTENSION` capture was cut with; present only when `transport_kind = EXTENSION` | ADR-0019 §4, §5 |
+| `capture_policy_digest` | the SHA-256 of that policy's one canonical serialization, recomputed by the server at ingest; present only when `transport_kind = EXTENSION` | ADR-0019 §4, §5 |
+| `NO_BUNDLE` | the Adaptive result of a run for which no reviewed usable EPR/PTR bundle exists. It is **not** a comparison PASS, `VALIDATED`, `SHADOW` or `ACTIVE`, and it states nothing about extraction quality | Issue #126 ruling `5906290729` B-7 |
+| `EXTENSION_COMPARE_ONLY` | the `detail` code of an E1 `EXTENSION` run settled `NO_REVISION`: captured and compared in memory, nothing written. It is a code on the existing outcome axis, not a new outcome | Issue #126 ruling `5906290729` B-6 |
+| `EXTENSION_CAPTURE_BUFFER_MISSING` | the `detail` code of an `EXTENSION` run settled `FAILED` because the in-process capture buffer was gone when its job ran (restart). It is never retried | Issue #126 ruling `5906712259` N-1 |
 | `VALIDATED` (a profile) | derived, never stored: a `PASS` validation run exists for the exact freshness tuple, implementation fingerprints included | ADR-0017 §7.1 |
 
 ## 4. Adoption and execution words

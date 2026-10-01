@@ -36,15 +36,16 @@ Do not mix broad refactoring with unrelated behavior changes in the same commit.
 
 ### 8.3 Pull requests
 
-Every PR states:
+Every PR states what changed, how it was verified and what it deliberately does not do. A BASIC
+documentation, infrastructure or simple internal PR may stop there.
 
-1. what changed
-2. which contract it implements or modifies
-3. whether schema changed
-4. whether external writes are involved
-5. how it was verified — commands and observed evidence
-6. what it explicitly does not do
+Add the applicable contract, schema/migration and external-write details when the PR changes them,
+and identify the §14.2 validation tier. A PR that changes shared canonical behaviour, an externally
+consumed canonical contract or product policy links the accepted ADR or canonical decision that
+authorizes it. An internal schema, endpoint implementation or adapter mapping for already approved
+behaviour is an implementation decision: explain and test it in the PR, but do not create an ADR
+only to satisfy a template.
 
-A PR that changes an approved contract links the ADR authorizing it. No ADR, no contract change.
-
-No merge based only on unit/mock PASS when the roadmap requires real E2E/read-back evidence.
+Unit/mock PASS alone cannot close a user feature or milestone whose acceptance criteria require
+real E2E/read-back evidence. That closeout rule does not turn every intermediate provider-zero PR
+into a LIVE verification run.

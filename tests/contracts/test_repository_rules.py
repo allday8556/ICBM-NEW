@@ -208,27 +208,30 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 
 
 # Issue #151 (ADR-0021 §3, §4): the rule bodies CLAUDE.md now imports are its former sections,
-# and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
+# and later reviewed changes stay explicitly pinned. Each digest began as the SHA-256 of the
+# pre-migration section (CLAUDE.md
 # at main e72a5cad) after the normalization below, which masks locators only: code spans that
 # name a path or a file, markdown link targets and bare path tokens. Every rule word must be
-# unchanged; a later reviewed rule change updates its digest in the same PR. §11 (milestone status)
+# unchanged unless a reviewed rule change updates its digest in the same PR. ADR-0022 and the
+# 2026-10-01 validation calibration updated the authority, risk, closeout, contract, PR and LIVE
+# scope wording. The digests below are of that reviewed text. §11 (milestone status)
 # is pinned by the milestone agreement test instead. documents/rules/README.md is deliberately
 # absent: it is the new index (the former intro and §13 restated with moved locators, plus the
 # section map), not a preserved body.
 _FORMER_CLAUDE_SECTIONS = {
-    "01-roles-and-exchange.md": "41d2e020b31971ce797b8d12eadacb06a15cec0b2c71d9ed5f9b46ea1223cc87",
+    "01-roles-and-exchange.md": "92a5d9b99bc3db6c4cf6bb7e8d39f74f1c80bb651b73f66010ca875bc66e57aa",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
     "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
-    "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
-    "05-architectural-rules.md": "d6c2f27ab6a1ec86371de23099c0c2bd69e57936f0ece79c833023a03eac7d61",
+    "04-runtime-stack.md": "23b06ad5483f0dd2e1a86a604c487498de6f22c9778630f07bdb7f886c72a3e3",
+    "05-architectural-rules.md": "64110977f367dbe264720f7f1489d313be04b8705a959ae4a0508fabb1df5d7a",
     "06-immutable-domain-rules.md": (
-        "4f3460debfb15568611ad547a158ea15b75491471312a0cf2ab5c47f06e8c1b9"
+        "7dc72add46c63e5af49bbe515621555b7ffd18a3325650643bc2f0207de663d7"
     ),
-    "07-execution-safety.md": "f398e0d780f8f0f6f8cf072084798190a271d316936362d86dbf92251c5689e5",
-    "08-git-conventions.md": "3f3c36c1927cfeeb3a05ef7f09e008b45d873fc29785941d9bf51298447d230a",
-    "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
-    "10-working-style.md": "3d6f95d224b6b27b17ece1c6b850a0b0151795e673c5f9f391542741e9b50f42",
-    "12-first-vertical.md": "3bf78de57d08ac04c4edfb8b5564b1070a1f3c348237359cfab49fd16db0746c",
+    "07-execution-safety.md": "57aebf9eb2dd22a987a29fe86a2f8a901982f58fd265d2c241200e08898c27e4",
+    "08-git-conventions.md": "369e8241e18fe0013273f441a5c137dfb73402a23676cf113053087cb3c002c9",
+    "09-definition-of-done.md": "58dadd3df8dce8dfae1594b34ddeefb41efcb1a3c05ce656d29bb2b9989b1def",
+    "10-working-style.md": "8c685dad839064be75eb77ea075d63fb01757b31a764f96715e6638637473b9d",
+    "12-first-vertical.md": "87bf12ed4b3d68da182516ea16046b6a7e7f8db4ad75480f4ae78a38c8d672bf",
 }
 
 
@@ -318,11 +321,396 @@ def test_architecture_cites_the_phase_c_record_status() -> None:
 
 
 def test_the_agent_host_protocol_states_its_merged_status() -> None:
-    """Issue #151 H10: the protocol says it is canonical since PR #147 merged, not a candidate."""
+    """Issue #151 H10: the protocol says it is canonical, not a candidate. V3 is the ADR-0022
+    operating-authority correction of V2."""
     protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
     status = protocol.split("\n", 3)[2]
-    assert status.startswith("Status: **V2 — canonical.**"), status
+    assert status.startswith("Status: **V3 — canonical.**"), status
     assert "canonical candidate" not in protocol.split("## 0.", 1)[0]
+
+
+AGENT_HOST_DIR = REPO_ROOT / "automation" / "agent-host"
+ADR_0022 = REPO_ROOT / "documents" / "decisions" / "adr" / "0022-agent-operating-authority.md"
+# The closed list of what stops a loop for the user (ADR-0022 §2). Anything else is technical.
+HUMAN_DECISION_CATEGORIES = [
+    "NEW_PRODUCT_FEATURE",
+    "PRODUCT_DIRECTION_UNDECIDED",
+    "BEYOND_USER_REQUIREMENT",
+    "LIVE",
+    "SUPPLIER_ORDER",
+    "RESIDUAL_RISK_APPROVAL",
+    "COST",
+    "EXTERNAL_DATA_TRANSFER",
+    "DESTRUCTIVE",
+    "OWNER_HOLD",
+]
+
+
+def _host_script(name: str) -> str:
+    return (AGENT_HOST_DIR / name).read_text("utf-8-sig")
+
+
+def test_the_operating_authority_is_one_rule_in_adr_protocol_and_rule_file() -> None:
+    """ADR-0022: the user decides the product and real external actions; the agent runs the loop;
+    no human classification gates a packet; and no mechanical check is relaxed."""
+    adr = _read(ADR_0022)
+    assert adr.splitlines()[2].startswith("Status: **ACCEPTED**")
+    for invariant in range(1, 11):
+        assert f"OA-{invariant:02d}  " in adr, invariant
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    for text in (adr, protocol, rule):
+        assert "auto_merge" in text and "auto_next" in text
+        assert "HUMAN_DECISION_REQUIRED" in text or "Stop for the user only for" in text
+    # the default mode
+    assert "auto_merge = true\nauto_next  = true" in protocol
+    assert "auto_merge = true\nauto_next  = true" in adr
+    # no human classification, and history is kept
+    assert "**A marked source never holds a packet.**" in protocol
+    assert "**No classification record is read.**" in protocol
+    assert "never deleted or edited" in adr and "never edited or deleted" in protocol
+    # the two hold classes, by category
+    assert "HUMAN_DECISION_REQUIRED   the closed list of §0.2." in protocol
+    assert "TECHNICAL_HOLD            everything else." in protocol
+    assert "never from how often something failed" in protocol
+    # nothing in the strong path is relaxed
+    kept = _section(protocol, r"0\.2 Operating authority")
+    for check in (
+        "the exact-HEAD audit and the generated Audit Packet",
+        "the packet digest and the two-part audit identity",
+        "the same-identity DUAL PASS",
+        "`evidence_seen` coverage and the PASS-only cache",
+        "FULL CI after READY",
+        "the pre-merge packet regeneration and the current-base check",
+        "MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY",
+        "every core invariant and protected action owned by rules §6 and §7",
+    ):
+        assert check in kept, check
+    # the authority write guard stays
+    assert "no automated actor creates or edits a\nmarker-first body" in protocol
+    assert "No automated actor writes a marker-first body" in adr
+    # the rule file never asks the user for bookkeeping and keeps §7
+    assert "No `[OWNER-AMENDMENT]` and no classification comment is requested." in rule
+    assert "§7 owns the exact protected-action list" in rule
+
+
+def test_validation_strength_is_risk_scoped_without_weakening_live_safety() -> None:
+    """The three validation tiers agree across the rule, Host protocol, ADR and CI workflow.
+
+    Final-LIVE evidence is generated on final main rather than churned after provider-zero merges.
+    """
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    adr = _read(ADR_0022)
+    ci = _read(REPO_ROOT / ".github" / "workflows" / "ci.yml")
+    done = _read(RULES_DIR / "09-definition-of-done.md")
+    for text in (rule, protocol, adr):
+        assert all(tier in text for tier in ("BASIC", "PROVIDER_ZERO", "HIGH_RISK"))
+    roles = _read(RULES_DIR / "01-roles-and-exchange.md")
+    assert "single operational assignment" in roles
+    assert "stated once in rule §14.1" in adr
+    assert "does not restate a\nsecond role contract" in protocol
+    assert "still V3, not V4" in protocol
+    assert "small internal PR" in done and "feature or milestone closeout" in done
+    assert "final main immediately before the\nbounded LIVE action" in rule
+    assert "BASIC or PROVIDER_ZERO merge does not rerun or re-record it" in protocol
+    standing_authority = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+    for text in (rule, protocol, adr, standing_authority):
+        assert "Transitional V3" in text or "transitional V3" in text
+        assert "current-main" in text or "current main" in text
+    assert "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED" in rule
+    assert "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED" in protocol
+    assert "without `-ForceFull`" in rule and "without `-ForceFull`" in protocol
+    assert "supervising agent" in rule and "supervising agent" in protocol
+    assert "not a merge prerequisite" in rule
+    assert "does not retroactively\nmake that PR HIGH_RISK" in protocol
+    for mode in ("basic", "provider_zero", "full", "wip"):
+        assert mode in ci
+    assert "if: needs.scope.outputs.final_live == 'true'" in ci
+    assert 'provider_zero) required="SCOPE QUALITY TESTS MIGRATIONS M5"' in ci
+    # These core owners can never be downgraded to BASIC by a Markdown or generic-code match.
+    for protected in (
+        "automation/agent-host/*.ps1",
+        "app/container.py",
+        "app/platform/core/*",
+        "app/platform/system/execution_mode.py",
+        "app/capabilities/live_safety/*",
+        "app/stages/register/*",
+        "app/stages/connect/accounts.py",
+        "app/stages/connect/account_models.py",
+        "app/stages/connect/service.py",
+        "app/stages/connect/sessions.py",
+        "app/stages/connect/smartstore/models.py",
+        "app/stages/connect/smartstore/service.py",
+        "app/platform/db/migrations/versions/0006_m2_marketplace_connections.py",
+        "app/platform/db/migrations/versions/0016_m5_registration_foundation.py",
+        "app/platform/db/migrations/versions/0017_m5_registration_execution_scope.py",
+        "app/platform/db/migrations/versions/0026_g3_live_authority.py",
+        "app/platform/db/migrations/versions/0029_g3_restore_retention.py",
+        "app/platform/db/migrations/versions/0030_g3_visual_acceptance.py",
+        "app/platform/db/migrations/versions/0031_m5_registration_reconcile.py",
+        "app/platform/db/migrations/versions/0033_m5_canary_eligibility.py",
+        "integrations/marketplaces/*",
+        "documents/rules/06-immutable-domain-rules.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md",
+        "documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md",
+        "documents/decisions/adr/0020-*",
+        "documents/decisions/adr/0022-*",
+    ):
+        assert protected in ci
+    assert "app/platform/db/migrations/*" not in ci
+    provider_zero_exceptions = ci.split('case "$f" in', 1)[1].split(";;", 1)[0]
+    assert "integrations/marketplaces/smartstore/readback.py" in provider_zero_exceptions
+    assert "integrations/marketplaces/smartstore/create.py" not in provider_zero_exceptions
+    assert "no real supplier order" in _host_script("run-lookahead-main-v1.ps1")
+    assert "SUPPLIER_ORDER: any real supplier order" in _host_script("run-repair-v1.1.ps1")
+    assert "any real supplier order" in _host_script("run-audit-v1.1.ps1")
+
+
+def test_the_calibrated_rules_remove_process_overhead_without_removing_safety() -> None:
+    """The second calibration removes template and approval churn while preserving hard gates."""
+    readme = _read(RULES_DIR / "README.md")
+    stack = _read(RULES_DIR / "04-runtime-stack.md")
+    architecture = _read(RULES_DIR / "05-architectural-rules.md")
+    immutable = _read(RULES_DIR / "06-immutable-domain-rules.md")
+    execution = _read(RULES_DIR / "07-execution-safety.md")
+    git_rules = _read(RULES_DIR / "08-git-conventions.md")
+    first_vertical = _read(RULES_DIR / "12-first-vertical.md")
+    standing_authority = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+
+    assert "adds no\nsecond stop or approval rule" in readme
+    assert "Safety ownership is also singular" in readme
+    assert "Compatible\ndependency updates" in stack and "without creating an ADR" in stack
+    assert "Site-specific request fields" in architecture
+    assert "milestone status, not as a second immutable rule" in immutable
+    assert "never blindly resent" in immutable
+    assert "per bounded scope, not necessarily per item" in execution
+    assert "does not ask again for each item" in execution
+    assert (
+        "A BASIC\ndocumentation, infrastructure or simple internal PR may stop there" in git_rules
+    )
+    assert "do not create an ADR\nonly to satisfy a template" in git_rules
+    assert "not a requirement\nfor each slice" in first_vertical
+    assert "do not execute LIVE merely to keep this proof current" in first_vertical
+    assert "routine read-only\n> provider call is not protected by name alone" in standing_authority
+    assert "The applicable gate" in standing_authority
+    assert "historical\nscope notes, not an active rule" in standing_authority
+    assert "routine read-only calls may proceed under rule §7.1" in standing_authority
+    assert "only HIGH_RISK requires exact-HEAD DUAL PASS" in standing_authority
+    authority = _read(RULES_DIR / "14-operating-authority.md")
+    assert "routine read-only provider call" in authority
+    assert "Uncertainty alone does not create HIGH_RISK" in authority
+    assert "### 14.2.1 Repository-wide application" in authority
+    assert "Agent Host is one consumer of\nthe rule, not its boundary" in authority
+    assert "non-mutating read-back, health check or lookup is not HIGH_RISK by default" in authority
+    assert "material cost" in authority and "changes provider state" in authority
+    assert "actual visual, restore and retention proof and durable record" in authority
+    assert "never removes focused tests or CI" in authority
+    assert "single active owner" in execution
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    assert "rule §14.4" in protocol and "rule §7.2" in protocol
+    assert "material defect in the changed code on a reachable path" in authority
+
+
+def test_transitional_v3_baseline_recovery_matches_the_existing_runtime() -> None:
+    """Lower-tier merges stay lower-tier while current V3 fail-closes auto-next on its baseline."""
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    adr = _read(ADR_0022)
+    standing = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+    lookahead = _host_script("run-lookahead-main-v1.ps1")
+    full_audit = _host_script("run-full-audit-v1.ps1")
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+
+    assert "[string]$baseline.main -ne $mainHead" in lookahead
+    assert '[string]$baseline.status -ne "DUAL_PASS"' in lookahead
+    assert 'Write-Output "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED"' in lookahead
+    assert "main = $mainHead" in full_audit and "status = $Status" in full_audit
+    assert 'Save-AuditBaseline -Status "BLOCKED"' in full_audit
+    assert 'Save-AuditBaseline -Status "DUAL_PASS"' in full_audit
+    assert "FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT" in full_audit
+    assert "FULL_AUDIT_RESULT=STALE_MAIN_MOVED" in full_audit
+    assert "-Params @{ MergedPr = $CurrentPr }" in orchestrator
+    assert "FULL_AUDIT_RESULT=DUAL_PASS" in orchestrator
+    assert "FULL_AUDIT_RESULT=BLOCKED" in orchestrator
+    assert "FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT" in orchestrator
+    for text in (rule, protocol, adr, standing):
+        assert "lower-tier" in text
+        assert "DUAL_PASS" in text
+    assert "Host does not invoke this standalone audit from the hold" in protocol
+    assert "fully unattended Host waits" in protocol
+    assert "not a\n  merge prerequisite or HIGH_RISK proof" in adr
+    assert "first five classes were decided" in adr
+    assert "sixth was added separately by the PR #174" in adr
+
+
+def test_the_host_stops_for_the_user_only_on_the_closed_category_list() -> None:
+    """ADR-0022 OA-01, OA-03: the closed list lives once, in the shared authority helper, and the
+    documents name exactly that list."""
+    authority = _host_script("agent-host-authority-v2.ps1")
+    block = authority.split("$script:HumanDecisionCategories = @(", 1)[1].split(")", 1)[0]
+    assert re.findall(r'"([A-Z_]+)"', block) == HUMAN_DECISION_CATEGORIES
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    for category in HUMAN_DECISION_CATEGORIES[:-1]:
+        assert f"`{category}`" in protocol, category
+    # the class word alone decides nothing, and neither does a category word inside another reason:
+    # only a whole reason in a form the Host composes makes a stop the user's
+    assert (
+        "'^(?:NEXT_HOLD_|[A-Z][A-Z_]*_HUMAN_DECISION_REQUIRED_)?([A-Z_]+)$'" in authority
+        and "$m.Groups[1].Value -cin $script:HumanDecisionCategories" in authority
+    )
+    assert '$r.Contains("HUMAN_DECISION_REQUIRED")' not in authority
+    assert '"(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)"' not in authority
+    audit = _host_script("run-audit-v1.1.ps1")
+    assert "-not (Get-HumanDecisionCategory $r.Summary)" in audit
+    assert "HUMAN_DECISION_WITHOUT_CATEGORY" in audit
+    # every script that can stop takes its class from that one helper
+    for name in ("orchestrator-v1.3.ps1", "run-repair-v1.1.ps1"):
+        script = _host_script(name)
+        assert 'agent-host-authority-v2.ps1")' in script, name
+        assert "Get-HoldClass" in script, name
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+    assert "$class = Get-HoldClass $Reason" in orchestrator
+    # no script writes the pre-ADR-0022 hand-off any more
+    for path in sorted(AGENT_HOST_DIR.glob("*.ps1")):
+        if path.name in {"orchestrator-v1.2.ps1", "run-lookahead-v1.ps1"}:
+            continue  # display-only / non-authoritative helpers, identity-pinned and unchanged
+        text = path.read_text("utf-8-sig")
+        assert '-Status "HUMAN_HOLD"' not in text, path.name
+        assert 'Write-Host "HUMAN_HOLD=' not in text, path.name
+
+
+def test_the_packet_generator_has_no_human_classification_gate() -> None:
+    """ADR-0022 OA-04: no classification record is parsed and no marker holds a packet."""
+    audit = _host_script("run-audit-v1.1.ps1")
+    for gone in (
+        "Read-ClassificationRecord",
+        "UNCLASSIFIED_MARKED_SOURCE",
+        "CLASSIFIED_SOURCE_DIGEST_CHANGED",
+        "CLASSIFICATION_CONFLICT",
+        "CLASSIFICATION_RECORD_",
+        "HOST_MANIFEST_MAY_NOT_CLASSIFY",
+        "$scopeLine",
+    ):
+        assert gone not in audit, gone
+    assert "Get-EvidenceReferences $declarationText" in audit
+    # declared evidence never silently disappears: a citation nothing holds is a technical hold
+    assert 'Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label"' in audit
+    # a citation names its kind and resolves only to a source of that kind, never by the id alone
+    assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
+    assert "$citedIds" not in audit
+    # the user's rule (ADR-0022 §4.1): only six kinds of finding block; the rest are notes
+    assert audit.count("WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1)") == 2
+    assert _host_script("run-full-audit-v1.ps1").count("WHAT A BLOCKER IS") == 2
+    for kind in (
+        "DATA_DAMAGE",
+        "DUPLICATE_OR_WRONG_SEND",
+        "SECURITY",
+        "CORE_BROKEN",
+        "CI_CODE_DEFECT",
+        "SAFETY_GATE_BYPASS",
+    ):
+        assert audit.count(kind) >= 2, kind
+    assert "### 4.1 What a BLOCKER is" in (
+        REPO_ROOT / "documents/decisions/adr/0022-agent-operating-authority.md"
+    ).read_text("utf-8")
+    # the canon the slice is judged against is in the packet, and an auditor never passes without it
+    assert "foreach ($cp in $evidenceRefs.Canon)" in audit and 'Kind = "CANON"' in audit
+    # canon is read at the audited base, and the Host's baseline is in every packet: a declaration
+    # only adds to it
+    assert "foreach ($cp in (Get-BaselineCanon))" in audit
+    assert '$locator = "git_blob:base:$cp"' in audit and "git_blob:HEAD:$cp" not in audit
+    baseline = _host_script("agent-host-authority-v2.ps1").split("function Get-BaselineCanon", 1)[1]
+    assert re.findall(r'"(documents/[^"]+)"', baseline.split("}", 1)[0]) == [
+        "documents/roadmap/ROADMAP.md",
+        "documents/roadmap/CURRENT-MILESTONE.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md",
+    ]
+    assert audit.count("never assume what an unseen document says") == 2
+    assert "(review:|review-comment:)?([1-9][0-9]{8,11})" in _host_script(
+        "agent-host-authority-v2.ps1"
+    )
+    assert 'Origin = "referenced"' in audit
+    assert 'Write-Output "HOLD_CLASS=TECHNICAL_HOLD"' in audit
+    # what V3 keeps in the generator
+    for kept in (
+        "PACKET_IMMUTABILITY_VIOLATION",
+        "STREAM_UNREADABLE",
+        "STREAM_TRUNCATED",
+        "EVIDENCE_NOT_SEEN",
+        '"PACKET_DIGEST=$packetDigest"',
+        "function Test-PassCache",
+    ):
+        assert kept in audit, kept
+    # the write guard is untouched
+    authority = _host_script("agent-host-authority-v2.ps1")
+    assert "AUTHORITY_WRITE_GUARD_MARKER_FIRST_BODY" in authority
+
+
+def test_the_agent_host_readme_pins_the_committed_script_bytes() -> None:
+    """The Agent Host scripts are identified byte for byte: every sha256 in the README's table is
+    the hash of the committed file, and every script is in the table."""
+    readme = (AGENT_HOST_DIR / "README.md").read_text("utf-8")
+    rows = dict(re.findall(r"^\| `([^`]+)` \| [^|]+ \| `([0-9a-f]{64})` \|\r?$", readme, re.M))
+    scripts = {
+        path.relative_to(AGENT_HOST_DIR).as_posix() for path in AGENT_HOST_DIR.rglob("*.ps1")
+    }
+    assert scripts <= set(rows), sorted(scripts - set(rows))
+    wrong = {
+        name: digest
+        for name, digest in rows.items()
+        if hashlib.sha256((AGENT_HOST_DIR / name).read_bytes()).hexdigest() != digest
+    }
+    assert wrong == {}
+
+
+def test_the_merge_path_keeps_every_mechanical_check() -> None:
+    """ADR-0022 OA-08: MERGE_GUARD and the merge are as strict as V2, plus base containment and the
+    post-merge tree check."""
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+    guard = orchestrator.split("function Invoke-MergeGuard {", 1)[1].split(
+        "function Invoke-AutoMerge {", 1
+    )[0]
+    for reason in (
+        "GUARD_PR_ON_OWNER_HOLD",
+        "GUARD_NOT_DUAL_PASS",
+        "GUARD_AUDITED_HEAD_MISMATCH",
+        "GUARD_PACKET_DIGEST_MISMATCH",
+        "HEAD_MOVED_AFTER_AUDIT",
+        "MAIN_MOVED_AFTER_AUDIT",
+        "HEAD_BEHIND_BASE",
+        "PACKET_DIGEST_CHANGED_AFTER_AUDIT",
+        "GUARD_PACKET_INCOMPLETE",
+        "GUARD_PR_IS_DRAFT",
+        "GUARD_CI_FAILED",
+        "GUARD_NOT_MERGEABLE_",
+    ):
+        assert reason in guard, reason
+    _assert_in_order(
+        guard,
+        [
+            "GUARD_NOT_DUAL_PASS",
+            "HEAD_MOVED_AFTER_AUDIT",
+            "MAIN_MOVED_AFTER_AUDIT",
+            "HEAD_BEHIND_BASE",
+            "PACKET_DIGEST_CHANGED_AFTER_AUDIT",
+            "GUARD_CI_FAILED",
+            'Decision = "MERGE"',
+        ],
+    )
+    merge = orchestrator.split("function Invoke-AutoMerge {", 1)[1]
+    assert '"-f", "sha=$AuditedHead"' in merge
+    assert "--force" not in orchestrator and "force-with-lease" not in orchestrator
+    assert "function Test-PostMergeTree" in orchestrator
+    assert 'Stop-Hold `\n                -Reason "POST_MERGE_TREE_MISMATCH"' in orchestrator
 
 
 def test_the_repository_map_counts_match_the_tree() -> None:
@@ -652,15 +1040,25 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "ADR-0019" in _read(canonical) or TRANSPORT_ADR.name in _read(canonical), canonical
     collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
     assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
-    # Issue #89 5847528940: the architecture states that EXTENSION is the target contract only;
-    # E0 is contract-only and runtime-zero, and DIRECT_URL is the current runnable path.
+    # Issue #89 5847528940 asked the architecture to state the implementation status beside the
+    # target contract. E1 (Issue #126 5906290729, owner amendment 5907095955) moved that status:
+    # one click, compare only, nothing appended; DIRECT_URL is still the only revision writer.
     for element in (
         "`EXTENSION`-primary is the accepted ADR-0019 **target contract**",
-        "**E0 only: contract, runtime zero**",
-        "`DIRECT_URL` is the **current runnable path**",
-        "E1 and every later slice (ADR-0019 §10) are separately authorized",
+        "**E1 is implemented: one click, compare only**",
+        "**appends nothing**: it ends `NO_REVISION` or `FAILED`, never `RECORDED`",
+        "`DIRECT_URL` is still the **only path that writes a revision**",
+        "E2 and every later slice (ADR-0019 §10) are separately authorized",
+        "The application gains no CORS",
+        "pairing replaces none",
+        "A refusal before that point creates no run",
+        "never written to the database, a job payload, the filesystem or a log",
+        "answers `NO_BUNDLE` unless the supplier's shadow switch has a bundle enabled",
+        "never backfilled, never an identity input",
+        "**No server supplier request** is sent for an extension run in E1",
     ):
         assert element in collect_section, element
+    assert "E0 only: contract, runtime zero" not in collect_section
     # ADR-0010 and ADR-0017 are amended by notes at exactly the named sections, text preserved.
     (collect_adr,) = (REPO_ROOT / "documents" / "decisions" / "adr").glob(
         "0010-supplier-generic-collect*.md"
@@ -730,10 +1128,12 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     ui = _section(adr, r"^12\. UI ownership and state semantics")
     assert "`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR" in ui
     assert "`REVIEW` is not a run outcome, and `AUTH` is not a field state" in ui
-    # The code facts the contract relies on still hold (F2): EXTENSION is not yet a transport.
+    # ADR-0019 §10 (AC-17): admitting EXTENSION belonged to E1, which did it. The policed gateway
+    # still sends for an HTTP profile only, and the server-side BROWSER is still not a collection
+    # transport.
     from integrations.suppliers.base import SupplierTransport
 
-    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER"}
+    assert {t.value for t in SupplierTransport} == {"HTTP", "BROWSER", "EXTENSION"}
 
 
 def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
@@ -1042,14 +1442,14 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Three are still missing at this main
+    order may never omit a mandatory pre-canary prerequisite. Two are still missing at this main
     — a production ASSET sender that can transmit (the adapter is wired with no committed session
-    and sends nothing), an executable committed-session read-back and a comparison that proves
-    published state, the two halves of ADR-0014 §11's success proof — and none is authorized by
-    ADR-0020. Two were closed by their own slices, each under its own architect resolution, and
-    the order records them as closed rather than dropping them: the ADR-0014 §27
-    authoring-revision owners (5907626428, ADR-0014 §27.1) and the durable canary-eligibility
-    owner (5910018106, ADR-0018 §5.1)."""
+    and sends nothing) and an executable committed-session read-back, the open half of ADR-0014
+    §11's success proof — and neither is authorized by ADR-0020. Three were closed by their own
+    slices, each under its own architect resolution, and the order records them as closed rather
+    than dropping them: the ADR-0014 §27 authoring-revision owners (5907626428, ADR-0014 §27.1),
+    the durable canary-eligibility owner (5910018106, ADR-0018 §5.1) and the comparison that
+    proves published state (5915900049 D1, ADR-0014 §11 amendment note)."""
     from app.capabilities.live_safety.proofs import DurableStageProofs
     from app.stages.register.authoring_revisions import AuthoringRevisionKind
     from app.stages.register.preparation import AUTHORING_REVISIONS_UNOWNED
@@ -1091,12 +1491,20 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "never this standing authorization",
         "the **executable committed-session read-back** (ADR-0014 §11)",
         "`SmartStoreReadback.available()` is `False` and `verify` refuses",
-        "a **read-back comparison that proves published state** (ADR-0014 §11)",
-        "`proves_published_state()` is `False`",
-        "nothing states the display status a unit is registered with, so no explicit expectation"
-        " exists",
-        "no canonical contract decides the expected published state",
+        "~~a **read-back comparison that proves published state** (ADR-0014 §11)~~ — **closed by"
+        " its own slice** (ADR-0014 §11 amendment note; Issue #89 architect resolution"
+        " `5915900049` D1)",
+        "`channelProductDisplayStatusType = ON`",
+        "the expected published state `SALE/ON` (`expected_published_state`),"
+        " `proves_published_state()` is `True`",
+        "`SALE` with `SUSPENSION`, any other sale status and a missing or unreadable half still"
+        " prove nothing",
+        "which display status ICBM registers was a product decision with no owner",
+        "Being provable confirms no registration by itself",
         "**Amendment note (published-state read).**",
+        "**Amendment note (published-state proof; Issue #89 `5915900049` D1).**",
+        "Two prerequisites are still missing",
+        "Closing that row confirms no registration by itself",
         "a CREATE that cannot be read back is never `CONFIRMED`",
         "Neither contract fixes an order among them",
         "all of them precede any canary",
@@ -1118,7 +1526,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 3
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 2
+    assert len(re.findall(r"^\| ~~a \*\*read-back comparison that proves", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*durable canary-eligibility owner\*\*", order, re.M)) == 1
     # The remaining user-decision steps are still listed, and now after those prerequisites.
@@ -1130,9 +1539,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
         "the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1",
         "the durable canary-eligibility owner by its own, ADR-0018 §5.1",
-        "the executable committed-session read-back",
-        "a read-back comparison that proves published state",
-        "are still missing, are not authorized here",
+        "the production ASSET sender and the executable committed-session read-back are still"
+        " missing, are not authorized here",
+        "a read-back comparison that proves published state by its own, the ADR-0014 §11"
+        " amendment note",
         "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11"
         " success proof is green",
     ):
@@ -1152,10 +1562,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the sender and the committed session because a real provider transport is not"
         " provider-zero",
         "**executable committed-session read-back**",
-        "**read-back comparison that proves published state**",
         "`READBACK_EXECUTABLE` stays unproven",
-        "`PUBLISHED_STATE_PROVABLE` stays unproven",
-        "ADR-0014 §11's own success proof",
+        "The read-back is the remaining half of ADR-0014 §11's own success proof",
+        "a comparison that proves published state, is closed by its own slice below",
     ):
         assert element in ordering, element
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
@@ -1169,11 +1578,18 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         " (`LIVE_SENDER_NOT_WIRED`)",
         "anything possibly transmitted is `UPLOAD_UNKNOWN` and is never resent",
         "**It closes no prerequisite**",
-        "**Pre-canary groundwork, prerequisite still open — the published-state read**",
-        "the display status ICBM registers (`ON` or `SUSPENSION`) has no owner, so none is stated"
-        " and nothing can be confirmed",
+        "**Pre-canary prerequisite closed — the published-state proof** (ADR-0014 §11 amendment"
+        " note; Issue #89 architect resolution `5915900049` D1;",
+        "every CREATE projection registers the SmartStore channel with"
+        " `channelProductDisplayStatusType = ON`",
+        "Only `SALE/ON` read back states a published state",
+        "never buyer visibility or read-after-write timing",
+        "the executable read-back and every other prerequisite still refuse",
     ):
         assert element in ordering, element
+    assert "**read-back comparison that proves published state**" not in ordering
+    assert "`PUBLISHED_STATE_PROVABLE` stays unproven" not in ordering
+    assert "prerequisite still open — the published-state read" not in ordering
     assert "`app/container.py` wires `UnwiredAssetSender`" not in ordering
     assert "Pre-canary prerequisite closed — the production ASSET sender" not in ordering
     # "After those two" still refers to the two adoption slices: every recorded slice follows it.
@@ -1216,9 +1632,10 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**owners for the category-mapping and detail-composition authoring revisions** — is"
         " closed by its own slice (ADR-0014 §27.1)",
         "still has to be `READY` on every other rule",
-        "the **read-back success proof of ADR-0014 §11**, which no slice has closed either",
+        "the **read-back success proof of ADR-0014 §11**, of which one half is still open",
         "an **executable committed-session read-back**",
-        "a **comparison that proves published state**",
+        "a **comparison that proves published state**, is closed by its own slice (ADR-0014 §11"
+        " amendment note; architect resolution `5915900049` D1)",
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
@@ -1249,12 +1666,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "DETAIL_COMPOSITION",
     ]
     assert "AuthoringRevisionStore(db, clock, audit)" in _read(REPO_ROOT / "app" / "container.py")
-    # And ADR-0014 §11's two halves: production wires no session to read back with, and the
-    # adopted comparison proves no published state.
+    # And ADR-0014 §11's two halves: production wires no session to read back with, which keeps
+    # that row open, while the comparison can prove the published state (5915900049 D1).
     assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
-    assert smartstore_readback.proves_published_state() is False
-    # The read half exists; the expectation does not, which is what keeps the row open.
+    assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
+    # A Snapshot that cannot be projected still expects nothing, so nothing is proven for it.
     assert smartstore_readback.expected_published_state({}).display_status is None
 
 
@@ -2517,6 +2934,10 @@ ADAPTIVE_IMPORTERS = {
         "app.stages.collect.adaptive.phase_c_capture",
     },
     "app/container.py": {
+        # ADR-0019 E1: the capture owner's sanitizer and final scan, handed to the extension
+        # ingest as a plain function, and the zero-write dry run, handed in as its seam.
+        "app.stages.collect.adaptive.engine.capture",
+        "app.stages.collect.adaptive.shadow.dry_run",
         "app.stages.collect.adaptive.engine.hooks",
         "app.stages.collect.adaptive.phase_c_capture.accounting",
         "app.stages.collect.adaptive.phase_c_capture.commands",
@@ -3255,3 +3676,78 @@ def test_only_the_phase_c_harness_persists_adaptive_profiles() -> None:
         if reached:
             callers[path] = reached
     assert callers == {f"{PHASE_C_HARNESS}harness.py": {"save_template", "save_draft"}}, callers
+
+
+# ---------------------------------------------------------------- test browsers stay on loopback
+
+BROWSER_OWNER = "tests/support/browser.py"
+# Any spelling of a browser start: ``launch``, ``launch_persistent_context``, ``launch_server``,
+# attaching to a browser the test did not launch, an engine other than Chromium, or the async API.
+_BROWSER_START = re.compile(
+    r"\.(launch\w*|connect_over_cdp)\(|\bchromium\.connect\(|\.(firefox|webkit)\b|\basync_playwright\b"
+)
+# The launches production and acceptance code make for a real operator. No test may reach them:
+# they are not the loopback-only owner's.
+_REAL_LAUNCHERS = (
+    "automation/acceptance/gate3_visual/harness/harness.py",
+    "automation/acceptance/m0/visual_check.py",
+    "integrations/suppliers/transport/gateway.py",
+)
+
+
+def test_every_test_browser_is_launched_by_the_one_loopback_only_owner() -> None:
+    """Issue #126 ``5909188774`` F-1 and owner amendment ``5909645067`` §3: a repository test
+    starts a browser only through ``tests/support/browser.py``, which always applies the
+    loopback-only resolver rule. The scan reads every test file as text, so a start written inside
+    a child-process script, behind an alias or in a helper that never says "playwright" is found
+    as well. There is no exception list."""
+    starters: dict[str, list[str]] = {}
+    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        if relative == "tests/contracts/test_repository_rules.py":
+            continue  # this rule's own pattern and names
+        found = sorted(
+            {match.group(0) for match in _BROWSER_START.finditer(path.read_text("utf-8"))}
+        )
+        if found:
+            starters[relative] = found
+    assert starters == {BROWSER_OWNER: [".launch(", ".launch_persistent_context("]}, starters
+    # No test module imports or calls a real launcher of production or acceptance code.
+    real = {
+        path: sorted(set(_BROWSER_START.findall((REPO_ROOT / path).read_text("utf-8"))))
+        for path in _REAL_LAUNCHERS
+    }
+    assert all(real.values()), real
+    reached = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if re.search(
+            r"visual_check\.(main|run|capture)\(|harness\.run\(|\._browse\(|PlaywrightLogin",
+            path.read_text("utf-8"),
+        )
+        and path.name != "test_repository_rules.py"
+    ]
+    assert reached == [], reached
+
+    owner = (REPO_ROOT / BROWSER_OWNER).read_text("utf-8")
+    assert 'NETWORK_BLOCK = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"' in owner
+    # Both launches take their arguments from the one function that puts the block first and
+    # refuses a caller's own resolver rule.
+    assert owner.count("args=_arguments(") == 2 == owner.count(".launch")
+    assert "return [NETWORK_BLOCK, *extra]" in owner
+    assert '_OWNED_ARGUMENTS = ("--host-resolver-rules", "--host-rules", "--proxy")' in owner
+    assert "**options" not in owner
+    # The block is defined once: nothing else in the test tree spells a resolver rule.
+    spelled = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if "--host-resolver-rules=" in path.read_text("utf-8")
+        and path.relative_to(REPO_ROOT).as_posix()
+        not in {
+            BROWSER_OWNER,
+            "tests/contracts/test_repository_rules.py",
+            # The owner's own unit test, which proves a caller's rule is refused.
+            "tests/unit/test_browser_support.py",
+        }
+    ]
+    assert spelled == [], spelled

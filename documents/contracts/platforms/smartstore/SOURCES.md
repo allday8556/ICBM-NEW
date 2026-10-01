@@ -317,12 +317,15 @@ Not proven, so fail-closed:
 - an enumerated value these sources do not list; none may be invented. The CREATE `statusType`
   input is listed (`SALE` only, 5862400626, 5868542027 E2);
 - which boolean ICBM sends as `naverShoppingRegistration`. The sources give its type (5862400626,
-  5868542027 E1), not ICBM's value: that is an ICBM ownership decision, and no value is guessed;
+  5868542027 E1), not ICBM's value: that is an ICBM ownership decision, and no value is guessed
+  (*amendment note:* the decision is Issue #89 architect resolution `5915900049` D2.1, `true`);
 - an ICBM projection for the simple, custom or standard option structures. The evidence selects no
   new option policy: only an option shape the canonical ICBM contracts already allow may be
   projected (5861477977 §C);
 - the field set of any type-specific `productInfoProvidedNotice` child. This sub-scope is not
-  captured; no value that ICBM does not own may be invented (5861933729 §D).
+  captured; no value that ICBM does not own may be invented (5861933729 §D). (*Amendment note:*
+  §5.5 captures the member sets of seven types and the mapping of 36 at 2.90.0; every other type
+  stays uncaptured.)
 
 The per-status meaning stays the product-API error contract of `ERRORS.md` §10: `BAD_REQUEST` is read
 from `invalidInputs` together with `message` (§10.1), then `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`
@@ -364,8 +367,10 @@ read-back retains.
 **How it was read, and what that limits.** The official reference is not reachable from the
 implementing environment, so the page was read through GPT (`codex`, web access) and the result is
 recorded verbatim in the locator comment. It is a reading of `P0` documentation, not an architect
-resolution and not runtime evidence: it has not been reviewed by a second reader, and nothing here
-is `R0`. It agrees with the enumerations already recorded for the same two structures by §5.2's
+resolution and not runtime evidence, and nothing here is `R0`. It is no longer single-reader: the
+architect independently re-read the 2.90.0 reference and confirmed this packet in Issue #89
+resolution `5915900049` ("This independently confirms the facts recorded in research packet
+`5911962320`. The packet is no longer single-reader evidence for these members."). It agrees with the enumerations already recorded for the same two structures by §5.2's
 packets. The channel-product read response was not accessible to that reader and nothing about it
 is recorded. The reference states no read-after-write consistency and does not state that `SALE`
 with `ON` guarantees a buyer can see and purchase the listing.
@@ -373,6 +378,25 @@ with `ON` guarantees a buyer can see and purchase the listing.
 This evidence adopts nothing and authorizes no call.
 
 ---
+
+### 5.5 M5 CREATE notice-child evidence (`2.90.0`)
+
+This is the single ledger entry for the pinned `productInfoProvidedNotice` table of the CREATE
+projection (Issue #89 architect resolution `5915900049` D2.3).
+
+| Source ID | Locator | Primary use | Dependent contract(s) | Freshness trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-NOTICE-CHILD-290` | Issue #89 comment 5916962285 (research packet of the 2.90.0 `(v2) 상품 등록` reference and its `원상품 정보 구조체` schema, https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product, read 2026-10-01) | `productInfoProvidedNoticeType` (string, required; "하위 요소 중 하나를 선택해서 입력"); the explicit type → sibling member mapping of 36 enum values (`LODGMENT_RESERVATION`, `TRAVEL_PACKAGE`, `AIRLINE_TICKET`, `RENT_CAR`: no documented member); the member sets, types, required badges, length bounds and conditional rules of `wear`, `shoes`, `homeAppliances`, `kitchenUtensils`, `cosmetic`, `generalFood` and `etc`; the five repeated members and their "미입력 시 상품상세 참조로 입력됩니다" default | `documents/evidence/marketplace-apis/PRODUCT_CREATE.md` § SmartStore; `NOTICE.md` § SmartStore; `ENDPOINT_MATRIX.md` §4.1.1; `integrations/marketplaces/smartstore/product.py` (`smartstore-notice-children/2.90.0-r1`) | any change of the notice-type enumeration, of a mapping, or of a captured child's members |
+
+**How it was read, and what that limits.** The official reference is not reachable from the
+implementing environment, so it was read through GPT (`codex`, web access, read-only, a prompt
+that forbade inference) and the answer is recorded unchanged in the locator comment. It is a
+single reading of `P0` documentation, not an architect resolution and not runtime evidence, and
+nothing here is `R0`. The two notice-lookup pages it could open still rendered 2.89.0; the table
+was taken from the 2.90.0 CREATE and schema pages only. The exact string `상세페이지 참조` does not
+occur in the schema; the documented text is `상품상세 참조`, as the omission default of the five
+repeated members, and the reference does not say that string itself may be sent — so ICBM omits
+such a member and never sends the string.
 
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
