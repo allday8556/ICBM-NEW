@@ -20,7 +20,9 @@ the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` 
 The extension capture transport, slice E1 (ADR-0019; Issue #126), added the client under
 `ui/extension/`, the ingest owner under `app/stages/collect/extension/`, its router, the KM
 capture policy beside the KM collect package, migration `0034`, the test-browser owner
-`tests/support/browser.py` and their tests. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
+`tests/support/browser.py` and their tests. Slice E2 removed the E1 dry run
+(`app/stages/collect/adaptive/shadow/dry_run.py`) and added the extension tests' `conftest.py`
+and `documents/acceptance/adaptive/EXTENSION-E2.md`. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
 The registration read state (ADR-0014 §28.5) added `app/stages/register/read_state.py`, the
 status card `ui/web/js/components/registration-status.js`, one unit and one contract suite.
 
@@ -28,11 +30,11 @@ status card `ui/web/js/components/registration-status.js`, one unit and one cont
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 251 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 250 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 41 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 64 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 121 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 120 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -40,8 +42,8 @@ status card `ui/web/js/components/registration-status.js`, one unit and one cont
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 3 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 3 |  |
-| `documents/` | 156 | all canonical and historical documents |
-| `documents/acceptance/` | 64 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 157 | all canonical and historical documents |
+| `documents/acceptance/` | 65 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
@@ -54,11 +56,11 @@ status card `ui/web/js/components/registration-status.js`, one unit and one cont
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 239 | tests |
+| `tests/` | 240 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 91 | integration tests by runtime owner |
+| `tests/integration/` | 92 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 82 | unit tests by runtime owner |
 | `ui/` | 53 | operator clients: the served web client and the capture extension |

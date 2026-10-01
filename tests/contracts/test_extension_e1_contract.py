@@ -1,9 +1,10 @@
-"""Repository pins of the extension capture transport, slice E1 (ADR-0019 §10; Issue #126 rulings
-5906290729 and 5906712259; owner amendment 5907095955 of the E1 specification 5907009512).
+"""Repository pins of the extension capture transport (ADR-0019 §10: E1, then E2; Issue #126
+rulings 5906290729 and 5906712259; owner amendment 5907095955 of the E1 specification 5907009512).
 
-These read the repository as text and structure. They hold what E1 is allowed to be: a transport
-with two routes and no CORS, a client with no storage or download reach, a job that is never
-replayed, and an owner that appends nothing.
+These read the repository as text and structure. They hold what the transport is allowed to be: two
+routes and no CORS, a client with no storage or download reach, a job that is never replayed, and
+an ingest owner that writes nothing itself — from E2 it hands the captured document to the
+collection owner, which is the only way to a revision.
 """
 
 import ast
@@ -194,7 +195,7 @@ def test_the_application_gains_no_cors() -> None:
 # ---------------------------------------------------------------- the owner
 
 
-def test_the_ingest_owner_appends_nothing_and_reaches_no_network() -> None:
+def test_the_ingest_owner_writes_nothing_itself_and_reaches_no_network() -> None:
     modules = sorted(OWNER.glob("*.py"))
     assert {path.name for path in modules} == {
         "__init__.py",
@@ -224,16 +225,23 @@ def test_the_ingest_owner_appends_nothing_and_reaches_no_network() -> None:
         assert not [name for name in imported if name.startswith("app.stages.collect.adaptive")]
         assert not [name for name in imported if name.startswith("app.stages.register")]
     source = _read(OWNER / "service.py")
-    # No canonical writer is called: no revision append, no asset record, no product read reserved.
+    # No canonical writer is called here: no revision append, no asset record, no image read, no
+    # product read reserved, and the run is never marked RECORDED by this owner.
     for call in (
         ".append(collected",
         "_revisions",
-        "recorder",
         "reserve_product_read",
         "read_image",
+        ".recorded(",
     ):
         assert call not in source, call
-    assert ".recorded(" not in source and "RECORDED" not in source.replace("``RECORDED``", "")
+    # E2: the one way to a revision is the collection owner, handed in as the recorder. It records
+    # the captured document through the pipeline a direct run uses (ADR-0019 §2).
+    assert source.count("self._recorder.record_captured_document(") == 1
+    assert "recorder=collection," in _read(REPO_ROOT / "app" / "container.py")
+    # The E1 zero-write dry run is gone with the compare-only slice.
+    assert not (REPO_ROOT / "app/stages/collect/adaptive/shadow/dry_run.py").exists()
+    assert not hasattr(service, "EXTENSION_COMPARE_ONLY") and not hasattr(service, "NO_BUNDLE")
 
 
 def test_the_capture_job_is_never_replayed() -> None:
@@ -282,12 +290,16 @@ def test_the_glossary_names_what_e1_introduced() -> None:
         "EXTENSION_CAPTURE_BUFFER_MISSING",
     ):
         assert f"| `{term}` |" in glossary, term
-    # The codes the code writes are the glossary's own.
-    assert service.EXTENSION_COMPARE_ONLY == "EXTENSION_COMPARE_ONLY"
+    # The code the code writes is the glossary's own.
     assert service.EXTENSION_CAPTURE_BUFFER_MISSING == "EXTENSION_CAPTURE_BUFFER_MISSING"
-    assert service.NO_BUNDLE == "NO_BUNDLE"
+    # The two E1 results stay defined, because a run E1 settled keeps its code, and each says that
+    # E2 no longer produces it.
     row = next(line for line in glossary.splitlines() if line.startswith("| `NO_BUNDLE` |"))
-    assert "**not** a comparison PASS" in row
+    assert "**not** a comparison PASS" in row and "E1 only" in row
+    row = next(
+        line for line in glossary.splitlines() if line.startswith("| `EXTENSION_COMPARE_ONLY` |")
+    )
+    assert "No run gets it from E2 on" in row
 
 
 def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
@@ -335,7 +347,24 @@ def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     assert "**E1 — one click, compare only — is implemented provider-zero**" in roadmap
     e1_line = roadmap.split("**E1 —", 1)[1].split("\n", 1)[0]
     assert "**E1 is accepted**" in e1_line and "`PENDING`" not in e1_line
-    assert "E2, E3 and the extension-transport Phase C are not authorized" in roadmap
+    assert "**E2 — one click, recorded — is implemented provider-zero**" in roadmap
+    assert "E3 and the extension-transport Phase C are later slices and are not implemented" in (
+        roadmap
+    )
+
+
+def test_the_e2_acceptance_record_is_pending() -> None:
+    record = _read(DOCUMENTS / "acceptance" / "adaptive" / "EXTENSION-E2.md")
+    assert record.splitlines()[2].startswith("- Status: **PENDING")
+    # The real acceptance is a real supplier read: the user's decision and the user's click.
+    for phrase in (
+        "Claude never\nbrowses the supplier",
+        "needs the user's own decision and the user's physical click",
+        "no server product read for an extension run",
+        "no replay of a capture",
+        "Adaptive is not a writer",
+    ):
+        assert phrase in record, phrase
 
 
 def test_no_extension_browser_test_can_leave_the_loopback() -> None:

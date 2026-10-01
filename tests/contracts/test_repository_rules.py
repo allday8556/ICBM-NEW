@@ -1041,21 +1041,24 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     collect_section = _section(_read(ARCHITECTURE_MD), r"^COLLECT$")
     assert "`EXTENSION`" in collect_section and "`DIRECT_URL`" in collect_section
     # Issue #89 5847528940 asked the architecture to state the implementation status beside the
-    # target contract. E1 (Issue #126 5906290729, owner amendment 5907095955) moved that status:
-    # one click, compare only, nothing appended; DIRECT_URL is still the only revision writer.
+    # target contract. E1 (Issue #126 5906290729, owner amendment 5907095955) moved that status
+    # to one click, compare only; E2 (ADR-0019 §10) moves it again: the extension run is recorded
+    # by the canonical extractor, through the one pipeline after capture.
     for element in (
         "`EXTENSION`-primary is the accepted ADR-0019 **target contract**",
-        "**E1 is implemented: one click, compare only**",
-        "**appends nothing**: it ends `NO_REVISION` or `FAILED`, never `RECORDED`",
-        "`DIRECT_URL` is still the **only path that writes a revision**",
-        "E2 and every later slice (ADR-0019 §10) are separately authorized",
+        "**E2 is implemented: one click, recorded**",
+        "**the supplier's canonical extractor is its revision writer**",
+        "Both transports write a revision through the one pipeline after capture",
+        "E3 and every later slice (ADR-0019 §10) are separate slices",
+        "**One pipeline after capture (ADR-0019 §2, E2).**",
         "The application gains no CORS",
         "pairing replaces none",
         "A refusal before that point creates no run",
         "never written to the database, a job payload, the filesystem or a log",
-        "answers `NO_BUNDLE` unless the supplier's shadow switch has a bundle enabled",
+        "the capture is never processed twice",
         "never backfilled, never an identity input",
-        "**No server supplier request** is sent for an extension run in E1",
+        "**No server product read** is made for an extension run",
+        "the browser relays no image bytes",
     ):
         assert element in collect_section, element
     assert "E0 only: contract, runtime zero" not in collect_section
@@ -2559,22 +2562,34 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
 def test_a_collection_reads_exactly_one_product_page() -> None:
     # Issue #52 ruling 5706133893: one operator URL, one product document. No listing, no
     # pagination, no related product. The budget is the structural guarantee, so every budget a
-    # production collection builds allows exactly one product read.
-    budgets = [
+    # production collection builds allows exactly one product read — except the budget of a run
+    # whose document the operator's browser captured (ADR-0019 E2), which allows none.
+    tree = ast.parse((REPO_ROOT / "app/stages/collect/collection.py").read_text("utf-8"))
+    budgets = {
+        function.name: call
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef)
+        for call in _calls(function)
+        if _callee(call) == "RunBudget"
+    }
+    everywhere = [
         call
-        for _, tree in _production_modules().items()
-        for call in _calls(tree)
+        for _, module in _production_modules().items()
+        for call in _calls(module)
         if _callee(call) == "RunBudget"
     ]
-    assert budgets, "the collection budget must exist"
-    for call in budgets:
+    assert len(everywhere) == len(budgets), "a collection budget is built by the collection owner"
+    allowed = {}
+    for name, call in budgets.items():
         reads = {
             keyword.arg: keyword.value
             for keyword in call.keywords
             if keyword.arg == "max_product_reads"
         }
         value = reads.get("max_product_reads")
-        assert isinstance(value, ast.Constant) and value.value == 1, ast.dump(call)
+        assert isinstance(value, ast.Constant), ast.dump(call)
+        allowed[name] = value.value
+    assert allowed == {"collect": 1, "record_captured_document": 0}
 
 
 def test_the_collection_job_belongs_to_collect_core() -> None:
@@ -2888,7 +2903,8 @@ def test_only_the_shadow_switch_moves_an_epr_into_or_out_of_shadow() -> None:
 
 def test_only_the_recovery_branch_settles_a_run_by_recovery() -> None:
     # Review 5312254605 B2: settled_by_recovery decides the one non-blocking missing-shadow cause,
-    # so exactly one call site — the collection's revision-recovery branch — may set it true.
+    # so exactly one call site — the collection's revision-recovery — may set it true. Both
+    # transports' jobs reach it through the same method (ADR-0019 E2).
     callers = [
         (path, node.lineno)
         for path, tree in _production_modules().items()
@@ -2897,18 +2913,28 @@ def test_only_the_recovery_branch_settles_a_run_by_recovery() -> None:
     ]
     assert [path for path, _ in callers] == ["app/stages/collect/collection.py"], callers
     tree = ast.parse((REPO_ROOT / "app/stages/collect/collection.py").read_text("utf-8"))
-    (run_job,) = (
-        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run_job"
+    (recover,) = (
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "recover_recorded"
     )
-    recovery = next(
-        n
-        for n in ast.walk(run_job)
-        if isinstance(n, ast.If)
-        and any(isinstance(c, ast.Attribute) and c.attr == "for_run" for c in ast.walk(n.test))
+    # The method reads the revision the run already appended, returns when there is none, and only
+    # then sets the marker.
+    statements = recover.body
+    lookup = next(
+        index
+        for index, node in enumerate(statements)
+        if any(isinstance(c, ast.Attribute) and c.attr == "for_run" for c in ast.walk(node))
     )
-    assert any(
-        isinstance(n, ast.Attribute) and n.attr == "recovered" for n in ast.walk(recovery)
-    ), "the marker is set inside the branch that found an already-appended revision"
+    absent = next(
+        index
+        for index, node in enumerate(statements)
+        if isinstance(node, ast.If) and any(isinstance(c, ast.Return) for c in node.body)
+    )
+    marker = next(
+        index
+        for index, node in enumerate(statements)
+        if any(isinstance(c, ast.Attribute) and c.attr == "recovered" for c in ast.walk(node))
+    )
+    assert lookup < absent < marker, "the marker is set only after an appended revision is found"
 
 
 def test_the_canonical_collection_knows_only_the_shadow_seam() -> None:
@@ -2935,9 +2961,8 @@ ADAPTIVE_IMPORTERS = {
     },
     "app/container.py": {
         # ADR-0019 E1: the capture owner's sanitizer and final scan, handed to the extension
-        # ingest as a plain function, and the zero-write dry run, handed in as its seam.
+        # ingest as a plain function.
         "app.stages.collect.adaptive.engine.capture",
-        "app.stages.collect.adaptive.shadow.dry_run",
         "app.stages.collect.adaptive.engine.hooks",
         "app.stages.collect.adaptive.phase_c_capture.accounting",
         "app.stages.collect.adaptive.phase_c_capture.commands",

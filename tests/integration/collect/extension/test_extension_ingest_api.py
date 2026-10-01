@@ -1,8 +1,8 @@
-"""The extension ingest over the real application (ADR-0019 E1; specification 5907009512 §3).
+"""The extension ingest over the real application (ADR-0019 E2; specification 5907009512 §3).
 
 Every test serves the real app with the real KM통상 collection definition and the reviewed KM
-capture policy. The captures are synthetic, nothing can reach a network, and the supplier's host
-appears only as text.
+capture policy. The captures are synthetic, the collection gateway is a script that sends nothing,
+and the supplier's host appears only as text.
 """
 
 import hashlib
@@ -23,6 +23,7 @@ from app.stages.collect.extension.pairing import (
     PairingRecord,
 )
 from app.stages.collect.extension.policy import MAX_HTML_BYTES, MAX_IMAGE_REFS, MAX_NODES
+from automation.acceptance.m3.rehearsal.fake_shop import FakeGateway
 from tests.support.extension_support import (
     BODY,
     CAPTURES,
@@ -32,6 +33,7 @@ from tests.support.extension_support import (
     ORIGIN,
     POLICY,
     PRODUCT_URL,
+    REVISION_TABLES,
     RUNS,
     SUPPLIER,
     envelope,
@@ -45,6 +47,7 @@ from tests.support.extension_support import (
     untouched,
     wait_for_outcome,
 )
+from tests.support.shadow_support import rows
 
 pytestmark = pytest.mark.integration
 
@@ -126,7 +129,7 @@ def test_the_policy_read_needs_everything_the_ingest_needs(
 
 
 def test_an_accepted_capture_opens_and_settles_one_canonical_run(
-    client: TestClient, config: AppConfig, paired: PairingRecord
+    client: TestClient, config: AppConfig, paired: PairingRecord, gateway: FakeGateway
 ) -> None:
     before = table_counts(config)
     response = post_capture(client, paired)
@@ -142,8 +145,9 @@ def test_an_accepted_capture_opens_and_settles_one_canonical_run(
     assert response.headers["Access-Control-Allow-Origin"] == ORIGIN
     run = wait_for_outcome(client, accepted["collection_run_id"])
     reference = policy_reference()
-    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
-    assert (run["revision_id"], run["facts_status"]) == (None, None)
+    # E2: the canonical extractor is the revision writer for an extension run too.
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+    assert run["revision_id"] is not None and run["facts_status"] is not None
     assert (run["supplier_key"], run["source_url"]) == (SUPPLIER, PRODUCT_URL)
     assert (
         run["transport_kind"],
@@ -155,23 +159,27 @@ def test_an_accepted_capture_opens_and_settles_one_canonical_run(
     assert after["collection_runs"] == before["collection_runs"] + 1
     assert after["jobs"] == before["jobs"] + 1
     assert [r["collection_run_id"] for r in _runs(client)] == [accepted["collection_run_id"]]
-    # Zero write: no revision, field, evidence, image reference, source asset, Product or
-    # Adaptive row. Every table outside the run's own is exactly as it was.
-    assert untouched(before, after) == {}
+    # One revision, the one the run names, carrying the run's transport provenance.
+    assert after["product_facts_revisions"] == before["product_facts_revisions"] + 1
+    assert rows(
+        config,
+        "SELECT revision_id, transport_kind, capture_policy_revision, capture_policy_digest"
+        " FROM product_facts_revisions",
+    ) == [(run["revision_id"], "EXTENSION", reference["revision"], reference["digest"])]
+    # What the run wrote is what a recorded collection writes — the revision and what hangs on it,
+    # then the canonical Product formed from it (M4) — and no Adaptive row for a supplier whose
+    # shadow switch is off.
+    assert set(untouched(before, after)) >= REVISION_TABLES - {"source_assets"}
     for table in (
-        "product_facts_revisions",
-        "product_facts_fields",
-        "product_facts_evidence",
-        "product_facts_image_refs",
-        "source_assets",
         "adaptive_shadow_records",
         "adaptive_capture_candidates",
         "adaptive_validation_samples",
     ):
         assert after[table] == 0, table
-    # The extension run reserved no server product read and froze no shadow or capture decision.
+    # The server read no product page — the browser did — and fetched the images the page names.
     record = _container(client).collection.run(accepted["collection_run_id"])
-    assert (record.product_read_at, record.frozen, record.source_product_id) == (None, None, "9001")
+    assert (record.product_read_at, record.source_product_id) == (None, "9001")
+    assert gateway.document_reads == 0 and gateway.image_reads != []
 
 
 def test_an_unresolved_identity_is_the_same_answer_it_is_on_the_direct_path(
@@ -337,23 +345,22 @@ def test_a_hash_named_image_is_accepted_end_to_end(
     assert body != BODY
     response = post_capture(client, paired, envelope(frame(body=body)))
     run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
 
 
 def test_a_lazy_load_image_with_an_empty_src_is_accepted_end_to_end(
     client: TestClient, config: AppConfig, paired: PairingRecord
 ) -> None:
     # The refusal of e1-km-349-02 (EXTENSION-E1.md §5.1): one <img> with an empty src in the KM
-    # product scope. It names no image, so the run compares and nothing is stored.
-    before = table_counts(config)
+    # product scope. It names no image, so the gate passes it and the run is recorded.
     lazy = '<img src="" ec-data-src="/web/upload/synthetic/detail-3.jpg">'
     assert BODY.count(IN_SCOPE) == 1
     response = post_capture(
         client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, lazy + IN_SCOPE)))
     )
     run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
-    assert untouched(before, table_counts(config)) == {}
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+    assert run["revision_id"] is not None
 
 
 @pytest.mark.parametrize(

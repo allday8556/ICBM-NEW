@@ -236,6 +236,36 @@ class CollectionRunStore:
             assert frozen_run is not None
             return frozen_run
 
+    def freeze_captured_run(self, run_id: str) -> FrozenRun:
+        """Freeze the decisions of a run whose document the extension captured (ADR-0019 E2).
+
+        No product read is reserved: the server sends none for this run, so ``product_read_at`` and
+        the pacing key stay empty and the same-product interval of the server's own reads is not
+        touched. What is frozen is what every run freezes once, in one unit:
+
+        - the shadow decision, exactly as a direct run freezes it (ADR-0017 §10.1);
+        - the capture decision ``OFF``: a Phase C capture request binds a run to a campaign through
+          its reserved sends, and an extension run reserves none;
+        - when the document was taken into the pipeline, in ``first_product_read_at``.
+
+        A second call keeps what the first froze.
+        """
+        with self._db.write() as session:
+            row = session.get(CollectionRun, run_id)
+            if row is None:
+                raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
+            if row.shadow_decision is None:
+                frozen = self._freeze(session, row.supplier_key)
+                row.shadow_decision = frozen.decision
+                row.shadow_switch_entry_id = frozen.switch_entry_id
+                row.shadow_bundle_key = frozen.bundle_key
+                row.first_product_read_at = self._clock.now()
+            if row.capture_decision is None:
+                row.capture_decision = CAPTURE_OFF.decision
+            frozen_run = _frozen(row)
+            assert frozen_run is not None
+            return frozen_run
+
     def _freeze_capture(self, session: Session, supplier_key: str, target: str) -> FrozenCapture:
         if self._capture_freezer is None:
             return CAPTURE_OFF

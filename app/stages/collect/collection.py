@@ -31,6 +31,7 @@ classes the shared job policy already approves are ever retried.
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -40,7 +41,13 @@ from app.capabilities.jobs.registry import JobContext, JobDefinition, TerminalJo
 from app.capabilities.jobs.service import JobService
 from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
-from app.platform.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
+from app.platform.core.errors import (
+    AppError,
+    ErrorClass,
+    InputValidationError,
+    NotFoundError,
+    PolicyBlockedError,
+)
 from app.platform.core.send_guard import guarding, reserve_send
 from app.platform.db.database import Database
 from app.stages.collect.facts import (
@@ -51,13 +58,14 @@ from app.stages.collect.facts import (
     ImageReference,
     ImageRole,
 )
-from app.stages.collect.models import CollectionOutcome
+from app.stages.collect.models import CollectionOutcome, TransportKind
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import (
     DIRECT_URL,
     CollectionRunRecord,
     CollectionRunStore,
     PacingKey,
+    RunProvenance,
     SameProductTooSoon,
 )
 from app.stages.collect.shadow import (
@@ -452,23 +460,7 @@ class ProductCollectionService:
             if record.outcome is CollectionOutcome.RECORDED:
                 self._recorded(record.collection_run_id)
             return
-        if (appended := self._revisions.for_run(record.collection_run_id)) is not None:
-            # The previous attempt appended this run's revision and died before settling the run.
-            # The revision is immutable and is already the answer: finish the run from it rather
-            # than reading the provider again and appending a second one.
-            logger.info(
-                "collect.recovered",
-                extra={
-                    "collection_run_id": record.collection_run_id,
-                    "revision_id": appended.revision_id,
-                },
-            )
-            self._runs.recovered(
-                record.collection_run_id,
-                revision_id=appended.revision_id,
-                facts_status=appended.facts_status,
-            )
-            self._recorded(record.collection_run_id)
+        if self.recover_recorded(record.collection_run_id):
             return
         try:
             result = self.collect(
@@ -485,17 +477,47 @@ class ProductCollectionService:
                 raise
             self._runs.failed(record.collection_run_id, detail=error.code)
             raise
+        self.settle(record.collection_run_id, result)
+
+    def recover_recorded(self, collection_run_id: str) -> bool:
+        """Finish a run from the revision it already appended, if it appended one.
+
+        An attempt can append its revision and die before settling the run. The revision is
+        immutable and is already the answer: the run is finished from it, rather than reading or
+        capturing again and appending a second one. Answers whether it did.
+        """
+        appended = self._revisions.for_run(collection_run_id)
+        if appended is None:
+            return False
+        logger.info(
+            "collect.recovered",
+            extra={"collection_run_id": collection_run_id, "revision_id": appended.revision_id},
+        )
+        self._runs.recovered(
+            collection_run_id,
+            revision_id=appended.revision_id,
+            facts_status=appended.facts_status,
+        )
+        self._recorded(collection_run_id)
+        return True
+
+    def settle(self, collection_run_id: str, result: CollectionResult) -> None:
+        """Give a run the answer its collection produced, and hand a RECORDED one on."""
         if result.revision_id is None or result.facts_status is None:
             self._runs.no_revision(
-                record.collection_run_id, reason=result.reason or "the identity is unresolved"
+                collection_run_id, reason=result.reason or "the identity is unresolved"
             )
             return
         self._runs.recorded(
-            record.collection_run_id,
+            collection_run_id,
             revision_id=result.revision_id,
             facts_status=result.facts_status,
         )
-        self._recorded(record.collection_run_id)
+        self._recorded(collection_run_id)
+
+    def after_recorded(self, collection_run_id: str) -> None:
+        """Hand an already RECORDED run on again: idempotent, for an attempt that died after it."""
+        self._recorded(collection_run_id)
 
     def _recorded(self, collection_run_id: str) -> None:
         """Hand a run to what follows it, only once its RECORDED outcome is durable."""
@@ -548,17 +570,76 @@ class ProductCollectionService:
         budget: RunBudget,
         frozen: FrozenRun,
     ) -> CollectionResult:
-        collection = registered.collection
-        profile = collection.profile
-        supplier_key = registered.supplier_key
+        profile = registered.collection.profile
         captured_at = self._clock.now()
         document = self._gateway.read_document(
             profile,
             product_url,
             kind=ReadKind.PRODUCT_READ,
             budget=budget,
-            session=self._sessions.collection_session(supplier_key),
+            session=self._sessions.collection_session(registered.supplier_key),
         )
+        # Every run this path opens is a direct-URL run, and so is its revision (ADR-0019 §4).
+        return self._record_document(
+            registered,
+            product_url,
+            run_id=run_id,
+            budget=budget,
+            frozen=frozen,
+            document=document,
+            captured_at=captured_at,
+            provenance=DIRECT_URL,
+        )
+
+    def record_captured_document(
+        self, record: CollectionRunRecord, document: DocumentView, *, captured_at: datetime
+    ) -> CollectionResult:
+        """Record the document an extension run captured (ADR-0019 §2, E2).
+
+        One pipeline after capture: from the ``DocumentView`` on, an extension run takes exactly
+        the steps a direct one takes — the supplier's identity and role rules, the server's own
+        policed image fetch (ADR-0019 §7), the canonical extractor as the revision writer, the
+        shadow. Only the page itself was not read by the server: the run reserves no product read
+        and its budget allows none.
+        """
+        provenance = record.provenance
+        if provenance is None or provenance.transport_kind is not TransportKind.EXTENSION:
+            raise PolicyBlockedError(
+                "COLLECT_RUN_NOT_EXTENSION", "only an extension run records a captured document"
+            )
+        registered = self._registered(record.supplier_key)
+        budget = RunBudget(
+            max_product_reads=0,
+            max_image_requests=registered.collection.profile.limits.max_image_requests_per_run,
+        )
+        frozen = self._runs.freeze_captured_run(record.collection_run_id)
+        return self._record_document(
+            registered,
+            record.source_url,
+            run_id=record.collection_run_id,
+            budget=budget,
+            frozen=frozen,
+            document=document,
+            captured_at=captured_at,
+            provenance=provenance,
+        )
+
+    def _record_document(
+        self,
+        registered: RegisteredCollection,
+        product_url: str,
+        *,
+        run_id: str,
+        budget: RunBudget,
+        frozen: FrozenRun,
+        document: DocumentView,
+        captured_at: datetime,
+        provenance: RunProvenance,
+    ) -> CollectionResult:
+        """Everything after the document: the same steps for both transports (ADR-0019 §2)."""
+        collection = registered.collection
+        profile = collection.profile
+        supplier_key = registered.supplier_key
         identity = collection.identity(document, product_url)
         if not isinstance(identity, SourceIdentity):
             logger.info(
@@ -605,9 +686,9 @@ class ProductCollectionService:
             fields=collection.fields(document),
             images=images,
         )
-        # Every run this service opens is a direct-URL run, and so is its revision (ADR-0019 §4).
+        # The revision states how its run's document was acquired (ADR-0019 §4).
         stored = self._revisions.append(
-            collected, url_policy=url_policy_of(profile), provenance=DIRECT_URL
+            collected, url_policy=url_policy_of(profile), provenance=provenance
         )
         logger.info(
             "collect.recorded",

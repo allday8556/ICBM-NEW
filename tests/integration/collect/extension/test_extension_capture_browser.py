@@ -368,8 +368,8 @@ def test_a_clean_capture_passes_the_real_ingest(
     )
     assert container.runner.run_next() is not None
     run = container.collection.run(accepted.collection_run_id)
-    assert (run.outcome, run.detail) == (CollectionOutcome.NO_REVISION, "EXTENSION_COMPARE_ONLY")
-    assert run.source_product_id == PRODUCT_NUMBER
+    assert (run.outcome, run.detail) == (CollectionOutcome.RECORDED, None)
+    assert run.revision_id is not None and run.source_product_id == PRODUCT_NUMBER
 
 
 # ---------------------------------------------------------------- preconditions (§11.2)

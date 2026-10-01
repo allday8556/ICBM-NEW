@@ -28,12 +28,14 @@ from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
 from app.stages.collect.models import CollectionOutcome, TransportKind
+from automation.acceptance.m3.rehearsal.fake_shop import FakeGateway, StubSessions
 from tests.support.browser import BROWSER_CHANNEL, launch_extension_context
 from tests.support.extension_support import (
     EXTENSION_ROOT,
     FIXTURE,
     PRODUCT_NUMBER,
     PRODUCT_URL,
+    REVISION_TABLES,
     SUPPLIER,
     policy_reference,
     table_counts,
@@ -52,8 +54,16 @@ def _role(name: str) -> str:
 
 @contextlib.contextmanager
 def _served(config: AppConfig) -> Iterator[tuple[Container, str, uvicorn.Server]]:
-    """The real application on a real loopback socket, on a port the system chose."""
-    app = create_app(config)
+    """The real application on a real loopback socket, on a port the system chose.
+
+    Its collection gateway is a script: the server fetches a recorded run's images through it
+    (ADR-0019 §7), and nothing in a test may reach a supplier.
+    """
+    app = create_app(
+        config,
+        collection_gateway=FakeGateway(documents=[]),
+        collection_sessions=StubSessions(),
+    )
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None, access_log=False)
     )
@@ -178,23 +188,23 @@ def test_one_click_captures_the_page_and_reads_the_canonical_run_back(
         expect(panel.locator(_role("run-outcome"))).not_to_have_text("—", timeout=TIMEOUT_MS)
         # What the side panel shows is the canonical run ICBM read back: the outcome on its own
         # line, the code on its own line, and a transport state that is neither.
-        assert _text(panel, "run-outcome") == "NO_REVISION"
-        assert _text(panel, "run-code") == "EXTENSION_COMPARE_ONLY"
+        assert _text(panel, "run-outcome") == "RECORDED"
+        assert _text(panel, "run-code") == "—"
         assert _text(panel, "transport-state") == "ICBM에 전달됨"
         run_id = _text(panel, "run-id")
         run = app.collection.run(run_id)
-        assert (run.outcome, run.detail) == (
-            CollectionOutcome.NO_REVISION,
-            "EXTENSION_COMPARE_ONLY",
-        )
+        assert (run.outcome, run.detail) == (CollectionOutcome.RECORDED, None)
+        assert run.revision_id is not None
         assert run.provenance is not None
         assert run.provenance.transport_kind is TransportKind.EXTENSION
         assert run.provenance.capture_policy_digest == policy_reference()["digest"]
         assert (run.source_url, run.source_product_id) == (PRODUCT_URL, PRODUCT_NUMBER)
-        # Exactly one run, and nothing appended anywhere.
+        # Exactly one run and its one revision, recorded as any collection is.
         after = table_counts(config)
         assert after["collection_runs"] == before["collection_runs"] + 1
-        assert untouched(before, after) == {}
+        assert after["product_facts_revisions"] == before["product_facts_revisions"] + 1
+        assert set(untouched(before, after)) >= REVISION_TABLES - {"source_assets"}
+        assert after["adaptive_shadow_records"] == before["adaptive_shadow_records"]
         # The extension keeps its pairing and nothing else: no page material, policy or result.
         stored = panel.evaluate(
             "async () => [Object.keys(await chrome.storage.local.get(null)),"

@@ -1,8 +1,8 @@
-"""The extension ingest owner: one capture, accepted or refused, then compared (ADR-0019 E1).
+"""The extension ingest owner: one capture, accepted or refused, then recorded (ADR-0019 E2).
 
-The order of one ingest is fixed (E1 specification ``5907009512`` §3). The caller has already
-proven the sender — loopback, ``X-ICBM-Client``, the pinned origin and the pairing — and this
-owner does the rest::
+The order of one ingest is fixed (E1 specification ``5907009512`` §3, unchanged up to step 10). The
+caller has already proven the sender — loopback, ``X-ICBM-Client``, the pinned origin and the
+pairing — and this owner does the rest::
 
     5  ceilings: bytes, elements, image references, one capture at a time, the minimum interval
     6  transport evidence: every ``DocumentView`` field is browser-observed and valid
@@ -10,26 +10,29 @@ owner does the rest::
     8  policy: the capture names the revision and digest the server recomputes now
     -- accepted: one write unit enqueues the job and opens the canonical run (``PENDING``,
        ``EXTENSION``, the policy revision and digest); the HTML waits in the in-process buffer --
-    9  the server's own structural check and final scan of exactly what arrived
+    9  the server's own structural check and final gate of exactly what arrived
     10 the same ``DocumentView``
-    11 the supplier's canonical extractor, in memory
-    12 the Adaptive dry run: a comparison, or ``NO_BUNDLE``
-    13 the run settles ``NO_REVISION``; any failure from step 9 on — a dry run that could
-       not compare included — settles it ``FAILED``
+    11 the one pipeline after capture (ADR-0019 §2): the collection owner records the document
+       exactly as it records a direct one — identity, the server's policed image fetch, the
+       canonical extractor as the revision writer, the shadow
+    12 the run settles ``RECORDED`` with its revision, or ``NO_REVISION`` when the identity is
+       unresolved; any failure from step 9 on settles it ``FAILED``
 
-Steps 5–8 never open a run. Steps 9–13 always settle the run that was opened. Nothing is appended:
-no ``ProductFactsRevision``, no source asset, no Adaptive row. ``RECORDED`` is unreachable here.
+Steps 5–8 never open a run. Steps 9–12 always settle the run that was opened. This owner writes
+nothing itself: the revision, its source assets and the shadow record are the collection owner's,
+through the same stores a direct run uses.
 
 The job is not replayable, because its capture is deliberately not durable (ruling ``5906712259``
 N-1): it is registered non-idempotent with one attempt, a missing buffer ends it with a fixed code,
-and an interrupted attempt is never run again.
+and an interrupted attempt is never run again. An attempt that appended its revision and died
+before settling is finished from that revision, never captured again.
 """
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
-from datetime import timedelta
-from typing import Any
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
@@ -38,7 +41,6 @@ from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobContext, JobDefinition, TerminalJob
 from app.capabilities.jobs.service import JobService
 from app.platform.core.clock import Clock
-from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import (
     AppError,
     InputValidationError,
@@ -47,7 +49,7 @@ from app.platform.core.errors import (
     RateLimitedError,
 )
 from app.platform.db.database import Database
-from app.stages.collect.collection import RegisteredCollection, url_policy_of
+from app.stages.collect.collection import CollectionResult, RegisteredCollection
 from app.stages.collect.extension.buffer import BufferedCapture, CaptureBuffer
 from app.stages.collect.extension.capture import (
     CAPTURED_CONTENT_TYPE,
@@ -65,22 +67,14 @@ from app.stages.collect.extension.policy import (
     CapturePolicyRefused,
     CapturePolicySource,
 )
-from app.stages.collect.facts import CollectedFacts
+from app.stages.collect.facts import FactsStatus
 from app.stages.collect.models import CollectionOutcome, TransportKind
 from app.stages.collect.runs import CollectionRunRecord, CollectionRunStore, RunProvenance
-from app.stages.collect.shadow import (
-    COMPARE_FAILED,
-    NO_BUNDLE,
-    DryRunInput,
-    DryRunResult,
-    DryRunStep,
-)
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
     CollectionProfile,
     DocumentView,
     ReadKind,
-    SourceIdentity,
 )
 from integrations.suppliers.transport.collection import CollectionTargetRefused, check_target
 
@@ -93,9 +87,6 @@ EXTENSION_CAPTURE_POLICY = RetryPolicy(max_attempts=1, base_delay_s=1.0)
 # accepted captures. These are E1 single-click caps, not list-queue values.
 MINIMUM_INGEST_INTERVAL_S = 5.0
 
-# The ``detail`` of an E1 run settled NO_REVISION: captured and compared in memory, nothing
-# written. A code on the existing outcome axis, never a new outcome.
-EXTENSION_COMPARE_ONLY = "EXTENSION_COMPARE_ONLY"
 # The ``detail`` of a run whose capture was gone when its job ran (a restart). Never retried.
 EXTENSION_CAPTURE_BUFFER_MISSING = "EXTENSION_CAPTURE_BUFFER_MISSING"
 EXTENSION_CAPTURE_POLICY_CHANGED = "EXTENSION_CAPTURE_POLICY_CHANGED"
@@ -104,12 +95,9 @@ EXTENSION_FINAL_SCAN_REFUSED = "EXTENSION_FINAL_SCAN_REFUSED"
 # The ``detail`` of a run whose processing raised something no one classified. The exception's
 # own text never leaves the process: it may quote the captured page.
 EXTENSION_PROCESSING_FAILED = "EXTENSION_PROCESSING_FAILED"
-# The ``detail`` of a run whose Adaptive dry run could not evaluate or compare its bundle. A
-# failure of step 12 is a failure of the run; only ``NO_BUNDLE`` and a comparison are answers.
-EXTENSION_ADAPTIVE_COMPARE_FAILED = "EXTENSION_ADAPTIVE_COMPARE_FAILED"
 UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
 # The failure details a log line carries: the structural refusals' kinds and boundaries, which never
-# hold a captured text or attribute value. Other details (the dry run's summary) stay out of it.
+# hold a captured text or attribute value. No other detail is logged.
 _LOGGED_DETAILS = ("finding_count", "findings", "violations")
 
 # The server's own final gate of a capture: the findings, as kinds and boundaries only. Empty
@@ -118,6 +106,24 @@ _LOGGED_DETAILS = ("finding_count", "findings", "violations")
 # hands in the capture owner's sanitizer and final scan, so this package never depends on the
 # Adaptive packages.
 FinalScan = Callable[[str], Sequence[str]]
+
+
+class CapturedDocumentRecorder(Protocol):
+    """The collection owner, as this owner uses it: the one pipeline after capture (ADR-0019 §2).
+
+    It is the same object that records a direct run, so an extension run and a direct run go through
+    the same identity rules, image fetch, revision store and shadow.
+    """
+
+    def record_captured_document(
+        self, record: CollectionRunRecord, document: DocumentView, *, captured_at: datetime
+    ) -> CollectionResult: ...
+
+    def settle(self, collection_run_id: str, result: CollectionResult) -> None: ...
+
+    def recover_recorded(self, collection_run_id: str) -> bool: ...
+
+    def after_recorded(self, collection_run_id: str) -> None: ...
 
 
 class ExtensionCeilingExceeded(PolicyBlockedError):
@@ -147,26 +153,22 @@ class AcceptedCapture:
 
 @dataclass(frozen=True)
 class CaptureReport:
-    """What one processed capture produced, in memory. It is handed to the report sink and logged
-    as counts; it is never persisted by this owner.
+    """What one processed capture produced: the run's own answer and the capture's evidence. It is
+    handed to the report sink and logged; this owner persists nothing of its own.
 
-    ``fields`` holds each canonical field's status, and ``image_roles`` how many references the
-    supplier's role rules put under each role. No captured value is part of it.
+    No captured value is part of it.
     """
 
     collection_run_id: str
     supplier_key: str
     outcome: CollectionOutcome
-    detail: str
+    revision_id: str | None
+    facts_status: FactsStatus | None
+    reason: str | None
     transport_kind: TransportKind
     capture_policy_revision: str
     capture_policy_digest: str
     evidence: Mapping[str, Any]
-    source_product_id: str | None
-    identity_reason: str | None
-    fields: Mapping[str, str] = field(default_factory=dict)
-    image_roles: Mapping[str, int] = field(default_factory=dict)
-    adaptive: DryRunResult = field(default_factory=lambda: DryRunResult(NO_BUNDLE))
 
 
 ReportSink = Callable[[CaptureReport], None]
@@ -184,8 +186,8 @@ class ExtensionCaptureService:
         buffer: CaptureBuffer,
         final_scan: FinalScan,
         worker_in_process: bool,
+        recorder: CapturedDocumentRecorder,
         collections: Sequence[RegisteredCollection] = (),
-        dry_run: DryRunStep | None = None,
         report_sink: ReportSink | None = None,
     ) -> None:
         self._db = db
@@ -199,7 +201,8 @@ class ExtensionCaptureService:
         # (ADR-0002 Option A). Where the worker is not in this process, nothing is accepted.
         self._worker_in_process = worker_in_process
         self._collections = {registered.supplier_key: registered for registered in collections}
-        self._dry_run = dry_run
+        # The collection owner records the document: this owner appends nothing itself.
+        self._recorder = recorder
         self._report_sink = report_sink
 
     # ------------------------------------------------------------------ the policy read
@@ -322,7 +325,7 @@ class ExtensionCaptureService:
         return JobDefinition(
             job_type=EXTENSION_CAPTURE_JOB,
             handler=self._run_job,
-            description="Compare one extension capture in memory; append nothing (E1).",
+            description="Record one extension capture through the collection pipeline (E2).",
             # The capture body lives in this process's memory only: an interrupted attempt cannot
             # be run again, and the job system must not try (ruling 5906712259 N-1).
             idempotent=False,
@@ -339,6 +342,10 @@ class ExtensionCaptureService:
         if record is None or record.outcome is not CollectionOutcome.PENDING:
             return
         self._buffer.discard(record.collection_run_id)
+        if self._recorder.recover_recorded(record.collection_run_id):
+            # The attempt appended its revision and died before settling: that revision is the
+            # answer. Nothing is captured or appended again.
+            return
         self._runs.failed(
             record.collection_run_id,
             detail=f"{UNFINISHED_RUN}:{terminal.error_code or terminal.state}",
@@ -357,10 +364,16 @@ class ExtensionCaptureService:
         record = self._runs.for_job(context.job_id)
         if record is None:
             raise NotFoundError("COLLECT_RUN_UNKNOWN", "this job has no collection run")
-        if record.outcome is not CollectionOutcome.PENDING:
-            return  # the run already has its answer; nothing rewrites it
         run_id = record.collection_run_id
+        if record.outcome is not CollectionOutcome.PENDING:
+            # The run already has its answer; nothing rewrites it. A RECORDED one may still owe
+            # what follows it.
+            if record.outcome is CollectionOutcome.RECORDED:
+                self._recorder.after_recorded(run_id)
+            return
         capture = self._buffer.take(run_id)
+        if self._recorder.recover_recorded(run_id):
+            return
         try:
             if capture is None:
                 # The process that accepted the capture is gone, and the capture with it.
@@ -369,7 +382,10 @@ class ExtensionCaptureService:
                     "the capture was not in this process's memory when its job ran",
                 )
             try:
-                report = self._compare(record, capture)
+                document, policy = self._document(record, capture)
+                result = self._recorder.record_captured_document(
+                    record, document, captured_at=self._clock.now()
+                )
             except AppError:
                 raise
             except Exception as unclassified:
@@ -381,7 +397,10 @@ class ExtensionCaptureService:
                     details={"failure": type(unclassified).__name__},
                 ) from None
         except AppError as error:
-            self._runs.failed(run_id, detail=error.code)
+            if not self._recorder.recover_recorded(run_id):
+                # Nothing was appended: the run failed. (A failure after the append is the
+                # appended revision's run, and is finished from it above.)
+                self._runs.failed(run_id, detail=error.code)
             # The capture is gone once the job ends, so the log is the only place an operator can
             # learn why a structural refusal happened: its kinds and boundaries, never a value.
             logger.warning(
@@ -393,17 +412,33 @@ class ExtensionCaptureService:
                 },
             )
             raise
-        self._runs.no_revision(run_id, reason=report.detail)
+        self._recorder.settle(run_id, result)
+        recorded = result.revision_id is not None
+        report = CaptureReport(
+            collection_run_id=run_id,
+            supplier_key=record.supplier_key,
+            outcome=CollectionOutcome.RECORDED if recorded else CollectionOutcome.NO_REVISION,
+            revision_id=result.revision_id,
+            facts_status=result.facts_status,
+            reason=result.reason,
+            transport_kind=TransportKind.EXTENSION,
+            capture_policy_revision=policy.revision,
+            capture_policy_digest=policy.digest,
+            evidence={
+                "response_status": capture.evidence.response_status,
+                "redirect_count": capture.evidence.redirect_count,
+                "content_type": capture.evidence.content_type,
+                "character_set": capture.evidence.character_set,
+            },
+        )
         logger.info(
-            "collect.extension_compared",
+            "collect.extension_recorded",
             extra={
                 "collection_run_id": run_id,
                 "supplier": report.supplier_key,
-                "detail": report.detail,
-                "identity_resolved": report.source_product_id is not None,
-                "fields": dict(report.fields),
-                "image_roles": dict(report.image_roles),
-                "adaptive": report.adaptive.state,
+                "outcome": report.outcome.value,
+                "revision_id": report.revision_id,
+                "facts_status": report.facts_status.value if report.facts_status else None,
             },
         )
         if self._report_sink is not None:
@@ -412,14 +447,15 @@ class ExtensionCaptureService:
             except Exception:
                 logger.exception("collect.extension_report_failed", extra={"run": run_id})
 
-    def _compare(self, record: CollectionRunRecord, capture: BufferedCapture) -> CaptureReport:
-        run_id, supplier_key = record.collection_run_id, record.supplier_key
-        registered = self._registered(supplier_key)
-        collection = registered.collection
+    def _document(
+        self, record: CollectionRunRecord, capture: BufferedCapture
+    ) -> tuple[DocumentView, BrowserCapturePolicy]:
+        """Steps 9 and 10: the server's own check of exactly what arrived, then the same
+        ``DocumentView`` a direct read produces, from what the browser observed and nothing else."""
+        supplier_key = record.supplier_key
         provenance = record.provenance
         assert provenance is not None and provenance.capture_policy_digest is not None
         assert provenance.capture_policy_revision is not None
-        # 9. The server's own check of exactly what arrived, under the policy the run names.
         policy = self._policies.load(supplier_key)
         if (policy.revision, policy.digest) != (
             provenance.capture_policy_revision,
@@ -443,101 +479,18 @@ class ExtensionCaptureService:
                 "the server's sanitizer and final scan found secret or private material",
                 details={"finding_count": len(findings), "findings": list(findings)[:20]},
             )
-        # 10. The same DocumentView, from what the browser observed and nothing else.
         evidence = capture.evidence
-        url = evidence.url
         document = DocumentView(
             kind=ReadKind.PRODUCT_READ,
             status=evidence.response_status,
-            path=urlsplit(url).path or "/",
+            path=urlsplit(evidence.url).path or "/",
             # The contract's value for a 200: the direct transport also reports no redirect
             # target unless the response is a 3xx. A redirected navigation was refused at ingest.
             location=None,
             content_type=evidence.content_type,
             body=capture.html,
         )
-        # 11. The supplier's canonical extractor, in memory. Nothing is appended.
-        identity = collection.identity(document, url)
-        candidates = tuple(collection.roles.classify(document.body, url))
-        roles: dict[str, int] = {}
-        for candidate in candidates:
-            roles[candidate.role.value] = roles.get(candidate.role.value, 0) + 1
-        collected: CollectedFacts | None = None
-        if isinstance(identity, SourceIdentity):
-            self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
-            collected = CollectedFacts(
-                supplier_key=supplier_key,
-                source_product_id=identity.source_product_id,
-                source_url=url,
-                captured_at=self._clock.now(),
-                extractor_revision=registered.extractor_revision,
-                extractor_fingerprint=registered.extractor_fingerprint,
-                collection_run_id=run_id,
-                correlation_id=get_correlation_id() or new_correlation_id(),
-                fields=collection.fields(document),
-                # A compare-only run fetches no image and records no source asset.
-                images=(),
-            )
-        # 12. The Adaptive dry run: a comparison, or NO_BUNDLE. It writes nothing.
-        adaptive = self._adaptive(
-            DryRunInput(
-                collection_run_id=run_id,
-                supplier_key=supplier_key,
-                source_url=url,
-                document=document,
-                identity=identity,
-                collected=collected,
-                url_policy=url_policy_of(collection.profile),
-                candidates=candidates,
-            )
-        )
-        if adaptive.state == COMPARE_FAILED:
-            # E1 specification §3: any failure from step 9 on settles the run FAILED.
-            raise ExtensionCaptureFailed(
-                EXTENSION_ADAPTIVE_COMPARE_FAILED,
-                "the Adaptive dry run could not evaluate or compare its bundle",
-                details=dict(adaptive.summary or {}),
-            )
-        return CaptureReport(
-            collection_run_id=run_id,
-            supplier_key=supplier_key,
-            outcome=CollectionOutcome.NO_REVISION,
-            # An unresolved identity is the same answer it is on the direct path: the parser's
-            # own reason. A resolved one says what E1 did with it.
-            detail=EXTENSION_COMPARE_ONLY
-            if isinstance(identity, SourceIdentity)
-            else (identity.reason or "the identity is unresolved"),
-            transport_kind=TransportKind.EXTENSION,
-            capture_policy_revision=policy.revision,
-            capture_policy_digest=policy.digest,
-            evidence={
-                "response_status": evidence.response_status,
-                "redirect_count": evidence.redirect_count,
-                "content_type": evidence.content_type,
-                "character_set": evidence.character_set,
-            },
-            source_product_id=identity.source_product_id
-            if isinstance(identity, SourceIdentity)
-            else None,
-            identity_reason=None if isinstance(identity, SourceIdentity) else identity.reason,
-            fields={}
-            if collected is None
-            else {key: fact.status.value for key, fact in collected.fields.items()},
-            image_roles=dict(sorted(roles.items())),
-            adaptive=adaptive,
-        )
-
-    def _adaptive(self, dry_run: DryRunInput) -> DryRunResult:
-        if self._dry_run is None:
-            return DryRunResult(NO_BUNDLE)
-        try:
-            return self._dry_run(dry_run)
-        except Exception as failure:
-            logger.exception(
-                "collect.extension_dry_run_escaped",
-                extra={"collection_run_id": dry_run.collection_run_id},
-            )
-            return DryRunResult(COMPARE_FAILED, None, {"failure": type(failure).__name__})
+        return document, policy
 
     # ------------------------------------------------------------------ common
 
