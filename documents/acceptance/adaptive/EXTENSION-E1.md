@@ -1,7 +1,7 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). The first
-  granted attempt failed closed at the final gate without a recorded reason (§5.1). A green PR, a
+- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). The first two
+  granted attempts failed closed at the final gate (§5.1); a third is granted. A green PR, a
   green CI or a synthetic test run accepts nothing. The
   implementation and its tests are provider-zero as corrected; the implementation **history** is
   not: two unauthorized requests reached the supplier host while it was written (§6).
@@ -143,14 +143,29 @@ the bounds and the per-run data roots are in
 | campaign | run | outcome | what it shows |
 | --- | --- | --- | --- |
 | `e1-km-286-01` | `66737efe-365b-4a5f-9f1e-faceab04afd8` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | the capture was accepted (13 481 bytes, 242 nodes, 25 image references) and the final gate refused it; zero write held (one run, one job, one attempt, one dead-letter audit event, nothing else) |
-| `e1-km-349-01` | — | not yet run | held until a refusal names its findings |
+| `e1-km-349-01` | `2cc9b341-9bcc-4d33-b52d-51654238d5fe` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `e07c3f2f` (PR #175); accepted (12 862 bytes, 229 nodes, 17 image references); findings `IMAGE_REFERENCE_NOT_A_LOCATOR:src@img#.` and `SANITIZER_EXCLUDED:PRIVATE@p#.member`; zero write held as above |
 
 The refusal of `e1-km-286-01` is not an acceptance and not a defect of the gate: it failed closed as
 §4 requires. Its findings were not recorded: the job kept only their count, and the capture is gone
 with the job by design. So the run cannot say which kind of private or secret material the gate saw.
-The failure log now carries the gate's findings and the policy violations, as kinds and boundaries
-only (`collect.extension_failed`), so the next granted run names its reason. Product 286 is not
-captured again under this grant: its one click was consumed.
+PR #175 made the failure log carry the gate's findings and the policy violations, as kinds and
+boundaries only (`collect.extension_failed`), and `e1-km-349-01` was run on that main.
+
+`e1-km-349-01` named two findings. The user identified the element on the page: the signed-in
+member's benefit box inside the product scope, which shows the member's name and grade
+(`<p class="member">`) beside a profile image. The capture owner rightly classifies it as private.
+Capture policy `kmretail-capture-2` adds that box, Cafe24's `xans-myshop-asyncbenefit` module, to the
+excluded regions: the browser cuts it, with everything it holds, before anything is sent.
+
+Only that box is cut. The private-region rule reads class and id names, never the page's words: a
+`회원가` label is no finding. But an element elsewhere whose class or id begins with `member` (a
+supplier might mark a member price that way) is not cut silently. It is sent, the gate refuses the
+run and names it, so a price is never lost unnoticed. The server's gate is unchanged.
+
+The image finding had no id or class and is most likely the box's profile image. Its kind is now
+named by shape (`NOT_A_LOCATOR_EMPTY`, `_WHITESPACE`, `_CHARACTER`, `_UNPARSEABLE`, `_NO_PATH`,
+`_SRCSET`) so that a further refusal says which. Both clicks of the first grant are consumed. The user then granted one more acceptance of
+product 349 (one page, one click), to run on the main that carries `kmretail-capture-2`.
 
 ## 6. Incident during implementation: two unintended requests to the supplier host
 
