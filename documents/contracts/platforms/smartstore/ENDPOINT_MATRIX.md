@@ -165,7 +165,24 @@ Adopted read-back contract, in the registry and pinned by tests:
 | Redirect | `NO_FOLLOW` |
 | Success predicate | HTTP 200 AND the body parses as a JSON object (`m5d-origin-read-r1`, `m5d-channel-read-r1`) |
 | Safe query keys | **none** (deny-by-default) |
-| Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
+| Retained response fields | `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url`; **the origin read also** `statusType` and `channelProductDisplayStatusType` (the published-state read, below) |
+
+**The published-state read (origin read only; mapping revision `m5-published-state-r1`).** The
+documented 200 response of `(v2) 원상품 조회` (Commerce API 2.90.0; `SOURCES.md` §5.4,
+`NAVER-P0-READ-STATUS-290`) has the top-level members `groupProduct`, `originProduct`,
+`windowChannelProduct` and `smartstoreChannelProduct`. ICBM reads the sale status at exactly
+`originProduct.statusType` and the SmartStore display status at exactly
+`smartstoreChannelProduct.channelProductDisplayStatusType`, each only as a value of its documented
+enumeration; a `windowChannelProduct` display status or a status nested anywhere else is never
+taken for them. No endpoint is adopted or re-adopted by this: method, path, predicate, timeouts and
+query keys are unchanged, and the channel read — whose response is not captured — retains neither
+leaf. **Reading is not proving**: ADR-0014 §11 compares the published state against an explicit
+expectation. That expectation is the Snapshot's own CREATE projection — the sale status `SALE`
+and the display status `ON`, which every registration carries (Issue #89 architect resolution
+`5915900049` D1; §4.1.1) — so it is exactly `SALE/ON` (`smartstore-readback-comparison/v3`).
+Only a read-back that carries both and both equal it states a published state; `SALE/SUSPENSION`,
+another sale status or a missing or unreadable half proves nothing and a read-back then confirms
+nothing (`REGISTER_PUBLISHED_STATE_UNPROVEN`).
 
 Adopted image-upload contract: bearer auth; `POST /v1/product-images/upload`; one artifact in one
 `imageFiles` multipart part; HTTP 200 with `images[].url`; no query keys; only `url` is retained.
@@ -207,7 +224,7 @@ Adopted CREATE contract, in the registry and pinned by tests:
 | Safe query keys | **none** (deny-by-default) |
 | Retained response fields | `originProductNo`, `smartstoreChannelProductNo`, `windowChannelProductNo`, plus the safe product leaves `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url` |
 | Idempotency | **none is invented**: no idempotency key, request-correlation key or replay header is sent, because the provider documents none |
-| Request completeness | **Incomplete at this adoption, and that is the frozen state.** The provider requires `originProduct` **and** `smartstoreChannelProduct`. `originProduct.statusType` is projected as `SALE`, the only CREATE input (E2). The required `smartstoreChannelProduct.naverShoppingRegistration` is a captured JSON boolean (E1), but no ICBM-owned value source decides which boolean ICBM publishes with; no Snapshot owns the publication decision behind `channelProductDisplayStatusType`; no Snapshot or ICBM owner decides the registration `originProduct.stockQuantity`, which the endpoint requires to be at least 1 (`5862400626`); and no type-specific child for `productInfoProvidedNotice` is captured. None of them is ever invented — neither `true` nor `false` is guessed — so `smartstoreChannelProduct` is **not emitted at all** rather than half-built, the frozen request schema admits only the projectable `originProduct` structure, and **no** Snapshot is sendable: every projection carries those named gaps and execution refuses with `REGISTER_WIRE_NOT_SENDABLE`. The value-level packet alone does not make a request sendable; the later decision that gives those values an ICBM-owned source is what completes the request |
+| Request completeness | **Incomplete at this adoption, and that is the frozen state.** The provider requires `originProduct` **and** `smartstoreChannelProduct`. `originProduct.statusType` is projected as `SALE`, the only CREATE input (E2). The required `smartstoreChannelProduct.naverShoppingRegistration` is a captured JSON boolean (E1), but no ICBM-owned value source decides which boolean ICBM publishes with; no Snapshot or ICBM owner decides the registration `originProduct.stockQuantity`, which the endpoint requires to be at least 1 (`5862400626`); and no type-specific child for `productInfoProvidedNotice` is captured. None of them is ever invented — neither `true` nor `false` is guessed — so no Snapshot is sendable. *(Amendment note, Issue #89 architect resolution `5915900049` D1: `channelProductDisplayStatusType` is owned — every document carries `smartstoreChannelProduct` with exactly `channelProductDisplayStatusType = ON` — and the frozen schema admits that one channel member besides `originProduct`; `naverShoppingRegistration` is still not emitted.)* Until Issue #89 architect resolution `5915900049` D2, **no** Snapshot was sendable: every projection carried those named gaps and execution refused with `REGISTER_WIRE_NOT_SENDABLE`. The value-level packet alone did not make a request sendable; the later decision that gave those values an ICBM-owned source is what completes the request. *(Amendment note, Issue #89 architect resolution `5915900049` D2: every required part is now owned or captured, so a single-Item document of a captured notice type is complete and sendable, and the completeness gate refuses only a document without a notice — the state of every Snapshot whose reviewed type is not captured.)* |
 
 Outcome classification, unchanged in substance by adoption (ADR-0014 §9–§10, §28; `ERRORS.md`
 §15):
@@ -233,9 +250,12 @@ Request projection, from the immutable `RegistrationSnapshot` only: `originProdu
 `salePrice`, `detailAttribute.sellerCodeInfo.sellerManagementCode`, the combination-form
 `optionInfo` for an option listing, and `leafCategoryId`, which the endpoint requires on
 registration (`5862400626`) and which is the operator-reviewed category the Snapshot froze. The provider-required
-`smartstoreChannelProduct` is **not** emitted at this adoption: neither of its required fields has
-an ICBM-owned value, and a half-built required structure would be an invented request, so it stays
-a named gap and the request stays unsendable instead. `windowChannelProduct` is out of scope and is
+`smartstoreChannelProduct` is emitted with both required members, each carrying the value ICBM
+owns: `channelProductDisplayStatusType = ON` (D1) and `naverShoppingRegistration = true` (D2.1).
+`originProduct.stockQuantity` is the registration seed `1` (D2.2), and
+`detailAttribute.productInfoProvidedNotice` carries exactly the child of the reviewed notice type
+when the pinned 2.90.0 table captures that type (D2.3; `NAVER-P0-NOTICE-CHILD-290`) — amendment
+notes, Issue #89 architect resolution `5915900049`. `windowChannelProduct` is out of scope and is
 never emitted. That list is also the request-side allow-list, checked **deny-by-default** before the
 document is frozen — the request-side twin of the retention profile: an unrecorded path, a value
 outside a documented bound, an image URL that is not a prepared sanitized provider reference, or a
@@ -247,12 +267,51 @@ as a local pre-handoff refusal). Every value the official evidence does
 not carry, or that no ICBM owner decides, stays **fail-closed** as a named gap, so the request is
 not sendable — the REGISTER execution owner refuses with `REGISTER_WIRE_NOT_SENDABLE` before it
 opens an Attempt, and the SmartStore sender, re-projecting the Snapshot itself, refuses again with
-its adapter-level `SMARTSTORE_CREATE_WIRE_NOT_SENDABLE` — for: the ICBM-owned value source of
-the required boolean `smartstoreChannelProduct.naverShoppingRegistration`; the publication decision
-behind `channelProductDisplayStatusType`; the registration `originProduct.stockQuantity` (required,
-at least 1, but owned by no Snapshot — never the option default 0 and never an invented 1); the
-type-specific child of `productInfoProvidedNotice`; and,
-for an option listing, whether a combination price is absolute or a difference.
+its adapter-level `SMARTSTORE_CREATE_WIRE_NOT_SENDABLE` — for: the child of a notice type the
+pinned table does not capture (it is never taken from another type); and, for an option listing,
+whether a combination price is absolute or a difference. *(Amendment note, Issue #89 architect resolution `5915900049` D2: the
+value source of `naverShoppingRegistration` and the registration `stockQuantity` were in this list
+and are owned now, and the notice child is projected for every captured type. A single-Item
+listing whose reviewed notice type is captured and whose notice satisfies the child's documented
+members is therefore **sendable**: the REGISTER owner no longer refuses it as not sendable, and
+what stops it is the rest of the send path — no committed session, `M0_DRY_RUN_ONLY` and the
+ADR-0018 send-time stack.)*
+
+**The display status is owned** (Issue #89 architect resolution `5915900049` D1): every CREATE
+document carries `smartstoreChannelProduct.channelProductDisplayStatusType = ON`; any other value,
+a missing channel object or an unowned channel member is refused before freezing (wire
+`smartstore-register-wire/v3`). It is the first-vertical publication
+decision, frozen with the Snapshot's projection and never derived from the provider or a session,
+and the read-back compares against it (§4.1).
+
+**The remaining CREATE values are owned** (Issue #89 architect resolution `5915900049` D2; wire
+`smartstore-register-wire/v4`). Each is frozen with the Snapshot's projection and never derived
+from the provider or a session:
+
+- **`naverShoppingRegistration = true`** (D2.1) — ICBM's publication intent. It is no assertion
+  that the account is a NAVER Shopping advertiser: the provider stores `false` for a
+  non-advertiser, and no account capability is inferred from the value. It is not read back.
+- **`originProduct.stockQuantity = 1`** (D2.2) — the registration seed, not a supplier quantity.
+  A Snapshot exists only for a unit whose final preflight is `READY`, which a sold-out source never
+  is (the M4 readiness it consumes is `BLOCKED` on `SOURCE_STOCK_SOLD_OUT`); no source quantity is
+  fabricated. The read-back compares it exactly at `originProduct.stockQuantity`
+  (`smartstore-readback-normalizer/v3`, `smartstore-readback-comparison/v4`): a different or
+  missing value is `STOCK_QUANTITY_MISMATCH`, never a confirmation.
+- **The `productInfoProvidedNotice` child** (D2.3) — selected from the reviewed
+  `CategoryMetadata.notice.notice_type` through the pinned table `smartstore-notice-children/2.90.0-r1`
+  (`NAVER-P0-NOTICE-CHILD-290`, evidence packet `5916962285`): the 36 type → member mappings the
+  schema states explicitly, and the captured text members of `WEAR`, `SHOES`, `HOME_APPLIANCES`,
+  `KITCHEN_UTENSILS`, `COSMETIC` and `ETC`. No child name is derived by casing a string; the four
+  enum values with no documented member, every type whose members are not captured, and
+  `GENERAL_FOOD` — whose required members `geneticallyModified` and `importDeclarationCheck` are
+  JSON booleans with no owned typed value — stay a named gap and never fall back to another child.
+  Only the Snapshot's own reviewed text values are projected, under their reviewed member names;
+  a member the child does not document is refused. The category rules decide which values are
+  required and which may be left to the product detail; a member left to the detail is omitted,
+  which is the documented provider default ("미입력 시 상품상세 참조로 입력됩니다") only for the five
+  members every child repeats — for any other required member the document is refused as
+  incomplete. The documented `yyyy-MM` form, the documented length bounds and the documented
+  "required when the other is absent" pairs are enforced, never repaired.
 
 `sellerManagementCode` is the ICBM projection `smartstore-seller-management-code/v1` (architect
 ruling R1, Issue #89 `5861607665`): the first 30 lowercase hexadecimal characters of

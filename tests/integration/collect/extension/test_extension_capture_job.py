@@ -296,7 +296,7 @@ def test_a_policy_revised_after_acceptance_fails_the_run(
     with _process(config, clock, gateway, capture_policy_root=root) as app:
         run_id = _accept(app, policy=_reference(root))
         revised = json.loads(_km_policy_text())
-        revised["revision"] = "kmretail-capture-2"
+        revised["revision"] = "kmretail-capture-next"
         (root / "kmretail" / POLICY_FILE).write_text(json.dumps(revised), "utf-8")
         result = app.runner.run_next()
         assert result is not None and result.error_code == "EXTENSION_CAPTURE_POLICY_CHANGED"

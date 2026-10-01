@@ -40,6 +40,26 @@ class DuplicateLookupSource(Protocol):
 
 
 @runtime_checkable
+class PreparedAssetSource(Protocol):
+    """The provider assets already prepared for one exact authored unit.
+
+    Read from the durable ASSET upload-attempt owner: only ``APPLIED_PROVEN`` uploads of exactly
+    this preparation revision under exactly this candidate fingerprint. Nothing is produced,
+    promoted or looked up here, and an absent asset is simply absent (Issue #89 architect
+    follow-up 5919917893 §3).
+    """
+
+    def prepared_assets(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        preparation_revision_id: str,
+        candidate_fingerprint: str,
+    ) -> tuple[PreparedAsset, ...]: ...
+
+
+@runtime_checkable
 class ProviderAssetSource(Protocol):
     """Promotion of one upload outcome to the provider asset identity of one exact artifact."""
 
@@ -66,13 +86,14 @@ class ReadbackComparator(Protocol):
         ...
 
     def proves_published_state(self) -> bool:
-        """Whether this comparison's canonical evidence can carry a published state at all.
+        """Whether this comparison can prove a published state at all.
 
-        ADR-0014 §11 confirms a registration only on an exact published-state comparison, and the
-        execution owner refuses with ``REGISTER_PUBLISHED_STATE_UNPROVEN`` rather than invent one.
-        ``False`` is the honest answer while the adopted read-back contract proves no published
-        state, so a readiness that names the proofs a real CREATE needs can report it as missing
-        instead of implying that endpoint adoption alone covers it.
+        ADR-0014 §11 confirms a registration only on an exact published-state comparison against
+        the explicitly expected state, and the execution owner refuses with
+        ``REGISTER_PUBLISHED_STATE_UNPROVEN`` rather than invent one. ``False`` is the honest
+        answer while either half is missing — the read-back cannot carry the state, or nothing
+        states the expected one — so a readiness that names the proofs a real CREATE needs can
+        report it as missing instead of implying that endpoint adoption alone covers it.
         """
         ...
 
@@ -192,6 +213,7 @@ __all__ = [
     "DuplicateLookupSource",
     "LookupStatus",
     "PreparedAsset",
+    "PreparedAssetSource",
     "ProviderAssetSource",
     "ReadbackComparator",
     "ReadbackSource",

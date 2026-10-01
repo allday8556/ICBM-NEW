@@ -406,7 +406,7 @@ class Evaluator:
     def __init__(self, result: Any) -> None:
         self.result = result
 
-    def evaluate(self, preparation_id: str) -> Any:
+    def stage_candidate(self, preparation_id: str) -> Any:
         return self.result
 
 

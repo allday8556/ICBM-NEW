@@ -1215,15 +1215,17 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     # Adoption is not readiness: CREATE_ADOPTED is satisfied while everything a real canary still
     # needs stays missing, so the verdict is unchanged.
     assert "CREATE_ADOPTED" not in canary["missing"]
-    # The read-back is adopted, and adoption is all that proves: production wires no session to
-    # read with, and the adopted comparison carries no published state, so each is named on its
-    # own rather than covered by `READBACK_ADOPTED` (post-merge audit of main `a10e4b79dbd3`).
+    # The read-back is adopted, and adoption alone is not executable: production wires no session
+    # to read with, so that is named on its own rather than covered by `READBACK_ADOPTED`
+    # (post-merge audit of main `a10e4b79dbd3`). The comparison can prove the published state
+    # (SALE/ON, architect resolution 5915900049 D1), so that requirement is satisfied — which
+    # proves no registration by itself.
     satisfied = {item["requirement"] for item in canary["requirements"] if item["satisfied"]}
     assert "READBACK_ADOPTED" in satisfied
+    assert "PUBLISHED_STATE_PROVABLE" in satisfied
     assert missing["READBACK_EXECUTABLE"]["reason_code"] == "READBACK_SESSION_NOT_WIRED"
-    assert missing["PUBLISHED_STATE_PROVABLE"]["reason_code"] == "PUBLISHED_STATE_UNPROVEN"
     assert missing["READBACK_EXECUTABLE"]["endpoint_id"] is None
-    assert missing["PUBLISHED_STATE_PROVABLE"]["endpoint_id"] is None
+    assert canary["verdict"] != "READY"
     # ADR-0018 §10 (post-merge audit of main `cfb0aa4f3af1`): the plan summarizes the two mutation
     # stages, read from the Gate 3 owners the send-time stack uses. `M0_DRY_RUN_ONLY` alone refuses
     # every mutation, so the CREATE stage is named here instead of being invisible to the plan.

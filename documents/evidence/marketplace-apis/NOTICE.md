@@ -21,7 +21,8 @@
 - **Notice in the product body:** `originProduct.detailAttribute.productInfoProvidedNotice` (required for registration; omissible on update only when a notice is already stored) with the required discriminator `productInfoProvidedNoticeType` and exactly one matching type child. The rules are recorded once in [PRODUCT_CREATE § Request structure](PRODUCT_CREATE.md#request-structure); the type-child fields are a not-captured, fail-closed gap of that record ([Coverage](PRODUCT_CREATE.md#coverage-and-remaining-gaps-exact)).
 - **Error example:** a missing required notice field has produced `BAD_REQUEST` with structured `invalidInputs` (`NAVER-P1-BADREQ-NOTICE-1649`, `OFFICIAL_SUPPORT`).
 - **Missing:** every response field of both lookups (none proven, `SOURCES.md` §5.1); the full list of type values; the field set of each type child; errors; rate limit.
-- **ICBM:** `SMARTSTORE_NOTICE_TYPES` / `SMARTSTORE_NOTICE_TYPE_READ` are `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4.1); no value of a type-specific child that ICBM does not own may be invented. Runtime `UNVERIFIED`.
+- **Captured since 2.90.0** (evidence packet `5916962285`, `NAVER-P0-NOTICE-CHILD-290`): the explicit type → member mapping of 36 types, and the member sets of `WEAR`, `SHOES`, `HOME_APPLIANCES`, `KITCHEN_UTENSILS`, `COSMETIC`, `GENERAL_FOOD` and `ETC` ([PRODUCT_CREATE § Coverage](PRODUCT_CREATE.md#coverage-and-remaining-gaps-exact)). The lookups' response fields are still missing.
+- **ICBM:** `SMARTSTORE_NOTICE_TYPES` / `SMARTSTORE_NOTICE_TYPE_READ` are `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4.1) and no discovery call is made; no value of a type-specific child that ICBM does not own may be invented. The CREATE projection selects the child of the reviewed notice type through the pinned table (`ENDPOINT_MATRIX.md` §4.1.1; Issue #89 architect resolution `5915900049` D2.3); an uncaptured type stays a gap. Runtime `UNVERIFIED`.
 
 ## Coupang
 

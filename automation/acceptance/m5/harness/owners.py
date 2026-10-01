@@ -59,7 +59,7 @@ from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.service import RegisterService
 from app.stages.register.store import RegistrationStore
 from automation.acceptance.m5.harness.seams import (
-    DeclaredComparator,
+    CountingComparator,
     DeclaredProjector,
     FakeReadback,
     FakeSender,
@@ -104,7 +104,7 @@ class Owners:
     readback: FakeReadback
     lookup: RecordingLookup
     projector: DeclaredProjector
-    comparator: DeclaredComparator
+    comparator: CountingComparator
 
     @property
     def database_file(self) -> Path:
@@ -168,7 +168,7 @@ def open_owners(
         )
         sender, readback, lookup = FakeSender(), FakeReadback(), RecordingLookup()
         projector = DeclaredProjector()
-        comparator = DeclaredComparator(smartstore_readback)
+        comparator = CountingComparator(smartstore_readback)
         execution = RegistrationExecutionService(
             registrations=registrations,
             preflight=preflight,

@@ -33,6 +33,11 @@ change, LIVE grant, kill switch, backup or restore code, retention runtime, visu
 provider adapter, endpoint adoption, provider call, LIVE execution, canary, ComplianceGate owner, M6
 or M6.5 work. `M0_DRY_RUN_ONLY` / `M0_LIVE_FORBIDDEN` stays the only execution policy at this main.
 
+Governance scope clarification, 2026-10-01: this ADR gates the side-effecting ASSET/CREATE mutations
+it defines. It is not a generic approval gate for a routine read-only provider call, read-back,
+health check or lookup. Its visual, restore and retention proofs are components of one final
+mutation-readiness check on final main, not separate user approvals and not per-PR ceremonies.
+
 Decision owner: Architect (ChatGPT). Sources:
 - the Gate 3 kickoff `5821078540` (D1–D7, the G3-0 scope and the expected later areas);
 - `documents/roadmap/ROADMAP.md` §14.1 (the LIVE-authorization and ComplianceGate gaps) and §14.2 (the preconditions
@@ -129,6 +134,28 @@ after the freeze. Each stage is its own mutation identity with its own grant (§
 proof (§7) and its own send-time readiness (§10). **A grant, proof or readiness of one stage never
 covers, widens into or automatically authorizes the other.** A unit that needs no provider asset has
 no ASSET stage; the CREATE stage is then the first mutation, and nothing of it is relaxed.
+
+> **Amendment note (one candidate for both stages; Issue #89 architect resolution `5915900049`
+> D4).** The candidate the ASSET stage binds — its candidate gate, its grant (§3.2) and its
+> eligibility review packet (§5.1) — is evaluated exactly as the CREATE path evaluates it: when
+> the target policy requires duplicate proof, with the same admissible evidence of the
+> provider-neutral duplicate-evidence owner seam that the final preflight and the first CREATE copy
+> consume (`RegistrationPreparationService.stage_candidate`). Both stages therefore derive the
+> same candidate fingerprint for the same canonical candidate. Missing evidence keeps the ASSET
+> stage fail-closed (`REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE`): no grant, no eligibility packet,
+> no upload. The fingerprint definition is unchanged, no second fingerprint exists, no duplicate
+> lookup endpoint is adopted, and the positive-only reconcile SEARCH is never duplicate evidence.
+>
+> **Amendment note (the application freeze; Issue #89 architect follow-up `5919917893` §3).** The
+> application freeze path (`POST …/preparations/{id}/freeze`, `RegistrationPreparationService.freeze_current`)
+> freezes with the exact current inputs the owners hold: the stage candidate above, with the owner
+> seam's duplicate evidence when the policy requires proof, and — when the policy needs provider
+> asset identities — the provider assets the durable ASSET upload-attempt owner (§3.4) holds as
+> `APPLIED_PROVEN` for exactly this preparation revision under exactly that candidate fingerprint
+> (`PreparedUploadAssets`). Nothing is substituted or looked up: missing evidence, a missing asset
+> and an asset of an earlier revision or another candidate leave the final preflight not `READY`,
+> and nothing is frozen (`REGISTER_PREFLIGHT_NOT_READY`). No second owner, fingerprint or asset path
+> exists.
 
 #### 3.2 What a grant binds, and every field is exact
 
@@ -285,6 +312,29 @@ independently of any UI state and of any grant.
 - **Releasing** requires a new explicit authorization and is audited. **Releasing the brake does not
   resurrect an expired, revoked or exhausted grant**, and does not widen any grant.
 - **It survives restart.** A restart never releases it.
+
+> **Amendment note (protected operator surface; Issue #89 architect resolution `5915900049` D3).**
+> The first canary's protected actions are run through the existing `icbm live` command family,
+> never a new screen or route: `icbm live inspect` (the brake, every grant and its readiness, and
+> the canary readiness — read-only), `eligibility-packet` and `record-eligibility` (§5.1),
+> `issue-asset-grant` and `issue-create-grant` (§3.2), and `release-brake` / `engage-brake` (§4.1).
+> Each is an owning command that holds the data directory (ADR-0006). Each protected action calls
+> exactly one existing owner method, of `CanaryEligibilityService` or `LiveAuthorityService`;
+> `inspect` writes nothing and reads the two existing read-only projections, `LiveStatusService`
+> and the REGISTER canary readiness. Each prints the owners' answer or refusal code. The commands own no
+> truth: no duplicate eligibility, grant or brake model exists, every value given is only an
+> expectation the owner checks, releasing still needs an authorization reference, and nothing here
+> changes the execution mode — the send-time stack still refuses every mutation under
+> `M0_DRY_RUN_ONLY`. Running one is itself a protected action and needs its own approval (rule
+> §7.2); this note grants none.
+>
+> **Amendment note (the local proof commands; Issue #89 follow-ups `5919917893`, `5921110564`).**
+> The two local proofs a canary needs had owners but no operator surface. Three owning commands of
+> the same family run them: `icbm live restore-drill-asset --grant-id` and
+> `restore-drill-create --intent-id` call `RestoreDrillService.drill_asset` / `drill_create` (§7)
+> into a fresh restore root the operator names, and `prove-retention` calls
+> `RetentionProofService.prove` (§8). Each owner computes its own target and records its own
+> PASSED or FAILED proof; the command decides nothing, and a proof proves only its own layer.
 
 #### 4.2 What the brake never does
 
@@ -564,6 +614,9 @@ This is UI acceptance only. It authorizes no provider mutation.
 detail panel — joins the required surfaces and state selectors of this acceptance, or their
 successor, when it is implemented. It is proven inside the harness, never re-recorded outside it.
 Any merged commit is a new accepted code SHA, so an earlier visual acceptance never covers it.
+That staleness rule is a send-time coverage rule, not an instruction to re-run acceptance after
+every provider-zero merge. The reviewed record is created on the final main immediately before the
+bounded LIVE action; until then no record is current and the readiness layer remains blocked.
 
 ### 10. Mutation-stage readiness
 

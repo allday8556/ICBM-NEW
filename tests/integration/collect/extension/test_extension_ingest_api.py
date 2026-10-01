@@ -7,6 +7,7 @@ and the supplier's host appears only as text.
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterator
 from typing import Any
 
@@ -238,6 +239,27 @@ def test_a_capture_the_sanitizer_would_have_to_clean_fails_the_run(
     assert untouched(before, table_counts(config)) == {}
 
 
+def test_a_refused_run_logs_its_findings_and_never_a_value(
+    client: TestClient, paired: PairingRecord, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The capture is gone once its job ends, so the failure log is the one place an operator learns
+    # why a real capture was refused: the gate's kinds and boundaries, never a captured value.
+    addition = '<div class="member-benefit"><p>회원 전용 안내</p></div><p>문의 010-0000-0000</p>'
+    with caplog.at_level(logging.WARNING):
+        response = post_capture(
+            client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, addition + IN_SCOPE)))
+        )
+        run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
+    [failed] = [r for r in caplog.records if r.getMessage() == "collect.extension_failed"]
+    # The final scan's residual refusal ends the gate, so it is the one finding, with its boundary.
+    assert vars(failed)["finding_count"] == 1
+    assert vars(failed)["findings"] == ["residual secret or private material: ['TEXT@p#.']"]
+    for entry in caplog.records:
+        logged = json.dumps({k: repr(v) for k, v in vars(entry).items()}, ensure_ascii=False)
+        assert "회원" not in logged and "010-0000" not in logged
+
+
 def test_the_final_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
     gate = _server_final_scan
     assert gate(frame()) == ()
@@ -288,6 +310,11 @@ def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
         f'<img ec-data-src="/web/upload/{hashed}{hashed}.png" data-original="/web/{hashed}.jpg">',
         '<img srcset=" /a.jpg 1x, /b.jpg 2x">',
         '<img srcset="/a.jpg 480w,/b.jpg 800w" src="https://kmretail.co.kr/c.jpg">',
+        # An empty value or srcset entry names no image: the image owner skips it, and so does the
+        # gate (EXTENSION-E1.md §5.1, e1-km-349-02). A Cafe24 lazy-load image leaves src empty.
+        '<img src="">',
+        '<img src="  " ec-data-src="/web/upload/a.jpg">',
+        '<img srcset="/a.jpg 1x, ">',
     ):
         assert gate(frame(body=BODY + clean)) == (), clean
     for bad, kind in (
@@ -296,8 +323,10 @@ def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
         ('<img src="https://user:pw@kmretail.co.kr/a.jpg">', "CREDENTIALS"),
         ('<img src="data:image/png;base64,AAAA">', "SCHEME"),
         ('<img src="javascript:void(0)">', "SCHEME"),
-        ('<img src="/a b.jpg">', "NOT_A_LOCATOR"),
-        ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR"),
+        ('<img src="/a b.jpg">', "NOT_A_LOCATOR_WHITESPACE"),
+        ('<img src="/a|b.jpg">', "NOT_A_LOCATOR_CHARACTER"),
+        ('<img src="http://[::1">', "NOT_A_LOCATOR_UNPARSEABLE"),
+        ('<img srcset="/a.jpg 1x, /b.jpg wide">', "NOT_A_LOCATOR_SRCSET"),
         ('<img src="/eyJhbGciOiJIUzI1NiJ9abc.jpg">', "TOKEN_SHAPED"),
         ('<img data-src="/a.jpg?token=synthetic-value">', "QUERY"),
     ):
@@ -317,6 +346,21 @@ def test_a_hash_named_image_is_accepted_end_to_end(
     response = post_capture(client, paired, envelope(frame(body=body)))
     run = wait_for_outcome(client, response.json()["collection_run_id"])
     assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+
+
+def test_a_lazy_load_image_with_an_empty_src_is_accepted_end_to_end(
+    client: TestClient, config: AppConfig, paired: PairingRecord
+) -> None:
+    # The refusal of e1-km-349-02 (EXTENSION-E1.md §5.1): one <img> with an empty src in the KM
+    # product scope. It names no image, so the gate passes it and the run is recorded.
+    lazy = '<img src="" ec-data-src="/web/upload/synthetic/detail-3.jpg">'
+    assert BODY.count(IN_SCOPE) == 1
+    response = post_capture(
+        client, paired, envelope(frame(body=BODY.replace(IN_SCOPE, lazy + IN_SCOPE)))
+    )
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+    assert run["revision_id"] is not None
 
 
 @pytest.mark.parametrize(

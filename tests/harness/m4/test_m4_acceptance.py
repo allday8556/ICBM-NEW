@@ -45,6 +45,7 @@ from automation.acceptance.m4 import harness
 from automation.acceptance.m4.harness import run_acceptance
 from automation.acceptance.m4.m4_acceptance import main
 from automation.acceptance.m4.owners import open_owners
+from tests.conftest import deliberate_egress_attempts
 
 pytestmark = pytest.mark.integration
 
@@ -506,11 +507,16 @@ def test_an_external_network_attempt_fails_the_run(
 ) -> None:
     # Kickoff §C, §Q 35: an attempt is counted, and the provider counters become unknown rather
     # than an invented zero.
+    blocked = "203.0.113.7"
+
     def act(_run: harness.Run) -> None:
         with contextlib.suppress(OSError):
-            socket.create_connection(("203.0.113.7", 443), timeout=0.05)
+            socket.create_connection((blocked, 443), timeout=0.05)
 
-    report = _failing_run(monkeypatch, tmp_path / "root", act)
+    # The attempt is this test's own, made on purpose: exactly it is withdrawn from the
+    # process-global guard count that later tests' readiness reads.
+    with deliberate_egress_attempts(blocked):
+        report = _failing_run(monkeypatch, tmp_path / "root", act)
     assert "hard_zero.external_network_attempts" in report["problems"]
     zero = report["external_hard_zero"]
     assert zero["forbidden_modules_preloaded"] == []

@@ -15,11 +15,12 @@ not readiness: every other requirement still refuses, so the verdict stays `BLOC
 
 **Adoption is not the whole proof of a seam**, and this result never lets one stand in for the
 other (post-merge audit of main `a10e4b79dbd3`). The origin-product read-back is adopted (PR-D),
-yet a real CREATE could still not be confirmed through it: production wires no committed session
-to read with, and the adopted contract proves no published state, which ADR-0014 §11 compares
-exactly and `app.stages.register.execution` refuses to invent. Both are named as their own
-requirements,
-so the enumeration covers every proof the result claims to cover.
+yet a real CREATE could still not be confirmed through it without two further facts: a committed
+session to read with, which production does not wire, and a comparison that can prove the
+published state, which ADR-0014 §11 compares exactly and `app.stages.register.execution` refuses
+to invent. The second is provable since the Snapshot's projection states `SALE/ON` (architect
+resolution 5915900049 D1); the first is not. Both are named as their own requirements, so the
+enumeration covers every proof the result claims to cover.
 
 **It summarizes the two Gate 3 mutation stages** (ADR-0018 §10), and it can never be `READY` while
 one of them is not: `CREATE_MUTATION_READY` always, and `ASSET_MUTATION_READY` for a unit that must

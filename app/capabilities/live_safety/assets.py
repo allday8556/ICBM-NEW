@@ -55,6 +55,7 @@ from app.capabilities.live_safety.store import (
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError
 from app.stages.products.model import ReadinessStatus
+from app.stages.register.model import DUPLICATE_EVIDENCE_UNAVAILABLE, RegistrationConflictError
 from app.stages.register.preparation import PreparedAsset
 from app.stages.register.sanitize import PayloadSanitationError
 
@@ -353,6 +354,39 @@ def _prepared(attempt: UploadAttemptRecord) -> PreparedAsset | None:
     )
 
 
+class PreparedUploadAssets:
+    """The provider assets the upload-attempt owner holds for one exact authored unit.
+
+    Only ``APPLIED_PROVEN`` attempts of exactly this preparation revision under exactly this
+    candidate fingerprint, of this account, each as the one :class:`PreparedAsset` its attempt
+    yields. Nothing is looked up at a provider or inferred: an artifact without such an attempt
+    has no prepared asset, and the final preflight refuses (Issue #89 5919917893 §3).
+    """
+
+    def __init__(self, store: LiveAuthorityStore) -> None:
+        self._store = store
+
+    def prepared_assets(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        preparation_revision_id: str,
+        candidate_fingerprint: str,
+    ) -> tuple[PreparedAsset, ...]:
+        prepared: list[PreparedAsset] = []
+        for attempt in self._store.applied_uploads(preparation_revision_id, candidate_fingerprint):
+            if (attempt.marketplace_key, attempt.marketplace_account_id) != (
+                marketplace_key,
+                marketplace_account_id,
+            ):
+                continue
+            asset = _prepared(attempt)
+            if asset is not None:
+                prepared.append(asset)
+        return tuple(prepared)
+
+
 class PreparationCandidateGate:
     """The candidate preflight of the preparation a revision belongs to, evaluated now."""
 
@@ -365,7 +399,14 @@ class PreparationCandidateGate:
         if preparation is None:
             return CandidateState(preparation_revision_id, False, False, None)
         current = preparation.current.preparation_revision_id == preparation_revision_id
-        result = self._preparations.evaluate(preparation.preparation_id)
+        try:
+            # The candidate the CREATE path binds, duplicate evidence included (5915900049 D4).
+            result = self._preparations.stage_candidate(preparation.preparation_id)
+        except RegistrationConflictError as refused:
+            if refused.code != DUPLICATE_EVIDENCE_UNAVAILABLE:
+                raise
+            # No admissible duplicate evidence: the stage stays closed and nothing is uploaded.
+            return CandidateState(preparation_revision_id, current, False, None)
         return CandidateState(
             preparation_revision_id,
             current=current,
@@ -389,6 +430,7 @@ __all__ = [
     "AssetUploadService",
     "CandidateGate",
     "PreparationCandidateGate",
+    "PreparedUploadAssets",
     "TransmissionPrecluded",
     "UploadSendResult",
 ]
