@@ -7,7 +7,7 @@ Status: **V3 — canonical.** V2 became canonical when PR #147 merged this file 
 a stop is either a user decision or a technical hold the Host recovers from by itself, and
 auto-merge and auto-next are the default mode. Every mechanical check of V2 is kept (§0.2).
 Date: 2026-09-28 (first text); refreshed on clean main `b1b5175774159989bcf2ea2ef0caed45a018641b`;
-V3 on 2026-09-30.
+V3 on 2026-09-30; risk-scope clarification on 2026-10-01 (still V3, not V4).
 Scope: ICBM-NEW Agent Host audit, CI, merge, and post-merge verification workflow.
 
 This document records the operating protocol agreed after PR #146 exposed three distinct failure
@@ -52,7 +52,7 @@ Those stay binding until their own ADR or canonical process supersedes them.
 A DUAL PASS, a GREEN FULL CI and a passed MERGE_GUARD authorize a merge only. What a slice may
 build is decided by the canonical documents and by the operating authority of ADR-0022 (§0.2), not
 by this protocol. The protocol never authorizes:
-- a provider call, LIVE or a canary;
+- a side-effecting provider mutation, LIVE write or canary;
 - the residual-risk acceptance;
 - any action `CLAUDE.md` §7.2 reserves for the user, such as a force-push, a branch deletion or a
   destructive operation.
@@ -105,8 +105,9 @@ therefore bounded as follows.
   - POST_MERGE_VERIFY applies unchanged.
 - **The bootstrap ends automatically** when PR-A is merged, its POST_MERGE_VERIFY passes and its
   bootstrap acceptance is recorded in a durable user or architect source. From that main commit on,
-  every slice uses the packet flow of §1–§8. **No slice other than #147 and PR-A may use this
-  exception**, including PR-B and PR-C.
+  the packet flow of §1–§8 is the strong path. Under the 2026-10-01 risk calibration it applies to
+  HIGH_RISK slices; BASIC and PROVIDER_ZERO use §1.1. **No slice other than #147 and PR-A may use
+  this historical bootstrap exception**, including PR-B and PR-C.
 
 ### 0.1.1 V3 transition (the PR that delivers V3 only)
 
@@ -129,13 +130,10 @@ Host script that differs from the merged main is not used.
 
 ### 0.2 Operating authority (ADR-0022)
 
-**Who decides what.**
-
-| decides | what |
-| --- | --- |
-| the user | product features, product behaviour, real external actions |
-| the implementing agent | how canonically defined work is built: design, schema, endpoint shape, tests, migrations, numbering, base freshness, conflict resolution |
-| GPT and Claude | whether that work is correct, safe and inside the canonical scope |
+**Who decides what.** The single operational assignment is `documents/rules/14-operating-authority.md`
+§14.1: product decisions are the user's, implementation decisions are the agent's, and
+safety/correctness verification follows the risk tier of §14.2. This protocol does not restate a
+second role contract.
 
 The user authorized continuous execution of the work the canonical documents define. The user is
 not a per-step approver. The default mode is:
@@ -156,20 +154,13 @@ to post anything on GitHub:
 - CI, a stale HEAD, a re-audit of the same HEAD, FULL CI, MERGE_GUARD;
 - the merge, POST_MERGE_VERIFY and the start of the next canonical slice.
 
-**The user's decisions.** A loop stops for the user only for one of these, as
-`HUMAN_DECISION_REQUIRED` (§5.1):
-- a product feature the canonical requirements do not contain;
-- a user-visible behaviour, UX or policy with several real product directions that no canonical
-  text decides;
-- a change beyond what the user asked for;
-- a real external action:
-  - a LIVE provider mutation, a real provider or marketplace call, a real canary;
-  - a real supplier or provider read whose acceptance needs its own grant;
-  - accepting the residual risk of such an action;
-  - a payment or a cost, a transfer of real data to an external service;
-  - a destructive operation, a force-push, a branch deletion;
-- a hold the user placed on a PR themselves (the owner's hold file): the user's own stop, which
-  only the user lifts.
+**The user's decisions.** The active list lives only in rule §14.4: an undecided or out-of-scope
+product decision, a protected execution action owned by rule §7.2, or the user's own hold. §5.1
+encodes those concepts as Host categories; it does not add another approval rule.
+
+A routine read-only provider call, read-back, health check or already-approved lookup with no
+external side effect, sensitive-data export or material new cost is not a protected action and does
+not stop for a separate approval.
 
 An implementation choice is never in that list. §5.1 names the same list as the Host's closed
 categories, one category per entry, and adds none.
@@ -179,7 +170,8 @@ An agent that finds the work needs a product feature or a product policy outside
 documents does not build it: it stops with `HUMAN_DECISION_REQUIRED`. The auditors return the same
 verdict when a diff does that.
 
-**What V3 keeps from V2, unchanged.** None of these is relaxed:
+**What V3 keeps from V2, unchanged for HIGH_RISK.** None of these is relaxed when rule §14.2 routes
+a change to the strong path:
 - the exact-HEAD audit and the generated Audit Packet;
 - the packet digest and the two-part audit identity (HEAD, packet digest);
 - the GPT audit, the independent Claude audit and the same-identity DUAL PASS;
@@ -187,9 +179,55 @@ verdict when a diff does that.
 - FULL CI after READY;
 - the pre-merge packet regeneration and the current-base check;
 - MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY;
-- every provider, LIVE and destructive-operation gate.
+- every core invariant and protected action owned by rules §6 and §7.
 
 ## 1. Flow
+
+### 1.1 Risk routing
+
+Before selecting a validation path, apply rule §14.2 to the whole diff and its intended operation.
+
+- **BASIC:** focused/default tests plus applicable lint/type checks and CI. No Audit Packet or
+  dual audit is required.
+- **PROVIDER_ZERO:** functional tests plus CI, and review when the changed boundary, contract or
+  complexity needs it. It may cover read-only/provider-zero integration paths, but it executes no
+  protected side-effecting LIVE action and does not rerun final LIVE evidence.
+- **HIGH_RISK:** the exact-HEAD strong flow below. A side-effecting LIVE write, `UNKNOWN`/replay or
+  external identity handling, credential/secret handling, an irreversible destructive data path or
+  actual weakening of a core safety gate is here. A routine read-only provider operation is not.
+
+A mixed change uses its highest credible risk. Uncertainty alone is not a tier; if an external side
+effect, credential exposure, identity collision or irreversible damage cannot be ruled out, that
+credible path is HIGH_RISK. The Host scripts in this directory implement the strong path; invoking
+them therefore selects HIGH_RISK. Lower tiers use the normal PR/CI route. This is a scope rule for
+V3, not a new Host generation.
+
+**Transitional V3 auto-next baseline.** A BASIC or PROVIDER_ZERO PR merges through the normal path
+after its own tier is green; a full-main audit is not a merge prerequisite and does not retroactively
+make that PR HIGH_RISK or give it strong-path proof. The present V3 lookahead still requires
+`full-audit-baseline.json` to name the current main with `status=DUAL_PASS`. Consequently, after a
+lower-tier merge moves main:
+
+```text
+run-lookahead-main-v1.ps1
+→ NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED
+→ TECHNICAL_HOLD (never HUMAN_DECISION_REQUIRED)
+→ supervising agent runs run-full-audit-v1.ps1 without `-ForceFull`
+→ existing DELTA/FULL self-escalation policy
+→ GPT + Claude DUAL PASS
+→ baseline main=current main, status=DUAL_PASS
+→ resume Host → lookahead → next canonical work
+```
+
+The Host does not invoke this standalone audit from the hold. The supervising agent observes the
+technical hold and performs the recovery without a routine user question. With no supervising agent,
+a fully unattended Host waits at `MAIN_NOT_DUAL_PASS_AUDITED`. BLOCKED, INSUFFICIENT, another
+technical hold or main movement never starts next work; the existing recovery, backoff and
+circuit-breaker rules apply, so the recovery does not loop without bound. A HIGH_RISK PR merged by
+the Host already goes through its existing post-merge full-main audit; its DUAL PASS writes the
+current-main baseline, and auto-next must not run a duplicate standalone audit.
+
+### 1.2 HIGH_RISK strong flow
 
 ```text
 DRAFT implementation
@@ -449,13 +487,15 @@ first three; its prompt is that Host's, not this contract.
 An exact-head audit returns one of:
 
 - **PASS** — audit satisfied for this audit identity.
-- **BLOCKER** — only one of the five kinds of ADR-0022 §4.1: real data damage, a real duplicate
+- **BLOCKER** — a material defect in changed code on a reachable path, in one of the six kinds of
+  ADR-0022 §4.1: real data damage, a real duplicate
   registration or wrong external transmission, a security or credential leak, a core function that
-  does not work, or a test or CI failure caused by a real code defect. The auditor names the kind
-  at the start of its summary. It is repaired automatically: new HEAD, new packet, both audits
-  again. A wording difference between documents, citation format, a non-essential packet detail,
-  a suggestion to be more rigorous or a request to prove a decided requirement in more detail is
-  not a BLOCKER: the auditor passes and records it as a note.
+  does not work, a test or CI failure caused by a real code defect, or a bypass of a core safety
+  gate. The auditor names the kind at the start of its summary. It is repaired automatically: new
+  HEAD, new packet, both audits again. A wording difference between documents, citation format, a
+  non-essential packet detail, a hypothetical concern, a defence-in-depth improvement, an
+  unrelated pre-existing issue, a suggestion to be more rigorous or a request to prove a decided
+  requirement in more detail is not a BLOCKER: the auditor passes and records it as a note.
 - **HUMAN_DECISION_REQUIRED** — the diff itself needs one of the user's decisions (§0.2). The
   auditor names the category of the closed list at the start of its summary. A verdict that names
   none has not said what the user should decide: the Host records it as a technical **HOLD** and
@@ -482,8 +522,8 @@ TECHNICAL_HOLD            everything else. The Host recovers or retries by itsel
   `TECHNICAL_HOLD_EXHAUSTED` and the class `TECHNICAL_HOLD`.
 - The human categories are a closed list in the Host, and they are exactly the entries of §0.2:
   `NEW_PRODUCT_FEATURE`, `PRODUCT_DIRECTION_UNDECIDED`, `BEYOND_USER_REQUIREMENT`, `LIVE`,
-  `PROVIDER_CALL`, `CANARY`, `REAL_EXTERNAL_READ`, `RESIDUAL_RISK_APPROVAL`, `COST`,
-  `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`, and `OWNER_HOLD` for the user's own hold file on a PR.
+  `SUPPLIER_ORDER`, `RESIDUAL_RISK_APPROVAL`, `COST`, `EXTERNAL_DATA_TRANSFER`, `DESTRUCTIVE`, and `OWNER_HOLD` for
+  the user's own hold file on a PR.
   A reason that names none of them is technical.
 - Examples of a TECHNICAL_HOLD: a stale main, a packet that could not be generated, an unreadable
   stream, a CI infrastructure failure, a mergeability problem, a migration collision, source
@@ -521,9 +561,10 @@ FULL CI is requested only after DUAL PASS and READY for the current audit identi
 The PR stays draft until then. Under `.github/workflows/ci.yml`, marking it ready for review is the
 FULL CI request for that exact HEAD. A draft run has no `CI gate` result at all.
 
-For a ready PR that touches only Markdown under `documents/evidence/`, the workflow runs its lighter docs
-scope, and that run's `CI gate` is judged by the same GREEN rule below. This protocol does not widen
-or narrow the workflow's scope classification.
+The workflow selects BASIC, PROVIDER_ZERO or FULL consistently with rule §14.2. BASIC runs focused
+default/contract checks; PROVIDER_ZERO runs the functional provider-zero suite; FULL is reserved
+for HIGH_RISK and explicit final-LIVE verification. Every selected scope ends in the same `CI gate`
+GREEN rule below.
 
 A FULL CI result is GREEN only when:
 
@@ -655,10 +696,12 @@ next step depends on an incomplete step of another track waits (`EARLIER_STEP_IN
 technical hold) instead of skipping it, and a track runs ahead only where the canonical documents
 make its work independent of the other track's open steps.
 
-**A merge moves main, so it changes the accepted code SHA.** Every exact-main proof bound to the
-previous main is stale for the new one, among them the Gate 3 visual acceptance (ADR-0018 G3-31).
-POST_MERGE_VERIFY never reports such a proof as current for the merged main. It is re-established
-only through its own reviewed path.
+**Final LIVE evidence is evaluated at final LIVE closeout, not after every merge.** A merge means a
+previous exact-main visual/restore/retention proof does not cover the new commit, but an ordinary
+BASIC or PROVIDER_ZERO merge does not rerun or re-record it. The proof is established once on the
+final main immediately before the bounded LIVE action, through its reviewed path. Until then the
+state is simply not current for LIVE and grants no permission. `UNKNOWN` never becomes retryable,
+identity remains isolated and credentials remain protected throughout.
 
 ## 9. Rollout order
 
@@ -705,7 +748,8 @@ Required control-loop tests (V3, same place):
   POST_MERGE_VERIFY;
 - after POST_MERGE_VERIFY the next canonical slice is selected and, with `auto_next`, started;
 - a step that needs a new product feature → `HUMAN_DECISION_REQUIRED`;
-- a real LIVE, provider or supplier action → `HUMAN_DECISION_REQUIRED`;
+- a protected execution action under rule §7.2 → `HUMAN_DECISION_REQUIRED`; a routine read-only
+  provider call is not one;
 - a changed HEAD or packet digest → no earlier PASS is reused;
 - a packet that changed just before the merge → no merge, a re-audit.
 

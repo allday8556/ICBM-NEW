@@ -198,14 +198,12 @@ $script:HumanDecisionCategories = @(
     "NEW_PRODUCT_FEATURE",          # A: a product feature the canonical requirements do not contain
     "PRODUCT_DIRECTION_UNDECIDED",  # B: a user-visible behaviour, UX or policy with several real product directions
     "BEYOND_USER_REQUIREMENT",      # C: a change that goes beyond what the user asked for
-    "LIVE",                         # D: a LIVE provider mutation
-    "PROVIDER_CALL",                # D: a real provider or marketplace call
-    "CANARY",                       # D: a real canary
-    "REAL_EXTERNAL_READ",           # D: a real supplier/provider read whose acceptance needs its own grant
-    "RESIDUAL_RISK_APPROVAL",       # D: accepting a residual risk of a real external action
-    "COST",                         # D: a payment or a cost
-    "EXTERNAL_DATA_TRANSFER",       # D: sending real data to an external service
-    "DESTRUCTIVE",                  # D: a destructive operation, a force-push, a branch deletion
+    "LIVE",                         # D: a side-effecting LIVE provider mutation or canary
+    "SUPPLIER_ORDER",               # D: any real supplier order / 발주
+    "RESIDUAL_RISK_APPROVAL",       # D: accepting a material residual risk that cannot be removed in scope
+    "COST",                         # D: a new or material unbudgeted payment or cost
+    "EXTERNAL_DATA_TRANSFER",       # D: sending credentials or non-public sensitive data externally
+    "DESTRUCTIVE",                  # D: an irreversible destructive operation, force-push or branch deletion
     "OWNER_HOLD"                    # the owner's own hold file on a PR (state\merge-hold-pr-<N>.json)
 )
 

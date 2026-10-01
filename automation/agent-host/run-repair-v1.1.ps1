@@ -110,7 +110,13 @@ Stop WITHOUT changing anything only when the work itself needs a decision that i
 - NEW_PRODUCT_FEATURE: a product feature the canonical requirements do not contain;
 - PRODUCT_DIRECTION_UNDECIDED: a user-visible behaviour, UX or policy with several real product directions that no canonical text decides;
 - BEYOND_USER_REQUIREMENT: a change beyond what the user asked for;
-- LIVE, PROVIDER_CALL, CANARY, REAL_EXTERNAL_READ, RESIDUAL_RISK_APPROVAL, COST, EXTERNAL_DATA_TRANSFER, DESTRUCTIVE: a real external action.
+- LIVE: a side-effecting LIVE provider mutation or canary;
+- SUPPLIER_ORDER: any real supplier order (발주);
+- RESIDUAL_RISK_APPROVAL: accepting a material residual risk that cannot be removed inside scope;
+- COST: a new or material unbudgeted payment or cost;
+- EXTERNAL_DATA_TRANSFER: sending credentials, customer/order data or other non-public sensitive data externally;
+- DESTRUCTIVE: an irreversible destructive operation, force-push or branch deletion.
+A routine read-only provider call, read-back, health check or already-approved lookup is not a human stop by name alone.
 Then finish with exactly:
 
 FIXER_RESULT=HUMAN_DECISION_REQUIRED

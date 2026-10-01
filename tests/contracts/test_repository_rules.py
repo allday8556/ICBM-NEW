@@ -208,29 +208,30 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 
 
 # Issue #151 (ADR-0021 §3, §4): the rule bodies CLAUDE.md now imports are its former sections,
-# and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
+# and later reviewed changes stay explicitly pinned. Each digest began as the SHA-256 of the
+# pre-migration section (CLAUDE.md
 # at main e72a5cad) after the normalization below, which masks locators only: code spans that
 # name a path or a file, markdown link targets and bare path tokens. Every rule word must be
-# unchanged; a later reviewed rule change updates its digest in the same PR. ADR-0022 is one: it
-# reworded one sentence of §1 and one of §10 (who decides an implementation matter), and their
-# digests below are of that text. §11 (milestone status)
+# unchanged unless a reviewed rule change updates its digest in the same PR. ADR-0022 and the
+# 2026-10-01 validation calibration updated the authority, risk, closeout, contract, PR and LIVE
+# scope wording. The digests below are of that reviewed text. §11 (milestone status)
 # is pinned by the milestone agreement test instead. documents/rules/README.md is deliberately
 # absent: it is the new index (the former intro and §13 restated with moved locators, plus the
 # section map), not a preserved body.
 _FORMER_CLAUDE_SECTIONS = {
-    "01-roles-and-exchange.md": "33bf7de49b592acb7441cb0b241d036f14e6eb954e91a1ff7fee75d945cb9ef5",
+    "01-roles-and-exchange.md": "92a5d9b99bc3db6c4cf6bb7e8d39f74f1c80bb651b73f66010ca875bc66e57aa",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
     "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
-    "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
-    "05-architectural-rules.md": "d6c2f27ab6a1ec86371de23099c0c2bd69e57936f0ece79c833023a03eac7d61",
+    "04-runtime-stack.md": "23b06ad5483f0dd2e1a86a604c487498de6f22c9778630f07bdb7f886c72a3e3",
+    "05-architectural-rules.md": "64110977f367dbe264720f7f1489d313be04b8705a959ae4a0508fabb1df5d7a",
     "06-immutable-domain-rules.md": (
-        "4f3460debfb15568611ad547a158ea15b75491471312a0cf2ab5c47f06e8c1b9"
+        "7dc72add46c63e5af49bbe515621555b7ffd18a3325650643bc2f0207de663d7"
     ),
-    "07-execution-safety.md": "f398e0d780f8f0f6f8cf072084798190a271d316936362d86dbf92251c5689e5",
-    "08-git-conventions.md": "3f3c36c1927cfeeb3a05ef7f09e008b45d873fc29785941d9bf51298447d230a",
-    "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
+    "07-execution-safety.md": "57aebf9eb2dd22a987a29fe86a2f8a901982f58fd265d2c241200e08898c27e4",
+    "08-git-conventions.md": "369e8241e18fe0013273f441a5c137dfb73402a23676cf113053087cb3c002c9",
+    "09-definition-of-done.md": "58dadd3df8dce8dfae1594b34ddeefb41efcb1a3c05ce656d29bb2b9989b1def",
     "10-working-style.md": "8c685dad839064be75eb77ea075d63fb01757b31a764f96715e6638637473b9d",
-    "12-first-vertical.md": "3bf78de57d08ac04c4edfb8b5564b1070a1f3c348237359cfab49fd16db0746c",
+    "12-first-vertical.md": "87bf12ed4b3d68da182516ea16046b6a7e7f8db4ad75480f4ae78a38c8d672bf",
 }
 
 
@@ -336,9 +337,7 @@ HUMAN_DECISION_CATEGORIES = [
     "PRODUCT_DIRECTION_UNDECIDED",
     "BEYOND_USER_REQUIREMENT",
     "LIVE",
-    "PROVIDER_CALL",
-    "CANARY",
-    "REAL_EXTERNAL_READ",
+    "SUPPLIER_ORDER",
     "RESIDUAL_RISK_APPROVAL",
     "COST",
     "EXTERNAL_DATA_TRANSFER",
@@ -374,7 +373,7 @@ def test_the_operating_authority_is_one_rule_in_adr_protocol_and_rule_file() -> 
     assert "HUMAN_DECISION_REQUIRED   the closed list of §0.2." in protocol
     assert "TECHNICAL_HOLD            everything else." in protocol
     assert "never from how often something failed" in protocol
-    # nothing mechanical is relaxed
+    # nothing in the strong path is relaxed
     kept = _section(protocol, r"0\.2 Operating authority")
     for check in (
         "the exact-HEAD audit and the generated Audit Packet",
@@ -384,7 +383,7 @@ def test_the_operating_authority_is_one_rule_in_adr_protocol_and_rule_file() -> 
         "FULL CI after READY",
         "the pre-merge packet regeneration and the current-base check",
         "MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY",
-        "every provider, LIVE and destructive-operation gate",
+        "every core invariant and protected action owned by rules §6 and §7",
     ):
         assert check in kept, check
     # the authority write guard stays
@@ -392,7 +391,164 @@ def test_the_operating_authority_is_one_rule_in_adr_protocol_and_rule_file() -> 
     assert "No automated actor writes a marker-first body" in adr
     # the rule file never asks the user for bookkeeping and keeps §7
     assert "No `[OWNER-AMENDMENT]` and no classification comment is requested." in rule
-    assert "§7 (execution safety) is unchanged" in rule
+    assert "§7 owns the exact protected-action list" in rule
+
+
+def test_validation_strength_is_risk_scoped_without_weakening_live_safety() -> None:
+    """The three validation tiers agree across the rule, Host protocol, ADR and CI workflow.
+
+    Final-LIVE evidence is generated on final main rather than churned after provider-zero merges.
+    """
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    adr = _read(ADR_0022)
+    ci = _read(REPO_ROOT / ".github" / "workflows" / "ci.yml")
+    done = _read(RULES_DIR / "09-definition-of-done.md")
+    for text in (rule, protocol, adr):
+        assert all(tier in text for tier in ("BASIC", "PROVIDER_ZERO", "HIGH_RISK"))
+    roles = _read(RULES_DIR / "01-roles-and-exchange.md")
+    assert "single operational assignment" in roles
+    assert "stated once in rule §14.1" in adr
+    assert "does not restate a\nsecond role contract" in protocol
+    assert "still V3, not V4" in protocol
+    assert "small internal PR" in done and "feature or milestone closeout" in done
+    assert "final main immediately before the\nbounded LIVE action" in rule
+    assert "BASIC or PROVIDER_ZERO merge does not rerun or re-record it" in protocol
+    standing_authority = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+    for text in (rule, protocol, adr, standing_authority):
+        assert "Transitional V3" in text or "transitional V3" in text
+        assert "current-main" in text or "current main" in text
+    assert "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED" in rule
+    assert "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED" in protocol
+    assert "without `-ForceFull`" in rule and "without `-ForceFull`" in protocol
+    assert "supervising agent" in rule and "supervising agent" in protocol
+    assert "not a merge prerequisite" in rule
+    assert "does not retroactively\nmake that PR HIGH_RISK" in protocol
+    for mode in ("basic", "provider_zero", "full", "wip"):
+        assert mode in ci
+    assert "if: needs.scope.outputs.final_live == 'true'" in ci
+    assert 'provider_zero) required="SCOPE QUALITY TESTS MIGRATIONS M5"' in ci
+    # These core owners can never be downgraded to BASIC by a Markdown or generic-code match.
+    for protected in (
+        "automation/agent-host/*.ps1",
+        "app/container.py",
+        "app/platform/core/*",
+        "app/platform/system/execution_mode.py",
+        "app/capabilities/live_safety/*",
+        "app/stages/register/*",
+        "app/stages/connect/accounts.py",
+        "app/stages/connect/account_models.py",
+        "app/stages/connect/service.py",
+        "app/stages/connect/sessions.py",
+        "app/stages/connect/smartstore/models.py",
+        "app/stages/connect/smartstore/service.py",
+        "app/platform/db/migrations/versions/0006_m2_marketplace_connections.py",
+        "app/platform/db/migrations/versions/0016_m5_registration_foundation.py",
+        "app/platform/db/migrations/versions/0017_m5_registration_execution_scope.py",
+        "app/platform/db/migrations/versions/0026_g3_live_authority.py",
+        "app/platform/db/migrations/versions/0029_g3_restore_retention.py",
+        "app/platform/db/migrations/versions/0030_g3_visual_acceptance.py",
+        "app/platform/db/migrations/versions/0031_m5_registration_reconcile.py",
+        "app/platform/db/migrations/versions/0033_m5_canary_eligibility.py",
+        "integrations/marketplaces/*",
+        "documents/rules/06-immutable-domain-rules.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md",
+        "documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md",
+        "documents/decisions/adr/0020-*",
+        "documents/decisions/adr/0022-*",
+    ):
+        assert protected in ci
+    assert "app/platform/db/migrations/*" not in ci
+    provider_zero_exceptions = ci.split('case "$f" in', 1)[1].split(";;", 1)[0]
+    assert "integrations/marketplaces/smartstore/readback.py" in provider_zero_exceptions
+    assert "integrations/marketplaces/smartstore/create.py" not in provider_zero_exceptions
+    assert "no real supplier order" in _host_script("run-lookahead-main-v1.ps1")
+    assert "SUPPLIER_ORDER: any real supplier order" in _host_script("run-repair-v1.1.ps1")
+    assert "any real supplier order" in _host_script("run-audit-v1.1.ps1")
+
+
+def test_the_calibrated_rules_remove_process_overhead_without_removing_safety() -> None:
+    """The second calibration removes template and approval churn while preserving hard gates."""
+    readme = _read(RULES_DIR / "README.md")
+    stack = _read(RULES_DIR / "04-runtime-stack.md")
+    architecture = _read(RULES_DIR / "05-architectural-rules.md")
+    immutable = _read(RULES_DIR / "06-immutable-domain-rules.md")
+    execution = _read(RULES_DIR / "07-execution-safety.md")
+    git_rules = _read(RULES_DIR / "08-git-conventions.md")
+    first_vertical = _read(RULES_DIR / "12-first-vertical.md")
+    standing_authority = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+
+    assert "adds no\nsecond stop or approval rule" in readme
+    assert "Safety ownership is also singular" in readme
+    assert "Compatible\ndependency updates" in stack and "without creating an ADR" in stack
+    assert "Site-specific request fields" in architecture
+    assert "milestone status, not as a second immutable rule" in immutable
+    assert "never blindly resent" in immutable
+    assert "per bounded scope, not necessarily per item" in execution
+    assert "does not ask again for each item" in execution
+    assert (
+        "A BASIC\ndocumentation, infrastructure or simple internal PR may stop there" in git_rules
+    )
+    assert "do not create an ADR\nonly to satisfy a template" in git_rules
+    assert "not a requirement\nfor each slice" in first_vertical
+    assert "do not execute LIVE merely to keep this proof current" in first_vertical
+    assert "routine read-only\n> provider call is not protected by name alone" in standing_authority
+    assert "The applicable gate" in standing_authority
+    assert "historical\nscope notes, not an active rule" in standing_authority
+    assert "routine read-only calls may proceed under rule §7.1" in standing_authority
+    assert "only HIGH_RISK requires exact-HEAD DUAL PASS" in standing_authority
+    authority = _read(RULES_DIR / "14-operating-authority.md")
+    assert "routine read-only provider call" in authority
+    assert "Uncertainty alone does not create HIGH_RISK" in authority
+    assert "### 14.2.1 Repository-wide application" in authority
+    assert "Agent Host is one consumer of\nthe rule, not its boundary" in authority
+    assert "non-mutating read-back, health check or lookup is not HIGH_RISK by default" in authority
+    assert "material cost" in authority and "changes provider state" in authority
+    assert "actual visual, restore and retention proof and durable record" in authority
+    assert "never removes focused tests or CI" in authority
+    assert "single active owner" in execution
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    assert "rule §14.4" in protocol and "rule §7.2" in protocol
+    assert "material defect in the changed code on a reachable path" in authority
+
+
+def test_transitional_v3_baseline_recovery_matches_the_existing_runtime() -> None:
+    """Lower-tier merges stay lower-tier while current V3 fail-closes auto-next on its baseline."""
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    adr = _read(ADR_0022)
+    standing = _read(
+        REPO_ROOT / "documents" / "decisions" / "adr" / "0020-roadmap-standing-authorization.md"
+    )
+    lookahead = _host_script("run-lookahead-main-v1.ps1")
+    full_audit = _host_script("run-full-audit-v1.ps1")
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+
+    assert "[string]$baseline.main -ne $mainHead" in lookahead
+    assert '[string]$baseline.status -ne "DUAL_PASS"' in lookahead
+    assert 'Write-Output "NEXT_HOLD=MAIN_NOT_DUAL_PASS_AUDITED"' in lookahead
+    assert "main = $mainHead" in full_audit and "status = $Status" in full_audit
+    assert 'Save-AuditBaseline -Status "BLOCKED"' in full_audit
+    assert 'Save-AuditBaseline -Status "DUAL_PASS"' in full_audit
+    assert "FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT" in full_audit
+    assert "FULL_AUDIT_RESULT=STALE_MAIN_MOVED" in full_audit
+    assert "-Params @{ MergedPr = $CurrentPr }" in orchestrator
+    assert "FULL_AUDIT_RESULT=DUAL_PASS" in orchestrator
+    assert "FULL_AUDIT_RESULT=BLOCKED" in orchestrator
+    assert "FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT" in orchestrator
+    for text in (rule, protocol, adr, standing):
+        assert "lower-tier" in text
+        assert "DUAL_PASS" in text
+    assert "Host does not invoke this standalone audit from the hold" in protocol
+    assert "fully unattended Host waits" in protocol
+    assert "not a\n  merge prerequisite or HIGH_RISK proof" in adr
+    assert "first five classes were decided" in adr
+    assert "sixth was added separately by the PR #174" in adr
 
 
 def test_the_host_stops_for_the_user_only_on_the_closed_category_list() -> None:
@@ -450,7 +606,7 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
     # a citation names its kind and resolves only to a source of that kind, never by the id alone
     assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
     assert "$citedIds" not in audit
-    # the user's rule (ADR-0022 §4.1): only five kinds of finding block; the rest are notes
+    # the user's rule (ADR-0022 §4.1): only six kinds of finding block; the rest are notes
     assert audit.count("WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1)") == 2
     assert _host_script("run-full-audit-v1.ps1").count("WHAT A BLOCKER IS") == 2
     for kind in (
@@ -459,6 +615,7 @@ def test_the_packet_generator_has_no_human_classification_gate() -> None:
         "SECURITY",
         "CORE_BROKEN",
         "CI_CODE_DEFECT",
+        "SAFETY_GATE_BYPASS",
     ):
         assert audit.count(kind) >= 2, kind
     assert "### 4.1 What a BLOCKER is" in (

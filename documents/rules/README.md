@@ -6,7 +6,13 @@ These rules are the enforcement layer for `documents/roadmap/ROADMAP.md` and `do
 The roadmap says what to build; architecture defines the approved contracts and stack;
 these rules define how implementation work is performed and recorded.
 
-If documents conflict on a product decision or a real external action (§14.4), stop and ask the user instead of guessing. A conflict on an implementation matter is decided under §14.5: follow the most recent ADR, state the choice, and the audits verify it.
+Decision ownership, conflict handling and when to stop are defined only by §14. This index adds no
+second stop or approval rule.
+
+Safety ownership is also singular: §6 owns immutable domain invariants, §7 owns protected execution
+actions and approval boundaries, and §14 owns repository-wide risk classification and validation
+strength. Other rules, ADRs, automation and reviews reference those owners instead of creating a
+broader parallel gate.
 
 The root `CLAUDE.md` is the bootstrap index that Claude Code loads automatically; it imports every
 file below with `@` imports, so the rules load with it (ADR-0021 §3). The rule bodies live here.
@@ -62,4 +68,4 @@ Additional locations:
 | `documents/reference/PATH_MIGRATION_MAP.md` | Permanent old → new path map of the repository restructure (ADR-0021 §6) |
 | `documents/reference/REPOSITORY_MAP.md` | Where each role lives after the restructure |
 
-If canonical documents conflict on a product decision or a real external action (§14.4), stop implementation and ask the user rather than guessing. A conflict on an implementation matter is decided under §14.5.
+For a conflict between canonical documents, apply §14.4–§14.5.

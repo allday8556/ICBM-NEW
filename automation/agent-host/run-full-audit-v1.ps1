@@ -868,7 +868,7 @@ RULES:
 - Do not use commit messages as proof.
 - You may use read-only local inspection commands such as rg, git log/show/diff and file reads.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
-- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for a material defect introduced or exposed by the changed code on a reachable path for the scoped operation, in one of these classes, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect), SAFETY_GATE_BYPASS (a core safety gate required by the scoped operation is actually bypassed or disabled). Anything else is NOT a BLOCKER: a hypothetical concern without a credible reachable path, a defence-in-depth improvement, an unrelated pre-existing issue the change does not worsen, a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 
 The first four output lines MUST be exactly:
 
@@ -934,7 +934,7 @@ Mandatory audit areas:
    - M6 must not start prematurely
    - CREATE / SEARCH / provider-write adoption truth
    - DRY_RUN / LIVE boundaries
-   - Gate-3 readiness and canary prerequisites
+   - Gate-3 readiness and the prerequisites causally applicable to the scoped mutation
    - residual-risk acceptance requirements
 
 3. REGISTRATION SAFETY
@@ -973,10 +973,10 @@ Mandatory audit areas:
    - no obvious contradiction where tests encode stale semantics
    - deterministic CI success must not be mistaken for semantic correctness
 
-9. EVIDENCE FRESHNESS
-   - exact-SHA visual acceptance
-   - restore/backup proof freshness
-   - retention proof freshness
+9. APPLICABLE EVIDENCE FRESHNESS
+   - exact-SHA visual acceptance where the scoped mutation uses that surface
+   - restore/backup proof freshness where the mutation can change durable state
+   - retention proof freshness for the evidence that mutation must durably keep
    - code identity/schema binding
    - a proof from an older main must not silently cover this main
 
@@ -1006,7 +1006,7 @@ RULES:
 - Do not run commands that mutate repository state.
 - Do not run the product against a real provider.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
-- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for a material defect introduced or exposed by the changed code on a reachable path for the scoped operation, in one of these classes, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect), SAFETY_GATE_BYPASS (a core safety gate required by the scoped operation is actually bypassed or disabled). Anything else is NOT a BLOCKER: a hypothetical concern without a credible reachable path, a defence-in-depth improvement, an unrelated pre-existing issue the change does not worsen, a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 - A documented stale proof is not automatically a code blocker if the canonical
   state correctly marks it stale and refuses to rely on it.
 - Separate true BLOCKERS from expected/deferred roadmap gaps.
@@ -1027,7 +1027,8 @@ NONBLOCKING_GAPS:
 - expected/deferred work only.
 
 EVIDENCE_FRESHNESS:
-- exact status of visual/restore/retention or other SHA-bound evidence.
+- exact status of the visual/restore/retention or other SHA-bound evidence applicable to the
+  scoped mutation; say NOT_APPLICABLE rather than inventing a gate.
 
 NEXT_ACTION:
 - one concise action.

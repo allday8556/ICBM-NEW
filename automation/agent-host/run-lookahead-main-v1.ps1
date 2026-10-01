@@ -313,9 +313,10 @@ DECISION=PROCEED when ALL of these hold:
 1. The canonical documents define the step: what it is for and how it is accepted. They need not spell out its design.
 2. It adds no product feature the canonical requirements do not contain, and it needs no choice between several real
    product directions that no canonical text decides.
-3. Its implementation performs no real provider/marketplace/supplier call, no LIVE switch, no real canary, no real
-   data transfer, no cost and no destructive operation, and needs no residual-risk acceptance.
-   Endpoint adoption in code (request/response/error classification, no call) is implementation.
+3. Its implementation performs no side-effecting LIVE provider write or canary, no real supplier order, no transfer of credentials or
+   non-public sensitive data, no material new cost and no irreversible destructive operation, and needs no material
+   residual-risk acceptance. A routine read-only call, read-back, health check or already-approved lookup is not a
+   human stop by name alone. Endpoint adoption in code remains implementation.
 4. It is exactly one slice: never combine two canonically separate slices (for example CREATE and SEARCH) into one.
 
 Where canonical documents conflict on an implementation matter, follow the most recent ADR, say so in HOLD_REASON as a
@@ -327,7 +328,8 @@ If every roadmap step of this track is complete, DECISION=DONE.
 
 RULES:
 - READ ONLY. No edits, commits, pushes, branches or PRs.
-- No provider/marketplace calls. No LIVE. No canary.
+- No side-effecting provider/marketplace write, LIVE mutation, canary or real supplier order. A read-only call is allowed only when the
+  canonical step and established integration already authorize it and it exports no sensitive data or material cost.
 - Cite exact file:section evidence.
 
 Return EXACTLY these lines first:
@@ -468,8 +470,9 @@ AGREE when ALL hold:
 2. The canonical documents define what it is for and how it is accepted. Implementation detail (design, schema,
    endpoint shape, paths) is the implementer's to decide and is not a reason to disagree.
 3. It adds no product feature outside the canonical requirements and needs no undecided product direction.
-4. It performs no real provider/marketplace/supplier call, no LIVE, no canary, no cost, no real data transfer and no
-   destructive operation, and needs no residual-risk acceptance.
+4. It performs no side-effecting LIVE provider write or canary, no real supplier order, no transfer of credentials or non-public sensitive
+   data, no material new cost and no irreversible destructive operation, and needs no material residual-risk
+   acceptance. A routine read-only provider operation is not a human stop by name alone.
 5. It is one slice.
 
 PROPOSAL:

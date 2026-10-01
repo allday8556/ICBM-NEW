@@ -2,14 +2,17 @@
 
 ## 1. Roles
 
+The single operational assignment of product decisions, implementation decisions and
+safety/correctness verification is §14.1. This section defines only the durable exchange roles:
+
 ```text
 GitHub       = single durable work hub / Source of Truth
-ChatGPT      = architecture, contracts, audit, review, acceptance decisions
-Claude Code  = implementation, tests, commits, PR updates, implementation drafts
-User         = product decisions and explicit protected/destructive approvals
+Review agent = architecture/contracts audit, review and acceptance evidence
+Implementing agent = implementation, tests, commits, PR updates and implementation drafts
 ```
 
-Claude implements approved architecture. Claude does not redefine product architecture inside code.
+An implementing agent follows approved architecture and does not redefine product decisions inside
+code. Decision ownership and protected-action approval come only from §14.1 and §14.4.
 Chat is not the durable work log. Anything that must survive a session belongs in this repository.
 
 ### 1.1 Repository exchange protocol
@@ -29,4 +32,5 @@ Rules:
 - Proposal/review documents written by an AI must identify their author and status: `PROPOSAL`, `UNDER REVIEW`, `ACCEPTED`, or `SUPERSEDED`.
 - Canonical documents such as `documents/roadmap/ROADMAP.md` and `documents/architecture/ARCHITECTURE.md` do not need author suffixes once accepted.
 - A contract/architecture decision becomes binding only when reflected in an ADR or canonical document.
-- If an implementation question needs a product decision or a real external action (§14.4), Claude stops and asks the user. An implementation or internal-architecture question is Claude's to decide: decide it, state the choice in the PR, and the audits verify it (§14, ADR-0022).
+- For who decides a question and how strongly it is verified, apply §14.1–§14.4. This exchange
+  section adds no second ownership rule.

@@ -2,7 +2,9 @@
 
 ## 9. Definition of Done
 
-A feature is not done because a function exists or a test is green.
+A feature or milestone closeout is not done because a function exists or a test is green. The
+end-to-end conditions below apply when closing a user-visible feature or milestone, not to every
+small documentation, infrastructure, refactoring or internal-only PR.
 
 1. UI action reaches the intended service.
 2. Service uses the canonical contract.
@@ -13,4 +15,12 @@ A feature is not done because a function exists or a test is green.
 7. The same flow succeeds again in a fresh session.
 8. No unrelated flow regresses.
 
-Acceptance evidence belongs in `documents/acceptance/`, not chat. It records correlation IDs, external IDs, timestamps, read-back evidence, and the fresh-session condition.
+For a small internal PR, done means the scoped change is complete, its focused tests and applicable
+lint/type checks pass, and the CI scope selected by §14.2 is green. It does not independently owe an
+external read-back or a fresh-session replay unless it changes that flow or is the feature/milestone
+closeout that claims the flow works.
+
+Acceptance evidence belongs in `documents/acceptance/`, not chat. At feature or milestone closeout
+it records the applicable correlation IDs, external IDs, timestamps, read-back evidence, and
+fresh-session condition. An item that cannot apply to the closeout is recorded as not applicable;
+it is not mechanically demanded from an unrelated internal PR.
