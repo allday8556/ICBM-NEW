@@ -36,7 +36,9 @@ $worktreeRoot = Join-Path $hostRoot "worktrees"
 #     sources + audit identity (HEAD, packet_digest) + evidence_seen. v6 이하 결과는 historical evidence 전용.
 # v8 (canonical V2 at main a0643e4, PR-A alignment): content-bound identities, full edit-aware re-scan, marker grammar,
 #     classification only from user/architect records, identity-level evidence_seen. v7 (draft) 결과는 재사용 불가.
-$auditPolicyVersion = "packet-v8-sol-high"
+# v9: ADR-0022 — no human classification. Packet sources are the durable evidence the slice declaration cites
+#     (referenced-evidence discovery); a marker is provenance and never holds a packet. v8 이하 결과는 재사용 불가.
+$auditPolicyVersion = "packet-v9-sol-high"
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
@@ -629,22 +631,29 @@ foreach ($rf in @(Get-ChildItem $stateDir -Filter "remediation-main-*.json" -Err
 }
 
 # -------------------------------------------------
-# 5b. Authoritative sources (AGENT_HOST_PROTOCOL_V2 at main a0643e4, §3, §4, §4.1)
+# 5b. Packet sources (AGENT_HOST_AUDIT_PROTOCOL §3, §4, §4.1; ADR-0022 §5)
 #
-# state\audit-sources-pr-<N>.json 은 designated authoritative stream 만 지정한다 (분류 권한 없음):
-#   { "pr": N, "designated_streams": [ {"type":"issue_comments","issue":89}, {"type":"issue_comments","issue":N},
-#       {"type":"pr_reviews","pr":N}, {"type":"pr_review_comments","pr":N}, {"type":"pr_body","pr":N}, {"type":"issue_body","issue":M} ] }
-#   host manifest 에 sources/excluded/required/classifications 가 있으면 HOLD (Host 는 스스로 분류하지 않는다).
-#   manifest 가 없으면 이 PR 자신의 4 stream (conversation comments, reviews, review comments, body).
-# 매 생성마다 모든 designated stream 을 전 페이지, 현재 body 로 다시 읽는다 (edit-aware). watermark 는 scan provenance 일 뿐
+# No human classifies a source. The slice declares its evidence by citing it, and the Host reads exactly that:
+#   declaration  = this PR's body, plus the host slice specification / remediation authorization when one exists
+#   streams      = this PR's own four streams (conversation comments, body, reviews, review comments)
+#                  + the comments of every issue the declaration names as "Issue #<n>"
+#                  + any stream state\audit-sources-pr-<N>.json designates (optional; designation only)
+#   sources      = the PR body itself (the declaration is audit input);
+#                  every source the declaration cites, by its kind (agent-host-authority-v2.ps1 Get-EvidenceReferences):
+#                    `<id>` a conversation comment, `review:<id>` a review, `review-comment:<id>` a review comment,
+#                    each <locator>@<sha256 of the current body>;
+#                  the Host's baseline canon and every `canon:<path>` the declaration cites, at the audited base,
+#                    each git_blob:base:<path>@<blob SHA>.
+#                  All are required. A citation that cannot be read is a TECHNICAL_HOLD; a baseline document absent at
+#                  the base is named in the packet header.
+# 매 생성마다 모든 stream 을 전 페이지, 현재 body 로 다시 읽는다 (edit-aware). watermark 는 scan provenance 일 뿐
 #   packet bytes 밖(state\packets\*.scan.json)에만 기록되고 어떤 source 도 건너뛰지 않는다.
-# marker = body 의 첫 non-empty line 이 정확히 token (agent-host-authority-v2.ps1 Get-AuthorityMarker).
-# 분류(required / evidence-only / excluded)는 designated stream 안의 marked [ARCHITECT-INSTRUCTION]/[OWNER-AMENDMENT]
-#   classification record (정확히 한 줄의 "scope: PR #<N>" 과 required:/evidence-only:/excluded: section 을 가진 body) 만 준다.
-#   entry 는 canonical kind + locator + body digest (git 은 ref:path + blob SHA). 문법은 아래 Read-ClassificationRecord 주석.
-#   record 는 locator + body digest 로 source 를 지정하고, Host 는 그 mapping 을 그대로 적용만 한다.
-# HOLD: 분류 없는 marked source, digest 가 바뀐 분류 source, record 간 충돌, 해석 불가 record, 읽을 수 없는 stream/source,
-#   잘린 listing. Host 는 자기 HOLD 를 스스로 풀 수 없다 (이 스크립트는 분류를 만들거나 저장하지 않는다).
+# marker = body 의 첫 non-empty line 이 정확히 token (agent-host-authority-v2.ps1 Get-AuthorityMarker). It is provenance only:
+#   a marked source is a packet source when the declaration cites it, like any other source, and is otherwise history.
+#   A marked source never holds a packet, and no "scope: PR #<N>" record is read (ADR-0022 §5; legacy records stay as history).
+# Edits still bind: a cited source's body digest is in the packet, so an edited body changes the packet digest.
+# TECHNICAL_HOLD only (the Host retries by itself, never the user): an unreadable or truncated stream, an unreadable
+#   declaration, a citation no scanned stream holds, an invalid host manifest, a packet derivation failure.
 # -------------------------------------------------
 
 $packetHoldReasons = New-Object System.Collections.Generic.List[string]
@@ -656,7 +665,6 @@ $designatedStreams = New-Object System.Collections.Generic.List[object]
 $streamItems = New-Object System.Collections.Generic.List[object]
 $scanProvenance = New-Object System.Collections.Generic.List[object]
 $packetSources = New-Object System.Collections.Generic.List[object]
-$packetExcluded = New-Object System.Collections.Generic.List[object]
 $scanStartedAt = (Get-Date).ToUniversalTime().ToString("o")
 
 function Add-PacketHold {
@@ -779,10 +787,7 @@ if (Test-Path -LiteralPath $sourceManifestPath) {
 
     if ($manifestDoc) {
         foreach ($k in @($manifestDoc.PSObject.Properties | ForEach-Object { $_.Name })) {
-            if ($k -in @("sources", "excluded", "required", "classifications", "classification", "evidence_only")) {
-                Add-PacketHold "SOURCE_MANIFEST_INVALID:HOST_MANIFEST_MAY_NOT_CLASSIFY" "key=$k"
-            }
-            elseif ($k -notin @("pr", "note", "designated_streams")) {
+            if ($k -notin @("pr", "note", "designated_streams")) {
                 Add-PacketHold "SOURCE_MANIFEST_INVALID:UNKNOWN_KEY:$k"
             }
         }
@@ -811,20 +816,48 @@ if (Test-Path -LiteralPath $sourceManifestPath) {
         }
     }
 }
-else {
-    foreach ($type in @("issue_comments", "pr_body", "pr_reviews", "pr_review_comments")) {
-        $designatedStreams.Add([pscustomobject]@{ Type = $type; Number = [int64]$PrNumber })
-    }
-}
 
-$designatedStreams = Sort-Ordinal -Items $designatedStreams.ToArray() -Key { "$($args[0].Type)`t$("{0:D20}" -f $args[0].Number)" }
-$streamKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
+# a duplicate inside the host manifest is a manifest error; the streams the Host adds below are de-duplicated
+$manifestStreamKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
 foreach ($ds in $designatedStreams) {
-    if (-not $streamKeys.Add("$($ds.Type):$($ds.Number)")) {
+    if (-not $manifestStreamKeys.Add("$($ds.Type):$($ds.Number)")) {
         Add-PacketHold "SOURCE_MANIFEST_INVALID:DUPLICATE_STREAM:$($ds.Type):$($ds.Number)"
     }
 }
+
+function Add-ScannedStream {
+    param([string]$Type, [int64]$Number)
+
+    if ($manifestStreamKeys.Add("${Type}:$Number")) {
+        $designatedStreams.Add([pscustomobject]@{ Type = $Type; Number = $Number })
+    }
+}
+
+# this PR's own four streams are always scanned
+foreach ($type in @("issue_comments", "pr_body", "pr_reviews", "pr_review_comments")) {
+    Add-ScannedStream -Type $type -Number ([int64]$PrNumber)
+}
+
+# the slice declaration: the PR body (read ONCE, here; the pr_body stream below reuses this read) + the host slice
+# spec / remediation authorization
+$declarationText = ""
+$prBodyResp = Invoke-GhJson "repos/$repoSlug/pulls/$PrNumber"
+
+if (-not $prBodyResp.Ok -or -not $prBodyResp.Data -or "$($prBodyResp.Data.number)" -ne "$PrNumber") {
+    Add-PacketHold "DECLARATION_UNREADABLE:pr_body:$PrNumber"
+}
+else {
+    $declarationText = (ConvertTo-LfText ([string]$prBodyResp.Data.body)) + "`n" + (ConvertTo-LfText $authorizationBlock)
+}
+
+$evidenceRefs = Get-EvidenceReferences $declarationText
+
+foreach ($n in $evidenceRefs.Issues) {
+    Add-ScannedStream -Type "issue_comments" -Number ([int64]$n)
+}
+
+$designatedStreams = Sort-Ordinal -Items $designatedStreams.ToArray() -Key { "$($args[0].Type)`t$("{0:D20}" -f $args[0].Number)" }
 
 # --- full, edit-aware re-scan of every designated stream (all pages, current bodies) ---
 if ($packetHoldReasons.Count -eq 0) {
@@ -835,7 +868,9 @@ if ($packetHoldReasons.Count -eq 0) {
 
         switch ($ds.Type) {
             "pr_body" {
-                $r = Invoke-GhJson "repos/$repoSlug/pulls/$($ds.Number)"
+                # This PR's body was read once, above, as the declaration. The packet source is that same read:
+                # the citations and the body the auditors see can never come from two different versions.
+                $r = if ("$($ds.Number)" -eq "$PrNumber" -and $prBodyResp.Ok) { $prBodyResp } else { Invoke-GhJson "repos/$repoSlug/pulls/$($ds.Number)" }
 
                 if (-not $r.Ok -or -not $r.Data -or "$($r.Data.number)" -ne "$($ds.Number)") {
                     Add-PacketHold "STREAM_UNREADABLE:$sk"
@@ -920,363 +955,137 @@ if ($packetHoldReasons.Count -eq 0) {
     }
 }
 
-# --- classification records (V2 §3; B2: explicit scope, canonical typed entries only; B1: path-bound git sources) ---
+# --- referenced-evidence discovery (AGENT_HOST_AUDIT_PROTOCOL §3, §4; ADR-0022 §5) ---
 #
-# A classification record is a marked [ARCHITECT-INSTRUCTION] / [OWNER-AMENDMENT] source in a designated stream whose body
-# has at least one section header line (trimmed): "required:", "evidence-only:" or "excluded:" (case-sensitive).
-#
-# Scope (exact grammar, case-sensitive, defined once):
-#   the body contains EXACTLY ONE line that, trimmed, starts with "scope:"; that line is before the first section header and
-#   equals exactly  "scope: PR #<N>"  (<N> = decimal PR number, no leading zero, nothing else on the line).
-#   The record applies to this packet only when <N> == the audited PR. Anything else (no scope line, two scope lines,
-#   another PR, extra text, other case) → the record does not apply; its own marker then needs a classification (HOLD if none).
-#
-# Entries (one per line, "- " prefix, trimmed; " — <reason>" suffix optional, required under excluded:):
-#   - issue-comment <id> sha256 <64 hex>
-#   - pr-review <pr>/<id> sha256 <64 hex>
-#   - pr-review-comment <id> sha256 <64 hex>
-#   - issue-body <n> sha256 <64 hex>
-#   - pr-body <n> sha256 <64 hex>
-#   - git-blob <ref>:<path> <40 hex blob sha>      <ref> = HEAD | base (bound to the audit identity) | 40-hex commit SHA
-#   "<section>: none[...]" declares an empty section.
-# HOLD (never guessed or reinterpreted):
-#   any other "- git..." form (e.g. "git blobs at base: CLAUDE.md <sha>")   → CLASSIFICATION_RECORD_AMBIGUOUS_GIT_SOURCE:<record id>
-#   a canonical kind with any other syntax (e.g. "(#143)" annotations)      → CLASSIFICATION_RECORD_UNPARSEABLE:<record id>
-#   a type-less "<id> <hex>" entry or any non-canonical kind                  → CLASSIFICATION_RECORD_UNTYPED_ENTRY:<record id>
-#   any other non-blank line inside a section                                → CLASSIFICATION_RECORD_UNPARSEABLE:<record id>
-$sectionHeader = '^(required|evidence-only|excluded):\s*(.*)$'
-$scopeLine = '^scope: PR #([1-9][0-9]*)$'
-$records = New-Object System.Collections.Generic.List[object]
-$entries = New-Object System.Collections.Generic.List[object]
+# A scanned source is a packet source when, and only when, the slice declaration cites its id. The Host applies that rule
+# mechanically: it never judges relevance, never reads a "scope: PR #<N>" record, and never asks anyone to classify.
+# Every packet source is required: both auditors must report it in EVIDENCE_SEEN by its content-bound identity.
+# A citation names its kind (`<id>` a conversation comment, `review:<id>`, `review-comment:<id>`), and resolves only to a
+# source of that kind: the key is "<locator kind>:<id>", never the id alone.
+$citedKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
-function Read-ClassificationRecord {
-    param($Item)
-
-    $lines = @($Item.Text -split "`n" | ForEach-Object { $_.Trim() })
-    $headerIdx = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -cmatch $sectionHeader) { $i } })
-
-    if ($headerIdx.Count -eq 0) {
-        return $null
-    }
-
-    # explicit scope: exactly one "scope:" line, before the first section, exact grammar, this PR
-    $scopeIdx = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].StartsWith("scope:", [System.StringComparison]::Ordinal)) { $i } })
-    $scopeOk = $false
-
-    if ($scopeIdx.Count -eq 1 -and $scopeIdx[0] -lt $headerIdx[0]) {
-        $sm = [regex]::Match($lines[$scopeIdx[0]], $scopeLine)
-        $scopeOk = ($sm.Success -and $lines[$scopeIdx[0]] -cmatch $scopeLine -and $sm.Groups[1].Value -eq "$PrNumber")
-    }
-
-    if (-not $scopeOk) {
-        return [pscustomobject]@{ Applicable = $false; Entries = @(); Errors = @() }
-    }
-
-    $out = New-Object System.Collections.Generic.List[object]
-    $errors = New-Object System.Collections.Generic.List[object]
-    $section = $null
-    $sectionNone = $false
-
-    for ($i = $headerIdx[0]; $i -lt $lines.Count; $i++) {
-        $ln = $lines[$i]
-
-        if ($ln.Length -eq 0) {
-            continue
-        }
-
-        if ($ln -cmatch $sectionHeader) {
-            $h = [regex]::Match($ln, $sectionHeader)
-            $section = $h.Groups[1].Value
-            $rest = $h.Groups[2].Value.Trim()
-            $sectionNone = ($rest -cmatch '^none(\b|$)')
-
-            if ($rest -and -not $sectionNone) {
-                $errors.Add([pscustomobject]@{ Cat = "UNPARSEABLE"; Msg = "line $($i + 1): section header with trailing text" })
-            }
-
-            continue
-        }
-
-        if (-not $ln.StartsWith("- ") -or $sectionNone) {
-            $errors.Add([pscustomobject]@{ Cat = "UNPARSEABLE"; Msg = "line $($i + 1): not an entry" })
-            continue
-        }
-
-        $pe = $null
-        $m = $null
-
-        if (($m = [regex]::Match($ln, '^- issue-comment (\d+) sha256 ([0-9a-f]{64})(?: — (.+))?$')).Success) {
-            $pe = [pscustomobject]@{ Kind = "issue_comment"; Locator = "github_issue_comment:$($m.Groups[1].Value)"; Id = $m.Groups[1].Value; Num = ""; Digest = $m.Groups[2].Value; Reason = $m.Groups[3].Value; Ref = ""; Path = "" }
-        }
-        elseif (($m = [regex]::Match($ln, '^- pr-review (\d+)/(\d+) sha256 ([0-9a-f]{64})(?: — (.+))?$')).Success) {
-            $pe = [pscustomobject]@{ Kind = "pr_review"; Locator = "github_pr_review:$($m.Groups[1].Value)/$($m.Groups[2].Value)"; Id = $m.Groups[2].Value; Num = $m.Groups[1].Value; Digest = $m.Groups[3].Value; Reason = $m.Groups[4].Value; Ref = ""; Path = "" }
-        }
-        elseif (($m = [regex]::Match($ln, '^- pr-review-comment (\d+) sha256 ([0-9a-f]{64})(?: — (.+))?$')).Success) {
-            $pe = [pscustomobject]@{ Kind = "pr_review_comment"; Locator = "github_pr_review_comment:$($m.Groups[1].Value)"; Id = $m.Groups[1].Value; Num = ""; Digest = $m.Groups[2].Value; Reason = $m.Groups[3].Value; Ref = ""; Path = "" }
-        }
-        elseif (($m = [regex]::Match($ln, '^- (issue-body|pr-body) (\d+) sha256 ([0-9a-f]{64})(?: — (.+))?$')).Success) {
-            $k = if ($m.Groups[1].Value -eq "issue-body") { "issue_body" } else { "pr_body" }
-            $pe = [pscustomobject]@{ Kind = $k; Locator = "github_$($k):$($m.Groups[2].Value)"; Id = $m.Groups[2].Value; Num = $m.Groups[2].Value; Digest = $m.Groups[3].Value; Reason = $m.Groups[4].Value; Ref = ""; Path = "" }
-        }
-        elseif (($m = [regex]::Match($ln, '^- git-blob (HEAD|base|[0-9a-f]{40}):(\S+) ([0-9a-f]{40})(?: — (.+))?$')).Success -and
-                $m.Groups[2].Value -notmatch '(^/|\\|(^|/)\.\.?(/|$)|//|/$)') {
-            $pe = [pscustomobject]@{ Kind = "git_blob"; Locator = "git_blob:$($m.Groups[1].Value):$($m.Groups[2].Value)"; Id = ""; Num = ""; Digest = $m.Groups[3].Value; Reason = $m.Groups[4].Value; Ref = $m.Groups[1].Value; Path = $m.Groups[2].Value }
-        }
-        elseif ($ln -cmatch '^- git') {
-            $errors.Add([pscustomobject]@{ Cat = "AMBIGUOUS_GIT_SOURCE"; Msg = "line $($i + 1): git source must be 'git-blob <ref>:<path> <blob-sha>'" })
-            continue
-        }
-        elseif ($ln -cmatch '^- (issue-comment|pr-review|pr-review-comment|issue-body|pr-body) ') {
-            $errors.Add([pscustomobject]@{ Cat = "UNPARSEABLE"; Msg = "line $($i + 1): canonical kind with non-canonical syntax" })
-            continue
-        }
-        else {
-            $errors.Add([pscustomobject]@{ Cat = "UNTYPED_ENTRY"; Msg = "line $($i + 1): entry without a canonical kind" })
-            continue
-        }
-
-        if ($section -eq "excluded" -and -not $pe.Reason) {
-            $errors.Add([pscustomobject]@{ Cat = "UNPARSEABLE"; Msg = "line $($i + 1): excluded entry without reason" })
-            continue
-        }
-
-        $pe | Add-Member -NotePropertyName Class -NotePropertyValue $section
-        $pe | Add-Member -NotePropertyName Record -NotePropertyValue "$($Item.Locator)@$($Item.Digest)"
-        $out.Add($pe)
-    }
-
-    return [pscustomobject]@{ Applicable = $true; Entries = $out.ToArray(); Errors = $errors.ToArray() }
+foreach ($k in $evidenceRefs.Keys) {
+    [void]$citedKeys.Add($k)
 }
 
-foreach ($it in $streamItems) {
-    if ($it.Marker -notin @("ARCHITECT-INSTRUCTION", "OWNER-AMENDMENT")) {
-        continue
-    }
+$resolvedKeys = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
+$seenLocators = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::Ordinal)
 
-    $rec = Read-ClassificationRecord $it
-
-    if ($null -eq $rec -or -not $rec.Applicable) {
-        continue
-    }
-
-    if (@($rec.Errors).Count -gt 0) {
-        foreach ($cat in @($rec.Errors | ForEach-Object { $_.Cat } | Sort-Object -Unique)) {
-            Add-PacketHold "CLASSIFICATION_RECORD_$($cat):$($it.Id)" (@($rec.Errors | Where-Object { $_.Cat -eq $cat } | ForEach-Object { $_.Msg }) -join '; ')
-        }
-
-        continue
-    }
-
-    $records.Add($it)
-
-    foreach ($e in $rec.Entries) {
-        $entries.Add($e)
-    }
-}
-
-# git 객체를 byte 그대로 읽는다 (worktree 의 object DB)
-function Get-GitObjectBytes {
-    param([string]$Sha)
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "git"
-    $psi.Arguments = "-C `"$auditWorktree`" cat-file blob $Sha"
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    $ms = New-Object System.IO.MemoryStream
-    $errTask = $proc.StandardError.ReadToEndAsync()
-    $proc.StandardOutput.BaseStream.CopyTo($ms)
-    $proc.WaitForExit()
-    [void]$errTask.Result
-
-    if ($proc.ExitCode -ne 0) {
-        return $null
-    }
-
-    return ,$ms.ToArray()
-}
-
-# record entry → 현재 content-bound source (또는 HOLD). 추론 없음: 선언된 kind + locator 만 읽는다.
-function Resolve-Entry {
-    param($E)
-
-    if ($E.Kind -eq "git_blob") {
-        # B1: 선언된 ref 의 선언된 path 를 그대로 해석하고, 그 blob SHA 가 선언값과 같아야 한다 (tree 의 다른 곳은 보지 않는다)
-        $commit = switch ($E.Ref) { "HEAD" { $prHead } "base" { $mainHead } default { $E.Ref } }
-        $commitOk = "$(Invoke-Git @('-C', $auditWorktree, 'rev-parse', '--verify', '-q', "$commit^{commit}"))".Trim()
-
-        if ($commitOk -ne $commit) {
-            return [pscustomobject]@{ Hold = "SOURCE_INCOMPLETE:$($E.Locator)"; Detail = "ref $($E.Ref) is not a readable commit" }
-        }
-
-        $resolved = "$(Invoke-Git @('-C', $auditWorktree, 'rev-parse', '--verify', '-q', "$($commit):$($E.Path)"))".Trim()
-
-        if (-not $resolved) {
-            return [pscustomobject]@{ Hold = "SOURCE_INCOMPLETE:$($E.Locator)"; Detail = "path $($E.Path) does not exist at $($E.Ref) $commit" }
-        }
-
-        $objType = "$(Invoke-Git @('-C', $auditWorktree, 'cat-file', '-t', $resolved))".Trim()
-
-        if ($objType -ne "blob" -or $resolved -ne $E.Digest) {
-            return [pscustomobject]@{ Hold = "CLASSIFIED_SOURCE_DIGEST_CHANGED:$($E.Locator)"; Detail = "record=$($E.Digest) current=$resolved type=$objType" }
-        }
-
-        $bytes = Get-GitObjectBytes $E.Digest
-
-        if ($null -eq $bytes -or (Get-GitBlobSha $bytes) -ne $E.Digest) {
-            return [pscustomobject]@{ Hold = "SOURCE_INCOMPLETE:$($E.Locator)"; Detail = "blob unreadable" }
-        }
-
-        try {
-            $text = ConvertTo-LfText ($utf8.GetString($bytes))
-        }
-        catch {
-            return [pscustomobject]@{ Hold = "SOURCE_NOT_TEXT:$($E.Locator)"; Detail = "" }
-        }
-
-        return [pscustomobject]@{ Hold = $null; Locator = $E.Locator; Digest = $E.Digest; Text = $text; Kind = "GIT-BLOB"; UpdatedAt = "" }
-    }
-
-    # mutable GitHub source: 같은 locator 의 scan 결과, 없으면 그 locator 를 직접 읽는다
-    $s = @($streamItems | Where-Object { $_.Locator -eq $E.Locator }) | Select-Object -First 1
-
-    if (-not $s) {
-        $api = switch ($E.Kind) {
-            "issue_comment" { "repos/$repoSlug/issues/comments/$($E.Id)" }
-            "pr_review" { "repos/$repoSlug/pulls/$($E.Num)/reviews/$($E.Id)" }
-            "pr_review_comment" { "repos/$repoSlug/pulls/comments/$($E.Id)" }
-            "issue_body" { "repos/$repoSlug/issues/$($E.Num)" }
-            "pr_body" { "repos/$repoSlug/pulls/$($E.Num)" }
-        }
-
-        $r = Invoke-GhJson $api
-        $idField = if ($E.Kind -in @("issue_body", "pr_body")) { "$($r.Data.number)" } else { "$($r.Data.id)" }
-
-        if (-not $r.Ok -or -not $r.Data -or $idField -ne $E.Id) {
-            return [pscustomobject]@{ Hold = "SOURCE_INCOMPLETE:$($E.Locator)"; Detail = "unreadable or not found" }
-        }
-
-        $upd = if ($E.Kind -eq "pr_review") { [string]$r.Data.submitted_at } else { [string]$r.Data.updated_at }
-        $s = New-StreamItem -Stream "direct" -Locator $E.Locator -Id $E.Id -Number $E.Num -Body $r.Data.body -UpdatedAt $upd
-    }
-
-    if ($s.Digest -ne $E.Digest) {
-        return [pscustomobject]@{ Hold = "CLASSIFIED_SOURCE_DIGEST_CHANGED:$($E.Locator)"; Detail = "record=$($E.Digest) current=$($s.Digest)" }
-    }
-
-    $kind = if ($s.Marker) { $s.Marker } else { "UNMARKED" }
-    return [pscustomobject]@{ Hold = $null; Locator = $s.Locator; Digest = $s.Digest; Text = $s.Text; Kind = $kind; UpdatedAt = $s.UpdatedAt }
-}
-
-# --- apply the declared mapping exactly (locator AND body digest); conflicts → HOLD ---
-$classByLocator = @{}
-
-foreach ($rec in $records) {
-    $classByLocator[$rec.Locator] = [pscustomobject]@{ Class = "classification-record"; Digest = $rec.Digest; Record = "self" }
-}
-
-foreach ($e in $entries) {
-    if ($e.Class -eq "excluded") {
-        # excluded 는 content 를 packet 에 넣지 않는다. stream 에 있으면 digest 가 record 와 같아야 한다.
-        # B2: 선언된 kind + locator 그대로 (추론 없음)
-        $loc = $e.Locator
-
-        $inStream = @($streamItems | Where-Object { $_.Locator -eq $loc })
-
-        if ($inStream.Count -gt 0 -and $inStream[0].Digest -ne $e.Digest) {
-            Add-PacketHold "CLASSIFIED_SOURCE_DIGEST_CHANGED:$loc" "record=$($e.Digest) current=$($inStream[0].Digest)"
-            continue
-        }
-
-        $resolvedExcluded = [pscustomobject]@{ Locator = $loc; Digest = $e.Digest }
-    }
-    else {
-        $res = Resolve-Entry $e
-
-        if ($res.Hold) {
-            Add-PacketHold $res.Hold $res.Detail
-
-            # 분류는 존재하지만 digest 가 맞지 않음 → 같은 locator 의 marked source 도 같은 사유로 보고 (UNCLASSIFIED 중복 방지)
-            if ($res.Hold -like "CLASSIFIED_SOURCE_DIGEST_CHANGED:*" -and -not $classByLocator.ContainsKey($res.Hold.Substring(33))) {
-                $classByLocator[$res.Hold.Substring(33)] = [pscustomobject]@{ Class = $e.Class; Digest = $e.Digest; Record = $e.Record }
-            }
-
-            continue
-        }
-
-        $resolvedExcluded = $null
-        $loc = $res.Locator
-    }
-
-    $digest = if ($resolvedExcluded) { $resolvedExcluded.Digest } else { $res.Digest }
-
-    if ($classByLocator.ContainsKey($loc)) {
-        $prev = $classByLocator[$loc]
-
-        if ($prev.Class -ne $e.Class -or $prev.Digest -ne $digest) {
-            Add-PacketHold "CLASSIFICATION_CONFLICT:$loc" "$($prev.Class)@$($prev.Digest) vs $($e.Class)@$digest"
-        }
-
-        continue
-    }
-
-    $classByLocator[$loc] = [pscustomobject]@{ Class = $e.Class; Digest = $digest; Record = $e.Record }
-
-    if ($e.Class -eq "excluded") {
-        $packetExcluded.Add([pscustomobject]@{ Identity = "$loc@$digest"; Reason = (($e.Reason -replace '\s+', ' ')).Trim(); Record = $e.Record })
-    }
-    else {
-        $packetSources.Add([pscustomobject]@{
-            Identity = "$loc@$($res.Digest)"
-            Locator = $loc
-            Digest = $res.Digest
-            Kind = $res.Kind
-            Class = $e.Class
-            Required = ($e.Class -eq "required")
-            Origin = "record-entry"
-            Record = $e.Record
-            Text = $res.Text
-            TextSha = Get-Sha256Hex $res.Text
-            Bytes = $utf8Out.GetByteCount($res.Text)
-            UpdatedAt = $res.UpdatedAt
-        })
-    }
-}
-
-foreach ($rec in $records) {
+# The declaration is audit input itself: what the slice says it does, does not do and relies on. The PR body is always a
+# required source, so both auditors read it and an edited body is a new audit identity.
+foreach ($it in @($streamItems | Where-Object { $_.Locator -eq "github_pr_body:$PrNumber" })) {
+    [void]$seenLocators.Add($it.Locator)
     $packetSources.Add([pscustomobject]@{
-        Identity = "$($rec.Locator)@$($rec.Digest)"
-        Locator = $rec.Locator
-        Digest = $rec.Digest
-        Kind = $rec.Marker
-        Class = "classification-record"
+        Identity = "$($it.Locator)@$($it.Digest)"
+        Locator = $it.Locator
+        Digest = $it.Digest
+        Kind = $(if ($it.Marker) { $it.Marker } else { "UNMARKED" })
+        Class = "required"
         Required = $true
-        Origin = "classification-record"
-        Record = "self"
-        Text = $rec.Text
-        TextSha = $rec.Digest
-        Bytes = $utf8Out.GetByteCount($rec.Text)
-        UpdatedAt = $rec.UpdatedAt
+        Origin = "declaration"
+        Record = "pr-body"
+        Text = $it.Text
+        TextSha = $it.Digest
+        Bytes = $utf8Out.GetByteCount($it.Text)
+        UpdatedAt = $it.UpdatedAt
     })
 }
 
-# --- every currently marked source in every designated stream must be covered (locator AND digest) ---
 foreach ($it in $streamItems) {
-    if (-not $it.Marker) {
+    $citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"
+
+    if (-not $citedKeys.Contains($citeKey)) {
         continue
     }
 
-    if (-not $classByLocator.ContainsKey($it.Locator)) {
-        Add-PacketHold "UNCLASSIFIED_MARKED_SOURCE:$($it.Id)" "locator=$($it.Locator) marker=$($it.Marker) digest=$($it.Digest)"
+    [void]$resolvedKeys.Add($citeKey)
+
+    # the same source can sit in two scanned streams (a manifest stream and an issue the declaration names)
+    if (-not $seenLocators.Add($it.Locator)) {
         continue
     }
 
-    if ($classByLocator[$it.Locator].Digest -ne $it.Digest) {
-        Add-PacketHold "CLASSIFIED_SOURCE_DIGEST_CHANGED:$($it.Locator)" "record=$($classByLocator[$it.Locator].Digest) current=$($it.Digest)"
+    $packetSources.Add([pscustomobject]@{
+        Identity = "$($it.Locator)@$($it.Digest)"
+        Locator = $it.Locator
+        Digest = $it.Digest
+        Kind = $(if ($it.Marker) { $it.Marker } else { "UNMARKED" })
+        Class = "required"
+        Required = $true
+        Origin = "referenced"
+        Record = "pr-body"
+        Text = $it.Text
+        TextSha = $it.Digest
+        Bytes = $utf8Out.GetByteCount($it.Text)
+        UpdatedAt = $it.UpdatedAt
+    })
+}
+
+# Canonical documents, read at the AUDITED BASE ($mainHead): the canon that binds before this slice. What the slice
+# changes in it is in the diff, so a slice never rewrites the canon it is judged against.
+#   baseline   : Get-BaselineCanon, carried by every packet whatever the declaration cites. One that is not at the base
+#                is recorded as absent in the packet header; it is never silently skipped.
+#   referenced : `canon:<path>` citations of the declaration. One that is not at the base is a TECHNICAL_HOLD.
+# Identity is content-bound by the git blob SHA, so a changed document is a new packet.
+$unresolvedCanon = New-Object System.Collections.Generic.List[string]
+$baselineAbsent = New-Object System.Collections.Generic.List[string]
+$canonWanted = New-Object System.Collections.Generic.List[object]
+
+foreach ($cp in (Get-BaselineCanon)) {
+    $canonWanted.Add([pscustomobject]@{ Path = $cp; Origin = "baseline" })
+}
+
+foreach ($cp in $evidenceRefs.Canon) {
+    $canonWanted.Add([pscustomobject]@{ Path = $cp; Origin = "referenced" })
+}
+
+foreach ($cw in $canonWanted) {
+    $cp = $cw.Path
+    $locator = "git_blob:base:$cp"
+
+    if ($seenLocators.Contains($locator)) {
+        continue
+    }
+
+    $blobSha = "$(Invoke-Git @('-C', $repo, 'rev-parse', '--verify', '--quiet', "${mainHead}:$cp"))".Trim()
+    $kind = if ($blobSha -match '^[0-9a-f]{40}$') { "$(Invoke-Git @('-C', $repo, 'cat-file', '-t', $blobSha))".Trim() } else { "" }
+
+    if ($kind -ne "blob") {
+        if ($cw.Origin -eq "baseline") { $baselineAbsent.Add($cp) } else { $unresolvedCanon.Add("canon:$cp") }
+        continue
+    }
+
+    $canonText = ConvertTo-LfText ((@(Invoke-Git @('-C', $repo, 'cat-file', 'blob', $blobSha)) -join "`n") + "`n")
+    [void]$seenLocators.Add($locator)
+
+    $packetSources.Add([pscustomobject]@{
+        Identity = "$locator@$blobSha"
+        Locator = $locator
+        Digest = $blobSha
+        Kind = "CANON"
+        Class = "required"
+        Required = $true
+        Origin = $cw.Origin
+        Record = $(if ($cw.Origin -eq "baseline") { "host-baseline" } else { "pr-body" })
+        Text = $canonText
+        TextSha = Get-Sha256Hex $canonText
+        Bytes = $utf8Out.GetByteCount($canonText)
+        UpdatedAt = ""
+    })
+}
+
+# A citation is declared evidence. One that no scanned stream holds (a wrong id, an issue the declaration does not
+# name, a source deleted since) cannot be read: hard completeness fails, as a TECHNICAL_HOLD. It is never dropped.
+$unresolvedRefs = @(@($evidenceRefs.Keys | Where-Object { -not $resolvedKeys.Contains($_) } | ForEach-Object { $evidenceRefs.Labels[$_] }) + @($unresolvedCanon))
+
+if ($packetHoldReasons.Count -eq 0) {
+    foreach ($label in $unresolvedRefs) {
+        Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label" "the declaration cites $label and it cannot be read: no scanned stream holds a source of that kind with that id, or no such file is at the audited base"
     }
 }
+
+# provenance only (scan.json, outside the packet bytes): what is marked and not cited
+$markedUncited = @($streamItems | Where-Object { $_.Marker -and -not $seenLocators.Contains($_.Locator) })
 
 foreach ($ps in $packetSources) {
     if ($ps.Text.Contains("[/SOURCE identity=")) {
@@ -1284,9 +1093,7 @@ foreach ($ps in $packetSources) {
     }
 }
 
-$classOrder = @{ "classification-record" = 0; "required" = 1; "evidence-only" = 2 }
-$packetSources = Sort-Ordinal -Items $packetSources.ToArray() -Key { "$($classOrder[$args[0].Class])`t$($args[0].Identity)" }
-$packetExcluded = Sort-Ordinal -Items $packetExcluded.ToArray() -Key { $args[0].Identity }
+$packetSources = Sort-Ordinal -Items $packetSources.ToArray() -Key { $args[0].Identity }
 $requiredSourceIds = @($packetSources | Where-Object { $_.Required } | ForEach-Object { $_.Identity })
 
 function Get-SourceSection {
@@ -1302,16 +1109,20 @@ $currentPtrPath = Join-Path $packetDir "pr-$PrNumber-head-$($prHead.Substring(0,
 # scan provenance (watermark, updated_at): packet bytes 밖, 매 생성마다 덮어쓴다
 $scanPath = Join-Path $packetDir "pr-$PrNumber-head-$($prHead.Substring(0,12)).scan.json"
 $scanDoc = [ordered]@{
-    note = "scan provenance only (AGENT_HOST_PROTOCOL_V2 §3/§4): never a skip boundary, never part of the canonical packet bytes"
+    note = "scan provenance only (AGENT_HOST_AUDIT_PROTOCOL §3/§4): never a skip boundary, never part of the canonical packet bytes"
     scanned_at = $scanStartedAt
     streams = @($scanProvenance | ForEach-Object { $_ })
     marked_sources = @($streamItems | Where-Object { $_.Marker } | ForEach-Object { [ordered]@{ locator = $_.Locator; marker = $_.Marker; digest = $_.Digest; updated_at = $_.UpdatedAt } })
     sources = @($packetSources | ForEach-Object { [ordered]@{ identity = $_.Identity; updated_at = $_.UpdatedAt } })
+    cited_issues = @($evidenceRefs.Issues)
+    unresolved_references = @($unresolvedRefs)
+    marked_not_cited = @($markedUncited | ForEach-Object { [ordered]@{ locator = $_.Locator; marker = $_.Marker; digest = $_.Digest } })
     hold = @($packetHoldReasons)
 }
 [System.IO.File]::WriteAllText($scanPath, ($scanDoc | ConvertTo-Json -Depth 6), $utf8Out)
 
-# hard completeness 실패 → HOLD (V2 §4.1). 캐시가 아닌 host 결과만 남기고, 이 HEAD 의 current packet 포인터를 무효화한다.
+# hard completeness 실패 → TECHNICAL_HOLD (§4.1, §5.1): the Host retries by itself; nobody is asked to do anything.
+# 캐시가 아닌 host 결과만 남기고, 이 HEAD 의 current packet 포인터를 무효화한다.
 function Stop-PacketHold {
     $holdPath = Join-Path $stateDir "$auditPolicyVersion-pr-$PrNumber-main-$($mainHead.Substring(0,12))-head-$($prHead.Substring(0,12))-packet-hold.result.txt"
 
@@ -1320,6 +1131,7 @@ function Stop-PacketHold {
         "VERDICT=HOLD"
         "SUMMARY=PACKET_HOLD: $($packetHoldReasons -join '; ')"
         "PACKET_DIGEST=NONE"
+        "HOLD_CLASS=TECHNICAL_HOLD"
     )
 
     foreach ($d in $packetHoldDetails) {
@@ -1341,13 +1153,15 @@ function Stop-PacketHold {
     }
 
     Write-Output "PACKET_HOLD_RESULT=$holdPath"
+    Write-Output "HOLD_CLASS=TECHNICAL_HOLD"
     Write-Output "AUDIT_HOLD=$($packetHoldReasons[0])"
     Write-Output "AUDIT_BLOCKED=$($packetHoldReasons[0])"
 }
 
-Write-Host "SOURCE_MANIFEST : $sourceManifestRel (designation only)"
-Write-Host "RECORDS         : $($records.Count) classification record(s)"
-Write-Host "SOURCES         : $(@($packetSources).Count) (required=$(@($requiredSourceIds).Count), excluded=$(@($packetExcluded).Count))"
+Write-Host "SOURCE_MANIFEST : $sourceManifestRel (optional stream designation; no classification)"
+Write-Host "SOURCES         : $(@($packetSources).Count) cited by the slice declaration (all required)"
+Write-Host "MARKED_NOT_CITED: $(@($markedUncited).Count) (provenance only; never a hold)"
+Write-Host "UNRESOLVED_REFS : $(@($unresolvedRefs).Count) (citations no scanned stream holds; each is a TECHNICAL_HOLD)"
 Write-Host "SCAN_PROVENANCE : $scanPath"
 
 foreach ($sp in $scanProvenance) {
@@ -1625,21 +1439,19 @@ else {
 # -------------------------------------------------
 
 $sourceLines = New-Object System.Collections.Generic.List[string]
-$sourceLines.Add("AUTHORITATIVE SOURCE MANIFEST (host-generated; AGENT_HOST_PROTOCOL_V2 sections 3-4; content-bound identity = <locator>@<body digest | git object SHA>):")
+$sourceLines.Add("AUTHORITATIVE SOURCE MANIFEST (host-generated; AGENT_HOST_AUDIT_PROTOCOL sections 3-4; sources are the durable evidence the slice declaration cites; content-bound identity = <locator>@<body digest>):")
 $sourceLines.Add("SOURCE_MANIFEST=$sourceManifestRel")
 
 foreach ($ds in $designatedStreams) {
     $sourceLines.Add("DESIGNATED_STREAM=$($ds.Type):$($ds.Number)")
 }
 
-foreach ($pe in $packetExcluded) {
-    $sourceLines.Add("EXCLUDED_SOURCE=$($pe.Identity) record=$($pe.Record) reason=$($pe.Reason)")
-}
-
 foreach ($ps in $packetSources) {
     $sourceLines.Add("SOURCE=$($ps.Identity) kind=$($ps.Kind) class=$($ps.Class) required=$($ps.Required.ToString().ToLower()) origin=$($ps.Origin) record=$($ps.Record) bytes=$($ps.Bytes)")
 }
 
+$sourceLines.Add("BASELINE_CANON=$((Get-BaselineCanon) -join ',')")
+$sourceLines.Add("BASELINE_CANON_ABSENT_AT_BASE=$(if ($baselineAbsent.Count -gt 0) { $baselineAbsent -join ',' } else { 'NONE' })")
 $sourceLines.Add("REQUIRED_SOURCES=$(if (@($requiredSourceIds).Count -gt 0) { $requiredSourceIds -join ',' } else { 'NONE' })")
 $sourceLines.Add("--- AUTHORITATIVE SOURCES START ($(@($packetSources).Count)) ---")
 
@@ -1652,7 +1464,7 @@ foreach ($ps in $packetSources) {
 $sourceBlock += "`n--- AUTHORITATIVE SOURCES END ---"
 
 $packetHeader = (@(
-    "PACKET_FORMAT=icbm-audit-packet-v2"
+    "PACKET_FORMAT=icbm-audit-packet-v3"
     "POLICY_VERSION=$auditPolicyVersion"
     "PR=$PrNumber"
     "EXACT_PR_HEAD=$prHead"
@@ -1739,7 +1551,7 @@ $packetManifestFile = Join-Path $packetDir "$packetBase.manifest.json"
 
 # manifest.json 은 canonical packet 에서 결정적으로 파생된 값만 담는다 (updated_at / watermark / 시각 없음 → scan.json)
 $packetManifestObj = [ordered]@{
-    packet_format = "icbm-audit-packet-v2"
+    packet_format = "icbm-audit-packet-v3"
     policy_version = $auditPolicyVersion
     pr = $PrNumber
     exact_pr_head = $prHead
@@ -1750,7 +1562,6 @@ $packetManifestObj = [ordered]@{
     remediation_authorization = $remediationAuthIdentity
     source_manifest = $sourceManifestRel
     designated_streams = @($designatedStreams | ForEach-Object { "$($_.Type):$($_.Number)" })
-    excluded = @($packetExcluded | ForEach-Object { [ordered]@{ identity = $_.Identity; record = $_.Record; reason = $_.Reason } })
     sources = @($packetSources | ForEach-Object {
         [ordered]@{ identity = $_.Identity; kind = $_.Kind; class = $_.Class; required = $_.Required; origin = $_.Origin; record = $_.Record; bytes = $_.Bytes }
     })
@@ -2041,7 +1852,7 @@ function Read-VerdictText {
 
     $verdictMatch = [regex]::Match(
         $Text,
-        "(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT|HOLD)\s*$"
+        "(?m)^VERDICT=(PASS|BLOCKER|INSUFFICIENT|HOLD|HUMAN_DECISION_REQUIRED)\s*$"
     )
 
     $summaryMatch = [regex]::Match(
@@ -2073,12 +1884,19 @@ function Read-CallVerdict {
         $r.Summary = "EVIDENCE_NOT_SEEN:$(@($r.Missing) -join ',') (auditor verdict was $($r.Verdict): $($r.Summary))"
         $r.Verdict = "HOLD"
     }
+    elseif ($r.Valid -and $r.Verdict -eq "HUMAN_DECISION_REQUIRED" -and -not (Get-HumanDecisionCategory $r.Summary)) {
+        # §5.1: only a category of the closed list is the user's. An auditor that names none has not said what the
+        # user should decide, so this is a technical hold and the audit is run again.
+        $r.Summary = "HUMAN_DECISION_WITHOUT_CATEGORY (auditor summary: $($r.Summary))"
+        $r.Verdict = "HOLD"
+    }
 
     return $r
 }
 
 # 여러 call 결과는 fail-closed로 합친다.
-# HOLD(근거 미확인) 우선, 그 다음 BLOCKER, 형식 오류 → INSUFFICIENT, 모든 call PASS일 때만 PASS.
+# HUMAN_DECISION_REQUIRED 우선, HOLD(근거 미확인 = TECHNICAL_HOLD), 그 다음 BLOCKER, 형식 오류 → INSUFFICIENT,
+# 모든 call PASS일 때만 PASS. HOLD 와 INSUFFICIENT 는 TECHNICAL_HOLD 이다 (§5.1): the Host re-audits, nobody is asked.
 # EVIDENCE_SEEN(aggregate) = 모든 call 이 공통으로 확인한 id (교집합).
 function Merge-CallVerdicts {
     param(
@@ -2087,11 +1905,16 @@ function Merge-CallVerdicts {
     )
 
     $invalid = @($Results | Where-Object { -not $_.Valid })
+    $human = @($Results | Where-Object { $_.Valid -and $_.Verdict -eq "HUMAN_DECISION_REQUIRED" })
     $holds = @($Results | Where-Object { $_.Valid -and $_.Verdict -eq "HOLD" })
     $blockers = @($Results | Where-Object { $_.Valid -and $_.Verdict -eq "BLOCKER" })
     $insufficient = @($Results | Where-Object { $_.Valid -and $_.Verdict -eq "INSUFFICIENT" })
 
-    if ($holds.Count -gt 0) {
+    if ($human.Count -gt 0) {
+        $verdict = "HUMAN_DECISION_REQUIRED"
+        $summary = ($human | ForEach-Object { "[CALL$($_.Index)] $($_.Summary)" }) -join " | "
+    }
+    elseif ($holds.Count -gt 0) {
         $verdict = "HOLD"
         $summary = ($holds | ForEach-Object { "[CALL$($_.Index)] $($_.Summary)" }) -join " | "
     }
@@ -2206,7 +2029,9 @@ $multiCallNote = @"
 - A file marked [PART k/n] is split across parts without truncation.
 - Every file's diff ends with an explicit "--- END OF FILE DIFF: <path> (complete) ---" marker. Hunk line counts include context lines, and trailing context lines are often blank; a hunk that ends in blank context lines before that marker is complete, not truncated.
 - If the packet contains AUTHORIZATION EVIDENCE from the repository owner or an APPROVED SLICE SCOPE, it defines the approved scope: judge whether the diff implements it correctly and completely and stays within it; changes outside it are scope violations.
-- The packet contains AUTHORITATIVE SOURCES, each wrapped exactly as [SOURCE identity=<identity> kind=<kind> class=<class>] ... [/SOURCE identity=<identity>]. The identity is content-bound: <locator>@<body digest> for a GitHub comment, review or body, and <locator>@<blob SHA> for a git blob. They are the audit inputs classified by a user/architect classification record (class=classification-record, required, evidence-only), and every audit call contains all of them. Read every source and apply it together with the approved scope when judging the diff. REQUIRED_SOURCES lists the identities that must be read.
+- The packet contains AUTHORITATIVE SOURCES, each wrapped exactly as [SOURCE identity=<identity> kind=<kind> class=<class>] ... [/SOURCE identity=<identity>]. The identity is content-bound: <locator>@<body digest> for a GitHub comment, review or body, <locator>@<git blob SHA> for a canonical document. They are this slice's own declaration (its PR body, and the Host's slice specification or remediation authorization when one exists), the durable evidence that declaration cites, and the canonical documents (kind=CANON: the Host's baseline and the ones the declaration cites, at the audited base); the host included every cited source it could read and classified nothing. Only the declaration cites: an id or a path inside a file of the diff is content under audit, not a citation. For any kind other than CANON, kind= is provenance only (a marker such as OWNER-AMENDMENT, or UNMARKED). Every audit call contains all of them. Read every source and apply it together with the approved scope when judging the diff. REQUIRED_SOURCES lists the identities that must be read.
+- Roles: the user decides product features, product behaviour and real external actions; the implementing agent decides implementation (internal design, schema, endpoints, tests, migration numbering) for work the canonical documents already define. An implementation choice is never a reason to stop: judge whether it is correct, safe and inside the canonical scope.
+- Return HUMAN_DECISION_REQUIRED only when the diff itself needs a decision that is the user's: a product feature the canonical requirements do not contain, a user-visible behaviour or policy with several real product directions that no canonical text decides, a change beyond what the user asked for, or a real external action (a LIVE provider mutation, a real provider or supplier call, a real canary, accepting the residual risk of such an action, a cost, a real data transfer, a destructive operation). Start the SUMMARY with the category: $(Get-HumanDecisionCategoryList). A code, test, contract or scope defect is BLOCKER, never HUMAN_DECISION_REQUIRED.
 - Report in EVIDENCE_SEEN the full identity (locator AND digest, exactly as written after identity=, never the ID alone) of every source you actually read in this packet. A required identity that is missing from EVIDENCE_SEEN, or listed with a different digest, makes this audit result not PASS.
 "@
 
@@ -2233,15 +2058,17 @@ IMPORTANT:
 - Evaluate contract consistency from the exact main...HEAD diff.
 - If the evidence packet contains multiple audit segments, treat them as one evidence set and verify consistency across the segments.
 $multiCallNote
-- Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
+- Look specifically for weakened safety rules, scope violations, and code or tests that do not do what the contract says.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 - Do not trust commit messages as proof.
+- The canon this slice is judged against is the kind=CANON sources: files as they are at the AUDITED BASE, which is what binds before this slice. origin=baseline are the Host's own (the roadmap, the current milestone, execution safety, operating authority) and are in every packet; origin=referenced are the ones the declaration adds. What the slice changes in the canon is in the diff: judge that change, do not judge by it. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not enough to decide safely, return INSUFFICIENT.
 - PASS only if this packet contains enough evidence and no blocker is visible.
 
 Return EXACTLY four lines:
 
 AUDIT_HEAD=$prHead
-VERDICT=<PASS|BLOCKER|INSUFFICIENT>
+VERDICT=<PASS|BLOCKER|INSUFFICIENT|HUMAN_DECISION_REQUIRED>
 SUMMARY=<one concise line>
 EVIDENCE_SEEN=<comma-separated identities (<locator>@<digest>, exactly as written after identity=) of the sources you actually read; NONE if the packet has no sources>
 
@@ -2380,14 +2207,16 @@ IMPORTANT:
 - Evaluate contract consistency from the exact main...HEAD diff.
 - If the evidence packet contains multiple audit segments, treat them as one evidence set and verify consistency across the segments.
 $multiCallNote
-- Look specifically for contradictory old/new contract language, stale reopening conditions, weakened safety rules, scope violations and missing/incorrect contract-test pins.
+- Look specifically for weakened safety rules, scope violations, and code or tests that do not do what the contract says.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
+- The canon this slice is judged against is the kind=CANON sources: files as they are at the AUDITED BASE, which is what binds before this slice. origin=baseline are the Host's own (the roadmap, the current milestone, execution safety, operating authority) and are in every packet; origin=referenced are the ones the declaration adds. What the slice changes in the canon is in the diff: judge that change, do not judge by it. If deciding needs a canonical document the packet does not carry, return INSUFFICIENT and name its path in SUMMARY; never assume what an unseen document says.
 - If the supplied packet is not sufficient to decide safely, return INSUFFICIENT.
 - PASS only when this packet provides sufficient evidence and no blocker is visible.
 
 Return EXACTLY four lines:
 
 AUDIT_HEAD=$prHead
-VERDICT=<PASS|BLOCKER|INSUFFICIENT>
+VERDICT=<PASS|BLOCKER|INSUFFICIENT|HUMAN_DECISION_REQUIRED>
 SUMMARY=<one concise line>
 EVIDENCE_SEEN=<comma-separated identities (<locator>@<digest>, exactly as written after identity=) of the sources you actually read; NONE if the packet has no sources>
 

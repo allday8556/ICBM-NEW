@@ -14,6 +14,8 @@ and `test_claude_md_auto_loads_every_rule_body` proves that every rule body is i
 `documents/rules/README.md` is not a preserved body: it is the new index, which restates the former
 intro and §13 read order with the moved locators and adds the section map. Former §11 (milestone
 status) is roadmap content, pinned by the milestone agreement test.
+`documents/rules/14-operating-authority.md` is not a former section either: it is the operating
+rule of ADR-0022 (who decides what, and what is never asked of the user).
 
 @documents/rules/README.md
 @documents/rules/01-roles-and-exchange.md
@@ -28,3 +30,4 @@ status) is roadmap content, pinned by the milestone agreement test.
 @documents/rules/10-working-style.md
 @documents/roadmap/CURRENT-MILESTONE.md
 @documents/rules/12-first-vertical.md
+@documents/rules/14-operating-authority.md

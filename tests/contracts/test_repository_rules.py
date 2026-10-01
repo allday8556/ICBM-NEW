@@ -211,12 +211,14 @@ def test_claude_md_takes_the_ui_source_from_the_record() -> None:
 # and only their locators moved. Each digest is the SHA-256 of the pre-migration section (CLAUDE.md
 # at main e72a5cad) after the normalization below, which masks locators only: code spans that
 # name a path or a file, markdown link targets and bare path tokens. Every rule word must be
-# unchanged; a later reviewed rule change updates its digest in the same PR. §11 (milestone status)
+# unchanged; a later reviewed rule change updates its digest in the same PR. ADR-0022 is one: it
+# reworded one sentence of §1 and one of §10 (who decides an implementation matter), and their
+# digests below are of that text. §11 (milestone status)
 # is pinned by the milestone agreement test instead. documents/rules/README.md is deliberately
 # absent: it is the new index (the former intro and §13 restated with moved locators, plus the
 # section map), not a preserved body.
 _FORMER_CLAUDE_SECTIONS = {
-    "01-roles-and-exchange.md": "41d2e020b31971ce797b8d12eadacb06a15cec0b2c71d9ed5f9b46ea1223cc87",
+    "01-roles-and-exchange.md": "33bf7de49b592acb7441cb0b241d036f14e6eb954e91a1ff7fee75d945cb9ef5",
     "02-no-legacy.md": "d31203c3015febe156ef1142992434fc67fbed479107c2eefa5fb31ac1f57ee3",
     "03-ui-source.md": "3a10a40e13552f52cb96e946cd8cdf16a8c500c20b116989649e3d44a69a2de1",
     "04-runtime-stack.md": "fc3053f078186aa4ab34718e83389ef6219c96a4c86915f7b66d117c605fc7e6",
@@ -227,7 +229,7 @@ _FORMER_CLAUDE_SECTIONS = {
     "07-execution-safety.md": "f398e0d780f8f0f6f8cf072084798190a271d316936362d86dbf92251c5689e5",
     "08-git-conventions.md": "3f3c36c1927cfeeb3a05ef7f09e008b45d873fc29785941d9bf51298447d230a",
     "09-definition-of-done.md": "66951f351d59ab2ce0b0a6c998a211356e811ba59a501c8b388fc3f7329d2a96",
-    "10-working-style.md": "3d6f95d224b6b27b17ece1c6b850a0b0151795e673c5f9f391542741e9b50f42",
+    "10-working-style.md": "8c685dad839064be75eb77ea075d63fb01757b31a764f96715e6638637473b9d",
     "12-first-vertical.md": "3bf78de57d08ac04c4edfb8b5564b1070a1f3c348237359cfab49fd16db0746c",
 }
 
@@ -318,11 +320,240 @@ def test_architecture_cites_the_phase_c_record_status() -> None:
 
 
 def test_the_agent_host_protocol_states_its_merged_status() -> None:
-    """Issue #151 H10: the protocol says it is canonical since PR #147 merged, not a candidate."""
+    """Issue #151 H10: the protocol says it is canonical, not a candidate. V3 is the ADR-0022
+    operating-authority correction of V2."""
     protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
     status = protocol.split("\n", 3)[2]
-    assert status.startswith("Status: **V2 — canonical.**"), status
+    assert status.startswith("Status: **V3 — canonical.**"), status
     assert "canonical candidate" not in protocol.split("## 0.", 1)[0]
+
+
+AGENT_HOST_DIR = REPO_ROOT / "automation" / "agent-host"
+ADR_0022 = REPO_ROOT / "documents" / "decisions" / "adr" / "0022-agent-operating-authority.md"
+# The closed list of what stops a loop for the user (ADR-0022 §2). Anything else is technical.
+HUMAN_DECISION_CATEGORIES = [
+    "NEW_PRODUCT_FEATURE",
+    "PRODUCT_DIRECTION_UNDECIDED",
+    "BEYOND_USER_REQUIREMENT",
+    "LIVE",
+    "PROVIDER_CALL",
+    "CANARY",
+    "REAL_EXTERNAL_READ",
+    "RESIDUAL_RISK_APPROVAL",
+    "COST",
+    "EXTERNAL_DATA_TRANSFER",
+    "DESTRUCTIVE",
+    "OWNER_HOLD",
+]
+
+
+def _host_script(name: str) -> str:
+    return (AGENT_HOST_DIR / name).read_text("utf-8-sig")
+
+
+def test_the_operating_authority_is_one_rule_in_adr_protocol_and_rule_file() -> None:
+    """ADR-0022: the user decides the product and real external actions; the agent runs the loop;
+    no human classification gates a packet; and no mechanical check is relaxed."""
+    adr = _read(ADR_0022)
+    assert adr.splitlines()[2].startswith("Status: **ACCEPTED**")
+    for invariant in range(1, 11):
+        assert f"OA-{invariant:02d}  " in adr, invariant
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    rule = _read(RULES_DIR / "14-operating-authority.md")
+    for text in (adr, protocol, rule):
+        assert "auto_merge" in text and "auto_next" in text
+        assert "HUMAN_DECISION_REQUIRED" in text or "Stop for the user only for" in text
+    # the default mode
+    assert "auto_merge = true\nauto_next  = true" in protocol
+    assert "auto_merge = true\nauto_next  = true" in adr
+    # no human classification, and history is kept
+    assert "**A marked source never holds a packet.**" in protocol
+    assert "**No classification record is read.**" in protocol
+    assert "never deleted or edited" in adr and "never edited or deleted" in protocol
+    # the two hold classes, by category
+    assert "HUMAN_DECISION_REQUIRED   the closed list of §0.2." in protocol
+    assert "TECHNICAL_HOLD            everything else." in protocol
+    assert "never from how often something failed" in protocol
+    # nothing mechanical is relaxed
+    kept = _section(protocol, r"0\.2 Operating authority")
+    for check in (
+        "the exact-HEAD audit and the generated Audit Packet",
+        "the packet digest and the two-part audit identity",
+        "the same-identity DUAL PASS",
+        "`evidence_seen` coverage and the PASS-only cache",
+        "FULL CI after READY",
+        "the pre-merge packet regeneration and the current-base check",
+        "MERGE_GUARD, the merge with `expected_head_sha`, POST_MERGE_VERIFY",
+        "every provider, LIVE and destructive-operation gate",
+    ):
+        assert check in kept, check
+    # the authority write guard stays
+    assert "no automated actor creates or edits a\nmarker-first body" in protocol
+    assert "No automated actor writes a marker-first body" in adr
+    # the rule file never asks the user for bookkeeping and keeps §7
+    assert "No `[OWNER-AMENDMENT]` and no classification comment is requested." in rule
+    assert "§7 (execution safety) is unchanged" in rule
+
+
+def test_the_host_stops_for_the_user_only_on_the_closed_category_list() -> None:
+    """ADR-0022 OA-01, OA-03: the closed list lives once, in the shared authority helper, and the
+    documents name exactly that list."""
+    authority = _host_script("agent-host-authority-v2.ps1")
+    block = authority.split("$script:HumanDecisionCategories = @(", 1)[1].split(")", 1)[0]
+    assert re.findall(r'"([A-Z_]+)"', block) == HUMAN_DECISION_CATEGORIES
+    protocol = _read(RULES_DIR / "agent-host" / "AGENT_HOST_AUDIT_PROTOCOL.md")
+    for category in HUMAN_DECISION_CATEGORIES[:-1]:
+        assert f"`{category}`" in protocol, category
+    # the class word alone decides nothing, and neither does a category word inside another reason:
+    # only a whole reason in a form the Host composes makes a stop the user's
+    assert (
+        "'^(?:NEXT_HOLD_|[A-Z][A-Z_]*_HUMAN_DECISION_REQUIRED_)?([A-Z_]+)$'" in authority
+        and "$m.Groups[1].Value -cin $script:HumanDecisionCategories" in authority
+    )
+    assert '$r.Contains("HUMAN_DECISION_REQUIRED")' not in authority
+    assert '"(^|[^A-Z0-9])$cat([^A-Z0-9]|`$)"' not in authority
+    audit = _host_script("run-audit-v1.1.ps1")
+    assert "-not (Get-HumanDecisionCategory $r.Summary)" in audit
+    assert "HUMAN_DECISION_WITHOUT_CATEGORY" in audit
+    # every script that can stop takes its class from that one helper
+    for name in ("orchestrator-v1.3.ps1", "run-repair-v1.1.ps1"):
+        script = _host_script(name)
+        assert 'agent-host-authority-v2.ps1")' in script, name
+        assert "Get-HoldClass" in script, name
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+    assert "$class = Get-HoldClass $Reason" in orchestrator
+    # no script writes the pre-ADR-0022 hand-off any more
+    for path in sorted(AGENT_HOST_DIR.glob("*.ps1")):
+        if path.name in {"orchestrator-v1.2.ps1", "run-lookahead-v1.ps1"}:
+            continue  # display-only / non-authoritative helpers, identity-pinned and unchanged
+        text = path.read_text("utf-8-sig")
+        assert '-Status "HUMAN_HOLD"' not in text, path.name
+        assert 'Write-Host "HUMAN_HOLD=' not in text, path.name
+
+
+def test_the_packet_generator_has_no_human_classification_gate() -> None:
+    """ADR-0022 OA-04: no classification record is parsed and no marker holds a packet."""
+    audit = _host_script("run-audit-v1.1.ps1")
+    for gone in (
+        "Read-ClassificationRecord",
+        "UNCLASSIFIED_MARKED_SOURCE",
+        "CLASSIFIED_SOURCE_DIGEST_CHANGED",
+        "CLASSIFICATION_CONFLICT",
+        "CLASSIFICATION_RECORD_",
+        "HOST_MANIFEST_MAY_NOT_CLASSIFY",
+        "$scopeLine",
+    ):
+        assert gone not in audit, gone
+    assert "Get-EvidenceReferences $declarationText" in audit
+    # declared evidence never silently disappears: a citation nothing holds is a technical hold
+    assert 'Add-PacketHold "CITED_SOURCE_UNRESOLVED:$label"' in audit
+    # a citation names its kind and resolves only to a source of that kind, never by the id alone
+    assert '$citeKey = "$(($it.Locator -split ":", 2)[0]):$($it.Id)"' in audit
+    assert "$citedIds" not in audit
+    # the user's rule (ADR-0022 §4.1): only five kinds of finding block; the rest are notes
+    assert audit.count("WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1)") == 2
+    assert _host_script("run-full-audit-v1.ps1").count("WHAT A BLOCKER IS") == 2
+    for kind in (
+        "DATA_DAMAGE",
+        "DUPLICATE_OR_WRONG_SEND",
+        "SECURITY",
+        "CORE_BROKEN",
+        "CI_CODE_DEFECT",
+    ):
+        assert audit.count(kind) >= 2, kind
+    assert "### 4.1 What a BLOCKER is" in (
+        REPO_ROOT / "documents/decisions/adr/0022-agent-operating-authority.md"
+    ).read_text("utf-8")
+    # the canon the slice is judged against is in the packet, and an auditor never passes without it
+    assert "foreach ($cp in $evidenceRefs.Canon)" in audit and 'Kind = "CANON"' in audit
+    # canon is read at the audited base, and the Host's baseline is in every packet: a declaration
+    # only adds to it
+    assert "foreach ($cp in (Get-BaselineCanon))" in audit
+    assert '$locator = "git_blob:base:$cp"' in audit and "git_blob:HEAD:$cp" not in audit
+    baseline = _host_script("agent-host-authority-v2.ps1").split("function Get-BaselineCanon", 1)[1]
+    assert re.findall(r'"(documents/[^"]+)"', baseline.split("}", 1)[0]) == [
+        "documents/roadmap/ROADMAP.md",
+        "documents/roadmap/CURRENT-MILESTONE.md",
+        "documents/rules/07-execution-safety.md",
+        "documents/rules/14-operating-authority.md",
+    ]
+    assert audit.count("never assume what an unseen document says") == 2
+    assert "(review:|review-comment:)?([1-9][0-9]{8,11})" in _host_script(
+        "agent-host-authority-v2.ps1"
+    )
+    assert 'Origin = "referenced"' in audit
+    assert 'Write-Output "HOLD_CLASS=TECHNICAL_HOLD"' in audit
+    # what V3 keeps in the generator
+    for kept in (
+        "PACKET_IMMUTABILITY_VIOLATION",
+        "STREAM_UNREADABLE",
+        "STREAM_TRUNCATED",
+        "EVIDENCE_NOT_SEEN",
+        '"PACKET_DIGEST=$packetDigest"',
+        "function Test-PassCache",
+    ):
+        assert kept in audit, kept
+    # the write guard is untouched
+    authority = _host_script("agent-host-authority-v2.ps1")
+    assert "AUTHORITY_WRITE_GUARD_MARKER_FIRST_BODY" in authority
+
+
+def test_the_agent_host_readme_pins_the_committed_script_bytes() -> None:
+    """The Agent Host scripts are identified byte for byte: every sha256 in the README's table is
+    the hash of the committed file, and every script is in the table."""
+    readme = (AGENT_HOST_DIR / "README.md").read_text("utf-8")
+    rows = dict(re.findall(r"^\| `([^`]+)` \| [^|]+ \| `([0-9a-f]{64})` \|\r?$", readme, re.M))
+    scripts = {
+        path.relative_to(AGENT_HOST_DIR).as_posix() for path in AGENT_HOST_DIR.rglob("*.ps1")
+    }
+    assert scripts <= set(rows), sorted(scripts - set(rows))
+    wrong = {
+        name: digest
+        for name, digest in rows.items()
+        if hashlib.sha256((AGENT_HOST_DIR / name).read_bytes()).hexdigest() != digest
+    }
+    assert wrong == {}
+
+
+def test_the_merge_path_keeps_every_mechanical_check() -> None:
+    """ADR-0022 OA-08: MERGE_GUARD and the merge are as strict as V2, plus base containment and the
+    post-merge tree check."""
+    orchestrator = _host_script("orchestrator-v1.3.ps1")
+    guard = orchestrator.split("function Invoke-MergeGuard {", 1)[1].split(
+        "function Invoke-AutoMerge {", 1
+    )[0]
+    for reason in (
+        "GUARD_PR_ON_OWNER_HOLD",
+        "GUARD_NOT_DUAL_PASS",
+        "GUARD_AUDITED_HEAD_MISMATCH",
+        "GUARD_PACKET_DIGEST_MISMATCH",
+        "HEAD_MOVED_AFTER_AUDIT",
+        "MAIN_MOVED_AFTER_AUDIT",
+        "HEAD_BEHIND_BASE",
+        "PACKET_DIGEST_CHANGED_AFTER_AUDIT",
+        "GUARD_PACKET_INCOMPLETE",
+        "GUARD_PR_IS_DRAFT",
+        "GUARD_CI_FAILED",
+        "GUARD_NOT_MERGEABLE_",
+    ):
+        assert reason in guard, reason
+    _assert_in_order(
+        guard,
+        [
+            "GUARD_NOT_DUAL_PASS",
+            "HEAD_MOVED_AFTER_AUDIT",
+            "MAIN_MOVED_AFTER_AUDIT",
+            "HEAD_BEHIND_BASE",
+            "PACKET_DIGEST_CHANGED_AFTER_AUDIT",
+            "GUARD_CI_FAILED",
+            'Decision = "MERGE"',
+        ],
+    )
+    merge = orchestrator.split("function Invoke-AutoMerge {", 1)[1]
+    assert '"-f", "sha=$AuditedHead"' in merge
+    assert "--force" not in orchestrator and "force-with-lease" not in orchestrator
+    assert "function Test-PostMergeTree" in orchestrator
+    assert 'Stop-Hold `\n                -Reason "POST_MERGE_TREE_MISMATCH"' in orchestrator
 
 
 def test_the_repository_map_counts_match_the_tree() -> None:

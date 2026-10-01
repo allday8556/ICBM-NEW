@@ -8,10 +8,11 @@
 # full-main DUAL PASS 이후, exact 최신 main의 canonical 문서(ROADMAP/ADR/acceptance/CLAUDE.md)를
 # 매번 새로 읽어 다음 미완료 단계를 고른다. 과거 NEXT 슬롯/계획은 사용하지 않는다.
 #
-# PROCEED: canonical 문서가 scope와 순서를 이미 정했고, 별도 승인/정책 결정/LIVE/provider/canary/
-#          residual-risk 승인이 필요 없는 단계 → run-repair -ImplementNext 로 자동 구현.
-# HOLD   : 그 외 → 사유 분류와 함께 사람에게.
-# DONE   : ROADMAP의 모든 단계 완료.
+# PROCEED: canonical 문서가 이미 정의한 다음 단계 → run-repair -ImplementNext 로 자동 구현 (ADR-0022: standing operating
+#          authority). 구현 세부 (schema, endpoint shape, 내부 설계, migration) 는 구현자가 정하고 감사자가 검증한다.
+# HOLD   : closed human-decision 목록 (새 제품 기능, 미결정 제품 방향, 사용자 요구 초과, 실제 외부 행위) 일 때만
+#          HUMAN_DECISION_REQUIRED. 그 외의 hold 는 TECHNICAL_HOLD 이며 host 가 스스로 재시도한다.
+# DONE   : 이 track 의 ROADMAP 단계가 모두 완료.
 #
 # GPT가 선택하고, PROCEED일 때만 Claude가 canonical 문서로 독립 교차확인한다.
 
@@ -22,6 +23,10 @@ $script:OutputEncoding = $utf8
 [Console]::OutputEncoding = $utf8
 
 $hostRoot = $PSScriptRoot
+
+# §5.1 hold taxonomy: the closed human-decision category list the prompts and the orchestrator share
+. (Join-Path $PSScriptRoot "agent-host-authority-v2.ps1")
+
 $configPath = Join-Path $hostRoot "state\orchestrator-config.json"
 $stateDir = Join-Path $hostRoot "state"
 $logDir = Join-Path $hostRoot "logs"
@@ -251,6 +256,24 @@ function Save-Selection {
 # 1. GPT selection (fresh canonical read at exact main)
 # -------------------------------------------------
 
+# One Host runs one track (parallel tracks run as separate Host directories). The track scope, when configured, bounds
+# what "the next step" means; it never widens what the canonical documents define.
+$trackNote = ""
+
+if ($config.track -and $config.track.name) {
+    $trackNote = @"
+TRACK:
+This Host runs the track "$($config.track.name)" only: $($config.track.scope)
+Select the next incomplete canonical step OF THIS TRACK. Work that belongs to another track is not yours to build.
+The canonical order still binds across tracks: if this track's next step depends, in the canonical documents, on a
+step of another track that is not complete (for example an earlier step of the first vertical, ROADMAP §12), do not
+skip it: DECISION=HOLD with HOLD_CATEGORY=EARLIER_STEP_INCOMPLETE and the step it waits for. That is a technical hold:
+this Host waits for the other track. A track only runs ahead of another where the canonical documents make its work
+independent of that other track's open steps. If this track has nothing left, DECISION=DONE.
+
+"@
+}
+
 $selectPrompt = @"
 [ICBM-NEW] AUTO-NEXT ROADMAP SELECTION
 
@@ -264,32 +287,43 @@ HOST-VERIFIED FACTS:
 - the working directory is a host-owned worktree at exact canonical main
 - the post-merge audit of this exact main is GPT PASS + Claude PASS with no blocker
 
+$trackNote
 TASK:
 Read the CURRENT canonical documents on this exact main. Do not rely on any earlier plan, lookahead or memory:
-- CLAUDE.md
-- ROADMAP.md (especially §12 Development sequence and §14 Immediate next work)
-- docs/ARCHITECTURE.md
-- relevant docs/adr/*
-- relevant docs/acceptance/*
+- CLAUDE.md and the rule files it imports under documents/rules/
+- documents/roadmap/ROADMAP.md (especially §12 Development sequence and §14 Immediate next work) and documents/roadmap/CURRENT-MILESTONE.md
+- documents/architecture/ARCHITECTURE.md
+- relevant documents/decisions/adr/* (ADR-0022 is the operating authority)
+- relevant documents/acceptance/*
 
 Identify the single next incomplete step in canonical order.
 
-DECISION=PROCEED only if ALL of these hold:
-1. The canonical documents at this main already fix both the scope and the order of that step (what to build, where, and its acceptance).
-2. No canonical document says this step still needs its own/separate authorization, a kickoff, an architect decision or user approval that is not already recorded in a canonical document at this main.
-   A canonical standing authorization (for example an ADR such as ADR-0020) whose conditions this step fully meets IS such a recorded authorization.
-3. It needs no new architecture or policy decision and no scope beyond what the canonical documents define.
-4. It performs no real provider/marketplace call, no LIVE switch and no real canary, and needs no residual-risk acceptance.
-   Endpoint adoption in code (request/response/error classification, no call) is allowed only where a canonical contract already defines it.
-5. The canonical documents do not conflict about it.
-6. Any schema/migration/data model it needs is already concretely decided by a canonical contract (then SCHEMA_CHANGE=AUTHORIZED_BY:file:section); otherwise HOLD.
-7. It is exactly one slice: never combine two canonically separate slices (for example CREATE and SEARCH) into one.
+WHO DECIDES WHAT (ADR-0022):
+- The user decides product features, product behaviour and real external actions.
+- The implementing agent decides implementation for work the canonical documents already define: internal design,
+  schema, migrations and data model for an already-approved feature, endpoint shape, tests, module layout.
+  GPT and Claude audits verify those choices. A missing implementation detail is never a reason to hold.
+- The user already authorized continuous execution of the canonically defined work. A canonical sentence that asks
+  for a separate per-step authorization, a kickoff or an architect sign-off for work of that kind is satisfied by
+  that standing authority. It still stands when what it gates is one of the user's decisions: a real external
+  action, a product feature outside the canonical requirements, an undecided product direction, a change beyond the
+  user's requirements, or the user's own hold.
 
-A step whose scope and order are fixed by the canonical documents and which they do not gate behind a separate authorization is PROCEED. Do not hold it merely to ask permission.
-Do not infer authorization merely because a step appears in ROADMAP either: if the canonical text gates it behind a separate authorization, that gate stands.
+DECISION=PROCEED when ALL of these hold:
+1. The canonical documents define the step: what it is for and how it is accepted. They need not spell out its design.
+2. It adds no product feature the canonical requirements do not contain, and it needs no choice between several real
+   product directions that no canonical text decides.
+3. Its implementation performs no real provider/marketplace/supplier call, no LIVE switch, no real canary, no real
+   data transfer, no cost and no destructive operation, and needs no residual-risk acceptance.
+   Endpoint adoption in code (request/response/error classification, no call) is implementation.
+4. It is exactly one slice: never combine two canonically separate slices (for example CREATE and SEARCH) into one.
 
-Otherwise DECISION=HOLD with the most specific HOLD_CATEGORY.
-If every roadmap step is complete, DECISION=DONE.
+Where canonical documents conflict on an implementation matter, follow the most recent ADR, say so in HOLD_REASON as a
+note, and PROCEED. Where the next step in order is a real external action or acceptance, that step is
+DECISION=HOLD with its category; do not skip past it to a later step that depends on it.
+
+Otherwise DECISION=HOLD with the most specific HOLD_CATEGORY. Use a human-decision category only when it truly applies.
+If every roadmap step of this track is complete, DECISION=DONE.
 
 RULES:
 - READ ONLY. No edits, commits, pushes, branches or PRs.
@@ -302,11 +336,11 @@ NEXT_MAIN=$mainHead
 DECISION=<PROCEED|HOLD|DONE>
 SLICE_ID=<short-kebab-id or NONE>
 SLICE_TITLE=<one line>
-HOLD_CATEGORY=<NONE|ROADMAP_ADR_CONFLICT|NEXT_UNCLEAR|ARCHITECTURE_OR_POLICY|SCOPE_EXPANSION|PROVIDER_CALL|LIVE|CANARY|RESIDUAL_RISK_APPROVAL|SEPARATE_AUTHORIZATION_REQUIRED|USER_JUDGMENT>
+HOLD_CATEGORY=<NONE|$(Get-HumanDecisionCategoryList)|EARLIER_STEP_INCOMPLETE|NEXT_UNCLEAR>
 HOLD_REASON=<one line with file:section evidence, or NONE>
 CANONICAL_SOURCES=<file:section references that fix scope and order>
-ALLOWED_PATHS=<comma-separated repository path prefixes the implementation may touch, or NONE>
-SCHEMA_CHANGE=<NONE|AUTHORIZED_BY:file:section>
+ALLOWED_PATHS=<comma-separated repository path prefixes where the slice lives (an estimate; the implementer may need more), or NONE>
+SCHEMA_CHANGE=<NONE|AUTHORIZED_BY:file:section|IMPLEMENTER_DESIGN:one line on what the approved feature needs>
 ACCEPTANCE=<one line>
 FORBIDDEN=<one line>
 
@@ -423,19 +457,20 @@ Independent architect. READ ONLY.
 CANONICAL MAIN:
 $mainHead
 
-A planner proposes that the next roadmap step below may be implemented automatically, without a new user
-authorization. Verify this against the CURRENT canonical documents on this exact main yourself
-(CLAUDE.md, ROADMAP.md §12/§14, docs/ARCHITECTURE.md, relevant docs/adr/*, docs/acceptance/*).
-
-AGREE only if ALL hold:
-1. It is the next incomplete step in canonical order.
-2. The canonical documents already fix its scope and order.
-3. No canonical document gates it behind a separate authorization, kickoff, architect decision or user approval
-   that is not already recorded in a canonical document at this main. A canonical standing authorization
-   (for example ADR-0020) whose conditions it fully meets counts as recorded authorization.
-4. It needs no new architecture/policy decision, no scope expansion, no provider call, no LIVE, no canary
-   and no residual-risk acceptance.
-5. ALLOWED_PATHS and SCHEMA_CHANGE below are no wider than the canonical documents authorize.
+A planner proposes that the next roadmap step below is implemented now, under the standing operating authority
+(ADR-0022). Verify this against the CURRENT canonical documents on this exact main yourself (CLAUDE.md and
+documents/rules/, documents/roadmap/ROADMAP.md §12/§14, documents/architecture/ARCHITECTURE.md,
+relevant documents/decisions/adr/*, documents/acceptance/*).
+$trackNote
+AGREE when ALL hold:
+1. It is the next incomplete step of this track in canonical order, and no step it depends on in the canonical
+   documents — of this track or of another, a real external action or acceptance included — is still open before it.
+2. The canonical documents define what it is for and how it is accepted. Implementation detail (design, schema,
+   endpoint shape, paths) is the implementer's to decide and is not a reason to disagree.
+3. It adds no product feature outside the canonical requirements and needs no undecided product direction.
+4. It performs no real provider/marketplace/supplier call, no LIVE, no canary, no cost, no real data transfer and no
+   destructive operation, and needs no residual-risk acceptance.
+5. It is one slice.
 
 PROPOSAL:
 $gptText

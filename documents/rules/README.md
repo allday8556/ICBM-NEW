@@ -6,7 +6,7 @@ These rules are the enforcement layer for `documents/roadmap/ROADMAP.md` and `do
 The roadmap says what to build; architecture defines the approved contracts and stack;
 these rules define how implementation work is performed and recorded.
 
-If documents conflict, stop and request architect resolution in GitHub instead of guessing.
+If documents conflict on a product decision or a real external action (§14.4), stop and ask the user instead of guessing. A conflict on an implementation matter is decided under §14.5: follow the most recent ADR, state the choice, and the audits verify it.
 
 The root `CLAUDE.md` is the bootstrap index that Claude Code loads automatically; it imports every
 file below with `@` imports, so the rules load with it (ADR-0021 §3). The rule bodies live here.
@@ -32,6 +32,7 @@ Section numbers are kept, so an existing reference to `CLAUDE.md §N` resolves t
 | §11 Current milestone | `documents/roadmap/CURRENT-MILESTONE.md` (roadmap content, not a rule) |
 | §12 First vertical | `documents/rules/12-first-vertical.md` |
 | §13 Canonical file index and read order | this file, below |
+| §14 Operating authority (ADR-0022; not a former section) | `documents/rules/14-operating-authority.md` |
 | intro (enforcement layer) | this file, above |
 
 ---
@@ -61,4 +62,4 @@ Additional locations:
 | `documents/reference/PATH_MIGRATION_MAP.md` | Permanent old → new path map of the repository restructure (ADR-0021 §6) |
 | `documents/reference/REPOSITORY_MAP.md` | Where each role lives after the restructure |
 
-If canonical documents conflict, stop implementation and request architect resolution in GitHub rather than guessing.
+If canonical documents conflict on a product decision or a real external action (§14.4), stop implementation and ask the user rather than guessing. A conflict on an implementation matter is decided under §14.5.

@@ -127,10 +127,10 @@ $milestonePattern = if ($fap -and $fap.milestone_marker_pattern) { [string]$fap.
 # FULL 강제 트리거 (baseline..main 변경 경로). config가 없으면 아래 기본값.
 # 위험 경계를 건드린 변경은 DELTA로 끝내지 않는다.
 $defaultTriggers = [ordered]@{
-    ARCHITECTURE_OR_ADR = @('^docs/adr/', '^docs/ARCHITECTURE\.md$', '^CLAUDE\.md$')
+    ARCHITECTURE_OR_ADR = @('^docs/adr/', '^docs/ARCHITECTURE\.md$', '^CLAUDE\.md$', '^documents/decisions/adr/', '^documents/architecture/ARCHITECTURE\.md$', '^documents/rules/')
     SCHEMA_OR_MIGRATION = @('^app/db/', '(^|/)models\.py$', '(^|/)alembic', '(^|/)migrations/')
-    PROVIDER_OR_LIVE_BOUNDARY = @('^integrations/', '^app/live/', '^app/core/execution\.py$', '^app/system/execution_mode\.py$', '^app/register/(execution|caller|canary)\.py$', '^app/container\.py$', '^docs/platforms/')
-    MILESTONE_OR_GATE_CLOSEOUT = @('^docs/acceptance/', '^app/__init__\.py$')
+    PROVIDER_OR_LIVE_BOUNDARY = @('^integrations/', '^app/live/', '^app/core/execution\.py$', '^app/system/execution_mode\.py$', '^app/register/(execution|caller|canary)\.py$', '^app/container\.py$', '^docs/platforms/', '^app/capabilities/live_safety/', '^app/platform/core/(execution|egress)', '^app/stages/register/(execution|caller|canary)\.py$', '^documents/contracts/platforms/')
+    MILESTONE_OR_GATE_CLOSEOUT = @('^docs/acceptance/', '^app/__init__\.py$', '^documents/acceptance/', '^documents/roadmap/CURRENT-MILESTONE\.md$')
 }
 
 $fullTriggers = [ordered]@{}
@@ -448,7 +448,7 @@ if ($ci.State -eq "PENDING") {
 
 if ($ci.State -eq "FAILED") {
     Save-FullAuditState `
-        -Status "HUMAN_HOLD" `
+        -Status "TECHNICAL_HOLD" `
         -Main $mainHead `
         -Detail "CI failed"
 
@@ -704,9 +704,11 @@ else {
             }
         }
 
-        if (-not $fullReason -and ($changedPaths -contains "ROADMAP.md")) {
+        $roadmapPath = @("documents/roadmap/ROADMAP.md", "ROADMAP.md") | Where-Object { $changedPaths -contains $_ } | Select-Object -First 1
+
+        if (-not $fullReason -and $roadmapPath) {
             $roadmapDiff = @(
-                Invoke-Git @("-C", $auditWorktree, "diff", "-U0", $candidate.Main, $mainHead, "--", "ROADMAP.md")
+                Invoke-Git @("-C", $auditWorktree, "diff", "-U0", $candidate.Main, $mainHead, "--", $roadmapPath)
             )
 
             if (@($roadmapDiff | Where-Object { "$_" -match $roadmapMilestoneLine }).Count -gt 0) {
@@ -866,6 +868,7 @@ RULES:
 - Do not use commit messages as proof.
 - You may use read-only local inspection commands such as rg, git log/show/diff and file reads.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 
 The first four output lines MUST be exactly:
 
@@ -917,11 +920,12 @@ Audit the CURRENT MERGED REPOSITORY as a whole, not only the last PR.
 Mandatory audit areas:
 
 1. CANONICAL CONTRACT CONSISTENCY
-   - ROADMAP.md
-   - docs/ARCHITECTURE.md
-   - docs/GLOSSARY.md where relevant
-   - relevant docs/adr/*
-   - relevant docs/acceptance/*
+   - CLAUDE.md and the rule files it imports under documents/rules/
+   - documents/roadmap/ROADMAP.md and documents/roadmap/CURRENT-MILESTONE.md
+   - documents/architecture/ARCHITECTURE.md
+   - documents/architecture/GLOSSARY.md where relevant
+   - relevant documents/decisions/adr/*
+   - relevant documents/acceptance/*
    - repository rules/tests that pin those contracts
    - look for stale or contradictory old/new rules
 
@@ -1002,6 +1006,7 @@ RULES:
 - Do not run commands that mutate repository state.
 - Do not run the product against a real provider.
 - If evidence is insufficient to make a safe judgment, use INSUFFICIENT.
+- WHAT A BLOCKER IS (the user's rule, ADR-0022 §4.1). Return BLOCKER only for one of these, and name it at the start of SUMMARY: DATA_DAMAGE (real data can be corrupted or lost), DUPLICATE_OR_WRONG_SEND (a real duplicate registration or a wrong external transmission can happen), SECURITY (a security hole or a credential, token or secret can leak), CORE_BROKEN (a core function does not actually work), CI_CODE_DEFECT (a test or CI fails because of a real code defect). Anything else is NOT a BLOCKER: a difference in document wording, the same meaning phrased differently across rule files, citation format, a non-essential difference in how the packet is built, a README/ADR/ROADMAP wording mismatch, a way the design could be made more rigorous, or a request to prove an already-decided product requirement in more detail. For those return VERDICT=PASS and put them after "NOTE:" in SUMMARY; they are recorded, never repaired as blockers.
 - A documented stale proof is not automatically a code blocker if the canonical
   state correctly marks it stale and refuses to rely on it.
 - Separate true BLOCKERS from expected/deferred roadmap gaps.
@@ -1140,7 +1145,7 @@ $auditScope
 
     if ($gptExit -ne 0 -or -not (Test-Path $gptCache)) {
         Save-FullAuditState `
-            -Status "HUMAN_HOLD" `
+            -Status "TECHNICAL_HOLD" `
             -Main $mainHead `
             -Detail "GPT audit execution failed"
 
@@ -1254,7 +1259,7 @@ $auditScope
 
     if ($claudeExit -ne 0) {
         Save-FullAuditState `
-            -Status "HUMAN_HOLD" `
+            -Status "TECHNICAL_HOLD" `
             -Main $mainHead `
             -GptVerdict $gptResult.Verdict `
             -Detail "Claude audit execution failed"
@@ -1316,7 +1321,7 @@ $mainNow = Get-RemoteMain
 
 if ($dirtyAfter) {
     Save-FullAuditState `
-        -Status "HUMAN_HOLD" `
+        -Status "TECHNICAL_HOLD" `
         -Main $mainHead `
         -GptVerdict $gptResult.Verdict `
         -ClaudeVerdict $claudeResult.Verdict `
@@ -1364,13 +1369,13 @@ if (
     $claudeResult.Verdict -eq "INSUFFICIENT"
 ) {
     Save-FullAuditState `
-        -Status "HUMAN_HOLD" `
+        -Status "TECHNICAL_HOLD" `
         -Main $mainHead `
         -GptVerdict $gptResult.Verdict `
         -ClaudeVerdict $claudeResult.Verdict `
         -Detail "At least one auditor returned INSUFFICIENT"
 
-    Write-Output "FULL_AUDIT_RESULT=HUMAN_HOLD_INSUFFICIENT"
+    Write-Output "FULL_AUDIT_RESULT=TECHNICAL_HOLD_INSUFFICIENT"
     Write-Host "IMPLEMENTATION_AUTHORIZED=FALSE"
     Write-Host "FULL_AUDIT_MERGES=NONE (merge decisions belong to orchestrator MERGE_GUARD)"
     return

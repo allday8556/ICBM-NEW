@@ -11,6 +11,12 @@ no blocker. This is a governance contract: docs only, runtime-zero.
 Decision owner: the user (repository owner, product decisions and protected approvals — `CLAUDE.md`
 §1). Recorded by Claude Code.
 
+> **Amendment note (ADR-0022, 2026-09-30).** The standing authorization is widened by
+> `documents/decisions/adr/0022-agent-operating-authority.md` §7: a step that is not one of the
+> user's decisions (ADR-0022 §2) is authorized by the standing operating authority, whether or not
+> it meets every condition below. A real provider call, LIVE, a real canary, the residual-risk
+> acceptance and every approval of `CLAUDE.md` §7.2 stay the user's. This text is unchanged.
+
 ---
 
 ## Context

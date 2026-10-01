@@ -144,3 +144,26 @@ Result: I4 PASS.
 - A merged or closed PR is inactive, because only open PRs are listed.
 - An open same-slice PR is ACTIVE. No label or other metadata can deactivate it; V2 has not adopted any supersession authority yet.
 - A `superseded` label is logged as advisory only (`SAME_SLICE_OPEN_PR_ADVISORY`). The result stays `DUPLICATE_ACTIVE_SLICE_PR:#N` (base main) or `SAME_SLICE_PR_OTHER_BASE:#N`.
+
+---
+
+## 7. V3 (ADR-0022, operating authority), 2026-09-30
+
+This inventory describes V2. V3 changes the control flow below; the rest of the inventory stands as the V2 record.
+
+| V2 item | V3 |
+|---|---|
+| §6 classification record grammar (`Read-ClassificationRecord`, `scope: PR #<N>`, typed entries) | **SUPERSEDED.** Removed from run-audit-v1.1.ps1. No record is parsed; existing records are history. |
+| HOLD reasons `UNCLASSIFIED_MARKED_SOURCE`, `CLASSIFIED_SOURCE_DIGEST_CHANGED`, `CLASSIFICATION_CONFLICT`, `CLASSIFICATION_RECORD_*`, `HOST_MANIFEST_MAY_NOT_CLASSIFY` | **SUPERSEDED.** They no longer exist. A marker never holds a packet. |
+| packet sources = entries of a classification record | **SUPERSEDED.** Sources are what the slice declaration cites — the PR body, plus the Host's slice specification or remediation authorization when one exists — in the scanned streams, and the Host's baseline canon. |
+| host manifest `audit-sources-pr-<N>.json` required to designate an authority issue | optional. `Issue #<n>` in the declaration designates that issue's comments. |
+| `HUMAN_HOLD` as the status of every stop | **SUPERSEDED.** `HUMAN_DECISION_REQUIRED` (closed category list) or `TECHNICAL_HOLD` (retried by the supervisor). |
+| `MAX_REPAIR_CYCLES`, `SCOPE_EXPANSION_REQUIRED`, `NEW_SCHEMA_OR_MIGRATION_REQUIRED` stop the run | **SUPERSEDED.** Independent re-analysis; scope, migration and removal are reported for the auditors. |
+| fixer / implementer result `HUMAN_HOLD` | `HUMAN_DECISION_REQUIRED` with a category of the closed list; the old word is a technical decline. |
+| selector categories `SEPARATE_AUTHORIZATION_REQUIRED`, `ARCHITECTURE_OR_POLICY`, `USER_JUDGMENT` stop for the user | technical. Only the closed list stops for the user. |
+| `pre_pr_c_note`: no automated merge and no auto-next before PR-C | **SUPERSEDED** by the owner decision of ADR-0022: `auto_merge` and `auto_next` are the default mode. |
+| MERGE_GUARD without base containment; no post-merge tree check | added: `behind_by == 0` before the merge (condition 8), base sync by update-branch, and the stateless POST_MERGE_VERIFY tree check. |
+| policy `packet-v8-sol-high`, format `icbm-audit-packet-v2` | `packet-v9-sol-high`, `icbm-audit-packet-v3`. v8 and older verdicts are never reused. |
+| kept unchanged | marker grammar; authority write guard; content-bound identities; deterministic packet; (HEAD, digest) identity; `evidence_seen`; PASS-only cache; FULL CI after READY; pre-merge regeneration; `expected_head_sha`; I2 duplicate guard. |
+
+Pinned identities of the V3 scripts are in `README.md`.
