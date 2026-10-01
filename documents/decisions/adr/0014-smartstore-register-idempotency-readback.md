@@ -316,6 +316,12 @@ A registration succeeds only when **all** hold:
 - The read-back normalizer and the comparison contract carry versions, and each verification records them.
 - **Published state — what is read (amendment note; evidence Issue #89 `5911962320`).** The SmartStore origin read-back documents two members that together are the published state: the sale status `originProduct.statusType` and the SmartStore display status `smartstoreChannelProduct.channelProductDisplayStatusType`. The adopted normalizer reads both at exactly those paths, as values of their documented enumerations only (`smartstore-readback-normalizer/v2`). **"Explicitly expected" is a requirement, not a default.** The documentation states no read-after-write consistency and does not state that `SALE` with `ON` means a buyer can see and purchase the listing; neither is assumed.
 - **Published state — what is expected (amendment note; Issue #89 architect resolution `5915900049` D1).** The first vertical registers the SmartStore channel displayed: every CREATE projection carries `smartstoreChannelProduct.channelProductDisplayStatusType = ON`, frozen with the Snapshot's wire projection (`smartstore-register-wire/v3`), never derived from the provider or a session. The expected published state is read from the Snapshot's own projection and is exactly `SALE/ON` (`smartstore-readback-comparison/v3`). A published state is stated only when both halves were read and both equal it; `SALE` with `SUSPENSION` or any other display status is a mismatch, another sale status is a mismatch, and a missing or unreadable half is no proof — in each case a registration is never `CONFIRMED` (`REGISTER_PUBLISHED_STATE_UNPROVEN`). The resolution states the decision as "register the SmartStore channel with: `channelProductDisplayStatusType = ON`" and "the exact expected published state is: `SALE / ON`", because M5 REGISTER is the path that creates a sellable listing, `SUSPENSION` deliberately creates a non-displayed channel product, and choosing it would require a later UPDATE/activation operation that M5 does not adopt; it is "an ICBM first-vertical publication decision, not a claim that NAVER documents buyer visibility or read-after-write timing". This decides no other unowned CREATE member of §17.3 and makes no request sendable.
+- **The registration stock seed is compared exactly (amendment note; Issue #89 architect resolution `5915900049` D2.2).** The
+  Snapshot's projection registers `originProduct.stockQuantity = 1`, an ICBM registration seed, and
+  the read-back compares the origin product's own `stockQuantity`, read at exactly that path,
+  `EXACT` against it (`smartstore-readback-normalizer/v3`, `smartstore-readback-comparison/v4`). A
+  different or missing value is a mismatch under `REVIEW_REQUIRED`, never a confirmation — a sale
+  that moved the provider's stock before the read-back included.
 - **A provider identity recovered by positive reconcile (§28.2) is a presence proof, not a success.** It is read back and compared exactly like one returned by the CREATE response.
 - **`MarketplaceRegistration` and `MarketplaceRegistrationItem` are the durable result after verification passes.** They are never created or updated before, and they are never the source of the comparison.
 - Provider option order or option-name normalization never breaks correspondence: `registration_item_key` does.
@@ -507,7 +513,11 @@ This amendment **relaxes nothing**:
   and the notice type child remain gaps. *(Amendment note, Issue #89 architect resolution
   `5915900049` D1: the channel display status was in this list and is no longer a gap — every
   projection carries `channelProductDisplayStatusType = ON` (§11 amendment note). The other three
-  gaps are unchanged by that note.)*
+  gaps are unchanged by that note.)* *(Amendment note, Issue #89 architect resolution `5915900049` D2: the other three are owned
+  now — `naverShoppingRegistration = true`, the registration seed `stockQuantity = 1`, and the
+  notice child of the reviewed type through the pinned 2.90.0 table of
+  `ENDPOINT_MATRIX.md` §4.1.1. A single-Item Snapshot of a captured notice type is sendable by
+  this contract; every other rule of this section, and the never-resend rule, is unchanged.)*
 - The request is the immutable Snapshot's typed projection and only that: it is validated against
   the adopted request contract as a whole — deny-by-default over every path, the documented bounds,
   and the `sellerManagementCode` that must be this listing identity's projection — and then frozen

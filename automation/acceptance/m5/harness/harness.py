@@ -380,7 +380,8 @@ def _retained(unit: Unit, payload: Mapping[str, Any], *, reverse: bool = False) 
         "originProduct": {
             "name": payload["name"]["value"],
             "salePrice": items[0]["sale_price_krw"],
-            "stockQuantity": len(items),
+            # The registration seed the projection sent (5915900049 D2.2), compared exactly.
+            "stockQuantity": 1,
             # What the provider would carry back: the projected provider code of this unit's
             # listing identity (architect ruling R1), which is exactly what the CREATE would have
             # sent and what the read-back comparison checks.
@@ -964,28 +965,31 @@ def boundary(run: Run, before: Mapping[str, Any]) -> dict[str, object]:
     checks.check(
         "boundary.provider_transport_unloadable", refusal == "ImportError", refusal=refusal
     )
-    # The adopted CREATE request still refuses this unit: required values stay uncaptured or
-    # unowned (the naverShoppingRegistration value source, the registration stock quantity, the
-    # notice type child), and none is ever invented. The
+    # The adopted CREATE request still refuses this unit: this run's reviewed notice type has no
+    # captured request child, and none is ever invented or taken from another type. The
     # scenarios above declared a sendable projection so the state machine could be exercised at
-    # all; the real one is asked here and still names its gaps.
+    # all; the real one is asked here and still names its gap.
     unsent = smartstore_product.project(_any_payload(owners))
     checks.check(
         "boundary.real_wire_projection_refuses",
         not unsent.sendable and bool(unsent.gaps),
         gaps=len(unsent.gaps),
     )
-    # The value-level evidence packet (Issue #89 `5868542027`, E1-E3) does not by itself make the
-    # request sendable: it projects statusType SALE (E2) and closes only the *type* of
-    # naverShoppingRegistration (E1), whose value still has no ICBM-owned source — so that gap
-    # stands, no boolean is guessed onto the wire, and the projection stays unsendable.
-    projected_origin = unsent.document.mapping().get("originProduct", {})
+    # The owned CREATE values are projected (architect resolution 5915900049 D1, D2): statusType
+    # SALE (E2), the registration seed stockQuantity 1, and the channel's ON display status and
+    # naverShoppingRegistration true. They never complete a request by themselves: the notice of
+    # an uncaptured type stays a gap, and no notice at all is emitted for it.
+    projected = unsent.document.mapping()
+    projected_origin = projected.get("originProduct", {})
     checks.check(
-        "boundary.value_packet_alone_leaves_create_unsendable",
+        "boundary.owned_values_never_complete_an_uncaptured_notice",
         not unsent.sendable
-        and smartstore_product.GAP_SHOPPING_REGISTRATION in unsent.gaps
+        and smartstore_product.GAP_NOTICE_TYPE_CHILD in unsent.gaps
         and projected_origin.get("statusType") == smartstore_product.CREATE_STATUS_TYPE
-        and "naverShoppingRegistration" not in unsent.document.canonical_json,
+        and projected_origin.get("stockQuantity") == smartstore_product.REGISTRATION_STOCK_QUANTITY
+        and projected.get("smartstoreChannelProduct")
+        == {"channelProductDisplayStatusType": "ON", "naverShoppingRegistration": True}
+        and "productInfoProvidedNotice" not in unsent.document.canonical_json,
         gaps=len(unsent.gaps),
     )
     adoption = _registration_adoption()

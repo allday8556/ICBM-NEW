@@ -10,12 +10,9 @@ SmartStore records the official 2.89.0 CREATE contract field by field (packet ``
 reviews ``5768199984`` / ``5768247290``, field packet ``5861477977``, required/conditional packet
 ``5861933729``, registration-requirement packet ``5862400626``, value-level packet ``5868542027``).
 The CREATE adoption slice freezes it here. The provider's request top level is ``originProduct``
-plus the required ``smartstoreChannelProduct``. This projection emits both, but the channel carries
-only the one member ICBM owns — the display status (below); the value of its other required member,
-``naverShoppingRegistration``, has no ICBM-owned source, so it stays a named *gap* and is never
-guessed — which means **no** Snapshot is sendable yet, by design and not by omission. Adoption froze
-the contract and this refusal; a slice that gives each remaining value an ICBM-owned source is what
-can make a request sendable.
+plus the required ``smartstoreChannelProduct``, and this projection emits both. Every value of them
+is either a Snapshot value or an ICBM-owned first-vertical decision (architect resolution
+``5915900049`` D1, D2); anything else stays a named *gap* and is never guessed.
 ``windowChannelProduct`` is a separate Shopping Window channel structure, out of scope, and is
 **never emitted**.
 
@@ -45,8 +42,8 @@ document and nothing else.
 The value-level packet ``5868542027`` (``NAVER-P0-VALUES-CREATE-289``) closes two request facts and
 no more: CREATE accepts only ``SALE`` as ``originProduct.statusType`` (E2), which is therefore
 projected; and ``smartstoreChannelProduct.naverShoppingRegistration`` is a required JSON boolean
-(E1) — which closes its *type* only. Which boolean ICBM publishes with is an ICBM decision no
-Snapshot, policy or owner yet makes, so it is never guessed as ``false`` or ``true``.
+(E1) — which closes its *type* only. Which boolean ICBM publishes with is the ICBM decision of D2.1
+below.
 
 **The display status is owned** (architect resolution ``5915900049`` D1): the first vertical
 registers the SmartStore channel with ``channelProductDisplayStatusType = ON``, an ICBM publication
@@ -54,12 +51,26 @@ decision frozen with the Snapshot's projection and never derived from the provid
 It is projected as a constant, like ``SALE``, and it is what the read-back compares the published
 state against (``readback.expected_published_state``).
 
-The gaps that still hold: the ICBM-owned value source of the required
-``naverShoppingRegistration``; the registration ``originProduct.stockQuantity``, which the endpoint
-requires to be at least 1 (packet ``5862400626``) but no Snapshot or ICBM owner decides; the
-type-specific child of ``productInfoProvidedNotice``, whose field set is captured for no notice type
-at all; and, for an option listing, whether an option combination's
-price is absolute or a difference. Each is fail-closed, never a default.
+**The remaining CREATE values are owned** (architect resolution ``5915900049`` D2), each frozen
+with the Snapshot's projection and never derived from the provider or a session:
+
+* D2.1 — ``naverShoppingRegistration = true``: ICBM's publication intent. It asserts nothing about
+  the account; the official contract stores ``false`` for a non-advertiser, and no account
+  capability is inferred from it.
+* D2.2 — ``originProduct.stockQuantity = 1``: an ICBM registration seed, not a claim that the
+  supplier holds one unit. A Snapshot exists only for a unit whose final preflight is ``READY`` —
+  a sold-out source is ``BLOCKED`` by the M4 readiness it consumes — and the read-back compares the
+  seed exactly (``readback.compare``). No source quantity is fabricated.
+* D2.3 — the ``productInfoProvidedNotice`` child is selected from the reviewed
+  ``CategoryMetadata`` notice type through the pinned 2.90.0 table below (evidence packet
+  ``5916962285``), never by casing a string. Only the Snapshot's own reviewed values are projected;
+  the category rules decide which are required and which may be left to the product detail. A
+  notice type whose child is not captured stays a named *gap*, and never falls back to another
+  child.
+
+The gap that still holds for every Snapshot shape: for an option listing, whether an option
+combination's price is absolute or a difference. A single-Item listing whose notice type is
+captured and whose notice satisfies the child's documented members is **sendable**.
 
 Seller-controlled identities are deterministic and stable. The listing's provider management code
 is the ``smartstore-seller-management-code/v1`` projection of the listing identity (architect
@@ -75,15 +86,18 @@ exactly on read-back and on a later positive reconcile. An option unit's code st
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Final
 
 from app.stages.register.model import ListingShape
 from app.stages.register.sanitize import safe_provider_reference
 
 # v3: the document carries smartstoreChannelProduct with the owned display status (5915900049 D1).
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v3"
+# v4: the owned naverShoppingRegistration, registration stockQuantity and notice child (D2).
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v4"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -122,10 +136,13 @@ FIELD_OPTION_SELLER_CODE: Final = "sellerManagerCode"
 FIELD_NOTICE: Final = "productInfoProvidedNotice"
 FIELD_NOTICE_TYPE: Final = "productInfoProvidedNoticeType"
 # The channel structure's own required fields. Their wire values are captured — a JSON boolean
-# (E1) and the two display-status write values. The display status ICBM registers with is owned
-# (5915900049 D1): ON. The boolean's value still has no owner.
+# (E1) and the two display-status write values — and ICBM owns the value of each (5915900049 D1,
+# D2.1).
 FIELD_NAVER_SHOPPING_REGISTRATION: Final = "naverShoppingRegistration"
 NAVER_SHOPPING_REGISTRATION_VALUES: Final = (True, False)
+# D2.1: ICBM's publication intent, not an assertion that the account is a NAVER Shopping
+# advertiser (the provider stores false for a non-advertiser).
+REGISTRATION_NAVER_SHOPPING_REGISTRATION: Final = True
 FIELD_CHANNEL_DISPLAY_STATUS: Final = "channelProductDisplayStatusType"
 CHANNEL_DISPLAY_STATUS_WRITE_VALUES: Final = ("ON", "SUSPENSION")
 # The ICBM first-vertical publication decision (architect resolution 5915900049 D1): a registered
@@ -135,6 +152,9 @@ REGISTRATION_DISPLAY_STATUS: Final = "ON"
 # broader shared-schema values are update or read states, never a CREATE input.
 FIELD_STATUS_TYPE: Final = "statusType"
 CREATE_STATUS_TYPE: Final = "SALE"
+# D2.2: the registration seed, required on registration (at least 1, packet 5862400626). It is not
+# a supplier quantity, and it is compared exactly on read-back.
+REGISTRATION_STOCK_QUANTITY: Final = 1
 
 # The numbered option-name keys of the combination form.
 _GROUP_NAME_KEYS: Final = ("optionGroupName1", "optionGroupName2", "optionGroupName3")
@@ -142,26 +162,198 @@ _OPTION_NAME_KEYS: Final = ("optionName1", "optionName2", "optionName3")
 
 # The gaps the captured official evidence, or the absence of an ICBM-owned value, leaves open. Each
 # names the exact path it blocks; none is ever filled with a default, a guess or an ICBM preference.
-GAP_SHOPPING_REGISTRATION: Final = (
-    f"{FIELD_CHANNEL_PRODUCT}.{FIELD_NAVER_SHOPPING_REGISTRATION}: a required JSON boolean, but no"
-    " ICBM-owned value source or policy decides which one ICBM publishes with, so neither true nor"
-    " false may be sent"
-)
-GAP_REGISTRATION_STOCK_QUANTITY: Final = (
-    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_STOCK_QUANTITY}: required on registration (at least 1,"
-    " packet 5862400626), but no Snapshot or ICBM owner decides the registration stock quantity,"
-    " so no value may be sent"
-)
 GAP_NOTICE_TYPE_CHILD: Final = (
-    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_NOTICE}: the type-specific child and"
-    " its field set are captured for no productInfoProvidedNoticeType, so the required notice"
-    " cannot be projected from the reviewed metadata"
+    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_NOTICE}: required on registration, but"
+    " the reviewed notice type has no captured request child in the pinned 2.90.0 table, so no"
+    " notice is emitted and none is ever guessed or taken from another type"
 )
 GAP_OPTION_PRICE_SEMANTICS: Final = (
     f"{FIELD_OPTION_COMBINATIONS}[].price: whether an option combination price is absolute or a"
     " difference from salePrice is not captured, so neither the value nor the documented default"
     " may be relied on"
 )
+
+
+# ----------------------------------------------------- the product-information notice (D2.3)
+#
+# The pinned 2.90.0 contract of ``originProduct.detailAttribute.productInfoProvidedNotice``
+# (evidence packet 5916962285, ``원상품 정보 구조체``): a required ``productInfoProvidedNoticeType``
+# and exactly one sibling child object carrying that type's members.
+NOTICE_SCHEMA_REVISION: Final = "smartstore-notice-children/2.90.0-r1"
+
+# Every type → child member mapping the official schema states explicitly ("<TYPE>(…), <member>
+# 필드에 정보 입력"). The enum values LODGMENT_RESERVATION, TRAVEL_PACKAGE, AIRLINE_TICKET and
+# RENT_CAR carry no documented member and are absent, never derived from their names.
+NOTICE_TYPE_MEMBERS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "WEAR": "wear",
+        "SHOES": "shoes",
+        "BAG": "bag",
+        "FASHION_ITEMS": "fashionItems",
+        "SLEEPING_GEAR": "sleepingGear",
+        "FURNITURE": "furniture",
+        "IMAGE_APPLIANCES": "imageAppliances",
+        "HOME_APPLIANCES": "homeAppliances",
+        "SEASON_APPLIANCES": "seasonAppliances",
+        "OFFICE_APPLIANCES": "officeAppliances",
+        "OPTICS_APPLIANCES": "opticsAppliances",
+        "MICROELECTRONICS": "microElectronics",
+        "CELLPHONE": "cellPhone",
+        "NAVIGATION": "navigation",
+        "CAR_ARTICLES": "carArticles",
+        "MEDICAL_APPLIANCES": "medicalAppliances",
+        "KITCHEN_UTENSILS": "kitchenUtensils",
+        "COSMETIC": "cosmetic",
+        "JEWELLERY": "jewellery",
+        "FOOD": "food",
+        "GENERAL_FOOD": "generalFood",
+        "DIET_FOOD": "dietFood",
+        "KIDS": "kids",
+        "MUSICAL_INSTRUMENT": "musicalInstrument",
+        "SPORTS_EQUIPMENT": "sportsEquipment",
+        "BOOKS": "books",
+        "RENTAL_HA": "rentalHa",
+        "RENTAL_ETC": "rentalEtc",
+        "DIGITAL_CONTENTS": "digitalContents",
+        "GIFT_CARD": "giftCard",
+        "MOBILE_COUPON": "mobileCoupon",
+        "MOVIE_SHOW": "movieShow",
+        "ETC_SERVICE": "etcService",
+        "BIOCHEMISTRY": "biochemistry",
+        "BIOCIDAL": "biocidal",
+        "ETC": "etc",
+    }
+)
+
+
+@dataclass(frozen=True)
+class NoticeMember:
+    """One documented text member of a notice child.
+
+    ``required`` is the schema's own badge. ``detail_default`` marks the documented rule "미입력 시
+    상품상세 참조로 입력됩니다": leaving the member out is the provider's own default, so an omitted
+    one is never filled in. ``required_without`` is the documented "<other>를 입력하지 않은 경우에는
+    필수": the member is required when the named one is absent. ``year_month`` is the documented
+    ``'yyyy-MM'`` form, validated and never reformatted.
+    """
+
+    required: bool = False
+    max_length: int | None = None
+    detail_default: bool = False
+    required_without: str | None = None
+    year_month: bool = False
+
+
+# The five members every captured child repeats: required, with the documented detail default and
+# no documented length bound.
+_COMMON_NOTICE_MEMBERS: Final[Mapping[str, NoticeMember]] = MappingProxyType(
+    {
+        name: NoticeMember(required=True, detail_default=True)
+        for name in (
+            "returnCostReason",
+            "noRefundReason",
+            "qualityAssuranceStandard",
+            "compensationProcedure",
+            "troubleShootingContents",
+        )
+    }
+)
+
+
+def _child(**members: NoticeMember) -> Mapping[str, NoticeMember]:
+    return MappingProxyType({**_COMMON_NOTICE_MEMBERS, **members})
+
+
+_R200 = NoticeMember(required=True, max_length=200)
+_R1500 = NoticeMember(required=True, max_length=1500)
+_R50 = NoticeMember(required=True, max_length=50)
+
+# The captured text members of each child whose whole field set the packet records. A type absent
+# here is not sendable: its member names may be documented, its members are not captured.
+# GENERAL_FOOD is recorded but absent on purpose: its required members geneticallyModified and
+# importDeclarationCheck are JSON booleans, and the reviewed notice values are text, so no owned
+# typed value exists for them. KITCHEN_UTENSILS' optional boolean importDeclaration is likewise not
+# a text member, so it is never emitted.
+NOTICE_CHILDREN: Final[Mapping[str, Mapping[str, NoticeMember]]] = MappingProxyType(
+    {
+        "WEAR": _child(
+            material=_R1500,
+            color=_R200,
+            size=_R200,
+            manufacturer=_R200,
+            caution=_R1500,
+            packDate=NoticeMember(max_length=300, year_month=True),
+            packDateText=NoticeMember(max_length=300, required_without="packDate"),
+            warrantyPolicy=_R1500,
+            afterServiceDirector=_R200,
+        ),
+        "SHOES": _child(
+            material=_R1500,
+            color=_R200,
+            size=_R200,
+            height=NoticeMember(max_length=200),
+            manufacturer=_R200,
+            caution=_R1500,
+            warrantyPolicy=_R1500,
+            afterServiceDirector=_R200,
+        ),
+        "HOME_APPLIANCES": _child(
+            itemName=_R50,
+            modelName=_R50,
+            certificationType=_R200,
+            ratedVoltage=NoticeMember(max_length=200),
+            powerConsumption=NoticeMember(max_length=200),
+            energyEfficiencyRating=NoticeMember(max_length=200),
+            releaseDate=NoticeMember(max_length=300, year_month=True),
+            releaseDateText=NoticeMember(max_length=300, required_without="releaseDate"),
+            manufacturer=_R200,
+            size=_R200,
+            additionalCost=_R200,
+            warrantyPolicy=_R1500,
+            afterServiceDirector=_R200,
+        ),
+        "KITCHEN_UTENSILS": _child(
+            itemName=_R50,
+            modelName=_R50,
+            material=_R200,
+            component=NoticeMember(required=True, max_length=500),
+            size=_R200,
+            releaseDate=NoticeMember(max_length=300, year_month=True),
+            releaseDateText=NoticeMember(max_length=300, required_without="releaseDate"),
+            manufacturer=_R200,
+            producer=_R200,
+            warrantyPolicy=_R1500,
+            afterServiceDirector=_R200,
+        ),
+        "COSMETIC": _child(
+            capacity=_R200,
+            specification=_R1500,
+            expirationDate=NoticeMember(max_length=300, year_month=True),
+            expirationDateText=NoticeMember(max_length=300, required_without="expirationDate"),
+            usage=_R1500,
+            manufacturer=_R200,
+            producer=_R200,
+            distributor=_R200,
+            customizedDistributor=NoticeMember(max_length=200),
+            mainIngredient=_R1500,
+            certificationType=_R200,
+            caution=_R1500,
+            warrantyPolicy=_R1500,
+            customerServicePhoneNumber=NoticeMember(required=True, max_length=30),
+        ),
+        "ETC": _child(
+            itemName=_R50,
+            modelName=_R50,
+            certificateDetails=NoticeMember(max_length=500),
+            manufacturer=_R200,
+            afterServiceDirector=NoticeMember(max_length=200),
+            customerServicePhoneNumber=NoticeMember(
+                max_length=30, required_without="afterServiceDirector"
+            ),
+        ),
+    }
+)
+_YEAR_MONTH: Final = re.compile(r"\A[0-9]{4}-(0[1-9]|1[0-2])\Z")
 
 
 class WireContractError(ValueError):
@@ -217,12 +409,11 @@ class SellerCodes:
 # trust that what it encodes is this projection's output over an immutable Snapshot and nothing
 # else.
 #
-# ``smartstoreChannelProduct`` carries the one channel field ICBM owns, the display status
-# (5915900049 D1). Its other required field, ``naverShoppingRegistration``, has no owner yet, so it
-# may not appear and the document stays incomplete (``completeness_gaps``) — never sent half-built.
+# ``smartstoreChannelProduct`` carries exactly its two required members, each with the one value
+# ICBM owns (5915900049 D1, D2.1); no optional channel member is owned, so none may appear.
 # ``windowChannelProduct`` is out of scope and never appears.
 _DOCUMENT_KEYS: Final = frozenset({FIELD_ORIGIN_PRODUCT, FIELD_CHANNEL_PRODUCT})
-_CHANNEL_KEYS: Final = frozenset({FIELD_CHANNEL_DISPLAY_STATUS})
+_CHANNEL_KEYS: Final = frozenset({FIELD_CHANNEL_DISPLAY_STATUS, FIELD_NAVER_SHOPPING_REGISTRATION})
 _ORIGIN_KEYS: Final = frozenset(
     {
         FIELD_STATUS_TYPE,
@@ -230,13 +421,14 @@ _ORIGIN_KEYS: Final = frozenset(
         FIELD_DETAIL,
         FIELD_IMAGES,
         FIELD_SALE_PRICE,
+        FIELD_STOCK_QUANTITY,
         FIELD_LEAF_CATEGORY_ID,
         FIELD_DETAIL_ATTRIBUTE,
     }
 )
 _IMAGES_KEYS: Final = frozenset({FIELD_REPRESENTATIVE_IMAGE, FIELD_OPTIONAL_IMAGES})
 _IMAGE_KEYS: Final = frozenset({FIELD_URL})
-_DETAIL_ATTRIBUTE_KEYS: Final = frozenset({FIELD_SELLER_CODE_INFO, FIELD_OPTION_INFO})
+_DETAIL_ATTRIBUTE_KEYS: Final = frozenset({FIELD_SELLER_CODE_INFO, FIELD_OPTION_INFO, FIELD_NOTICE})
 _SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
 _OPTION_INFO_KEYS: Final = frozenset({FIELD_OPTION_GROUP_NAMES, FIELD_OPTION_COMBINATIONS})
 
@@ -335,6 +527,43 @@ def _validate_option_info(value: Any, path: str) -> None:
         raise WireContractError("WIRE_ITEM_CODES_NOT_DISTINCT", f"{row_path}: a code repeats")
 
 
+def _validate_notice(value: Any, path: str) -> None:
+    """The notice of the pinned 2.90.0 contract: a captured type, exactly its own child, and only
+    that child's documented text members within their documented bounds and forms, with every
+    member it requires present."""
+    notice = _object(value, path, frozenset({FIELD_NOTICE_TYPE, *NOTICE_TYPE_MEMBERS.values()}))
+    _required(notice, path, (FIELD_NOTICE_TYPE,))
+    notice_type = notice[FIELD_NOTICE_TYPE]
+    members = NOTICE_CHILDREN.get(notice_type) if isinstance(notice_type, str) else None
+    if members is None:
+        raise WireContractError(
+            "WIRE_NOTICE_TYPE_NOT_CAPTURED", f"{path}.{FIELD_NOTICE_TYPE} has no captured child"
+        )
+    child_key = NOTICE_TYPE_MEMBERS[notice_type]
+    if set(notice) != {FIELD_NOTICE_TYPE, child_key}:
+        # Exactly the child of this type: another type's child, or a second one, is never sent.
+        raise WireContractError("WIRE_NOTICE_CHILD_MISMATCH", f"{path} is not exactly {child_key}")
+    child_path = f"{path}.{child_key}"
+    child = _object(notice[child_key], child_path, frozenset(members))
+    for name, text in child.items():
+        member = members[name]
+        _string(text, f"{child_path}.{name}", limit=member.max_length)
+        if member.year_month and not _YEAR_MONTH.match(text):
+            raise WireContractError(
+                "WIRE_DOCUMENT_VALUE_INVALID", f"{child_path}.{name} is not yyyy-MM"
+            )
+    for name, member in members.items():
+        if name in child:
+            continue
+        if member.required and not member.detail_default:
+            raise WireContractError("WIRE_DOCUMENT_FIELD_MISSING", f"{child_path}.{name}")
+        if member.required_without is not None and member.required_without not in child:
+            raise WireContractError(
+                "WIRE_DOCUMENT_FIELD_MISSING",
+                f"{child_path}.{name} (required without {member.required_without})",
+            )
+
+
 def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     """Check one projected request body against the adopted CREATE request contract.
 
@@ -346,7 +575,13 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     document = _object(body, "document", _DOCUMENT_KEYS)
     _required(document, "document", (FIELD_ORIGIN_PRODUCT, FIELD_CHANNEL_PRODUCT))
     channel = _object(document[FIELD_CHANNEL_PRODUCT], FIELD_CHANNEL_PRODUCT, _CHANNEL_KEYS)
-    _required(channel, FIELD_CHANNEL_PRODUCT, (FIELD_CHANNEL_DISPLAY_STATUS,))
+    _required(channel, FIELD_CHANNEL_PRODUCT, sorted(_CHANNEL_KEYS))
+    if channel[FIELD_NAVER_SHOPPING_REGISTRATION] is not REGISTRATION_NAVER_SHOPPING_REGISTRATION:
+        # A JSON boolean (E1), and exactly the one ICBM publishes with (D2.1).
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{FIELD_CHANNEL_PRODUCT}.{FIELD_NAVER_SHOPPING_REGISTRATION} is not true",
+        )
     if channel[FIELD_CHANNEL_DISPLAY_STATUS] != REGISTRATION_DISPLAY_STATUS:
         # One of the two captured write values, and exactly the one ICBM registers with (D1).
         raise WireContractError(
@@ -368,6 +603,14 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     _bounded_int(
         origin[FIELD_SALE_PRICE], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_SALE_PRICE}", MAX_SALE_PRICE
     )
+    stock_path = f"{FIELD_ORIGIN_PRODUCT}.{FIELD_STOCK_QUANTITY}"
+    if _bounded_int(origin[FIELD_STOCK_QUANTITY], stock_path, MAX_STOCK_QUANTITY) != (
+        REGISTRATION_STOCK_QUANTITY
+    ):
+        # The registration seed and nothing else (D2.2): no source quantity is ever sent.
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID", f"{stock_path} is not {REGISTRATION_STOCK_QUANTITY}"
+        )
     _validate_images(origin[FIELD_IMAGES], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_IMAGES}")
     attribute_path = f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}"
     attribute = _object(origin[FIELD_DETAIL_ATTRIBUTE], attribute_path, _DETAIL_ATTRIBUTE_KEYS)
@@ -387,6 +630,8 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
         )
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
+    if FIELD_NOTICE in attribute:
+        _validate_notice(attribute[FIELD_NOTICE], f"{attribute_path}.{FIELD_NOTICE}")
 
 
 @dataclass(frozen=True)
@@ -463,9 +708,9 @@ def verified(document: object) -> CreateDocument:
 # The request parts the provider requires on registration, each with the named gap that stands while
 # it is absent from a document (packets 5861477977, 5861933729, 5862400626, 5868542027). They are
 # read from the document body itself, so completeness never depends on who built the document.
+# The schema itself requires the channel's two members and the registration stock quantity, so the
+# notice is the one required part a validated document can still lack.
 _REQUIRED_ON_REGISTRATION: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
-    ((FIELD_CHANNEL_PRODUCT, FIELD_NAVER_SHOPPING_REGISTRATION), GAP_SHOPPING_REGISTRATION),
-    ((FIELD_ORIGIN_PRODUCT, FIELD_STOCK_QUANTITY), GAP_REGISTRATION_STOCK_QUANTITY),
     ((FIELD_ORIGIN_PRODUCT, FIELD_DETAIL_ATTRIBUTE, FIELD_NOTICE), GAP_NOTICE_TYPE_CHILD),
 )
 
@@ -474,10 +719,9 @@ def completeness_gaps(document: CreateDocument) -> tuple[str, ...]:
     """The provider-required registration parts a validated document does not carry.
 
     Computed from the document body alone — never from a projection's or a caller's claim — so the
-    wire boundary can refuse an incomplete CREATE whoever built it. The adopted request schema
-    admits none of these parts yet, so every document has gaps and no CREATE can leave the
-    machine; a slice that gives one an ICBM owner is what can close it. (The display status has
-    one — 5915900049 D1 — and is part of every document.)
+    wire boundary can refuse an incomplete CREATE whoever built it. The channel members and the
+    registration stock quantity are owned (5915900049 D1, D2) and required by the schema itself;
+    the notice is absent from a document whose reviewed type has no captured child.
     """
     body = document.mapping()
     gaps: list[str] = []
@@ -506,8 +750,8 @@ class WireProjection:
     document: CreateDocument
     image_references: tuple[str, ...]
     gaps: tuple[str, ...]
-    # The reviewed notice the Snapshot owns, kept as evidence of what a projectable notice child
-    # would be filled from. It is never emitted while GAP_NOTICE_TYPE_CHILD stands.
+    # The reviewed notice the Snapshot owns. It is emitted as the child of its type when that type
+    # is captured (D2.3), and kept here either way as the evidence it was projected from.
     notice_type: str | None = None
     notice_fields: Mapping[str, str] = field(default_factory=dict)
 
@@ -657,8 +901,7 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
     left to the product detail, and that conditional fields are omitted when they do not apply.
 
     The provider requires a notice for registration, so a Snapshot that owns none is refused here.
-    Projecting it is a different question: no ``productInfoProvidedNoticeType`` child is captured,
-    so :data:`GAP_NOTICE_TYPE_CHILD` keeps the structure unemitted (and the request unsendable).
+    Projecting it is :func:`_notice_document`'s question.
     """
     notice = payload.get("notice")
     if not isinstance(notice, Mapping):
@@ -682,6 +925,22 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
     if not reviewed:
         raise WireContractError("WIRE_NOTICE_MISSING", "every notice field was left to the detail")
     return notice_type, reviewed
+
+
+def _notice_document(notice_type: str, fields: Mapping[str, str]) -> dict[str, Any] | None:
+    """The notice child of the reviewed type, or ``None`` when the type has no captured child.
+
+    The type is looked up in the pinned table exactly as reviewed — never cased, trimmed or
+    matched loosely — and only the child of that type is built, from the Snapshot's own reviewed
+    text values under their reviewed member names. A value the operator left to the product detail
+    is already out (:func:`_notice`): for the five members with the documented detail default that
+    *is* the documented behaviour, and for any other required member the document validation
+    refuses the request as incomplete rather than send it. Unknown members, values out of bound and
+    missing required members are all refused by :func:`create_document`.
+    """
+    if notice_type not in NOTICE_CHILDREN:
+        return None
+    return {FIELD_NOTICE_TYPE: notice_type, NOTICE_TYPE_MEMBERS[notice_type]: dict(fields)}
 
 
 def _option_dimensions(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
@@ -757,11 +1016,17 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     codes = seller_codes(payload)
     references = _image_references(items)
     notice_type, notice_fields = _notice(payload)
-    gaps: list[str] = [GAP_NOTICE_TYPE_CHILD]
+    gaps: list[str] = []
 
     detail_attribute: dict[str, Any] = {
         FIELD_SELLER_CODE_INFO: {FIELD_SELLER_MANAGEMENT_CODE: codes.seller_management_code},
     }
+    # D2.3: the child of the reviewed notice type, or a named gap — never another type's child.
+    notice = _notice_document(notice_type, notice_fields)
+    if notice is None:
+        gaps.append(GAP_NOTICE_TYPE_CHILD)
+    else:
+        detail_attribute[FIELD_NOTICE] = notice
     if len(items) > 1:
         dimensions = _option_dimensions(items)
         detail_attribute[FIELD_OPTION_INFO] = _option_info(items, codes.option_codes, dimensions)
@@ -773,21 +1038,18 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_DETAIL: _detail_content(payload),
         FIELD_IMAGES: _images(references),
         FIELD_SALE_PRICE: _sale_price(items),
+        # D2.2: the registration seed, never a source quantity.
+        FIELD_STOCK_QUANTITY: REGISTRATION_STOCK_QUANTITY,
         FIELD_LEAF_CATEGORY_ID: _leaf_category_id(payload),
         FIELD_DETAIL_ATTRIBUTE: detail_attribute,
     }
-    # smartstoreChannelProduct: the display status ICBM registers with is owned (5915900049 D1) and
-    # emitted. naverShoppingRegistration is a captured boolean (E1) whose value no ICBM owner
-    # decides yet, so it is not emitted and its gap keeps the projection unsendable; every
-    # optional field (channelProductName, bbsSeq, storeKeepExclusiveProduct) is unowned and never
-    # emitted. windowChannelProduct is out of scope and is never emitted.
-    channel_product: dict[str, Any] = {FIELD_CHANNEL_DISPLAY_STATUS: REGISTRATION_DISPLAY_STATUS}
-    gaps.append(GAP_SHOPPING_REGISTRATION)
-    # stockQuantity is required on registration (at least 1, packet 5862400626). The Snapshot owns
-    # no registration stock: stock is a source/OPERATE fact, and no ICBM decision turns it into the
-    # provider's registration quantity. It is not emitted, and the named gap keeps the request
-    # unsendable rather than sending a guessed quantity.
-    gaps.append(GAP_REGISTRATION_STOCK_QUANTITY)
+    # smartstoreChannelProduct: both required members carry the value ICBM owns (5915900049 D1,
+    # D2.1); every optional member (channelProductName, bbsSeq, storeKeepExclusiveProduct) is
+    # unowned and never emitted. windowChannelProduct is out of scope and is never emitted.
+    channel_product: dict[str, Any] = {
+        FIELD_CHANNEL_DISPLAY_STATUS: REGISTRATION_DISPLAY_STATUS,
+        FIELD_NAVER_SHOPPING_REGISTRATION: REGISTRATION_NAVER_SHOPPING_REGISTRATION,
+    }
     # Validated and frozen here, at the one place a request document is ever built: what leaves
     # this function is already checked against the adopted contract and can no longer change.
     document = create_document(

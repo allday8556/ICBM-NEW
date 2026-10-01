@@ -123,7 +123,7 @@ REQUIRED_CHECKS = {
         "boundary.declarations_name_their_own_gap",
         "boundary.provider_transport_unloadable",
         "boundary.real_wire_projection_refuses",
-        "boundary.value_packet_alone_leaves_create_unsendable",
+        "boundary.owned_values_never_complete_an_uncaptured_notice",
         "boundary.create_adopted_but_unreachable",
         "boundary.upload_adopted_but_unreachable",
         "boundary.search_adopted_for_positive_reconcile_only",
