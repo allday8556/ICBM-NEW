@@ -711,6 +711,9 @@ def build_container(
         adoption=SmartStoreAdoption(),
         stages=canary_stages,
         execution_mode=execution_mode.state().mode.value,
+        # ADR-0014 §28.5: the status panel shows the ICBM seller code the provider is sent.
+        clock=clock,
+        seller_code=smartstore_product.seller_management_code,
     )
     screens = ScreenService(
         clock=clock,

@@ -45,8 +45,10 @@ from app.platform.core.errors import InputValidationError
 from app.stages.register.sanitize import problems
 
 REPORT_VERSION: Final = "g3-visual-report/v1"
-HARNESS_VERSION: Final = "g3-visual-acceptance/v1"
-SCENARIO: Final = "g3-populated-first-vertical/v1"
+# v2: the global registration status card is measured beside `#content`, and the scenario holds
+# registration outcomes in all four ADR-0014 §28.5 read states.
+HARNESS_VERSION: Final = "g3-visual-acceptance/v2"
+SCENARIO: Final = "g3-populated-first-vertical/v2"
 DIGEST_FIELD: Final = "report_digest"
 
 # ADR-0018 §9's accepted viewport set: at least the two established sizes. More may be added.
@@ -94,6 +96,13 @@ REQUIRED_TARGETS: Final[tuple[Target, ...]] = (
             '[data-role="live-brake"][data-brake-state]',
             '[data-role="live-grants"] [data-grant-state]',
             '[data-role="live-proofs"] [data-proof]',
+            # ADR-0014 §28.5: the registration status card and its detail panel, in each of the
+            # four read states the scenario holds.
+            '#registrationStatus [data-read-state="RECHECK_REQUIRED"]',
+            '[data-role="register-status"] tr[data-intent] [data-read-state="REGISTERING"]',
+            '[data-role="register-status"] tr[data-intent] [data-read-state="REGISTERED"]',
+            '[data-role="register-status"] tr[data-intent] [data-read-state="RECHECK_REQUIRED"]',
+            '[data-role="register-status"] tr[data-intent] [data-read-state="FAILED"]',
         ),
     ),
     Target("dashboard", "dashboard", ('[data-role="dashboard-review"] tr[data-kind][data-state]',)),
@@ -121,6 +130,7 @@ STATE_SELECTORS: Final[tuple[str, ...]] = (
     "[data-proof]",
     "[data-missing]",
     "[data-coverage]",
+    "[data-read-state]",
     ".chip",
     ".note",
 )

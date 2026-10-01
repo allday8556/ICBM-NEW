@@ -48,7 +48,19 @@ POPULATED = """
 <div data-role="live-grants"><span data-grant-state="ACTIVE">ACTIVE</span></div>
 <ul data-role="live-proofs"><li data-proof="visual_acceptance_recorded">no</li></ul>
 <select><option data-account="a1" data-reason="">account</option></select>
+<section data-role="register-status"><table><tbody>
+<tr data-intent="i1"><td><span class="chip" data-read-state="REGISTERING">등록중</span></td></tr>
+<tr data-intent="i2"><td><span class="chip" data-read-state="REGISTERED">등록성공</span></td></tr>
+<tr data-intent="i3"><td><b class="chip" data-read-state="RECHECK_REQUIRED">re</b></td></tr>
+<tr data-intent="i4"><td><span class="chip" data-read-state="FAILED">등록실패</span></td></tr>
+</tbody></table></section>
 """
+# The global registration status card (ADR-0014 §28.5): outside #content, fixed at the lower right.
+CARD = (
+    "<aside id='registrationStatus' style='position:fixed;right:0;bottom:0;width:300px;"
+    "height:90px;background:#fff;z-index:10'>"
+    "<span class='chip' data-read-state='RECHECK_REQUIRED'>재확인필요 1</span></aside>"
+)
 DEFECTS = {
     "truncated": (
         '<div style="width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
@@ -69,6 +81,11 @@ DEFECTS = {
         '<span data-reason="Y" style="margin-left:600px">reason</span></div></div>',
         "no_horizontal_overflow",
     ),
+    "under_card": (
+        '<span class="chip" data-state="UNDER" style="position:fixed;right:20px;bottom:20px">'
+        "UNDER</span>",
+        "state_not_covered",
+    ),
     "sideways": (
         '<div style="width:3000px" data-state="WIDE">wide</div>',
         "no_horizontal_overflow",
@@ -82,7 +99,7 @@ def page_html(body: str, *, help_icons: int = 1) -> str:
         "<html><body style='margin:0'>"
         f"<nav id='nav'>{NAV}</nav>"
         f"<main><div id='content' data-page='register'><h1>register{icons}</h1>"
-        f"{POPULATED}{body}</div></main></body></html>"
+        f"{POPULATED}{body}</div></main>{CARD}</body></html>"
     )
 
 

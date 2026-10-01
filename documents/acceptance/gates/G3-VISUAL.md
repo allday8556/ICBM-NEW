@@ -66,7 +66,7 @@ passes.
 | --- | --- | --- |
 | `collect` | 수집관리 | recorded runs; the focused run's facts status |
 | `db` | 통합DB | the Product's members, its images fact, its review items |
-| `register` | 등록관리 | the unit, its candidate preflight, its §26 execution scope, its review items, the canary readiness, the protected-write brake, every grant with its ASSET readiness, the unit-independent proofs |
+| `register` | 등록관리 | the unit, its candidate preflight, its §26 execution scope, its review items, the canary readiness, the protected-write brake, every grant with its ASSET readiness, the unit-independent proofs; the ADR-0014 §28.5 registration status card (lower right, outside `#content`) with its 재확인필요 count, and its detail panel with a row in each read state — 등록중, 등록성공, 재확인필요, 등록실패 |
 | `dashboard` | 대시보드 | the review counts, with their state |
 | `soldout` | 품절 | the stock review count, with its state |
 | `settings-policy` | 설정 · 정책 | the account's target policy state |
@@ -90,8 +90,11 @@ passes.
 `[data-reason]`, `[data-state]`, `[data-review-state]`, `[data-requirement]`, `[data-scope-state]`,
 `[data-preflight]`, `[data-outcome]`, `[data-facts-status]`, `[data-policy-state]`,
 `[data-canary]`, `[data-capability]`, `[data-brake-state]`, `[data-grant-state]`, `[data-proof]`,
-`[data-missing]`, `[data-coverage]`, `.chip` and `.note`. A native `<option>` is judged by the
-`<select>` that shows it.
+`[data-missing]`, `[data-coverage]`, `[data-read-state]`, `.chip` and `.note`. A native `<option>`
+is judged by the `<select>` that shows it. The measured state is every such element inside
+`#content` and inside the global registration status card while it is shown; the card is fixed at
+the lower right, so its elements are judged for overlap among themselves, and anything it covers
+in the page fails `state_not_covered`.
 
 **What the whole run must show.**
 - No external request.
@@ -114,6 +117,8 @@ owners and routes into a fresh dedicated root:
 - the account's durable target policy and a reviewed category's metadata;
 - a Draft and its authored preparation, whose candidate preflight reports what the durable policy
   still lacks;
+- four frozen units in one registration batch, one in each ADR-0014 §28.5 read state (등록성공,
+  등록중, 재확인필요, 등록실패), which populate the registration status card and its detail panel;
 - the account's CREATE scope PAUSED for AUTH;
 - the protected-write brake ENGAGED;
 - an evidence-retention proof;
@@ -125,6 +130,10 @@ owners and routes into a fresh dedicated root:
 - `live_grants`: an ACTIVE and a REVOKED ASSET grant. Under a durable policy no candidate can be
   READY at this main, so the grant service would refuse them. Every readiness they show is still
   the server's own derivation, and it is `BLOCKED`.
+- `registration_outcomes`: the four units are frozen by the real Snapshot builder under the M5
+  harness's invented static policy (no unit is READY under the durable sources at this main), and
+  each CREATE outcome is recorded by the REGISTER store's own attempt and verification methods. No
+  provider is asked; every read state shown is the server's own partition of them.
 
 ## 4. Procedure for an accepted final-main run (immediately before LIVE)
 

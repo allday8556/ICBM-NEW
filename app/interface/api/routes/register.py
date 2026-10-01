@@ -29,6 +29,7 @@ from app.stages.register.contracts import (
     AuthoringMetadataView,
     PreparationView,
     RegisterOverview,
+    RegistrationStatusView,
     UnitView,
 )
 from app.stages.register.drafting import CreateDraftRequest, DraftCreatedView, DraftTargetsView
@@ -75,6 +76,13 @@ def _correlation() -> str:
 @router.get("/overview")
 def overview(container: ContainerDep) -> RegisterOverview:
     return container.register.overview()
+
+
+@router.get("/status")
+def registration_status(container: ContainerDep) -> RegistrationStatusView:
+    """The registration status card and its detail panel (ADR-0014 §28.5): every recent
+    Intent's read state from the one server-side partition, and the batches' derived counts."""
+    return container.register.registration_status()
 
 
 @router.get("/live")

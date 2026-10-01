@@ -10,8 +10,10 @@ owners and routes, exactly as production does, over a dedicated root the run own
   (G1-B);
 - **등록관리**: a Draft of the first Item, priced under that policy, and its authored preparation —
   its candidate preflight reports what the durable policy still lacks, so a REGISTER review item
-  exists; the account's CREATE execution scope PAUSED for AUTH (§26); the protected-write brake
-  ENGAGED; an evidence-retention proof;
+  exists; four more frozen units in one registration batch, one in each ADR-0014 §28.5 read state
+  (등록성공, 등록중, 재확인필요, 등록실패), so the status card and its detail panel are populated;
+  the account's CREATE execution scope PAUSED for AUTH (§26); the protected-write brake ENGAGED; an
+  evidence-retention proof;
 - **dashboard / 품절**: the review counts the producers derive from all of it.
 
 **Declared seams**, each written by its owner's own store and named in the report:
@@ -23,6 +25,11 @@ owners and routes, exactly as production does, over a dedicated root the run own
   so the rows are recorded directly by the LIVE owner's store. They are display state for this
   acceptance only; every readiness they show is still the server's own derivation, and it is
   BLOCKED.
+- ``registration_outcomes``: four units frozen by the real Snapshot builder under the M5 harness's
+  invented static target policy and category metadata (no unit is READY under the durable
+  production sources at this main), and each one's CREATE outcome recorded by the REGISTER store's
+  own attempt and verification methods. No provider was asked: the outcomes are display state for
+  this acceptance only, and every read state shown is the server's own partition of them.
 """
 
 import uuid
@@ -45,8 +52,11 @@ from app.stages.collect.facts import (
     ImageReference,
     ImageRole,
 )
+from app.stages.connect.marketplace.capability import RemoteOutcome
+from app.stages.register.builder import RegistrationSnapshotBuilder
 from app.stages.register.execution import CREATE_ENDPOINT_GROUP
 from app.stages.register.model import ListingShape, ScopePauseReason
+from app.stages.register.preflight import RegistrationPreflightService
 from automation.acceptance.common.synthetic import fields, png
 from automation.acceptance.m5.harness import synthetic
 
@@ -57,7 +67,7 @@ CLIENT: Final = {"X-ICBM-Client": "icbm-g3-visual"}
 TAXONOMY: Final = "g3-visual-taxonomy-1"
 CATEGORY: Final = "g3-visual-category-1"
 REVIEW_REF: Final = "5843380581"
-DECLARED_SEAMS: Final = ("connect_binding", "live_grants")
+DECLARED_SEAMS: Final = ("connect_binding", "live_grants", "registration_outcomes")
 
 
 @dataclass(frozen=True)
@@ -281,6 +291,78 @@ def _grants(container: Container, account: str, preparation_id: str) -> None:
     )
 
 
+def _outcomes(container: Container, account: str) -> None:
+    """The declared ``registration_outcomes`` seam: one frozen unit in each §28.5 read state."""
+    policies, metadata = synthetic.policy_sources(account)
+    preflight = RegistrationPreflightService(
+        registrations=container.registrations,
+        readiness=container.product_readiness,
+        pricing=container.pricing,
+        images=container.images,
+        capability=container.marketplace_capability,
+        metadata=metadata,
+        policies=policies,
+    )
+    builder = RegistrationSnapshotBuilder(
+        preflight=preflight, registrations=container.registrations
+    )
+    owners = _owners(container)
+    owners.preflight = preflight
+    frozen = []
+    for n in range(4):
+        ready = synthetic.ready_item(owners, product=f"g3-visual-outcome-{n}", sequence=10 + n)
+        draft_id = synthetic.draft(owners, account, [ready])
+        _req, final = synthetic.ready_final(owners, synthetic.request(owners, draft_id, [ready]))
+        frozen.append(builder.freeze(final, created_by=OPERATOR, correlation_id=CID))
+    store = container.registrations
+    with store.transaction() as unit:
+        batch = unit.create_batch(MARKET, account, created_by=OPERATOR, correlation_id=CID)
+        intents = [
+            unit.create_intent(
+                batch, snapshot.registration_snapshot_id, created_by=OPERATOR, correlation_id=CID
+            )
+            for snapshot in frozen
+        ]
+    registered, registering, recheck, failed = intents
+    outcomes = (
+        (registered, RemoteOutcome.APPLIED_PROVEN, None, None),
+        (registering, RemoteOutcome.APPLIED_PROVEN, None, None),
+        (recheck, RemoteOutcome.UNKNOWN, ErrorClass.TRANSIENT, "G3_VISUAL_RESPONSE_LOST"),
+        (failed, RemoteOutcome.NOT_APPLIED_PROVEN, ErrorClass.VALIDATION, "G3_VISUAL_REJECTED"),
+    )
+    for n, (intent, outcome, error_class, error_code) in enumerate(outcomes):
+        applied = outcome is RemoteOutcome.APPLIED_PROVEN
+        with store.transaction() as unit:
+            attempt = unit.start_attempt(
+                intent.intent_id,
+                sanitized_request={"listing": f"g3-visual-outcome-{n}"},
+                sanitizer_profile_version="m5-acceptance-sanitizer-1",
+                correlation_id=CID,
+            )
+            unit.finish_attempt(
+                attempt.attempt_id,
+                remote_outcome=outcome,
+                marketplace_product_id=f"99000000{n}" if applied else None,
+                response_status=200 if applied else None,
+                sanitized_response={"accepted": applied},
+                error_class=error_class,
+                error_code=error_code,
+                correlation_id=CID,
+            )
+    snapshot = frozen[0]
+    with store.transaction() as unit:
+        unit.confirm_registration(
+            registered.intent_id,
+            comparison_contract_version="g3-visual-comparison-1",
+            normalizer_version="g3-visual-normalizer-1",
+            sanitized_readback={"published_state": "SALE/ON"},
+            published_state="SALE/ON",
+            option_ids={item.registration_item_key: None for item in snapshot.items},
+            created_by=OPERATOR,
+            correlation_id=CID,
+        )
+
+
 def populate(container: Container, api: TestClient) -> Populated:
     """Write the whole scenario through the owners of the application ``api`` serves."""
     owners = _owners(container)
@@ -348,6 +430,7 @@ def populate(container: Container, api: TestClient) -> Populated:
         },
     )
     preparation_id = str(prepared["preparation_id"])
+    _outcomes(container, account)
     with container.registrations.transaction() as unit:
         unit.pause_scope(
             MARKET,
