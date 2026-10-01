@@ -80,6 +80,7 @@ REQUIRED_CHECKS = {
         "s6.batch_partial_is_derived",
     ),
     "7 proven absence keeps history and frees a fresh start": (
+        "s7.registration_published_state_proven",
         "s7.absence_needs_provider_evidence",
         "s7.history_preserved_after_proven_absence",
         "s7.fresh_unit_allowed_after_absence",
@@ -210,7 +211,6 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "READ_BACK",
         "RECONCILE_LOOKUP",
         "WIRE_PROJECTION",
-        "PUBLISHED_STATE",
         "ACCOUNT_BINDING",
         "LIVE_AUTHORITY",
     }
@@ -242,13 +242,10 @@ def test_the_report_states_what_the_run_declared_and_what_it_proved(accepted: Ac
         "endpoint_id": "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
         "endpoint_adopted": True,
     }
-    # A wire contract and a published state are gaps of their own, not endpoints.
+    # A wire contract is a gap of its own, not an endpoint. The published state is no longer
+    # declared: the adopted comparison proves SALE/ON (architect resolution 5915900049 D1).
     assert declared["WIRE_PROJECTION"]["reason"] == "WIRE_CONTRACT_UNPROVEN"
-    assert declared["PUBLISHED_STATE"] == {
-        "reason": "PUBLISHED_STATE_UNPROVEN",
-        "endpoint_id": None,
-        "endpoint_adopted": None,
-    }
+    assert "PUBLISHED_STATE" not in declared
     assert declared["ACCOUNT_BINDING"]["reason"] == "OFFLINE_SYNTHETIC_PROVIDER_RESPONSE"
     assert report["account_scope"]["synthetic_connect_binding"] is True
     adoption = report["endpoint_adoption"]

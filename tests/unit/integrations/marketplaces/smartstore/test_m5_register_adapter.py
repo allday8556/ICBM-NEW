@@ -138,8 +138,11 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v2"
+    assert projected.encoding_version == "smartstore-register-wire/v3"
     assert projected.document.mapping() == {
+        # The owned display status (architect resolution 5915900049 D1), and nothing else of the
+        # channel: naverShoppingRegistration has no owner yet.
+        "smartstoreChannelProduct": {"channelProductDisplayStatusType": "ON"},
         "originProduct": {
             # E2 (Issue #89 `5868542027`): on registration the CREATE endpoint accepts only SALE.
             "statusType": "SALE",
@@ -154,7 +157,7 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
             # category id the Snapshot froze, emitted verbatim.
             "leafCategoryId": "cat-1",
             "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
-        }
+        },
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
     # The reviewed notice the Snapshot owns is carried as evidence, never emitted: no notice type
@@ -168,7 +171,6 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
     assert set(projected.gaps) == {
         product.GAP_NOTICE_TYPE_CHILD,
         product.GAP_SHOPPING_REGISTRATION,
-        product.GAP_CHANNEL_DISPLAY_STATUS,
         product.GAP_REGISTRATION_STOCK_QUANTITY,
     }
 
@@ -207,7 +209,9 @@ def test_the_value_packet_alone_does_not_make_the_request_sendable() -> None:
     assert not any("statusType" in gap for gap in projected.gaps)
     assert not hasattr(product, "GAP_STATUS_TYPE")
     # The unrelated gaps are unchanged by the packet (F3).
-    assert product.GAP_CHANNEL_DISPLAY_STATUS in projected.gaps
+    # The display status is owned (5915900049 D1), so no display gap exists any more.
+    assert not hasattr(product, "GAP_CHANNEL_DISPLAY_STATUS")
+    assert not any("channelProductDisplayStatusType" in gap for gap in projected.gaps)
     assert product.GAP_REGISTRATION_STOCK_QUANTITY in projected.gaps
     assert product.GAP_NOTICE_TYPE_CHILD in projected.gaps
     items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
@@ -217,11 +221,15 @@ def test_the_value_packet_alone_does_not_make_the_request_sendable() -> None:
 
 
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
-    text = product.project(payload()).document.canonical_json
+    projected = product.project(payload()).document
+    text = projected.canonical_json
+    # The channel carries the one field ICBM owns, the display status (5915900049 D1), and nothing
+    # else of it.
+    assert projected.mapping()["smartstoreChannelProduct"] == {
+        "channelProductDisplayStatusType": "ON"
+    }
     for never in (
         "naverShoppingRegistration",
-        "channelProductDisplayStatusType",
-        "smartstoreChannelProduct",
         # A separate Shopping Window channel structure, out of the SmartStore-only scope.
         "windowChannelProduct",
         "productInfoProvidedNotice",
@@ -409,7 +417,7 @@ def _compare(**kwargs: Any) -> readback.Comparison:
 def test_an_exact_read_back_matches_the_snapshot() -> None:
     result = _compare()
     assert (result.verdict, result.reasons) == (readback.ReadbackVerdict.MATCH, ())
-    assert result.comparison_contract_version == "smartstore-readback-comparison/v2"
+    assert result.comparison_contract_version == "smartstore-readback-comparison/v3"
     assert result.normalizer_version == "smartstore-readback-normalizer/v2"
     # The read-back is compared against the projected provider code, exactly (R1).
     assert result.normalized["seller_management_code"] == SELLER_CODE
@@ -482,26 +490,45 @@ def test_a_value_outside_the_documented_enumerations_is_unreadable(sale: Any, di
     assert (listing.sale_status, listing.display_status) == (None, None)
 
 
-def test_no_published_state_is_stated_while_the_display_status_has_no_owner() -> None:
-    # The sale status ICBM registers is SALE; which display status it registers has no owner.
+def test_the_snapshot_expects_exactly_sale_and_on() -> None:
+    # The expectation is what the Snapshot's own CREATE projection writes: SALE, the only CREATE
+    # input, and ON, the owned display status (architect resolution 5915900049 D1).
     expected = readback.expected_published_state(payload())
     assert (expected.sale_status, expected.display_status, expected.complete) == (
         "SALE",
-        None,
-        False,
+        "ON",
+        True,
     )
     assert readback.reads_published_state() is True
-    assert readback.proves_published_state() is False
-    # Both halves read back, everything else matching: still no published state is stated, so
-    # the execution owner refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
-    for display in ("ON", "SUSPENSION", "WAIT"):
-        result = _compare_origin(display=display)
-        assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
-        assert "published_state" not in result.normalized
-        assert (result.normalized["sale_status"], result.normalized["display_status"]) == (
-            "SALE",
-            display,
-        )
+    assert readback.proves_published_state() is True
+    # A Snapshot that cannot be projected expects nothing, so nothing can be proven for it.
+    broken = readback.expected_published_state({"items": []})
+    assert (broken.sale_status, broken.display_status, broken.complete) == (None, None, False)
+
+
+def test_sale_on_read_back_proves_the_published_state() -> None:
+    result = _compare_origin()
+    assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
+    assert result.normalized["published_state"] == "SALE/ON"
+
+
+@pytest.mark.parametrize("display", ["SUSPENSION", "WAIT"])
+def test_another_display_status_is_a_mismatch_and_proves_nothing(display: str) -> None:
+    result = _compare_origin(display=display)
+    assert result.verdict is readback.ReadbackVerdict.MISMATCH
+    assert result.reasons == ("DISPLAY_STATUS_MISMATCH",)
+    assert "published_state" not in result.normalized
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [{"sale": None}, {"display": None}, {"sale": None, "display": None}, {"display": "DISPLAYED"}],
+    ids=["no-sale", "no-display", "neither", "unreadable-display"],
+)
+def test_a_missing_or_unreadable_half_proves_nothing(missing: dict[str, Any]) -> None:
+    result = _compare_origin(**missing)
+    assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
+    assert "published_state" not in result.normalized
 
 
 @pytest.mark.parametrize("sale", ["OUTOFSTOCK", "WAIT", "SUSPENSION", "PROHIBITION", "DELETE"])

@@ -131,55 +131,24 @@ class DeclaredProjector:
 
 
 @dataclass
-class DeclaredComparison:
-    """PR-D's own comparison, with the one field its contract does not prove declared."""
+class CountingComparator:
+    """PR-D's own read-back comparison, run for real and counted.
 
-    inner: Any
-    published_state: str
-
-    @property
-    def verdict(self) -> Any:
-        return self.inner.verdict
-
-    def __getattr__(self, name: str) -> Any:
-        # Everything else — the contract and normalizer versions, the reasons — is PR-D's own.
-        return getattr(self.inner, name)
-
-    def canonical(self) -> dict[str, Any]:
-        evidence = dict(self.inner.canonical())
-        normalized = dict(evidence.get("normalized") or {})
-        normalized.setdefault("published_state", self.published_state)
-        evidence["normalized"] = normalized
-        return evidence
-
-
-@dataclass
-class DeclaredComparator:
-    """The read-back comparison, run for real, with a declared published state.
-
-    The adopted read-back contract proves no published state (PR-D), so the execution owner
-    refuses to confirm a registration rather than invent one. A run that must reach CONFIRMED
-    therefore declares that one field and lets **PR-D's real normalizer and comparison** decide
-    everything else — the verdict, the per-Item correspondence and the subset rule are not faked.
+    Nothing of it is declared: the verdict, the per-Item correspondence, the subset rule and the
+    published state are all the adopted comparison's own. The published state is proven against
+    the Snapshot's own projection, SALE/ON (architect resolution 5915900049 D1), so a run reaches
+    CONFIRMED only when the synthetic read-back carries exactly that.
     """
 
     inner: Any
-    published_state: str = "DECLARED_ON_SALE"
     calls: int = 0
 
-    def compare(
-        self, snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]
-    ) -> DeclaredComparison:
+    def compare(self, snapshot_payload: Mapping[str, Any], retained: Mapping[str, Any]) -> Any:
         self.calls += 1
-        return DeclaredComparison(
-            self.inner.compare(snapshot_payload, retained), self.published_state
-        )
+        return self.inner.compare(snapshot_payload, retained)
 
     def proves_published_state(self) -> bool:
-        """This seam declares the field, so within this run it is carried. It is a declaration,
-        never a proof about the adopted contract: `PUBLISHED_STATE` stays a declared seam and the
-        canary plan reads the production answer instead (`harness.canary`)."""
-        return True
+        return bool(self.inner.proves_published_state())
 
 
 def _complete_zero() -> dict[str, Any]:
