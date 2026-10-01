@@ -214,23 +214,41 @@ def test_the_cut_drops_every_excluded_region_tag_and_attribute(
         assert excluded not in html, excluded
 
 
-def test_a_member_region_inside_the_scope_never_leaves_the_browser(
+def test_the_member_benefit_box_never_leaves_the_browser(
     browser: Browser, policy: dict[str, Any], fixture_html: str
 ) -> None:
     # The first real KM통상 attempts (EXTENSION-E1.md §5.1) were refused by the server's final
-    # gate for a ``p.member`` inside the product scope: a private region by the capture owner's
-    # rule. Policy kmretail-capture-2 cuts it in the browser, with whatever it holds, so it is
-    # never sent; the server's gate is unchanged and still refuses one that arrives.
-    member = '<p class="member"><img src="/web/upload/grade icon.gif"> 합성 등급 안내</p>'
+    # gate for a ``p.member`` and an image inside the product scope: the signed-in member's
+    # benefit box (the member's name and grade, beside a profile image). Policy
+    # kmretail-capture-2 cuts that box, with everything it holds, in the browser.
+    benefit = (
+        '<div class="xans-element- xans-myshop xans-myshop-asyncbenefit">'
+        '<p><img src=""></p><div><p class="member">합성회원 님은 [합성등급] 회원이십니다.</p>'
+        "</div></div>"
+    )
     anchor = '<div class="xans-element- xans-product xans-product-action">'
     assert fixture_html.count(anchor) == 1
-    page_html = fixture_html.replace(anchor, member + anchor)
-    html = _cut(browser, page_html, policy)["html"]
-    for gone in ('class="member"', "grade icon", "합성 등급 안내"):
+    html = _cut(browser, fixture_html.replace(anchor, benefit + anchor), policy)["html"]
+    for gone in ("asyncbenefit", 'class="member"', "합성회원 님은", 'src=""'):
         assert gone not in html, gone
     assert _server_final_scan(html) == ()
-    arrived = html.replace("</body>", member + "</body>")
-    assert "SANITIZER_EXCLUDED:PRIVATE@p#.member" in _server_final_scan(arrived)
+
+
+def test_a_member_named_element_outside_the_box_is_refused_never_dropped(
+    browser: Browser, policy: dict[str, Any], fixture_html: str
+) -> None:
+    # Only the benefit box is cut. Any other element whose class or id names a member — a
+    # supplier may mark a member price that way — is not cut silently: it is sent, and the
+    # server's gate refuses the run and names it, so a price is never lost unnoticed. The words
+    # "회원가" in a page's text are no finding at all.
+    anchor = '<div class="xans-element- xans-product xans-product-action">'
+    labelled = '<table><tr><th scope="row">회원가</th><td>10,000원</td></tr></table>'
+    html = _cut(browser, fixture_html.replace(anchor, labelled + anchor), policy)["html"]
+    assert "회원가" in html and _server_final_scan(html) == ()
+    named = '<p class="member_price">10,000원</p>'
+    html = _cut(browser, fixture_html.replace(anchor, named + anchor), policy)["html"]
+    assert 'class="member_price"' in html
+    assert _server_final_scan(html) == ("SANITIZER_EXCLUDED:PRIVATE@p#.member_price",)
 
 
 def test_the_cut_never_modifies_the_page(

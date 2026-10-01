@@ -11,7 +11,7 @@
     {"by": "class", "token": "xans-product-review"},
     {"by": "class", "token": "xans-product-qna"},
     {"by": "class", "token": "xans-product-relation"},
-    {"by": "class", "token": "member"}
+    {"by": "class", "token": "xans-myshop-asyncbenefit"}
   ],
   "excluded_tags": [
     "script",

@@ -151,14 +151,20 @@ with the job by design. So the run cannot say which kind of private or secret ma
 PR #175 made the failure log carry the gate's findings and the policy violations, as kinds and
 boundaries only (`collect.extension_failed`), and `e1-km-349-01` was run on that main.
 
-`e1-km-349-01` named two findings. A `<p class="member">` sits inside the KM product scope, and the
-capture owner classifies a `member` region as private. The KM extractor reads labelled table rows
-(`판매가`, `최저판매가`, …), not that element. So capture policy `kmretail-capture-2` adds `member` to
-the excluded regions: the browser cuts it, with whatever it holds, before anything is sent. The
-server's gate is unchanged and still refuses one that arrives. The image finding had no id or class
-and may sit inside that element; its kind is now named by shape (`NOT_A_LOCATOR_EMPTY`,
-`_WHITESPACE`, `_CHARACTER`, `_UNPARSEABLE`, `_NO_PATH`, `_SRCSET`) so that a further refusal says
-which. Both clicks of the first grant are consumed. The user then granted one more acceptance of
+`e1-km-349-01` named two findings. The user identified the element on the page: the signed-in
+member's benefit box inside the product scope, which shows the member's name and grade
+(`<p class="member">`) beside a profile image. The capture owner rightly classifies it as private.
+Capture policy `kmretail-capture-2` adds that box, Cafe24's `xans-myshop-asyncbenefit` module, to the
+excluded regions: the browser cuts it, with everything it holds, before anything is sent.
+
+Only that box is cut. The private-region rule reads class and id names, never the page's words: a
+`회원가` label is no finding. But an element elsewhere whose class or id begins with `member` (a
+supplier might mark a member price that way) is not cut silently. It is sent, the gate refuses the
+run and names it, so a price is never lost unnoticed. The server's gate is unchanged.
+
+The image finding had no id or class and is most likely the box's profile image. Its kind is now
+named by shape (`NOT_A_LOCATOR_EMPTY`, `_WHITESPACE`, `_CHARACTER`, `_UNPARSEABLE`, `_NO_PATH`,
+`_SRCSET`) so that a further refusal says which. Both clicks of the first grant are consumed. The user then granted one more acceptance of
 product 349 (one page, one click), to run on the main that carries `kmretail-capture-2`.
 
 ## 6. Incident during implementation: two unintended requests to the supplier host

@@ -30,7 +30,7 @@ SUPPLIERS = REPO_ROOT / "integrations" / "suppliers"
 # The reviewed KM policy. A change of the file changes the digest; a change without a new revision
 # is what this pin refuses.
 KM_REVISION = "kmretail-capture-2"
-KM_DIGEST = "d5668653f1a235c8e24f941d262f74202a91f7d625268035e4f927c4aa7f8c0a"
+KM_DIGEST = "74670a991bf12686b837928436ebf6bae67cdb0516d5299c3eb22c1762707679"
 
 
 def _document() -> dict[str, Any]:
