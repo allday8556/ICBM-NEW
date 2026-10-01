@@ -1,8 +1,8 @@
 # Extension capture transport E1 — one click, compare only
 
-- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). The first two
-  granted attempts failed closed at the final gate (§5.1); a third is granted. A green PR, a
-  green CI or a synthetic test run accepts nothing. The
+- Status: **PENDING — implemented; the real KM통상 acceptance has not passed** (§5). Three granted
+  attempts failed closed at the final gate (§5.1). A green PR, a green CI or a synthetic test run
+  accepts nothing. The
   implementation and its tests are provider-zero as corrected; the implementation **history** is
   not: two unauthorized requests reached the supplier host while it was written (§6).
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
@@ -144,6 +144,7 @@ the bounds and the per-run data roots are in
 | --- | --- | --- | --- |
 | `e1-km-286-01` | `66737efe-365b-4a5f-9f1e-faceab04afd8` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | the capture was accepted (13 481 bytes, 242 nodes, 25 image references) and the final gate refused it; zero write held (one run, one job, one attempt, one dead-letter audit event, nothing else) |
 | `e1-km-349-01` | `2cc9b341-9bcc-4d33-b52d-51654238d5fe` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `e07c3f2f` (PR #175); accepted (12 862 bytes, 229 nodes, 17 image references); findings `IMAGE_REFERENCE_NOT_A_LOCATOR:src@img#.` and `SANITIZER_EXCLUDED:PRIVATE@p#.member`; zero write held as above |
+| `e1-km-349-02` | `080145a9-23be-4e89-8392-4b276b8b11c6` | `FAILED` / `EXTENSION_FINAL_SCAN_REFUSED` | on main `25aac655` (PR #176, policy `kmretail-capture-2`); accepted (10 974 bytes, 194 nodes, 16 image references): the benefit box was cut; one finding `IMAGE_REFERENCE_NOT_A_LOCATOR_EMPTY:src@img#.`; zero write held as above |
 
 The refusal of `e1-km-286-01` is not an acceptance and not a defect of the gate: it failed closed as
 §4 requires. Its findings were not recorded: the job kept only their count, and the capture is gone
@@ -162,10 +163,13 @@ Only that box is cut. The private-region rule reads class and id names, never th
 supplier might mark a member price that way) is not cut silently. It is sent, the gate refuses the
 run and names it, so a price is never lost unnoticed. The server's gate is unchanged.
 
-The image finding had no id or class and is most likely the box's profile image. Its kind is now
-named by shape (`NOT_A_LOCATOR_EMPTY`, `_WHITESPACE`, `_CHARACTER`, `_UNPARSEABLE`, `_NO_PATH`,
-`_SRCSET`) so that a further refusal says which. Both clicks of the first grant are consumed. The user then granted one more acceptance of
-product 349 (one page, one click), to run on the main that carries `kmretail-capture-2`.
+PR #176 also made an image finding name its shape. `e1-km-349-02`, granted by the user for one more
+click on that main, confirmed the cut and left one finding: an `<img>` whose `src` is empty. That
+was a defect of the gate, not of the page. The supplier's image owner
+(`integrations/suppliers/kmretail/collect/images.py`) reads an empty value as no reference, and a
+Cafe24 lazy-load image leaves `src` empty and names its image in `ec-data-src`. The gate refused the
+same input. The gate now reads an empty value or `srcset` entry exactly as the image owner does: it
+names no image, so it is no reference. All three granted clicks are consumed.
 
 ## 6. Incident during implementation: two unintended requests to the supplier host
 
