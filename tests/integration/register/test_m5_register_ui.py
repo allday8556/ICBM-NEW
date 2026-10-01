@@ -381,3 +381,44 @@ def test_the_page_keeps_no_registration_state_of_its_own(
             "() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])"
         )
         assert json.loads(stored) == [[], []]
+
+
+def test_the_status_card_and_panel_show_the_servers_read_state_only(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    """ADR-0014 §28.5: the lower-right card and its detail panel render the server's partition.
+    An unknown outcome is 재확인필요 — amber, never red and never 등록실패 — and the card keeps it
+    visible; the only action offered is the read-only 등록확인 재시도."""
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(
+        container, prep, sender=FakeSender(outcome=RemoteOutcome.UNKNOWN, product_id=None)
+    )
+    with pytest.raises(AppError):
+        run.service.run(context(ready))
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        card = page.locator("#registrationStatus")
+        card.locator("[data-read-state='RECHECK_REQUIRED']").wait_for(timeout=10_000)
+        assert card.is_visible()
+        chip = card.locator("[data-read-state='RECHECK_REQUIRED']")
+        assert chip.inner_text().strip() == "재확인필요 1"
+        assert "bad" not in (chip.get_attribute("class") or "")
+        assert "등록실패" not in card.inner_text()
+        row = page.locator(f"[data-role='register-status'] tr[data-intent='{ready.intent_id}']")
+        assert (
+            row.locator("[data-read-state='RECHECK_REQUIRED']").inner_text().strip() == "재확인필요"
+        )
+        assert "등록실패" not in row.inner_text()
+        button = row.locator("button[data-action='RECONCILE']")
+        assert button.inner_text().strip() == "등록확인 재시도"
+        assert not row.locator("button[data-action='CREATE_ENQUEUE']").count()
+        # The card opens the detail panel on the register screen.
+        card.locator("button[data-action='open-registration-status']").click()
+        page.wait_for_function("location.hash.includes('status=open')")
+        page.wait_for_selector("[data-role='register-status']", timeout=10_000)
+        assert writes == []

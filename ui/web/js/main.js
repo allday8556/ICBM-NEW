@@ -9,6 +9,7 @@ import { closeModal } from './core/modal.js';
 import { setMarketplaces } from './core/platform.js';
 import { DEFAULT_PAGE, navigate, parseRoute } from './core/router.js';
 import { toast } from './core/toast.js';
+import { refreshRegistrationStatus } from './components/registration-status.js';
 import { errorState } from './components/states.js';
 import { PAGE_BY_KEY, PAGES } from './pages/index.js';
 
@@ -70,6 +71,8 @@ async function show(route) {
   content.removeAttribute('aria-busy');
   content.dataset.page = page.key;
   window.scrollTo(0, 0);
+  // The registration status card is global: every navigation re-reads the server's partition.
+  refreshRegistrationStatus();
 }
 
 async function boot() {

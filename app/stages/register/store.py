@@ -296,6 +296,10 @@ class AttemptRecord:
     error_code: str | None = None
     # When the attempt opened: what windows an execution policy against a scope reset (PR-E).
     started_at: datetime | None = None
+    # When it finished, and when an evidence-backed resolution was recorded: the anchors of the
+    # §28.5 verification deadline. Read only; never a second truth.
+    finished_at: datetime | None = None
+    resolved_at: datetime | None = None
 
     @property
     def outcome(self) -> RemoteOutcome | None:
@@ -519,6 +523,10 @@ class RegistrationStore:
     def batch_summary(self, registration_batch_id: str) -> BatchSummary:
         with self.reading() as unit:
             return unit.batch_summary(registration_batch_id)
+
+    def batch_intents(self, registration_batch_id: str) -> tuple[IntentRecord, ...]:
+        with self.reading() as unit:
+            return unit.batch_intents(registration_batch_id)
 
     def conflicting_intents(self, registration_snapshot_id: str) -> tuple[str, ...]:
         with self.reading() as unit:
@@ -1774,6 +1782,15 @@ class RegistrationUnit:
         row = self.session.get(RegistrationIntent, intent_id)
         return None if row is None else _intent_record(row)
 
+    def batch_intents(self, registration_batch_id: str) -> tuple[IntentRecord, ...]:
+        """Every Intent of one registration batch: what its derived counters count (§28.5)."""
+        rows = self.session.scalars(
+            select(RegistrationIntent)
+            .where(RegistrationIntent.registration_batch_id == registration_batch_id)
+            .order_by(RegistrationIntent.created_at, RegistrationIntent.intent_id)
+        ).all()
+        return tuple(_intent_record(row) for row in rows)
+
     def batch_summary(self, registration_batch_id: str) -> BatchSummary:
         """Derived from the batch's Intents; nothing about it is stored (§12)."""
         states = self.session.scalars(
@@ -3016,6 +3033,8 @@ def _attempt_record(row: RegistrationAttempt) -> AttemptRecord:
         error_class=None if row.error_class is None else ErrorClass(row.error_class),
         error_code=row.error_code,
         started_at=row.started_at,
+        finished_at=row.finished_at,
+        resolved_at=row.resolved_at,
     )
 
 

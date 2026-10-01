@@ -3,6 +3,10 @@
 // attributes only, never by their text.
 ([stateSelectors, populatedSelectors, screen]) => {
   const content = document.querySelector('#content');
+  // The global registration status card (ADR-0014 §28.5) sits beside #content, fixed at the lower
+  // right; while it is shown its server-owned state is judged too, and it may cover nothing.
+  const card = document.querySelector('#registrationStatus:not([hidden])');
+  const roots = [content, card].filter(Boolean);
   const describe = (el) => {
     const parts = [el.tagName.toLowerCase()];
     if (el.classList.length) parts.push('.' + el.classList[0]);
@@ -55,7 +59,8 @@
     return null;
   };
   const selector = stateSelectors.join(',');
-  const elements = content ? [...new Set(content.querySelectorAll(selector))] : [];
+  const elements = [...new Set(roots.flatMap((root) => [...root.querySelectorAll(selector)]))];
+  const rootOf = (el) => (card && card.contains(el) ? card : content);
   // A native <option> never has a layout box of its own: the <select> that shows it is judged.
   const subjects = elements.map((el) => (el.tagName === 'OPTION' ? el.closest('select') || el : el));
   const states = subjects.map((el, index) => {
@@ -87,6 +92,8 @@
       const [a, sa] = visible[i];
       const [b, sb] = visible[j];
       if (a.contains(b) || b.contains(a)) continue;
+      // A fixed card and the scrolled page are judged by elementFromPoint, never by page boxes.
+      if (rootOf(a) !== rootOf(b)) continue;
       const w = Math.min(sa.box[2], sb.box[2]) - Math.max(sa.box[0], sb.box[0]);
       const h = Math.min(sa.box[3], sb.box[3]) - Math.max(sa.box[1], sb.box[1]);
       if (w > 1 && h > 1) overlaps.push(`${sa.at} ~ ${sb.at}`);
@@ -98,7 +105,9 @@
   const nav = [...document.querySelectorAll('#nav .nav-item')];
   const active = document.querySelector("#nav .nav-item[aria-current='page']");
   const populated = {};
-  for (const sel of populatedSelectors) populated[sel] = content ? content.querySelectorAll(sel).length : 0;
+  for (const sel of populatedSelectors) {
+    populated[sel] = roots.reduce((total, root) => total + root.querySelectorAll(sel).length, 0);
+  }
   return {
     rendered: Boolean(content) && content.dataset.page === screen && !content.hasAttribute('aria-busy'),
     populated,

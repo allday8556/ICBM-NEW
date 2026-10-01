@@ -19,6 +19,7 @@ import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 import { KIND_LABEL } from '../components/review-counts.js';
+import { READ_STATE_TONE } from '../components/registration-status.js';
 
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
@@ -29,6 +30,9 @@ const HELP =
   '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
 const CANARY_HELP =
   '실제 마켓 쓰기는 별도 승인이 필요한 제한 캠페인입니다. 이 영역은 준비 상태만 보여주며 아무 것도 승인하지 않습니다.';
+
+const STATUS_HELP =
+  '등록 상태는 서버가 한 가지 기준으로 판정한 등록중 · 등록성공 · 재확인필요 · 등록실패입니다. 결과를 모르는 등록은 실패로 표시하지 않고, 다시 보내지 않은 채 등록 여부를 확인합니다.';
 
 const LIVE_HELP =
   '보호 쓰기 브레이크와 실행 권한(grant)은 서버가 가진 상태 그대로입니다. 준비도는 서버가 계산한 결과이며, 이 화면에서 아무 것도 승인하거나 기록하지 않습니다.';
@@ -48,8 +52,6 @@ const INTENT_LABEL = {
   UNKNOWN: '결과 미확인',
   FAILED: '전송 실패',
 };
-
-const INTENT_TONE = { CONFIRMED: 'good', UNKNOWN: 'warn', FAILED: 'bad' };
 
 const VERIFICATION_LABEL = {
   NOT_VERIFIED: '읽기 확인 전',
@@ -79,7 +81,7 @@ const ACTION_LABEL = {
   EVALUATE: 'Preflight 평가',
   FREEZE: '스냅샷 고정',
   CREATE_ENQUEUE: '등록 전송',
-  RECONCILE: '결과 대조',
+  RECONCILE: '등록확인 재시도',
   VERIFY: '읽기 확인',
   RESUME_SCOPE: '전송 재개',
 };
@@ -88,6 +90,18 @@ const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
+  REGISTER_READ_QUEUED: '전송 작업이 대기 중입니다.',
+  REGISTER_READ_SENDABLE: '전송할 수 있는 상태입니다.',
+  REGISTER_READ_SEND_IN_FLIGHT: '전송이 진행 중입니다.',
+  REGISTER_READ_AWAITING_VERIFICATION: '마켓 반영이 확인되어 읽기 확인을 기다리고 있습니다.',
+  REGISTER_READ_RETRY_SCHEDULED: '자동 재시도가 예약되어 있습니다.',
+  REGISTER_READ_VERIFIED: '읽기 확인이 스냅샷과 일치했습니다.',
+  REGISTER_READ_OUTCOME_UNKNOWN: '전송 결과를 확인하지 못했습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
+  REGISTER_READ_READBACK_MISMATCH: '마켓에 반영된 내용이 스냅샷과 다릅니다.',
+  REGISTER_READ_VERIFICATION_OVERDUE: '반영 후 읽기 확인이 기한 안에 끝나지 않았습니다.',
+  REGISTER_READ_NOT_APPLIED: '마켓에 반영되지 않은 것이 확인되었습니다.',
+  REGISTER_READ_PRE_SEND_FAILED: '전송 전에 거부되어 아무 것도 보내지 않았습니다.',
+  REGISTER_READ_STATE_UNCLASSIFIED: '서버가 이 등록 상태를 분류하지 못했습니다. 결함으로 기록되었습니다.',
   REGISTER_INTENT_ABSENT: '아직 등록 요청이 만들어지지 않았습니다.',
   REGISTER_INTENT_NOT_SENDABLE: '지금 상태에서는 서버가 전송을 허용하지 않습니다.',
   REGISTER_JOB_ALREADY_QUEUED: '이미 대기 중인 전송 작업이 있습니다.',
@@ -557,6 +571,93 @@ function call(unit, action, intentId) {
   return sendJson('POST', `/api/v1/register/intents/${intentId}/${path}`, {});
 }
 
+// ADR-0014 §28.5: the server's read state, as it labelled it. Only 등록실패 is red.
+function readStateChip(read, problem) {
+  if (!read) {
+    return h('span', { class: 'chip bad', 'data-reason': problem ?? 'REGISTER_READ_STATE_UNCLASSIFIED' }, '분류 오류');
+  }
+  return h('span', { class: `chip ${READ_STATE_TONE[read.state] ?? ''}`.trim(), 'data-read-state': read.state }, read.label);
+}
+
+async function runStatus(entry, action, button, onDone) {
+  button.disabled = true;
+  try {
+    await call({}, action, entry.intent_id);
+    toast(`${ACTION_LABEL[action] ?? action} 완료`);
+    onDone();
+  } catch (error) {
+    const code = error instanceof ApiError ? error.error?.code : null;
+    toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+    button.disabled = false;
+  }
+}
+
+function statusRow(entry, onDone) {
+  const read = entry.read_state;
+  const action = read?.action ?? null;
+  const button = action
+    ? h(
+        'button',
+        {
+          type: 'button',
+          class: read.action_enabled ? 'btn blue' : 'btn',
+          disabled: !read.action_enabled,
+          'data-action': action,
+          'data-intent': entry.intent_id,
+          onclick: () => runStatus(entry, action, button, onDone),
+        },
+        ACTION_LABEL[action] ?? action,
+      )
+    : null;
+  return h(
+    'tr',
+    { 'data-intent': entry.intent_id, 'data-read-row': read?.state ?? 'UNCLASSIFIED' },
+    h('td', {}, entry.product_name ?? '—'),
+    h('td', {}, entry.seller_code ?? '—'),
+    h('td', {}, readStateChip(read, entry.read_state_problem)),
+    h(
+      'td',
+      {},
+      read
+        ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? read.reason_code)
+        : reason(entry.read_state_problem),
+      read?.cause_code ? h('span', { class: 'mini' }, read.cause_code) : null,
+    ),
+    h('td', {}, read?.requested_at ? dotDateTime(read.requested_at) : '—'),
+    h('td', {}, read?.last_confirmed_at ? dotDateTime(read.last_confirmed_at) : '—'),
+    h('td', {}, String(read?.confirmation_attempts ?? 0)),
+    h('td', {}, button ?? '—', button && !read.action_enabled ? reason(read.action_reason_code) : null),
+  );
+}
+
+// The detail panel of the registration status card (ADR-0014 §28.5): every recent Intent with the
+// server's read state, its reason, request and confirmation times and the one action it offers.
+function registrationStatusPanel(status, onDone) {
+  if (!status || !status.entries.length) return null;
+  const counts = status.counts;
+  return h(
+    'section',
+    { class: 'panel register-status', 'data-role': 'register-status' },
+    h(
+      'div',
+      { class: 'supplier-head-row' },
+      withHelp(h('h2', { class: 'panel-title' }, '등록 진행 상태'), STATUS_HELP),
+    ),
+    h(
+      'div',
+      { class: 'register-summary' },
+      kv(status.labels.REGISTERING, String(counts.registering)),
+      kv(status.labels.REGISTERED, String(counts.registered)),
+      kv(status.labels.RECHECK_REQUIRED, String(counts.recheck_required)),
+      kv(status.labels.FAILED, String(counts.failed)),
+    ),
+    table(
+      ['상품명', 'ICBM 판매자코드', '상태', '사유', '요청 시각', '마지막 확인', '확인 시도', '동작'],
+      status.entries.map((entry) => statusRow(entry, onDone)),
+    ),
+  );
+}
+
 function actionCell(unit, action, onDone) {
   const button = h(
     'button',
@@ -589,8 +690,9 @@ function unitPanel(unit, onDone) {
       { class: 'supplier-head-row' },
       h('h2', { class: 'panel-title' }, unit.unit_ref),
       chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
-      intent ? chip(INTENT_LABEL[intent.state] ?? intent.state, INTENT_TONE[intent.state]) : null,
+      intent ? readStateChip(intent.read_state, intent.read_state_problem) : null,
     ),
+    intent ? kv('요청 상태', INTENT_LABEL[intent.state] ?? intent.state) : null,
     kv('초안', unit.draft_id),
     kv('리스팅 형태', unit.listing_shape),
     kv('판매 계정', unit.marketplace_account_id),
@@ -762,9 +864,15 @@ export default {
       return fragment(head, errorState(error));
     }
     const reload = () => ctx.navigate('register');
+    const statusPanel = registrationStatusPanel(overview.registration_status, reload);
+    // Opened from the registration status card: its detail panel is brought into view.
+    if (statusPanel && ctx.params.get('status') === 'open') {
+      window.setTimeout(() => statusPanel.scrollIntoView({ block: 'start' }), 0);
+    }
     if (!overview.units.length) {
       return fragment(
         head,
+        statusPanel,
         canaryPanel(canary),
         livePanel(live),
         emptyState({
@@ -788,7 +896,9 @@ export default {
     );
     const reviews = [...accounts.values()].map((unit) => reviewPanel(unit.marketplace_key, unit.marketplace_account_id));
     const focused = panels.find((panel) => panel.getAttribute('aria-current') === 'true');
-    if (focused) window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
+    if (focused && ctx.params.get('status') !== 'open') {
+      window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
+    }
     return fragment(
       head,
       h(
@@ -798,6 +908,7 @@ export default {
         kv('등록 완료', String(screen.registrations_total)),
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
+      statusPanel,
       canaryPanel(canary),
       livePanel(live),
       ...reviews,

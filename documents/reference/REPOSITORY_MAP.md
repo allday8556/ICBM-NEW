@@ -23,16 +23,18 @@ capture policy beside the KM collect package, migration `0034`, the test-browser
 `tests/support/browser.py` and their tests. Slice E2 removed the E1 dry run
 (`app/stages/collect/adaptive/shadow/dry_run.py`) and added the extension tests' `conftest.py`
 and `documents/acceptance/adaptive/EXTENSION-E2.md`. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
+The registration read state (ADR-0014 §28.5) added `app/stages/register/read_state.py`, the
+status card `ui/web/js/components/registration-status.js`, one unit and one contract suite.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 249 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 250 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 41 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 64 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 119 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 120 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -54,13 +56,13 @@ and `documents/acceptance/adaptive/EXTENSION-E2.md`. No file moved, so `PATH_MIG
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 238 | tests |
-| `tests/contracts/` | 8 | repository-rule and document-contract tests |
+| `tests/` | 240 | tests |
+| `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 92 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 81 | unit tests by runtime owner |
-| `ui/` | 52 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 82 | unit tests by runtime owner |
+| `ui/` | 53 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 8 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 44 | the served web client |
+| `ui/web/` | 45 | the served web client |
