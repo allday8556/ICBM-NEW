@@ -14,7 +14,9 @@ before it is asked:
   locator with no credentials, no query and no fragment. A generic secret pattern would refuse any
   image whose file name is a long hash, which is how suppliers commonly name uploads, so the
   reference is judged by what it is and then masked for the scan. A reference that is not such a
-  locator is a finding.
+  locator is a finding. An empty value is no reference at all, as the supplier's image owner reads
+  it (``integrations/suppliers/kmretail/collect/images.py``): a Cafe24 lazy-load ``<img>`` leaves
+  ``src`` empty and names its image in ``ec-data-src``.
 - **Regions the sanitizer sets aside.** The sanitizer drops a navigation or non-authoritative region
   whole and looks no further into it, but the extractor receives the whole capture. So every such
   region is opened and scanned as well: it is neutralized and the sanitizer is asked again, until
@@ -79,12 +81,10 @@ BoundaryOf = Callable[[Mapping[str, Any]], str]
 def _locator_problem(value: str) -> str | None:
     """Why one image locator is not a plain one, or ``None``.
 
-    A "not a locator" answer names its shape (empty, whitespace, another unsafe character,
-    unparseable, no path), never the value: a refused real capture is gone with its job, so the
-    kind is all an operator can learn from (EXTENSION-E1.md §5.1).
+    A "not a locator" answer names its shape (whitespace, another unsafe character, unparseable,
+    no path), never the value: a refused real capture is gone with its job, so the kind is all an
+    operator can learn from (EXTENSION-E1.md §5.1).
     """
-    if not value:
-        return "NOT_A_LOCATOR_EMPTY"
     if (unsafe := _UNSAFE_IN_LOCATOR.search(value)) is not None:
         return "NOT_A_LOCATOR_WHITESPACE" if unsafe.group().isspace() else "NOT_A_LOCATOR_CHARACTER"
     try:
@@ -107,13 +107,12 @@ def _locator_problem(value: str) -> str | None:
 
 
 def _reference_problem(name: str, value: str) -> str | None:
-    """Why one image reference attribute is not made of plain locators, or ``None``."""
+    """Why one image reference attribute is not made of plain locators, or ``None``. An empty
+    value or an empty ``srcset`` entry names no image, so it is no reference: the image owner
+    skips both the same way."""
     if name != "srcset":
-        return _locator_problem(value.strip())
-    entries = [entry.strip() for entry in value.split(",")]
-    if not entries or any(not entry for entry in entries):
-        return "NOT_A_LOCATOR_SRCSET"
-    for entry in entries:
+        return _locator_problem(value.strip()) if value.strip() else None
+    for entry in filter(None, (entry.strip() for entry in value.split(","))):
         parts = entry.split()
         if len(parts) > 2 or (len(parts) == 2 and not _DESCRIPTOR.match(parts[1])):
             return "NOT_A_LOCATOR_SRCSET"
