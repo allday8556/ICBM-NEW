@@ -86,12 +86,64 @@ function Remove-HostWorktree {
 }
 
 # Machine-readable 결과는 Write-Host가 아니라 캡처 가능한 output으로 반환한다.
+# The class is decided by the reason's category (agent-host-authority-v2.ps1 Get-HoldClass, protocol §5.1):
+# HUMAN_DECISION_REQUIRED only for the closed product / real-external-action list; anything else is a TECHNICAL_HOLD the
+# Host retries by itself.
 function Stop-RepairHold {
     param([string]$Reason)
 
     Remove-HostWorktree -Path $script:activeWorktree
+    Write-Output "HOLD_CLASS=$(Get-HoldClass $Reason)"
     Write-Output "REPAIR_HOLD=$Reason"
     exit 0
+}
+
+# What a fixer or implementer is told about stopping (protocol §0.2, ADR-0022 §3-§4). One text for every mode.
+$humanDecisionRule = @"
+WHO DECIDES WHAT:
+- The user decides product features, product behaviour and real external actions.
+- You decide implementation for work the canonical documents already define: internal design, schema and migrations
+  for an already-approved feature, endpoint shape, tests, repository rules, migration numbering, document pins.
+  An implementation choice is never a reason to stop. Make it, state it in FIXER_SUMMARY, and the auditors verify it.
+
+Stop WITHOUT changing anything only when the work itself needs a decision that is the user's:
+- NEW_PRODUCT_FEATURE: a product feature the canonical requirements do not contain;
+- PRODUCT_DIRECTION_UNDECIDED: a user-visible behaviour, UX or policy with several real product directions that no canonical text decides;
+- BEYOND_USER_REQUIREMENT: a change beyond what the user asked for;
+- LIVE: a side-effecting LIVE provider mutation or canary;
+- SUPPLIER_ORDER: any real supplier order (발주);
+- RESIDUAL_RISK_APPROVAL: accepting a material residual risk that cannot be removed inside scope;
+- COST: a new or material unbudgeted payment or cost;
+- EXTERNAL_DATA_TRANSFER: sending credentials, customer/order data or other non-public sensitive data externally;
+- DESTRUCTIVE: an irreversible destructive operation, force-push or branch deletion.
+A routine read-only provider call, read-back, health check or already-approved lookup is not a human stop by name alone.
+Then finish with exactly:
+
+FIXER_RESULT=HUMAN_DECISION_REQUIRED
+FIXER_CATEGORY=<$(Get-HumanDecisionCategoryList)>
+FIXER_REASON=<one line: the decision the user has to make>
+"@
+
+# A fixer's own stop. Only the closed category list is a human decision; any other refusal is a TECHNICAL_HOLD and the
+# next attempt re-analyses the problem.
+function Stop-FixerDecision {
+    param([string]$Out, [string]$Who)
+
+    if ($Out -match '(?m)^FIXER_RESULT=HUMAN_DECISION_REQUIRED\s*$') {
+        $cat = [regex]::Match($Out, '(?m)^FIXER_CATEGORY=(\S+)\s*$').Groups[1].Value
+        Write-Host "FIXER_CATEGORY=$(if ($cat) { $cat } else { 'UNSPECIFIED' })"
+
+        if ($cat -and (Get-HoldClass $cat) -eq "HUMAN_DECISION_REQUIRED") {
+            Stop-RepairHold "${Who}_HUMAN_DECISION_REQUIRED_$cat"
+        }
+
+        Stop-RepairHold "${Who}_DECLINED_WITHOUT_A_HUMAN_CATEGORY"
+    }
+
+    # the pre-ADR-0022 word: never a human decision by itself
+    if ($Out -match '(?m)^FIXER_RESULT=HUMAN_HOLD\s*$') {
+        Stop-RepairHold "${Who}_DECLINED_LEGACY_HUMAN_HOLD"
+    }
 }
 
 # -------------------------------------------------
@@ -546,11 +598,9 @@ if ($RemediateMain) {
 ARCHITECT RULING (repository owner, $authUrl) - AUTHORITATIVE FOR THIS REMEDIATION:
 $authBody
 
-With this ruling, the architect decisions it states are RESOLVED and are no longer ARCHITECTURE_OR_POLICY holds.
 Implement exactly the authorized items and nothing the ruling lists as not included.
 You may modify ONLY these existing files:
 $authFileList
-Return HUMAN_HOLD only if an authorized item cannot be completed within these files and limits.
 
 "@
     }
@@ -568,40 +618,23 @@ FULL-AUDIT REPORTS (GPT and Claude, both on this exact main):
 $reportText
 
 $authSection
-STANDING AUTHORIZATION - you MAY fix ONLY:
-- obvious inconsistency between the canonical contract and the current implementation
+SCOPE - fix every blocker in the reports:
+- inconsistency between the canonical contract and the current implementation
 - stale docs/tests
 - runtime fail-close restoration where current behavior violates an existing invariant
-- minimal changes so an already existing owner/guard behaves as intended
-- directly affected tests
-
-FORBIDDEN - if ANY blocker needs one of these, make NO change and return HUMAN_HOLD:
-- new schema or migration
-- endpoint adoption
-- provider call
-- LIVE
-- canary
-- new architecture or policy decision
-- anything that widens existing authorization/approved scope
-- ambiguous scope
+- changes so an already existing owner/guard behaves as intended
+- directly affected tests, and whatever implementation detail the fix needs
 
 WORKING ENVIRONMENT:
 - Shell commands, file search/read/edit and local tests/lint/type checks are allowed.
-- Do NOT make provider/API/network calls.
+- Do NOT make provider/API/network calls. No LIVE. No canary. DRY_RUN only.
 - Do NOT push. Do NOT merge. Do NOT create branches or PRs.
-- Do NOT create new files except tests under tests/.
-- Do NOT delete files.
 
 RULES:
-- Fix every blocker in the reports only if ALL of them are inside the standing authorization.
 - Make the smallest semantically complete correction.
-- Preserve unrelated accepted behavior and safety invariants.
+- Preserve unrelated accepted behavior and safety invariants. Never weaken a safety gate to make a blocker go away.
 
-If any blocker is outside the standing authorization, finish with:
-
-FIXER_RESULT=HUMAN_HOLD
-FIXER_HOLD_CATEGORY=<SCHEMA_OR_MIGRATION|ENDPOINT_ADOPTION|PROVIDER_CALL|LIVE|CANARY|ARCHITECTURE_OR_POLICY|SCOPE_WIDENING|AMBIGUOUS_SCOPE>
-FIXER_REASON=<reason>
+$humanDecisionRule
 
 Otherwise finish with:
 
@@ -620,11 +653,7 @@ FIXER_SUMMARY=<one concise line>
     Write-Host $fixerOut
     Write-Host ""
 
-    if ($fixerOut -match '(?m)^FIXER_RESULT=HUMAN_HOLD\s*$') {
-        $cat = [regex]::Match($fixerOut, '(?m)^FIXER_HOLD_CATEGORY=(\S+)\s*$')
-        Write-Host "FIXER_HOLD_CATEGORY=$(if ($cat.Success) { $cat.Groups[1].Value } else { 'UNSPECIFIED' })"
-        Stop-RepairHold "CLAUDE_FIXER_HUMAN_HOLD"
-    }
+    Stop-FixerDecision -Out $fixerOut -Who "FIXER"
 
     if ($fixerOut -notmatch '(?m)^FIXER_RESULT=READY\s*$') {
         Stop-RepairHold "CLAUDE_FIXER_RESULT_UNREADABLE"
@@ -645,7 +674,7 @@ FIXER_SUMMARY=<one concise line>
         Invoke-Git @("-C", $remWorktree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
     ) | Where-Object { $_ }
 
-    $allChanged = @($modified + $untracked) | Sort-Object -Unique
+    $allChanged = @(@($modified) + @($untracked)) | Where-Object { $_ } | Sort-Object -Unique
 
     if ($allChanged.Count -eq 0) {
         Stop-RepairHold "FIXER_NO_CHANGES"
@@ -659,31 +688,18 @@ FIXER_SUMMARY=<one concise line>
         }
     )
 
-    if ($migrationPaths.Count -gt 0) {
-        foreach ($f in $migrationPaths) { Write-Host "SCHEMA_OR_MIGRATION=$f" }
-        Stop-RepairHold "NEW_SCHEMA_OR_MIGRATION_REQUIRED"
-    }
-
-    if ($deleted.Count -gt 0) {
-        foreach ($f in $deleted) { Write-Host "OUT_OF_SCOPE_DELETE=$f" }
-        Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
-    }
+    # Implementation detail is the fixer's to decide (ADR-0022 §3): a migration, a new file or a removed file is
+    # reported for the auditors and never a hold. An explicit ruling's file list is still enforced, as a TECHNICAL_HOLD.
+    foreach ($f in $migrationPaths) { Write-Host "SCHEMA_OR_MIGRATION=$f" }
+    foreach ($f in $deleted) { Write-Host "REMOVED_FILE=$f" }
 
     if ($authFiles.Count -gt 0) {
-        # architect ruling 범위 밖 파일 → HUMAN_HOLD
         $outOfAuth = @($allChanged | Where-Object { $_ -cnotin $authFiles })
 
         if ($outOfAuth.Count -gt 0) {
             foreach ($f in $outOfAuth) { Write-Host "OUT_OF_AUTHORIZATION=$f" }
-            Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
+            Stop-RepairHold "SCOPE_OUTSIDE_THE_RULING"
         }
-    }
-
-    $newNonTest = @($untracked | Where-Object { $_ -notmatch '^tests/' -and $_ -cnotin $authFiles })
-
-    if ($newNonTest.Count -gt 0) {
-        foreach ($f in $newNonTest) { Write-Host "OUT_OF_SCOPE_NEW_FILE=$f" }
-        Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
     }
 
     $currentMain = "$(gh api "repos/$repoSlug/commits/main" --jq .sha)".Trim()
@@ -745,8 +761,8 @@ $authLine
 **Changed files**
 $(($allChanged | ForEach-Object { "- ``$_``" }) -join "`n")
 
-This PR follows the audit-before-CI loop: draft PR → GPT exact-head audit + independent Claude cross-audit → on BLOCKER fix (still draft, local checks) and re-audit, max $maxCycles cycles → when GPT PASS and Claude PASS meet on the same exact HEAD, ready for review → FULL CI once → GREEN + MERGE_GUARD → merge.
-$(if ($config.auto_merge -eq $true) { "AUTO_MERGE=TRUE only after MERGE_GUARD (CI GREEN + GPT PASS + Claude PASS on this exact HEAD/main, merged with expected_head_sha)." } else { "AUTO_MERGE=FALSE — human merge required." })
+This PR follows the audit-before-CI loop: draft PR → GPT exact-head audit + independent Claude cross-audit → on BLOCKER fix (still draft, local checks) and re-audit until it passes → when GPT PASS and Claude PASS meet on the same exact HEAD, ready for review → FULL CI once → GREEN + MERGE_GUARD → merge.
+$(if ($config.auto_merge -eq $true) { "AUTO_MERGE=TRUE only after MERGE_GUARD (CI GREEN + GPT PASS + Claude PASS on this exact HEAD/main, merged with expected_head_sha)." } else { "AUTO_MERGE=FALSE (host configuration)." })
 "@
 
     [System.IO.File]::WriteAllText($bodyPath, $body, $nativeUtf8)
@@ -798,7 +814,8 @@ $(if ($config.auto_merge -eq $true) { "AUTO_MERGE=TRUE only after MERGE_GUARD (C
 # AUTO-NEXT IMPLEMENTATION MODE
 #
 # run-lookahead-main-v1.ps1 이 exact main의 canonical 문서에서 고르고
-# Claude가 교차확인한 slice만 구현한다. 선택된 ALLOWED_PATHS 밖은 HUMAN_HOLD.
+# Claude가 교차확인한 slice만 구현한다. ALLOWED_PATHS 는 selector 의 추정이다: 밖의 파일은 보고만 하고 (SCOPE_WIDENED),
+# 범위 판단은 감사자가 한다 (ADR-0022 §3). 사람에게 넘기는 것은 closed human-decision 목록뿐이다.
 # =================================================
 
 if ($ImplementNext) {
@@ -953,21 +970,16 @@ SPEC:
 $($slice.spec)
 $draftNote
 RULES:
-- Read CLAUDE.md, ROADMAP.md, docs/ARCHITECTURE.md and the CANONICAL_SOURCES first.
-- Implement exactly this slice and nothing else. Touch only paths under ALLOWED_PATHS.
-- No schema or migration unless SCHEMA_CHANGE names the authorizing document.
+- Read CLAUDE.md (it imports documents/rules/), documents/roadmap/ROADMAP.md, documents/architecture/ARCHITECTURE.md and the CANONICAL_SOURCES first.
+- Implement exactly this slice and nothing else. ALLOWED_PATHS is where the slice lives; touch another path only when
+  the slice needs it (its tests, a document pin, a repository-map count, a migration) and say so in FIXER_SUMMARY.
+- A schema or migration this already-approved slice needs is yours to design; keep it additive where you can.
 - Add or update the tests that pin this slice; run the relevant local tests, lint and type checks.
 - Do NOT make provider/marketplace/API/network calls. No LIVE. No canary. DRY_RUN only.
 - Do NOT push, merge, or create branches or PRs. The host does that.
-- Do NOT delete files.
+- Where canonical documents conflict on an implementation matter, follow the most recent ADR and say so.
 
-If the slice turns out to need anything outside these limits (a new architecture/policy decision,
-scope beyond ALLOWED_PATHS, an unauthorized schema change, a provider call, LIVE, a canary,
-a residual-risk acceptance, or canonical documents that conflict), make no change and finish with:
-
-FIXER_RESULT=HUMAN_HOLD
-FIXER_HOLD_CATEGORY=<ARCHITECTURE_OR_POLICY|SCOPE_EXPANSION|SCHEMA_OR_MIGRATION|PROVIDER_CALL|LIVE|CANARY|RESIDUAL_RISK_APPROVAL|ROADMAP_ADR_CONFLICT|NEXT_UNCLEAR>
-FIXER_REASON=<reason>
+$humanDecisionRule
 
 Otherwise finish with:
 
@@ -987,11 +999,7 @@ FIXER_SUMMARY=<one concise line>
     Write-Host $implOut
     Write-Host ""
 
-    if ($implOut -match '(?m)^FIXER_RESULT=HUMAN_HOLD\s*$') {
-        $cat = [regex]::Match($implOut, '(?m)^FIXER_HOLD_CATEGORY=(\S+)\s*$')
-        Write-Host "FIXER_HOLD_CATEGORY=$(if ($cat.Success) { $cat.Groups[1].Value } else { 'UNSPECIFIED' })"
-        Stop-RepairHold "IMPLEMENTER_HUMAN_HOLD"
-    }
+    Stop-FixerDecision -Out $implOut -Who "IMPLEMENTER"
 
     if ($implOut -notmatch '(?m)^FIXER_RESULT=READY\s*$') {
         Stop-RepairHold "IMPLEMENTER_RESULT_UNREADABLE"
@@ -1012,16 +1020,14 @@ FIXER_SUMMARY=<one concise line>
         Invoke-Git @("-C", $implWorktree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
     ) | Where-Object { $_ }
 
-    $allChanged = @($modified + $untracked) | Sort-Object -Unique
+    $allChanged = @(@($modified) + @($untracked)) | Where-Object { $_ } | Sort-Object -Unique
 
     if ($allChanged.Count -eq 0) {
         Stop-RepairHold "IMPLEMENTER_NO_CHANGES"
     }
 
-    if ($deleted.Count -gt 0) {
-        foreach ($f in $deleted) { Write-Host "OUT_OF_SCOPE_DELETE=$f" }
-        Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
-    }
+    # Reported for the auditors, never a hold (ADR-0022 §3): the selector's ALLOWED_PATHS are an estimate.
+    foreach ($f in $deleted) { Write-Host "REMOVED_FILE=$f" }
 
     $outOfSlice = @(
         $allChanged | Where-Object {
@@ -1030,10 +1036,7 @@ FIXER_SUMMARY=<one concise line>
         }
     )
 
-    if ($outOfSlice.Count -gt 0) {
-        foreach ($f in $outOfSlice) { Write-Host "OUT_OF_SLICE=$f" }
-        Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
-    }
+    foreach ($f in $outOfSlice) { Write-Host "SCOPE_WIDENED=$f" }
 
     $migrationPaths = @(
         $allChanged | Where-Object {
@@ -1043,10 +1046,7 @@ FIXER_SUMMARY=<one concise line>
         }
     )
 
-    if ($migrationPaths.Count -gt 0 -and -not $schemaAuthorized) {
-        foreach ($f in $migrationPaths) { Write-Host "SCHEMA_OR_MIGRATION=$f" }
-        Stop-RepairHold "NEW_SCHEMA_OR_MIGRATION_REQUIRED"
-    }
+    foreach ($f in $migrationPaths) { Write-Host "SCHEMA_OR_MIGRATION=$f (selector: $($slice.schema_change))" }
 
     $currentMain = "$(gh api "repos/$repoSlug/commits/main" --jq .sha)".Trim()
 
@@ -1118,9 +1118,9 @@ Auto-next slice for exact main ``$mainHead``, selected by ICBM Agent Host from t
 
 **Changed files**
 $changedList
-
-No provider call, no LIVE, no canary. This PR follows the audit-before-CI loop: draft PR → GPT exact-head audit + independent Claude cross-audit → on BLOCKER fix (still draft, local checks) and re-audit, max $maxCycles cycles → when GPT PASS and Claude PASS meet on the same exact HEAD, ready for review → FULL CI once → GREEN + MERGE_GUARD → merge.
-$(if ($config.auto_merge -eq $true) { "AUTO_MERGE=TRUE only after MERGE_GUARD (CI GREEN + GPT PASS + Claude PASS on this exact HEAD/main, merged with expected_head_sha)." } else { "AUTO_MERGE=FALSE — human merge required." })
+$(if (@($outOfSlice).Count -gt 0) { "`n**Outside the selector's allowed paths (for the auditors to judge)**`n" + ((@($outOfSlice) | ForEach-Object { "- $_" }) -join "`n") + "`n" })$(if (@($migrationPaths).Count -gt 0) { "`n**Schema or migration**`n" + ((@($migrationPaths) | ForEach-Object { "- $_" }) -join "`n") + "`n" })
+No provider call, no LIVE, no canary. This PR follows the audit-before-CI loop: draft PR → GPT exact-head audit + independent Claude cross-audit → on BLOCKER fix (still draft, local checks) and re-audit until it passes → when GPT PASS and Claude PASS meet on the same exact HEAD, ready for review → FULL CI once → GREEN + MERGE_GUARD → merge.
+$(if ($config.auto_merge -eq $true) { "AUTO_MERGE=TRUE only after MERGE_GUARD (CI GREEN + GPT PASS + Claude PASS on this exact HEAD/main, merged with expected_head_sha)." } else { "AUTO_MERGE=FALSE (host configuration)." })
 "@
 
     [System.IO.File]::WriteAllText($bodyPath, $body, $nativeUtf8)
@@ -1208,10 +1208,15 @@ if ($pr.state -ne "OPEN") {
 $prHead = [string]$pr.headRefOid
 
 # -------------------------------------------------
-# Repair-cycle limit
+# Repair cycles (protocol §5.1; ADR-0022 §4)
+#
+# A count never hands the PR to the user. After repair_loop.max_cycles attempts the fixer stops repeating itself: every
+# later attempt is an INDEPENDENT RE-ANALYSIS, given the blockers the earlier attempts left, and told to take another
+# approach. The number of repairs never ends the loop and never hands it over (protocol §1, §5.1).
 # -------------------------------------------------
 
 $cycles = 0
+$blockerHistory = @()
 
 if (Test-Path $repairStatePath) {
     try {
@@ -1219,15 +1224,19 @@ if (Test-Path $repairStatePath) {
             ConvertFrom-Json
 
         $cycles = [int]$repairState.cycles
+        $blockerHistory = @($repairState.history | Where-Object { $_ } | ForEach-Object { [string]$_ })
     }
     catch {
         $cycles = 0
+        $blockerHistory = @()
     }
 }
 
-if ($cycles -ge $maxCycles) {
+$reanalysis = ($cycles -ge $maxCycles)
+
+if ($reanalysis) {
     Write-Host "CYCLES=$cycles"
-    Stop-RepairHold "MAX_REPAIR_CYCLES"
+    Write-Output "REPAIR_MODE=INDEPENDENT_REANALYSIS"
 }
 
 # -------------------------------------------------
@@ -1344,7 +1353,7 @@ if ($allowedFiles.Count -eq 0) {
 Write-Host "HEAD       : $prHead"
 Write-Host "MAIN       : $mainHead"
 Write-Host "BLOCKER    : $blocker"
-Write-Host "CYCLE      : $($cycles + 1)/$maxCycles"
+Write-Host "CYCLE      : $($cycles + 1) $(if ($reanalysis) { '(independent re-analysis)' } else { "of the first $maxCycles" })"
 Write-Host ""
 
 # -------------------------------------------------
@@ -1373,6 +1382,19 @@ if (-not (New-HostWorktree -Path $repairWorktree -Commit $prHead)) {
     Stop-RepairHold "WORKTREE_CREATE_FAILED"
 }
 
+$reanalysisNote = ""
+
+if ($reanalysis) {
+    $reanalysisNote = @"
+
+INDEPENDENT RE-ANALYSIS (attempt $($cycles + 1)):
+$cycles earlier repair attempts did not end this PR's blockers. Do not repeat them. The blockers they were given, oldest first:
+$(($blockerHistory | ForEach-Object { "- $_" }) -join "`n")
+Re-derive the problem from the canonical documents and the code as they are now. Decide what the earlier attempts
+misunderstood, take a different approach, and fix the root cause so that this class of blocker cannot return.
+"@
+}
+
 $fixPrompt = @"
 [ICBM-NEW] CURRENT PR exact-head BLOCKER repair
 
@@ -1391,10 +1413,14 @@ $mainHead
 $AuditSource AUDIT BLOCKER:
 $blocker
 
-STRICT SCOPE:
-You may modify ONLY files already changed by this PR:
+SCOPE:
+The slice this PR implements. These are the files it already changes:
 
 $fileList
+
+Prefer them. Add or change another file only when the fix needs it (a test, a fixture, a document pin, a repository-map
+count, a migration renumber) and say so in FIXER_SUMMARY.
+$reanalysisNote
 
 WORKING ENVIRONMENT:
 - You are inside a disposable repair worktree.
@@ -1408,19 +1434,13 @@ WORKING ENVIRONMENT:
 - Do NOT open a canary.
 
 RULES:
-- Fix only the blocker above.
-- Read only the minimum relevant canonical context.
+- Fix the blocker above, and every other place in this PR with the same weakness.
+- Read the canonical context the blocker touches.
 - Make the smallest semantically complete correction.
-- Preserve unrelated accepted behavior and safety invariants.
-- Do not broaden authorization.
-- Do not adopt unrelated endpoints.
-- Do not add unrelated schema, migrations or runtime behavior.
+- Preserve unrelated accepted behavior and safety invariants. Never weaken a safety gate to make a blocker go away.
+- Do not adopt unrelated endpoints, schema, migrations or runtime behavior.
 
-If the blocker cannot be fixed inside the current PR scope and authorization,
-make no intentional repair and finish with:
-
-FIXER_RESULT=HUMAN_HOLD
-FIXER_REASON=<reason>
+$humanDecisionRule
 
 Otherwise finish with:
 
@@ -1439,48 +1459,29 @@ Write-Host "CLAUDE FIXER:"
 Write-Host $claudeOut
 Write-Host ""
 
-if ($claudeOut -match '(?m)^FIXER_RESULT=HUMAN_HOLD\s*$') {
-    Stop-RepairHold "CLAUDE_FIXER_HUMAN_HOLD"
-}
+Stop-FixerDecision -Out $claudeOut -Who "FIXER"
 
 if ($claudeOut -notmatch '(?m)^FIXER_RESULT=READY\s*$') {
     Stop-RepairHold "CLAUDE_FIXER_RESULT_UNREADABLE"
 }
 
-# 새 파일 생성은 CURRENT_PR_ONLY 범위에서 허용하지 않는다.
+# Exact HEAD와 비교한 전체 repair delta (새 파일 포함).
+# Claude가 sandbox 안에서 로컬 commit을 했더라도 포함된다.
 $untracked = @(
     Invoke-Git @("-C", $repairWorktree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
 ) | Where-Object { $_ }
 
-if ($untracked.Count -gt 0) {
-    foreach ($file in $untracked) {
-        Write-Host "OUT_OF_SCOPE_UNTRACKED=$file"
-    }
-
-    Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
-}
-
-# Exact HEAD와 비교한 전체 repair delta.
-# Claude가 sandbox 안에서 로컬 commit을 했더라도 포함된다.
 $modified = @(
-    Invoke-Git @("-C", $repairWorktree, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", $prHead, "--")
+    @(Invoke-Git @("-C", $repairWorktree, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", $prHead, "--")) + $untracked
 ) | Where-Object { $_ } | Sort-Object -Unique
 
 if ($modified.Count -eq 0) {
     Stop-RepairHold "FIXER_NO_CHANGES"
 }
 
-$outOfScope = @(
-    $modified |
-    Where-Object { $_ -notin $allowedFiles }
-)
-
-if ($outOfScope.Count -gt 0) {
-    foreach ($file in $outOfScope) {
-        Write-Host "OUT_OF_SCOPE=$file"
-    }
-
-    Stop-RepairHold "SCOPE_EXPANSION_REQUIRED"
+# Reported for the auditors, never a hold (ADR-0022 §3): a fix may need a file the PR did not touch yet.
+foreach ($file in @($modified | Where-Object { $_ -notin $allowedFiles })) {
+    Write-Host "SCOPE_WIDENED=$file"
 }
 
 # Claude 작업 중 remote PR/main 이동 여부 확인
@@ -1558,6 +1559,7 @@ $repairState = [ordered]@{
     main = $mainHead
     blocker_source = $AuditSource
     blocker = $blocker
+    history = @(@($blockerHistory) + @("[$AuditSource] $blocker") | Select-Object -Last 12)
     updated_at = (Get-Date).ToString("o")
 }
 

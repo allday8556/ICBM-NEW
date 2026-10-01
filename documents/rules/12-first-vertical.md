@@ -16,4 +16,7 @@ KM통상 CONNECT
 → fulfillment record/tracking path when applicable
 ```
 
-Required: two consecutive complete passes in fresh sessions.
+At final first-vertical closeout, the complete flow requires two consecutive passes in fresh
+sessions on the final implementation line-up. This is one closeout requirement, not a requirement
+for each slice, internal PR or provider-zero intermediate. Those changes use their §14.2 validation
+tier and do not execute LIVE merely to keep this proof current.

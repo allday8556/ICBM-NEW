@@ -14,43 +14,51 @@ positive-only reconcile slice added `integrations/marketplaces/smartstore/search
 and migration `0031` (37 and 17). The authoring-revision owners slice added
 `app/stages/register/authoring_revisions.py`, migration `0032` and one integration suite. The canary-eligibility owner slice added
 `app/capabilities/live_safety/eligibility.py`, migration `0033` and one integration suite. The ASSET duplicate-evidence fix (Issue #89 resolution `5915900049` D4) added one integration suite. The protected operator commands (D3) added one integration suite. The application-freeze inputs fix (Issue #89 follow-up `5919917893` §3) added one integration suite.
+The Agent Host operating-authority correction (ADR-0022) added `documents/rules/14-operating-authority.md`,
+the ADR, the fixture configuration `automation/agent-host/tests/fx-config.json` and the fixture test under
+`tests/harness/agent_host/`. No file moved.
+The extension capture transport, slice E1 (ADR-0019; Issue #126), added the client under
+`ui/extension/`, the ingest owner under `app/stages/collect/extension/`, its router, the KM
+capture policy beside the KM collect package, migration `0034`, the test-browser owner
+`tests/support/browser.py` and their tests. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 239 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 250 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 41 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 19 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 63 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 111 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
-| `automation/` | 93 | tooling outside the runtime |
+| `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 64 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 120 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
-| `automation/agent-host/` | 13 | Agent Host scripts (sha256-pinned bytes) |
+| `automation/agent-host/` | 14 | Agent Host scripts (sha256-pinned bytes) |
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 3 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 3 |  |
-| `documents/` | 153 | all canonical and historical documents |
-| `documents/acceptance/` | 63 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 156 | all canonical and historical documents |
+| `documents/acceptance/` | 64 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
-| `documents/decisions/` | 23 | ADRs and architect review records |
+| `documents/decisions/` | 24 | ADRs and architect review records |
 | `documents/evidence/` | 27 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
-| `documents/rules/` | 13 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 37 | adapters: suppliers and marketplaces |
+| `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
+| `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
-| `integrations/suppliers/` | 19 |  |
-| `tests/` | 220 | tests |
-| `tests/contracts/` | 7 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 10 | test fixtures (byte-pinned) |
-| `tests/harness/` | 28 | tests of the acceptance harnesses |
-| `tests/integration/` | 85 | integration tests by runtime owner |
-| `tests/support/` | 12 | shared test support |
-| `tests/unit/` | 76 | unit tests by runtime owner |
-| `ui/` | 44 |  |
+| `integrations/suppliers/` | 20 |  |
+| `tests/` | 237 | tests |
+| `tests/contracts/` | 8 | repository-rule and document-contract tests |
+| `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
+| `tests/harness/` | 30 | tests of the acceptance harnesses |
+| `tests/integration/` | 91 | integration tests by runtime owner |
+| `tests/support/` | 14 | shared test support |
+| `tests/unit/` | 81 | unit tests by runtime owner |
+| `ui/` | 52 | operator clients: the served web client and the capture extension |
+| `ui/extension/` | 8 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 44 | the served web client |

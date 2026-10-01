@@ -9,4 +9,4 @@ design/prototypes/*.html -text
 
 # Agent Host scripts are pinned byte-for-byte by sha256 (documents/rules/agent-host/AGENT_HOST_AUDIT_PROTOCOL.md; automation/agent-host/README.md).
 # Never convert their line endings or strip their BOM.
-automation/agent-host/** -text
+automation/agent-host/** -text whitespace=cr-at-eol

@@ -51,4 +51,8 @@ The deterministic seller product code is ICBM's own correlation identity for a p
 - an operator assertion is never the evidence
 - no lookup contract that could prove remote absence is adopted (ADR-0014 §17.2), so a possibly transmitted CREATE that no admissible evidence resolves stays `UNKNOWN` with a `REVIEW_REQUIRED` overlay and its conflict scope stays closed
 
-The current provider-evidence verdict is recorded in `documents/acceptance/milestones/M5.md` §9; never soften it in code or documents.
+The current provider-evidence verdict is recorded in `documents/acceptance/milestones/M5.md` §9 as
+milestone status, not as a second immutable rule. New reviewed provider evidence or an accepted
+contract may update that verdict. Until then, the rules above remain fail-closed: an unresolved
+possibly transmitted CREATE stays `UNKNOWN`, is never blindly resent and keeps its conflict scope
+closed.

@@ -7,7 +7,6 @@ resolution sends the scope and generation it was shown; while the source still s
 condition, the server keeps the item open and the page says so. The page counts nothing.
 """
 
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -20,11 +19,11 @@ from playwright.sync_api import Error as PlaywrightError
 from app.config import AppConfig
 from tests.conftest import LOCAL
 from tests.integration.review.test_g2b_collect_review import UnclearShop, collect_unclear
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_submit_support import served
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 
 
@@ -32,7 +31,7 @@ FORWARDED = ("x-icbm-client", "content-type", "accept")
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

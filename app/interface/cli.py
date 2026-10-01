@@ -1,7 +1,8 @@
 """``icbm`` command line: serve the application, manage the database schema, record a reviewed
-visual acceptance (ADR-0018 §9) — the only path by which one is ever recorded — and run the
+visual acceptance (ADR-0018 §9) — the only path by which one is ever recorded — run the
 protected pre-LIVE operator commands of the first canary (Issue #89 architect resolution
-``5915900049`` D3).
+``5915900049`` D3), and pair, rotate or revoke the capture extension (ADR-0019 §3), which is the
+only way a pairing is ever issued.
 
 **The protected operator commands own no truth.** Each protected action —
 ``eligibility-packet``, ``record-eligibility``, ``issue-asset-grant``, ``issue-create-grant``,
@@ -58,6 +59,12 @@ _IN_USE_HINTS: dict[Command, str] = {
     ("live", "record-visual-acceptance"): (
         "Stop the ICBM server using this data directory, then retry the recording."
     ),
+    **{
+        ("extension", action): (
+            "Stop the ICBM server using this data directory, then retry the pairing command."
+        )
+        for action in ("pair", "rotate", "revoke")
+    },
 }
 # The protected operator commands (5915900049 D3) all hold the data directory, like the recording.
 LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
@@ -97,6 +104,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     visual.add_argument("--actor", required=True, help="who runs this command")
     _add_operator_commands(live_commands)
+    extension = commands.add_parser("extension", help="capture extension pairing (ADR-0019 §3)")
+    extension_commands = extension.add_subparsers(dest="extension_command", required=True)
+    pair = extension_commands.add_parser(
+        "pair", help="pair one extension identity and print its one-time pairing code"
+    )
+    pair.add_argument(
+        "--extension-id", required=True, help="the extension's own identity (32 letters a-p)"
+    )
+    extension_commands.add_parser(
+        "rotate", help="issue a new pairing generation; the prior code stops working"
+    )
+    extension_commands.add_parser("revoke", help="remove the pairing")
     return parser
 
 
@@ -174,6 +193,8 @@ def _command_of(args: argparse.Namespace) -> Command:
         return ("db", args.db_command)
     if args.command == "live":
         return ("live", args.live_command)
+    if args.command == "extension":
+        return ("extension", args.extension_command)
     return (args.command,)
 
 
@@ -234,6 +255,43 @@ def _record_visual_acceptance(
     finally:
         container.db.dispose()
     print(f"visual acceptance recorded: {acceptance_id} ({report['code_sha']})")
+    return 0
+
+
+def _extension_pairing(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
+    """Pair, rotate or revoke the capture extension (ADR-0019 §3; ruling 5906290729 B-2).
+
+    The pairing lives in the OS keyring only. A pairing code is printed once, for the operator to
+    paste into the extension; it is never logged and never written to a file here.
+    """
+    from app.platform.core.clock import SystemClock
+    from app.platform.core.errors import AppError
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.collect.extension.nonces import NonceCache
+    from app.stages.collect.extension.pairing import ExtensionPairing
+
+    clock = SystemClock()
+    pairing = ExtensionPairing(build_secret_store(config.secret_backend), clock, NonceCache(clock))
+    origin = f"http://{config.host}:{config.port}"
+    try:
+        if args.extension_command == "revoke":
+            print("pairing revoked" if pairing.revoke() else "no pairing existed")
+            return 0
+        issued = (
+            pairing.pair(args.extension_id, origin=origin)
+            if args.extension_command == "pair"
+            else pairing.rotate(origin=origin)
+        )
+    except AppError as exc:
+        print(f"{exc.code}: {exc}", file=sys.stderr)
+        return 1
+    described = issued.record.describe()
+    print(
+        f"paired extension {described['extension_id']} "
+        f"(pairing {described['pairing_id']}, generation {described['generation']})"
+    )
+    print("pairing code — paste it into the extension once, and keep it nowhere else:")
+    print(issued.code)
     return 0
 
 
@@ -419,6 +477,9 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("db", "upgrade"): _db_upgrade,
     ("live", "record-visual-acceptance"): _record_visual_acceptance,
     **{("live", name): _operate for name in LIVE_OPERATOR_COMMANDS},
+    ("extension", "pair"): _extension_pairing,
+    ("extension", "rotate"): _extension_pairing,
+    ("extension", "revoke"): _extension_pairing,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).
 READ_ONLY_COMMANDS: dict[Command, Callable[[AppConfig], int]] = {

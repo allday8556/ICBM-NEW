@@ -30,6 +30,11 @@ delete.
 - A change to executed or served code in the working tree moves the digest.
 - An install with no readable checkout has no SHA, and no record is ever current for it.
 
+Stale is a truthful readiness state, not a trigger to run this procedure after each merge. The
+procedure is run and reviewed on the final main immediately before the bounded LIVE action. Normal
+BASIC and PROVIDER_ZERO PRs leave the visual layer blocked and do not create throwaway records for
+intermediate commits.
+
 **The record was written by the one path.** The only path is
 `icbm live record-visual-acceptance`, an owning command that holds the data directory. It records
 a report only when every one of these holds:
@@ -121,7 +126,7 @@ owners and routes into a fresh dedicated root:
   READY at this main, so the grant service would refuse them. Every readiness they show is still
   the server's own derivation, and it is `BLOCKED`.
 
-## 4. Procedure for the accepted run (after the area 3 merge)
+## 4. Procedure for an accepted final-main run (immediately before LIVE)
 
 1. Exact-main CI is green, including `g3-visual-acceptance` (its artifact is exact-main evidence of
    that commit).

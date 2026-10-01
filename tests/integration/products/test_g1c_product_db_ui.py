@@ -15,7 +15,6 @@ No supplier, marketplace or AI provider is reached.
 """
 
 import contextlib
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -41,12 +40,12 @@ from app.stages.collect.facts import (
 from app.stages.products.materialization import MaterializationStatus
 from app.stages.products.model import MoveReason
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_support import confirmed
 from tests.support.product_support import SUPPLIER, Collections, product, raw
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 SCREEN = f"{LOCAL}/#/db"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 DETAIL = "[data-role='product-detail']"
@@ -71,7 +70,7 @@ NEVER_CREATED = (
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Synthetic fixture for the extension capture tests: an invented product on a KM통상-shaped
+     Cafe24 layout. No real page, account, person or product. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>합성 샘플 상품 - 합성 상점</title>
+<meta property="og:title" content="합성 샘플 상품 1kg">
+<meta property="og:image" content="https://kmretail.co.kr/web/product/big/synthetic-9001.jpg">
+<meta property="product:productId" content="9001">
+<meta property="product:retailer_item_id" content="9001">
+<meta property="product:price:amount" content="12000">
+<link rel="canonical" href="https://kmretail.co.kr/product/synthetic-sample/9001/">
+<link rel="stylesheet" href="/layout/basic/css/layout.css">
+<script>window.layoutState = {"memberGrade": "SYNTHETIC"};</script>
+</head>
+<body>
+<div id="header" class="xans-layout-logotop">
+  <a class="member-link" href="/member/login.html">합성회원 로그인</a>
+  <a class="cs-link" href="mailto:help@synthetic.invalid">help@synthetic.invalid</a>
+  <img src="/web/upload/logo.png">
+</div>
+<div id="contents">
+  <div class="xans-element- xans-product xans-product-detail">
+    <div class="xans-element- xans-product xans-product-image imgArea">
+      <div class="keyImg"><img class="BigImage" src="/web/product/big/synthetic-9001.jpg" onclick="zoom()" alt="합성 샘플 상품"></div>
+      <div class="xans-element- xans-product xans-product-addimage listImg">
+        <img class="ThumbImage" src="/web/product/small/synthetic-9001-a.jpg">
+        <img class="ThumbImage" src="/web/product/small/synthetic-9001-b.jpg">
+      </div>
+    </div>
+    <div class="infoArea">
+      <table>
+        <tbody>
+          <tr><th scope="row">상품명</th><td>합성 샘플 상품 1kg</td></tr>
+          <tr><th scope="row">판매가</th><td><strong id="span_product_price_text">12,000원</strong></td></tr>
+          <tr><th scope="row">소비자가</th><td>15,000원</td></tr>
+          <tr><th scope="row">배송방법</th><td>택배</td></tr>
+          <tr><th scope="row">배송비</th><td>3,000원</td></tr>
+          <tr><th scope="row">원산지</th><td>국산</td></tr>
+          <tr class="displaynone"><th scope="row">브랜드</th><td>합성브랜드</td></tr>
+        </tbody>
+      </table>
+      <table class="xans-element- xans-product xans-product-option"><tbody></tbody></table>
+      <input type="text" name="quantity" value="3">
+      <div class="xans-element- xans-product xans-product-action">
+        <span id="btnBuy" class="btnBuy" data-member-token="not-a-real-token">구매하기</span>
+        <span class="btnBasket">장바구니</span>
+      </div>
+    </div>
+  </div>
+  <div class="xans-element- xans-product xans-product-additional">
+    <div id="prdDetail" class="ec-base-tab">
+      <ul class="dMenu"><li>상세정보</li><li>구매후기</li></ul>
+      <div class="cont">
+        <p>아침에 한 번씩 드시는 합성 샘플 상품입니다.</p>
+        <img ec-data-src="/web/upload/synthetic/detail-1.jpg">
+        <img ec-data-src="/web/upload/synthetic/detail-2.jpg">
+      </div>
+      <!-- a layout comment inside the description -->
+      <script>trackDetail();</script>
+    </div>
+    <div class="xans-element- xans-product xans-product-review">
+      <p>박** 님: 배송이 빨라요</p>
+      <table><tr><th>판매가</th><td>9,900원</td></tr></table>
+    </div>
+    <div class="xans-element- xans-product xans-product-relation">
+      <span class="btnBuy">연관상품 구매</span>
+      <img src="/web/product/medium/related-1.jpg">
+    </div>
+  </div>
+</div>
+<div id="footer" class="addr">
+  <a class="cs-link" href="mailto:help@synthetic.invalid">help@synthetic.invalid</a>
+</div>
+</body>
+</html>

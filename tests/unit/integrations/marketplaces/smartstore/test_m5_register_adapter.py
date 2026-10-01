@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import json
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -138,8 +139,13 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v2"
+    assert projected.encoding_version == "smartstore-register-wire/v4"
     assert projected.document.mapping() == {
+        # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
+        "smartstoreChannelProduct": {
+            "channelProductDisplayStatusType": "ON",
+            "naverShoppingRegistration": True,
+        },
         "originProduct": {
             # E2 (Issue #89 `5868542027`): on registration the CREATE endpoint accepts only SALE.
             "statusType": "SALE",
@@ -150,88 +156,276 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
                 "optionalImages": [{"url": REF_DETAIL}],
             },
             "salePrice": 19900,
+            # The registration seed (D2.2), never a source quantity.
+            "stockQuantity": 1,
             # Required on registration (packet 5862400626); the value is the operator-reviewed
             # category id the Snapshot froze, emitted verbatim.
             "leafCategoryId": "cat-1",
             "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
-        }
+        },
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
-    # The reviewed notice the Snapshot owns is carried as evidence, never emitted: no notice type
-    # child is captured, so nothing of it may be placed on the wire.
+    # The reviewed notice the Snapshot owns is kept as evidence. Its type has no captured child
+    # in the pinned table, so nothing of it is placed on the wire.
     assert projected.notice_type == "Wear2023"
     assert projected.notice_fields == {"material": "면 100%"}
-    # The request is not sendable: no ICBM owner decides the naverShoppingRegistration boolean,
-    # the channel display status or the registration stock quantity, and the official evidence
-    # captures no notice child. None of them is ever invented.
     assert not projected.sendable
-    assert set(projected.gaps) == {
-        product.GAP_NOTICE_TYPE_CHILD,
-        product.GAP_SHOPPING_REGISTRATION,
-        product.GAP_CHANNEL_DISPLAY_STATUS,
-        product.GAP_REGISTRATION_STOCK_QUANTITY,
-    }
+    assert projected.gaps == (product.GAP_NOTICE_TYPE_CHILD,)
 
 
-def test_the_registration_stock_quantity_is_a_named_gap_never_a_guess() -> None:
-    # Packet 5862400626: stockQuantity is required on registration and must be at least 1. The
-    # Snapshot owns no registration stock, so the field is never emitted — neither the documented
-    # option default 0 nor an invented 1 — and the named gap keeps every projection unsendable.
+def test_the_registration_stock_quantity_is_the_owned_seed() -> None:
+    # D2.2: stockQuantity is required on registration and must be at least 1 (5862400626). ICBM
+    # registers the seed 1 for every projected Snapshot — never the documented option default 0,
+    # never a source quantity — and it is no gap.
     for items in (
         None,
         [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})],
     ):
         projected = product.project(payload() if items is None else payload(items=items))
-        assert product.GAP_REGISTRATION_STOCK_QUANTITY in projected.gaps
-        assert "stockQuantity" not in projected.document.mapping()["originProduct"]
-        assert '"stockQuantity"' not in projected.document.canonical_json
-        assert projected.sendable is False
-    assert "at least 1" in product.GAP_REGISTRATION_STOCK_QUANTITY
-    assert "5862400626" in product.GAP_REGISTRATION_STOCK_QUANTITY
+        assert projected.document.mapping()["originProduct"]["stockQuantity"] == 1
+        assert not any("stockQuantity" in gap for gap in projected.gaps)
+    assert product.REGISTRATION_STOCK_QUANTITY == 1
+    assert not hasattr(product, "GAP_REGISTRATION_STOCK_QUANTITY")
+    # A document carrying any other quantity is outside the frozen contract.
+    body = product.project(payload()).document.mapping()
+    for other in (0, 2, 10, True, "1"):
+        body["originProduct"]["stockQuantity"] = other
+        with pytest.raises(product.WireContractError) as refused:
+            product.create_document(IDENTITY, body)
+        assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID", other
 
 
-def test_the_value_packet_alone_does_not_make_the_request_sendable() -> None:
-    # F1/F2 (Issue #89 `5868542027`, `5868656082`): E1 closes the *type* of
-    # naverShoppingRegistration (a required JSON boolean) and nothing else. Which boolean ICBM
-    # publishes with has no ICBM-owned source, so the closed type gap is replaced by a value-source
-    # gap — and the projection stays unsendable, with neither boolean guessed onto the wire.
+def test_the_channel_members_carry_the_owned_values_only() -> None:
+    # E1 closes the *type* of naverShoppingRegistration; D2.1 owns its value: true, ICBM's
+    # publication intent. The display status is ON (D1). Neither is derived from the provider.
     projected = product.project(payload())
-    assert projected.sendable is False
-    assert product.GAP_SHOPPING_REGISTRATION in projected.gaps
-    assert "boolean" in product.GAP_SHOPPING_REGISTRATION
-    assert "value source" in product.GAP_SHOPPING_REGISTRATION
-    assert "value type is not captured" not in product.GAP_SHOPPING_REGISTRATION
+    channel = projected.document.mapping()["smartstoreChannelProduct"]
+    assert channel == {"channelProductDisplayStatusType": "ON", "naverShoppingRegistration": True}
+    assert product.REGISTRATION_NAVER_SHOPPING_REGISTRATION is True
     assert product.NAVER_SHOPPING_REGISTRATION_VALUES == (True, False)
-    # E2 closes the statusType gap: it is projected, and no gap names it any more.
+    assert not hasattr(product, "GAP_SHOPPING_REGISTRATION")
+    assert not any("naverShoppingRegistration" in gap for gap in projected.gaps)
+    # E2 closes the statusType gap: it is projected, and no gap names it.
     assert projected.document.mapping()["originProduct"]["statusType"] == "SALE"
-    assert not any("statusType" in gap for gap in projected.gaps)
     assert not hasattr(product, "GAP_STATUS_TYPE")
-    # The unrelated gaps are unchanged by the packet (F3).
-    assert product.GAP_CHANNEL_DISPLAY_STATUS in projected.gaps
-    assert product.GAP_REGISTRATION_STOCK_QUANTITY in projected.gaps
-    assert product.GAP_NOTICE_TYPE_CHILD in projected.gaps
+    assert not hasattr(product, "GAP_CHANNEL_DISPLAY_STATUS")
+    body = projected.document.mapping()
+    for value in (False, "true", 1, None):
+        body["smartstoreChannelProduct"]["naverShoppingRegistration"] = value
+        with pytest.raises(product.WireContractError) as refused:
+            product.create_document(IDENTITY, body)
+        assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID", value
+    # The option-price gap is unchanged: an option listing is still never sendable.
     items = [_item(KEY_A, 19900, {"색상": "빨강"}), _item(KEY_B, 19900, {"색상": "파랑"})]
-    options = product.project(payload(items=items))
-    assert product.GAP_OPTION_PRICE_SEMANTICS in options.gaps
+    options = product.project(payload(items=items, notice=_etc_notice()))
+    assert options.gaps == (product.GAP_OPTION_PRICE_SEMANTICS,)
     assert options.sendable is False
 
 
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
-    text = product.project(payload()).document.canonical_json
+    projected = product.project(payload()).document
+    text = projected.canonical_json
     for never in (
-        "naverShoppingRegistration",
-        "channelProductDisplayStatusType",
-        "smartstoreChannelProduct",
         # A separate Shopping Window channel structure, out of the SmartStore-only scope.
         "windowChannelProduct",
+        # The reviewed type of this Snapshot has no captured child: no notice at all.
         "productInfoProvidedNotice",
-        # Unowned optional structures are omitted rather than defaulted (delivery, stock, A/S).
+        # Unowned optional structures are omitted rather than defaulted (delivery, A/S, origin).
         "deliveryInfo",
-        "stockQuantity",
         "afterServiceInfo",
         "originAreaInfo",
+        # Unowned optional channel members.
+        "channelProductName",
+        "bbsSeq",
+        "storeKeepExclusiveProduct",
     ):
         assert never not in text
+
+
+# ---------------------------------------------------------------- the notice child (D2.3)
+
+
+def _value(text: str) -> dict[str, Any]:
+    return {"value": text, "provenance": "OPERATOR_CONFIRMED"}
+
+
+def _etc_notice(**fields: dict[str, Any] | None) -> dict[str, Any]:
+    """A reviewed ETC (기타 재화) notice with every required member, as the payload freezes it."""
+    values: dict[str, Any] = {
+        "itemName": _value("텀블러"),
+        "modelName": _value("TB-500"),
+        "manufacturer": _value("KM통상"),
+        "customerServicePhoneNumber": _value("02-000-0000"),
+        "returnCostReason": {"detail_page_reference": True, "provenance": "OPERATOR_CONFIRMED"},
+    }
+    values.update(fields)
+    return {
+        "notice_type": "ETC",
+        "fields": {key: value for key, value in values.items() if value is not None},
+    }
+
+
+def test_the_pinned_table_maps_only_documented_types_to_their_documented_child() -> None:
+    members = product.NOTICE_TYPE_MEMBERS
+    # Every explicit mapping of the 2.90.0 schema (evidence packet 5916962285), and no other.
+    assert len(members) == 36
+    assert members["ETC"] == "etc" and members["GENERAL_FOOD"] == "generalFood"
+    assert members["SPORTS_EQUIPMENT"] == "sportsEquipment"
+    assert members["CELLPHONE"] == "cellPhone" and members["MICROELECTRONICS"] == "microElectronics"
+    for undocumented in ("LODGMENT_RESERVATION", "TRAVEL_PACKAGE", "AIRLINE_TICKET", "RENT_CAR"):
+        assert undocumented not in members
+    # Only the children whose whole member set is captured are projectable.
+    assert set(product.NOTICE_CHILDREN) == {
+        "WEAR",
+        "SHOES",
+        "HOME_APPLIANCES",
+        "KITCHEN_UTENSILS",
+        "COSMETIC",
+        "ETC",
+    }
+    assert product.NOTICE_SCHEMA_REVISION == "smartstore-notice-children/2.90.0-r1"
+    common = {
+        "returnCostReason",
+        "noRefundReason",
+        "qualityAssuranceStandard",
+        "compensationProcedure",
+        "troubleShootingContents",
+    }
+    for child in product.NOTICE_CHILDREN.values():
+        assert common <= set(child)
+        assert all(child[name].detail_default for name in common)
+
+
+def test_a_captured_notice_makes_a_single_item_listing_sendable() -> None:
+    projected = product.project(payload(notice=_etc_notice()))
+    notice = projected.document.mapping()["originProduct"]["detailAttribute"][
+        "productInfoProvidedNotice"
+    ]
+    # Exactly the child of the reviewed type, with exactly the reviewed text values. The member
+    # left to the product detail is out: its documented default is "상품상세 참조".
+    assert notice == {
+        "productInfoProvidedNoticeType": "ETC",
+        "etc": {
+            "itemName": "텀블러",
+            "modelName": "TB-500",
+            "manufacturer": "KM통상",
+            "customerServicePhoneNumber": "02-000-0000",
+        },
+    }
+    assert projected.gaps == ()
+    assert projected.sendable is True
+    assert product.completeness_gaps(projected.document) == ()
+
+
+@pytest.mark.parametrize(
+    "notice_type",
+    ["Wear2023", "etc", "Etc", " ETC", "BAG", "GENERAL_FOOD", "LODGMENT_RESERVATION", "기타"],
+)
+def test_an_uncaptured_notice_type_stays_a_gap_and_never_falls_back(notice_type: str) -> None:
+    notice = _etc_notice()
+    notice["notice_type"] = notice_type
+    projected = product.project(payload(notice=notice))
+    assert projected.gaps == (product.GAP_NOTICE_TYPE_CHILD,)
+    assert projected.sendable is False
+    assert "productInfoProvidedNotice" not in projected.document.canonical_json
+    assert product.completeness_gaps(projected.document) == (product.GAP_NOTICE_TYPE_CHILD,)
+
+
+@pytest.mark.parametrize(
+    ("fields", "code"),
+    [
+        # A member the child does not document, including another type's member.
+        ({"material": _value("면")}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        ({"importDeclaration": _value("true")}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        # A required member without a documented default, missing or left to the detail.
+        ({"itemName": None}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        (
+            {"modelName": {"detail_page_reference": True, "provenance": "OPERATOR_CONFIRMED"}},
+            "WIRE_DOCUMENT_FIELD_MISSING",
+        ),
+        # customerServicePhoneNumber is required without afterServiceDirector.
+        ({"customerServicePhoneNumber": None}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        # A value past its documented bound.
+        ({"itemName": _value("x" * 51)}, "WIRE_DOCUMENT_VALUE_INVALID"),
+    ],
+    ids=[
+        "another-type-member",
+        "boolean-member",
+        "required-missing",
+        "required-left-to-detail",
+        "conditional-missing",
+        "too-long",
+    ],
+)
+def test_a_notice_outside_its_child_contract_is_refused(fields: dict[str, Any], code: str) -> None:
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(payload(notice=_etc_notice(**fields)))
+    assert refused.value.code == code
+
+
+def test_a_conditional_member_is_satisfied_by_its_alternative() -> None:
+    # customerServicePhoneNumber is required only without afterServiceDirector.
+    notice = _etc_notice(
+        customerServicePhoneNumber=None, afterServiceDirector=_value("홍길동 02-111-1111")
+    )
+    projected = product.project(payload(notice=notice))
+    child = projected.document.mapping()["originProduct"]["detailAttribute"][
+        "productInfoProvidedNotice"
+    ]["etc"]
+    assert "customerServicePhoneNumber" not in child
+    assert projected.sendable is True
+
+
+def test_a_year_month_member_is_validated_never_reformatted() -> None:
+    wear = {
+        "notice_type": "WEAR",
+        "fields": {
+            "material": _value("면 100%"),
+            "color": _value("흰색"),
+            "size": _value("M"),
+            "manufacturer": _value("KM통상"),
+            "caution": _value("찬물 세탁"),
+            "warrantyPolicy": _value("소비자분쟁해결기준"),
+            "afterServiceDirector": _value("KM통상 02-000-0000"),
+            "packDate": _value("2026-09"),
+        },
+    }
+    projected = product.project(payload(notice=wear))
+    child = projected.document.mapping()["originProduct"]["detailAttribute"][
+        "productInfoProvidedNotice"
+    ]["wear"]
+    # packDate is given, so its text alternative is not required.
+    assert child["packDate"] == "2026-09" and "packDateText" not in child
+    assert projected.sendable is True
+    for bad in ("2026-9", "2026-13", "2026.09", "Sep 2026"):
+        wear["fields"]["packDate"] = _value(bad)
+        with pytest.raises(product.WireContractError) as refused:
+            product.project(payload(notice=wear))
+        assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID", bad
+    # Without either, the text alternative is the required one.
+    del wear["fields"]["packDate"]
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(payload(notice=wear))
+    assert refused.value.code == "WIRE_DOCUMENT_FIELD_MISSING"
+
+
+def test_a_notice_document_names_exactly_its_own_child() -> None:
+    body = product.project(payload(notice=_etc_notice())).document.mapping()
+    notice = body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"]
+    for broken, code in (
+        ({**notice, "wear": {}}, "WIRE_NOTICE_CHILD_MISMATCH"),
+        ({"productInfoProvidedNoticeType": "ETC"}, "WIRE_NOTICE_CHILD_MISMATCH"),
+        (
+            {"productInfoProvidedNoticeType": "WEAR", "etc": notice["etc"]},
+            "WIRE_NOTICE_CHILD_MISMATCH",
+        ),
+        ({"productInfoProvidedNoticeType": "BAG", "bag": {}}, "WIRE_NOTICE_TYPE_NOT_CAPTURED"),
+        ({"etc": notice["etc"]}, "WIRE_DOCUMENT_FIELD_MISSING"),
+    ):
+        body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"] = broken
+        with pytest.raises(product.WireContractError) as refused:
+            product.create_document(IDENTITY, body)
+        assert refused.value.code == code, broken
 
 
 def test_the_projection_is_deterministic_for_the_same_snapshot() -> None:
@@ -386,13 +580,15 @@ def _provider_body(
     codes: tuple[str, ...] = (KEY_A,),
     url: str = REF_MAIN,
     management: str | None = SELLER_CODE,
+    stock: Any = 1,
 ) -> dict[str, Any]:
     """A provider read-back shaped as an envelope the packet does not prove, so the normalizer
     must recognize the proven leaves wherever they sit."""
     product_node: dict[str, Any] = {
         "name": name,
         "salePrice": price,
-        "stockQuantity": 10,
+        # The registration seed the Snapshot's projection sent (D2.2).
+        "stockQuantity": stock,
         "images": {"representativeImage": {"url": url}},
         "optionCombinations": [{"sellerManagerCode": code} for code in codes],
     }
@@ -409,8 +605,8 @@ def _compare(**kwargs: Any) -> readback.Comparison:
 def test_an_exact_read_back_matches_the_snapshot() -> None:
     result = _compare()
     assert (result.verdict, result.reasons) == (readback.ReadbackVerdict.MATCH, ())
-    assert result.comparison_contract_version == "smartstore-readback-comparison/v2"
-    assert result.normalizer_version == "smartstore-readback-normalizer/v2"
+    assert result.comparison_contract_version == "smartstore-readback-comparison/v4"
+    assert result.normalizer_version == "smartstore-readback-normalizer/v3"
     # The read-back is compared against the projected provider code, exactly (R1).
     assert result.normalized["seller_management_code"] == SELLER_CODE
 
@@ -482,26 +678,45 @@ def test_a_value_outside_the_documented_enumerations_is_unreadable(sale: Any, di
     assert (listing.sale_status, listing.display_status) == (None, None)
 
 
-def test_no_published_state_is_stated_while_the_display_status_has_no_owner() -> None:
-    # The sale status ICBM registers is SALE; which display status it registers has no owner.
+def test_the_snapshot_expects_exactly_sale_and_on() -> None:
+    # The expectation is what the Snapshot's own CREATE projection writes: SALE, the only CREATE
+    # input, and ON, the owned display status (architect resolution 5915900049 D1).
     expected = readback.expected_published_state(payload())
     assert (expected.sale_status, expected.display_status, expected.complete) == (
         "SALE",
-        None,
-        False,
+        "ON",
+        True,
     )
     assert readback.reads_published_state() is True
-    assert readback.proves_published_state() is False
-    # Both halves read back, everything else matching: still no published state is stated, so
-    # the execution owner refuses to confirm (REGISTER_PUBLISHED_STATE_UNPROVEN).
-    for display in ("ON", "SUSPENSION", "WAIT"):
-        result = _compare_origin(display=display)
-        assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
-        assert "published_state" not in result.normalized
-        assert (result.normalized["sale_status"], result.normalized["display_status"]) == (
-            "SALE",
-            display,
-        )
+    assert readback.proves_published_state() is True
+    # A Snapshot that cannot be projected expects nothing, so nothing can be proven for it.
+    broken = readback.expected_published_state({"items": []})
+    assert (broken.sale_status, broken.display_status, broken.complete) == (None, None, False)
+
+
+def test_sale_on_read_back_proves_the_published_state() -> None:
+    result = _compare_origin()
+    assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
+    assert result.normalized["published_state"] == "SALE/ON"
+
+
+@pytest.mark.parametrize("display", ["SUSPENSION", "WAIT"])
+def test_another_display_status_is_a_mismatch_and_proves_nothing(display: str) -> None:
+    result = _compare_origin(display=display)
+    assert result.verdict is readback.ReadbackVerdict.MISMATCH
+    assert result.reasons == ("DISPLAY_STATUS_MISMATCH",)
+    assert "published_state" not in result.normalized
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [{"sale": None}, {"display": None}, {"sale": None, "display": None}, {"display": "DISPLAYED"}],
+    ids=["no-sale", "no-display", "neither", "unreadable-display"],
+)
+def test_a_missing_or_unreadable_half_proves_nothing(missing: dict[str, Any]) -> None:
+    result = _compare_origin(**missing)
+    assert result.verdict is readback.ReadbackVerdict.MATCH, result.reasons
+    assert "published_state" not in result.normalized
 
 
 @pytest.mark.parametrize("sale", ["OUTOFSTOCK", "WAIT", "SUSPENSION", "PROHIBITION", "DELETE"])
@@ -549,9 +764,13 @@ def test_normalization_is_deterministic_across_envelopes_and_orderings() -> None
     nested = {"channelProducts": [_provider_body()]}
     flat = _provider_body()["originProduct"]
     other = {"result": {"data": [flat]}}
-    assert readback.normalize(retain(contract, nested)) == expected
-    assert readback.normalize(retain(contract, dict(flat))) == expected
-    assert readback.normalize(retain(contract, other)) == expected
+    # The stock quantity is the one leaf read at its documented path (normalizer v3): outside
+    # ``originProduct`` it is not read at all.
+    unplaced = replace(expected, stock_quantity=None)
+    assert expected.stock_quantity == 1
+    assert readback.normalize(retain(contract, nested)) == unplaced
+    assert readback.normalize(retain(contract, dict(flat))) == unplaced
+    assert readback.normalize(retain(contract, other)) == unplaced
 
 
 def test_a_value_outside_a_proven_bound_is_not_a_number_this_contract_understands() -> None:
@@ -563,9 +782,32 @@ def test_a_value_outside_a_proven_bound_is_not_a_number_this_contract_understand
     assert "SALE_PRICE_MISMATCH" in out_of_range.reasons
     contract = resolve(ORIGIN_READ)
     huge_stock = readback.normalize(
-        retain(contract, _provider_body() | {"stockQuantity": product.MAX_STOCK_QUANTITY + 1})
+        retain(contract, _provider_body(stock=product.MAX_STOCK_QUANTITY + 1))
     )
     assert huge_stock.stock_quantity is None
+
+
+@pytest.mark.parametrize("stock", [0, 2, 10, None, True, "1"])
+def test_a_read_back_stock_other_than_the_seed_is_a_mismatch(stock: Any) -> None:
+    # D2.2: the seed the Snapshot's projection sent is compared exactly. A different, missing or
+    # unreadable quantity is a mismatch for review, never a confirmation.
+    result = _compare_origin(stock=stock)
+    assert result.verdict is readback.ReadbackVerdict.MISMATCH
+    assert result.reasons == ("STOCK_QUANTITY_MISMATCH",)
+    assert "published_state" not in result.normalized
+
+
+def test_the_stock_seed_is_read_only_at_the_origin_product() -> None:
+    body = _origin_read()
+    del body["originProduct"]["stockQuantity"]
+    # An option row or another node carrying a stock quantity is never taken for the seed.
+    body["originProduct"]["optionCombinations"][0]["stockQuantity"] = 1
+    body["stockQuantity"] = 1
+    result = readback.compare(payload(), retain(resolve(ORIGIN_READ), body))
+    assert result.normalized["stock_quantity"] is None
+    assert result.reasons == ("STOCK_QUANTITY_MISMATCH",)
+    assert readback.expected_stock_quantity(payload()) == 1
+    assert readback.expected_stock_quantity({"items": []}) is None
 
 
 @pytest.mark.parametrize(

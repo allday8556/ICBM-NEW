@@ -76,10 +76,17 @@ ORIGIN: dict[str, Any] = {
     "detailContent": "본문",
     "images": {"representativeImage": {"url": REF_MAIN}},
     "salePrice": 19900,
+    # The registration seed (architect resolution 5915900049 D2.2).
+    "stockQuantity": 1,
     "leafCategoryId": "cat-1",
     "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
 }
-DOCUMENT: dict[str, Any] = {"originProduct": ORIGIN}
+# The channel members ICBM owns (architect resolution 5915900049 D1, D2.1).
+CHANNEL: dict[str, Any] = {
+    "channelProductDisplayStatusType": "ON",
+    "naverShoppingRegistration": True,
+}
+DOCUMENT: dict[str, Any] = {"originProduct": ORIGIN, "smartstoreChannelProduct": CHANNEL}
 # The only form a request may reach the caller in: checked against the adopted request contract and
 # frozen with its provenance by the wire projection.
 FROZEN = product.create_document(IDENTITY, DOCUMENT)
@@ -88,7 +95,10 @@ FROZEN = product.create_document(IDENTITY, DOCUMENT)
 def _origin(**changes: Any) -> dict[str, Any]:
     """One request body with the named origin-product fields replaced or removed."""
     origin = {**deepcopy(ORIGIN), **changes}
-    return {"originProduct": {key: value for key, value in origin.items() if value is not None}}
+    return {
+        "originProduct": {key: value for key, value in origin.items() if value is not None},
+        "smartstoreChannelProduct": deepcopy(CHANNEL),
+    }
 
 
 def _caller(provider: Provider) -> SmartStoreEndpointCaller:
@@ -272,19 +282,17 @@ def test_the_validated_projection_document_survives_the_wire_check() -> None:
 @pytest.mark.parametrize(
     ("body", "code"),
     [
-        # Deny-by-default: a path the captured official evidence does not record cannot be sent,
-        # whatever built the mapping — including a required field whose value no ICBM owner decides.
-        (_origin(stockQuantity=3), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
-        (
-            {**deepcopy(DOCUMENT), "smartstoreChannelProduct": {"naverShoppingRegistration": True}},
-            "WIRE_DOCUMENT_FIELD_UNKNOWN",
-        ),
+        # Deny-by-default: a value no ICBM owner decides cannot be sent, whatever built the
+        # mapping — the registration stock is exactly the seed (D2.2), never a source quantity.
+        (_origin(stockQuantity=3), "WIRE_DOCUMENT_VALUE_INVALID"),
+        (_origin(stockQuantity=None), "WIRE_DOCUMENT_FIELD_MISSING"),
+        (_origin(originAreaInfo={}), "WIRE_DOCUMENT_FIELD_UNKNOWN"),
         (
             {
                 **deepcopy(DOCUMENT),
-                "smartstoreChannelProduct": {"naverShoppingRegistration": False},
+                "smartstoreChannelProduct": {**CHANNEL, "naverShoppingRegistration": False},
             },
-            "WIRE_DOCUMENT_FIELD_UNKNOWN",
+            "WIRE_DOCUMENT_VALUE_INVALID",
         ),
         # E2: on registration only SALE may be entered — the broader shared-schema values, and
         # SUSPENSION (an update input), are never a CREATE input.
@@ -415,7 +423,7 @@ def test_a_document_of_another_listing_identity_never_reaches_the_transport() ->
 def test_an_unsendable_projection_never_reaches_the_transport() -> None:
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
 
-    unsendable = declared(FROZEN, gaps=(product.GAP_SHOPPING_REGISTRATION,))
+    unsendable = declared(FROZEN, gaps=(product.GAP_NOTICE_TYPE_CHILD,))
     sender = declared_projection_sender(
         caller=_caller(provider), bearer=lambda: Bearer(), projection=lambda payload: unsendable
     )
@@ -779,16 +787,11 @@ def test_the_production_sender_takes_no_projection() -> None:
 
 
 def test_the_production_caller_refuses_every_create_document_as_incomplete() -> None:
-    # The wire boundary reads completeness from the document body itself. The adopted request
-    # schema admits none of the parts the provider requires on registration beyond originProduct's
-    # projectable fields, so even the validated projection document is refused — locally, before
-    # any byte is written — whoever built it and whatever a projection declared.
-    assert set(product.completeness_gaps(FROZEN)) == {
-        product.GAP_SHOPPING_REGISTRATION,
-        product.GAP_CHANNEL_DISPLAY_STATUS,
-        product.GAP_REGISTRATION_STOCK_QUANTITY,
-        product.GAP_NOTICE_TYPE_CHILD,
-    }
+    # The wire boundary reads completeness from the document body itself. A document without the
+    # notice the provider requires on registration — the state of every Snapshot whose reviewed
+    # notice type has no captured child — is refused locally, before any byte is written, whoever
+    # built it and whatever a projection declared.
+    assert product.completeness_gaps(FROZEN) == (product.GAP_NOTICE_TYPE_CHILD,)
     provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
     production = SmartStoreEndpointCaller(transport=httpx.MockTransport(provider))
     with pytest.raises(SmartStoreCallError) as refused:
@@ -811,18 +814,73 @@ def test_the_production_caller_refuses_every_create_document_as_incomplete() -> 
 
 def test_completeness_is_read_from_the_body_not_declared() -> None:
     # A body that carries a required part no longer names that part's gap: the gate is a function
-    # of the document, so it can only ever close when the adopted schema admits the part.
+    # of the document, so a forged notice closes it — and the schema, which admits only a captured
+    # child, still refuses the forged body, so it never reaches the wire either way.
     body = json.loads(FROZEN.canonical_json)
-    body["originProduct"]["stockQuantity"] = 1
+    body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"] = {
+        "productInfoProvidedNoticeType": "BAG",
+        "bag": {"material": "가죽"},
+    }
     forged = product.CreateDocument(
         encoding_version=product.WIRE_ENCODING_VERSION,
         listing_identity=IDENTITY,
         canonical_json=json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":")),
     )
-    assert product.GAP_REGISTRATION_STOCK_QUANTITY not in product.completeness_gaps(forged)
-    # The schema still refuses that body, so it never reaches the wire either way.
-    with pytest.raises(product.WireContractError):
+    assert product.completeness_gaps(forged) == ()
+    with pytest.raises(product.WireContractError) as refused:
         product.verified(forged)
+    assert refused.value.code == "WIRE_NOTICE_TYPE_NOT_CAPTURED"
+
+
+# The reviewed ETC notice of a sendable single-Item listing (D2.3; packet 5916962285).
+ETC_NOTICE: dict[str, Any] = {
+    "productInfoProvidedNoticeType": "ETC",
+    "etc": {
+        "itemName": "텀블러",
+        "modelName": "TB-500",
+        "manufacturer": "KM통상",
+        "customerServicePhoneNumber": "02-000-0000",
+    },
+}
+
+
+def _complete() -> product.CreateDocument:
+    body = deepcopy(DOCUMENT)
+    body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"] = deepcopy(ETC_NOTICE)
+    return product.create_document(IDENTITY, body)
+
+
+def test_a_complete_document_passes_the_gate_and_production_still_sends_nothing() -> None:
+    # With every required part owned (5915900049 D1, D2), a single-Item document of a captured
+    # notice type is complete: the wire boundary no longer refuses it as incomplete. Nothing is
+    # sent in production all the same — the production sender has no committed session, and the
+    # send-time safety stack above it refuses every mutation under M0_DRY_RUN_ONLY.
+    complete = _complete()
+    assert product.completeness_gaps(complete) == ()
+    assert product.verified(complete) == complete
+    provider = Provider(httpx.Response(200, json={"originProductNo": 1}))
+    production = SmartStoreCreateSender(
+        caller=SmartStoreEndpointCaller(transport=httpx.MockTransport(provider)),
+        bearer=lambda: None,
+    )
+    # A real Snapshot payload whose reviewed ETC notice is captured: its own projection is
+    # sendable, so the refusal below is the missing session and nothing else.
+    from tests.unit.integrations.marketplaces.smartstore.test_m5_register_adapter import (
+        IDENTITY as SNAPSHOT_IDENTITY,
+    )
+    from tests.unit.integrations.marketplaces.smartstore.test_m5_register_adapter import (
+        _etc_notice,
+        payload,
+    )
+
+    snapshot = payload(notice=_etc_notice())
+    assert product.project(snapshot).sendable is True
+    handoff = production.send(
+        payload=snapshot, idempotency_key="k", listing_identity=SNAPSHOT_IDENTITY
+    )
+    assert provider.requests == []
+    assert handoff.error_code == "SMARTSTORE_SESSION_UNAVAILABLE"
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
 
 
 def test_the_sender_recomputes_completeness_from_the_document() -> None:
@@ -862,3 +920,55 @@ def test_no_body_is_encoded_for_an_incomplete_create(monkeypatch: pytest.MonkeyP
         )
     assert refused.value.code == "SMARTSTORE_CREATE_REQUEST_INCOMPLETE"
     assert encoded == [] and provider.requests == []
+
+
+@pytest.mark.parametrize(
+    ("channel", "code"),
+    [
+        (None, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({"channelProductDisplayStatusType": "ON"}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({"naverShoppingRegistration": True}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        (
+            {**CHANNEL, "channelProductDisplayStatusType": "SUSPENSION"},
+            "WIRE_DOCUMENT_VALUE_INVALID",
+        ),
+        ({**CHANNEL, "channelProductDisplayStatusType": "WAIT"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({**CHANNEL, "channelProductDisplayStatusType": "on"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({**CHANNEL, "naverShoppingRegistration": False}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({**CHANNEL, "naverShoppingRegistration": "true"}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({**CHANNEL, "naverShoppingRegistration": 1}, "WIRE_DOCUMENT_VALUE_INVALID"),
+        ({**CHANNEL, "bbsSeq": 1}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+        ({**CHANNEL, "channelProductName": "x"}, "WIRE_DOCUMENT_FIELD_UNKNOWN"),
+    ],
+    ids=[
+        "no-channel",
+        "empty-channel",
+        "no-shopping-registration",
+        "no-display-status",
+        "suspension",
+        "wait",
+        "lowercase",
+        "shopping-registration-false",
+        "shopping-registration-string",
+        "shopping-registration-int",
+        "unowned-optional",
+        "unowned-name",
+    ],
+)
+def test_the_channel_carries_exactly_the_owned_values(
+    channel: dict[str, Any] | None, code: str
+) -> None:
+    """Architect resolution 5915900049 D1 and D2.1: every CREATE document registers the SmartStore
+    channel as displayed (ON) with naverShoppingRegistration true. No other value, and no channel
+    member ICBM does not own, is ever encodable."""
+    body: dict[str, Any] = {"originProduct": deepcopy(ORIGIN)}
+    if channel is not None:
+        body["smartstoreChannelProduct"] = channel
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == code
+    assert product.create_document(IDENTITY, DOCUMENT).mapping()["smartstoreChannelProduct"] == {
+        "channelProductDisplayStatusType": "ON",
+        "naverShoppingRegistration": True,
+    }

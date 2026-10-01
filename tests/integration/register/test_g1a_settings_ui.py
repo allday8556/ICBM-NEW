@@ -12,7 +12,6 @@ No provider is reached: a target policy is local configuration.
 """
 
 import contextlib
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -26,12 +25,12 @@ from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
 from tests.conftest import LOCAL
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import raw
 from tests.support.register_support import establish
 
 pytestmark = pytest.mark.integration
 
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 MARKETPLACE = "smartstore"
 POLICY_TAB = f"{LOCAL}/#/settings?tab=smartstore&sub=policy"
 COMMON_TAB = f"{LOCAL}/#/settings?tab=common"
@@ -61,7 +60,7 @@ VALUES = {
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

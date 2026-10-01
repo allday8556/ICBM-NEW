@@ -8,7 +8,6 @@ PR-E owns no CAPABILITY_MAPPING §17 target and claims none of PR-D's projection
 
 import json
 import sqlite3
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -37,11 +36,11 @@ from tests.integration.connect.test_smartstore_operator_api import (
     UID_B,
     Provider,
 )
+from tests.support.browser import BROWSER_CHANNEL, launch_browser
 
 pytestmark = pytest.mark.integration
 
 KEY = "smartstore"
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 API_TAB = f"{LOCAL}/#/settings?tab=smartstore&sub=api"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 AUTH_TEXT = ".capability-projection [data-axis='auth'] .cap-text"
@@ -61,7 +60,7 @@ class Traffic:
 def browser() -> Iterator[Browser]:
     with sync_playwright() as playwright:
         try:
-            launched = playwright.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
+            launched = launch_browser(playwright)
         except PlaywrightError as exc:
             pytest.skip(f"no {BROWSER_CHANNEL} browser to launch here ({type(exc).__name__})")
         try:

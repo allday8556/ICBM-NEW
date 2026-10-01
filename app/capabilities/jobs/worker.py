@@ -22,6 +22,11 @@ RECONCILE_INTERVAL_S = 60.0
 
 
 class JobWorker:
+    # ADR-0002 Option A: this worker runs inside the application process. An owner that hands
+    # work to its job through this process's memory depends on exactly that, and says so by
+    # reading this. A worker placed anywhere else must not claim it.
+    IN_PROCESS = True
+
     def __init__(
         self,
         runner: JobRunner,

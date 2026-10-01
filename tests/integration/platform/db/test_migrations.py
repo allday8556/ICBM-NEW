@@ -133,7 +133,7 @@ CANONICAL_TABLES = (
     # The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106).
     "canary_eligibility_records",
 )
-HEAD = "0033_m5_canary_eligibility"
+HEAD = "0034_collect_transport_provenance"
 
 
 def _url(path: Path) -> str:

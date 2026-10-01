@@ -17,11 +17,11 @@ from pathlib import Path
 import pytest
 
 from app.platform.core.ownership import DataDirInUseError, acquire_data_dir
+from tests.support.browser import BROWSER_CHANNEL
 
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-BROWSER_CHANNEL = "msedge" if sys.platform == "win32" else "chrome"
 
 OWNER = textwrap.dedent(
     """
@@ -35,9 +35,10 @@ OWNER = textwrap.dedent(
         child_pid = child.pid
     else:
         from playwright.sync_api import sync_playwright
+        from tests.support.browser import launch_browser
         try:
             playwright = sync_playwright().start()
-            browser = playwright.chromium.launch(channel=sys.argv[3], headless=True)
+            browser = launch_browser(playwright, channel=sys.argv[3])
         except Exception as exc:
             print("SKIP", type(exc).__name__, flush=True)
             raise SystemExit(0)

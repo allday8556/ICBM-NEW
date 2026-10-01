@@ -1213,6 +1213,8 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
         # Migration 0031 adds the provider channel identity column to these two.
         "registration_intents",
         "marketplace_registrations",
+        # Migration 0034 adds the transport provenance columns to the run and the revision.
+        "product_facts_revisions",
     }
     assert {"adaptive_capture_requests", "adaptive_capture_candidates"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0026_g3_live_authority")

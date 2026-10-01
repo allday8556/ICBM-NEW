@@ -156,6 +156,17 @@ def _refused(reason: FetchTargetRefusal, message: str) -> CollectionTargetRefuse
     return CollectionTargetRefused(reason, message)
 
 
+def _require_http(profile: CollectionProfile) -> None:
+    """This gateway sends over HTTP only. A profile under any other transport — the extension
+    envelope of ADR-0019 §10 above all — is refused before a target is judged, a request reserved
+    or a byte sent: the operator's browser made that read, and the server makes none for it."""
+    if profile.transport is not SupplierTransport.HTTP:
+        raise PolicyBlockedError(
+            "COLLECT_TRANSPORT_NOT_HTTP",
+            "the policed gateway sends requests for an HTTP collection profile only",
+        )
+
+
 def _https(url: str) -> SplitResult:
     """The parts of an https URL without credentials, another port, a fragment or whitespace.
 
@@ -325,6 +336,7 @@ class PolicedCollectionGateway:
     ) -> DocumentView:
         if kind is ReadKind.IMAGE_REQUEST:
             raise ValueError("images are read with read_image")
+        _require_http(profile)
         subject = check_target(profile, url, kind)
         budget.reserve(kind, subject)
         cookies: list[dict[str, str]] = []
@@ -338,6 +350,7 @@ class PolicedCollectionGateway:
     ) -> DocumentView:
         """One public document linked from a product page: same storefront, no session (there is
         no session parameter), no query, and at most once per budget."""
+        _require_http(profile)
         path = check_discovered_policy(profile, url)
         budget.reserve(ReadKind.POLICY_READ, f"{DISCOVERED_POLICY_PREFIX}{path}")
         return self._document(profile, url, ReadKind.POLICY_READ, [], DEFAULT_USER_AGENT)
@@ -395,6 +408,7 @@ class PolicedCollectionGateway:
         to spend. The bound is applied to the declared size and to the body as it arrives, so a
         response never reaches the caller — and never reaches storage — above it.
         """
+        _require_http(profile)
         host = check_target(profile, url, ReadKind.IMAGE_REQUEST)
         budget.reserve(ReadKind.IMAGE_REQUEST, host)
         headers = {}

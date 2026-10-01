@@ -11,6 +11,14 @@ no blocker. This is a governance contract: docs only, runtime-zero.
 Decision owner: the user (repository owner, product decisions and protected approvals — `CLAUDE.md`
 §1). Recorded by Claude Code.
 
+> **Amendment note (ADR-0022, 2026-09-30).** The standing authorization is widened by
+> `documents/decisions/adr/0022-agent-operating-authority.md` §7: a step that is not one of the
+> user's decisions (ADR-0022 §2) is authorized by the standing operating authority, whether or not
+> it meets every condition below. Under the 2026-10-01 calibration, rule §7.2 owns the active list
+> of protected execution actions and rule §14.2 owns validation strength. A routine read-only
+> provider call is not protected by name alone; the historical status tables below do not create a
+> second approval or audit list.
+
 ---
 
 ## Context
@@ -44,8 +52,9 @@ A slice is **authorized by this standing authorization** — with no further use
    §14, read fresh from that exact main. No earlier selection, lookahead or cached plan is reused.
 2. **Already decided.** The canonical documents (`documents/roadmap/ROADMAP.md`, `documents/architecture/ARCHITECTURE.md`, `documents/decisions/adr/*`,
    `documents/acceptance/*`) already define its scope, its safety invariants and its owner boundary.
-3. **Provider-zero.** It adds local runtime, tests and docs only. It makes no real provider or
-   marketplace call.
+3. **Provider-zero.** It adds local runtime, tests and docs without a real external side effect. A
+   routine read-only provider call may be used when rule §7.1 allows it; a provider mutation stays
+   outside this clause.
 4. **Endpoint adoption only as already contracted.** It may adopt an endpoint in code (request,
    response, error classification, typed adapter) only where a canonical contract already defines
    that adoption and its limits. Adoption is never a call: execution stays `DRY_RUN`, LIVE stays
@@ -55,30 +64,32 @@ A slice is **authorized by this standing authorization** — with no further use
    contract leaves undecided is not authorized by this ADR.
 6. **Its own PR, one at a time.** It is one slice in one PR, never merged with another slice and
    never run in parallel with another slice.
-7. **The full gate.** The PR passes CI, the GPT exact-head audit and the independent Claude
-   cross-audit (DUAL PASS) and is merged only under the exact-HEAD/main freshness merge guard. After
-   the merge, the new main passes its post-merge audit before the next slice is selected — again
-   fresh from that new main.
+7. **The applicable gate.** The PR passes the risk tier selected by rule §14.2. PROVIDER_ZERO uses
+   functional tests, CI and any review needed by its changed boundary; only HIGH_RISK uses the
+   exact-HEAD DUAL PASS and strong merge guard. The next slice is selected from fresh main.
 
 The record of each use is durable and per slice: the selection on the exact main (the slice, the
 canonical sources, the allowed paths and whether a schema change is contract-decided), the
 independent cross-check of that selection, the PR itself and its two audits.
 
-### 3. What it never authorizes — these stay explicit user (and, where stated, architect) decisions
+### 3. What it never authorizes
 
-- any **real provider or marketplace call**;
-- any **LIVE** switch or LIVE grant use;
-- any **real canary** (ADR-0018 §12 area 5);
+- any protected execution action owned by rule §7.2, including opening or widening a bounded
+  side-effecting **LIVE** mutation scope or real canary;
 - the **residual-risk acceptance** of ADR-0018 §6.1 / ADR-0014 §28.7;
 - any **new architecture or policy decision**;
 - a step on which **the canonical documents conflict**;
 - a next step whose **scope is unclear**;
 - a **schema or data model design** that no canonical contract has decided;
 - any **scope expansion** beyond the slice's canonical definition;
-- every approval of `CLAUDE.md` §7.2.
+- every approval of rule §7.2.
 
 A slice that needs any of these stops before implementation and asks the user, stating the exact
 condition and its canonical source.
+
+The detailed tables below record the repository state when this ADR was adopted. Their statements
+that a provider session or provider call was outside this standing authorization are historical
+scope notes, not an active rule that overrides §7.2 or §14.2.
 
 ### 4. The current order under this ADR
 
@@ -101,7 +112,7 @@ order among them — each refuses on its own — so they take no numbered positi
 | ~~the **durable canary-eligibility owner** (ADR-0018 §5)~~ — **closed by its own slice** (ADR-0018 §5.1; Issue #89 architect resolution `5910018106`; migration `0033`): the durable owner exists and `DurableStageProofs.canary_non_regulated` reads it for the exact lineage of each stage | it was mandatory because both stages require `CANARY_NON_REGULATED` (ADR-0018 §10, G3-13); without that proof the canary stays `BLOCKED`, and an operator assertion is never it. The layer is still unproven for every lineage that has no current `PROVEN_OUTSIDE` record | it was outside this ADR because the eligibility record's data model was explicitly undecided (ADR-0018 §13); that decision is the architect resolution above, never this standing authorization |
 | ~~the **authoring-revision owners** for the category mapping and the detail composition (ADR-0014 §27)~~ — **closed by its own slice** (ADR-0014 §27.1; Issue #89 architect resolution `5907626428`; migration `0032`): the durable owner exists and the server stamps its current revisions into every target-policy revision it appends | it was mandatory because each stage's own gate is a mandatory requirement (ADR-0018 §10) and, while either revision was unowned, the candidate preflight answered `AUTHORING_REVISIONS_UNOWNED`, no unit was ever `READY` and no Snapshot and no Intent could exist. A target-policy revision appended before the owner existed still answers it until a new revision is appended: nothing is backfilled | it was outside this ADR because ADR-0014 §27 recorded real owners for both revisions as "a later, separately authorized decision" with no canonical data model; that decision is the architect resolution above, never this standing authorization |
 | the **executable committed-session read-back** (ADR-0014 §11) — `app/container.py` passes `bearer=lambda: None`, so `SmartStoreReadback.available()` is `False` and `verify` refuses; the canary readiness reports `READBACK_EXECUTABLE` with `READBACK_SESSION_NOT_WIRED` | read-back is the success proof (ADR-0014 §11): a CREATE that cannot be read back is never `CONFIRMED`, so a canary run without it could only end `UNKNOWN` or unverified — and `documents/acceptance/milestones/M5.md` §6 records it as not proven | a committed provider session that actually reads back is not provider-zero, so §2.3 is not met and §3 stops it for the user |
-| a **read-back comparison that proves published state** (ADR-0014 §11) — the adopted origin read carries both halves of the published state and the normalizer reads them at their documented paths, but nothing states the display status a unit is registered with, so no explicit expectation exists, `proves_published_state()` is `False` and execution refuses with `REGISTER_PUBLISHED_STATE_UNPROVEN`; the canary readiness reports `PUBLISHED_STATE_PROVABLE` as unproven | published state is an `EXACT` comparison class of ADR-0014 §11, so without it no critical-field comparison can pass and no canary can be confirmed rather than invented | no canonical contract decides the expected published state: which display status ICBM registers is a product decision with no owner. It becomes `True` only when that expectation is decided and owned, so §2.3 and §2.5 are not met and §3 stops it for the user |
+| ~~a **read-back comparison that proves published state** (ADR-0014 §11)~~ — **closed by its own slice** (ADR-0014 §11 amendment note; Issue #89 architect resolution `5915900049` D1): every CREATE projection registers the SmartStore channel with `channelProductDisplayStatusType = ON`, the Snapshot's own projection states the expected published state `SALE/ON` (`expected_published_state`), `proves_published_state()` is `True`, and only a read-back that carries exactly `SALE` and `ON` adds a published state to the comparison; the canary readiness reports `PUBLISHED_STATE_PROVABLE` as satisfied | it was mandatory because published state is an `EXACT` comparison class of ADR-0014 §11: without it no critical-field comparison can pass and no canary can be confirmed rather than invented. `SALE` with `SUSPENSION`, any other sale status and a missing or unreadable half still prove nothing, and execution still refuses with `REGISTER_PUBLISHED_STATE_UNPROVEN` | it was outside this ADR because which display status ICBM registers was a product decision with no owner; that decision is the architect resolution above, never this standing authorization. Being provable confirms no registration by itself: the executable committed-session read-back is still missing |
 
 Their order relative to each other is part of the user's decision on each; all of them precede any
 canary.
@@ -169,6 +180,16 @@ and leaving `M0_DRY_RUN_ONLY` — keeps its own condition and its own decision.
 > a unit is registered with has no owner — so no published state can be proven and nothing can be
 > confirmed. This note grants nothing.
 
+> **Amendment note (published-state proof; Issue #89 `5915900049` D1).** The last row of the
+> second table is closed, which supersedes the first sentence of the published-state read note
+> above; the rest of that note stays true. The architect resolution decided the display status
+> every registration carries (`ON`), and the slice owns it provider-zero in the CREATE projection
+> and states the expected published state, `SALE/ON`, from the Snapshot's own projection
+> (ADR-0014 §11 amendment note). Two prerequisites are still missing — the transmitting ASSET
+> sender and the executable committed-session read-back — and this note grants none of them.
+> Closing that row confirms no registration by itself: a read-back still needs a committed
+> session, and every other ADR-0018 §10 requirement keeps its own condition.
+
 An adoption slice updates the adoption status of **its own endpoint only** — in
 `documents/contracts/platforms/smartstore/ENDPOINT_MATRIX.md`, `documents/acceptance/milestones/M5.md` and the invariant text and
 contract-test pins that record that endpoint as `NOT_ADOPTED` — by amendment note, never by silent
@@ -182,13 +203,13 @@ condition of ADR-0018 §6 and §10.
 SA-01  every slice still needs its own authorization and is its own PR; this ADR only defines a standing way to meet that rule
 SA-02  a slice is authorized here only when it is the next step in ROADMAP order read fresh from the exact main, with no cached selection
 SA-03  a slice is authorized here only when the canonical documents already decide its scope, safety invariants and owner boundary
-SA-04  a slice authorized here is provider-zero: no real provider or marketplace call, execution stays DRY_RUN
+SA-04  a slice authorized here creates no real external side effect: routine read-only calls may proceed under rule §7.1, while provider mutation stays DRY_RUN/refused
 SA-05  endpoint adoption is authorized here only where a canonical contract already defines it; adoption is never a call and never re-decides the provider-evidence verdict
 SA-06  schema or migration is authorized here only where a canonical contract already decides it concretely
 SA-07  LIVE, a real canary, the residual-risk acceptance, new architecture or policy, conflicting canon, unclear scope, undecided data model and scope expansion always stop for the user
-SA-08  each slice passes CI, the GPT exact-head audit and the independent Claude cross-audit, merges only under the exact-HEAD/main guard, and the new main is audited before the next selection
+SA-08  each slice passes the applicable rule §14.2 tier; only HIGH_RISK requires exact-HEAD DUAL PASS, FULL CI and MERGE_GUARD before merge. A lower-tier merge itself requires no post-merge full-main audit, while transitional V3 auto-next waits for the current-main DUAL_PASS baseline and a supervising agent re-establishes it with the default DELTA/FULL standalone audit before the next selection
 SA-09  CREATE adoption and SEARCH positive-only reconcile adoption are two separate slices, CREATE first
-SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11; the production ASSET sender, the executable committed-session read-back and a read-back comparison that proves published state are still missing, are not authorized here (the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1, and the durable canary-eligibility owner by its own, ADR-0018 §5.1), and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11 success proof is green
+SA-10  §4's remaining-work order never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11; the production ASSET sender and the executable committed-session read-back are still missing, are not authorized here (the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1, the durable canary-eligibility owner by its own, ADR-0018 §5.1, and a read-back comparison that proves published state by its own, the ADR-0014 §11 amendment note), and the canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11 success proof is green
 ```
 
 ## Consequences
