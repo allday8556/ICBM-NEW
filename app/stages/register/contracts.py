@@ -27,6 +27,7 @@ from app.stages.register.model import (
     ScopePauseReason,
     VerificationState,
 )
+from app.stages.register.read_state import ReadState
 
 
 class RegisterAction(StrEnum):
@@ -293,6 +294,29 @@ class PreflightView(BaseModel):
     fingerprint_matches_snapshot: bool | None = None
 
 
+class ReadStateView(BaseModel):
+    """One Intent's user-facing registration read state (ADR-0014 §28.5), as the server derived
+    it. The screen renders it; it never recalculates a state from the Intent's own fields."""
+
+    partition_version: str
+    state: ReadState
+    label: str
+    # Why it is in this state, from the owners' own facts.
+    reason_code: str
+    # The latest cause an owner recorded — the Attempt's or the CREATE job's error code, or the
+    # latest reconcile check's result — when one exists.
+    cause_code: str | None
+    # The one action this state offers, and whether the server accepts it now.
+    action: RegisterAction | None
+    action_enabled: bool
+    action_reason_code: str | None
+    registration_batch_id: str
+    # When the CREATE was requested, and the §28.4 reconcile checks of this Intent.
+    requested_at: datetime | None
+    last_confirmed_at: datetime | None
+    confirmation_attempts: int
+
+
 class IntentView(BaseModel):
     intent_id: str
     state: IntentState
@@ -303,6 +327,10 @@ class IntentView(BaseModel):
     idempotency_key: str
     attempts: tuple[AttemptView, ...]
     live_job_id: str | None
+    # ADR-0014 §28.5. ``read_state_problem`` names a durable state the partition refused: a defect,
+    # surfaced and never defaulted to a label.
+    read_state: ReadStateView | None = None
+    read_state_problem: str | None = None
 
 
 class UnitView(BaseModel):
@@ -341,6 +369,49 @@ class UnitView(BaseModel):
     actions: tuple[ActionView, ...]
 
 
+class ReadStateCounts(BaseModel):
+    """The four read-state counts of a set of Intents. They sum to ``total`` unless a durable
+    state was refused, which ``unclassified`` counts and surfaces (ADR-0014 §28.5)."""
+
+    registering: int
+    registered: int
+    recheck_required: int
+    failed: int
+    unclassified: int
+    total: int
+
+
+class RegistrationStatusEntry(BaseModel):
+    """One provider-listing unit's row in the registration status card's detail panel."""
+
+    intent_id: str
+    draft_id: str | None
+    product_name: str | None
+    # The ICBM seller code the provider is sent (``sellerManagementCode``), when a projection
+    # is wired.
+    seller_code: str | None
+    read_state: ReadStateView | None
+    read_state_problem: str | None
+
+
+class RegistrationBatchStatus(BaseModel):
+    registration_batch_id: str
+    counts: ReadStateCounts
+
+
+class RegistrationStatusView(BaseModel):
+    """The lower-right registration status card and its detail panel (ADR-0014 §28.5): the
+    batches holding the most recent Intents, each counted in full by the one partition."""
+
+    partition_version: str
+    verification_deadline_s: int
+    # The operator-facing label of each state, from the partition itself: no client names one.
+    labels: dict[ReadState, str]
+    counts: ReadStateCounts
+    batches: tuple[RegistrationBatchStatus, ...]
+    entries: tuple[RegistrationStatusEntry, ...]
+
+
 class RegisterOverview(BaseModel):
     """The Registration Management screen's server-owned state."""
 
@@ -348,6 +419,7 @@ class RegisterOverview(BaseModel):
     registrations_total: int
     units: tuple[UnitView, ...]
     paused_scopes: tuple[ScopeBrakeView, ...]
+    registration_status: RegistrationStatusView | None = None
 
 
 class ActionResult(BaseModel):

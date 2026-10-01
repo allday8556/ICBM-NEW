@@ -8,8 +8,10 @@ No provider is reached: execution stays DRY_RUN, the execution seams refuse loca
 canary readiness is a derived read that authorizes nothing.
 """
 
+import contextlib
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -32,11 +34,14 @@ from app.stages.register.model import (
 )
 from app.stages.register.policy import StaticRegistrationPolicy
 from app.stages.register.preparation import UnitRequest
+from app.stages.register.read_state import VERIFICATION_DEADLINE, ReadState
 from app.stages.register.service import RegisterService
 from app.stages.register.store import RegistrationStore, RegistrationUnit, SnapshotRecord
+from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from tests.conftest import LOCAL
 from tests.integration.register.test_m5_register_execution import (
+    FakeReadback,
     FakeSender,
     context,
     execution,
@@ -1257,5 +1262,149 @@ def test_a_reload_reconstructs_the_same_view_from_durable_rows(
         jobs=container.jobs,
         capability=container.marketplace_capability,
         adoption=SmartStoreAdoption(),
+        clock=container.clock,
+        seller_code=smartstore_product.seller_management_code,
     ).overview()
     assert again.model_dump(mode="json") == before
+
+
+# ---------------------------------------------------------------- ADR-0014 §28.5 read state
+
+
+def _status(api: TestClient) -> dict:
+    status = _get(api, OVERVIEW)["registration_status"]
+    assert status["partition_version"] == "registration-read-state/v1"
+    counts = status["counts"]
+    # M5-35: the four derived counts sum exactly to the Intents counted.
+    assert (
+        counts["registering"]
+        + counts["registered"]
+        + counts["recheck_required"]
+        + counts["failed"]
+        + counts["unclassified"]
+        == counts["total"]
+        == len(status["entries"])
+    )
+    for batch in status["batches"]:
+        b = batch["counts"]
+        assert (
+            b["registering"] + b["registered"] + b["recheck_required"] + b["failed"] == b["total"]
+        )
+    return status
+
+
+def test_a_prepared_unit_reads_as_registering_with_its_seller_code(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    status = _status(api)
+    (entry,) = status["entries"]
+    assert entry["intent_id"] == ready.intent_id
+    assert entry["read_state"]["state"] == "REGISTERING"
+    assert entry["read_state"]["label"] == "등록중"
+    assert entry["read_state"]["reason_code"] == "REGISTER_READ_SENDABLE"
+    snapshot = container.registrations.snapshot(
+        container.registrations.intent(ready.intent_id).registration_snapshot_id
+    )
+    assert snapshot is not None
+    # The ICBM seller code the provider is sent: the R1 projection, never the raw identity.
+    assert entry["seller_code"] == smartstore_product.seller_management_code(
+        snapshot.listing_identity
+    )
+    assert entry["product_name"]
+    assert status["counts"]["registering"] == 1
+    # The unit row carries the same server verdict.
+    assert _unit(api)["intent"]["read_state"]["state"] == "REGISTERING"
+
+
+def test_an_unknown_outcome_reads_as_recheck_and_offers_only_a_read_only_recheck(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(
+        container, prep, sender=FakeSender(outcome=RemoteOutcome.UNKNOWN, product_id=None)
+    )
+    with pytest.raises(AppError):
+        run.service.run(context(ready))
+    (entry,) = _status(api)["entries"]
+    read = entry["read_state"]
+    # M5-36: an unknown outcome is never 등록실패.
+    assert read["state"] == "RECHECK_REQUIRED" and read["label"] == "재확인필요"
+    assert read["action"] == RegisterAction.RECONCILE.value and read["action_enabled"] is True
+
+
+def test_a_proven_non_application_without_a_retry_reads_as_failed(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
+            product_id=None,
+            error_class=ErrorClass.VALIDATION,
+            error_code="PROVIDER_REJECTED",
+        ),
+    )
+    with pytest.raises(AppError):
+        run.service.run(context(ready))
+    status = _status(api)
+    (entry,) = status["entries"]
+    assert entry["read_state"]["state"] == "FAILED"
+    assert entry["read_state"]["label"] == "등록실패"
+    assert entry["read_state"]["cause_code"] == "PROVIDER_REJECTED"
+    assert status["counts"]["failed"] == 1
+
+
+def test_an_applied_create_awaits_verification_until_the_server_deadline(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(container, prep, readback=FakeReadback(is_available=False))
+    # The read-back is unavailable, so the applied CREATE stays unverified (what run() reports).
+    with contextlib.suppress(AppError):
+        run.service.run(context(ready))
+    intent = container.registrations.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.SENT
+    (entry,) = _status(api)["entries"]
+    assert entry["read_state"]["state"] == "REGISTERING"
+    assert entry["read_state"]["reason_code"] == "REGISTER_READ_AWAITING_VERIFICATION"
+
+    class Later:
+        def now(self) -> datetime:
+            return container.clock.now() + VERIFICATION_DEADLINE + timedelta(seconds=1)
+
+    later = RegisterService(
+        registrations=container.registrations,
+        execution=container.registration_execution,
+        preflight=container.registration_preflight,
+        authoring=container.registration_preparations,
+        accounts=container.accounts,
+        jobs=container.jobs,
+        capability=container.marketplace_capability,
+        adoption=SmartStoreAdoption(),
+        clock=Later(),
+    ).registration_status()
+    (overdue,) = later.entries
+    assert overdue.read_state is not None
+    assert overdue.read_state.state is ReadState.RECHECK_REQUIRED
+    assert overdue.read_state.reason_code == "REGISTER_READ_VERIFICATION_OVERDUE"
+    # An applied listing is re-checked by its read-back, never registered again.
+    assert overdue.read_state.action is RegisterAction.VERIFY

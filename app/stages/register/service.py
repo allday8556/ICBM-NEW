@@ -19,10 +19,14 @@ exact authored revision linked to the Snapshot and current owner truth, then eve
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
+from app.capabilities.jobs.models import JobState
+from app.capabilities.jobs.records import JobRecord
 from app.capabilities.jobs.service import JobService
+from app.platform.core.clock import Clock, SystemClock
 from app.platform.core.errors import AppError, NotFoundError
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
 from app.stages.connect.marketplace.capability import (
@@ -63,8 +67,13 @@ from app.stages.register.contracts import (
     PreparationRevisionView,
     PreparationState,
     PreparationView,
+    ReadStateCounts,
+    ReadStateView,
     RegisterAction,
     RegisterOverview,
+    RegistrationBatchStatus,
+    RegistrationStatusEntry,
+    RegistrationStatusView,
     ScopeBrakeView,
     SnapshotView,
     UnitView,
@@ -90,6 +99,16 @@ from app.stages.register.model import (
     VerificationState,
 )
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
+from app.stages.register.read_state import (
+    READ_STATE_LABELS,
+    READ_STATE_PARTITION_VERSION,
+    UNCLASSIFIED,
+    VERIFICATION_DEADLINE,
+    IntentReadFacts,
+    ReadState,
+    classify,
+    counts,
+)
 from app.stages.register.store import (
     AttemptRecord,
     DraftItemRecord,
@@ -97,6 +116,7 @@ from app.stages.register.store import (
     IntentRecord,
     PreparationRecord,
     PreparationRevisionRecord,
+    ReconcileCheckRecord,
     RegistrationStore,
     ScopeRecord,
     SnapshotProvenance,
@@ -160,6 +180,8 @@ class RegisterService:
         stages: StageReadinessFacts | None = None,
         marketplace_key: str = _MARKETPLACE,
         execution_mode: str = DRY_RUN,
+        clock: Clock | None = None,
+        seller_code: Callable[[str], str] | None = None,
     ) -> None:
         self._registrations = registrations
         self._execution = execution
@@ -172,6 +194,10 @@ class RegisterService:
         self._stages = stages
         self._marketplace_key = marketplace_key
         self._execution_mode = execution_mode
+        self._clock = clock or SystemClock()
+        # The provider projection of a listing identity (the SmartStore ``sellerManagementCode``),
+        # wired by the composition root: REGISTER never imports a marketplace adapter.
+        self._seller_code = seller_code
 
     # ------------------------------------------------------------------ counts (screens)
 
@@ -195,6 +221,121 @@ class RegisterService:
             registrations_total=self.registration_count(),
             units=units,
             paused_scopes=tuple(self._scope_view(scope) for scope in store.paused_scopes()),
+            registration_status=self.registration_status(limit=limit),
+        )
+
+    # ------------------------------------------------------------------ read state (§28.5)
+
+    def registration_status(self, *, limit: int = 50) -> RegistrationStatusView:
+        """The registration status card and its detail panel (ADR-0014 §28.5, M5-35).
+
+        The batches holding the ``limit`` most recent Intents, each counted in full: a batch's four
+        counts are its Intents, every one classified by the one partition. Nothing is stored.
+        """
+        store = self._require_store()
+        recent = store.intents(limit=limit)
+        batch_ids = list(dict.fromkeys(intent.registration_batch_id for intent in recent))
+        batches: list[RegistrationBatchStatus] = []
+        entries: list[RegistrationStatusEntry] = []
+        for batch_id in batch_ids:
+            rows = [self._status_entry(intent) for intent in store.batch_intents(batch_id)]
+            batches.append(
+                RegistrationBatchStatus(registration_batch_id=batch_id, counts=_counts(rows))
+            )
+            entries.extend(rows)
+        return RegistrationStatusView(
+            partition_version=READ_STATE_PARTITION_VERSION,
+            verification_deadline_s=int(VERIFICATION_DEADLINE.total_seconds()),
+            labels=dict(READ_STATE_LABELS),
+            counts=_counts(entries),
+            batches=tuple(batches),
+            entries=tuple(entries),
+        )
+
+    def _status_entry(self, intent: IntentRecord) -> RegistrationStatusEntry:
+        store = self._require_store()
+        snapshot = store.snapshot(intent.registration_snapshot_id)
+        payload = store.snapshot_payload(intent.registration_snapshot_id) or {}
+        name = payload.get("name")
+        live = self._live_job(intent)
+        scope = self._scope_record(intent.marketplace_key, intent.marketplace_account_id)
+        budget = self._budget_of(intent.marketplace_key, intent.marketplace_account_id, scope)
+        binding = self._binding(intent.marketplace_key, intent.marketplace_account_id)
+        actions = self._actions(intent, scope, budget, binding, live)
+        view, problem = self._read_state(intent, store.attempts(intent.intent_id), live, actions)
+        return RegistrationStatusEntry(
+            intent_id=intent.intent_id,
+            draft_id=None if snapshot is None else snapshot.draft_id,
+            product_name=(
+                str(name["value"]) if isinstance(name, Mapping) and name.get("value") else None
+            ),
+            seller_code=(
+                None
+                if snapshot is None or self._seller_code is None
+                else self._seller_code(snapshot.listing_identity)
+            ),
+            read_state=view,
+            read_state_problem=problem,
+        )
+
+    def _read_state(
+        self,
+        intent: IntentRecord,
+        attempts: Sequence[AttemptRecord],
+        live_job: str | None,
+        actions: Sequence[ActionView],
+    ) -> tuple[ReadStateView | None, str | None]:
+        """One Intent's read state, from its owners' durable facts, or the refusal of a durable
+        state the partition does not match: surfaced, never defaulted to a label (§28.5)."""
+        store = self._require_store()
+        job = (
+            None
+            if self._jobs is None
+            else self._jobs.latest_job(CREATE_JOB_TYPE, target_ref(intent.intent_id))
+        )
+        facts = IntentReadFacts(
+            state=intent.state,
+            remote_outcome=intent.remote_outcome,
+            verification_state=intent.verification_state,
+            attempt_in_flight=any(not attempt.finished for attempt in attempts),
+            applied_at=_applied_at(attempts),
+            create_job_live=live_job is not None,
+            create_job_dead=(
+                live_job is None and job is not None and job.state == JobState.DEAD.value
+            ),
+            attempted=bool(attempts),
+        )
+        try:
+            verdict = classify(facts, now=self._clock.now())
+        except AppError as refused:
+            if refused.code != UNCLASSIFIED:
+                raise
+            logger.error(
+                "registration read state unclassified",
+                extra={"intent_id": intent.intent_id, **refused.details},
+            )
+            return None, refused.code
+        checks = store.reconcile_checks(intent.intent_id)
+        action = _read_action(verdict.state, intent.state)
+        offered = next((a for a in actions if a.action is action), None)
+        return (
+            ReadStateView(
+                partition_version=READ_STATE_PARTITION_VERSION,
+                state=verdict.state,
+                label=verdict.label,
+                reason_code=verdict.reason_code,
+                cause_code=_cause(intent, attempts, checks, job),
+                action=action,
+                action_enabled=offered is not None and offered.enabled,
+                action_reason_code=None if offered is None else offered.reason_code,
+                registration_batch_id=intent.registration_batch_id,
+                requested_at=_requested_at(attempts, job),
+                last_confirmed_at=(
+                    None if not checks else (checks[-1].finished_at or checks[-1].started_at)
+                ),
+                confirmation_attempts=len(checks),
+            ),
+            None,
         )
 
     def canary_readiness(self, unit_ref: str | None = None) -> CanaryReadinessView:
@@ -637,6 +778,19 @@ class RegisterService:
         binding = self._binding(draft.marketplace_key, draft.marketplace_account_id)
         registration = self._registration_of(intent)
         live = self._live_job(intent)
+        actions = self._actions(
+            intent,
+            scope,
+            budget,
+            binding,
+            live,
+            authored=authored,
+            preflight=preflight,
+            frozen=snapshot is not None,
+        )
+        read_state, read_problem = (
+            (None, None) if intent is None else self._read_state(intent, attempts, live, actions)
+        )
         return UnitView(
             unit_ref=unit_ref,
             draft_id=draft.draft_id,
@@ -665,22 +819,15 @@ class RegisterService:
                     idempotency_key=intent.idempotency_key,
                     attempts=tuple(_attempt_view(a) for a in attempts),
                     live_job_id=live,
+                    read_state=read_state,
+                    read_state_problem=read_problem,
                 )
             ),
             registration_id=None if registration is None else registration[0],
             published_state=None if registration is None else registration[1],
             conflicting_intents=conflicting_intents,
             scope=self._scope_view(scope, budget=budget),
-            actions=self._actions(
-                intent,
-                scope,
-                budget,
-                binding,
-                live,
-                authored=authored,
-                preflight=preflight,
-                frozen=snapshot is not None,
-            ),
+            actions=actions,
         )
 
     def _actions(
@@ -1341,3 +1488,74 @@ def _attempt_view(attempt: AttemptRecord) -> AttemptView:
 
 
 _ = ScopePauseReason  # the vocabulary this surface renders, re-exported by the contracts
+
+
+# ---------------------------------------------------------------- read state helpers (§28.5)
+
+
+def _applied_at(attempts: Sequence[AttemptRecord]) -> datetime | None:
+    """When the latest applied outcome was established: its evidence-backed resolution, else the
+    applied Attempt's finish. The verification deadline runs from it."""
+    found: datetime | None = None
+    for attempt in attempts:
+        if attempt.outcome is not RemoteOutcome.APPLIED_PROVEN:
+            continue
+        at = attempt.resolved_at if attempt.resolved_outcome is not None else attempt.finished_at
+        if at is not None and (found is None or at > found):
+            found = at
+    return found
+
+
+def _requested_at(attempts: Sequence[AttemptRecord], job: JobRecord | None) -> datetime | None:
+    """When the CREATE was requested: the CREATE job's creation, else the first Attempt."""
+    if job is not None:
+        return job.created_at
+    return attempts[0].started_at if attempts else None
+
+
+def _read_action(state: ReadState, intent_state: IntentState) -> RegisterAction | None:
+    """The one action a read state offers. 재확인필요 offers only a read-only re-check —
+    "등록확인 재시도" for an unknown outcome, the read-back for an applied one — never a CREATE."""
+    if state is ReadState.RECHECK_REQUIRED:
+        return (
+            RegisterAction.RECONCILE
+            if intent_state is IntentState.UNKNOWN
+            else RegisterAction.VERIFY
+        )
+    if state is ReadState.FAILED:
+        return RegisterAction.CREATE_ENQUEUE
+    return None
+
+
+def _cause(
+    intent: IntentRecord,
+    attempts: Sequence[AttemptRecord],
+    checks: Sequence[ReconcileCheckRecord],
+    job: JobRecord | None,
+) -> str | None:
+    """The latest cause an owner recorded: a finished reconcile check of an unknown outcome, the
+    latest Attempt's error, or the CREATE job's last error."""
+    if intent.state is IntentState.UNKNOWN:
+        finished = [check for check in checks if check.result is not None]
+        if finished:
+            result = finished[-1].result
+            assert result is not None
+            return result.value
+    if attempts and attempts[-1].error_code:
+        return attempts[-1].error_code
+    if job is not None and job.last_error_code:
+        return job.last_error_code
+    return None
+
+
+def _counts(entries: Sequence[RegistrationStatusEntry]) -> ReadStateCounts:
+    """The four derived counts, and the refused states surfaced beside them (§28.5)."""
+    found = counts(e.read_state.state for e in entries if e.read_state is not None)
+    return ReadStateCounts(
+        registering=found[ReadState.REGISTERING],
+        registered=found[ReadState.REGISTERED],
+        recheck_required=found[ReadState.RECHECK_REQUIRED],
+        failed=found[ReadState.FAILED],
+        unclassified=sum(1 for e in entries if e.read_state is None),
+        total=len(entries),
+    )
