@@ -270,7 +270,8 @@ def _empty(sender: VerifiedSender) -> None:
 
 @router.get(QUEUE_POLICY_PATH)
 def queue_policy(supplier_key: str, request: Request, container: ContainerDep) -> Response:
-    """The supplier's reviewed product path form and its declared queue limits."""
+    """The supplier's reviewed product path form, its declared queue limits and its queue
+    that is still open, if any."""
     sender = _authenticate(request, container.extension_pairing)
     _empty(sender)
     policy = container.extension_queues.discovery_policy(supplier_key)
@@ -284,6 +285,7 @@ def queue_policy(supplier_key: str, request: Request, container: ContainerDep) -
             "max_discovered_links": policy.max_discovered_links,
             "max_queue_products": policy.max_queue_products,
             "min_queue_interval_s": policy.min_queue_interval_s,
+            "open_queue": None if policy.open_queue is None else _queue(policy.open_queue),
         },
     )
 

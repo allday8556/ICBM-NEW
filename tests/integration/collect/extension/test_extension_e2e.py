@@ -429,6 +429,61 @@ def test_a_queue_without_its_bounds_is_refused_and_reads_nothing(
         assert table_counts(config)["extension_queues"] == 0
 
 
+def _start_and_close_after_one(
+    chromium: BrowserContext, app: Container, origin: str
+) -> tuple[Page, str]:
+    """Start a two-product queue, close the panel once the first product is recorded, and open a
+    new panel: the queue is still open in ICBM, and the new panel finds it there."""
+    panel = _paired_panel(chromium, app, origin)
+    listing = _discover(panel, chromium)
+    panel.locator("#queue-max").fill("2")
+    panel.locator("#queue-interval").select_option("10")
+    panel.locator("[data-action='queue-start']").dispatch_event("click")
+    first = panel.locator("[data-role='queue-rows'] .queue-row").nth(0).locator(".chip")
+    expect(first).to_have_text("RECORDED", timeout=60_000)
+    panel.close()
+    extension_id = _extension_id(chromium)
+    reopened = chromium.new_page()
+    reopened.goto(f"chrome-extension://{extension_id}/sidepanel.html")
+    expect(reopened.locator(_role("pairing-state"))).to_have_text("페어링됨", timeout=TIMEOUT_MS)
+    listing.bring_to_front()
+    expect(reopened.locator("[data-action='discover']")).to_be_enabled(timeout=TIMEOUT_MS)
+    reopened.locator("[data-action='discover']").dispatch_event("click")
+    expect(reopened.locator(_role("queue-status"))).to_contain_text(
+        "열려 있는 대기열", timeout=TIMEOUT_MS
+    )
+    open_queue = app.extension_queues.discovery_policy(SUPPLIER).open_queue
+    assert open_queue is not None
+    return reopened, open_queue.queue_id
+
+
+def test_a_closed_panel_finds_its_open_queue_again_and_resumes_it(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel, queue_id = _start_and_close_after_one(chromium, app, origin)
+        # Resumed, never declared again: the same queue reads its second product and finishes.
+        panel.locator("[data-action='queue-pause']").dispatch_event("click")
+        expect(panel.locator(_role("queue-count"))).to_have_text("2 / 2", timeout=60_000)
+        assert app.extension_queues.read(queue_id).state.value == "FINISHED"
+        assert table_counts(config)["extension_queues"] == 1
+        runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
+        assert sorted(run.source_url for run in runs) == [_product("9001"), _product("9002")]
+
+
+def test_a_closed_panel_finds_its_open_queue_again_and_cancels_it(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel, queue_id = _start_and_close_after_one(chromium, app, origin)
+        panel.locator("[data-action='queue-cancel']").dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("취소", timeout=TIMEOUT_MS)
+        assert app.extension_queues.read(queue_id).state.value == "CANCELLED"
+        # The unread product stays unread.
+        runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
+        assert [run.source_url for run in runs] == [_product("9001")]
+
+
 def _requests(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str, int]]:
     found: list[tuple[str, str, int]] = []
     for record in caplog.records:

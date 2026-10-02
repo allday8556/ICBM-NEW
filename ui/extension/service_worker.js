@@ -267,6 +267,8 @@ async function discover() {
     found: found.found,
     max_queue_products: policy.max_queue_products,
     min_queue_interval_s: policy.min_queue_interval_s,
+    // The supplier's queue that is still open in ICBM, to resume or cancel, or null.
+    open_queue: policy.open_queue || null,
   };
 }
 
@@ -288,13 +290,22 @@ function load(tabId, url, limitMs) {
   });
 }
 
-// What the operator asked for one queue: pause (ask for nothing new), resume, or cancel.
-function queueControl(tabId, declaration) {
+// The one queue this worker drives, whichever panel is open, or null. It is memory only: the queue
+// itself lives in ICBM, and a panel that was closed — or a worker that was stopped — finds it again
+// there and resumes or cancels it (ADR-0019 §8.1).
+let active = null;
+
+// What the operator asked for one queue: pause (ask for nothing new), resume, or cancel. `queueId`
+// is set from the start when an open queue is resumed, and is never declared again.
+function queueControl({ port, tell, tabId, supplierKey, declaration, queueId }) {
   let wake = null;
   const control = {
+    port,
+    tell,
     tabId,
+    supplierKey,
     declaration,
-    queueId: null,
+    queueId,
     paused: false,
     cancelled: false,
     pause() {
@@ -320,19 +331,22 @@ function queueControl(tabId, declaration) {
   return control;
 }
 
-// One queue, read by read, exactly as ICBM issues them.
-async function runQueue(control, tell) {
+// One queue, read by read, exactly as ICBM issues them. Whatever panel is open is told.
+async function runQueue(control) {
+  const tell = (message) => control.tell(message);
   const paired = await pairing();
   if (!paired) return tell({ type: "stopped", code: "EXTENSION_NOT_PAIRED" });
-  let declared;
-  try {
-    declared = await declareQueue(paired, chrome.runtime.id, control.declaration);
-  } catch (error) {
-    return tell({ type: "stopped", code: codeOf(error, "QUEUE_DECLARATION_UNAVAILABLE") });
+  if (!control.queueId) {
+    let declared;
+    try {
+      declared = await declareQueue(paired, chrome.runtime.id, control.declaration);
+    } catch (error) {
+      return tell({ type: "stopped", code: codeOf(error, "QUEUE_DECLARATION_UNAVAILABLE") });
+    }
+    control.queueId = declared.queue.queue_id;
+    tell({ type: "queue", queue: declared.queue, count: declared.count });
   }
-  control.queueId = declared.queue.queue_id;
-  tell({ type: "queue", queue: declared.queue, count: declared.count });
-  const target = { tabId: control.tabId, supplierKey: control.declaration.supplier_key };
+  const target = { tabId: control.tabId, supplierKey: control.supplierKey };
   let code = null;
   while (!control.cancelled) {
     if (control.paused) {
@@ -383,6 +397,14 @@ async function runQueue(control, tell) {
   tell({ type: code ? "stopped" : "finished", code });
 }
 
+// Drive one queue, as the only one this worker drives.
+function drive(control) {
+  active = control;
+  runQueue(control).finally(() => {
+    if (active === control) active = null;
+  });
+}
+
 async function showQueue(paired, queueId, tell) {
   try {
     tell({ type: "queue", queue: await readQueue(paired, chrome.runtime.id, queueId) });
@@ -401,8 +423,31 @@ async function cancel(queueId, tell) {
   }
 }
 
+// Resume an open queue: the one this worker still drives, now told to this panel, or — after the
+// worker was stopped — a new drive of the same queue in the operator's active supplier tab.
+async function resume(queueId, port, tell) {
+  if (active && active.queueId === queueId) {
+    active.port = port;
+    active.tell = tell;
+    active.resume();
+    return;
+  }
+  if (active) return tell({ type: "stopped", code: "QUEUE_ALREADY_RUNNING" });
+  const target = await activeSupplierTab();
+  if (!target) return tell({ type: "stopped", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" });
+  drive(
+    queueControl({
+      port,
+      tell,
+      tabId: target.tabId,
+      supplierKey: target.supplierKey,
+      declaration: null,
+      queueId,
+    }),
+  );
+}
+
 function queuePort(port) {
-  let control = null;
   const tell = (message) => {
     try {
       port.postMessage(message);
@@ -413,24 +458,31 @@ function queuePort(port) {
   port.onMessage.addListener(async (message) => {
     if (message.type === "discover") {
       tell({ type: "discovered", discovery: await discover() });
-    } else if (message.type === "start" && !control) {
-      control = queueControl(message.tab_id, message.declaration);
-      const running = control;
-      runQueue(running, tell).finally(() => {
-        if (control === running) control = null;
-      });
-    } else if (message.type === "pause" && control) {
-      control.pause();
-    } else if (message.type === "resume" && control) {
-      control.resume();
+    } else if (message.type === "start") {
+      if (active) return tell({ type: "stopped", code: "QUEUE_ALREADY_RUNNING" });
+      drive(
+        queueControl({
+          port,
+          tell,
+          tabId: message.tab_id,
+          supplierKey: message.declaration.supplier_key,
+          declaration: message.declaration,
+          queueId: null,
+        }),
+      );
+    } else if (message.type === "pause") {
+      if (active && active.port === port) active.pause();
+    } else if (message.type === "resume") {
+      await resume(message.queue_id, port, tell);
     } else if (message.type === "cancel") {
-      if (control) control.stop();
+      if (active && active.queueId === message.queue_id) active.stop();
       await cancel(message.queue_id, tell);
     }
   });
-  // The panel is gone: no new read is asked for. A read already issued finishes its capture.
+  // The panel is gone: no new read is asked for. A read already issued finishes its capture, and
+  // the queue stays open in ICBM for the next panel to resume or cancel.
   port.onDisconnect.addListener(() => {
-    if (control) control.pause();
+    if (active && active.port === port) active.pause();
   });
 }
 

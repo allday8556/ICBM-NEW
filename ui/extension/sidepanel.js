@@ -369,6 +369,7 @@ const QUEUE_LABELS = {
   FINISHED: "대기열을 마쳤습니다",
   STOPPED: "대기열이 멈췄습니다 · 건너뛰지 않습니다",
   CANCELLED: "대기열을 취소했습니다",
+  OPEN: "열려 있는 대기열이 있습니다 · 재개하거나 취소합니다",
 };
 
 // Which surface the panel shows: the product capture, or a list page's queue.
@@ -487,9 +488,20 @@ function listMessage(message) {
       max.placeholder = `최대 ${found.max_queue_products}`;
       max.value = "";
       intervalChoices(found.min_queue_interval_s);
+      // A queue that is still open in ICBM — this panel was closed, or the worker stopped — is
+      // shown as ICBM holds it, to resume or cancel. A new one is never declared beside it.
+      if (found.open_queue) {
+        queue = found.open_queue;
+        control = "PAUSED";
+        queueLine = QUEUE_LABELS.OPEN;
+      }
     }
   } else if (message.type === "queue") {
     queue = message.queue;
+    if (queue.state !== "OPEN" && control === "PAUSED") {
+      control = "ENDED";
+      queueLine = QUEUE_LABELS[queue.state] || queueLine;
+    }
   } else if (message.type === "waiting") {
     queueLine = `${QUEUE_LABELS.WAITING} · ${message.seconds}초`;
   } else if (message.type === "issued" || message.type === "progress") {
@@ -585,10 +597,10 @@ action("queue-pause").addEventListener("click", () => {
   if (!queuePort) return;
   if (control === "RUNNING") {
     queuePort.postMessage({ type: "pause" });
-  } else if (control === "PAUSED") {
+  } else if (control === "PAUSED" && queue) {
     control = "RUNNING";
     queueLine = QUEUE_LABELS.RUNNING;
-    queuePort.postMessage({ type: "resume" });
+    queuePort.postMessage({ type: "resume", queue_id: queue.queue_id });
   }
   render();
 });
