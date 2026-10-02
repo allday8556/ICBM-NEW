@@ -373,7 +373,7 @@ def test_a_business_contact_inside_the_scope_is_product_data(
     browser: Browser, policy: dict[str, Any], fixture_html: str, container: Container
 ) -> None:
     # A supplier's or maker's contact in the product information is not the member's own data:
-    # the user decided it is collected (ADR-0019 §6.1). The run compares, and nothing is stored.
+    # the user decided it is collected (ADR-0019 §6.1). The run goes on and is recorded (E2).
     contact = fixture_html.replace(
         ORIGIN_ROW, ORIGIN_ROW + '<tr><th scope="row">A/S 문의</th><td>010-0000-0000</td></tr>'
     )
@@ -382,8 +382,8 @@ def test_a_business_contact_inside_the_scope_is_product_data(
     with pytest.raises(CaptureRefused):
         capture_candidate(cut["html"])  # the Adaptive capture owner's own rule is unchanged
     run = _ingested(container, cut)
-    assert (run.outcome, run.detail) == (CollectionOutcome.NO_REVISION, "EXTENSION_COMPARE_ONLY")
-    assert run.revision_id is None
+    assert (run.outcome, run.detail) == (CollectionOutcome.RECORDED, None)
+    assert run.revision_id is not None
 
 
 def test_a_clean_capture_passes_the_real_ingest(

@@ -212,7 +212,6 @@ PRODUCT_DATA = {
     "business-phone": "<p>A/S 문의 010-0000-0000</p>",
     "business-email": "<p>문의 help@synthetic.invalid</p>",
     "image-version-query": '<img src="/web/product/extra/synthetic-9001.jpg?v=20260930">',
-    "image-empty-src": '<img src="">',
 }
 
 
@@ -241,12 +240,12 @@ def test_product_data_that_only_looks_private_goes_on(
     client: TestClient, config: AppConfig, paired: PairingRecord, addition: str
 ) -> None:
     # ADR-0019 §6.1: broad product capture. A business contact, a member price or an odd image
-    # reference is product data; the run compares as it arrived, and nothing is stored.
-    before = table_counts(config)
+    # reference is product data; the run goes on as it arrived and the canonical extractor records
+    # its revision, as any extension run is recorded (E2).
     response = post_capture(client, paired, _with(addition))
     run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
-    assert untouched(before, table_counts(config)) == {}
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+    assert (run["transport_kind"], run["revision_id"] is not None) == ("EXTENSION", True)
 
 
 def _logged(caplog: pytest.LogCaptureFixture) -> str:
@@ -283,7 +282,7 @@ def test_a_noted_run_logs_its_notes_and_never_a_value(
     with caplog.at_level(logging.INFO):
         response = post_capture(client, paired, _with(addition))
         run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert (run["outcome"], run["detail"]) == ("NO_REVISION", "EXTENSION_COMPARE_ONLY")
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
     [noted] = [r for r in caplog.records if r.getMessage() == "collect.extension_gate_notes"]
     assert vars(noted)["notes"] == ["CONTACT_TEXT@p#.", "MEMBER_NAMED@p#.member_price"]
     assert "010-0000" not in _logged(caplog)

@@ -209,8 +209,10 @@ broad product capture → security-only hard filter → ICBM canonical extractio
   fragment or odd shape — goes on as well. Each such item is recorded as a note (a kind and a
   boundary, never a value) in the run's log.
 - **What ICBM does not need is dropped at extraction.** The supplier's canonical extractor takes
-  only the fields ICBM defines. Only canonical facts and their evidence are ever stored, never the
-  capture. E1 stores neither.
+  only the fields ICBM defines. Only canonical facts and their evidence are ever stored, in the
+  `ProductFactsRevision` the extractor writes (E2), never the capture.
+- **An empty image reference is no reference**, as the supplier's image owner reads it (a Cafe24
+  lazy-load `<img>` leaves `src` empty); it is neither a finding nor a note.
 - A known identity widget is better cut in the browser than refused on the server: the KM policy
   `kmretail-capture-2` cuts the member benefit box.
 - The Adaptive capture owner's own sanitizer and final scan
