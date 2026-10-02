@@ -1624,7 +1624,7 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "~~**The residual-risk acceptance proof** (ADR-0018 §6.1, ADR-0014 §28.7)~~ — **done**"
         " (PR #192, `HIGH_RISK`)",
         "~~**The committed-session bearer seam**~~ — **done** (PR #196, `HIGH_RISK`)",
-        "**The bounded LIVE runtime transition of ADR-0018** — `HIGH_RISK`",
+        "~~**The bounded LIVE runtime transition of ADR-0018**~~ — **done** (PR #197, `HIGH_RISK`)",
         "~~**The user-facing registration read state** (ADR-0014 §28.5, M5-35)~~ — **done**",
         "**executable committed-session read-back**",
         "`READBACK_EXECUTABLE` is unproven",

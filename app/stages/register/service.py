@@ -179,7 +179,7 @@ class RegisterService:
         adoption: AdoptionFacts | None = None,
         stages: StageReadinessFacts | None = None,
         marketplace_key: str = _MARKETPLACE,
-        execution_mode: str = DRY_RUN,
+        execution_mode: str | Callable[[], str] = DRY_RUN,
         clock: Clock | None = None,
         seller_code: Callable[[str], str] | None = None,
     ) -> None:
@@ -193,7 +193,10 @@ class RegisterService:
         self._adoption_source = adoption
         self._stages = stages
         self._marketplace_key = marketplace_key
-        self._execution_mode = execution_mode
+        # The execution-mode owner's current answer, read at every evaluation.
+        self._execution_mode: Callable[[], str] = (
+            execution_mode if callable(execution_mode) else lambda: execution_mode
+        )
         self._clock = clock or SystemClock()
         # The provider projection of a listing identity (the SmartStore ``sellerManagementCode``),
         # wired by the composition root: REGISTER never imports a marketplace adapter.
@@ -413,7 +416,7 @@ class RegisterService:
         return evaluate(
             facts,
             self._adoption(),
-            execution_mode=self._execution_mode,
+            execution_mode=self._execution_mode(),
             write_status=capability[2],
         )
 

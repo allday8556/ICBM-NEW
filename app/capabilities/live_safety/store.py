@@ -222,6 +222,23 @@ class LiveAuthorityStore:
         with self.reading() as unit:
             return unit.grant_record(grant_id)
 
+    def live_scope_until(self) -> datetime | None:
+        """Until when an approved bounded LIVE mutation scope exists, or None (ADR-0018 §2,
+        ROADMAP §14 item 5).
+
+        Opening that scope is the protected action that carries the user's approval (rule §7.2):
+        a grant, issued only by an explicit operator action. A grant that is ``ACTIVE``, inside its
+        window and with budget left is such a scope; the answer is the latest expiry among them.
+        Read-only.
+        """
+        now = self._clock.now()
+        with self._db.read() as session:
+            rows = session.scalars(
+                select(LiveGrant).where(LiveGrant.state == GrantState.ACTIVE.value)
+            )
+            live = [record for record in map(_grant_record, rows) if record.live_at(now)]
+        return max((record.expires_at for record in live), default=None)
+
     def brake(self) -> BrakeRecord:
         with self.reading() as unit:
             return unit.brake()
