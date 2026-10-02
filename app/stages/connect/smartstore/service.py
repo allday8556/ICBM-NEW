@@ -23,6 +23,7 @@ CONNECT refuses before any provider call.
 """
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -42,6 +43,7 @@ from app.stages.connect.marketplace.attestation import (
 )
 from app.stages.connect.marketplace.capability import (
     AuthEvidence,
+    AuthStatus,
     ContractDecision,
     FailureEvidence,
     Finding,
@@ -73,6 +75,8 @@ from integrations.marketplaces.smartstore.signing import (
 )
 
 KEY = MARKETPLACE_KEY
+
+logger = logging.getLogger("icbm.connect.smartstore")
 SYSTEM_ACTOR = "system:connect"
 _TARGET = f"marketplace:{KEY}"
 _SESSION_FORMAT = 1
@@ -490,6 +494,65 @@ class SmartStoreConnectService:
             or committed.credential_generation != credentials.credential_generation
         ):
             return None  # AUTH §18: a session of another credential generation is not current
+        return committed
+
+    # ------------------------------------------------------------------ the committed bearer
+
+    def committed_bearer(self) -> CommittedSession | None:
+        """The bearer of the current committed session, for the REGISTER provider seams (CREATE,
+        read-back, SEARCH and ASSET; ROADMAP §14 item 4), or None.
+
+        **Read-only.** It never issues, renews or commits a token, takes no single-flight lock and
+        never clears or rewrites a session, so a readiness render can ask it freely. Renewal stays
+        CONNECT's own operator action (AUTH §15). There is no second token owner and no second
+        store: it reads this owner's committed bundle and its connection row.
+
+        It answers only when every condition holds, and None otherwise — including when any of it
+        cannot be read:
+        - a renewal margin is configured (AUTH §15) and more than that margin remains of the
+          token's lifetime: a token about to expire is no bearer;
+        - the credential bundle and the committed session are readable and of the same credential
+          generation (AUTH §18);
+        - the session is the current committed one: its credential and session generations equal
+          the connection's high-water marks (AUTH §13);
+        - the connection is bound to an account, and CONNECT's auth is READY with no
+          AUTHENTICATION overlay — a token valid by its local expiry is never READY by itself
+          (AUTH §23), and a session for the wrong account never answers (ACCOUNT_IDENTITY §4).
+        A process start never trusts a persisted READY (AUTH §17), so no bearer is answered until
+        CONNECT proves the identity again in this process.
+        """
+        margin = self._renewal_margin
+        if margin is None:
+            return None
+        try:
+            credentials = self._credentials.load(KEY)
+            if credentials is None:
+                return None
+            payload = self._sessions.peek(KEY)
+            committed = CommittedSession.decode(payload) if payload is not None else None
+            if (
+                committed is None
+                or committed.credential_generation != credentials.credential_generation
+                or committed.expires_at - self._clock.now() <= margin
+            ):
+                return None
+            with self._db.read() as session:
+                row = session.get(MarketplaceConnection, KEY)
+                if row is None or not row.provider_account_uid:
+                    return None
+                if (row.credential_generation_hwm, row.session_generation_hwm) != (
+                    committed.credential_generation,
+                    committed.session_generation,
+                ):
+                    return None
+            view = self._capability.capability(KEY)
+        except Exception:
+            logger.warning("marketplace.bearer.unreadable", extra=safe_payload(marketplace_key=KEY))
+            return None
+        if view.auth is not AuthStatus.READY or any(
+            overlay.workflow_scope is WorkflowScope.AUTHENTICATION for overlay in view.workflow
+        ):
+            return None
         return committed
 
     def _binding(self) -> str | None:

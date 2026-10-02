@@ -580,27 +580,29 @@ def build_container(
     live_authority = LiveAuthorityService(
         store=live_store, registrations=registrations, preparations=registration_preparations
     )
+    # ROADMAP §14 item 4: the one canonical bearer source of every SmartStore REGISTER seam.
+    committed_bearer = smartstore.committed_bearer
     registration_execution = RegistrationExecutionService(
         registrations=registrations,
         preflight=registration_preflight,
-        # The CREATE contract is adopted, but production wires no committed session to send or
-        # read with (ADR-0020 §4: a committed provider session is not provider-zero). Every
-        # mutation is refused earlier anyway: M0_DRY_RUN_ONLY, the brake and the grant refuse in
-        # the send-time stack, and the wire projection is not sendable while the official evidence
-        # leaves a required value uncaptured.
+        # ROADMAP §14 item 4: the four SmartStore seams read one canonical bearer source, the
+        # CONNECT owner's read-only committed bearer. It answers only for the current committed
+        # session of a proven, bound account with more than the renewal margin left, and None
+        # otherwise. A bearer permits no mutation: M0_DRY_RUN_ONLY, the brake, the grant and every
+        # other send-time layer still refuse CREATE and ASSET, and the wire projection is not
+        # sendable while the official evidence leaves a required value uncaptured.
         sender=SmartStoreCreateSender(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
-            bearer=lambda: None,
+            bearer=committed_bearer,
         ),
         readback=SmartStoreReadback(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
-            bearer=lambda: None,
+            bearer=committed_bearer,
         ),
-        # SEARCH is adopted for positive-only reconcile, with the same absent session: a check
-        # records LOOKUP_UNAVAILABLE and proves nothing, and no provider is read.
+        # SEARCH is adopted for positive-only reconcile with the same bearer source.
         lookup=SmartStoreReconcileLookup(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
-            bearer=lambda: None,
+            bearer=committed_bearer,
         ),
         capability=marketplace_capability,
         compare=smartstore_readback,
@@ -610,14 +612,14 @@ def build_container(
     )
     registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
     # The ASSET upload path (§3.4) with its durable attempt owner. The sender is the adopted
-    # SmartStore image upload with the same absent session as the CREATE seams: it is
-    # unavailable, so the stack's sender layer refuses and nothing is sent.
+    # SmartStore image upload with the same canonical bearer source as the CREATE seams; the
+    # send-time stack still refuses every upload under M0_DRY_RUN_ONLY.
     asset_uploads = AssetUploadService(
         store=live_store,
         stack=safety_stack,
         sender=SmartStoreAssetSender(
             caller=smartstore_caller or SmartStoreEndpointCaller(),
-            bearer=lambda: None,
+            bearer=committed_bearer,
         ),
         hosts=WireHostPolicy(
             {SMARTSTORE_KEY: smartstore_registry.canonical_host()},

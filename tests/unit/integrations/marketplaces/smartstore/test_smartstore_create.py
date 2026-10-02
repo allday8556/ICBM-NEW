@@ -853,8 +853,8 @@ def _complete() -> product.CreateDocument:
 def test_a_complete_document_passes_the_gate_and_production_still_sends_nothing() -> None:
     # With every required part owned (5915900049 D1, D2), a single-Item document of a captured
     # notice type is complete: the wire boundary no longer refuses it as incomplete. Nothing is
-    # sent in production all the same — the production sender has no committed session, and the
-    # send-time safety stack above it refuses every mutation under M0_DRY_RUN_ONLY.
+    # sent in production all the same — even with a committed session the send-time safety stack
+    # above the production sender refuses every mutation under M0_DRY_RUN_ONLY.
     complete = _complete()
     assert product.completeness_gaps(complete) == ()
     assert product.verified(complete) == complete
