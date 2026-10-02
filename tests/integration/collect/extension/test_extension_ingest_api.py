@@ -200,7 +200,11 @@ SECURITY_MATERIAL = {
     "myshop-module": '<div class="xans-element- xans-myshop xans-myshop-mileage"><p>1</p></div>',
     "mypage-region": '<div id="mypage-summary"><p>등급 안내</p></div>',
     "login-region": '<div class="login-state"><p>안내</p></div>',
+    # A region is one name however it is written: my-page, my_page, user_info.
+    "my-page-region": '<div class="my-page"><p>안내</p></div>',
+    "user-info-region": '<div id="user_info"><p>안내</p></div>',
     "session-text": "<p>session=synthetic-value-1234</p>",
+    "short-session-text": "<p>session=1</p>",
     "jwt-text": "<p>eyJhbGciOiJIUzI1NiJ9synthetic</p>",
     "url-credentials": '<img src="https://user:synthetic-value@kmretail.co.kr/a.jpg">',
     "url-secret-query": '<img src="/web/a.jpg?token=synthetic-value">',
@@ -335,6 +339,14 @@ def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
         assert result.blocking, addition
         for kind in (*result.blocking, *result.notes):
             assert secret not in kind, (addition, kind)
+    # Every value and text is read percent-decoded, and a comment is read as text, so the gate
+    # stands on its own whatever the structure check before it refuses.
+    for addition in (
+        '<p style="background:url(/a.jpg?x=token%3Dsynthetic)">x</p>',
+        "<p>session%253Dsynthetic</p>",
+        "<!-- session=synthetic -->",
+    ):
+        assert gate(frame(body=BODY + addition)).blocking, addition
     # Any other <img> attribute is read for a secret too, whatever a policy allows.
     blocking = gate(frame(body=BODY + '<img alt="token=synthetic-value-1234">')).blocking
     assert any(kind.startswith("SECRET_VALUE:alt@") for kind in blocking), blocking

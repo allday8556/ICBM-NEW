@@ -13,11 +13,11 @@ refuses **only** what must never be collected, fail-closed:
 
 - a secret: an attribute named for a token, session, cookie, credential or signature; a value
   shaped like a JWT, a bearer token, a ``key=value`` secret parameter or a long hex secret; a URL
-  carrying credentials. Every value is read, an image reference's whole value and its decoded form
-  included (its query, fragment and descriptors);
+  carrying credentials. Every value and text is read as it arrived and percent-decoded, an image
+  reference's whole value included (its query, fragment and descriptors);
 - the signed-in member's own account and identity: a Cafe24 member variable
   (``xans-member-var-*``), a Cafe24 my-shop module (``xans-myshop-*``), or an account, my-page,
-  login or user-info region.
+  login or user-info region, written with or without "-" or "_".
 
 User input values never arrive: the policy keeps no ``value`` or ``name`` attribute and no
 ``textarea``, and one that arrives is a policy violation before this gate runs.
@@ -80,16 +80,19 @@ _SECRET_SHAPE = (
     r"eyJ[A-Za-z0-9_-]{10,}"
     r"|\bbearer\s+[A-Za-z0-9._~+/-]{8,}"
     rf"|\b(?:[a-z_-]*(?:{_SECRET_WORDS})[a-z_-]*"
-    r"|auth|authorization|sid|sessid|jsessionid|phpsessid|sig|pwd)\s*[=:]\s*[^\s&\"'<>]{4,}"
+    r"|auth|authorization|sid|sessid|jsessionid|phpsessid|sig|pwd)\s*[=:]\s*[^\s&\"'<>]+"
     r"|[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"
 )
 # A value that is a secret, wherever it sits: a secret shape or a long hex run.
 _SECRET_VALUE = re.compile(rf"(?i)({_SECRET_SHAPE}|\b[a-f0-9]{{32,}}\b)")
 # The same in an image reference but for the hex run: suppliers name uploads with long hashes.
 _SECRET_IN_REFERENCE = re.compile(rf"(?i)({_SECRET_SHAPE})")
+# How many times a value is percent-decoded while it still changes, so an encoded secret is read.
+_DECODE_ROUNDS = 4
 # The signed-in member's own account and identity.
 _IDENTITY_PREFIXES = ("xans-member-var", "xans-myshop")
-_ACCOUNT_PREFIXES = ("account", "mypage", "login", "userinfo", "user-info")
+# Matched with "-" and "_" folded away, so my-page, my_page and mypage are one region.
+_ACCOUNT_PREFIXES = ("account", "mypage", "login", "userinfo")
 # Product data that only looks private: recorded as notes, never refused.
 _MEMBER_PREFIX = "member"
 _CONTACT = re.compile(
@@ -154,6 +157,22 @@ def _reference_problems(name: str, value: str) -> list[str]:
     return problems
 
 
+def _holds_secret(text: str, shape: re.Pattern[str]) -> bool:
+    """Whether ``text``, or any percent-decoded form of it, holds a secret of ``shape``."""
+    for _ in range(_DECODE_ROUNDS):
+        if shape.search(text):
+            return True
+        decoded = unquote(text)
+        if decoded == text:
+            return False
+        text = decoded
+    return shape.search(text) is not None
+
+
+def _folded(token: str) -> str:
+    return token.replace("-", "").replace("_", "")
+
+
 def _tokens(values: Mapping[str, str]) -> set[str]:
     return {*values.get("class", "").lower().split(), values.get("id", "").lower()} - {""}
 
@@ -203,7 +222,7 @@ class _Scan(HTMLParser):
         tokens = _tokens(values)
         if any(token.startswith(_IDENTITY_PREFIXES) for token in tokens):
             self.blocking.setdefault(f"MEMBER_IDENTITY@{boundary}")
-        if any(token.startswith(_ACCOUNT_PREFIXES) for token in tokens):
+        if any(_folded(token).startswith(_ACCOUNT_PREFIXES) for token in tokens):
             self.blocking.setdefault(f"ACCOUNT_REGION@{boundary}")
         if any(token.startswith(_MEMBER_PREFIX) for token in tokens):
             self.notes.setdefault(f"MEMBER_NAMED@{boundary}")
@@ -221,14 +240,10 @@ class _Scan(HTMLParser):
                         self.blocking.setdefault(finding)
                     else:
                         self.notes.setdefault(finding)
-            # Every value is read for a secret. An image reference is read whole and decoded too: a
-            # fragment, a descriptor or a query value can carry one as well as a query key.
-            if refused:
-                secret = False
-            elif reference:
-                secret = any(_SECRET_IN_REFERENCE.search(text) for text in (value, unquote(value)))
-            else:
-                secret = _SECRET_VALUE.search(value) is not None
+            # Every value is read for a secret. An image reference is read whole too: a fragment, a
+            # descriptor or a query value can carry one as well as a query key.
+            shape = _SECRET_IN_REFERENCE if reference else _SECRET_VALUE
+            secret = not refused and _holds_secret(value, shape)
             if secret or _SECRET_VALUE.search(name):
                 self.blocking.setdefault(f"SECRET_VALUE:{quoted}@{boundary}")
             elif not reference and _CONTACT.search(value):
@@ -248,10 +263,24 @@ class _Scan(HTMLParser):
                 return
 
     def handle_data(self, data: str) -> None:
-        if _SECRET_VALUE.search(data):
+        if _holds_secret(data, _SECRET_VALUE):
             self.blocking.setdefault(f"SECRET_TEXT@{self._here()}")
         elif _CONTACT.search(data):
             self.notes.setdefault(f"CONTACT_TEXT@{self._here()}")
+
+    # The structure check refuses a comment, a declaration and a processing instruction before this
+    # gate runs. The gate still reads each as text, so it stands on its own.
+    def handle_comment(self, data: str) -> None:
+        self.handle_data(data)
+
+    def handle_decl(self, decl: str) -> None:
+        self.handle_data(decl)
+
+    def unknown_decl(self, data: str) -> None:
+        self.handle_data(data)
+
+    def handle_pi(self, data: str) -> None:
+        self.handle_data(data)
 
 
 def security_gate(html: str, *, boundary_of: BoundaryOf) -> GateResult:
