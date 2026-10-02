@@ -333,7 +333,7 @@ def build_container(
         max_age_days=config.smartstore_a0_max_age_days,
     )
     marketplace_capability.set_permission_evidence(permission_attestation)
-    execution_mode = ExecutionModeService(config.execution_mode, audit)
+    execution_mode = ExecutionModeService(config.execution_mode, audit, clock)
     diagnostics = DiagnosticsService(
         enabled=config.diagnostics_enabled, db=db, jobs=jobs, audit=audit
     )
@@ -704,7 +704,8 @@ def build_container(
         capability=marketplace_capability,
         adoption=SmartStoreAdoption(),
         stages=canary_stages,
-        execution_mode=execution_mode.state().mode.value,
+        # Read at every evaluation: a bounded LIVE window opens and lapses at runtime (§14 item 5).
+        execution_mode=lambda: execution_mode.state().mode.value,
         # ADR-0014 §28.5: the status panel shows the ICBM seller code the provider is sent.
         clock=clock,
         seller_code=smartstore_product.seller_management_code,
