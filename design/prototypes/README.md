@@ -12,6 +12,15 @@ Authority: [`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md`](../../documents/cont
 
 Prototype files are stored byte-exact (`.gitattributes`: `-text`), and `tests/contracts/test_repository_rules.py` verifies the file against the record on every CI run.
 
+## Extension Collector prototype
+
+`icbm_extension_collector.html` — the Chrome extension side panel's approved prototype (the user's
+`ICBM 확장 수집기.html`)
+
+- SHA-256: `5eec99911aca06a857ea5b5460c77ac25f0270a4384e7257a81b5466b6bdb879`
+- Size: `7949739` bytes
+- Authority: `documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` (Extension Collector visual source)
+
 ## Superseded
 
 `icbm_redesign_test_v28_icbm_new_gaps.html` (v28) is kept for history only and is not an implementation source.

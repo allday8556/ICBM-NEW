@@ -196,6 +196,20 @@ def test_prototype_readme_mirrors_the_canonical_record() -> None:
     assert "documents/contracts/ui/UI_SOURCE_OF_TRUTH.md" in readme
 
 
+def test_the_extension_collector_prototype_is_the_recorded_file() -> None:
+    # The side panel's own approved prototype (ADR-0019 §12.1), recorded beside v29 and mirrored by
+    # the prototypes README; the repository copy is byte-identical to what the user approved.
+    record = _section(_read(UI_SOURCE_OF_TRUTH), r"^Extension Collector visual source$")
+    name = re.search(r"`design/prototypes/(icbm_extension_collector\.html)`", record)
+    sha = re.search(r"SHA-256:\s*`([0-9a-f]{64})`", record)
+    size = re.search(r"Size:\s*`(\d+)`", record)
+    assert name and sha and size, "UI_SOURCE_OF_TRUTH lost the Extension Collector record"
+    data = (REPO_ROOT / "design" / "prototypes" / name.group(1)).read_bytes()
+    assert (len(data), hashlib.sha256(data).hexdigest()) == (int(size.group(1)), sha.group(1))
+    mirror = _section(_read(PROTOTYPE_README), r"^Extension Collector prototype$")
+    assert name.group(1) in mirror and sha.group(1) in mirror and f"`{size.group(1)}`" in mirror
+
+
 def test_claude_md_takes_the_ui_source_from_the_record() -> None:
     for path in (CLAUDE_MD, CURRENT_MILESTONE_MD, *sorted(RULES_DIR.glob("*.md"))):
         assert PROTOTYPE_FILE.findall(_read(path)) == [], f"{path.name} hard-codes a prototype file"

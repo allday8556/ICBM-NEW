@@ -138,19 +138,41 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         assert gone not in everything, gone
 
 
-def test_the_side_panel_keeps_the_three_axes_apart() -> None:
-    # ADR-0019 §12.3–§12.4 (AC-21, AC-22): a transport state, a run outcome and a code are three
-    # things, and a run outcome is shown only when ICBM read it back.
+def test_the_side_panel_keeps_the_axes_apart() -> None:
+    # ADR-0019 §12.3–§12.4 (AC-21, AC-22): a transport state, a run outcome, a code and the field
+    # truth of a recorded revision are separate things, and a run outcome is shown only when ICBM
+    # read it back.
     panel = _read(EXTENSION / "sidepanel.html")
-    for role in ("transport-state", "run-outcome", "run-code", "run-id"):
+    for role in ("transport-state", "run-outcome", "run-code", "run-id", "fields", "images"):
         assert f'data-role="{role}"' in panel
     script = _read(EXTENSION / "sidepanel.js")
+    worker = _read(EXTENSION / "service_worker.js")
     assert 'result.state === "READ_BACK" ? result.outcome : "—"' in script
-    # No outcome word is ever written by the extension itself, and REVIEW and AUTH are no states.
-    for source in (script, _read(EXTENSION / "service_worker.js")):
-        for word in ('"RECORDED"', '"NO_REVISION"', '"FAILED"', "REVIEW_REQUIRED", '"AUTH"'):
+    # No outcome word is ever written by the extension itself, and AUTH is no state of it.
+    for source in (script, worker):
+        for word in ('"RECORDED"', '"NO_REVISION"', '"FAILED"', '"AUTH"'):
             assert word not in source, word
+    # The field truth is named in one place only: the side panel's chip vocabulary of the approved
+    # board. The worker never names it, and no field status is ever a transport state or outcome.
+    assert "REVIEW_REQUIRED" not in worker
+    vocabulary = re.search(r"const FIELD_TRUTH = \{([^}]*)\};", script)
+    assert vocabulary and "REVIEW_REQUIRED" in vocabulary.group(1)
+    assert script.count("REVIEW_REQUIRED") == vocabulary.group(1).count("REVIEW_REQUIRED")
+    assert "REVIEW_REQUIRED" not in script.split("const TRANSPORT_LABELS", 1)[1].split("};", 1)[0]
     assert "전송됨" in script and "처리 중" in script
+
+
+def test_the_side_panel_previews_only_what_icbm_recorded() -> None:
+    # ADR-0019 §12.1, §12.5: the field and evidence preview is the canonical revision ICBM read
+    # back for this run, through the one read-back of the client; nothing is fetched or kept
+    # beside it, and the panel only opens Collection Management at the paired ICBM.
+    client = _read(EXTENSION / "lib" / "client.js")
+    assert "/api/v1/collect/revisions/" in client
+    worker = _read(EXTENSION / "service_worker.js")
+    assert "readRevision(paired, revisionId)" in worker
+    assert "${paired.origin}/#/collect?" in worker
+    script = _read(EXTENSION / "sidepanel.js")
+    assert "fetch(" not in script and "chrome.storage" not in script
 
 
 # ---------------------------------------------------------------- the surface

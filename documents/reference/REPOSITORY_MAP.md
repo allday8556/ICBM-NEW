@@ -25,6 +25,8 @@ capture policy beside the KM collect package, migration `0034`, the test-browser
 and `documents/acceptance/adaptive/EXTENSION-E2.md`. No file moved, so `PATH_MIGRATION_MAP` is unchanged.
 The registration read state (ADR-0014 §28.5) added `app/stages/register/read_state.py`, the
 status card `ui/web/js/components/registration-status.js`, one unit and one contract suite.
+The Extension Collector UI added the side panel's approved prototype
+`design/prototypes/icbm_extension_collector.html`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -40,8 +42,8 @@ status card `ui/web/js/components/registration-status.js`, one unit and one cont
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
 | `automation/agent-host/` | 14 | Agent Host scripts (sha256-pinned bytes) |
 | `automation/archive/` | 2 | historical entry points, byte-identical |
-| `design/` | 3 | UI prototypes (design reference; `archive/` holds superseded ones) |
-| `design/prototypes/` | 3 |  |
+| `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
+| `design/prototypes/` | 4 |  |
 | `documents/` | 157 | all canonical and historical documents |
 | `documents/acceptance/` | 65 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
