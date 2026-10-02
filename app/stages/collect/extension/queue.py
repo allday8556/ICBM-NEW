@@ -14,14 +14,15 @@ decides everything after that, and the extension's own clock decides nothing:
   ``WAIT`` (with the seconds left), ``ISSUE`` (one item, its URL and a random single-use ticket,
   written before the answer is returned) or ``DONE``. A supplier has at most one open queue and at
   most one issued, unsettled read.
-- **One item is one read.** An item is never reissued or retried; an issued item that is not
-  captured in time expires and still counts.
+- **One item is one read.** An item is never reissued or retried. An issued read that ends without
+  a capture — its time ran out, or its capture was refused — is ``EXPIRED``: spent, still counted.
 - **A queue stops at the first item that does not end ``RECORDED`` or ``NO_REVISION``** — an
-  expired ticket or a ``FAILED`` run — and never skips forward.
+  expired ticket, a refused capture or a ``FAILED`` run — and never skips forward.
 
 A ticketed capture goes through the unchanged ingest (``service.py``), which claims its item here
 for exactly that URL, once, in the ingest's own write unit. The run is an ordinary ``EXTENSION``
-run; its outcome stays its own, and an item's state is never a run outcome (AC-31).
+run; its outcome stays its own, and an item's state is never a run outcome (AC-31). A single click
+is serialized with the queue: the ingest refuses it while a queue read of the supplier is out.
 
 Only a ticket's SHA-256 is stored. Neither a ticket nor a refused link is ever logged.
 """
@@ -72,6 +73,7 @@ logger = logging.getLogger("icbm.collect.extension.queue")
 # Why a queue stopped. Codes of ours, never page content.
 EXTENSION_QUEUE_TICKET_EXPIRED = "EXTENSION_QUEUE_TICKET_EXPIRED"
 EXTENSION_QUEUE_RUN_FAILED = "EXTENSION_QUEUE_RUN_FAILED"
+EXTENSION_QUEUE_CAPTURE_REFUSED = "EXTENSION_QUEUE_CAPTURE_REFUSED"
 # How long the extension is told to wait for a run that is still being processed. It is a polling
 # hint, never a bound: no read is issued until the run has settled.
 SETTLING_WAIT_S = 2.0
@@ -511,6 +513,44 @@ class ExtensionQueues:
         item.state = QueueItemState.CAPTURED.value
         item.collection_run_id = collection_run_id
         session.flush()
+
+    def read_in_flight(self, session: Session, supplier_key: str) -> bool:
+        """Whether a queue read of this supplier is issued and still open."""
+        held = session.scalar(
+            select(func.count())
+            .select_from(ExtensionQueueItem)
+            .where(
+                ExtensionQueueItem.supplier_key == supplier_key,
+                ExtensionQueueItem.state == QueueItemState.ISSUED.value,
+                ExtensionQueueItem.expires_at > self._clock.now(),
+            )
+        )
+        return bool(held)
+
+    def refuse(self, *, supplier_key: str, ticket: str) -> None:
+        """A ticketed capture was refused: its issued read is spent and its queue stops. A ticket
+        that answers no issued read of this supplier changes nothing."""
+        with self._db.write() as session:
+            item = session.scalar(
+                select(ExtensionQueueItem).where(
+                    ExtensionQueueItem.ticket_sha256 == _ticket_digest(ticket)
+                )
+            )
+            if (
+                item is None
+                or item.supplier_key != supplier_key
+                or item.state != QueueItemState.ISSUED.value
+            ):
+                return
+            now = self._clock.now()
+            assert item.expires_at is not None
+            # A read whose time had already run out stopped the queue by expiring, not by refusal.
+            expired = _aware(item.expires_at, now) <= now
+            item.state = QueueItemState.EXPIRED.value
+            queue = _queue(session, item.queue_id)
+            reason = EXTENSION_QUEUE_TICKET_EXPIRED if expired else EXTENSION_QUEUE_CAPTURE_REFUSED
+            self._stop(queue, reason, now)
+            session.flush()
 
 
 def _operator_bounds(declaration: QueueDeclaration, limits: QueueLimits) -> tuple[int, float]:

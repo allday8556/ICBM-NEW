@@ -22,6 +22,7 @@ from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
 from app.stages.collect.extension.capture import CaptureEnvelope
 from app.stages.collect.extension.queue import (
+    EXTENSION_QUEUE_CAPTURE_REFUSED,
     EXTENSION_QUEUE_RUN_FAILED,
     EXTENSION_QUEUE_TICKET_EXPIRED,
     ExtensionQueues,
@@ -290,22 +291,72 @@ def test_every_read_is_issued_once_durably_and_paced_by_the_server(
     assert (done.kind, done.queue_state) == ("DONE", QueueState.FINISHED)
 
 
-def test_a_ticket_is_claimed_only_for_its_exact_url_once_and_in_time(
+def test_a_ticket_claims_once_and_an_unknown_ticket_changes_nothing(
     container: Container, config: AppConfig, clock: FakeClock
 ) -> None:
     queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
     issued = _issue(container, queue_id)
     runs_before = _count(config, "collection_runs")
-    # Another product's capture with this ticket: refused whole, nothing written.
-    _refused(lambda: _capture(container, "9002", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
-    # A ticket that was never issued.
+    # A ticket that was never issued answers no read: refused, and the issued read stays open.
     _refused(lambda: _capture(container, "9001", "A" * 43), "EXTENSION_QUEUE_TICKET_REFUSED")
     assert _count(config, "collection_runs") == runs_before
+    view = container.extension_queues.read(queue_id)
+    assert view.state is QueueState.OPEN and view.items[0].state is QueueItemState.ISSUED
     _capture(container, "9001", issued.ticket)
     container.runner.run_next()
     clock.advance(QUEUE_MIN_INTERVAL_S)
-    # Used once: the same ticket never claims again.
+    # Used once: the same ticket never claims again, and its captured item stays captured.
     _refused(lambda: _capture(container, "9001", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
+    assert container.extension_queues.read(queue_id).items[0].state is QueueItemState.CAPTURED
+
+
+@pytest.mark.parametrize(
+    ("number", "changes", "code"),
+    [
+        # Another product's capture under this ticket.
+        ("9002", {}, "EXTENSION_QUEUE_TICKET_REFUSED"),
+        # The right product, cut with a policy that is no longer the reviewed one.
+        ("9001", {"policy": {"revision": "stale", "digest": "0" * 64}}, "CAPTURE_POLICY_MISMATCH"),
+    ],
+)
+def test_a_refused_capture_spends_its_read_and_stops_the_queue(
+    container: Container, config: AppConfig, number: str, changes: dict[str, Any], code: str
+) -> None:
+    queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
+    issued = _issue(container, queue_id)
+    runs_before = _count(config, "collection_runs")
+    url = _url(number)
+    refused = envelope(
+        _page(number),
+        transport=transport(url=url, navigation_name=url),
+        queue_ticket=issued.ticket,
+        **changes,
+    )
+    _refused(
+        lambda: container.extension_capture.ingest(CaptureEnvelope.model_validate(refused)), code
+    )
+    assert _count(config, "collection_runs") == runs_before
+    view = container.extension_queues.read(queue_id)
+    assert (view.state, view.stop_reason) == (QueueState.STOPPED, EXTENSION_QUEUE_CAPTURE_REFUSED)
+    # Spent and counted, never reissued, and the queue never skips forward.
+    assert [item.state for item in view.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]
+    _refused(lambda: _capture(container, "9001", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
+    assert container.extension_queues.next(queue_id).kind == "DONE"
+
+
+def test_a_single_click_waits_while_a_queue_read_is_out(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    queue_id = _declare(container, [_url("9001")]).view.queue_id
+    _issue(container, queue_id)
+    runs_before = _count(config, "collection_runs")
+    _refused(lambda: _capture(container, "9003", None), "EXTENSION_QUEUE_READ_IN_FLIGHT")
+    assert _count(config, "collection_runs") == runs_before
+    # Once the issued read has expired it no longer holds the supplier.
+    clock.advance(QUEUE_ISSUE_TTL_S)
+    assert container.collection.run(_capture(container, "9003", None)).outcome is (
+        CollectionOutcome.PENDING
+    )
 
 
 def test_an_expired_read_still_counts_and_stops_the_queue(

@@ -106,7 +106,8 @@ The extension transport as implemented by E1 and E2:
   - **Issued reads.** It answers each `next` with a wait, one issued read or done. An issue is written before the answer, with only its single-use ticket's SHA-256.
   - **Pacing.** The same-product interval counts server reads, issued queue reads and extension captures.
   - **Ticketed capture.** A ticketed capture claims its item for exactly that URL, once and in time, in the unchanged ingest's own write unit.
-  - **Stopping.** The queue stops, and never skips forward, at an expired read or a `FAILED` run.
+  - **Stopping.** The queue stops, and never skips forward, at an expired read, a refused queue capture or a `FAILED` run.
+  - **Serialization.** A single click waits while a queue read of the supplier is out.
 - **Sender.** Loopback, `X-ICBM-Client`, the pinned extension origin when an `Origin` is present, and the pairing are all required; pairing replaces none. The pairing secret lives in the OS keyring only. Each request carries the extension identity, pairing id and generation, a timestamp, a nonce, the body digest and an HMAC over that tuple. The replay cache is bounded and in memory.
 - **Policy.** One `BrowserCapturePolicy` per supplier, at `integrations/suppliers/<supplier>/browser_capture_policy.json`. The extension holds no copy: it reads the canonical bytes before every cut, and every capture names the revision and digest the server recomputes.
 - **Order of one ingest.** Authentication, then the ceilings (512 KiB, 20 000 elements, 40 image references, one capture at a time, 5 s between two), then the browser-observed transport evidence, the target check and the policy. Only then are a job and a canonical run opened. A refusal before that point creates no run.
