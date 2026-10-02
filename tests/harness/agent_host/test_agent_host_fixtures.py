@@ -60,6 +60,10 @@ SCENARIOS = {
     "packet-citation-kind": "a review with a cited comment's id never stands in for it",
     "packet-canon-missing": "a cited canonical document not at the audited base stops the packet",
     "packet-cite-added": "a changed declaration just before the merge: no merge, a re-audit",
+    # Issue #185: where the per-PR GPT audit runs, and what may be reused as a Host PASS
+    "gpt-audit-cwd": "GPT runs in the exact-HEAD audit worktree, never the non-git Host root; a"
+    " wrong-HEAD or missing worktree or a packet naming another HEAD is refused; an unstamped"
+    " result is never a Host PASS",
     # the mechanical checks V3 keeps or adds
     "behind-base": "a PR HEAD behind main is brought up to date before it is audited",
     "guard-main-moved": "main moved after the audit: base sync, re-audit, then merge",
