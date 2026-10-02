@@ -331,8 +331,6 @@ LIST_PAGE = (
     "overflow:hidden;clip:rect(0,0,0,0)'>시각적 숨김</a></li>"
     "<li style='clip-path:inset(100%)'>"
     "<a href='/product/synthetic-sample/9011/'>경로로 잘림</a></li>"
-    "<li style='position:relative'><a href='/product/synthetic-sample/9012/'>덮인 상품</a>"
-    "<div style='position:absolute;inset:0;background:#fff'></div></li>"
     "<li><a href='/product/list.html?cate_no=23'>다음 쪽</a></li>"
     "<li><a href='https://elsewhere.invalid/product/synthetic-sample/9004/'>다른 곳</a></li>"
     "</ul></body></html>"
@@ -356,7 +354,6 @@ def _list_page(context: BrowserContext) -> Page:
             "9009",
             "9010",
             "9011",
-            "9012",
         )
     }
 
