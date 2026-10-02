@@ -423,8 +423,9 @@ def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     e2_line = roadmap.split("**E2 —", 1)[1].split("\n", 1)[0]
     assert "**E2 is accepted**" in e2_line and "`PENDING`" not in e2_line
     assert "**E3 — the list queue — is implemented provider-zero** (ADR-0019 §8.1" in roadmap
-    assert "`documents/acceptance/adaptive/EXTENSION-E3.md`, `PENDING`" in roadmap
-    assert "E3's real acceptance needs the user's own grant" in roadmap
+    assert "`documents/acceptance/adaptive/EXTENSION-E3.md`, `ACCEPTED`" in roadmap
+    e3_line = roadmap.split("**E3 —", 1)[1].split("\n", 1)[0]
+    assert "**E3 is accepted**" in e3_line and "`PENDING`" not in e3_line
     assert "The extension-transport Phase C is a later slice and is not implemented" in roadmap
 
 
