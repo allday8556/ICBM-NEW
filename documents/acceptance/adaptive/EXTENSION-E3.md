@@ -2,8 +2,8 @@
 
 - Status: **ACCEPTED — the real KM통상 acceptance passed on exact main `091133b6`** (§5.2; queue
   `ecdd0927-a4f9-42d2-a7e6-f98d3ae69725`, 27 products found, 25 `RECORDED`, 1 `SKIPPED`, 1
-  `FAILED` by a host operating error disclosed there). A green PR, a green CI or a synthetic test
-  run accepts nothing on its own.
+  `FAILED` by a host operating error disclosed there and then recorded by the operator's single
+  click). A green PR, a green CI or a synthetic test run accepts nothing on its own.
 - Issue: #126. Contract: `documents/decisions/adr/0019-extension-primary-collection-transport.md`
   §8.1 and AC-27 to AC-31 (merged as PR #188).
 - Builds on E1 and E2 (`documents/acceptance/adaptive/EXTENSION-E1.md`, `EXTENSION-E2.md`). The
@@ -133,7 +133,10 @@ bounds 500 products a queue and a 10 s floor (PR #194). Evidence root:
   old process (a capture is never durable and never replayed, ruling `5906712259` N-1). The queue
   went on, as the user's rule says. The extension's loop stopped while ICBM was unreachable, and
   the user resumed the same queue from the panel (`열려 있는 대기열` → `재개`); no second queue was
-  declared. Product 355 is left to the operator's single click.
+  declared. Product 355 was then recorded by the operator's own single click (E1/E2's click, not
+  the queue): run `0dac8721-2085-4475-aaf3-87147d5fcc46`, `RECORDED`, identity `355`, no server
+  product read, revision `b605810d-18ca-4a4e-9888-674267a3fda5`, 12 image requests all HTTP 200.
+  With it, every product the operator saw on the list page is recorded.
 - **Supplier traffic (server log, 14:37Z–15:19Z):** 303 `IMAGE_REQUEST`, all HTTP 200, retry
   count 0, under the 30-per-run cap (the largest run made 15): `onewbio.diskn.com` ×227,
   `kmretail.co.kr` ×76 — only the KM profile's image hosts. **0 product-page requests by the
