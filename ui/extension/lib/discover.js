@@ -11,6 +11,13 @@
 // and a queue read of such a link stops the queue at a product the operator never saw. A hidden
 // anchor is never discovered: this narrows discovery, as ADR-0019 §8.1 allows, and widens nothing.
 //
+// Whether the operator can see an anchor is not decided by reading styles one by one — every
+// concealment has another — but by asking the browser what it paints at the anchor's own spot:
+// the anchor is scrolled into the viewport and hit-tested at the centre of its painted box. That
+// is one rule for display, visibility, opacity, clipping of every kind, an overlay on top, a box
+// off the page and a box of no size. The page is only scrolled, never modified, and the scroll is
+// put back.
+//
 // It is serialized and run in the page, so it is self-contained: it reads the DOM, talks to
 // nothing, and returns. The server judges every link again; this filter keeps material in the page
 // and never decides what is read.
@@ -25,51 +32,21 @@ export function discoverInPage(rule) {
     }
     return null;
   };
-  // The part of a box an ancestor lets through: every ancestor that clips (overflow, clip-path or
-  // the legacy clip) cuts the box down to its own; a box cut to nothing is clipped away.
-  const unclipped = (rect, anchor) => {
-    let left = rect.left;
-    let top = rect.top;
-    let right = rect.right;
-    let bottom = rect.bottom;
-    for (let el = anchor.parentElement; el && el !== document.body; el = el.parentElement) {
-      const style = getComputedStyle(el);
-      const clips =
-        style.overflowX !== "visible" ||
-        style.overflowY !== "visible" ||
-        style.clipPath !== "none" ||
-        style.clip !== "auto";
-      if (!clips) continue;
-      const own = el.getBoundingClientRect();
-      left = Math.max(left, own.left);
-      top = Math.max(top, own.top);
-      right = Math.min(right, own.right);
-      bottom = Math.min(bottom, own.bottom);
-      if (right <= left || bottom <= top) return null;
-    }
-    const style = getComputedStyle(anchor);
-    if (style.clipPath !== "none" || style.clip !== "auto") return null;
-    return { left, top, right, bottom };
-  };
-  // Whether the operator can see this anchor: the browser's own visibility check (display,
+  // Whether the operator can see this anchor: the browser's own visibility check first (display,
   // visibility, content-visibility and opacity, ancestors included; Chrome 105+, the manifest pins
-  // 114), a painted box, that box not clipped away by an ancestor, and inside the page the
-  // operator can scroll to.
+  // 114), then the browser's own paint at the centre of the anchor's box once it is scrolled into
+  // the viewport. What is painted there must be the anchor or something inside it.
   const shown = (anchor) => {
     if (!anchor.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
-    const painted = box(anchor);
-    if (!painted) return false;
-    const rect = unclipped(painted, anchor);
+    if (!box(anchor)) return false;
+    anchor.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    const rect = box(anchor);
     if (!rect) return false;
-    const root = document.documentElement;
-    const left = rect.left + window.scrollX;
-    const top = rect.top + window.scrollY;
-    return (
-      rect.right + window.scrollX > 0 &&
-      rect.bottom + window.scrollY > 0 &&
-      left < root.scrollWidth &&
-      top < root.scrollHeight
-    );
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && (hit === anchor || anchor.contains(hit));
   };
   let form;
   try {
@@ -80,22 +57,28 @@ export function discoverInPage(rule) {
   const links = [];
   const seen = new Set();
   let found = 0;
-  for (const anchor of document.querySelectorAll("a[href]")) {
-    let url;
-    try {
-      url = new URL(anchor.href);
-    } catch {
-      continue;
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  try {
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      let url;
+      try {
+        url = new URL(anchor.href);
+      } catch {
+        continue;
+      }
+      if (url.protocol !== "https:" || url.hostname !== rule.host) continue;
+      if (url.username || url.password || url.port) continue;
+      if (!form.test(url.pathname)) continue;
+      const link = `https://${url.hostname}${url.pathname}`;
+      if (seen.has(link)) continue;
+      if (!shown(anchor)) continue;
+      seen.add(link);
+      found += 1;
+      if (links.length < rule.maxLinks) links.push(link);
     }
-    if (url.protocol !== "https:" || url.hostname !== rule.host) continue;
-    if (!shown(anchor)) continue;
-    if (url.username || url.password || url.port) continue;
-    if (!form.test(url.pathname)) continue;
-    const link = `https://${url.hostname}${url.pathname}`;
-    if (seen.has(link)) continue;
-    seen.add(link);
-    found += 1;
-    if (links.length < rule.maxLinks) links.push(link);
+  } finally {
+    window.scrollTo({ left: scrollX, top: scrollY, behavior: "instant" });
   }
   return { ok: true, links, found };
 }
