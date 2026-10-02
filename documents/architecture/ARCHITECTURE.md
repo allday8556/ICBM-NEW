@@ -106,7 +106,7 @@ The extension transport as implemented by E1 and E2:
   - **Issued reads.** It answers each `next` with a wait, one issued read or done. An issue is written before the answer, with only its single-use ticket's SHA-256.
   - **Pacing.** The same-product interval counts server reads, issued queue reads and extension captures.
   - **Ticketed capture.** A ticketed capture claims its item for exactly that URL, once and in time, in the unchanged ingest's own write unit.
-  - **Stopping.** The queue stops, and never skips forward, at an expired read, a refused queue capture or a `FAILED` run.
+  - **Going on.** The queue goes on past an expired read, a refused queue capture or a `FAILED` run; the item keeps how it ended and is never reissued.
   - **Serialization.** A single click waits while a queue read of the supplier is out.
   - **Client.** `ui/extension/lib/discover.js` reads the operator's loaded list page and returns only links that fully match the supplier's reviewed product path form, as scheme, host and path.
     - The service worker asks for the next read and waits as ICBM says.

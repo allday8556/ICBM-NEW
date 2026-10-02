@@ -22,9 +22,6 @@ from app.platform.core.ownership import acquire_data_dir
 from app.platform.core.secrets import MemorySecretStore
 from app.stages.collect.extension.capture import CaptureEnvelope
 from app.stages.collect.extension.queue import (
-    EXTENSION_QUEUE_CAPTURE_REFUSED,
-    EXTENSION_QUEUE_RUN_FAILED,
-    EXTENSION_QUEUE_TICKET_EXPIRED,
     ExtensionQueues,
     QueueAnswer,
     QueueDeclaration,
@@ -342,8 +339,13 @@ def test_a_ticket_claims_once_and_an_unknown_ticket_changes_nothing(
         ("9001", {"supplier_key": "synthetic-other"}, "COLLECT_SUPPLIER_UNKNOWN"),
     ],
 )
-def test_a_refused_capture_spends_its_read_and_stops_the_queue(
-    container: Container, config: AppConfig, number: str, changes: dict[str, Any], code: str
+def test_a_refused_capture_spends_its_read_and_the_queue_goes_on(
+    container: Container,
+    config: AppConfig,
+    clock: FakeClock,
+    number: str,
+    changes: dict[str, Any],
+    code: str,
 ) -> None:
     queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
     issued = _issue(container, queue_id)
@@ -360,11 +362,12 @@ def test_a_refused_capture_spends_its_read_and_stops_the_queue(
     )
     assert _count(config, "collection_runs") == runs_before
     view = container.extension_queues.read(queue_id)
-    assert (view.state, view.stop_reason) == (QueueState.STOPPED, EXTENSION_QUEUE_CAPTURE_REFUSED)
-    # Spent and counted, never reissued, and the queue never skips forward.
+    assert view.state is QueueState.OPEN
+    # Spent and counted, never reissued; the queue goes on to the next item (the user's rule).
     assert [item.state for item in view.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]
     _refused(lambda: _capture(container, "9001", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
-    assert container.extension_queues.next(queue_id).kind == "DONE"
+    clock.advance(QUEUE_MIN_INTERVAL_S)
+    assert _issue(container, queue_id).item.source_url == _url("9002")  # type: ignore[union-attr]
 
 
 def test_a_single_click_waits_while_a_queue_read_is_out(
@@ -382,22 +385,22 @@ def test_a_single_click_waits_while_a_queue_read_is_out(
     )
 
 
-def test_an_expired_read_still_counts_and_stops_the_queue(
+def test_an_expired_read_still_counts_and_the_queue_goes_on(
     container: Container, config: AppConfig, clock: FakeClock
 ) -> None:
     queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
     issued = _issue(container, queue_id)
     clock.advance(QUEUE_ISSUE_TTL_S)
     _refused(lambda: _capture(container, "9001", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
-    done = container.extension_queues.next(queue_id)
-    assert (done.kind, done.queue_state) == ("DONE", QueueState.STOPPED)
+    # The expired read is spent and never reissued; the next item is issued.
+    second = _issue(container, queue_id)
+    assert second.item is not None and second.item.source_url == _url("9002")
     view = container.extension_queues.read(queue_id)
-    assert view.stop_reason == EXTENSION_QUEUE_TICKET_EXPIRED
-    # Never reissued, and the queue never skips forward.
-    assert [item.state for item in view.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]
+    assert view.state is QueueState.OPEN
+    assert [item.state for item in view.items] == [QueueItemState.EXPIRED, QueueItemState.ISSUED]
 
 
-def test_a_failed_run_stops_the_queue_and_it_never_skips_forward(
+def test_a_failed_run_is_its_items_own_and_the_queue_goes_on(
     container: Container, clock: FakeClock
 ) -> None:
     queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
@@ -410,11 +413,12 @@ def test_a_failed_run_stops_the_queue_and_it_never_skips_forward(
     container.runner.run_next()
     assert container.collection.run(run_id).outcome is CollectionOutcome.FAILED
     clock.advance(QUEUE_MIN_INTERVAL_S)
-    done = container.extension_queues.next(queue_id)
-    assert (done.kind, done.queue_state) == ("DONE", QueueState.STOPPED)
+    second = _issue(container, queue_id)
+    assert second.item is not None and second.item.source_url == _url("9002")
     view = container.extension_queues.read(queue_id)
-    assert view.stop_reason == EXTENSION_QUEUE_RUN_FAILED
-    assert [item.state for item in view.items] == [QueueItemState.CAPTURED, QueueItemState.WAITING]
+    assert view.state is QueueState.OPEN
+    # The item keeps its run's own outcome (AC-31); the queue went on to the next item.
+    assert [item.state for item in view.items] == [QueueItemState.CAPTURED, QueueItemState.ISSUED]
     assert view.items[0].run_outcome is CollectionOutcome.FAILED
 
 
@@ -601,8 +605,9 @@ def test_the_discovery_policy_names_the_queue_still_open(
     held = container.extension_queues.discovery_policy(SUPPLIER).open_queue
     assert held is not None and held.queue_id == queue_id
     assert [item.state for item in held.items] == [QueueItemState.ISSUED, QueueItemState.WAITING]
-    # It is settled before it is named: a read whose time ran out stops it, and it is no longer
-    # open.
+    # It is settled before it is named: a read whose time ran out is spent, and the queue is
+    # still open, with its next item waiting.
     clock.advance(QUEUE_ISSUE_TTL_S)
-    assert container.extension_queues.discovery_policy(SUPPLIER).open_queue is None
-    assert container.extension_queues.read(queue_id).state is QueueState.STOPPED
+    held = container.extension_queues.discovery_policy(SUPPLIER).open_queue
+    assert held is not None and held.state is QueueState.OPEN
+    assert [item.state for item in held.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]

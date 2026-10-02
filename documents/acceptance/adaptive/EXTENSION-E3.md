@@ -16,8 +16,8 @@ decides every read.
 
 1. **Discovery reads nothing.** The side panel asks ICBM for the supplier's reviewed product path
    form and its declared queue limits. The extension then reads the list page the operator already
-   loaded and returns only links that fully match that form, as their scheme, host and path
-   (`ui/extension/lib/discover.js`). Nothing of the list page itself, and no credentials, query or
+   loaded and returns only the links the operator can see that fully match that form, as their
+   scheme, host and path (`ui/extension/lib/discover.js`). A hidden anchor is never discovered. Nothing of the list page itself, and no credentials, query or
    fragment, is sent.
 2. **The bounds are declared twice.** The supplier's `CollectionProfile` declares its
    `QueueLimits`; the operator declares the queue's number of products and its interval inside
@@ -26,8 +26,9 @@ decides every read.
    next read and waits as long as ICBM says. When ICBM issues one, the worker navigates the
    operator's own tab to that one URL, captures it with the unchanged E1 cut and sends it with its
    single-use ticket through the unchanged ingest.
-4. **A queue stops, and never skips forward,** at the first item that does not end `RECORDED` or
-   `NO_REVISION`: an expired read, a refused capture or a `FAILED` run.
+4. **A queue goes on past an item that fails** (the user's rule of 2026-10-02): an expired read, a
+   refused capture or a `FAILED` run leaves its item as it ended, never reissued, and the queue
+   reads the next item.
 
 The server half is `app/stages/collect/extension/queue.py` with migration 0035 (PR #189); the
 extension half is the discovery, the worker's queue loop and the side panel's queue board.
@@ -59,7 +60,7 @@ extension half is the discovery, the worker's queue loop and the side panel's qu
 | no declared limits, no queue; a missing or out-of-range bound refuses with zero rows | `tests/integration/collect/extension/test_extension_queue.py` |
 | every refused link is counted and never stored or logged | the same |
 | issue, wait, capture, settle and done; the ticket's digest stored, never the ticket | the same |
-| a refused or expired read and a `FAILED` run stop the queue without skipping forward | the same |
+| a refused or expired read and a `FAILED` run leave their item as it ended and the queue goes on | the same |
 | the same-product interval counts an extension capture; one issued read per supplier | the same |
 | a queue read by read in a real Chromium, with nothing of the list page sent | `tests/integration/collect/extension/test_extension_e2e.py` |
 | a queue without its bounds is refused and reads nothing | the same |
@@ -81,7 +82,8 @@ The operator's procedure:
 
 1. Open the granted list page in the paired Chrome.
 2. In the side panel choose `이 페이지의 상품 목록 찾기`, then declare the granted bounds.
-3. Start the queue once. There is no retry: a stopped queue is reported as it stopped.
+3. Start the queue once. There is no retry: a product that fails is reported as it failed, and
+   the queue goes on.
 
 The record then states, from ICBM and never from the extension:
 

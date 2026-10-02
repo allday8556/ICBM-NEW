@@ -16,8 +16,9 @@ decides everything after that, and the extension's own clock decides nothing:
   most one issued, unsettled read.
 - **One item is one read.** An item is never reissued or retried. An issued read that ends without
   a capture — its time ran out, or its capture was refused — is ``EXPIRED``: spent, still counted.
-- **A queue stops at the first item that does not end ``RECORDED`` or ``NO_REVISION``** — an
-  expired ticket, a refused capture or a ``FAILED`` run — and never skips forward.
+- **A queue goes on past an item that fails** (the user's rule of 2026-10-02). An expired read, a
+  refused capture and a ``FAILED`` run leave their item as it ended, and the queue reads the next
+  item. The operator sees every failure in the queue and in Collection Management.
 
 A ticketed capture goes through the unchanged ingest (``service.py``), which claims its item here
 for exactly that URL, once, in the ingest's own write unit. The run is an ordinary ``EXTENSION``
@@ -70,15 +71,9 @@ from integrations.suppliers.transport.collection import CollectionTargetRefused,
 
 logger = logging.getLogger("icbm.collect.extension.queue")
 
-# Why a queue stopped. Codes of ours, never page content.
-EXTENSION_QUEUE_TICKET_EXPIRED = "EXTENSION_QUEUE_TICKET_EXPIRED"
-EXTENSION_QUEUE_RUN_FAILED = "EXTENSION_QUEUE_RUN_FAILED"
-EXTENSION_QUEUE_CAPTURE_REFUSED = "EXTENSION_QUEUE_CAPTURE_REFUSED"
 # How long the extension is told to wait for a run that is still being processed. It is a polling
 # hint, never a bound: no read is issued until the run has settled.
 SETTLING_WAIT_S = 2.0
-# The outcomes after which a queue goes on (ADR-0019 §8.1). Any other settled outcome stops it.
-_GOES_ON = frozenset({CollectionOutcome.RECORDED.value, CollectionOutcome.NO_REVISION.value})
 # The longest product URL a declaration may carry. A longer one is refused and counted.
 MAX_LINK_CHARS = 2048
 
@@ -121,7 +116,6 @@ class QueueView:
     queue_id: str
     supplier_key: str
     state: QueueState
-    stop_reason: str | None
     max_products: int
     interval_s: float
     skip_collected: bool
@@ -449,40 +443,22 @@ class ExtensionQueues:
         return max(0.0, owed)
 
     def _settle(self, session: Session, queue: ExtensionQueue, now: datetime) -> None:
-        """Expire an issued read whose time ran out, and stop the queue at the first item that did
-        not end RECORDED or NO_REVISION. Written in the caller's unit."""
+        """Expire an issued read whose time ran out: spent, still counted, never reissued. The
+        queue goes on. Written in the caller's unit."""
         for item in session.scalars(
             select(ExtensionQueueItem).where(
                 ExtensionQueueItem.queue_id == queue.queue_id,
-                ExtensionQueueItem.state.in_(
-                    (QueueItemState.ISSUED.value, QueueItemState.CAPTURED.value)
-                ),
+                ExtensionQueueItem.state == QueueItemState.ISSUED.value,
             )
         ):
-            if item.state == QueueItemState.ISSUED.value:
-                assert item.expires_at is not None
-                if _aware(item.expires_at, now) <= now:
-                    item.state = QueueItemState.EXPIRED.value
-                    self._stop(queue, EXTENSION_QUEUE_TICKET_EXPIRED, now)
-                continue
-            outcome = session.scalar(
-                select(CollectionRun.outcome).where(
-                    CollectionRun.collection_run_id == item.collection_run_id
+            assert item.expires_at is not None
+            if _aware(item.expires_at, now) <= now:
+                item.state = QueueItemState.EXPIRED.value
+                logger.info(
+                    "collect.extension_queue_read_expired",
+                    extra={"queue_id": queue.queue_id, "item_id": item.item_id},
                 )
-            )
-            if outcome != CollectionOutcome.PENDING.value and outcome not in _GOES_ON:
-                self._stop(queue, EXTENSION_QUEUE_RUN_FAILED, now)
         session.flush()
-
-    def _stop(self, queue: ExtensionQueue, reason: str, now: datetime) -> None:
-        if queue.state != QueueState.OPEN.value:
-            return
-        queue.state = QueueState.STOPPED.value
-        queue.stop_reason = reason
-        queue.finished_at = now
-        logger.info(
-            "collect.extension_queue_stopped", extra={"queue_id": queue.queue_id, "reason": reason}
-        )
 
     # ------------------------------------------------------------------ the operator's own calls
 
@@ -556,10 +532,10 @@ class ExtensionQueues:
         return bool(held)
 
     def refuse(self, ticket: str) -> None:
-        """A ticketed capture was refused: its issued read is spent and its queue stops. The ticket
-        alone names the read — a random 256-bit value issued once — so nothing else the refused
-        capture claims, its supplier included, can keep the read open. A ticket that answers no
-        issued read changes nothing."""
+        """A ticketed capture was refused: its issued read is spent, never reissued, and the queue
+        goes on. The ticket alone names the read — a random 256-bit value issued once — so nothing
+        else the refused capture claims, its supplier included, can keep the read open. A ticket
+        that answers no issued read changes nothing."""
         with self._db.write() as session:
             item = session.scalar(
                 select(ExtensionQueueItem).where(
@@ -568,14 +544,11 @@ class ExtensionQueues:
             )
             if item is None or item.state != QueueItemState.ISSUED.value:
                 return
-            now = self._clock.now()
-            assert item.expires_at is not None
-            # A read whose time had already run out stopped the queue by expiring, not by refusal.
-            expired = _aware(item.expires_at, now) <= now
             item.state = QueueItemState.EXPIRED.value
-            queue = _queue(session, item.queue_id)
-            reason = EXTENSION_QUEUE_TICKET_EXPIRED if expired else EXTENSION_QUEUE_CAPTURE_REFUSED
-            self._stop(queue, reason, now)
+            logger.info(
+                "collect.extension_queue_read_refused",
+                extra={"queue_id": item.queue_id, "item_id": item.item_id},
+            )
             session.flush()
 
 
@@ -747,7 +720,6 @@ def _view(session: Session, queue_id: str) -> QueueView:
         queue_id=queue.queue_id,
         supplier_key=queue.supplier_key,
         state=QueueState(queue.state),
-        stop_reason=queue.stop_reason,
         max_products=queue.max_products,
         interval_s=queue.interval_s,
         skip_collected=queue.skip_collected,
