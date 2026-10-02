@@ -1076,7 +1076,7 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         "Both transports write a revision through the one pipeline after capture",
         "**E3 is implemented: the list queue**",
         "every queue read is issued by the server, durably, before it happens",
-        "E3's real acceptance needs the user's own grant",
+        "E3's real acceptance passed under the user's grant",
         "**One pipeline after capture (ADR-0019 §2, E2).**",
         "The application gains no CORS",
         "pairing replaces none",
