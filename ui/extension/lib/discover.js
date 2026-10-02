@@ -75,6 +75,16 @@ export function discoverInPage(rule) {
     if (!paint) return false;
     const rect = unclipped(paint);
     if (!rect) return false;
+    // Where the operator can bring the box by scrolling: the whole page, or — for a box that is
+    // fixed to the viewport and so never scrolls — the viewport itself.
+    if (fixed(paint.element)) {
+      return (
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < window.innerWidth &&
+        rect.top < window.innerHeight
+      );
+    }
     const root = document.documentElement;
     return (
       rect.right + window.scrollX > 0 &&
@@ -83,6 +93,13 @@ export function discoverInPage(rule) {
       rect.top + window.scrollY < root.scrollHeight
     );
   };
+  // Whether an element, or an ancestor, is fixed to the viewport.
+  function fixed(element) {
+    for (let el = element; el && el !== document.body; el = el.parentElement) {
+      if (getComputedStyle(el).position === "fixed") return true;
+    }
+    return false;
+  }
   let form;
   try {
     form = new RegExp(`^(?:${rule.productPath})$`);
