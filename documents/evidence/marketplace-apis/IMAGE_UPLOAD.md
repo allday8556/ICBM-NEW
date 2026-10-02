@@ -48,7 +48,7 @@
 
 - `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` is `ADOPTED` (M5 IMAGE UPLOAD amendment; `ENDPOINT_MATRIX.md` §4, §4.1; ADR-0014 §17.1): one artifact per request in one `imageFiles` part; no query keys; only `url` is retained; `endpoint_mapping_revision = m5-image-upload-r1`. A successful `images[].url` may cross the `PreparedAsset` boundary only when exactly one safe URL corresponds to that artifact and candidate fingerprint.
 - ICBM policy: redirect `NO_FOLLOW`, connect `5s`, read `30s`, no automatic retry; any possibly transmitted failure is `UPLOAD_UNKNOWN`, distinct from `RegistrationIntent.UNKNOWN`.
-- Runtime: `UNVERIFIED`. Execution is `DRY_RUN`/provider-zero and no application route invokes the upload. The production ASSET sender (`SmartStoreAssetSender`) is the only caller of this endpoint, behind the ADR-0018 §3.4 attempt owner and the send-time safety stack; with no committed session it is unavailable and sends nothing.
+- Runtime: `UNVERIFIED`. Execution is `DRY_RUN`/provider-zero and no application route invokes the upload. The production ASSET sender (`SmartStoreAssetSender`) is the only caller of this endpoint, behind the ADR-0018 §3.4 attempt owner and the send-time safety stack; it reads the CONNECT owner's committed bearer (ROADMAP §14 item 4), so with no proven current committed session it is unavailable and sends nothing, and with one the send-time stack still refuses every upload under `M0_DRY_RUN_ONLY`.
 
 ## Coupang
 

@@ -743,6 +743,12 @@ expected areas, none authorized by this ADR:
 > layer and the sender layer both still refuse; `M0_DRY_RUN_ONLY`, the residual-risk acceptance
 > and every other requirement refuse as before, and both stage readinesses and the canary stay
 > **`BLOCKED`**.
+>
+> **Amendment note (committed-session bearer seam; ROADMAP §14 item 4).** The ASSET sender
+> reads the CONNECT owner's read-only committed bearer, so it is available only while CONNECT
+> holds a proven current committed session. That is still not readiness: the sender layer is
+> one layer, and `M0_DRY_RUN_ONLY`, the grant, the brake, eligibility, the residual-risk
+> acceptance and every other requirement refuse as before.
 
 ### 13. What this ADR does not decide
 
@@ -812,7 +818,8 @@ G3-31  the registration read state and its status card and detail panel are surf
   `BLOCKED` for several independent reasons at once. *(Amendment note: CREATE and SEARCH were
   adopted by their own slices — §12 — and the eligibility owner exists — §5.1; the eligibility
   layer is proven only per exact reviewed lineage, and every other reason still refuses. The ASSET
-  sender is wired as well — §10 — and stays unavailable while no committed session exists.)*
+  sender is wired as well — §10 — and stays unavailable while no committed session exists; since
+  ROADMAP §14 item 4 a proven committed session supplies its bearer.)*
 - The grant and the protected-write brake were implemented, with the ASSET upload-attempt owner, by
   the separately authorized Gate 3 area 1 slice, which added migration `0026_g3_live_authority`
   under its own authorization.

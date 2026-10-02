@@ -112,7 +112,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, an `UNKNOWN` is never resent, and the adopted request is not sendable while required values stay uncaptured or without an ICBM-owned value (§4.1.1) |
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); ASSET sender wired (`SmartStoreAssetSender`) with no committed session, so unavailable |
+| `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); ASSET sender wired (`SmartStoreAssetSender`) to the CONNECT owner's committed bearer (ROADMAP §14 item 4), so unavailable without a proven current committed session; every upload still refused by the send-time stack under `M0_DRY_RUN_ONLY` |
 | `SMARTSTORE_CATEGORY_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories` | Category discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -275,7 +275,8 @@ and are owned now, and the notice child is projected for every captured type. A 
 listing whose reviewed notice type is captured and whose notice satisfies the child's documented
 members is therefore **sendable**: the REGISTER owner no longer refuses it as not sendable, and
 what stops it is the rest of the send path — no committed session, `M0_DRY_RUN_ONLY` and the
-ADR-0018 send-time stack.)*
+ADR-0018 send-time stack. Since ROADMAP §14 item 4 a proven committed session supplies the
+bearer, and `M0_DRY_RUN_ONLY` and the stack still refuse.)*
 
 **The display status is owned** (Issue #89 architect resolution `5915900049` D1): every CREATE
 document carries `smartstoreChannelProduct.channelProductDisplayStatusType = ON`; any other value,
@@ -374,8 +375,11 @@ persisted: `marketplace_product_id` stays the `originProductNo` and `marketplace
 holds the `STOREFARM` `channelProductNo` (§B); a missing or ambiguous channel identity is never
 guessed and proves nothing.
 
-**Adoption is a contract, never a call.** Production wires the lookup with no committed session, so
-every check is `LOOKUP_UNAVAILABLE` and no provider is read; execution stays `DRY_RUN`,
+**Adoption is a contract, never a call.** Production wired the lookup with no committed session, so
+every check was `LOOKUP_UNAVAILABLE` and no provider was read. *(Since ROADMAP §14 item 4 it reads
+the CONNECT owner's committed bearer: without a proven current committed session every check is
+still `LOOKUP_UNAVAILABLE`, and with one a check is a routine read-only provider read, reached only
+from an operator route on an applied or `UNKNOWN` Intent.)* execution stays `DRY_RUN`,
 `product_registration.write` stays `UNVERIFIED`, and the canary stays `BLOCKED` on every other
 prerequisite. The provider-evidence verdict stays `INSUFFICIENT` (ADR-0014 §17.2): this adoption
 needs no deterministic lookup and assumes none. The search is **never** a duplicate lookup —

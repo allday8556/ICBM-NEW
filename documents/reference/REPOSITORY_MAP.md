@@ -34,6 +34,7 @@ Its extension half added the list discovery the side panel injects,
 `documents/acceptance/adaptive/EXTENSION-E3.md`.
 The residual-risk acceptance proof (ADR-0018 §6.1, G3-30) added
 `app/capabilities/live_safety/residual_risk.py`, migration `0036` and one integration suite.
+The committed-session bearer seam (ROADMAP §14 item 4) added one integration suite.
 
 | path | files | role |
 | --- | --- | --- |
@@ -65,11 +66,11 @@ The residual-risk acceptance proof (ADR-0018 §6.1, G3-30) added
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 242 | tests |
+| `tests/` | 243 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 94 | integration tests by runtime owner |
+| `tests/integration/` | 95 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 82 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |

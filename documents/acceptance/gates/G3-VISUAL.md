@@ -51,8 +51,8 @@ A recorded acceptance is a **proof, never permission**. Even with it, the execut
 `M0_DRY_RUN_ONLY` and CREATE/SEARCH stay `NOT_ADOPTED`. Eligibility is unproven and no ASSET sender
 is wired, so every stage stays `BLOCKED`. *(Amendment note: CREATE and SEARCH were adopted by their
 own slices, the eligibility owner exists with no record for any lineage, and the ASSET sender is
-wired with no committed session. Every stage still stays `BLOCKED`, and a recorded acceptance is
-still never permission.)*
+wired with no committed session — since ROADMAP §14 item 4 it reads the CONNECT owner's committed
+bearer. Every stage still stays `BLOCKED`, and a recorded acceptance is still never permission.)*
 
 ## 2. The contract (`app/live/visual.py`)
 

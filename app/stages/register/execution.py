@@ -621,9 +621,10 @@ class RegistrationExecutionService:
     def readback_available(self) -> bool:
         """Whether the adopted read-back could actually be executed now (§11).
 
-        Adoption is not execution: production wires no committed session, so the seam answers
-        ``False`` and ``verify`` refuses. Read-only, so a readiness can report the gap instead of
-        reading endpoint adoption as if it covered it.
+        Adoption is not execution: the seam reads the CONNECT owner's committed bearer, so it
+        answers ``False`` and ``verify`` refuses unless CONNECT holds a proven current committed
+        session in this process (ROADMAP §14 item 4). Read-only, so a readiness can report the gap
+        instead of reading endpoint adoption as if it covered it.
         """
         return bool(self._readback.available())
 

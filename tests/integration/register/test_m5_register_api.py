@@ -1220,8 +1220,8 @@ def test_the_canary_plan_is_blocked_by_the_contracts_that_are_not_adopted(
     # Adoption is not readiness: CREATE_ADOPTED is satisfied while everything a real canary still
     # needs stays missing, so the verdict is unchanged.
     assert "CREATE_ADOPTED" not in canary["missing"]
-    # The read-back is adopted, and adoption alone is not executable: production wires no session
-    # to read with, so that is named on its own rather than covered by `READBACK_ADOPTED`
+    # The read-back is adopted, and adoption alone is not executable: no CONNECT session exists
+    # here to read with, so that is named on its own rather than covered by `READBACK_ADOPTED`
     # (post-merge audit of main `a10e4b79dbd3`). The comparison can prove the published state
     # (SALE/ON, architect resolution 5915900049 D1), so that requirement is satisfied — which
     # proves no registration by itself.
