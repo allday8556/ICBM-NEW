@@ -119,6 +119,8 @@ class QueueItemView:
     item_id: str
     position: int
     source_url: str
+    # The product the URL names, as the supplier's own URL form says it, or the normalized URL.
+    product_key: str
     state: QueueItemState
     collection_run_id: str | None
     # The run's own outcome, read from the run: a separate axis from the item state (AC-31).
@@ -701,6 +703,7 @@ def _item_view(item: ExtensionQueueItem, run: CollectionRun | None) -> QueueItem
         item_id=item.item_id,
         position=item.position,
         source_url=item.source_url,
+        product_key=item.product_key,
         state=QueueItemState(item.state),
         collection_run_id=item.collection_run_id,
         run_outcome=None if run is None else CollectionOutcome(run.outcome),

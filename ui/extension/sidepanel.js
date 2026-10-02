@@ -6,6 +6,10 @@
 // read back, the code of a refusal or failure, and the field truth of a recorded revision. Before
 // ICBM has answered, only a transport state is shown. Every outcome, status and value is ICBM's own
 // word, written into the page as it came; nothing here saves or exports anything.
+//
+// On a list page it shows the list queue (ADR-0019 §8.1): the products found on the operator's own
+// page, the bounds the operator declares, and each queued product's own state beside its run's own
+// outcome. ICBM decides every read; the panel only starts, pauses and cancels.
 
 const TRANSPORT_LABELS = {
   IDLE: "대기",
@@ -207,10 +211,11 @@ function render() {
   const supplier = Boolean(status && status.supplier_key);
   const answered = Boolean(shown) && shown.state !== "IDLE";
   const disconnected = Boolean(shown) && shown.state === "REFUSED_DISCONNECTED";
+  const listing = mode === "list";
   show("pairing-card", Boolean(status) && !paired);
-  show("unsupported-card", paired && !supplier && !answered);
+  show("unsupported-card", paired && !supplier && !answered && !listing);
   show("disconnected-card", disconnected);
-  show("context", paired && (supplier || answered) && !disconnected);
+  show("context", paired && (supplier || answered) && !disconnected && !listing);
   show("context-meta", answered || Boolean(inFlight));
   role("supplier-key").textContent =
     (shown && shown.supplier_key) || (status && status.supplier_key) || "—";
@@ -221,7 +226,15 @@ function render() {
   action("recapture").hidden = !answered || disconnected;
   action("open-icbm").hidden = !answered || !paired || disconnected;
   action("check").disabled = !capturable;
-  document.querySelector(".bottom").hidden = Boolean(status) && (!paired || (!supplier && !answered));
+  action("discover").disabled = Boolean(inFlight) || !capturable;
+  document.querySelector(".bottom").hidden =
+    listing || (Boolean(status) && (!paired || (!supplier && !answered)));
+  show("queue-footer", listing && paired);
+  if (listing && paired) {
+    renderList();
+  } else {
+    for (const name of ["list-context", "queue-bounds", "queue-section"]) show(name, false);
+  }
 }
 
 // `probe` asks ICBM whether it is reachable. A tab change only re-reads what this browser knows.
@@ -335,11 +348,267 @@ function capture() {
   port.postMessage({ type: "capture" });
 }
 
+// ---------------------------------------------------------------- the list queue (E3)
+
+// A queue item's own state axis (ADR-0019 §8.1, AC-31), as the approved board writes its chips. It
+// is never a run outcome: a captured item shows its run's own outcome, the word ICBM returned.
+const ITEM_STATES = {
+  DISCOVERED: "발견",
+  WAITING: "대기",
+  ISSUED: "수집 중",
+  SKIPPED: "건너뜀",
+  EXPIRED: "만료",
+  CANCELLED: "취소됨",
+};
+// A captured item whose run ICBM has not settled yet.
+const RUN_PENDING = "PENDING";
+const QUEUE_LABELS = {
+  RUNNING: "진행 중",
+  WAITING: "ICBM이 정한 간격을 기다리는 중",
+  PAUSED: "일시정지됨 · 새 상품을 요청하지 않습니다",
+  FINISHED: "대기열을 마쳤습니다",
+  STOPPED: "대기열이 멈췄습니다 · 건너뛰지 않습니다",
+  CANCELLED: "대기열을 취소했습니다",
+};
+
+// Which surface the panel shows: the product capture, or a list page's queue.
+let mode = "product";
+// The products found on the operator's loaded list page, or null. Product URLs only.
+let discovery = null;
+// The worker port of the list mode, open while it is shown.
+let queuePort = null;
+// The queue as ICBM last returned it, or null before one is declared.
+let queue = null;
+// This panel's own control of the worker: IDLE, RUNNING, PAUSED or ENDED.
+let control = "IDLE";
+// The last word of the queue's progress, and the code it stopped with, if any.
+let queueLine = null;
+let queueCode = null;
+
+function queueRow(item) {
+  const row = element("div", "queue-row");
+  const line = element("div", "queue-line");
+  const name = element("span", "queue-name", readable(item.source_url));
+  name.title = item.source_url;
+  const settled = item.state === "CAPTURED" && item.run_outcome && item.run_outcome !== RUN_PENDING;
+  const chip = element(
+    "span",
+    "chip",
+    item.state === "CAPTURED"
+      ? settled
+        ? item.run_outcome
+        : TRANSPORT_LABELS.PROCESSING
+      : ITEM_STATES[item.state] || item.state,
+  );
+  chip.dataset.state = item.state === "CAPTURED" ? (settled ? "SETTLED" : "PROCESSING") : item.state;
+  if (settled) chip.dataset.outcome = item.run_outcome;
+  line.append(name, chip);
+  const note = element("div", "queue-note");
+  note.append(element("span", "mono", item.product_key || "—"), ` · ${itemNote(item)}`);
+  row.append(line, note);
+  return row;
+}
+
+function itemNote(item) {
+  if (item.state === "DISCOVERED") return "선언 전";
+  if (item.state === "WAITING") return `대기열 ${item.position}번`;
+  if (item.state === "SKIPPED") return "이미 수집한 상품";
+  if (item.state === "ISSUED") return "상세 페이지 캡처 중";
+  if (item.state === "EXPIRED") return "읽기가 끝났습니다 · 다시 읽지 않습니다";
+  if (item.state === "CANCELLED") return "취소됨";
+  return item.run_detail || `run ${item.collection_run_id || "—"}`;
+}
+
+function intervalChoices(minimum) {
+  const select = document.getElementById("queue-interval");
+  const choices = [1, 1.5, 2, 3, 6].map((factor) => Math.round(minimum * factor));
+  const blank = element("option", "", "선택");
+  blank.value = "";
+  select.replaceChildren(
+    blank,
+    ...[...new Set(choices)].map((seconds) => {
+      const option = element("option", "", `${seconds}초`);
+      option.value = String(seconds);
+      return option;
+    }),
+  );
+}
+
+function renderList() {
+  const items = queue
+    ? queue.items
+    : (discovery ? discovery.links : []).map((url, index) => ({
+        source_url: url,
+        state: "DISCOVERED",
+        position: index + 1,
+        product_key: null,
+      }));
+  show("list-context", true);
+  role("list-supplier-key").textContent = discovery ? discovery.supplier_key : "—";
+  role("list-title").textContent = (discovery && discovery.title) || "—";
+  role("list-found").textContent = String(discovery ? discovery.found : 0);
+  show("queue-bounds", Boolean(discovery) && !queue);
+  show("queue-section", items.length > 0 || Boolean(queueLine));
+  role("queue-rows").replaceChildren(...items.map(queueRow));
+  const done = items.filter(
+    (item) => item.state === "CAPTURED" && item.run_outcome && item.run_outcome !== RUN_PENDING,
+  ).length;
+  const running = items.filter(
+    (item) => item.state === "ISSUED" || (item.state === "CAPTURED" && !(item.run_outcome && item.run_outcome !== RUN_PENDING)),
+  ).length;
+  const total = queue ? items.length : 0;
+  role("queue-count").textContent = queue ? `${done} / ${total}` : `${items.length}개 발견`;
+  role("queue-done").style.width = total ? `${(100 * done) / total}%` : "0";
+  role("queue-running").style.width = total ? `${(100 * running) / total}%` : "0";
+  const status = [queueLine, queueCode ? `코드 ${queueCode}` : null].filter(Boolean).join(" · ");
+  role("queue-status").textContent = status;
+  show("queue-status", Boolean(status));
+  action("queue-start").disabled = control !== "IDLE" || !discovery || discovery.links.length === 0;
+  action("queue-start").hidden = control === "PAUSED";
+  action("queue-pause").disabled = control !== "RUNNING" && control !== "PAUSED";
+  action("queue-pause").textContent = control === "PAUSED" ? "재개" : "일시정지";
+  action("queue-cancel").hidden = !queue || queue.state !== "OPEN" || control === "RUNNING";
+  action("product-mode").disabled = control === "RUNNING" || control === "PAUSED";
+}
+
+function listMessage(message) {
+  if (message.type === "discovered") {
+    const found = message.discovery;
+    if (!found || !found.ok) {
+      discovery = null;
+      queueLine = "상품 링크를 찾지 못했습니다";
+      queueCode = found ? found.code : "DISCOVERY_UNAVAILABLE";
+    } else {
+      discovery = found;
+      queueLine = null;
+      queueCode = null;
+      const max = document.getElementById("queue-max");
+      max.max = String(found.max_queue_products);
+      max.placeholder = `최대 ${found.max_queue_products}`;
+      max.value = "";
+      intervalChoices(found.min_queue_interval_s);
+    }
+  } else if (message.type === "queue") {
+    queue = message.queue;
+  } else if (message.type === "waiting") {
+    queueLine = `${QUEUE_LABELS.WAITING} · ${message.seconds}초`;
+  } else if (message.type === "issued" || message.type === "progress") {
+    queueLine = QUEUE_LABELS.RUNNING;
+  } else if (message.type === "result") {
+    queueLine = QUEUE_LABELS.RUNNING;
+    if (message.result.state !== "READ_BACK") queueCode = message.result.code || message.result.state;
+  } else if (message.type === "paused") {
+    control = "PAUSED";
+    queueLine = QUEUE_LABELS.PAUSED;
+  } else if (message.type === "finished") {
+    control = "ENDED";
+    queueLine = queue && queue.state === "CANCELLED" ? QUEUE_LABELS.CANCELLED : QUEUE_LABELS.FINISHED;
+  } else if (message.type === "stopped") {
+    control = queue ? "ENDED" : "IDLE";
+    queueLine = QUEUE_LABELS.STOPPED;
+    queueCode = message.code || queueCode;
+  }
+  render();
+}
+
+function enterList() {
+  if (inFlight || mode === "list") return;
+  clearResult();
+  mode = "list";
+  discovery = null;
+  queue = null;
+  control = "IDLE";
+  queueLine = "상품 링크를 찾는 중";
+  queueCode = null;
+  queuePort = chrome.runtime.connect({ name: "queue" });
+  const port = queuePort;
+  port.onMessage.addListener((message) => {
+    if (queuePort === port) listMessage(message);
+  });
+  port.onDisconnect.addListener(() => {
+    if (queuePort !== port) return;
+    queuePort = null;
+    if (control === "RUNNING") {
+      control = "ENDED";
+      queueLine = QUEUE_LABELS.STOPPED;
+      queueCode = "EXTENSION_WORKER_ENDED";
+    }
+    render();
+  });
+  port.postMessage({ type: "discover" });
+  render();
+}
+
+function leaveList() {
+  if (control === "RUNNING" || control === "PAUSED") return;
+  if (queuePort) {
+    const port = queuePort;
+    queuePort = null;
+    port.disconnect();
+  }
+  mode = "product";
+  discovery = null;
+  queue = null;
+  control = "IDLE";
+  queueLine = null;
+  queueCode = null;
+  refresh();
+}
+
+action("discover").addEventListener("click", enterList);
+action("product-mode").addEventListener("click", leaveList);
+
+// The operator's own bounds go to ICBM as they were entered: an empty one is sent as missing, and
+// ICBM refuses it. Nothing here fills one in.
+action("queue-start").addEventListener("click", () => {
+  if (!queuePort || !discovery || control !== "IDLE") return;
+  const max = document.getElementById("queue-max").value;
+  const interval = document.getElementById("queue-interval").value;
+  control = "RUNNING";
+  queueLine = QUEUE_LABELS.RUNNING;
+  queueCode = null;
+  queuePort.postMessage({
+    type: "start",
+    tab_id: discovery.tab_id,
+    declaration: {
+      supplier_key: discovery.supplier_key,
+      links: discovery.links,
+      max_products: max === "" ? null : Number(max),
+      interval_s: interval === "" ? null : Number(interval),
+      skip_collected: document.getElementById("queue-skip").checked,
+    },
+  });
+  render();
+});
+
+action("queue-pause").addEventListener("click", () => {
+  if (!queuePort) return;
+  if (control === "RUNNING") {
+    queuePort.postMessage({ type: "pause" });
+  } else if (control === "PAUSED") {
+    control = "RUNNING";
+    queueLine = QUEUE_LABELS.RUNNING;
+    queuePort.postMessage({ type: "resume" });
+  }
+  render();
+});
+
+action("queue-cancel").addEventListener("click", () => {
+  if (!queuePort || !queue) return;
+  queuePort.postMessage({ type: "cancel", queue_id: queue.queue_id });
+});
+
 action("capture").addEventListener("click", capture);
 action("recapture").addEventListener("click", capture);
 
-// An answer belongs to the page it was captured from: another tab or a reload clears it.
+// An answer belongs to the page it was captured from: another tab or a reload clears it. A list
+// belongs to its page too, unless its queue is running: then the worker itself moves the tab.
 function pageChanged() {
+  if (mode === "list") {
+    if (control === "IDLE" || control === "ENDED") leaveList();
+    else refresh();
+    return;
+  }
   if (!inFlight) clearResult();
   refresh();
 }

@@ -76,6 +76,7 @@ def test_the_extension_is_plain_modules_with_no_toolchain() -> None:
         "sidepanel.js",
         "lib/capture.js",
         "lib/client.js",
+        "lib/discover.js",
         "lib/signing.js",
     }
     assert not (REPO_ROOT / "extension").exists()
@@ -113,14 +114,16 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         text = _read(path)
         for word in forbidden:
             assert word not in text, f"{path.name}: {word}"
-    # The function injected into the tab talks to nothing: it returns, and the service worker sends.
-    capture = "\n".join(
-        line
-        for line in _read(EXTENSION / "lib" / "capture.js").splitlines()
-        if not line.lstrip().startswith("//")
-    )
-    for word in ("fetch(", "chrome.", "import ", "WebSocket", "sendBeacon", "postMessage"):
-        assert word not in capture, word
+    # The functions injected into the tab talk to nothing: they return, and the service worker
+    # sends. The cut (E1) and the list discovery (E3, ADR-0019 §8.1) alike.
+    for injected in ("capture.js", "discover.js"):
+        body = "\n".join(
+            line
+            for line in _read(EXTENSION / "lib" / injected).splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        for word in ("fetch(", "chrome.", "import ", "WebSocket", "sendBeacon", "postMessage"):
+            assert word not in body, (injected, word)
     # Every request to ICBM omits credentials and refuses a redirect.
     client = _read(EXTENSION / "lib" / "client.js")
     assert client.count("fetch(") == client.count('credentials: "omit"') == 2
@@ -161,6 +164,30 @@ def test_the_side_panel_keeps_the_axes_apart() -> None:
     assert script.count("REVIEW_REQUIRED") == vocabulary.group(1).count("REVIEW_REQUIRED")
     assert "REVIEW_REQUIRED" not in script.split("const TRANSPORT_LABELS", 1)[1].split("};", 1)[0]
     assert "전송됨" in script and "처리 중" in script
+
+
+def test_the_list_queue_reads_only_what_icbm_issues() -> None:
+    # ADR-0019 §8.1 (AC-27 to AC-31): discovery sends product URLs only, ICBM issues every read,
+    # and a queue read is captured through the one capture path a single click uses.
+    worker = _read(EXTENSION / "service_worker.js")
+    # The tab is moved in one place, to the URL of the read ICBM issued, never to a found link.
+    assert worker.count("chrome.tabs.update(") == 1
+    assert "load(target.tabId, item.source_url, limit)" in worker
+    assert "nextRead(paired, chrome.runtime.id, control.queueId)" in worker
+    assert worker.count("sendCapture(") == 1
+    assert "captureTab(paired, target, answer.ticket," in worker
+    assert "captureTab(paired, target, null, progress)" in worker
+    # Only the scheme, host and path of a link that fully matches the reviewed form leaves the page.
+    discover = _read(EXTENSION / "lib" / "discover.js")
+    assert "`https://${url.hostname}${url.pathname}`" in discover
+    assert "new RegExp(`^(?:${rule.productPath})$`)" in discover
+    for leaked in ("url.search", "url.hash", "textContent", "innerText", "location", "title"):
+        assert leaked not in discover, leaked
+    # The operator's bounds are never pre-filled: an empty one goes to ICBM as missing.
+    script = _read(EXTENSION / "sidepanel.js")
+    assert 'max.value = "";' in script
+    assert 'max_products: max === "" ? null : Number(max)' in script
+    assert 'interval_s: interval === "" ? null : Number(interval)' in script
 
 
 def test_the_side_panel_previews_only_what_icbm_recorded() -> None:
@@ -395,8 +422,8 @@ def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     assert "**E2 — one click, recorded — is implemented provider-zero**" in roadmap
     e2_line = roadmap.split("**E2 —", 1)[1].split("\n", 1)[0]
     assert "**E2 is accepted**" in e2_line and "`PENDING`" not in e2_line
-    assert "**E3 — the list queue — is in progress** (ADR-0019 §8.1)" in roadmap
-    assert "**E3's server half is implemented provider-zero:**" in roadmap
+    assert "**E3 — the list queue — is implemented provider-zero** (ADR-0019 §8.1" in roadmap
+    assert "`documents/acceptance/adaptive/EXTENSION-E3.md`, `PENDING`" in roadmap
     assert "E3's real acceptance needs the user's own grant" in roadmap
     assert "The extension-transport Phase C is a later slice and is not implemented" in roadmap
 

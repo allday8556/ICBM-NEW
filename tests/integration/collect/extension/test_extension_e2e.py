@@ -299,6 +299,136 @@ def test_a_page_of_another_host_offers_no_capture(
         assert app.collection.recent_runs() == ()
 
 
+# ---------------------------------------------------------------- the list queue (E3)
+
+LIST_URL = "https://kmretail.co.kr/category/synthetic-list/23/"
+SECRET = "synthetic-list-secret"
+
+
+def _product(number: str) -> str:
+    return f"https://kmretail.co.kr/product/synthetic-sample/{number}/"
+
+
+LIST_PAGE = (
+    "<!doctype html><html><head><title>합성 카테고리</title></head><body><ul class='prdList'>"
+    "<li><a href='/product/synthetic-sample/9001/'>합성 상품 하나</a></li>"
+    "<li><a href='/product/synthetic-sample/9002/'>합성 상품 둘</a></li>"
+    "<li><a href='/product/synthetic-sample/9001/'>합성 상품 하나 (다시)</a></li>"
+    f"<li><a href='/product/synthetic-sample/9003/?token={SECRET}#{SECRET}'>질의 링크</a></li>"
+    "<li><a href='/product/list.html?cate_no=23'>다음 쪽</a></li>"
+    "<li><a href='https://elsewhere.invalid/product/synthetic-sample/9004/'>다른 곳</a></li>"
+    "</ul></body></html>"
+)
+
+
+def _list_page(context: BrowserContext) -> Page:
+    """A synthetic list page and its products, served by the test at the reviewed host. The
+    extension navigates this same tab to each product ICBM issues."""
+    products = {
+        _product(number): FIXTURE.read_text("utf-8").replace(PRODUCT_NUMBER, number)
+        for number in ("9001", "9002", "9003")
+    }
+
+    def answer(route: Route) -> None:
+        url = route.request.url
+        if url == LIST_URL:
+            route.fulfill(status=200, content_type="text/html; charset=utf-8", body=LIST_PAGE)
+        elif url in products:
+            route.fulfill(status=200, content_type="text/html; charset=utf-8", body=products[url])
+        else:
+            route.abort()
+
+    page = context.new_page()
+    page.route("**/*", answer)
+    page.goto(LIST_URL)
+    return page
+
+
+def _paired_panel(context: BrowserContext, app: Container, origin: str) -> Page:
+    extension_id = _extension_id(context)
+    issued = app.extension_pairing.pair(extension_id, origin=origin)
+    panel = context.new_page()
+    panel.goto(f"chrome-extension://{extension_id}/sidepanel.html")
+    panel.locator("#pairing-code").fill(issued.code)
+    panel.locator("[data-role='pairing-form'] button[type='submit']").click()
+    expect(panel.locator(_role("pairing-state"))).to_have_text("페어링됨", timeout=TIMEOUT_MS)
+    return panel
+
+
+def _discover(panel: Page, context: BrowserContext) -> Page:
+    listing = _list_page(context)
+    listing.bring_to_front()
+    expect(panel.locator("[data-action='discover']")).to_be_enabled(timeout=TIMEOUT_MS)
+    panel.locator("[data-action='discover']").dispatch_event("click")
+    expect(panel.locator(_role("list-found"))).to_have_text("3", timeout=TIMEOUT_MS)
+    return listing
+
+
+def test_a_list_page_queue_is_read_by_read_as_icbm_issues_it(
+    chromium: BrowserContext, config: AppConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO), _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        listing = _discover(panel, chromium)
+        # The list page's own title is shown here and never sent.
+        assert _text(panel, "list-title") == "합성 카테고리"
+        rows = panel.locator("[data-role='queue-rows'] .queue-row")
+        assert rows.count() == 3
+        panel.locator("#queue-max").fill("2")
+        panel.locator("#queue-interval").select_option("10")
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-count"))).to_have_text("2 / 2", timeout=60_000)
+        expect(panel.locator(_role("queue-status"))).to_contain_text(
+            "마쳤습니다", timeout=TIMEOUT_MS
+        )
+        # Two ordinary extension runs, recorded as any capture is, in the order ICBM issued them.
+        runs = sorted(
+            (run for run in app.collection.recent_runs() if run.provenance is not None),
+            key=lambda run: run.requested_at,
+        )
+        assert [(run.source_url, run.outcome) for run in runs] == [
+            (_product("9001"), CollectionOutcome.RECORDED),
+            (_product("9002"), CollectionOutcome.RECORDED),
+        ]
+        assert all(run.provenance.transport_kind is TransportKind.EXTENSION for run in runs)  # type: ignore[union-attr]
+        # At least the declared interval apart, as ICBM issued them.
+        assert (runs[1].requested_at - runs[0].requested_at).total_seconds() >= 10
+        chips = [rows.nth(i).locator(".chip").inner_text() for i in range(rows.count())]
+        assert chips == ["RECORDED", "RECORDED"]
+        # The tab the operator opened is where each read happened.
+        assert listing.url == _product("9002")
+        stored = panel.evaluate(
+            "async () => [Object.keys(await chrome.storage.local.get(null)),"
+            " Object.keys(await chrome.storage.session.get(null))]"
+        )
+        assert stored == [["pairing"], []]
+        requests = _requests(caplog)
+        logged = "\n".join(str(vars(record)) for record in caplog.records)
+    # Nothing of the list page left it: not its URL, not a query or fragment of a link.
+    assert SECRET not in logged and "synthetic-list" not in logged
+    paths = [path for _, path, _ in requests]
+    assert ("POST", "/api/v1/collect/extension/queues", 201) in requests
+    assert (
+        len([r for r in requests if r[:2] == ("POST", "/api/v1/collect/extension/captures")]) == 2
+    )
+    assert any(path.endswith("/next") for path in paths)
+
+
+def test_a_queue_without_its_bounds_is_refused_and_reads_nothing(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        _discover(panel, chromium)
+        # No number of products and no interval: ICBM refuses, and nothing falls back to a default.
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text(
+            "EXTENSION_QUEUE_CAP_MISSING", timeout=TIMEOUT_MS
+        )
+        assert app.collection.recent_runs() == ()
+        assert table_counts(config)["extension_queues"] == 0
+
+
 def _requests(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str, int]]:
     found: list[tuple[str, str, int]] = []
     for record in caplog.records:

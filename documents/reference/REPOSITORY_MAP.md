@@ -29,6 +29,9 @@ The Extension Collector UI added the side panel's approved prototype
 `design/prototypes/icbm_extension_collector.html`.
 The E3 list queue's server half (ADR-0019 §8.1) added the queue owner
 `app/stages/collect/extension/queue.py`, migration `0035` and one integration suite.
+Its extension half added the list discovery the side panel injects,
+`ui/extension/lib/discover.js`, and its acceptance record
+`documents/acceptance/adaptive/EXTENSION-E3.md`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -46,8 +49,8 @@ The E3 list queue's server half (ADR-0019 §8.1) added the queue owner
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 157 | all canonical and historical documents |
-| `documents/acceptance/` | 65 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 158 | all canonical and historical documents |
+| `documents/acceptance/` | 66 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
@@ -67,6 +70,6 @@ The E3 list queue's server half (ADR-0019 §8.1) added the queue owner
 | `tests/integration/` | 93 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 82 | unit tests by runtime owner |
-| `ui/` | 53 | operator clients: the served web client and the capture extension |
-| `ui/extension/` | 8 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
+| `ui/` | 54 | operator clients: the served web client and the capture extension |
+| `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 45 | the served web client |

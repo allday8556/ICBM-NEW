@@ -4,9 +4,27 @@
 // sends it to the paired ICBM over the loopback, and reads the canonical run back. It writes no
 // database, no ProductFactsRevision and no file, and it keeps no page material: a capture exists
 // in memory between the cut and the send, and nowhere afterwards.
+//
+// A list queue (ADR-0019 §8.1, E3) is the same capture, read by read: the operator's loaded list
+// page is searched for product URLs, the operator declares the queue's bounds, and ICBM decides
+// every read. This worker asks ICBM for the next read, waits when told to wait, navigates the
+// operator's own tab to the one URL ICBM issued, captures it with the unchanged cut and sends it
+// with its ticket. Its own clock never decides that a read may happen.
 
 import { captureInPage } from "./lib/capture.js";
-import { IcbmRefused, fetchPolicy, readRevision, readRun, sendCapture } from "./lib/client.js";
+import {
+  IcbmRefused,
+  cancelQueue,
+  declareQueue,
+  fetchPolicy,
+  fetchQueuePolicy,
+  nextRead,
+  readQueue,
+  readRevision,
+  readRun,
+  sendCapture,
+} from "./lib/client.js";
+import { discoverInPage } from "./lib/discover.js";
 import { parsePairingCode } from "./lib/signing.js";
 
 // The reviewed supplier hosts (ADR-0019 §3). This names which supplier a host belongs to and
@@ -59,6 +77,12 @@ async function capture(progress) {
   if (!paired) return { state: "REFUSED", code: "EXTENSION_NOT_PAIRED" };
   const target = await activeSupplierTab();
   if (!target) return { state: "REFUSED", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
+  return captureTab(paired, target, null, progress);
+}
+
+// The one capture path, for a single click and for a queue read alike: the policy, the cut, one
+// send (with the queue read's ticket, when there is one) and the canonical run's read-back.
+async function captureTab(paired, target, ticket, progress) {
   let accepted;
   let sending = false;
   try {
@@ -85,6 +109,7 @@ async function capture(progress) {
       revision,
       digest,
       capture: cut,
+      ticket,
     });
   } catch (error) {
     const code = error instanceof IcbmRefused ? error.code : "CAPTURE_UNAVAILABLE";
@@ -183,7 +208,237 @@ async function openCollectionManagement(runId) {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------- the list queue (E3)
+
+// How often a wait the server ordered is counted down to the panel. The server decides how long;
+// this only keeps the panel and the worker awake while it passes.
+const WAIT_TICK_MS = 1000;
+// How long a navigation to an issued URL may take, at most. An issued read that is not captured
+// expires at ICBM, still counted, and stops its queue there.
+const LOAD_LIMIT_MS = 60_000;
+// How much of an issued read's time is kept back for the capture and its send after the load.
+const SEND_MARGIN_MS = 15_000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const codeOf = (error, fallback) => (error instanceof IcbmRefused ? error.code : fallback);
+
+// Find the products of the loaded list page in the active tab. ICBM is asked only for the
+// supplier's reviewed product path form and its declared queue limits; the page is read where it
+// is, and only its product URLs come back from it.
+async function discover() {
+  const paired = await pairing();
+  if (!paired) return { ok: false, code: "EXTENSION_NOT_PAIRED" };
+  const target = await activeSupplierTab();
+  if (!target) return { ok: false, code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
+  let policy;
+  try {
+    policy = await fetchQueuePolicy(paired, chrome.runtime.id, target.supplierKey);
+  } catch (error) {
+    return { ok: false, code: codeOf(error, "QUEUE_POLICY_UNAVAILABLE") };
+  }
+  let found;
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId },
+      func: discoverInPage,
+      args: [
+        {
+          host: policy.storefront_host,
+          productPath: policy.product_path,
+          maxLinks: policy.max_discovered_links,
+        },
+      ],
+    });
+    found = injection && injection.result;
+  } catch {
+    found = null;
+  }
+  if (!found || !found.ok) {
+    return { ok: false, code: (found && found.code) || "DISCOVERY_UNAVAILABLE" };
+  }
+  const tab = await chrome.tabs.get(target.tabId);
+  return {
+    ok: true,
+    supplier_key: target.supplierKey,
+    tab_id: target.tabId,
+    // Shown in the panel only; it is never sent.
+    title: tab.title || "",
+    links: found.links,
+    found: found.found,
+    max_queue_products: policy.max_queue_products,
+    min_queue_interval_s: policy.min_queue_interval_s,
+  };
+}
+
+// Navigate the operator's own tab to the one URL ICBM issued, and wait until it has loaded there.
+function load(tabId, url, limitMs) {
+  return new Promise((resolve) => {
+    let timer = null;
+    const done = (ok) => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listen);
+      resolve(ok);
+    };
+    const listen = (id, change, tab) => {
+      if (id === tabId && change.status === "complete") done(tab.url === url);
+    };
+    timer = setTimeout(() => done(false), limitMs);
+    chrome.tabs.onUpdated.addListener(listen);
+    chrome.tabs.update(tabId, { url }).catch(() => done(false));
+  });
+}
+
+// What the operator asked for one queue: pause (ask for nothing new), resume, or cancel.
+function queueControl(tabId, declaration) {
+  let wake = null;
+  const control = {
+    tabId,
+    declaration,
+    queueId: null,
+    paused: false,
+    cancelled: false,
+    pause() {
+      control.paused = true;
+    },
+    resume() {
+      control.paused = false;
+      if (wake) wake();
+    },
+    stop() {
+      control.cancelled = true;
+      if (wake) wake();
+    },
+    resumed() {
+      return new Promise((resolve) => {
+        wake = () => {
+          wake = null;
+          resolve();
+        };
+      });
+    },
+  };
+  return control;
+}
+
+// One queue, read by read, exactly as ICBM issues them.
+async function runQueue(control, tell) {
+  const paired = await pairing();
+  if (!paired) return tell({ type: "stopped", code: "EXTENSION_NOT_PAIRED" });
+  let declared;
+  try {
+    declared = await declareQueue(paired, chrome.runtime.id, control.declaration);
+  } catch (error) {
+    return tell({ type: "stopped", code: codeOf(error, "QUEUE_DECLARATION_UNAVAILABLE") });
+  }
+  control.queueId = declared.queue.queue_id;
+  tell({ type: "queue", queue: declared.queue, count: declared.count });
+  const target = { tabId: control.tabId, supplierKey: control.declaration.supplier_key };
+  let code = null;
+  while (!control.cancelled) {
+    if (control.paused) {
+      tell({ type: "paused" });
+      await control.resumed();
+      continue;
+    }
+    let answer;
+    try {
+      answer = await nextRead(paired, chrome.runtime.id, control.queueId);
+    } catch (error) {
+      code = codeOf(error, "QUEUE_NEXT_UNAVAILABLE");
+      break;
+    }
+    if (answer.kind === "DONE") break;
+    if (answer.kind === "WAIT") {
+      // ICBM said how long. This worker only waits it out, and then asks again.
+      let remaining = Math.max(1, Math.ceil(answer.wait_s || 0));
+      while (remaining > 0 && !control.paused && !control.cancelled) {
+        tell({ type: "waiting", seconds: remaining });
+        await sleep(WAIT_TICK_MS);
+        remaining -= 1;
+      }
+      continue;
+    }
+    // One issued read: this URL, under this ticket, once.
+    const item = answer.item;
+    tell({ type: "issued", item });
+    const limit = Math.min(LOAD_LIMIT_MS, Math.max(0, answer.expires_in_s * 1000 - SEND_MARGIN_MS));
+    if (!(await load(target.tabId, item.source_url, limit))) {
+      // Nothing was captured: the issued read expires at ICBM, still counted, and stops the queue.
+      code = "QUEUE_PAGE_NOT_LOADED";
+      break;
+    }
+    const result = await captureTab(paired, target, answer.ticket, (state, runId) =>
+      tell({ type: "progress", item_id: item.item_id, state, collection_run_id: runId || null }),
+    );
+    tell({ type: "result", item_id: item.item_id, result });
+    await showQueue(paired, control.queueId, tell);
+    // A refused or unknown capture ends this worker's part: ICBM stops the queue for it, and the
+    // operator decides what follows.
+    if (result.state !== "READ_BACK") {
+      code = result.code || result.state;
+      break;
+    }
+  }
+  await showQueue(paired, control.queueId, tell);
+  tell({ type: code ? "stopped" : "finished", code });
+}
+
+async function showQueue(paired, queueId, tell) {
+  try {
+    tell({ type: "queue", queue: await readQueue(paired, chrome.runtime.id, queueId) });
+  } catch {
+    // The panel keeps what it last showed; ICBM holds the queue either way.
+  }
+}
+
+async function cancel(queueId, tell) {
+  const paired = await pairing();
+  if (!paired || typeof queueId !== "string" || !queueId) return;
+  try {
+    tell({ type: "queue", queue: await cancelQueue(paired, chrome.runtime.id, queueId) });
+  } catch (error) {
+    tell({ type: "stopped", code: codeOf(error, "QUEUE_CANCEL_UNAVAILABLE") });
+  }
+}
+
+function queuePort(port) {
+  let control = null;
+  const tell = (message) => {
+    try {
+      port.postMessage(message);
+    } catch {
+      // The panel is gone. No new read is asked for once it notices; ICBM holds the queue.
+    }
+  };
+  port.onMessage.addListener(async (message) => {
+    if (message.type === "discover") {
+      tell({ type: "discovered", discovery: await discover() });
+    } else if (message.type === "start" && !control) {
+      control = queueControl(message.tab_id, message.declaration);
+      const running = control;
+      runQueue(running, tell).finally(() => {
+        if (control === running) control = null;
+      });
+    } else if (message.type === "pause" && control) {
+      control.pause();
+    } else if (message.type === "resume" && control) {
+      control.resume();
+    } else if (message.type === "cancel") {
+      if (control) control.stop();
+      await cancel(message.queue_id, tell);
+    }
+  });
+  // The panel is gone: no new read is asked for. A read already issued finishes its capture.
+  port.onDisconnect.addListener(() => {
+    if (control) control.pause();
+  });
+}
+
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "queue") {
+    queuePort(port);
+    return;
+  }
   if (port.name !== "capture") return;
   port.onMessage.addListener(async (message) => {
     if (message.type !== "capture") return;

@@ -38,13 +38,16 @@ application. Its approved visual prototype is:
 - Scope:
   - The side panel reproduces the boards `확장 — 상품 상세 수집`, `확장 — REVIEW 포함` and
     `확장 — 예외와 AUTH 중단` structurally (ADR-0003).
-  - `확장 — 목록 발견과 대기열` is E3 and not authorized.
+  - From E3 (ADR-0019 §8.1) it also reproduces `확장 — 목록 발견과 대기열` structurally.
   - The three `수집관리` boards depict the application's Collection Management, which this record
     does not change.
 - Where a board shows what a canonical rule forbids, the rule wins:
   - no resend of an unsent capture (ADR-0019 §12.6);
   - no supplier-session state the extension does not know;
-  - no list queue before E3.
+  - a queue row's chip is the item's own state or its run's own outcome, never `REVIEW`
+    (AC-21, AC-31);
+  - no pre-filled queue bound: the board's `20` and `[간격]` are placeholders, and an empty
+    bound is refused, never defaulted (ADR-0019 §8.1).
 
 ## Revision history
 

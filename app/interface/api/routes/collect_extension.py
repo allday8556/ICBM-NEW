@@ -224,6 +224,7 @@ def _item(item: QueueItemView) -> dict[str, Any]:
         "item_id": item.item_id,
         "position": item.position,
         "source_url": item.source_url,
+        "product_key": item.product_key,
         # The item's own state and its run's own outcome: two axes, never one (AC-31).
         "state": item.state.value,
         "collection_run_id": item.collection_run_id,
