@@ -23,10 +23,17 @@
 // and never decides what is read.
 
 export function discoverInPage(rule) {
-  // The box an anchor paints: its own, or its first painted descendant's when the anchor itself
-  // is an empty inline around block children.
+  const visible = (element) =>
+    element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  // Whether an element has text of its own that paints: a text node that is not blank.
+  const ownText = (element) =>
+    [...element.childNodes].some((node) => node.nodeType === 3 && node.nodeValue.trim() !== "");
+  // The box an anchor paints: its own, when it has text of its own, or else that of its first
+  // visible descendant with a box. An anchor whose only content is hidden paints nothing.
   const box = (anchor) => {
     for (const element of [anchor, ...anchor.querySelectorAll("*")]) {
+      if (!visible(element)) continue;
+      if (element === anchor && !ownText(anchor)) continue;
       const rect = element.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) return rect;
     }
@@ -62,7 +69,7 @@ export function discoverInPage(rule) {
   // 114), a painted box, that box not clipped away, and inside the page the operator can scroll
   // to. Nothing here scrolls or changes the page.
   const shown = (anchor) => {
-    if (!anchor.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+    if (!visible(anchor)) return false;
     const painted = box(anchor);
     if (!painted) return false;
     const rect = unclipped(painted, anchor);
