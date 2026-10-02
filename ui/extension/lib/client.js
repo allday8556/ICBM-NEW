@@ -11,7 +11,8 @@ import { sha256Hex, signedHeaders } from "./signing.js";
 
 const POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/capture-policies/${supplierKey}`;
 const CAPTURE_PATH = "/api/v1/collect/extension/captures";
-const RUN_PATH = (runId) => `/api/v1/collect/collections/${runId}`;
+const RUN_PATH = (runId) => `/api/v1/collect/collections/${encodeURIComponent(runId)}`;
+const REVISION_PATH = (revisionId) => `/api/v1/collect/revisions/${encodeURIComponent(revisionId)}`;
 const POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest";
 const encoder = new TextEncoder();
 
@@ -86,11 +87,11 @@ export async function sendCapture(pairing, extensionId, { supplierKey, revision,
   }
 }
 
-// The canonical run, exactly as ICBM holds it.
-export async function readRun(pairing, runId) {
+// One canonical read-back, exactly as ICBM holds it. `unreadable` names an answer that is not JSON.
+async function readCanonical(pairing, path, unreadable) {
   let response;
   try {
-    response = await fetch(`${pairing.origin}${RUN_PATH(runId)}`, {
+    response = await fetch(`${pairing.origin}${path}`, {
       credentials: "omit",
       redirect: "error",
       cache: "no-store",
@@ -102,6 +103,17 @@ export async function readRun(pairing, runId) {
   try {
     return await response.json();
   } catch {
-    throw new IcbmRefused("RUN_READ_BACK_UNREADABLE");
+    throw new IcbmRefused(unreadable);
   }
+}
+
+// The canonical run.
+export function readRun(pairing, runId) {
+  return readCanonical(pairing, RUN_PATH(runId), "RUN_READ_BACK_UNREADABLE");
+}
+
+// The canonical revision a recorded run names: its fields, their evidence and its image references,
+// as COLLECT recorded them. The side panel previews it; it is never kept.
+export function readRevision(pairing, revisionId) {
+  return readCanonical(pairing, REVISION_PATH(revisionId), "REVISION_READ_BACK_UNREADABLE");
 }
