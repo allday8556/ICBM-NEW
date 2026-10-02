@@ -61,16 +61,15 @@ _NOT_A_REFERENCE = frozenset({"id", "class", "style"})
 _DESCRIPTOR = re.compile(r"^\d+(?:\.\d+)?[wx]$")
 _UNSAFE_IN_LOCATOR = re.compile(r"[\s<>\"'\\^`{|}\x00-\x1f\x7f]")
 
-# An attribute whose very name says it carries a secret.
-_SECRET_NAME = re.compile(
-    r"(?i)(csrf|xsrf|token|session|cookie|secret|passw|auth|api[-_]?key|signature|credential)"
-)
 # The secrets the user named (ADR-0019 §6.1): credentials, tokens, cookies and sessions, with the
-# names they commonly travel under. One list for query keys and for ``name=value`` text.
+# names they commonly travel under. One list for attribute names, query keys and ``name=value``
+# text.
 _SECRET_WORDS = (
     r"token|session|cookie|secret|passw|credential|csrf|xsrf|signature"
     r"|(?:api|access|secret|private|client)[-_]?key"
 )
+# An attribute whose very name says it carries a secret.
+_SECRET_NAME = re.compile(rf"(?i)({_SECRET_WORDS}|auth)")
 # A query key that carries a secret or signs a URL.
 _SECRET_KEY = re.compile(
     rf"(?i)^(?:.*(?:{_SECRET_WORDS}|auth).*|sid|sessid|jsessionid|phpsessid|sig|key|pw|pwd)$"

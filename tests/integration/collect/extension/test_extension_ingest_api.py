@@ -331,6 +331,10 @@ def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
         assert result.blocking, addition
         for kind in (*result.blocking, *result.notes):
             assert secret not in kind, (addition, kind)
+    # An attribute name is read with the same secret words as a query key and a name=value text.
+    for name in ("data-cookie", "data-access-key", "data-private_key", "data-csrf", "data-auth"):
+        blocking = gate(frame(body=BODY + f'<p {name}="1">x</p>')).blocking
+        assert any(kind.startswith(f"SECRET_ATTRIBUTE:{name}@") for kind in blocking), name
     # A plain identifier is still named as it is.
     assert gate(frame(body=BODY + '<p class="member_price">1</p>')).notes == (
         "MEMBER_NAMED@p#.member_price",
