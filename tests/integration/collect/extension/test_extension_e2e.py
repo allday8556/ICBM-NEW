@@ -165,7 +165,9 @@ def test_one_click_captures_the_page_and_reads_the_canonical_run_back(
         issued = app.extension_pairing.pair(extension_id, origin=origin)
         panel = chromium.new_page()
         panel.goto(f"chrome-extension://{extension_id}/sidepanel.html")
-        assert _text(panel, "extension-id") == extension_id
+        # The panel asks the worker for its status after it paints: the id appears when that
+        # answer arrives, not with the first paint.
+        expect(panel.locator(_role("extension-id"))).to_have_text(extension_id, timeout=TIMEOUT_MS)
         panel.locator("#pairing-code").fill(issued.code)
         panel.locator("[data-role='pairing-form'] button[type='submit']").click()
         expect(panel.locator(_role("pairing-state"))).to_have_text("페어링됨", timeout=TIMEOUT_MS)
