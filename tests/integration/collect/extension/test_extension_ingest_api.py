@@ -334,6 +334,10 @@ def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
         ('<div id="token=synthetic-value-1234">x</div>', "synthetic-value"),
         ('<p class="price eyJhbGciOiJIUzI1NiJ9abcdef">x</p>', "eyJhbG"),
         ('<p class="0a1b2c3d4e5f60718293a4b5c6d7e8f9">x</p>', "0a1b2c3d"),
+        # A secret that spans plain tokens masks every token of the value.
+        ('<p class="price bearer synthetic-value">x</p>', "synthetic-value"),
+        ('<p class="price bearer synthetic-value">x</p>', "bearer"),
+        ('<p class="price bearer synthetic-value">x</p>', "price"),
     ):
         result = gate(frame(body=BODY + addition))
         assert result.blocking, addition

@@ -201,9 +201,13 @@ def safe_token(token: str) -> str:
 def _safe_boundary(boundary_of: BoundaryOf, tag: str, values: Mapping[str, str]) -> str:
     """The boundary as the capture owner names it, built from the page's names made safe."""
     identifier = values.get("id", "").strip()
+    classes = values.get("class", "")
+    # A secret can span tokens ("bearer …"): when the value as a whole holds one, every token is
+    # masked, not only the tokens that hold one alone.
+    whole = _holds_secret(classes, _SECRET_VALUE) or _TOKEN_IN_LOCATOR.search(classes) is not None
     named = {
         "id": safe_token(identifier) if identifier else "",
-        "class": " ".join(safe_token(token) for token in values.get("class", "").split()),
+        "class": " ".join(MASKED if whole else safe_token(token) for token in classes.split()),
     }
     return boundary_of({"tag": safe_token(tag), "attrs": named})
 
