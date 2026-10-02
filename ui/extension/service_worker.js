@@ -6,7 +6,7 @@
 // in memory between the cut and the send, and nowhere afterwards.
 
 import { captureInPage } from "./lib/capture.js";
-import { IcbmRefused, fetchPolicy, readRun, sendCapture } from "./lib/client.js";
+import { IcbmRefused, fetchPolicy, readRevision, readRun, sendCapture } from "./lib/client.js";
 import { parsePairingCode } from "./lib/signing.js";
 
 // The reviewed supplier hosts (ADR-0019 §3). This names which supplier a host belongs to and
@@ -126,11 +126,27 @@ async function capture(progress) {
         collection_run_id: runId,
         outcome: run.outcome,
         detail: typeof run.detail === "string" ? run.detail : null,
+        supplier_key: run.supplier_key,
+        source_url: run.source_url,
+        ...(await preview(paired, run.revision_id)),
       };
     }
     code = run.outcome === PENDING ? null : "RUN_READ_BACK_UNREADABLE";
   }
   return { state: "PROCESSING", collection_run_id: runId, code };
+}
+
+// The field and evidence preview of a recorded run (ADR-0019 §12.1): the canonical revision as
+// COLLECT holds it, handed to the panel and kept nowhere. A run that names no revision has none,
+// and a revision that cannot be read leaves the run's own outcome standing.
+async function preview(paired, revisionId) {
+  if (typeof revisionId !== "string" || !revisionId) return { revision: null };
+  try {
+    return { revision: await readRevision(paired, revisionId) };
+  } catch (error) {
+    const code = error instanceof IcbmRefused ? error.code : "REVISION_READ_BACK_UNAVAILABLE";
+    return { revision: null, revision_code: code };
+  }
 }
 
 // What the side panel shows of the connection. Only a `probe` asks ICBM: every signed request
@@ -142,6 +158,7 @@ async function status(probe) {
     extension_id: chrome.runtime.id,
     paired: Boolean(paired),
     supplier_key: target ? target.supplierKey : null,
+    reviewed_hosts: Object.keys(SUPPLIERS),
     icbm: "UNKNOWN",
     policy_revision: null,
   };
@@ -153,6 +170,17 @@ async function status(probe) {
     const code = error instanceof IcbmRefused ? error.code : "ICBM_DISCONNECTED";
     return { ...answer, icbm: code === "ICBM_DISCONNECTED" ? "DISCONNECTED" : code };
   }
+}
+
+// ICBM Collection Management owns canonical run management and the DIRECT_URL fallback
+// (ADR-0019 §12.2): the panel only opens it, at the paired ICBM, on a run when it has one.
+async function openCollectionManagement(runId) {
+  const paired = await pairing();
+  if (!paired) return { ok: false, code: "EXTENSION_NOT_PAIRED" };
+  const query = new URLSearchParams({ view: "jobs" });
+  if (typeof runId === "string" && runId) query.set("run", runId);
+  await chrome.tabs.create({ url: `${paired.origin}/#/collect?${query}` });
+  return { ok: true };
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -190,6 +218,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message.type === "unpair") {
     chrome.storage.local.remove(PAIRING_KEY).then(() => respond({ ok: true }));
+    return true;
+  }
+  if (message.type === "open-icbm") {
+    openCollectionManagement(message.collection_run_id).then(respond);
     return true;
   }
   return false;
