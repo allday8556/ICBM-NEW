@@ -10,10 +10,15 @@ The preparation routes are the operator's authoring path (§27): they record the
 provider-listing unit is prepared from, evaluate them against current truth through the preflight
 owner, and freeze a Snapshot only through the owners that already decide READY and freshness.
 
-No route here can reach a marketplace mutation: the adopted CREATE contract is never a call
-(execution stays DRY_RUN and the send-time stack refuses every mutation even with a committed
-session), and the canary readiness
-result is derived and read-only — it authorizes nothing.
+No route here makes a marketplace mutation by itself. A CREATE and a deletion (ADR-0018 §3.5) run
+only through their owners and the send-time safety stack, which refuses unless every layer allows
+— a bounded LIVE window, the released brake and the exact grant among them; outside one the
+execution mode refuses every mutation even with a committed session. The canary readiness result
+is derived and read-only — it authorizes nothing.
+
+The deletion routes delete one ICBM-confirmed registration under its own DELETE grant, read a
+possibly applied deletion back, and list a registration's deletion attempts. An unknown deletion is
+never resent.
 """
 
 from typing import Any
@@ -185,6 +190,42 @@ def reconcile(container: ContainerDep, intent_id: str) -> ActionResult:
 @router.post("/intents/{intent_id}/verify")
 def verify(container: ContainerDep, intent_id: str) -> ActionResult:
     return container.register.verify(intent_id, correlation_id=_correlation())
+
+
+def _deletion(record: Any) -> dict[str, Any]:
+    return {
+        "deletion_id": record.deletion_id,
+        "registration_id": record.registration_id,
+        "marketplace_product_id": record.marketplace_product_id,
+        "attempt_no": record.attempt_no,
+        "state": record.state.value,
+        "verification": None if record.verification is None else record.verification.value,
+        "response_status": record.response_status,
+        "error_code": record.error_code,
+        "deleted": record.deleted,
+        "open": record.open,
+    }
+
+
+@router.post("/registrations/{registration_id}/delete")
+def delete_registration(container: ContainerDep, registration_id: str) -> dict[str, Any]:
+    record = container.registration_deletions.delete(
+        registration_id,
+        actor=container.config.operator_actor,
+        correlation_id=_correlation(),
+    )
+    return _deletion(record)
+
+
+@router.post("/registrations/{registration_id}/delete/verify")
+def verify_deletion(container: ContainerDep, registration_id: str) -> dict[str, Any]:
+    record = container.registration_deletions.verify(registration_id, correlation_id=_correlation())
+    return _deletion(record)
+
+
+@router.get("/registrations/{registration_id}/deletions")
+def list_deletions(container: ContainerDep, registration_id: str) -> list[dict[str, Any]]:
+    return [_deletion(r) for r in container.registration_deletions.deletions(registration_id)]
 
 
 @router.post("/scopes/resume")

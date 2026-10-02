@@ -61,6 +61,8 @@ class AuditEventType(StrEnum):
     REGISTRATION_OUTCOME_RESOLVED = "REGISTRATION_OUTCOME_RESOLVED"
     REGISTRATION_VERIFICATION_RECORDED = "REGISTRATION_VERIFICATION_RECORDED"
     REGISTRATION_EXTERNAL_ABSENCE_RECORDED = "REGISTRATION_EXTERNAL_ABSENCE_RECORDED"
+    # ADR-0018 §3.5: one deletion attempt of a confirmed registration, its outcome or its read-back.
+    REGISTRATION_DELETION_RECORDED = "REGISTRATION_DELETION_RECORDED"
     REGISTRATION_DUPLICATE_OVERRIDE_RECORDED = "REGISTRATION_DUPLICATE_OVERRIDE_RECORDED"
     # M5 PR-E (ADR-0014 §26): the REGISTER send brake of one execution scope. Scope key, cause,
     # policy version, generation and safe actor/reason labels only — the authoritative state is

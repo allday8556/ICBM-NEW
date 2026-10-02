@@ -28,7 +28,8 @@ class ListingShape(StrEnum):
 
 
 class Operation(StrEnum):
-    """ADR-0014 §8: UPDATE and DELETE are not authorized in M5's first vertical."""
+    """ADR-0014 §8: an Intent is a CREATE. UPDATE is not authorized in M5's first vertical, and a
+    deletion is never an Intent: it is its own owner (ADR-0018 §3.5, ``registration_deletions``)."""
 
     CREATE = "CREATE"
 
@@ -143,6 +144,33 @@ class ReconcileResult(StrEnum):
     MULTIPLE = "MULTIPLE"
     LOOKUP_UNAVAILABLE = "LOOKUP_UNAVAILABLE"
     ERROR = "ERROR"
+
+
+class DeletionState(StrEnum):
+    """ADR-0018 §3.5: one attempt to delete one confirmed registration at the provider.
+
+    ``STARTED`` is opened, with its grant spent, before any byte is sent. It ends exactly once:
+    ``APPLIED_PROVEN`` when the provider answered the documented success, ``NOT_APPLIED_PROVEN``
+    only when transmission was provably precluded, and ``UNKNOWN`` for everything else. An
+    ``UNKNOWN`` is never resent.
+    """
+
+    STARTED = "STARTED"
+    APPLIED_PROVEN = "APPLIED_PROVEN"
+    NOT_APPLIED_PROVEN = "NOT_APPLIED_PROVEN"
+    UNKNOWN = "UNKNOWN"
+
+
+class DeletionVerification(StrEnum):
+    """ADR-0018 §3.5: what an origin-product read-back after a deletion attempt showed.
+
+    ``DELETE_CONFIRMED``: the read-back carries the documented sale status ``DELETE``.
+    ``STILL_PRESENT``: it carries any other documented sale status — the listing is still there.
+    A read-back that fails or carries nothing readable records nothing.
+    """
+
+    DELETE_CONFIRMED = "DELETE_CONFIRMED"
+    STILL_PRESENT = "STILL_PRESENT"
 
 
 class AbsenceEvidence(StrEnum):

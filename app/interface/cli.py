@@ -6,14 +6,14 @@ only way a pairing is ever issued.
 
 **The protected operator commands own no truth.** Each protected action —
 ``eligibility-packet``, ``record-eligibility``, ``issue-asset-grant``, ``issue-create-grant``,
-``release-brake`` and ``engage-brake`` — calls exactly one existing owner method, of the
-canary-eligibility owner (ADR-0018 §5.1) or the LIVE authority (§3, §4). ``icbm live inspect``
-writes nothing and reads two existing read-only projections, the live status and the canary
-readiness. Each prints what the owners returned. Every rule, identity and refusal stays with the
-owner: a value given here is only an expectation the owner checks, never a fact it records as
-given. Nothing here reaches a
-provider, changes the execution mode or makes a mutation permitted: a grant and a released brake
-are two layers of the send-time stack, which still refuses under ``M0_DRY_RUN_ONLY``.
+``issue-delete-grant``, ``release-brake`` and ``engage-brake`` — calls exactly one existing owner
+method, of the canary-eligibility owner (ADR-0018 §5.1) or the LIVE authority (§3, §3.5, §4).
+``icbm live inspect`` writes nothing and reads two existing read-only projections, the live status
+and the canary readiness. Each prints what the owners returned. Every rule, identity and refusal
+stays with the owner: a value given here is only an expectation the owner checks, never a fact it
+records as given. Nothing here reaches a provider, changes the execution mode or makes a mutation
+permitted: a grant and a released brake are two layers of the send-time stack, which still refuses
+outside a bounded LIVE window (``M0_DRY_RUN_ONLY``).
 
 **The two local proofs** (ADR-0018 §7, §8) run the same way: ``restore-drill-asset`` and
 ``restore-drill-create`` call ``RestoreDrillService.drill_asset`` / ``drill_create`` for one
@@ -86,6 +86,7 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "record-eligibility",
     "issue-asset-grant",
     "issue-create-grant",
+    "issue-delete-grant",
     "release-brake",
     "engage-brake",
     "restore-drill-asset",
@@ -201,6 +202,12 @@ def _add_operator_commands(live_commands: Any) -> None:
     )
     create.add_argument("--intent-id", required=True)
     _add_window(create)
+    delete = live_commands.add_parser(
+        "issue-delete-grant",
+        help="issue the exact DELETE grant of one confirmed registration (ADR-0018 §3.5)",
+    )
+    delete.add_argument("--registration-id", required=True)
+    _add_window(delete)
     release = live_commands.add_parser(
         "release-brake", help="release the protected-write brake (ADR-0018 §4.1)"
     )
@@ -501,6 +508,17 @@ def _issue_asset_grant(container: Any, args: argparse.Namespace, correlation_id:
     )
 
 
+def _issue_delete_grant(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    return container.live_authority.issue_delete_grant(
+        registration_id=args.registration_id,
+        not_before=_instant(args.not_before, "--not-before"),
+        expires_at=_instant(args.expires_at, "--expires-at"),
+        approved_by=args.approved_by,
+        authorization_ref=args.authorization_ref,
+        correlation_id=correlation_id,
+    )
+
+
 def _issue_create_grant(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
     return container.live_authority.issue_create_grant(
         intent_id=args.intent_id,
@@ -556,6 +574,7 @@ _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "record-eligibility": _record_eligibility,
     "issue-asset-grant": _issue_asset_grant,
     "issue-create-grant": _issue_create_grant,
+    "issue-delete-grant": _issue_delete_grant,
     "release-brake": _release_brake,
     "engage-brake": _engage_brake,
     "restore-drill-asset": _restore_drill_asset,

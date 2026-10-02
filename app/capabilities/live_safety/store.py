@@ -37,6 +37,8 @@ from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.capabilities.live_safety.model import (
     ASSET_ENDPOINT_GROUP,
     CREATE_BUDGET,
+    DELETE_BUDGET,
+    DELETE_ENDPOINT_GROUP,
     FENCING_UPLOAD_STATES,
     MAX_ASSET_BUDGET,
     MAX_GRANT_WINDOW_S,
@@ -347,6 +349,37 @@ class LiveUnit:
             intent_id=intent_id,
             idempotency_key=idempotency_key,
             create_attempt_no=create_attempt_no,
+        )
+        return _grant_record(row)
+
+    def issue_delete_grant(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        registration_snapshot_id: str,
+        intent_id: str,
+        not_before: datetime,
+        expires_at: datetime,
+        approved_by: str,
+        authorization_ref: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        """A DELETE grant (§3.5): one attempt to remove the exact confirmed registration that
+        Intent and Snapshot produced. Which registration may be removed is its owner's check."""
+        row = self._new_grant(
+            MutationStage.DELETE,
+            marketplace_key,
+            marketplace_account_id,
+            endpoint_group=DELETE_ENDPOINT_GROUP,
+            budget=DELETE_BUDGET,
+            not_before=not_before,
+            expires_at=expires_at,
+            approved_by=approved_by,
+            authorization_ref=authorization_ref,
+            correlation_id=correlation_id,
+            registration_snapshot_id=registration_snapshot_id,
+            intent_id=intent_id,
         )
         return _grant_record(row)
 

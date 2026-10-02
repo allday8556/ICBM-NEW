@@ -11,7 +11,10 @@ validates each named identity against its own owner before the store records it:
 - a CREATE grant names an Intent that exists, belongs to the named account, is ``PREPARED`` or
   proven not applied, with its own Snapshot and idempotency key, and **the next attempt number**
   — so it authorizes exactly that one attempt, and a retry after ``NOT_APPLIED_PROVEN`` needs a
-  new grant (G3-27).
+  new grant (G3-27);
+- a DELETE grant (§3.5) names a registration ICBM itself confirmed, still ``ACTIVE`` and with no
+  deletion attempt that is in flight, applied, or unresolved — so a deletion whose outcome is
+  unknown is never authorized again until a read-back proves the listing still there.
 
 There is no confirmation-prose parameter anywhere: the durable grant keeps only safe identities,
 the approver and the authorization reference (G3-23). A grant changes nothing else: no adoption,
@@ -31,7 +34,7 @@ from app.capabilities.live_safety.store import (
 )
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.stages.products.model import ReadinessStatus
-from app.stages.register.model import IntentState
+from app.stages.register.model import IntentState, RegistrationLifecycle
 from app.stages.register.preparation import PreflightResult
 from app.stages.register.store import RegistrationStore
 
@@ -172,6 +175,44 @@ class LiveAuthorityService:
                 intent_id=intent.intent_id,
                 idempotency_key=intent.idempotency_key,
                 create_attempt_no=next_attempt,
+                not_before=not_before,
+                expires_at=expires_at,
+                approved_by=approved_by,
+                authorization_ref=authorization_ref,
+                correlation_id=correlation_id,
+            )
+
+    def issue_delete_grant(
+        self,
+        *,
+        registration_id: str,
+        not_before: datetime,
+        expires_at: datetime,
+        approved_by: str,
+        authorization_ref: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        registration = self._registrations.registration(registration_id)
+        if registration is None:
+            raise NotFoundError("LIVE_GRANT_REGISTRATION_NOT_FOUND", "no such registration")
+        if registration.lifecycle_state is not RegistrationLifecycle.ACTIVE:
+            raise InputValidationError(
+                "LIVE_GRANT_REGISTRATION_NOT_ACTIVE",
+                "only an ACTIVE confirmed registration may be granted a DELETE",
+                details={"lifecycle_state": registration.lifecycle_state.value},
+            )
+        if self._registrations.deletion_open(registration_id):
+            raise InputValidationError(
+                "LIVE_GRANT_DELETION_OPEN",
+                "a deletion of this registration is in flight, applied or unresolved; a deletion"
+                " is never authorized twice",
+            )
+        with self._store.transaction() as unit:
+            return unit.issue_delete_grant(
+                marketplace_key=registration.marketplace_key,
+                marketplace_account_id=registration.marketplace_account_id,
+                registration_snapshot_id=registration.registration_snapshot_id,
+                intent_id=registration.intent_id,
                 not_before=not_before,
                 expires_at=expires_at,
                 approved_by=approved_by,

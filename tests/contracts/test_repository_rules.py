@@ -319,8 +319,9 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     smartstore = REPO_ROOT / "documents" / "contracts" / "platforms" / "smartstore"
     matrix = _section(_read(smartstore / "ENDPOINT_MATRIX.md"), r"^4\. Master registry")
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
-    # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices
-    assert len(adopted) == 7, adopted
+    # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
+    # and the DELETE slice (ADR-0018 §3.5)
+    assert len(adopted) == 8, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -1749,7 +1750,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # read-only committed bearer; none is a hard-coded absent session any more.
     container = _read(REPO_ROOT / "app" / "container.py")
     assert "committed_bearer = smartstore.committed_bearer" in container
-    assert container.count("bearer=committed_bearer") == 4
+    # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
+    # (ADR-0018 §3.5): six seams, one source.
+    assert container.count("bearer=committed_bearer") == 6
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
@@ -1963,10 +1966,15 @@ def test_the_container_wires_the_deny_by_default_stack_and_a_sessionless_sender(
     # Like every provider seam production wires, its bearer is the one canonical source.
     bearer = _keyword(sender, "bearer")
     assert isinstance(bearer, ast.Name) and bearer.id == "committed_bearer"
-    for seam in ("SmartStoreCreateSender", "SmartStoreReadback", "SmartStoreReconcileLookup"):
-        (built,) = _calls(tree, seam)
-        source = _keyword(built, "bearer")
-        assert isinstance(source, ast.Name) and source.id == "committed_bearer", seam
+    for seam in (
+        "SmartStoreCreateSender",
+        "SmartStoreReadback",
+        "SmartStoreReconcileLookup",
+        "SmartStoreDeleteSender",
+    ):
+        for built in _calls(tree, seam):
+            source = _keyword(built, "bearer")
+            assert isinstance(source, ast.Name) and source.id == "committed_bearer", seam
     connect = inspect.getsource(
         importlib.import_module(
             "app.stages.connect.smartstore.service"
@@ -3734,6 +3742,7 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "extension_queues",
         "extension_queue_items",
         "residual_risk_acceptances",
+        "registration_deletions",
     }
     offenders = [
         path

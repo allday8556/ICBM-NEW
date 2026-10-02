@@ -117,6 +117,7 @@ from app.stages.register.category_metadata import (
     CategoryMetadataStore,
     DurableRegistrationMetadata,
 )
+from app.stages.register.deletion import RegistrationDeletionService
 from app.stages.register.drafting import DraftCommandService
 from app.stages.register.execution import (
     CREATE_ENDPOINT_GROUP,
@@ -140,6 +141,7 @@ from integrations.marketplaces.smartstore import registry as smartstore_registry
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
 from integrations.marketplaces.smartstore.execution import MARKETPLACE_KEY as SMARTSTORE_KEY
 from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
@@ -210,6 +212,7 @@ class Container:
     residual_risk: ResidualRiskAcceptanceService
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
+    registration_deletions: RegistrationDeletionService
     restore_drills: RestoreDrillService
     retention: RetentionProofService
     visual_acceptance: VisualAcceptanceService
@@ -632,6 +635,22 @@ def build_container(
         candidates=PreparationCandidateGate(registration_preparations, registrations),
         clock=clock,
     )
+    # ADR-0018 §3.5: the deletion of one ICBM-confirmed registration, through the same send-time
+    # stack and the same canonical bearer source. Its exact DELETE grant is the only authority for
+    # it, an unknown deletion is never resent, and only a read-back confirms or resolves one.
+    registration_deletions = RegistrationDeletionService(
+        registrations=registrations,
+        sender=SmartStoreDeleteSender(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=committed_bearer,
+        ),
+        readback=SmartStoreReadback(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=committed_bearer,
+        ),
+        sale_status=lambda retained: smartstore_readback.normalize(retained).sale_status,
+        authority=safety_stack,
+    )
     # Gate 3 area 3 (§9): the read-only projection of the brake, the grants, their ASSET readiness
     # and the unit-independent proofs, which 등록관리 shows. It writes and authorizes nothing.
     live_status = LiveStatusService(
@@ -771,6 +790,7 @@ def build_container(
         residual_risk=residual_risk,
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
+        registration_deletions=registration_deletions,
         restore_drills=restore_drills,
         retention=retention,
         visual_acceptance=visual_acceptance,

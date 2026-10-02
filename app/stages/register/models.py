@@ -75,6 +75,8 @@ from app.platform.db.types import UTCDateTime
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from app.stages.register.model import (
     AbsenceEvidence,
+    DeletionState,
+    DeletionVerification,
     ExecutionScopeState,
     IntentState,
     ListingShape,
@@ -907,3 +909,74 @@ class RegistrationReconcileCheck(Base):
     # SHA-256 of the sanitized canonical evidence (§15), never of wire bytes.
     evidence_digest: Mapped[str | None] = mapped_column(String(64))
     next_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+# A deletion that blocks another: in flight, applied, or unknown without a read-back that shows the
+# listing still there (ADR-0018 §3.5). At most one per registration.
+DELETION_OPEN = (
+    "state IN ('STARTED', 'APPLIED_PROVEN')"
+    " OR (state = 'UNKNOWN' AND (verification IS NULL OR verification <> 'STILL_PRESENT'))"
+)
+
+
+class RegistrationDeletion(Base):
+    """One attempt to delete one ICBM-confirmed registration (ADR-0018 §3.5; migration 0037).
+
+    Append-only: an attempt is opened ``STARTED`` with its DELETE grant spent, ends exactly once,
+    and only its read-back verification may be recorded afterwards — forward only, and never on an
+    attempt proven not applied. While one is open (``DELETION_OPEN``) no other attempt of the same
+    registration can start, so an unknown deletion is never resent.
+    """
+
+    __tablename__ = "registration_deletions"
+    __table_args__ = (
+        Index(
+            "ux_registration_deletions_open",
+            "registration_id",
+            unique=True,
+            sqlite_where=sql(DELETION_OPEN),
+        ),
+        UniqueConstraint("registration_id", "attempt_no"),
+        CheckConstraint("attempt_no > 0", name="attempt_no_positive"),
+        CheckConstraint(_in("state", DeletionState), name="state_valid"),
+        CheckConstraint(
+            f"verification IS NULL OR {_in('verification', DeletionVerification)}",
+            name="verification_valid",
+        ),
+        CheckConstraint(
+            "(state = 'STARTED') = (finished_at IS NULL)", name="finished_unless_started"
+        ),
+        CheckConstraint(
+            "finished_at IS NULL OR finished_at >= started_at", name="finished_after_start"
+        ),
+        CheckConstraint("(verification IS NULL) = (verified_at IS NULL)", name="verified_together"),
+        CheckConstraint(
+            "verification IS NULL OR state IN ('APPLIED_PROVEN', 'UNKNOWN')",
+            name="verified_only_when_possibly_applied",
+        ),
+        CheckConstraint(_present("marketplace_product_id"), name="product_present"),
+        CheckConstraint(_present("grant_id"), name="grant_present"),
+        CheckConstraint(_present("actor"), name="actor_present"),
+        CheckConstraint(_present("correlation_id"), name="correlation_present"),
+    )
+
+    deletion_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    registration_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("marketplace_registrations.registration_id")
+    )
+    intent_id: Mapped[str] = mapped_column(String(36))
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
+    marketplace_product_id: Mapped[str] = mapped_column(String(64))
+    # The DELETE grant this attempt spent (ADR-0018 §3.5), by identity.
+    grant_id: Mapped[str] = mapped_column(String(36))
+    attempt_no: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(24))
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    verification: Mapped[str | None] = mapped_column(String(24))
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    actor: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

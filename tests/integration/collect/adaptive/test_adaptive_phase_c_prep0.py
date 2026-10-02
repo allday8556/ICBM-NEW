@@ -518,6 +518,8 @@ def test_0028_is_additive_and_its_downgrade_never_destroys_accounting(
         "marketplace_registrations",
         "collection_runs",
         "product_facts_revisions",
+        # Migration 0037 admits the DELETE stage in the grant's stage CHECKs (ADR-0018 §3.5).
+        "live_grants",
     }
     assert set(ACCOUNTING) | {"adaptive_phase_c_read_refusals"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0027_adaptive_capture_seam")

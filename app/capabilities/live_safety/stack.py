@@ -94,7 +94,7 @@ from app.capabilities.live_safety.store import (
 from app.platform.core.execution import ExecutionMode
 from app.stages.register.model import ExecutionScopeState
 from app.stages.register.preparation import PreflightResult
-from app.stages.register.store import IntentRecord, ScopeRecord
+from app.stages.register.store import IntentRecord, RegistrationRecord, ScopeRecord
 
 # A second selection of the same outbound bytes in one unit: one upload may serve it only through
 # a reuse/rebind path, which is not adopted. The liveness limit is reported, never hidden.
@@ -305,6 +305,69 @@ class SafetyStack:
         # by the REGISTER owners and handed in, never assumed.
         layers.append(_layer(Layer.STAGE_GATE, stage_gate.ready, CREATE_STAGE_GATE_NOT_READY))
         return _readiness(MutationStage.CREATE, layers)
+
+    # ------------------------------------------------------------------ DELETE (§3.5)
+
+    def admit_delete(
+        self,
+        session: Session,
+        *,
+        registration: RegistrationRecord,
+        endpoint_adopted: bool,
+        actor: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        """Admit one DELETE attempt inside the unit that opens it, and spend its grant (§3.5).
+
+        A deletion removes one listing ICBM itself registered and confirmed; it creates nothing.
+        Its layers are the ones that bound any marketplace mutation — the execution mode, the
+        protected-write brake, the exact grant, the adopted endpoint — and evidence retention, so
+        the deletion's own evidence is kept. The canary-only rows (eligibility, the restore drill,
+        the residual-risk acceptance of an ambiguous CREATE, the populated visual acceptance) are
+        not causally relevant to removing a confirmed listing, and are not layers of it.
+        """
+        unit = self._store.unit(session)
+        grant = self._delete_grant(unit, registration)
+        layers = self._delete_layers(unit, endpoint_adopted=endpoint_adopted)
+        layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        _refuse_unless_all(layers)
+        assert grant is not None
+        return unit.consume(grant.grant_id, actor=actor, correlation_id=correlation_id)
+
+    def _delete_grant(self, unit: LiveUnit, registration: RegistrationRecord) -> GrantRecord | None:
+        now = self._clock.now()
+        for grant in unit.grants(
+            MutationStage.DELETE, registration.marketplace_key, registration.marketplace_account_id
+        ):
+            if (
+                grant.live_at(now)
+                and grant.intent_id == registration.intent_id
+                and grant.registration_snapshot_id == registration.registration_snapshot_id
+            ):
+                return grant
+        return None
+
+    def _delete_layers(self, unit: LiveUnit, *, endpoint_adopted: bool) -> list[LayerView]:
+        state = self._mode.state()
+        live = bool(state.live_writes_permitted) and state.mode is ExecutionMode.LIVE
+        try:
+            brake = unit.brake()
+        except SQLAlchemyError:
+            brake_layer = _layer(Layer.PROTECTED_WRITE_BRAKE, False, BRAKE_UNREADABLE)
+        else:
+            brake_layer = _layer(
+                Layer.PROTECTED_WRITE_BRAKE, brake.state is BrakeState.RELEASED, BRAKE_ENGAGED
+            )
+        return [
+            _layer(Layer.EXECUTION_MODE, live, MODE_NOT_LIVE),
+            brake_layer,
+            _layer(Layer.ENDPOINT_ADOPTED, endpoint_adopted, ENDPOINT_NOT_ADOPTED),
+            _layer(
+                Layer.EVIDENCE_RETENTION,
+                self._proofs.evidence_retention_ready(),
+                RETENTION_UNPROVEN,
+            ),
+        ]
 
     # ------------------------------------------------------------------ restore targets (§7)
 
