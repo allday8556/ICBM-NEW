@@ -103,22 +103,12 @@ class QueueDeclaration:
 
 
 @dataclass(frozen=True)
-class DiscoveryPolicy:
-    """What the extension needs to find a list page's products, and the bounds it may declare."""
-
-    supplier_key: str
-    storefront_host: str
-    product_path: str
-    max_discovered_links: int
-    max_queue_products: int
-    min_queue_interval_s: float
-
-
-@dataclass(frozen=True)
 class QueueItemView:
     item_id: str
     position: int
     source_url: str
+    # The product the URL names, as the supplier's own URL form says it, or the normalized URL.
+    product_key: str
     state: QueueItemState
     collection_run_id: str | None
     # The run's own outcome, read from the run: a separate axis from the item state (AC-31).
@@ -136,6 +126,23 @@ class QueueView:
     interval_s: float
     skip_collected: bool
     items: tuple[QueueItemView, ...]
+
+
+@dataclass(frozen=True)
+class DiscoveryPolicy:
+    """What the extension needs to find a list page's products, and the bounds it may declare.
+
+    ``open_queue`` is the supplier's queue that is still open, or ``None``. The queue lives here,
+    not in the extension: a panel that was closed, or a worker that was stopped, finds it again
+    and resumes or cancels it."""
+
+    supplier_key: str
+    storefront_host: str
+    product_path: str
+    max_discovered_links: int
+    max_queue_products: int
+    min_queue_interval_s: float
+    open_queue: QueueView | None
 
 
 @dataclass(frozen=True)
@@ -197,9 +204,22 @@ class ExtensionQueues:
     # ------------------------------------------------------------------ the declared bounds
 
     def discovery_policy(self, supplier_key: str) -> DiscoveryPolicy:
-        """The supplier's reviewed product path form and its queue limits, or a refusal."""
+        """The supplier's reviewed product path form and its queue limits, or a refusal, with
+        the supplier's queue that is still open, settled first."""
         registered, limits = self._declared(supplier_key)
         profile = registered.collection.profile
+        with self._db.write() as session:
+            open_queue: QueueView | None = None
+            queue = session.scalars(
+                select(ExtensionQueue).where(
+                    ExtensionQueue.supplier_key == registered.supplier_key,
+                    ExtensionQueue.state == QueueState.OPEN.value,
+                )
+            ).first()
+            if queue is not None:
+                self._settle(session, queue, self._clock.now())
+                if queue.state == QueueState.OPEN.value:
+                    open_queue = _view(session, queue.queue_id)
         return DiscoveryPolicy(
             supplier_key=registered.supplier_key,
             storefront_host=profile.storefront_host,
@@ -207,6 +227,7 @@ class ExtensionQueues:
             max_discovered_links=limits.max_discovered_links,
             max_queue_products=limits.max_queue_products,
             min_queue_interval_s=limits.min_queue_interval_s,
+            open_queue=open_queue,
         )
 
     def _declared(self, supplier_key: str) -> tuple[RegisteredCollection, QueueLimits]:
@@ -701,6 +722,7 @@ def _item_view(item: ExtensionQueueItem, run: CollectionRun | None) -> QueueItem
         item_id=item.item_id,
         position=item.position,
         source_url=item.source_url,
+        product_key=item.product_key,
         state=QueueItemState(item.state),
         collection_run_id=item.collection_run_id,
         run_outcome=None if run is None else CollectionOutcome(run.outcome),

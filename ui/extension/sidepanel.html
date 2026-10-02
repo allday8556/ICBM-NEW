@@ -86,6 +86,49 @@
           </dl>
         </section>
 
+        <section class="context" data-role="list-context" hidden>
+          <div class="kicker">
+            <span class="supplier" data-role="list-supplier-key"></span>
+            <span>목록 페이지 · 상품 링크 발견</span>
+          </div>
+          <h1 data-role="list-title">—</h1>
+          <p class="found">이 페이지에서 상품 링크 <b data-role="list-found">0</b>개를 찾았습니다.</p>
+        </section>
+
+        <section class="group bounds" data-role="queue-bounds" hidden>
+          <div class="group-head">
+            <h2>대기열 상한</h2>
+          </div>
+          <div class="bounds-grid">
+            <label>
+              <span>최대 상품 수</span>
+              <input type="number" id="queue-max" min="1" step="1" inputmode="numeric" autocomplete="off" />
+            </label>
+            <label>
+              <span>상품 간 간격</span>
+              <select id="queue-interval"></select>
+            </label>
+          </div>
+          <p class="note">상한은 선언해야 시작됩니다. 비워 두면 무제한이 아니라 실행 거부입니다.</p>
+          <label class="check">
+            <input type="checkbox" id="queue-skip" checked />
+            이미 수집한 상품 건너뛰기
+          </label>
+        </section>
+
+        <section class="group" data-role="queue-section" hidden>
+          <div class="group-head">
+            <h2>대기열</h2>
+            <span data-role="queue-count">0 / 0</span>
+          </div>
+          <div class="progress" data-role="queue-bar">
+            <span class="progress-done" data-role="queue-done"></span>
+            <span class="progress-running" data-role="queue-running"></span>
+          </div>
+          <div class="list" data-role="queue-rows"></div>
+          <p class="note" data-role="queue-status" hidden></p>
+        </section>
+
         <div class="review-banner" data-role="review-banner" hidden>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>
@@ -130,6 +173,19 @@
         <div class="result-code" data-role="result-code" hidden>코드 <span data-role="run-code">—</span></div>
         <button type="button" class="primary" data-action="capture" disabled>이 상품 수집</button>
         <button type="button" class="secondary" data-action="open-icbm" hidden>수집관리에서 보기</button>
+        <button type="button" class="text-button" data-action="discover" disabled>이 페이지의 상품 목록 찾기</button>
+      </footer>
+
+      <footer class="bottom queue-bottom" data-role="queue-footer" hidden>
+        <p class="note">각 상품은 ICBM의 collection run 하나로 기록됩니다. 진행과 이력은 수집관리에서 함께 보입니다.</p>
+        <div class="pair-buttons">
+          <button type="button" class="secondary" data-action="queue-pause" disabled>일시정지</button>
+          <button type="button" class="primary" data-action="queue-start" disabled>대기열 수집 시작</button>
+        </div>
+        <div class="pair-buttons">
+          <button type="button" class="text-button" data-action="queue-cancel" hidden>대기열 취소</button>
+          <button type="button" class="text-button" data-action="product-mode">상품 수집으로</button>
+        </div>
       </footer>
 
       <details class="about">

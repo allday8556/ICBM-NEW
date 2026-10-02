@@ -584,3 +584,20 @@ def test_a_queue_declaration_is_the_exact_envelope(client: TestClient) -> None:
         response = _send(client, record, "POST", QUEUES, payload)
         assert response.status_code == 422, payload
         assert response.json()["error"]["code"] == "EXTENSION_PAYLOAD_INVALID"
+
+
+def test_the_discovery_policy_names_the_queue_still_open(
+    container: Container, clock: FakeClock
+) -> None:
+    # A closed panel or a stopped worker finds its queue again in ICBM, to resume or cancel it.
+    assert container.extension_queues.discovery_policy(SUPPLIER).open_queue is None
+    queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
+    _issue(container, queue_id)
+    held = container.extension_queues.discovery_policy(SUPPLIER).open_queue
+    assert held is not None and held.queue_id == queue_id
+    assert [item.state for item in held.items] == [QueueItemState.ISSUED, QueueItemState.WAITING]
+    # It is settled before it is named: a read whose time ran out stops it, and it is no longer
+    # open.
+    clock.advance(QUEUE_ISSUE_TTL_S)
+    assert container.extension_queues.discovery_policy(SUPPLIER).open_queue is None
+    assert container.extension_queues.read(queue_id).state is QueueState.STOPPED
