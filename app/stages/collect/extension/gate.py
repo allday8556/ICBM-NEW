@@ -65,18 +65,23 @@ _UNSAFE_IN_LOCATOR = re.compile(r"[\s<>\"'\\^`{|}\x00-\x1f\x7f]")
 _SECRET_NAME = re.compile(
     r"(?i)(csrf|xsrf|token|session|cookie|secret|passw|auth|api[-_]?key|signature|credential)"
 )
+# The secrets the user named (ADR-0019 §6.1): credentials, tokens, cookies and sessions, with the
+# names they commonly travel under. One list for query keys and for ``name=value`` text.
+_SECRET_WORDS = (
+    r"token|session|cookie|secret|passw|credential|csrf|xsrf|signature"
+    r"|(?:api|access|secret|private|client)[-_]?key"
+)
 # A query key that carries a secret or signs a URL.
 _SECRET_KEY = re.compile(
-    r"(?i)^(?:.*(?:token|session|secret|passw|auth|api[-_]?key|signature|credential|csrf|xsrf)"
-    r".*|sid|sessid|jsessionid|phpsessid|sig|key|pw|pwd)$"
+    rf"(?i)^(?:.*(?:{_SECRET_WORDS}|auth).*|sid|sessid|jsessionid|phpsessid|sig|key|pw|pwd)$"
 )
 # A value that is a secret, wherever it sits.
 _SECRET_VALUE = re.compile(
     r"(?i)("
     r"eyJ[A-Za-z0-9_-]{10,}"
     r"|\bbearer\s+[A-Za-z0-9._~+/-]{8,}"
-    r"|\b(?:[a-z_-]*(?:token|session|secret|passw|apikey|api_key|api-key|csrf|xsrf|signature)"
-    r"|sid|sessid|jsessionid|phpsessid|sig|auth|pwd)\s*[=:]\s*[^\s&\"'<>]{4,}"
+    rf"|\b(?:[a-z_-]*(?:{_SECRET_WORDS})[a-z_-]*"
+    r"|auth|authorization|sid|sessid|jsessionid|phpsessid|sig|pwd)\s*[=:]\s*[^\s&\"'<>]{4,}"
     r"|\b[a-f0-9]{32,}\b"
     r"|[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"
     r")"

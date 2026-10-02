@@ -204,6 +204,13 @@ SECURITY_MATERIAL = {
     "jwt-text": "<p>eyJhbGciOiJIUzI1NiJ9synthetic</p>",
     "url-credentials": '<img src="https://user:synthetic-value@kmretail.co.kr/a.jpg">',
     "url-secret-query": '<img src="/web/a.jpg?token=synthetic-value">',
+    # Every secret the user named (ADR-0019 §6.1), as a query key and as name=value text.
+    "url-cookie-query": '<img src="/web/a.jpg?cookie=synthetic-value">',
+    "url-access-key-query": '<img src="/web/a.jpg?access_key=synthetic-value">',
+    "cookie-text": "<p>Set-Cookie: PHPSESSID=synthetic-value-1234</p>",
+    "credential-text": "<p>credential=synthetic-value-1234</p>",
+    "password-text": "<p>password: synthetic-value-1234</p>",
+    "authorization-text": "<p>Authorization: synthetic-value-1234</p>",
 }
 # Product data that only looks private: it goes on as it arrived and leaves a note.
 PRODUCT_DATA = {
@@ -302,6 +309,13 @@ def test_the_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
         assert gate(frame(body=BODY + addition)).blocking != (), addition
     for addition in PRODUCT_DATA.values():
         assert gate(frame(body=BODY + addition)).blocking == (), addition
+
+
+def test_a_word_that_only_contains_a_secret_word_is_product_text() -> None:
+    # "Author: …" holds "auth" but is no credential; the secret words are matched as names.
+    gate = _server_final_scan
+    for text in ("<p>Author: 합성저자</p>", "<p>Secretary desk 1kg</p>", "<p>Tokens included</p>"):
+        assert gate(frame(body=BODY + text)) == GateResult(), text
 
 
 def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
