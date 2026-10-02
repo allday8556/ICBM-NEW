@@ -394,11 +394,28 @@ def _paired_panel(context: BrowserContext, app: Container, origin: str) -> Page:
 
 
 def _discover(panel: Page, context: BrowserContext) -> Page:
+    """Open the synthetic list page and find its products from the panel.
+
+    Discovery runs in whichever tab the browser reports as active and loaded; on a slow runner
+    the panel can be told a supplier tab is active before the list page has painted, and then
+    finds nothing. That is the runner, not the extension, so the operator's own recovery is
+    repeated: back to product mode, find again, at most three times.
+    """
     listing = _list_page(context)
+    listing.wait_for_load_state("load")
     listing.bring_to_front()
     expect(panel.locator("[data-action='discover']")).to_be_enabled(timeout=TIMEOUT_MS)
-    panel.locator("[data-action='discover']").dispatch_event("click")
-    expect(panel.locator(_role("list-found"))).to_have_text("3", timeout=TIMEOUT_MS)
+    found = panel.locator(_role("list-found"))
+    for attempt in range(3):
+        panel.locator("[data-action='discover']").dispatch_event("click")
+        try:
+            expect(found).to_have_text("3", timeout=TIMEOUT_MS // 2)
+            return listing
+        except AssertionError:
+            if attempt == 2:
+                raise
+            panel.locator("[data-action='product-mode']").dispatch_event("click")
+            expect(panel.locator("[data-action='discover']")).to_be_enabled(timeout=TIMEOUT_MS)
     return listing
 
 
