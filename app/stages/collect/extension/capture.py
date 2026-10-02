@@ -14,8 +14,9 @@ none of that: it measures and checks exactly what arrived.
 - :class:`TransportEvidence` is what the browser observed of the navigation. Each value becomes a
   ``DocumentView`` field only if it is present and valid; nothing is defaulted (ADR-0019 §2).
 
-Every finding is a kind and a tag or attribute name. Captured text and attribute values are never
-part of a finding, a log or an error.
+Every finding is a kind and a tag or attribute name, quoted only when it is a plain identifier
+(``gate.safe_token``). Captured text and attribute values are never part of a finding, a log or an
+error.
 """
 
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from html.parser import HTMLParser
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
+from app.stages.collect.extension.gate import safe_token
 from app.stages.collect.extension.policy import BrowserCapturePolicy
 
 CAPTURED_CONTENT_TYPE = "text/html"
@@ -128,22 +130,24 @@ class _Structure(HTMLParser):
         if tag in _FRAME and depth == (0 if tag == "html" else 1):
             self._frame.append(tag)
             if values:
-                self.violations.append(f"FRAME_ATTRIBUTE:{tag}")
+                self.violations.append(f"FRAME_ATTRIBUTE:{safe_token(tag)}")
         elif depth < 2:
             # Nothing may sit outside <head> and <body>, or beside <html>.
-            self.violations.append(f"OUTSIDE_FRAME:{tag}")
+            self.violations.append(f"OUTSIDE_FRAME:{safe_token(tag)}")
         elif self._policy is not None:
             if self._in_head():
                 if not self._policy.keeps_head(tag, values):
-                    self.violations.append(f"HEAD_NOT_ALLOWED:{tag}")
+                    self.violations.append(f"HEAD_NOT_ALLOWED:{safe_token(tag)}")
             elif tag in self._policy.excluded_tags:
-                self.violations.append(f"TAG_EXCLUDED:{tag}")
+                self.violations.append(f"TAG_EXCLUDED:{safe_token(tag)}")
             elif self._policy.is_excluded_region(values):
                 # The browser cuts these out; one that arrives was not cut by the policy.
-                self.violations.append(f"REGION_EXCLUDED:{tag}")
+                self.violations.append(f"REGION_EXCLUDED:{safe_token(tag)}")
             for name in values:
                 if not self._policy.keeps_attribute(tag, name):
-                    self.violations.append(f"ATTRIBUTE_NOT_ALLOWED:{tag}[{name}]")
+                    self.violations.append(
+                        f"ATTRIBUTE_NOT_ALLOWED:{safe_token(tag)}[{safe_token(name)}]"
+                    )
         if tag not in _VOID:
             self._open.append(tag)
 

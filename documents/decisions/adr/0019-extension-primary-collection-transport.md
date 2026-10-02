@@ -163,15 +163,63 @@ product-scope cut → browser sanitize → loopback → server final scan → Do
 
 - **Scope first.** The product-scope cut happens first, in the browser, under the
   `BrowserCapturePolicy`. **A whole authenticated page is never sent or retained.**
-- **The server always runs its own sanitizer and final scan** on exactly what arrived. Browser
-  sanitization is defense in depth, never the only guard.
+- **The server always runs its own structural check and security gate** on exactly what arrived.
+  Browser sanitization is defense in depth, never the only guard.
 - **Forbidden:** whole-page capture followed by exceptions for `href` or anchor text. A final-scan
   finding is never cleared by such an allowance.
-- **Private material inside the product scope still refuses fail-closed.**
+- **Security material inside the product scope still refuses fail-closed** (§6.1).
 - **The C1 regression pair** is required of the first extension slice:
   - the shared non-product anchor that blocked both C1 candidates must be absent, because it lies
     outside the scope;
-  - private material placed inside the scope must still refuse.
+  - security material placed inside the scope must still refuse.
+
+### 6.1 Broad product capture, security-only gate (the user's decision, 2026-10-01)
+
+The first real KM통상 E1 acceptances (`documents/acceptance/adaptive/EXTENSION-E1.md` §5.1) were
+refused because the server's final gate refused anything the Adaptive capture owner's sanitizer
+would have cleaned: a member-named element, a business phone number, an image query. The user
+decided, in the Track A session on 2026-10-01, that collection works this way:
+
+```text
+broad product capture → security-only hard filter → ICBM canonical extraction
+→ what ICBM does not need is dropped → only canonical facts and evidence are stored
+```
+
+- **Inside the product scope, product data and its evidence are collected as broadly as
+  possible.** The capture goes on as it arrived.
+- **Only what must never be collected refuses, fail-closed, at the capture step:**
+  credentials, tokens, cookies, sessions, login information, user input values and obvious
+  personal information. The server's security gate (`app/stages/collect/extension/gate.py`)
+  refuses:
+  - a secret: an attribute named for a token, session, cookie, credential or signature; a value
+    shaped like a JWT, a bearer token, a secret `key=value` parameter or a long hex secret; a URL
+    carrying credentials; an image reference with a secret query key;
+  - the signed-in member's own account and identity: a Cafe24 member variable
+    (`xans-member-var-*`), a Cafe24 my-shop module (`xans-myshop-*`), or an account, my-page,
+    login or user-info region.
+- **User input values never arrive.** The `BrowserCapturePolicy` keeps no `value` or `name`
+  attribute and no `textarea`, and one that arrives is a policy violation.
+- **A supplier's or maker's business contact is product data** (the user's decision). A phone
+  number or e-mail in the product information is collected; only the signed-in member's own
+  contact is personal.
+- **A member price is product data.** A `회원가` label, or an element whose class begins with
+  `member`, is collected. The private-region naming rule of the Adaptive capture owner does not
+  decide what the extension may collect.
+- **Everything else that only looks private** — an image reference with an ordinary query,
+  fragment or odd shape — goes on as well. Each such item is recorded as a note (a kind and a
+  boundary, never a value) in the run's log.
+- **What ICBM does not need is dropped at extraction.** The supplier's canonical extractor takes
+  only the fields ICBM defines. Only canonical facts and their evidence are ever stored, in the
+  `ProductFactsRevision` the extractor writes (E2), never the capture.
+- **An empty image reference is no reference**, as the supplier's image owner reads it (a Cafe24
+  lazy-load `<img>` leaves `src` empty); it is neither a finding nor a note.
+- A known identity widget is better cut in the browser than refused on the server: the KM policy
+  `kmretail-capture-2` cuts the member benefit box.
+- The Adaptive capture owner's own sanitizer and final scan
+  (`app/stages/collect/adaptive/engine/capture.py`) are unchanged for the Adaptive Phase C path.
+
+This supersedes owner amendment `5909645067` §1 (a capture the sanitizer had to clean fails its
+run) for the extension transport.
 
 ### 7. Images
 
@@ -306,7 +354,7 @@ AC-09  A difference in observed locators or content between transports still yie
 AC-10  BrowserCapturePolicy is an owner separate from EPR and PTR; it owns only the capture topology (product root, allowed and excluded regions, attributes, node and byte bounds) and holds no source fact or extraction rule
 AC-11  CollectionProfile keeps owning host, path, query, pacing and transport; BrowserCapturePolicy never overlaps it
 AC-12  The capture order is product-scope cut, browser sanitize, loopback, server final scan, DocumentView; a whole authenticated page is never sent or retained
-AC-13  A final-scan finding is never cleared by an href or anchor-text exception after a whole-page capture; private material inside the product scope still refuses fail closed
+AC-13  A final-scan finding is never cleared by an href or anchor-text exception after a whole-page capture; security material (a secret, or the signed-in member's own account and identity) inside the product scope still refuses fail closed, and other product data is captured broadly (§6.1)
 AC-14  The server policed fetch is the image default and the owner of the canonical checksum and source asset; a browser byte relay is not authorized by this ADR
 AC-15  A list-page queue is bounded by declared caps; a missing cap refuses fail closed before any read
 AC-16  No legacy ICBM extension code is inspected, copied or transplanted; only single-click collection and list-link discovery are inherited as requirements

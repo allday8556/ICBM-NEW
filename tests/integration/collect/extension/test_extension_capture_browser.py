@@ -231,24 +231,29 @@ def test_the_member_benefit_box_never_leaves_the_browser(
     html = _cut(browser, fixture_html.replace(anchor, benefit + anchor), policy)["html"]
     for gone in ("asyncbenefit", 'class="member"', "합성회원 님은", 'src=""'):
         assert gone not in html, gone
-    assert _server_final_scan(html) == ()
+    assert _server_final_scan(html).blocking == ()
+    # Were it to arrive, the box is the member's own identity: the gate refuses it.
+    arrived = html.replace("</body>", benefit + "</body>")
+    assert "MEMBER_IDENTITY@div#.xans-element-.xans-myshop.xans-myshop-asyncbenefit" in (
+        _server_final_scan(arrived).blocking
+    )
 
 
-def test_a_member_named_element_outside_the_box_is_refused_never_dropped(
+def test_a_member_price_is_product_data_and_never_dropped(
     browser: Browser, policy: dict[str, Any], fixture_html: str
 ) -> None:
-    # Only the benefit box is cut. Any other element whose class or id names a member — a
-    # supplier may mark a member price that way — is not cut silently: it is sent, and the
-    # server's gate refuses the run and names it, so a price is never lost unnoticed. The words
-    # "회원가" in a page's text are no finding at all.
+    # Only the benefit box is cut. A member price is product data, whether its label says "회원가"
+    # or its class begins with "member": it is sent as it is, and it only leaves a note
+    # (ADR-0019 §6.1).
     anchor = '<div class="xans-element- xans-product xans-product-action">'
     labelled = '<table><tr><th scope="row">회원가</th><td>10,000원</td></tr></table>'
     html = _cut(browser, fixture_html.replace(anchor, labelled + anchor), policy)["html"]
-    assert "회원가" in html and _server_final_scan(html) == ()
+    assert "회원가" in html and _server_final_scan(html).blocking == ()
     named = '<p class="member_price">10,000원</p>'
     html = _cut(browser, fixture_html.replace(anchor, named + anchor), policy)["html"]
     assert 'class="member_price"' in html
-    assert _server_final_scan(html) == ("SANITIZER_EXCLUDED:PRIVATE@p#.member_price",)
+    gate = _server_final_scan(html)
+    assert gate.blocking == () and "MEMBER_NAMED@p#.member_price" in gate.notes
 
 
 def test_the_cut_never_modifies_the_page(
@@ -335,28 +340,50 @@ def test_the_canonical_extractor_reads_the_same_facts_from_both_transports(
 # ---------------------------------------------------------------- C1 regression, second half
 
 
-def test_c1_regression_private_material_inside_the_scope_still_refuses(
-    browser: Browser, policy: dict[str, Any], fixture_html: str, container: Container
-) -> None:
-    private = fixture_html.replace(
-        '<tr><th scope="row">원산지</th><td>국산</td></tr>',
-        '<tr><th scope="row">원산지</th><td>국산</td></tr>'
-        '<tr><th scope="row">문의</th><td>010-0000-0000</td></tr>',
-    )
-    assert private != fixture_html
-    cut = _cut(browser, private, policy)
-    # The browser cuts topology; it makes no exception and hides nothing.
-    assert cut["ok"] is True and "010-0000-0000" in cut["html"]
-    with pytest.raises(CaptureRefused):
-        capture_candidate(cut["html"])
-    # Through the real ingest owner: accepted, then the server's final scan fails the run.
+ORIGIN_ROW = '<tr><th scope="row">원산지</th><td>국산</td></tr>'
+
+
+def _ingested(container: Container, cut: dict[str, Any]) -> Any:
     accepted = container.extension_capture.ingest(
         CaptureEnvelope.model_validate(envelope(cut["html"], transport=cut["transport"]))
     )
     assert container.runner.run_next() is not None
-    run = container.collection.run(accepted.collection_run_id)
+    return container.collection.run(accepted.collection_run_id)
+
+
+def test_c1_regression_security_material_inside_the_scope_still_refuses(
+    browser: Browser, policy: dict[str, Any], fixture_html: str, container: Container
+) -> None:
+    # ADR-0019 §6.1 (the user's decision of 2026-10-01): the signed-in member's own identity is
+    # never collected, wherever the scope holds it.
+    identity = fixture_html.replace(
+        ORIGIN_ROW,
+        ORIGIN_ROW + '<tr><td><span class="xans-member-var-name">합성회원</span> 님</td></tr>',
+    )
+    cut = _cut(browser, identity, policy)
+    # The browser cuts topology; it makes no exception and hides nothing.
+    assert cut["ok"] is True and "xans-member-var-name" in cut["html"]
+    # Through the real ingest owner: accepted, then the server's security gate fails the run.
+    run = _ingested(container, cut)
     assert (run.outcome, run.detail) == (CollectionOutcome.FAILED, "EXTENSION_FINAL_SCAN_REFUSED")
     assert run.revision_id is None
+
+
+def test_a_business_contact_inside_the_scope_is_product_data(
+    browser: Browser, policy: dict[str, Any], fixture_html: str, container: Container
+) -> None:
+    # A supplier's or maker's contact in the product information is not the member's own data:
+    # the user decided it is collected (ADR-0019 §6.1). The run goes on and is recorded (E2).
+    contact = fixture_html.replace(
+        ORIGIN_ROW, ORIGIN_ROW + '<tr><th scope="row">A/S 문의</th><td>010-0000-0000</td></tr>'
+    )
+    cut = _cut(browser, contact, policy)
+    assert cut["ok"] is True and "010-0000-0000" in cut["html"]
+    with pytest.raises(CaptureRefused):
+        capture_candidate(cut["html"])  # the Adaptive capture owner's own rule is unchanged
+    run = _ingested(container, cut)
+    assert (run.outcome, run.detail) == (CollectionOutcome.RECORDED, None)
+    assert run.revision_id is not None
 
 
 def test_a_clean_capture_passes_the_real_ingest(

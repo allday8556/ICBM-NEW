@@ -10,7 +10,7 @@ pairing — and this owner does the rest::
     8  policy: the capture names the revision and digest the server recomputes now
     -- accepted: one write unit enqueues the job and opens the canonical run (``PENDING``,
        ``EXTENSION``, the policy revision and digest); the HTML waits in the in-process buffer --
-    9  the server's own structural check and final gate of exactly what arrived
+    9  the server's own structural check and security gate of exactly what arrived
     10 the same ``DocumentView``
     11 the one pipeline after capture (ADR-0019 §2): the collection owner records the document
        exactly as it records a direct one — identity, the server's policed image fetch, the
@@ -59,6 +59,7 @@ from app.stages.collect.extension.capture import (
     measure,
     policy_violations,
 )
+from app.stages.collect.extension.gate import GateResult
 from app.stages.collect.extension.policy import (
     MAX_HTML_BYTES,
     MAX_IMAGE_REFS,
@@ -100,12 +101,10 @@ UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
 # hold a captured text or attribute value. No other detail is logged.
 _LOGGED_DETAILS = ("finding_count", "findings", "violations")
 
-# The server's own final gate of a capture: the findings, as kinds and boundaries only. Empty
-# means the capture owner's sanitizer had nothing private or secret to take out of it and its
-# final scan found no residual — only then may the capture go on as it arrived. The container
-# hands in the capture owner's sanitizer and final scan, so this package never depends on the
-# Adaptive packages.
-FinalScan = Callable[[str], Sequence[str]]
+# The server's own security gate of a capture (gate.py; ADR-0019 §6.1): what must never be
+# collected refuses the run, everything else goes on as it arrived and is only noted. Both are
+# kinds and boundaries only. The container hands it in.
+FinalScan = Callable[[str], GateResult]
 
 
 class CapturedDocumentRecorder(Protocol):
@@ -472,12 +471,24 @@ class ExtensionCaptureService:
                 "the capture holds what its policy does not allow",
                 details={"violations": list(violations)[:20]},
             )
-        findings = self._final_scan(capture.html)
-        if findings:
+        gate = self._final_scan(capture.html)
+        if gate.blocking:
             raise ExtensionCaptureFailed(
                 EXTENSION_FINAL_SCAN_REFUSED,
-                "the server's sanitizer and final scan found secret or private material",
-                details={"finding_count": len(findings), "findings": list(findings)[:20]},
+                "the server's security gate found material that is never collected",
+                details={"finding_count": len(gate.blocking), "findings": list(gate.blocking)[:20]},
+            )
+        if gate.notes:
+            # Product data that only looks private (a business contact, a member-named price, an
+            # odd image reference): it goes on as it arrived, and the extractor keeps only what
+            # ICBM needs. Kinds and boundaries only.
+            logger.info(
+                "collect.extension_gate_notes",
+                extra={
+                    "collection_run_id": record.collection_run_id,
+                    "note_count": len(gate.notes),
+                    "notes": list(gate.notes)[:20],
+                },
             )
         evidence = capture.evidence
         document = DocumentView(
