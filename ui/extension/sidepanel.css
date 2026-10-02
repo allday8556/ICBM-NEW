@@ -696,3 +696,145 @@ h1 {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+
+/* The list queue (ADR-0019 §8.1), as the approved board `확장 — 목록 발견과 대기열` lays it out,
+   with the canonical corrections: a row's chip is the item's state or its run's outcome, never a
+   field truth, and there is no supplier-session indicator. */
+
+.found {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.found b {
+  color: var(--ink);
+}
+
+.bounds-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bounds-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.bounds-grid input,
+.bounds-grid select {
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.bounds-grid input {
+  font-family: var(--font-mono);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  font-size: 14px;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ink);
+}
+
+.progress {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--badge-bg);
+}
+
+.progress-done {
+  background: var(--ok-ink);
+}
+
+.progress-running {
+  background: #c98a2e;
+}
+
+.queue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-row);
+}
+
+.queue-row:last-child {
+  border-bottom: 0;
+}
+
+.queue-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.queue-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-note {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.queue-note .mono {
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+.queue-row .chip[data-state="ISSUED"],
+.queue-row .chip[data-state="PROCESSING"] {
+  background: #dce6f0;
+  color: #1f4e79;
+}
+
+.queue-row .chip[data-state="SETTLED"] {
+  background: var(--ok-bg);
+  color: var(--ok-ink);
+}
+
+.queue-row .chip[data-state="EXPIRED"] {
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
+.pair-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.queue-row .chip[data-outcome="FAILED"] {
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
+.queue-row .chip[data-outcome="NO_REVISION"] {
+  background: var(--neutral-bg);
+  color: var(--ink-3);
+}

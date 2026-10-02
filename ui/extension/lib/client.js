@@ -6,11 +6,16 @@
 //   canonical run afterwards and is never invented here.
 // - Nothing is kept: no page material, no policy, no result. The pairing is the only thing this
 //   extension stores, and it is read from the extension's own storage by the caller.
+// - A list queue (ADR-0019 §8.1) is declared, read, asked for its next read and cancelled through
+//   the same signed requests. ICBM decides every read; this client only asks and relays.
 
 import { sha256Hex, signedHeaders } from "./signing.js";
 
 const POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/capture-policies/${supplierKey}`;
 const CAPTURE_PATH = "/api/v1/collect/extension/captures";
+const QUEUE_POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/queue-policies/${supplierKey}`;
+const QUEUES_PATH = "/api/v1/collect/extension/queues";
+const QUEUE_PATH = (queueId) => `${QUEUES_PATH}/${encodeURIComponent(queueId)}`;
 const RUN_PATH = (runId) => `/api/v1/collect/collections/${encodeURIComponent(runId)}`;
 const REVISION_PATH = (revisionId) => `/api/v1/collect/revisions/${encodeURIComponent(revisionId)}`;
 const POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest";
@@ -69,14 +74,21 @@ export async function fetchPolicy(pairing, extensionId, supplierKey) {
   return { policy, revision: policy.revision, digest };
 }
 
-// Send one capture. The answer names the run to read back, and says nothing about its outcome.
-export async function sendCapture(pairing, extensionId, { supplierKey, revision, digest, capture }) {
-  const body = JSON.stringify({
+// Send one capture. The answer names the run to read back, and says nothing about its outcome. A
+// queue read's capture carries its single-use ticket; a single click carries none.
+export async function sendCapture(
+  pairing,
+  extensionId,
+  { supplierKey, revision, digest, capture, ticket },
+) {
+  const envelope = {
     supplier_key: supplierKey,
     policy: { revision, digest },
     transport: capture.transport,
     html: capture.html,
-  });
+  };
+  if (ticket) envelope.queue_ticket = ticket;
+  const body = JSON.stringify(envelope);
   const response = await request(pairing, extensionId, { method: "POST", path: CAPTURE_PATH, body });
   if (response.status !== 202) throw await refusal(response);
   try {
@@ -116,4 +128,44 @@ export function readRun(pairing, runId) {
 // as COLLECT recorded them. The side panel previews it; it is never kept.
 export function readRevision(pairing, revisionId) {
   return readCanonical(pairing, REVISION_PATH(revisionId), "REVISION_READ_BACK_UNREADABLE");
+}
+
+// One signed request whose answer is JSON, or the refusal ICBM named.
+async function signedJson(pairing, extensionId, { method, path, body, expected = 200 }) {
+  const response = await request(pairing, extensionId, { method, path, body });
+  if (response.status !== expected) throw await refusal(response);
+  try {
+    return await response.json();
+  } catch {
+    throw new IcbmRefused("QUEUE_ANSWER_UNREADABLE");
+  }
+}
+
+// The supplier's reviewed product path form and its declared queue limits (ADR-0019 §8.1).
+export function fetchQueuePolicy(pairing, extensionId, supplierKey) {
+  return signedJson(pairing, extensionId, { method: "GET", path: QUEUE_POLICY_PATH(supplierKey) });
+}
+
+// Declare one queue from discovered product URLs and the operator's own bounds.
+export function declareQueue(pairing, extensionId, declaration) {
+  return signedJson(pairing, extensionId, {
+    method: "POST",
+    path: QUEUES_PATH,
+    body: JSON.stringify(declaration),
+    expected: 201,
+  });
+}
+
+// Ask ICBM for the next read: it answers WAIT, ISSUE or DONE. ICBM decides; this only asks.
+export function nextRead(pairing, extensionId, queueId) {
+  return signedJson(pairing, extensionId, { method: "POST", path: `${QUEUE_PATH(queueId)}/next` });
+}
+
+// The queue as ICBM holds it: each item's own state beside its run's own outcome.
+export function readQueue(pairing, extensionId, queueId) {
+  return signedJson(pairing, extensionId, { method: "GET", path: QUEUE_PATH(queueId) });
+}
+
+export function cancelQueue(pairing, extensionId, queueId) {
+  return signedJson(pairing, extensionId, { method: "POST", path: `${QUEUE_PATH(queueId)}/cancel` });
 }
