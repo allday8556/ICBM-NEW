@@ -27,16 +27,18 @@ The registration read state (ADR-0014 §28.5) added `app/stages/register/read_st
 status card `ui/web/js/components/registration-status.js`, one unit and one contract suite.
 The Extension Collector UI added the side panel's approved prototype
 `design/prototypes/icbm_extension_collector.html`.
+The E3 list queue's server half (ADR-0019 §8.1) added the queue owner
+`app/stages/collect/extension/queue.py`, migration `0035` and one integration suite.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 250 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 252 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 41 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 20 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 64 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 120 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 65 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 121 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -58,11 +60,11 @@ The Extension Collector UI added the side panel's approved prototype
 | `integrations/` | 38 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 17 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 240 | tests |
+| `tests/` | 241 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 92 | integration tests by runtime owner |
+| `tests/integration/` | 93 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 82 | unit tests by runtime owner |
 | `ui/` | 53 | operator clients: the served web client and the capture extension |

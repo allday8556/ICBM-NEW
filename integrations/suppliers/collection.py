@@ -73,6 +73,32 @@ class CollectionLimits:
 
 
 @dataclass(frozen=True)
+class QueueLimits:
+    """A supplier's list-queue bounds (ADR-0019 §8.1). No field has a default.
+
+    A supplier that declares none has no list queue: discovery and every queue call refuse. The
+    operator declares each queue's own size and interval inside these.
+    """
+
+    # The most product links one discovery may submit.
+    max_discovered_links: int
+    # The most products one queue may read.
+    max_queue_products: int
+    # The shortest interval between two queue reads. Never below the supplier's request interval;
+    # the queue owner also refuses one below the extension ingest interval.
+    min_queue_interval_s: float
+    # How long an issued read may stay open before it expires, still counted.
+    issue_ttl_s: float
+
+    def __post_init__(self) -> None:
+        counts = (self.max_discovered_links, self.max_queue_products)
+        if any(not isinstance(v, int) or isinstance(v, bool) or v < 1 for v in counts):
+            raise ValueError("queue limits are positive integers")
+        if not self.min_queue_interval_s > 0 or not self.issue_ttl_s > 0:
+            raise ValueError("queue intervals are positive")
+
+
+@dataclass(frozen=True)
 class CollectionProfile:
     supplier: SupplierProfile
     # Regular expression that the whole product path must match (the form reconnaissance proved).
@@ -85,10 +111,18 @@ class CollectionProfile:
     safe_query_keys: Mapping[str, frozenset[str]]
     limits: CollectionLimits
     transport: SupplierTransport = SupplierTransport.HTTP
+    # The list queue's bounds (ADR-0019 §8.1). None is no list queue at all, never a default one.
+    queue_limits: QueueLimits | None = None
 
     def __post_init__(self) -> None:
         if not self.product_path.startswith("/"):
             raise ValueError("the product path form is an absolute path pattern")
+        if (
+            self.queue_limits is not None
+            and self.queue_limits.min_queue_interval_s
+            < self.supplier.request_policy.minimum_request_interval_s
+        ):
+            raise ValueError("the queue interval is never below the supplier's request interval")
         re.compile(self.product_path)
         if any(not p.startswith("/") or "?" in p or "#" in p for p in self.policy_paths):
             raise ValueError("policy documents are exact absolute paths without query")

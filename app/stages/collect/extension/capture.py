@@ -90,6 +90,9 @@ class CaptureEnvelope(BaseModel):
     policy: PolicyReference
     transport: TransportEvidence
     html: StrictStr = Field(repr=False)
+    # The single-use ticket of the queue read this capture answers (ADR-0019 §8.1), or nothing for
+    # a single click. It is checked against its item's exact URL and never logged.
+    queue_ticket: StrictStr | None = Field(default=None, repr=False, pattern=r"^[A-Za-z0-9_-]{43}$")
 
 
 @dataclass(frozen=True)
