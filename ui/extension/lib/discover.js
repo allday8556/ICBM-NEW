@@ -28,14 +28,14 @@ export function discoverInPage(rule) {
   // Whether an element has text of its own that paints: a text node that is not blank.
   const ownText = (element) =>
     [...element.childNodes].some((node) => node.nodeType === 3 && node.nodeValue.trim() !== "");
-  // The box an anchor paints: its own, when it has text of its own, or else that of its first
-  // visible descendant with a box. An anchor whose only content is hidden paints nothing.
-  const box = (anchor) => {
+  // What an anchor paints, and where: the anchor itself when it has text of its own, or else its
+  // first visible descendant with a box. An anchor whose only content is hidden paints nothing.
+  const painted = (anchor) => {
     for (const element of [anchor, ...anchor.querySelectorAll("*")]) {
       if (!visible(element)) continue;
       if (element === anchor && !ownText(anchor)) continue;
       const rect = element.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) return rect;
+      if (rect.width > 0 && rect.height > 0) return { element, rect };
     }
     return null;
   };
@@ -44,17 +44,18 @@ export function discoverInPage(rule) {
   // can only leave a product to the operator's own click.
   const clips = (style) => style.overflowX !== "visible" || style.overflowY !== "visible";
   const concealed = (style) => style.clipPath !== "none" || style.clip !== "auto";
-  // The part of a box the anchor's ancestors let through: each one that clips cuts the box down
-  // to its own; a box cut to nothing, or an anchor or ancestor under a clip, is not shown.
-  const unclipped = (rect, anchor) => {
+  // The part of a painted box its ancestors let through, from the element that paints it up to
+  // the body: each one that clips cuts the box down to its own; a box cut to nothing, or any
+  // element on the way under a clip, is not shown.
+  const unclipped = ({ element, rect }) => {
     let left = rect.left;
     let top = rect.top;
     let right = rect.right;
     let bottom = rect.bottom;
-    for (let el = anchor; el && el !== document.body; el = el.parentElement) {
+    for (let el = element; el && el !== document.body; el = el.parentElement) {
       const style = getComputedStyle(el);
       if (concealed(style)) return null;
-      if (el === anchor || !clips(style)) continue;
+      if (el === element || !clips(style)) continue;
       const own = el.getBoundingClientRect();
       left = Math.max(left, own.left);
       top = Math.max(top, own.top);
@@ -70,9 +71,9 @@ export function discoverInPage(rule) {
   // to. Nothing here scrolls or changes the page.
   const shown = (anchor) => {
     if (!visible(anchor)) return false;
-    const painted = box(anchor);
-    if (!painted) return false;
-    const rect = unclipped(painted, anchor);
+    const paint = painted(anchor);
+    if (!paint) return false;
+    const rect = unclipped(paint);
     if (!rect) return false;
     const root = document.documentElement;
     return (

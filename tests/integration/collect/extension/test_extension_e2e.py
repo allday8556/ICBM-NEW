@@ -333,6 +333,9 @@ LIST_PAGE = (
     "<a href='/product/synthetic-sample/9011/'>경로로 잘림</a></li>"
     "<li><a href='/product/synthetic-sample/9012/'>"
     "<span style='visibility:hidden'>내용만 숨김</span></a></li>"
+    "<li><a href='/product/synthetic-sample/9013/'><span style='display:block;width:0;height:0;"
+    "overflow:hidden'><span style='display:block;width:120px;height:20px'>안에서 잘림</span>"
+    "</span></a></li>"
     "<li><a href='/product/list.html?cate_no=23'>다음 쪽</a></li>"
     "<li><a href='https://elsewhere.invalid/product/synthetic-sample/9004/'>다른 곳</a></li>"
     "</ul></body></html>"
@@ -357,6 +360,7 @@ def _list_page(context: BrowserContext) -> Page:
             "9010",
             "9011",
             "9012",
+            "9013",
         )
     }
 
