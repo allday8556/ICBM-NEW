@@ -1112,7 +1112,7 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         assert "Amendment note (ADR-0019" in _section(adaptive, heading), heading
     block = adr.split("\n## Invariants", 1)[1].split("```text", 1)[1].split("```", 1)[0]
     invariants = dict(re.findall(r"^(AC-\d\d)\s+(.*\S)\s*$", block, re.M))
-    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 27)]
+    assert list(invariants) == [f"AC-{n:02d}" for n in range(1, 32)]
     # Two transports, one pipeline, Collection Management kept.
     assert "exactly two acquisition transports" in invariants["AC-01"]
     assert "Collection Management is kept" in invariants["AC-01"]
@@ -1153,6 +1153,19 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     assert "never causes authenticated whole-DOM local persistence" in invariants["AC-24"]
     assert "never an in-app capture button" in invariants["AC-25"]
     assert "no general BrowserCapturePolicy editor" in invariants["AC-26"]
+    # The E3 queue contract (section 8.1): discovery reads nothing, the bounds are declared twice,
+    # every read is server-issued and durable, a queue stops and never skips forward.
+    assert "reads only the operator's already-loaded page" in invariants["AC-27"]
+    assert "the server judges every link with check_target" in invariants["AC-27"]
+    assert "fully match the supplier's reviewed product path form" in invariants["AC-27"]
+    assert "nothing of the list page itself" in invariants["AC-27"]
+    assert "CollectionProfile declares its queue limits" in invariants["AC-28"]
+    assert "a missing or out-of-range bound refuses before any read" in invariants["AC-28"]
+    assert "written durably before the read" in invariants["AC-29"]
+    assert "never reissued or retried" in invariants["AC-29"]
+    assert "never skipping forward" in invariants["AC-30"]
+    assert "ordinary EXTENSION run" in invariants["AC-30"]
+    assert "never a run outcome" in invariants["AC-31"]
     ui = _section(adr, r"^12\. UI ownership and state semantics")
     assert "`documents/contracts/ui/UI_SOURCE_OF_TRUTH.md` is not changed by this ADR" in ui
     assert "`REVIEW` is not a run outcome, and `AUTH` is not a field state" in ui
