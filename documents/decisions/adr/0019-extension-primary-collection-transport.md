@@ -269,8 +269,8 @@ rule.
 
 **The bounds are declared, twice, and never defaulted.**
 - The supplier's `CollectionProfile` declares its queue limits (it owns pacing, AC-11):
-  - the most links one discovery may submit;
-  - the most products one queue may hold;
+  - the most links one discovery may submit, which is also the most items one queue holds;
+  - the most products one queue may read; a skipped product takes no read;
   - the shortest interval between two queue reads. It is never below the supplier's request
     interval or the extension ingest interval;
   - how long an issued read may stay open.
