@@ -40,17 +40,24 @@ REPLAY_KEY_VERSION: Final = "asset-replay-key/v1"
 # scope
 # row and never pretends one exists.
 ASSET_ENDPOINT_GROUP: Final = "product_image_upload"
+# The DELETE stage (ADR-0018 §3.5): removing one listing ICBM itself registered and confirmed.
+DELETE_ENDPOINT_GROUP: Final = "product_deletion"
 
 # Server-owned bounds the implementing slice fixes (ADR-0018 §13). A grant is short-lived and
 # small: a canary is one unit, and a CREATE grant authorizes exactly one attempt (G3-27).
 MAX_GRANT_WINDOW_S: Final = 4 * 60 * 60
 MAX_ASSET_BUDGET: Final = 10
 CREATE_BUDGET: Final = 1
+# A DELETE grant authorizes exactly one attempt for one confirmed registration (§3.5).
+DELETE_BUDGET: Final = 1
 
 
 class MutationStage(StrEnum):
     ASSET = "ASSET"
     CREATE = "CREATE"
+    # §3.5: the removal of one ICBM-confirmed listing. Never part of a canary's ASSET -> CREATE
+    # order, and it has no restore drill, eligibility review or residual-risk proof of its own.
+    DELETE = "DELETE"
 
 
 class GrantState(StrEnum):

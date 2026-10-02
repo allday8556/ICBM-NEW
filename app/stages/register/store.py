@@ -58,6 +58,8 @@ from app.stages.register.model import (
     BLOCKING_STATES,
     AbsenceEvidence,
     BatchSummary,
+    DeletionState,
+    DeletionVerification,
     ExecutionScopeState,
     IntentState,
     ListingShape,
@@ -85,6 +87,7 @@ from app.stages.register.models import (
     MarketplaceRegistrationItem,
     RegistrationAttempt,
     RegistrationBatch,
+    RegistrationDeletion,
     RegistrationDraft,
     RegistrationDraftItem,
     RegistrationExecutionScope,
@@ -340,6 +343,45 @@ class RegistrationRecord:
 
 
 @dataclass(frozen=True)
+class DeletionRecord:
+    """One attempt to delete one confirmed registration (ADR-0018 §3.5; migration 0037)."""
+
+    deletion_id: str
+    registration_id: str
+    intent_id: str
+    marketplace_key: str
+    marketplace_account_id: str
+    marketplace_product_id: str
+    grant_id: str
+    attempt_no: int
+    state: DeletionState
+    response_status: int | None
+    error_code: str | None
+    verification: DeletionVerification | None
+    verified_at: datetime | None
+    started_at: datetime
+    finished_at: datetime | None
+
+    @property
+    def open(self) -> bool:
+        """In flight, applied, or unknown without a read-back that shows the listing still there:
+        no other deletion of the registration may start (never resend)."""
+        if self.state in (DeletionState.STARTED, DeletionState.APPLIED_PROVEN):
+            return True
+        return (
+            self.state is DeletionState.UNKNOWN
+            and self.verification is not DeletionVerification.STILL_PRESENT
+        )
+
+    @property
+    def deleted(self) -> bool:
+        """The provider answered the documented success, or a read-back showed ``DELETE``."""
+        return self.state is DeletionState.APPLIED_PROVEN or (
+            self.verification is DeletionVerification.DELETE_CONFIRMED
+        )
+
+
+@dataclass(frozen=True)
 class ConflictRecord:
     """A CREATE Intent in a unit's R2 conflict scope, and its state (``SENT`` or ``UNKNOWN``)."""
 
@@ -519,6 +561,14 @@ class RegistrationStore:
     def registration(self, registration_id: str) -> RegistrationRecord | None:
         with self.reading() as unit:
             return unit.registration(registration_id)
+
+    def deletions(self, registration_id: str) -> tuple[DeletionRecord, ...]:
+        with self.reading() as unit:
+            return unit.deletions(registration_id)
+
+    def deletion_open(self, registration_id: str) -> bool:
+        """Whether a deletion of the registration is in flight, applied or unresolved (§3.5)."""
+        return any(record.open for record in self.deletions(registration_id))
 
     def batch_summary(self, registration_batch_id: str) -> BatchSummary:
         with self.reading() as unit:
@@ -2035,6 +2085,143 @@ class RegistrationUnit:
         self.session.flush()
         return _check_record(row)
 
+    # ------------------------------------------------------------------ deletions (ADR-0018 §3.5)
+
+    def deletions(self, registration_id: str) -> tuple[DeletionRecord, ...]:
+        rows = self.session.scalars(
+            select(RegistrationDeletion)
+            .where(RegistrationDeletion.registration_id == registration_id)
+            .order_by(RegistrationDeletion.attempt_no)
+        )
+        return tuple(_deletion_record(row) for row in rows)
+
+    def start_deletion(
+        self,
+        registration: RegistrationRecord,
+        *,
+        grant_id: str,
+        actor: str,
+        correlation_id: str,
+    ) -> DeletionRecord:
+        """Open the next deletion attempt of an ACTIVE confirmed registration, ``STARTED``.
+
+        It runs in the unit that spent the DELETE grant, before any byte is sent. While another
+        attempt is open (in flight, applied, or unknown without a read-back that shows the listing
+        still there) none starts: an unknown deletion is never resent. The database repeats it.
+        """
+        row = self.session.get(MarketplaceRegistration, registration.registration_id)
+        if row is None or row.lifecycle_state != RegistrationLifecycle.ACTIVE.value:
+            raise RegistrationConflictError(
+                "REGISTER_DELETE_NOT_ACTIVE", "only an ACTIVE confirmed registration is deleted"
+            )
+        existing = self.deletions(registration.registration_id)
+        if any(record.open for record in existing):
+            raise RegistrationConflictError(
+                "REGISTER_DELETE_OPEN",
+                "a deletion of this registration is in flight, applied or unresolved; it is never"
+                " resent",
+            )
+        deletion = RegistrationDeletion(
+            deletion_id=str(uuid.uuid4()),
+            registration_id=row.registration_id,
+            intent_id=row.intent_id,
+            marketplace_key=row.marketplace_key,
+            marketplace_account_id=row.marketplace_account_id,
+            marketplace_product_id=row.marketplace_product_id,
+            grant_id=grant_id,
+            attempt_no=len(existing) + 1,
+            state=DeletionState.STARTED.value,
+            actor=actor,
+            correlation_id=correlation_id,
+            started_at=self._clock.now(),
+        )
+        self.session.add(deletion)
+        self.session.flush()
+        self._deletion_event("start_deletion", deletion, correlation_id)
+        return _deletion_record(deletion)
+
+    def finish_deletion(
+        self,
+        deletion_id: str,
+        *,
+        state: DeletionState,
+        response_status: int | None,
+        error_code: str | None,
+        correlation_id: str,
+    ) -> DeletionRecord:
+        """End one started deletion attempt, exactly once, with the provider's outcome."""
+        row = self.session.get(RegistrationDeletion, deletion_id)
+        if row is None or row.state != DeletionState.STARTED.value:
+            raise RegistrationConflictError(
+                "REGISTER_DELETE_NOT_STARTED", "the deletion attempt is not in flight"
+            )
+        if state is DeletionState.STARTED:
+            raise InputValidationError("REGISTER_DELETE_OUTCOME_INVALID", "a finish is terminal")
+        row.state = state.value
+        row.response_status = response_status
+        row.error_code = error_code
+        row.finished_at = self._clock.now()
+        self.session.flush()
+        self._deletion_event("finish_deletion", row, correlation_id)
+        return _deletion_record(row)
+
+    def record_deletion_verification(
+        self,
+        deletion_id: str,
+        *,
+        verification: DeletionVerification,
+        correlation_id: str,
+    ) -> DeletionRecord:
+        """Record what a read-back after a possibly applied deletion showed (§3.5).
+
+        Forward only: ``STILL_PRESENT`` may later become ``DELETE_CONFIRMED`` on an applied
+        attempt, a confirmation never changes, and an unknown attempt whose read-back showed the
+        listing still there is final — that read-back is what lets a new grant be issued.
+        """
+        row = self.session.get(RegistrationDeletion, deletion_id)
+        if row is None or row.state not in (
+            DeletionState.APPLIED_PROVEN.value,
+            DeletionState.UNKNOWN.value,
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_DELETE_NOT_VERIFIABLE",
+                "only a deletion that may have been applied is read back",
+            )
+        current = row.verification
+        if current == DeletionVerification.DELETE_CONFIRMED.value or (
+            current == DeletionVerification.STILL_PRESENT.value
+            and row.state == DeletionState.UNKNOWN.value
+        ):
+            raise RegistrationConflictError(
+                "REGISTER_DELETE_VERIFICATION_FINAL", "this verification never changes"
+            )
+        if current is not None and verification is not DeletionVerification.DELETE_CONFIRMED:
+            return _deletion_record(row)
+        row.verification = verification.value
+        row.verified_at = self._clock.now()
+        self.session.flush()
+        self._deletion_event("verify_deletion", row, correlation_id)
+        return _deletion_record(row)
+
+    def _deletion_event(self, action: str, row: RegistrationDeletion, correlation_id: str) -> None:
+        self._event(
+            AuditEventType.REGISTRATION_DELETION_RECORDED,
+            action,
+            row.actor,
+            correlation_id,
+            f"marketplace_registration:{row.registration_id}",
+            {
+                "deletion_id": row.deletion_id,
+                "attempt_no": row.attempt_no,
+                "marketplace_product_id": row.marketplace_product_id,
+                "grant_id": row.grant_id,
+                "state": row.state,
+                "response_status": row.response_status,
+                "error_code": row.error_code,
+                "verification": row.verification,
+            },
+        )
+
     def settle_interrupted_checks(self) -> int:
         """Finish, as ``ERROR``, every check an earlier process left in flight (§28.4).
 
@@ -2997,6 +3184,26 @@ def _require_channel(outcome: RemoteOutcome, channel_product_id: str | None) -> 
             "REGISTER_PROVIDER_IDENTITY",
             "a channel identity is named only with an applied outcome",
         )
+
+
+def _deletion_record(row: RegistrationDeletion) -> DeletionRecord:
+    return DeletionRecord(
+        deletion_id=row.deletion_id,
+        registration_id=row.registration_id,
+        intent_id=row.intent_id,
+        marketplace_key=row.marketplace_key,
+        marketplace_account_id=row.marketplace_account_id,
+        marketplace_product_id=row.marketplace_product_id,
+        grant_id=row.grant_id,
+        attempt_no=row.attempt_no,
+        state=DeletionState(row.state),
+        response_status=row.response_status,
+        error_code=row.error_code,
+        verification=None if row.verification is None else DeletionVerification(row.verification),
+        verified_at=row.verified_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+    )
 
 
 def _check_record(row: RegistrationReconcileCheck) -> ReconcileCheckRecord:

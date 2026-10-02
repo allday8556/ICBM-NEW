@@ -500,6 +500,7 @@ ADAPTIVE_TABLES = (
     "extension_queues",
     "extension_queue_items",
     "residual_risk_acceptances",
+    "registration_deletions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

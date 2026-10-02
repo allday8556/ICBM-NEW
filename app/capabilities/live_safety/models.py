@@ -23,6 +23,7 @@ Every table is append-oriented: a delete is refused by a trigger, and an update 
 state machine forward.
 """
 
+from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
 
@@ -41,6 +42,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.capabilities.live_safety.model import (
     CREATE_BUDGET,
+    DELETE_BUDGET,
     FENCING_UPLOAD_STATES,
     BrakeState,
     GrantState,
@@ -56,7 +58,7 @@ def _hex64(column: str) -> str:
     return f"length({column}) = 64 AND {column} NOT GLOB '*[^0-9a-f]*'"
 
 
-def _in(column: str, values: type[StrEnum]) -> str:
+def _in(column: str, values: Iterable[StrEnum]) -> str:
     listed = ", ".join(f"'{member.value}'" for member in values)
     return f"{column} IN ({listed})"
 
@@ -83,6 +85,17 @@ _CREATE_BOUND = (
     " AND artifact_set_json IS NULL AND artifact_set_digest IS NULL AND asset_profile IS NULL"
 )
 
+# §3.5: a DELETE grant binds the exact confirmed registration through its Intent and Snapshot,
+# and names no idempotency key or attempt number of a CREATE.
+_DELETE_BOUND = (
+    "registration_snapshot_id IS NOT NULL AND intent_id IS NOT NULL"
+    " AND idempotency_key IS NULL AND create_attempt_no IS NULL"
+    " AND preparation_revision_id IS NULL AND candidate_fingerprint IS NULL"
+    " AND artifact_set_json IS NULL AND artifact_set_digest IS NULL AND asset_profile IS NULL"
+)
+# Restore drills exist for the two canary stages only; a DELETE has none (§3.5).
+_DRILL_STAGES = (MutationStage.ASSET, MutationStage.CREATE)
+
 
 class LiveGrant(Base):
     """One bounded LIVE grant: one stage, one exact unit, a finite window and budget (§3.2)."""
@@ -96,7 +109,8 @@ class LiveGrant(Base):
         CheckConstraint("endpoint_group <> ''", name="endpoint_group_present"),
         # One stage, one unit: the binding of the other stage is empty (§3.2, G3-21).
         CheckConstraint(
-            f"(stage = 'ASSET' AND {_ASSET_BOUND}) OR (stage = 'CREATE' AND {_CREATE_BOUND})",
+            f"(stage = 'ASSET' AND {_ASSET_BOUND}) OR (stage = 'CREATE' AND {_CREATE_BOUND})"
+            f" OR (stage = 'DELETE' AND {_DELETE_BOUND})",
             name="stage_binding_exact",
         ),
         CheckConstraint(
@@ -116,6 +130,9 @@ class LiveGrant(Base):
         CheckConstraint("budget_max >= 1", name="budget_finite_and_positive"),
         CheckConstraint(
             f"stage <> 'CREATE' OR budget_max = {CREATE_BUDGET}", name="create_budget_is_one"
+        ),
+        CheckConstraint(
+            f"stage <> 'DELETE' OR budget_max = {DELETE_BUDGET}", name="delete_budget_is_one"
         ),
         CheckConstraint("budget_used >= 0 AND budget_used <= budget_max", name="budget_bounded"),
         CheckConstraint("expires_at > not_before", name="window_finite"),
@@ -291,7 +308,7 @@ class RestoreDrill(Base):
 
     __tablename__ = "restore_drills"
     __table_args__ = (
-        CheckConstraint(_in("stage", MutationStage), name="stage_valid"),
+        CheckConstraint(_in("stage", _DRILL_STAGES), name="stage_valid"),
         CheckConstraint(_in("verdict", ProofVerdict), name="verdict_valid"),
         CheckConstraint(_hex64("target_digest"), name="target_digest_hex"),
         CheckConstraint(

@@ -47,7 +47,8 @@ from app.stages.register.sanitize import SANITIZER_RULES_VERSION
 
 # v5: the canary-eligibility owner (ADR-0018 §5.1, migration 0033) joins the protected tables.
 # v6: the residual-risk acceptance proof (ADR-0018 §6.1, migration 0036) joins them.
-RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v6"
+# v7: the deletion-attempt owner (ADR-0018 §3.5, migration 0037) joins them.
+RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v7"
 
 # Every table whose rows are canary evidence or the chain a restore proof compares (§7, §8).
 PROTECTED_TABLES: Final = (
@@ -66,6 +67,7 @@ PROTECTED_TABLES: Final = (
     "registration_intents",
     "registration_attempts",
     "registration_reconcile_checks",
+    "registration_deletions",
     "registration_execution_scopes",
     "marketplace_registrations",
     "marketplace_registration_items",

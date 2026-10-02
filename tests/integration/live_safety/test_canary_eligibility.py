@@ -938,6 +938,7 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "extension_queues",
         "extension_queue_items",
         "residual_risk_acceptances",
+        "registration_deletions",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
@@ -954,7 +955,7 @@ def test_the_retention_owner_protects_the_table() -> None:
     from app.capabilities.live_safety.retention import PROTECTED_TABLES, RETENTION_CHECKS_VERSION
 
     assert TABLE in PROTECTED_TABLES
-    assert RETENTION_CHECKS_VERSION == "evidence-retention-checks/v6"
+    assert RETENTION_CHECKS_VERSION == "evidence-retention-checks/v7"
 
 
 def test_the_metadata_owner_gained_no_compliance_meaning() -> None:

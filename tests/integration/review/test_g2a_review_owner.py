@@ -692,6 +692,7 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "extension_queues",
         "extension_queue_items",
         "residual_risk_acceptances",
+        "registration_deletions",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

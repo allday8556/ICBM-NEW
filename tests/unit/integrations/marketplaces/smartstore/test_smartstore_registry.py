@@ -58,6 +58,7 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         IMAGE_UPLOAD,
         CREATE,
         EndpointId.SMARTSTORE_PRODUCT_SEARCH,
+        EndpointId.SMARTSTORE_PRODUCT_DELETE_V2,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -129,10 +130,11 @@ def test_em5_the_adopted_group_union_and_the_only_adopted_mutation() -> None:
     assert union == {"판매자정보", "상품"}
     assert resolve(TOKEN).required_groups == frozenset()
     assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
-    # The two adopted mutations, and no third. Adoption is never LIVE authority: the send-time
-    # safety stack refuses both while M0_DRY_RUN_ONLY holds.
+    # The three adopted mutations — the image upload, CREATE and the DELETE of one confirmed
+    # listing (ADR-0018 §3.5). Adoption is never LIVE authority: the send-time safety stack
+    # refuses each outside a bounded LIVE window and without its exact grant.
     assert sorted(c.endpoint_id for c in ADOPTED.values() if c.mutating) == sorted(
-        [CREATE, IMAGE_UPLOAD]
+        [CREATE, IMAGE_UPLOAD, EndpointId.SMARTSTORE_PRODUCT_DELETE_V2]
     )
 
 
@@ -356,7 +358,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-published-state-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-delete-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -366,6 +368,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-create-r2",
         "m5-search-r1",
         "m5-published-state-r1",
+        "m5-delete-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

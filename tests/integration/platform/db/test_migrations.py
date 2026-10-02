@@ -137,8 +137,9 @@ CANONICAL_TABLES = (
     "extension_queue_items",
     # The residual-risk acceptance proof (ADR-0018 §6.1, G3-30).
     "residual_risk_acceptances",
+    "registration_deletions",
 )
-HEAD = "0036_g3_residual_risk_acceptance"
+HEAD = "0037_g3_delete_stage"
 
 
 def _url(path: Path) -> str:

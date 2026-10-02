@@ -68,7 +68,8 @@ M2_ENDPOINTS = frozenset({"SMARTSTORE_AUTH_TOKEN", "SMARTSTORE_SELLER_ACCOUNT"})
 # M5 PR-D adopts the two product reads (packet 5746489554), the IMAGE UPLOAD amendment the
 # one-artifact upload, the CREATE adoption slice (ADR-0020 §4 order 1) POST /v2/products, and the
 # SEARCH positive-only reconcile slice (order 2; Issue #89 5904349289) POST /v1/products/search as
-# a read. Nothing else, and no third mutation.
+# a read, and the DELETE slice (ADR-0018 §3.5) DELETE /v2/products/origin-products/{originProductNo}
+# — the removal of one ICBM-confirmed listing. Nothing else.
 M5_ADOPTED = frozenset(
     {
         "SMARTSTORE_ORIGIN_PRODUCT_READ_V2",
@@ -76,6 +77,7 @@ M5_ADOPTED = frozenset(
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_SEARCH",
+        "SMARTSTORE_PRODUCT_DELETE_V2",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -89,7 +91,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-published-state-r1"
+M5_MAPPING_REVISION = "m5-delete-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -110,11 +112,12 @@ def test_only_the_adopted_m5_contracts_resolve_and_the_rest_fail_locally() -> No
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_the_image_upload_and_the_create_are_the_only_adopted_mutating_contracts() -> None:
+def test_the_image_upload_the_create_and_the_delete_are_the_only_adopted_mutations() -> None:
     from integrations.marketplaces.smartstore import registry
 
     assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
         "SMARTSTORE_PRODUCT_CREATE_V2",
+        "SMARTSTORE_PRODUCT_DELETE_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
     ]
     # SEARCH (ADR-0020 §4 order 2, ADR-0014 §28.2-§28.4) is adopted as a read, never a mutation.
@@ -200,7 +203,9 @@ EXTENSION_QUEUE = "0035_extension_list_queue"
 # ADR-0018 §6.1, G3-30: the durable proof of the user and architect residual-risk acceptance. Live
 # safety evidence, never registration state.
 G3_RESIDUAL_RISK = "0036_g3_residual_risk_acceptance"
-SCHEMA_HEAD = G3_RESIDUAL_RISK
+# ADR-0018 §3.5: the DELETE stage of live_grants and the deletion-attempt owner.
+G3_DELETE = "0037_g3_delete_stage"
+SCHEMA_HEAD = G3_DELETE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -218,6 +223,7 @@ AFTER_M5 = (
     COLLECT_TRANSPORT,
     EXTENSION_QUEUE,
     G3_RESIDUAL_RISK,
+    G3_DELETE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
@@ -240,6 +246,8 @@ REGISTRATION_TABLES = frozenset(
         "marketplace_registration_items",
         "duplicate_overrides",
         "registration_execution_scopes",
+        # ADR-0018 §3.5: every attempt to delete one ICBM-confirmed registration.
+        "registration_deletions",
         "registration_preparations",
         "registration_preparation_revisions",
         "registration_preparation_items",

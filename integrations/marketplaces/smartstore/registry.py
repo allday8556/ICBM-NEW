@@ -79,6 +79,8 @@ class EndpointId(StrEnum):
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
+    # ADOPTED by the DELETE slice (ADR-0018 §3.5): the removal of one ICBM-confirmed listing.
+    SMARTSTORE_PRODUCT_DELETE_V2 = "SMARTSTORE_PRODUCT_DELETE_V2"
     SMARTSTORE_CATEGORY_LIST = "SMARTSTORE_CATEGORY_LIST"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
@@ -91,6 +93,7 @@ class EndpointId(StrEnum):
 class Method(StrEnum):
     GET = "GET"
     POST = "POST"
+    DELETE = "DELETE"
 
 
 class RedirectPolicy(StrEnum):
@@ -152,6 +155,15 @@ def product_create_succeeded(status: int, body: object) -> bool:
     ``UNKNOWN``: a 200 that passes here is never by itself an applied mutation, a missing or
     malformed identifier is never a proven non-application, and a 2xx is never a registration
     confirmation (ADR-0014 §11).
+    """
+    return status == 200 and isinstance(body, dict)
+
+
+def product_delete_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND the body parses as a JSON object (the documented ``CommonResponse``).
+
+    Anything else — another 2xx, an empty or unparsable body — is never a proven deletion: it is
+    ``UNKNOWN``, never resent, and only an origin-product read-back resolves it (ADR-0018 §3.5).
     """
     return status == 200 and isinstance(body, dict)
 
@@ -387,6 +399,25 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5-search-r1",
         retained_response_fields=_PRODUCT_SEARCH_FIELDS,
     ),
+    # ---- The DELETE slice (ADR-0018 §3.5; documents/evidence/marketplace-apis/PRODUCT_DELETE.md
+    # § SmartStore). The path is the adopted origin read's, with the documented method. A deletion
+    # is a mutation: execution, the brake, the exact DELETE grant and the send-time stack decide,
+    # and an UNKNOWN is never resent. Nothing of the response is retained.
+    EndpointId.SMARTSTORE_PRODUCT_DELETE_V2: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_PRODUCT_DELETE_V2,
+        method=Method.DELETE,
+        path="/v2/products/origin-products/{originProductNo}",
+        content_type=None,
+        requires_bearer=True,
+        # ICBM policy, never a provider fact: the bounds of the other adopted mutations.
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=True,
+        success_predicate=product_delete_succeeded,
+        predicate_revision="m5-delete-r1",
+    ),
     # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
     EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
@@ -473,7 +504,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-published-state-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-delete-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -500,6 +531,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # The published-state read slice: the origin-product read retains the two documented status
     # leaves (Issue #89 5911962320). No endpoint is adopted or re-adopted by it.
     "m5-published-state-r1": "c20e9369999e1c38db61df874d47ea354670f41f6180cec7bce0dc36e8ced138",
+    # The DELETE slice adopts DELETE /v2/products/origin-products/{originProductNo} (ADR-0018 §3.5).
+    "m5-delete-r1": "6b23aeaf7d315c87fc97ddc7c431e4e6e7b3ae2e09074f87191012ed2ae0869f",
 }
 
 

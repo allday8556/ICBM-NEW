@@ -84,6 +84,7 @@ _PRODUCT_READS = frozenset(
 _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
+_PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
 # The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
 # of an ICBM listing identity (ruling R1), 30 lowercase hexadecimal characters. A search is never
 # made with an operator's text, a product name or the 37-character internal identity.
@@ -140,6 +141,20 @@ class ProductReadRequest:
     ``product_no`` fills the single path placeholder of the adopted read-back. It is the provider's
     own identifier, so it is accepted only in the conservative shape below; the request carries no
     query at all, because both endpoints declare an empty safe query-key allow-list."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    product_no: str
+
+
+@dataclass(frozen=True)
+class ProductDeleteRequest:
+    """Delete one origin product by its provider number (ADR-0018 §3.5).
+
+    ``product_no`` fills the single path placeholder, in the same conservative shape as a
+    read-back; the request carries no query and no body. The bearer exists only for this call.
+    """
 
     access_token: str = field(repr=False)
     credential_generation: int
@@ -212,6 +227,15 @@ class ProductReadback:
     endpoint_id: EndpointId
     product_no: str
     retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class ProductDeleteResponse:
+    """A deletion the provider answered with the documented success (``product_delete_succeeded``).
+    Nothing of the body is retained."""
+
+    product_no: str
     http_status: int
 
 
@@ -380,6 +404,14 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
+    if contract.endpoint_id is _PRODUCT_DELETE:
+        if not isinstance(request, ProductDeleteRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        (placeholder,) = contract.path_params
+        return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
     if contract.endpoint_id is _PRODUCT_CREATE:
         # The document type is the provenance gate: only the wire projection produces one, and it
         # produces one only after validating the whole request against the adopted contract.
@@ -473,6 +505,7 @@ _Result = (
     | SellerAccount
     | ProductReadback
     | ProductCreateResponse
+    | ProductDeleteResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -481,6 +514,9 @@ _Result = (
 def _result(contract: EndpointContract, request: object, body: object, status: int) -> _Result:
     """The typed result of a response that passed the endpoint's success predicate."""
     fields = cast(dict[str, object], body)
+    if contract.endpoint_id is _PRODUCT_DELETE:
+        assert isinstance(request, ProductDeleteRequest)
+        return ProductDeleteResponse(product_no=request.product_no, http_status=status)
     if contract.endpoint_id is _PRODUCT_CREATE:
         assert isinstance(request, ProductCreateRequest)
         # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
@@ -567,6 +603,13 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD],
         request: ImageUploadRequest,
     ) -> ImageUploadResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_DELETE_V2],
+        request: ProductDeleteRequest,
+    ) -> ProductDeleteResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...
