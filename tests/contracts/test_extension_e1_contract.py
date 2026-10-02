@@ -216,8 +216,8 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
     )
     # E1: the policy read and the capture. E3 (ADR-0019 §8.1): the queue policy read, the
-    # declaration, the queue read, the server-issued next read and the cancel. Each has its own
-    # preflight and nothing else does.
+    # declaration, the queue read, the server-issued next read, the cancel and the release of a
+    # read the extension could not capture. Each has its own preflight and nothing else does.
     assert routes == [
         ("get", "POLICY_PATH"),
         ("get", "QUEUE_PATH"),
@@ -229,10 +229,12 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         ("options", "QUEUE_NEXT_PATH"),
         ("options", "QUEUE_PATH"),
         ("options", "QUEUE_POLICY_PATH"),
+        ("options", "QUEUE_RELEASE_PATH"),
         ("post", "CAPTURE_PATH"),
         ("post", "QUEUES_PATH"),
         ("post", "QUEUE_CANCEL_PATH"),
         ("post", "QUEUE_NEXT_PATH"),
+        ("post", "QUEUE_RELEASE_PATH"),
     ]
     source = _read(ROUTER)
     assert 'POLICY_PATH = "/api/v1/collect/extension/capture-policies/{supplier_key}"' in source
@@ -243,6 +245,7 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         'QUEUE_PATH = "/api/v1/collect/extension/queues/{queue_id}"',
         'QUEUE_NEXT_PATH = "/api/v1/collect/extension/queues/{queue_id}/next"',
         'QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"',
+        'QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"',
     ):
         assert path in source, path
 

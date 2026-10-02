@@ -15,7 +15,8 @@ decides everything after that, and the extension's own clock decides nothing:
   written before the answer is returned) or ``DONE``. A supplier has at most one open queue and at
   most one issued, unsettled read.
 - **One item is one read.** An item is never reissued or retried. An issued read that ends without
-  a capture — its time ran out, or its capture was refused — is ``EXPIRED``: spent, still counted.
+  a capture — its time ran out, its capture was refused, or the extension gave it back because it
+  could not capture it — is ``EXPIRED``: spent, still counted.
 - **A queue goes on past an item that fails** (the user's rule of 2026-10-02). An expired read, a
   refused capture and a ``FAILED`` run leave their item as it ended, and the queue reads the next
   item. The operator sees every failure in the queue and in Collection Management.
@@ -536,19 +537,32 @@ class ExtensionQueues:
         goes on. The ticket alone names the read — a random 256-bit value issued once — so nothing
         else the refused capture claims, its supplier included, can keep the read open. A ticket
         that answers no issued read changes nothing."""
+        self._spend(ticket, None, "collect.extension_queue_read_refused")
+
+    def release(self, queue_id: str, ticket: str) -> QueueView:
+        """The extension could not capture an issued read — the page did not load, or the cut
+        refused it before anything was sent — and gives the read back at once instead of letting
+        it run out. It is spent exactly as an expired or refused read is, never reissued, and the
+        queue goes on without waiting for the issue lifetime. The ticket alone names the read; a
+        ticket that answers no issued read of this queue changes nothing."""
+        self._spend(ticket, queue_id, "collect.extension_queue_read_released")
+        return self.read(queue_id)
+
+    def _spend(self, ticket: str, queue_id: str | None, event: str) -> None:
         with self._db.write() as session:
             item = session.scalar(
                 select(ExtensionQueueItem).where(
                     ExtensionQueueItem.ticket_sha256 == _ticket_digest(ticket)
                 )
             )
-            if item is None or item.state != QueueItemState.ISSUED.value:
+            if (
+                item is None
+                or item.state != QueueItemState.ISSUED.value
+                or (queue_id is not None and item.queue_id != queue_id)
+            ):
                 return
             item.state = QueueItemState.EXPIRED.value
-            logger.info(
-                "collect.extension_queue_read_refused",
-                extra={"queue_id": item.queue_id, "item_id": item.item_id},
-            )
+            logger.info(event, extra={"queue_id": item.queue_id, "item_id": item.item_id})
             session.flush()
 
 
