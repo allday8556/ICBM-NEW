@@ -211,6 +211,10 @@ SECURITY_MATERIAL = {
     "credential-text": "<p>credential=synthetic-value-1234</p>",
     "password-text": "<p>password: synthetic-value-1234</p>",
     "authorization-text": "<p>Authorization: synthetic-value-1234</p>",
+    # An image reference is read whole: a fragment, a descriptor or an encoded query value.
+    "url-fragment-secret": '<img src="/web/a.jpg#token=synthetic-value">',
+    "srcset-descriptor-secret": '<img srcset="/web/a.jpg session=synthetic-value">',
+    "url-encoded-secret": '<img src="/web/a.jpg?x=token%3Dsynthetic-value">',
 }
 # Product data that only looks private: it goes on as it arrived and leaves a note.
 PRODUCT_DATA = {
@@ -331,6 +335,9 @@ def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
         assert result.blocking, addition
         for kind in (*result.blocking, *result.notes):
             assert secret not in kind, (addition, kind)
+    # Any other <img> attribute is read for a secret too, whatever a policy allows.
+    blocking = gate(frame(body=BODY + '<img alt="token=synthetic-value-1234">')).blocking
+    assert any(kind.startswith("SECRET_VALUE:alt@") for kind in blocking), blocking
     # An attribute name is read with the same secret words as a query key and a name=value text.
     for name in ("data-cookie", "data-access-key", "data-private_key", "data-csrf", "data-auth"):
         blocking = gate(frame(body=BODY + f'<p {name}="1">x</p>')).blocking
@@ -376,7 +383,8 @@ def test_the_gate_reads_every_region_alike() -> None:
 
 def test_an_image_reference_is_judged_as_a_locator_not_as_a_secret() -> None:
     # Suppliers name uploaded images with long hashes. A reference is judged by what it is: only a
-    # credential, a secret query key or a token shape blocks; any other odd shape is a note.
+    # credential, a secret query key, a token shape or a secret anywhere in its value blocks; any
+    # other odd shape is a note.
     gate = _server_final_scan
     hashed = "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d"
     for clean in (

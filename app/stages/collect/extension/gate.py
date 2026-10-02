@@ -13,7 +13,8 @@ refuses **only** what must never be collected, fail-closed:
 
 - a secret: an attribute named for a token, session, cookie, credential or signature; a value
   shaped like a JWT, a bearer token, a ``key=value`` secret parameter or a long hex secret; a URL
-  carrying credentials;
+  carrying credentials. Every value is read, an image reference's whole value and its decoded form
+  included (its query, fragment and descriptors);
 - the signed-in member's own account and identity: a Cafe24 member variable
   (``xans-member-var-*``), a Cafe24 my-shop module (``xans-myshop-*``), or an account, my-page,
   login or user-info region.
@@ -36,7 +37,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 BoundaryOf = Callable[[Mapping[str, Any]], str]
 
@@ -74,17 +75,18 @@ _SECRET_NAME = re.compile(rf"(?i)({_SECRET_WORDS}|auth)")
 _SECRET_KEY = re.compile(
     rf"(?i)^(?:.*(?:{_SECRET_WORDS}|auth).*|sid|sessid|jsessionid|phpsessid|sig|key|pw|pwd)$"
 )
-# A value that is a secret, wherever it sits.
-_SECRET_VALUE = re.compile(
-    r"(?i)("
+# A secret by its shape: a JWT, a bearer token, a ``name=value`` secret or URL credentials.
+_SECRET_SHAPE = (
     r"eyJ[A-Za-z0-9_-]{10,}"
     r"|\bbearer\s+[A-Za-z0-9._~+/-]{8,}"
     rf"|\b(?:[a-z_-]*(?:{_SECRET_WORDS})[a-z_-]*"
     r"|auth|authorization|sid|sessid|jsessionid|phpsessid|sig|pwd)\s*[=:]\s*[^\s&\"'<>]{4,}"
-    r"|\b[a-f0-9]{32,}\b"
     r"|[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"
-    r")"
 )
+# A value that is a secret, wherever it sits: a secret shape or a long hex run.
+_SECRET_VALUE = re.compile(rf"(?i)({_SECRET_SHAPE}|\b[a-f0-9]{{32,}}\b)")
+# The same in an image reference but for the hex run: suppliers name uploads with long hashes.
+_SECRET_IN_REFERENCE = re.compile(rf"(?i)({_SECRET_SHAPE})")
 # The signed-in member's own account and identity.
 _IDENTITY_PREFIXES = ("xans-member-var", "xans-myshop")
 _ACCOUNT_PREFIXES = ("account", "mypage", "login", "userinfo", "user-info")
@@ -209,17 +211,27 @@ class _Scan(HTMLParser):
             quoted = safe_token(name)
             if _SECRET_NAME.search(name):
                 self.blocking.setdefault(f"SECRET_ATTRIBUTE:{quoted}@{boundary}")
-            if tag == "img" and name not in _NOT_A_REFERENCE:
+            reference = tag == "img" and name not in _NOT_A_REFERENCE
+            refused = False
+            if reference:
                 for problem in _reference_problems(name, value):
                     finding = f"IMAGE_REFERENCE_{problem}:{quoted}@{boundary}"
                     if problem in _SECURITY_REFERENCE:
+                        refused = True
                         self.blocking.setdefault(finding)
                     else:
                         self.notes.setdefault(finding)
-                continue
-            if _SECRET_VALUE.search(value) or _SECRET_VALUE.search(name):
+            # Every value is read for a secret. An image reference is read whole and decoded too: a
+            # fragment, a descriptor or a query value can carry one as well as a query key.
+            if refused:
+                secret = False
+            elif reference:
+                secret = any(_SECRET_IN_REFERENCE.search(text) for text in (value, unquote(value)))
+            else:
+                secret = _SECRET_VALUE.search(value) is not None
+            if secret or _SECRET_VALUE.search(name):
                 self.blocking.setdefault(f"SECRET_VALUE:{quoted}@{boundary}")
-            elif _CONTACT.search(value):
+            elif not reference and _CONTACT.search(value):
                 self.notes.setdefault(f"CONTACT:{quoted}@{boundary}")
         if tag not in _VOID:
             self._open.append((tag, boundary))
