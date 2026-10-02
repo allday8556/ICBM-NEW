@@ -66,7 +66,8 @@ def test_0034_adds_nullable_columns_and_rewrites_nothing(tmp_path: Path) -> None
     command.upgrade(alembic_config(_url(database)), BEFORE)
     _old_rows(database)
     triggers = _triggers(database)
-    upgrade_to_head(_url(database))
+    # Exactly this migration: a later one may add its own table and triggers (e.g. 0036).
+    command.upgrade(alembic_config(_url(database)), MIGRATION)
     with contextlib.closing(sqlite3.connect(database)) as raw:
         for table in TABLES:
             columns = {row[1]: row for row in raw.execute(f"PRAGMA table_info({table})")}
@@ -76,7 +77,7 @@ def test_0034_adds_nullable_columns_and_rewrites_nothing(tmp_path: Path) -> None
             assert raw.execute(f"SELECT {', '.join(COLUMNS)} FROM {table}").fetchall() == [
                 (None, None, None)
             ], table
-    # Additive only: every trigger that existed is still there, unchanged, and none was added.
+    # Additive only: every trigger that existed is still there, unchanged, and 0034 added none.
     assert _triggers(database) == triggers
 
 

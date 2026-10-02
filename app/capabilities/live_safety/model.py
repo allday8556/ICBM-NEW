@@ -131,9 +131,9 @@ ENDPOINT_NOT_ADOPTED: Final = "LIVE_ENDPOINT_NOT_ADOPTED"
 # (ADR-0014 §28); the missing one is named on its own, never folded into the CREATE sender's.
 RECONCILE_PATH_NOT_ADOPTED: Final = "LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED"
 SENDER_NOT_WIRED: Final = "LIVE_SENDER_NOT_WIRED"
-# §6.1 / G3-30: the explicit user and architect acceptance of the residual risk. It is **not
-# recorded** (§10); the decision is recorded in GitHub, never in the application, so it has no
-# durable owner here, is never proven in process and this layer always refuses.
+# §6.1 / G3-30: the explicit user and architect acceptance of the residual risk. The decision is
+# recorded in GitHub; the layer is satisfied only by its durable proof (migration 0036) for the
+# stage's own account under the current risk contract, and refuses without one.
 RESIDUAL_RISK_UNACCEPTED: Final = "LIVE_RESIDUAL_RISK_NOT_ACCEPTED"
 ELIGIBILITY_UNPROVEN: Final = "LIVE_CANARY_ELIGIBILITY_UNPROVEN"
 RESTORE_PROOF_ABSENT: Final = "LIVE_RESTORE_PROOF_ABSENT"

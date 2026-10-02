@@ -197,7 +197,10 @@ COLLECT_TRANSPORT = "0034_collect_transport_provenance"
 # ADR-0019 §8.1 (E3): the extension list queue and its items. Collection state, never registration
 # state.
 EXTENSION_QUEUE = "0035_extension_list_queue"
-SCHEMA_HEAD = EXTENSION_QUEUE
+# ADR-0018 §6.1, G3-30: the durable proof of the user and architect residual-risk acceptance. Live
+# safety evidence, never registration state.
+G3_RESIDUAL_RISK = "0036_g3_residual_risk_acceptance"
+SCHEMA_HEAD = G3_RESIDUAL_RISK
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -214,6 +217,7 @@ AFTER_M5 = (
     M5_ELIGIBILITY,
     COLLECT_TRANSPORT,
     EXTENSION_QUEUE,
+    G3_RESIDUAL_RISK,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

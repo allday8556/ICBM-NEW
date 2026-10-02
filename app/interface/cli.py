@@ -22,6 +22,12 @@ exact ASSET grant or Intent into a fresh restore root the operator names, and
 FAILED proof of the state as it is; nothing here decides a verdict, and a proof proves only
 itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 
+**The residual-risk acceptance** (ADR-0018 §6.1, G3-30) is given by the user and the architect in
+GitHub. ``record-residual-risk-acceptance`` is the only path that records its durable proof: it
+calls ``ResidualRiskAcceptanceService.record`` with the account, the current risk contract and
+the two GitHub comment identities (``github_issue_comment:<id>@<sha256>``). It records a pointer
+to that decision, never the decision, and it authorizes nothing: every other layer still decides.
+
 Data-directory ownership (ADR-0006) is the default: every command acquires the exclusive
 data-directory lock before it does anything, unless it is listed in ``READ_ONLY_COMMANDS``.
 A new command therefore owns the directory unless someone deliberately classifies it as
@@ -85,6 +91,7 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "restore-drill-asset",
     "restore-drill-create",
     "prove-retention",
+    "record-residual-risk-acceptance",
 )
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
@@ -151,6 +158,26 @@ def _add_operator_commands(live_commands: Any) -> None:
         "--checks", required=True, type=Path, help="the closed checklist, as a JSON object"
     )
     record.add_argument("--actor", required=True, help="the reviewer who records it")
+    accept = live_commands.add_parser(
+        "record-residual-risk-acceptance",
+        help="record the proof of the user and architect residual-risk acceptance (ADR-0018 §6.1)",
+    )
+    accept.add_argument("--marketplace-key", required=True)
+    accept.add_argument("--account", required=True, help="the canonical marketplace account id")
+    accept.add_argument(
+        "--risk-contract", required=True, help="the exact residual-risk contract version accepted"
+    )
+    accept.add_argument(
+        "--user-acceptance",
+        required=True,
+        help="the user's GitHub acceptance comment: github_issue_comment:<id>@<sha256 of body>",
+    )
+    accept.add_argument(
+        "--architect-acceptance",
+        required=True,
+        help="the architect's GitHub acceptance comment: github_issue_comment:<id>@<sha256>",
+    )
+    accept.add_argument("--actor", required=True, help="the operator who records it")
     asset = live_commands.add_parser(
         "issue-asset-grant", help="issue the exact ASSET-stage grant (ADR-0018 §3.2)"
     )
@@ -437,6 +464,20 @@ def _record_eligibility(container: Any, args: argparse.Namespace, correlation_id
     )
 
 
+def _record_residual_risk_acceptance(
+    container: Any, args: argparse.Namespace, correlation_id: str
+) -> Any:
+    return container.residual_risk.record(
+        marketplace_key=args.marketplace_key,
+        marketplace_account_id=args.account,
+        risk_contract=args.risk_contract,
+        user_acceptance=args.user_acceptance,
+        architect_acceptance=args.architect_acceptance,
+        actor=args.actor,
+        correlation_id=correlation_id,
+    )
+
+
 def _issue_asset_grant(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
     return container.live_authority.issue_asset_grant(
         marketplace_key=args.marketplace,
@@ -514,6 +555,7 @@ _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "restore-drill-asset": _restore_drill_asset,
     "restore-drill-create": _restore_drill_create,
     "prove-retention": _prove_retention,
+    "record-residual-risk-acceptance": _record_residual_risk_acceptance,
 }
 
 

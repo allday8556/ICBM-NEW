@@ -14,6 +14,10 @@
 - ``canary_eligibility_records`` (ADR-0018 §5.1; migration 0033): the canary-local eligibility
   evidence of one exact lineage. Append-only: never updated, never deleted; the current record of
   a scope is its highest ``seq``.
+- ``residual_risk_acceptances`` (ADR-0018 §6.1, G3-30; migration 0036): the durable proof that
+  the user and the architect accepted the §6.1 residual risk in GitHub, for one account and one
+  exact risk contract. It owns no decision: it points at the two exact GitHub comments, by id and
+  body digest. Append-only: never updated, never deleted.
 
 Every table is append-oriented: a delete is refused by a trigger, and an update may only move the
 state machine forward.
@@ -503,5 +507,59 @@ class CanaryEligibilityRecord(Base):
     review_packet_digest: Mapped[str] = mapped_column(String(64))
     checks_json: Mapped[str] = mapped_column(Text)
     verdict: Mapped[str] = mapped_column(String(16))
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+# A GitHub comment identity: the numeric id of an issue or PR comment (as ``live_grants`` holds).
+_COMMENT_ID_CHECK = "length({c}) BETWEEN 6 AND 20 AND {c} NOT GLOB '*[^0-9]*'"
+
+
+class ResidualRiskAcceptance(Base):
+    """The durable proof of one explicit user and architect acceptance of the ADR-0018 §6.1
+    residual risk, for one canonical account and one exact risk contract (G3-30).
+
+    GitHub holds the decision; this row only points at it — the user's and the architect's
+    comment, each by id and the SHA-256 of its body — and binds it to the account and to the
+    risk contract version and statement digest it accepted. Append-only. It authorizes nothing:
+    it is one layer of the send-time stack, and every other layer still decides.
+    """
+
+    __tablename__ = "residual_risk_acceptances"
+    __table_args__ = (
+        _account(),
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        CheckConstraint(_hex64("risk_statement_digest"), name="risk_statement_digest_hex"),
+        CheckConstraint(_COMMENT_ID_CHECK.format(c="user_comment_id"), name="user_comment_id"),
+        CheckConstraint(
+            _COMMENT_ID_CHECK.format(c="architect_comment_id"), name="architect_comment_id"
+        ),
+        CheckConstraint(_hex64("user_comment_digest"), name="user_comment_digest_hex"),
+        CheckConstraint(_hex64("architect_comment_digest"), name="architect_comment_digest_hex"),
+        CheckConstraint("user_comment_id <> architect_comment_id", name="two_distinct_acceptances"),
+        CheckConstraint(
+            "risk_contract_version <> '' AND recorded_by <> ''", name="identity_present"
+        ),
+        Index(
+            "ux_residual_risk_acceptances_scope_seq",
+            "marketplace_key",
+            "marketplace_account_id",
+            "risk_contract_version",
+            "seq",
+            unique=True,
+        ),
+    )
+
+    acceptance_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    marketplace_key: Mapped[str] = mapped_column(String(40))
+    marketplace_account_id: Mapped[str] = mapped_column(String(40))
+    risk_contract_version: Mapped[str] = mapped_column(String(64))
+    # SHA-256 of the exact §6.1 residual-risk statement this acceptance accepted.
+    risk_statement_digest: Mapped[str] = mapped_column(String(64))
+    seq: Mapped[int] = mapped_column(Integer)
+    user_comment_id: Mapped[str] = mapped_column(String(20))
+    user_comment_digest: Mapped[str] = mapped_column(String(64))
+    architect_comment_id: Mapped[str] = mapped_column(String(20))
+    architect_comment_digest: Mapped[str] = mapped_column(String(64))
     recorded_by: Mapped[str] = mapped_column(String(64))
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)

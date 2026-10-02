@@ -104,6 +104,7 @@ def test_every_operator_command_is_an_owning_live_command() -> None:
         ("live", "restore-drill-asset"),
         ("live", "restore-drill-create"),
         ("live", "prove-retention"),
+        ("live", "record-residual-risk-acceptance"),
     }
     # They hold the data directory like every other writer; none is classified read-only.
     assert commands <= set(cli.OWNING_COMMANDS)
@@ -549,3 +550,71 @@ def test_the_create_drill_runs_through_the_drill_owner_for_one_intent(
         OPERATOR,
     )
     assert code == 1 and "DRILL_RESTORE_ROOT_INVALID" in err
+
+
+# ---------------------------------------------------------------- residual-risk acceptance (§6.1)
+
+USER_ACCEPTANCE = "github_issue_comment:5950000001@" + "a" * 64
+ARCHITECT_ACCEPTANCE = "github_issue_comment:5950000002@" + "b" * 64
+
+
+def test_the_residual_risk_acceptance_proof_is_recorded_by_its_command(
+    served: Container, config: AppConfig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from app.capabilities.live_safety.residual_risk import (
+        CONTRACT_NOT_CURRENT,
+        RESIDUAL_RISK_CONTRACT_VERSION,
+    )
+    from tests.support.register_support import MARKET, establish
+
+    account = establish(served, config, MARKET, "uid-market-a-1")
+    base = ["record-residual-risk-acceptance", "--marketplace-key", MARKET, "--account", account]
+    tail = ["--user-acceptance", USER_ACCEPTANCE, "--architect-acceptance", ARCHITECT_ACCEPTANCE]
+    # A contract that is not the current one is refused with the owner's code; nothing recorded.
+    code, _, err = _run(
+        capsys,
+        *base,
+        "--risk-contract",
+        "adr-0018-6.1-residual-risk/v0",
+        *tail,
+        "--actor",
+        OPERATOR,
+    )
+    assert code == 1 and CONTRACT_NOT_CURRENT in err
+    assert served.residual_risk.accepted(MARKET, account) is False
+    code, shown, _ = _run(
+        capsys, *base, "--risk-contract", RESIDUAL_RISK_CONTRACT_VERSION, *tail, "--actor", OPERATOR
+    )
+    assert code == 0
+    assert shown["seq"] == 1 and shown["marketplace_account_id"] == account
+    assert shown["user_acceptance"]["comment_id"] == "5950000001"
+    assert shown["architect_acceptance"]["comment_id"] == "5950000002"
+    assert served.residual_risk.accepted(MARKET, account) is True
+
+
+def test_an_unsupported_acceptance_form_is_refused_and_records_nothing(
+    fresh: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from app.capabilities.live_safety.residual_risk import (
+        EVIDENCE_UNSUPPORTED,
+        RESIDUAL_RISK_CONTRACT_VERSION,
+    )
+
+    code, _, err = _run(
+        capsys,
+        "record-residual-risk-acceptance",
+        "--marketplace-key",
+        "smartstore",
+        "--account",
+        "acct-1",
+        "--risk-contract",
+        RESIDUAL_RISK_CONTRACT_VERSION,
+        "--user-acceptance",
+        "https://github.com/o/r/issues/89#issuecomment-5950000001",
+        "--architect-acceptance",
+        ARCHITECT_ACCEPTANCE,
+        "--actor",
+        OPERATOR,
+    )
+    assert code == 1 and EVIDENCE_UNSUPPORTED in err
+    assert _rows(fresh, "residual_risk_acceptances") == 0

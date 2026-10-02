@@ -15,9 +15,10 @@ failing layer, and its code is the first failing one, so this order decides the 
    (for an upload also: the artifact, and at admission its provenance, is the granted one);
 4. the stage's endpoint is adopted — ``SMARTSTORE_PRODUCT_CREATE_V2`` for a CREATE, the image
    upload for an upload;
-5. the residual-risk acceptance of §6.1 is recorded — at this main it is **not** recorded (§10),
-   and the decision is recorded in GitHub rather than in the application, so it has no durable owner
-   here and is never proven in process; this layer refuses every mutation at this main (G3-30);
+5. the residual-risk acceptance of §6.1 is recorded — the decision is the user's and the
+   architect's in GitHub, and its durable proof (migration 0036) binds the stage's own account and
+   the exact risk contract; without such a proof this layer refuses (G3-30). It authorizes nothing
+   by itself: every other layer still decides;
 6. canary eligibility, a current restore proof, evidence retention and visual acceptance are
    proven — production wires :class:`~app.capabilities.live_safety.proofs.DurableStageProofs`, whose
    restore, retention
@@ -156,7 +157,7 @@ class StageProofs(Protocol):
         self, stage: MutationStage, unit_ref: str, binding: EligibilityBinding | None
     ) -> bool: ...
 
-    def residual_risk_accepted(self) -> bool: ...
+    def residual_risk_accepted(self, marketplace_key: str, marketplace_account_id: str) -> bool: ...
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool: ...
 
@@ -263,6 +264,7 @@ class SafetyStack:
             target_digest=_create_digest(intent, attempt_no, scope),
             endpoint_adopted=endpoint_adopted,
             eligibility=binding_of(send_gate, preparation_revision_id, unit_ref=unit_ref),
+            account=(intent.marketplace_key, intent.marketplace_account_id),
         )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
         layers.append(_reconcile_layer(reconcile_path_adopted))
@@ -291,6 +293,7 @@ class SafetyStack:
                 target_digest=_create_digest(intent, attempt_no, scope),
                 endpoint_adopted=endpoint_adopted,
                 eligibility=stage_gate.eligibility,
+                account=(intent.marketplace_key, intent.marketplace_account_id),
             )
         layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
         # §10: the CREATE endpoint-adoption row is CREATE **and** the positive-only reconcile path.
@@ -499,6 +502,7 @@ class SafetyStack:
             target_digest=target_digest,
             endpoint_adopted=target.endpoint_adopted,
             eligibility=target.candidate.eligibility,
+            account=(target.key.marketplace_key, target.key.marketplace_account_id),
         )
         layers.insert(2, _layer(Layer.GRANT, matching, GRANT_MISSING))
         layers.insert(
@@ -552,6 +556,7 @@ class SafetyStack:
         target_digest: str,
         endpoint_adopted: bool,
         eligibility: EligibilityBinding | None,
+        account: tuple[str, str],
     ) -> list[LayerView]:
         state = self._mode.state()
         live = bool(state.live_writes_permitted) and state.mode is ExecutionMode.LIVE
@@ -569,12 +574,12 @@ class SafetyStack:
             brake_layer,
             _layer(Layer.ENDPOINT_ADOPTED, endpoint_adopted, ENDPOINT_NOT_ADOPTED),
             # §10 'residual-risk acceptance (§6.1)': a mandatory row of both stage columns, proven
-            # from its own evidence and never asserted. At this main it is not recorded, and the
-            # decision is recorded in GitHub rather than in the application, so it has no durable
-            # owner here, no production proof source answers True and this layer refuses (G3-30).
+            # from its own evidence and never asserted. The decision is in GitHub; the proof owner
+            # answers only for the stage's own account and the exact current risk contract, and
+            # without that proof this layer refuses (G3-30).
             _layer(
                 Layer.RESIDUAL_RISK_ACCEPTED,
-                proofs.residual_risk_accepted(),
+                proofs.residual_risk_accepted(*account),
                 RESIDUAL_RISK_UNACCEPTED,
             ),
             _layer(

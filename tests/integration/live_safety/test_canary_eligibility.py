@@ -933,7 +933,12 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
 
     before = tables()
     command.downgrade(alembic_config(url), "0032_m5_registration_authoring_revisions")
-    assert before - tables() == {TABLE, "extension_queues", "extension_queue_items"}
+    assert before - tables() == {
+        TABLE,
+        "extension_queues",
+        "extension_queue_items",
+        "residual_risk_acceptances",
+    }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
     with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
@@ -949,7 +954,7 @@ def test_the_retention_owner_protects_the_table() -> None:
     from app.capabilities.live_safety.retention import PROTECTED_TABLES, RETENTION_CHECKS_VERSION
 
     assert TABLE in PROTECTED_TABLES
-    assert RETENTION_CHECKS_VERSION == "evidence-retention-checks/v5"
+    assert RETENTION_CHECKS_VERSION == "evidence-retention-checks/v6"
 
 
 def test_the_metadata_owner_gained_no_compliance_meaning() -> None:

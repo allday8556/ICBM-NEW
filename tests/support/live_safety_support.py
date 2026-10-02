@@ -89,7 +89,7 @@ class ProvenProofs:
     def canary_non_regulated(self, stage: MutationStage, unit_ref: str, binding: Any) -> bool:
         return "eligibility" not in self.missing
 
-    def residual_risk_accepted(self) -> bool:
+    def residual_risk_accepted(self, marketplace_key: str, marketplace_account_id: str) -> bool:
         return "residual_risk" not in self.missing
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:

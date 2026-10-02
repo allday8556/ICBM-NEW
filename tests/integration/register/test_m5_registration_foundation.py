@@ -499,6 +499,7 @@ ADAPTIVE_TABLES = (
     "canary_eligibility_records",
     "extension_queues",
     "extension_queue_items",
+    "residual_risk_acceptances",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
