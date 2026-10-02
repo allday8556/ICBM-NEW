@@ -502,7 +502,12 @@ def test_0032_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     before = tables()
     command.downgrade(alembic_config(url), "0031_m5_registration_reconcile")
     # 0032 owns exactly this table; the one a later revision adds steps down with it.
-    assert before - tables() == {TABLE, "canary_eligibility_records"}
+    assert before - tables() == {
+        TABLE,
+        "canary_eligibility_records",
+        "extension_queues",
+        "extension_queue_items",
+    }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
     with contextlib.closing(sqlite3.connect(tmp_path / "icbm.db")) as connection:
