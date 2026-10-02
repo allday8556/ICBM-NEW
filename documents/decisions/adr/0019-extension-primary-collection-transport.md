@@ -163,15 +163,63 @@ product-scope cut → browser sanitize → loopback → server final scan → Do
 
 - **Scope first.** The product-scope cut happens first, in the browser, under the
   `BrowserCapturePolicy`. **A whole authenticated page is never sent or retained.**
-- **The server always runs its own sanitizer and final scan** on exactly what arrived. Browser
-  sanitization is defense in depth, never the only guard.
+- **The server always runs its own structural check and security gate** on exactly what arrived.
+  Browser sanitization is defense in depth, never the only guard.
 - **Forbidden:** whole-page capture followed by exceptions for `href` or anchor text. A final-scan
   finding is never cleared by such an allowance.
-- **Private material inside the product scope still refuses fail-closed.**
+- **Security material inside the product scope still refuses fail-closed** (§6.1).
 - **The C1 regression pair** is required of the first extension slice:
   - the shared non-product anchor that blocked both C1 candidates must be absent, because it lies
     outside the scope;
-  - private material placed inside the scope must still refuse.
+  - security material placed inside the scope must still refuse.
+
+### 6.1 Broad product capture, security-only gate (the user's decision, 2026-10-01)
+
+The first real KM통상 E1 acceptances (`documents/acceptance/adaptive/EXTENSION-E1.md` §5.1) were
+refused because the server's final gate refused anything the Adaptive capture owner's sanitizer
+would have cleaned: a member-named element, a business phone number, an image query. The user
+decided, in the Track A session on 2026-10-01, that collection works this way:
+
+```text
+broad product capture → security-only hard filter → ICBM canonical extraction
+→ what ICBM does not need is dropped → only canonical facts and evidence are stored
+```
+
+- **Inside the product scope, product data and its evidence are collected as broadly as
+  possible.** The capture goes on as it arrived.
+- **Only what must never be collected refuses, fail-closed, at the capture step:**
+  credentials, tokens, cookies, sessions, login information, user input values and obvious
+  personal information. The server's security gate (`app/stages/collect/extension/gate.py`)
+  refuses:
+  - a secret: an attribute named for a token, session, cookie, credential or signature; a value
+    shaped like a JWT, a bearer token, a secret `key=value` parameter or a long hex secret; a URL
+    carrying credentials; an image reference with a secret query key;
+  - the signed-in member's own account and identity: a Cafe24 member variable
+    (`xans-member-var-*`), a Cafe24 my-shop module (`xans-myshop-*`), or an account, my-page,
+    login or user-info region.
+- **User input values never arrive.** The `BrowserCapturePolicy` keeps no `value` or `name`
+  attribute and no `textarea`, and one that arrives is a policy violation.
+- **A supplier's or maker's business contact is product data** (the user's decision). A phone
+  number or e-mail in the product information is collected; only the signed-in member's own
+  contact is personal.
+- **A member price is product data.** A `회원가` label, or an element whose class begins with
+  `member`, is collected. The private-region naming rule of the Adaptive capture owner does not
+  decide what the extension may collect.
+- **Everything else that only looks private** — an image reference with an ordinary query,
+  fragment or odd shape — goes on as well. Each such item is recorded as a note (a kind and a
+  boundary, never a value) in the run's log.
+- **What ICBM does not need is dropped at extraction.** The supplier's canonical extractor takes
+  only the fields ICBM defines. Only canonical facts and their evidence are ever stored, in the
+  `ProductFactsRevision` the extractor writes (E2), never the capture.
+- **An empty image reference is no reference**, as the supplier's image owner reads it (a Cafe24
+  lazy-load `<img>` leaves `src` empty); it is neither a finding nor a note.
+- A known identity widget is better cut in the browser than refused on the server: the KM policy
+  `kmretail-capture-2` cuts the member benefit box.
+- The Adaptive capture owner's own sanitizer and final scan
+  (`app/stages/collect/adaptive/engine/capture.py`) are unchanged for the Adaptive Phase C path.
+
+This supersedes owner amendment `5909645067` §1 (a capture the sanitizer had to clean fails its
+run) for the extension transport.
 
 ### 7. Images
 
@@ -194,6 +242,88 @@ product-scope cut → browser sanitize → loopback → server final scan → Do
   server-issued work, never by the extension's own clock alone.
 - **Performance** is a later benchmark, never an acceptance promise; correctness and bounded
   behaviour come first. "500 products in under an hour" is an example of such a target.
+
+### 8.1 The E3 queue contract (the user's instruction, 2026-10-02)
+
+The user ordered E3 after the security gate (§6.1) merged. This section is the contract E3 is built
+and audited against. It adds no read, host, path or query to any supplier and changes no E1 or E2
+rule.
+
+**Discovery reads nothing.**
+- The operator opens a supplier list page in their own Chrome and asks the side panel to find its
+  products. The extension reads only that already-loaded page: its anchors, in document order.
+- **Only a product URL leaves the browser.** The server gives the extension the supplier's reviewed
+  product path form from its `CollectionProfile`. The extension sends a link only when it is on the
+  storefront host and its path fully matches that form, and it sends only its scheme, host and
+  path. No other link, and nothing of the list page itself (its URL, HTML or anchor text), is sent
+  or kept, and no credentials, query or fragment ever are. A product link carries what a single
+  click on that product would already send (E1), and nothing more. A product named only in a query
+  is not discovered.
+- **The server judges every link again.** A link is a queue candidate only if `check_target`
+  accepts it as a product read of that supplier and the §6.1 secret rules find nothing in it.
+  Links are deduplicated by the product the URL names. A refused link is counted, never stored or
+  logged by value. The browser filter keeps material in the page; it never decides what is read.
+- No list-page topology is added to a supplier. Reconnaissance never observed one, and a value is
+  never added because it seems likely. A later, observed list region may narrow discovery; it may
+  never widen it.
+
+**The bounds are declared, twice, and never defaulted.**
+- The supplier's `CollectionProfile` declares its queue limits (it owns pacing, AC-11):
+  - the most links one discovery may submit;
+  - the most products one queue may hold;
+  - the shortest interval between two queue reads. It is never below the supplier's request
+    interval or the extension ingest interval;
+  - how long an issued read may stay open.
+
+  A supplier without them has no list queue: discovery and every queue call refuse fail-closed.
+- The operator declares each queue's own bounds in the side panel: the number of products and the
+  interval between them. An absent or out-of-range value refuses the queue before it exists. There
+  is no "unlimited", and nothing falls back to a code default.
+- Concurrency is one: a supplier has at most one issued, unsettled queue read. It is serialized
+  with the single-click path by the existing one-pending-extension-run rule.
+
+**Every read is server-issued work, reserved durably before it happens.**
+- The extension asks the server for the next item. The server answers with exactly one of:
+  - **wait**, with the seconds left: the queue interval, the same-product interval or an unsettled
+    run;
+  - **issue**: one item, its product URL and a random, single-use ticket. The issue is written
+    before the answer is sent, and it counts against the queue's budget;
+  - **done**: the queue is finished, cancelled or stopped.
+
+  The extension's clock never decides.
+- **The same-product interval of ADR-0010 §4 holds for queue reads.** Before an issue it counts
+  every read of the product: the server's own reads, issued queue reads and extension captures. A
+  single click stays the operator's own read under the E1 rules and is never refused by it.
+- One item is one read. An item is never reissued or retried. An issued item that is never captured
+  expires after the declared time and still counts.
+- **The queue stops, and never skips forward, at the first item that does not end `RECORDED` or
+  `NO_REVISION`.** That covers a refused capture, an expired ticket and a `FAILED` run. The operator
+  decides what follows; a new queue is a new declaration.
+- The operator may pause, by not asking, or cancel. Cancelling settles every unissued item.
+
+**Every product is an ordinary run.**
+- The extension navigates the operator's own tab to the issued URL, captures it with the unchanged
+  E1 capture, and sends it through the unchanged ingest with its ticket. The server accepts a
+  ticketed capture only for that item's exact URL, once, before the ticket expires.
+- From there it is the E2 pipeline: the §6.1 security gate, the KM extractor and a
+  `ProductFactsRevision`. An E3 run differs from a single-click run only in naming its queue item.
+- **"Skip collected products"** is an operator choice per queue. It skips, without a read, a product
+  that already has a `RECORDED` run for the supplier.
+
+**State and UI.**
+- The queue and its items are durable server state, so a restart loses no issued read. An item has
+  its own state axis: waiting, issued, captured, skipped, expired or cancelled. This axis is never a
+  run outcome. A captured item names its run, and the run keeps its own outcome, facts status and
+  code (§12.3).
+- The side panel shows discovery and queue progress (§12.1) as the approved prototype board
+  `확장 — 목록 발견과 대기열` draws them, with two corrections where a canonical rule wins:
+  - a row's chip is the item state or the run outcome, never `REVIEW` (AC-21);
+  - there is no supplier-session indicator the extension cannot know.
+- Collection Management shows every E3 run as it shows any run.
+
+**The real acceptance needs its own grant.** It needs one list page, a queue no larger than the
+user grants, and the declared interval, with the user's own click. Until then the slice runs only
+against local fixtures, with zero supplier reads.
 
 ### 9. No legacy extension code
 
@@ -306,7 +436,7 @@ AC-09  A difference in observed locators or content between transports still yie
 AC-10  BrowserCapturePolicy is an owner separate from EPR and PTR; it owns only the capture topology (product root, allowed and excluded regions, attributes, node and byte bounds) and holds no source fact or extraction rule
 AC-11  CollectionProfile keeps owning host, path, query, pacing and transport; BrowserCapturePolicy never overlaps it
 AC-12  The capture order is product-scope cut, browser sanitize, loopback, server final scan, DocumentView; a whole authenticated page is never sent or retained
-AC-13  A final-scan finding is never cleared by an href or anchor-text exception after a whole-page capture; private material inside the product scope still refuses fail closed
+AC-13  A final-scan finding is never cleared by an href or anchor-text exception after a whole-page capture; security material (a secret, or the signed-in member's own account and identity) inside the product scope still refuses fail closed, and other product data is captured broadly (§6.1)
 AC-14  The server policed fetch is the image default and the owner of the canonical checksum and source asset; a browser byte relay is not authorized by this ADR
 AC-15  A list-page queue is bounded by declared caps; a missing cap refuses fail closed before any read
 AC-16  No legacy ICBM extension code is inspected, copied or transplanted; only single-click collection and list-link discovery are inherited as requirements
@@ -320,6 +450,11 @@ AC-23  The extension may preview a sanitized candidate image reference, role and
 AC-24  A disconnected ICBM never causes authenticated whole-DOM local persistence; a retry buffer needs its own separately defined capture-envelope, sanitization and retention contract, and without it the extension fails closed
 AC-25  The EXTENSION area of the Collection Management start screen is connection and entry guidance and recent intake or status, never an in-app capture button; DIRECT_URL is the actionable fallback form
 AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics the bounded KM single-click acceptance requires; documents/contracts/ui/UI_SOURCE_OF_TRUTH.md changes only when an approved prototype revision and its fingerprint are recorded under its own process
+AC-27  List discovery reads only the operator's already-loaded page and sends only the scheme, host and path of links that fully match the supplier's reviewed product path form, nothing of the list page itself; the server judges every link with check_target and the secret rules, and no list-page topology is added without reconnaissance (§8.1)
+AC-28  A list queue exists only when the supplier's CollectionProfile declares its queue limits and the operator declares the queue's size and interval within them; a missing or out-of-range bound refuses before any read
+AC-29  Every queue read is server-issued work, written durably before the read and counted against the queue budget, never reissued or retried; the same-product interval counts server reads, issued queue reads and extension captures
+AC-30  A queue stops, never skipping forward, at the first item that does not end RECORDED or NO_REVISION; every queued product is an ordinary EXTENSION run through the unchanged ingest, security gate and extractor
+AC-31  A queue item's state is its own axis and never a run outcome; the side panel shows no REVIEW chip and no supplier-session indicator the extension cannot know
 ```
 
 ## Consequences
