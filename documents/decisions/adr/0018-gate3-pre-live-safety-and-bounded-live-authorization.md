@@ -495,6 +495,16 @@ now       never resend while the outcome is unknown
   prerequisite. The acceptance authorizes nothing by itself. It is one more precondition, and no
   grant, proof or readiness implies it.
 
+  > **Amendment note (residual-risk acceptance proof; migration `0036`).** The decision stays the
+  > user's and the architect's, recorded in GitHub. The application holds only its durable proof,
+  > `residual_risk_acceptances` (`app.capabilities.live_safety.residual_risk`): append-only, recorded
+  > only by the protected command `icbm live record-residual-risk-acceptance`, and bound to one
+  > canonical account, the risk contract `adr-0018-6.1-residual-risk/v1` with the SHA-256 of the
+  > statement above, and the user's and the architect's acceptance comment, each by GitHub id and
+  > body digest. The existing §10 layer reads it for the stage's own account; a missing, malformed,
+  > wrong-scope or stale proof refuses. No acceptance is recorded by this note, and the proof still
+  > authorizes nothing: every other layer of both stages decides as before.
+
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 
 A restore proof is **stage-bound and freshness-bound**. The mutation it gates needs its own proof,

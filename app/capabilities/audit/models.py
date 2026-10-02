@@ -114,6 +114,9 @@ class AuditEventType(StrEnum):
     # lineage. Identifiers, sequence, verdict and the packet digest only — never a check's
     # evidence reference, which lives in the record row.
     CANARY_ELIGIBILITY_RECORDED = "CANARY_ELIGIBILITY_RECORDED"
+    # ADR-0018 §6.1, G3-30: one durable proof of the user and architect residual-risk acceptance
+    # recorded for one account and one risk contract. Identifiers and digests only.
+    RESIDUAL_RISK_ACCEPTANCE_RECORDED = "RESIDUAL_RISK_ACCEPTANCE_RECORDED"
 
 
 class AuditOutcome(StrEnum):

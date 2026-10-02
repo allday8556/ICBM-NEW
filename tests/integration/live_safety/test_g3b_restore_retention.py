@@ -161,6 +161,7 @@ def proofs(container: Container) -> DurableStageProofs:
         retention=container.retention,
         visual=container.visual_acceptance,
         eligibility=container.canary_eligibility,
+        residual_risk=container.residual_risk,
         schema_head=head_revision,
     )
 
@@ -221,6 +222,7 @@ def test_an_asset_drill_restores_the_exact_pre_upload_chain_into_a_fresh_root(
         retention=container.retention,
         visual=container.visual_acceptance,
         eligibility=container.canary_eligibility,
+        residual_risk=container.residual_risk,
         schema_head=lambda: "other-head",
     )
     assert not other_head.restore_proof(MutationStage.ASSET, result.target_digest)

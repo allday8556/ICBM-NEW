@@ -14,14 +14,16 @@
   lineage, so an earlier record no longer matches; no lineage, no record or an unreadable owner
   is unproven.
 - **residual-risk acceptance** (§6.1, G3-30): an explicit user and architect acceptance recorded in
-  GitHub. It has no durable owner and none is authorized here, so it is never proven in process and
-  stays unproven, whatever grant, brake, drill, retention or visual record exists.
+  GitHub. Its durable proof (``app.capabilities.live_safety.residual_risk``, migration 0036) points
+  at the two exact GitHub comments; it is proven only for the stage's own account under the current
+  risk contract and statement, and it authorizes nothing by itself.
 """
 
 from collections.abc import Callable
 
 from app.capabilities.live_safety.eligibility import CanaryEligibilityService, EligibilityBinding
 from app.capabilities.live_safety.model import MutationStage
+from app.capabilities.live_safety.residual_risk import ResidualRiskAcceptanceService
 from app.capabilities.live_safety.retention import RetentionProofService
 from app.capabilities.live_safety.store import LiveAuthorityStore
 from app.capabilities.live_safety.visual import VisualAcceptanceService
@@ -35,9 +37,11 @@ class DurableStageProofs:
         retention: RetentionProofService,
         visual: VisualAcceptanceService,
         eligibility: CanaryEligibilityService,
+        residual_risk: ResidualRiskAcceptanceService,
         schema_head: Callable[[], str | None],
     ) -> None:
         self._eligibility = eligibility
+        self._residual_risk = residual_risk
         self._store = store
         self._retention = retention
         self._visual = visual
@@ -48,11 +52,8 @@ class DurableStageProofs:
     ) -> bool:
         return self._eligibility.proven(stage, unit_ref, binding)
 
-    def residual_risk_accepted(self) -> bool:
-        # §6.1: not recorded (§10), and the decision is recorded in GitHub rather than in the
-        # application, so it has no durable owner here. Nothing in process may answer True, so the
-        # §10 layer refuses every mutation of both stages at this main.
-        return False
+    def residual_risk_accepted(self, marketplace_key: str, marketplace_account_id: str) -> bool:
+        return self._residual_risk.accepted(marketplace_key, marketplace_account_id)
 
     def restore_proof(self, stage: MutationStage, target_digest: str) -> bool:
         head = self._head()

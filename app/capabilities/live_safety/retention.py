@@ -46,7 +46,8 @@ from app.platform.db.schema_contract import (
 from app.stages.register.sanitize import SANITIZER_RULES_VERSION
 
 # v5: the canary-eligibility owner (ADR-0018 §5.1, migration 0033) joins the protected tables.
-RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v5"
+# v6: the residual-risk acceptance proof (ADR-0018 §6.1, migration 0036) joins them.
+RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v6"
 
 # Every table whose rows are canary evidence or the chain a restore proof compares (§7, §8).
 PROTECTED_TABLES: Final = (
@@ -95,6 +96,7 @@ PROTECTED_TABLES: Final = (
     "retention_proofs",
     "visual_acceptances",
     "canary_eligibility_records",
+    "residual_risk_acceptances",
 )
 FORWARD_ONLY_TRIGGERS: Final = (
     "trg_live_grants_forward_only",

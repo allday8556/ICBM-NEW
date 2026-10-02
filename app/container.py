@@ -26,6 +26,7 @@ from app.capabilities.live_safety.eligibility import CanaryEligibilityService
 from app.capabilities.live_safety.gates import CanaryStageReadiness
 from app.capabilities.live_safety.model import WireHostPolicy
 from app.capabilities.live_safety.proofs import DurableStageProofs
+from app.capabilities.live_safety.residual_risk import ResidualRiskAcceptanceService
 from app.capabilities.live_safety.retention import RetentionProofService
 from app.capabilities.live_safety.stack import SafetyStack
 from app.capabilities.live_safety.status import LiveStatusService
@@ -206,6 +207,7 @@ class Container:
     registration_execution: RegistrationExecutionService
     live_authority: LiveAuthorityService
     canary_eligibility: CanaryEligibilityService
+    residual_risk: ResidualRiskAcceptanceService
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
     restore_drills: RestoreDrillService
@@ -561,11 +563,15 @@ def build_container(
     canary_eligibility = CanaryEligibilityService(
         store=live_store, registrations=registrations, preparations=registration_preparations
     )
+    # ADR-0018 §6.1, G3-30 (migration 0036): the durable proof of the user and architect
+    # residual-risk acceptance recorded in GitHub, for one account and the exact risk contract.
+    residual_risk = ResidualRiskAcceptanceService(live_store)
     stage_proofs = DurableStageProofs(
         store=live_store,
         retention=retention,
         visual=visual_acceptance,
         eligibility=canary_eligibility,
+        residual_risk=residual_risk,
         schema_head=head_revision,
     )
     safety_stack = SafetyStack(
@@ -755,6 +761,7 @@ def build_container(
         registration_execution=registration_execution,
         live_authority=live_authority,
         canary_eligibility=canary_eligibility,
+        residual_risk=residual_risk,
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
         restore_drills=restore_drills,

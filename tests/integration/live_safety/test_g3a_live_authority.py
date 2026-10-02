@@ -1097,3 +1097,46 @@ def test_a_sessionless_smartstore_sender_is_refused_before_any_attempt(
     )
     assert refusal.code == live_model.SENDER_NOT_WIRED
     assert provider.requests == [] and count(container.config, "asset_upload_attempts") == 0
+
+
+def test_a_recorded_acceptance_satisfies_only_its_own_asset_layer(
+    container: Container, smartstore: str
+) -> None:
+    """ADR-0018 §6.1, G3-30: the ASSET stage reads the same canonical proof for the grant's own
+    account. Another account's proof answers nothing, and an accepted risk still leaves every
+    other layer refusing: nothing is started or spent."""
+    from app.capabilities.live_safety.residual_risk import RESIDUAL_RISK_CONTRACT_VERSION
+
+    grant_id = grant(container, smartstore, [DERIVED_A], market="smartstore")
+    release(container)
+
+    def reasons() -> set[str]:
+        refusal = refused(
+            live_model.MODE_NOT_LIVE,
+            lambda: container.asset_uploads.upload(request(grant_id, DERIVED_A)),
+        )
+        return {layer["reason"] for layer in refusal.details["layers"]}
+
+    assert live_model.RESIDUAL_RISK_UNACCEPTED in reasons()
+    container.residual_risk.record(
+        marketplace_key="smartstore",
+        marketplace_account_id=smartstore,
+        risk_contract=RESIDUAL_RISK_CONTRACT_VERSION,
+        user_acceptance="github_issue_comment:5950000001@" + "a" * 64,
+        architect_acceptance="github_issue_comment:5950000002@" + "b" * 64,
+        actor="operator",
+        correlation_id="test-residual-risk",
+    )
+    after = reasons()
+    assert live_model.RESIDUAL_RISK_UNACCEPTED not in after
+    assert {
+        live_model.MODE_NOT_LIVE,
+        live_model.SENDER_NOT_WIRED,
+        live_model.ELIGIBILITY_UNPROVEN,
+        live_model.RESTORE_PROOF_ABSENT,
+        live_model.RETENTION_UNPROVEN,
+        live_model.VISUAL_UNRECORDED,
+    } <= after
+    assert count(container.config, "asset_upload_attempts") == 0
+    stored = container.live_authority.grant_record(grant_id)
+    assert stored is not None and stored.budget_used == 0 and stored.state is GrantState.ACTIVE
