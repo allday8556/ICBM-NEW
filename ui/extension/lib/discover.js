@@ -32,13 +32,13 @@ export function discoverInPage(rule) {
     }
     return null;
   };
-  // Whether an element clips what is inside it. A clip path is not measured: an element under
-  // one is taken as concealed, which can only leave a product to the operator's own click.
-  const clips = (style) =>
-    style.overflowX !== "visible" || style.overflowY !== "visible" || style.clip !== "auto";
-  const concealed = (style) => style.clipPath !== "none";
-  // The part of a box the anchor and its ancestors let through: each one that clips cuts the box
-  // down to its own; a box cut to nothing, or under a clip path, is not shown.
+  // Whether an element clips what is inside it to its own box (overflow). A clip path and the
+  // legacy clip are not measured: the anchor or an ancestor under one is taken as concealed, which
+  // can only leave a product to the operator's own click.
+  const clips = (style) => style.overflowX !== "visible" || style.overflowY !== "visible";
+  const concealed = (style) => style.clipPath !== "none" || style.clip !== "auto";
+  // The part of a box the anchor's ancestors let through: each one that clips cuts the box down
+  // to its own; a box cut to nothing, or an anchor or ancestor under a clip, is not shown.
   const unclipped = (rect, anchor) => {
     let left = rect.left;
     let top = rect.top;
