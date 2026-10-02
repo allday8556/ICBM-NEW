@@ -251,7 +251,8 @@ rule.
 
 **Discovery reads nothing.**
 - The operator opens a supplier list page in their own Chrome and asks the side panel to find its
-  products. The extension reads only that already-loaded page: its anchors, in document order.
+  products. The extension reads only that already-loaded page: the anchors the operator can see,
+  in document order. A hidden anchor is not the operator's list and is never discovered.
 - **Only a product URL leaves the browser.** The server gives the extension the supplier's reviewed
   product path form from its `CollectionProfile`. The extension sends a link only when it is on the
   storefront host and its path fully matches that form, and it sends only its scheme, host and
@@ -288,7 +289,7 @@ rule.
     run;
   - **issue**: one item, its product URL and a random, single-use ticket. The issue is written
     before the answer is sent, and it counts against the queue's budget;
-  - **done**: the queue is finished, cancelled or stopped.
+  - **done**: the queue is finished or cancelled.
 
   The extension's clock never decides.
 - **The same-product interval of ADR-0010 §4 holds for queue reads.** Before an issue it counts
@@ -296,9 +297,11 @@ rule.
   single click stays the operator's own read under the E1 rules and is never refused by it.
 - One item is one read. An item is never reissued or retried. An issued item that is never captured
   expires after the declared time and still counts.
-- **The queue stops, and never skips forward, at the first item that does not end `RECORDED` or
-  `NO_REVISION`.** That covers a refused capture, an expired ticket and a `FAILED` run. The operator
-  decides what follows; a new queue is a new declaration.
+- **A queue goes on past an item that fails** (the user's rule of 2026-10-02, replacing the first
+  contract's stop at the first failure). An expired ticket, a refused capture and a `FAILED` run
+  leave their item as it ended — `EXPIRED`, or captured with its run's own outcome — and the queue
+  reads the next item. Nothing is reissued or retried, and the operator sees every failure in the
+  queue and in Collection Management.
 - The operator may pause, by not asking, or cancel. Cancelling settles every unissued item.
 
 **Every product is an ordinary run.**
@@ -453,7 +456,7 @@ AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics t
 AC-27  List discovery reads only the operator's already-loaded page and sends only the scheme, host and path of links that fully match the supplier's reviewed product path form, nothing of the list page itself; the server judges every link with check_target and the secret rules, and no list-page topology is added without reconnaissance (§8.1)
 AC-28  A list queue exists only when the supplier's CollectionProfile declares its queue limits and the operator declares the queue's size and interval within them; a missing or out-of-range bound refuses before any read
 AC-29  Every queue read is server-issued work, written durably before the read and counted against the queue budget, never reissued or retried; the same-product interval counts server reads, issued queue reads and extension captures
-AC-30  A queue stops, never skipping forward, at the first item that does not end RECORDED or NO_REVISION; every queued product is an ordinary EXTENSION run through the unchanged ingest, security gate and extractor
+AC-30  A queue goes on past an item that fails, never reissuing or retrying it; every queued product is an ordinary EXTENSION run through the unchanged ingest, security gate and extractor
 AC-31  A queue item's state is its own axis and never a run outcome; the side panel shows no REVIEW chip and no supplier-session indicator the extension cannot know
 ```
 

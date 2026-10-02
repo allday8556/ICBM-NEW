@@ -1166,7 +1166,7 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     assert "a missing or out-of-range bound refuses before any read" in invariants["AC-28"]
     assert "written durably before the read" in invariants["AC-29"]
     assert "never reissued or retried" in invariants["AC-29"]
-    assert "never skipping forward" in invariants["AC-30"]
+    assert "goes on past an item that fails, never reissuing or retrying it" in invariants["AC-30"]
     assert "ordinary EXTENSION run" in invariants["AC-30"]
     assert "never a run outcome" in invariants["AC-31"]
     ui = _section(adr, r"^12\. UI ownership and state semantics")
