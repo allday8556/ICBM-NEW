@@ -96,6 +96,8 @@ $global:FxNextPr = 1
 $global:FxCiPending = @{}      # sha -> remaining pending polls
 $global:FxCiDefaultPending = 0
 $global:FxCalls = New-Object System.Collections.Generic.List[string]
+$global:FxGptCwd = New-Object System.Collections.Generic.List[string]   # "<cwd>|<HEAD there>" of every PR GPT audit
+$global:FxBeforeGpt = $null                                            # one-shot hook between the audit worktree and GPT
 
 function global:Add-FxPr { param([string]$Branch, [string]$Title = "fixture PR", [string]$CreatedAt = ((Get-Date).ToUniversalTime().AddMinutes(5).ToString("yyyy-MM-ddTHH:mm:ssZ")), [string]$Body = "", [string[]]$Labels = @(), [string]$Base = "main")
     $n = $global:FxNextPr; $global:FxNextPr++
@@ -196,6 +198,12 @@ switch ($Scenario) {
     { $_ -in @("claude-blocker-hold", "fixer-human") } {
         New-PrBranch "feat/claudehold" { W "docs/contract.md" "# Contract`nBUG_MARKER_CLAUDE`n" }
         [void](Add-FxPr "feat/claudehold")
+    }
+    "gpt-audit-cwd" {
+        foreach ($b in @("feat/cwd-a", "feat/cwd-b", "feat/cwd-c")) {
+            New-PrBranch $b { W "docs/contract.md" "# Contract`nrule: never resend CREATE`n$b`n" }
+            [void](Add-FxPr $b)
+        }
     }
     "scope-expansion" {
         New-PrBranch "feat/scope" { W "docs/contract.md" "# Contract`nBUG_MARKER_GPT`n" }
@@ -493,6 +501,8 @@ function global:gh {
         elseif ($path -match '/pulls/(\d+)/comments$') { $streamKey = "rc:$($Matches[1])" }
         if ($streamKey) {
             $global:FxCalls.Add("STREAM_LIST $streamKey page=$pageNo")
+            # the packet is built after the audit worktree is prepared and before GPT runs
+            if ($global:FxBeforeGpt) { $hook = $global:FxBeforeGpt; $global:FxBeforeGpt = $null; & $hook }
             $fail = $global:FxStreamFail[$streamKey]
             if ($fail -eq "page") { Write-Error "gh: HTTP 502 Bad Gateway (page $pageNo)"; $global:LASTEXITCODE = 1; return }
             if ($fail -eq "perm") { Write-Error "gh: Resource not accessible by integration (HTTP 403)"; $global:LASTEXITCODE = 1; return }
@@ -574,6 +584,16 @@ function global:codex {
     $o = $a[[array]::IndexOf($a, "-o") + 1]
     $c = $a[[array]::IndexOf($a, "-C") + 1]
     $role = if ($prompt -match 'AUTO-NEXT ROADMAP SELECTION') { "gpt-next" } elseif ($prompt -match 'POST-MERGE DELTA AUDIT') { "gpt-delta" } elseif ($prompt -match 'POST-MERGE FULL REPOSITORY AUDIT') { "gpt-full" } else { "gpt-pr" }
+    # Like the real CLI (Issue #185): a working directory outside a git repository is refused, and a
+    # check-skipping option is never acceptable. Every PR audit records where it ran.
+    if ($a -contains "--skip-git-repo-check") { $global:FxCalls.Add("FORBIDDEN codex --skip-git-repo-check"); $global:LASTEXITCODE = 1; return }
+    if ("$(& git -C $c rev-parse --is-inside-work-tree 2>$null)".Trim() -ne "true") {
+        $global:FxCalls.Add("CODEX_REFUSED_UNTRUSTED_CWD $role")
+        [Console]::Error.WriteLine("Not inside a trusted directory and --skip-git-repo-check was not specified.")
+        $global:LASTEXITCODE = 1
+        return
+    }
+    if ($role -eq "gpt-pr") { $global:FxGptCwd.Add("$c|$("$(& git -C $c rev-parse HEAD 2>$null)".Trim())") }
     Save-FxPrompt $role $prompt
     $text = & $global:FxAi $role $prompt $c
     if ($role -eq "gpt-pr") { $text = "$text" + (Fx-EvidenceLine "gpt" $prompt) }
@@ -974,6 +994,75 @@ try {
             f2_bare_numbers_are_not_citations = "True/True/6"
             g_stream_page_fail = "STREAM_UNREADABLE:issue_comments:89/HOLD_CLASS=TECHNICAL_HOLD"
             h_stream_truncated = "STREAM_TRUNCATED:issue_comments:1/HOLD_CLASS=TECHNICAL_HOLD"; ai_prompts = 0
+        }
+        $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
+        $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }
+        Write-Host "FX_EXPECT=$($global:FxChecks.expect)"
+    }
+    if ($Scenario -eq "gpt-audit-cwd") {
+        # Issue #185: the per-PR GPT audit runs in the Host's exact-HEAD audit worktree, never in the
+        # Host root, which is not a git repository here (as in a real runtime outside a checkout).
+        $skipOrch = $true
+        $global:FxWtRoot = Join-Path $hostDir "worktrees"
+        $global:FxChecks.host_root_is_not_git = ("$(& git -C $hostDir rev-parse --is-inside-work-tree 2>$null)".Trim() -ne "true")
+        # a: an ordinary audit
+        $ra = Fx-RunAudit @{ PrNumber = 1; SkipCiGate = $true }
+        $head1 = Get-FxHead 1
+        $global:FxChecks.a_gpt_verdict = Fx-Line $ra "GPT_VERDICT"
+        $global:FxChecks.a_claude_ran = (@(Get-ChildItem $promptDir -Filter "*-claude-pr.txt").Count -eq 1)
+        $global:FxChecks.a_gpt_cwd_is_exact_audit_worktree = (@($global:FxGptCwd).Count -eq 1 -and $global:FxGptCwd[0] -eq "$(Join-Path $global:FxWtRoot 'audit-pr-1')|$head1")
+        # b: the same audit identity again is a cache hit; nothing about the identity changed
+        $rb = Fx-RunAudit @{ PrNumber = 1; SkipCiGate = $true }
+        $global:FxChecks.b_same_identity_cache_hit = (@($rb | Where-Object { $_ -match '^GPT_CACHE=(HIT|MISS)' })[0] -like "GPT_CACHE=HIT*") -and (@($global:FxGptCwd).Count -eq 1)
+        # c: a PASS result made outside the Host, at the cache path, without the Host's stamp, is never a Host PASS
+        $cache = @(Get-ChildItem (Join-Path $hostDir "state") -Filter "*-pr-1-*-gpt.txt")[0]
+        $manual = ([System.IO.File]::ReadAllText($cache.FullName)) -replace '(?m)^(AUDIT_TOOL|AUDIT_TOOL_SHA256|AUDIT_POLICY|AUDITOR|AUDITOR_CLI|AUDIT_STAMPED_AT)=.*(\r?\n)?', ''
+        [System.IO.File]::WriteAllText($cache.FullName, $manual + "PROVENANCE=MANUAL_OUTSIDE_HOST`n", (New-Object System.Text.UTF8Encoding($false)))
+        $rc = Fx-RunAudit @{ PrNumber = 1; SkipCiGate = $true }
+        $global:FxChecks.c_manual_result_not_promoted = (@($rc | Where-Object { $_ -match '^GPT_CACHE=(HIT|MISS)' })[0] -eq "GPT_CACHE=MISS") -and (@($global:FxGptCwd).Count -eq 2)
+        # d: the audit worktree left the PR HEAD after it was prepared: refused, no GPT call
+        $global:FxBeforeGpt = { & git -C (Join-Path $global:FxWtRoot "audit-pr-2") checkout -q --detach HEAD~1 2>$null }
+        $rd = Fx-RunAudit @{ PrNumber = 2; SkipCiGate = $true }
+        $global:FxChecks.d_wrong_head = Fx-Line $rd "AUDIT_BLOCKED"
+        $global:FxChecks.d_no_gpt_call = (@($global:FxGptCwd).Count -eq 2)
+        # e: the audit worktree is gone before the call: refused, no GPT call
+        $global:FxBeforeGpt = { Remove-Item -LiteralPath (Join-Path $global:FxWtRoot "audit-pr-3") -Recurse -Force -ErrorAction SilentlyContinue }
+        $re = Fx-RunAudit @{ PrNumber = 3; SkipCiGate = $true }
+        $global:FxChecks.e_missing = Fx-Line $re "AUDIT_BLOCKED"
+        $global:FxChecks.e_no_gpt_call = (@($global:FxGptCwd).Count -eq 2)
+        # f: the committed guard itself, extracted from the script and run on fixture worktrees
+        $script:nativeErrPath = Join-Path $fx "native-err.txt"
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $hostDir "run-audit-v1.1.ps1"), [ref]$null, [ref]$null)
+        foreach ($fn in @("Invoke-Git", "Test-GptAuditWorktree")) {
+            $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fn }, $true)
+            . ([scriptblock]::Create($def.Extent.Text))
+        }
+        $wt1 = Join-Path $global:FxWtRoot "audit-pr-1"
+        $head2 = Get-FxHead 2
+        $pk1 = "ICBM EXACT-HEAD AUDIT CALL`nEXACT_PR_HEAD=$head1`n"
+        $guard = [ordered]@{
+            ok = "$(Test-GptAuditWorktree -Path $wt1 -ExpectedHead $head1 -PacketText $pk1)"
+            missing = "$(Test-GptAuditWorktree -Path (Join-Path $global:FxWtRoot 'no-such') -ExpectedHead $head1 -PacketText $pk1)"
+            wrong_head = "$(Test-GptAuditWorktree -Path $wt1 -ExpectedHead $head2 -PacketText "EXACT_PR_HEAD=$head2`n")"
+            packet_head = "$(Test-GptAuditWorktree -Path $wt1 -ExpectedHead $head1 -PacketText "EXACT_PR_HEAD=$head2`n")"
+            packet_unnamed = "$(Test-GptAuditWorktree -Path $wt1 -ExpectedHead $head1 -PacketText "no head line`n")"
+        }
+        Set-Content -LiteralPath (Join-Path $wt1 "stray.txt") -Value "stray"
+        $guard.dirty = "$(Test-GptAuditWorktree -Path $wt1 -ExpectedHead $head1 -PacketText $pk1)"
+        Remove-Item -LiteralPath (Join-Path $wt1 "stray.txt") -Force
+        $global:FxChecks.f_guard = ($guard.Values -join ",")
+        # g: no check-skipping option, and no Host-root working directory, anywhere in the script
+        $src = [System.IO.File]::ReadAllText((Join-Path $hostDir "run-audit-v1.1.ps1"))
+        $global:FxChecks.g_no_skip_option = (-not $src.Contains("skip-git-repo-check"))
+        $global:FxChecks.g_no_host_root_cwd = (-not ($src -match '-C \$hostRoot'))
+        $global:FxChecks.no_forbidden_call = (@($global:FxCalls | Where-Object { $_ -like "FORBIDDEN*" -or $_ -like "UNHANDLED*" -or $_ -like "CODEX_REFUSED*" }).Count -eq 0)
+        $expected = [ordered]@{
+            host_root_is_not_git = "True"; a_gpt_verdict = "PASS"; a_claude_ran = "True"; a_gpt_cwd_is_exact_audit_worktree = "True"
+            b_same_identity_cache_hit = "True"; c_manual_result_not_promoted = "True"
+            d_wrong_head = "GPT_AUDIT_WORKTREE_HEAD_MISMATCH"; d_no_gpt_call = "True"
+            e_missing = "GPT_AUDIT_WORKTREE_MISSING"; e_no_gpt_call = "True"
+            f_guard = ",GPT_AUDIT_WORKTREE_MISSING,GPT_AUDIT_WORKTREE_HEAD_MISMATCH,GPT_PACKET_HEAD_MISMATCH,GPT_PACKET_HEAD_MISMATCH,GPT_AUDIT_WORKTREE_DIRTY"
+            g_no_skip_option = "True"; g_no_host_root_cwd = "True"; no_forbidden_call = "True"
         }
         $failed = @($expected.Keys | Where-Object { "$($global:FxChecks[$_])" -ne "$($expected[$_])" })
         $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ",") }

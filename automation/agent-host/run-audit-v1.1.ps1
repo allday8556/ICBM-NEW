@@ -1979,8 +1979,12 @@ function Merge-CallVerdicts {
 
 # PASS 캐시 판정: 파일이 있고, 같은 HEAD, 같은 packet digest, VERDICT=PASS, EVIDENCE_SEEN ⊇ required.
 # 하나라도 어긋나면 캐시가 아니다 (그 파일은 지운다 — 다음 결과는 fresh audit).
+# A cached PASS is reused only when this Host produced it: Publish-AuditResult stamps every result
+# it caches with this script's own sha256, the auditor and the audit policy. A result made outside
+# the Host (a manual audit, a copied file) carries no such stamp and is never promoted to a Host
+# PASS (Issue #185); the audit identity itself, (HEAD, packet digest), is unchanged.
 function Test-PassCache {
-    param([string]$Path)
+    param([string]$Path, [string]$Auditor)
 
     if (-not (Test-Path -LiteralPath $Path)) {
         return $false
@@ -1992,7 +1996,10 @@ function Test-PassCache {
         $t -match "(?m)^AUDIT_HEAD=$prHead\s*$" -and
         $t -match "(?m)^PACKET_DIGEST=$packetDigest\s*$" -and
         $t -match '(?m)^VERDICT=PASS\s*$' -and
-        @(Get-MissingEvidence @(Read-EvidenceSeen $t)).Count -eq 0
+        @(Get-MissingEvidence @(Read-EvidenceSeen $t)).Count -eq 0 -and
+        $t -match "(?m)^AUDIT_TOOL_SHA256=$script:auditToolSha\s*$" -and
+        $t -match "(?m)^AUDITOR=$Auditor\s*$" -and
+        $t -match "(?m)^AUDIT_POLICY=$([regex]::Escape($auditPolicyVersion))\s*$"
     )
 
     if (-not $ok) {
@@ -2078,11 +2085,48 @@ $PacketText
 "@
 }
 
+# The GPT working directory (Issue #185): the Host's own exact-HEAD audit worktree of this audit
+# identity, created and verified by Initialize-HostWorktree above, exactly as run-full-audit-v1.ps1
+# runs its auditor in its own audit worktree. Never $hostRoot, which need not be a git repository
+# (Codex refuses a non-git directory), and never a check-skipping option. Before each call it must
+# still be a git worktree, clean, at exactly the PR HEAD, and the call packet must name that same
+# HEAD; otherwise nothing is audited and the reason is returned as a hold.
+function Test-GptAuditWorktree {
+    param(
+        [string]$Path,
+        [string]$ExpectedHead,
+        [string]$PacketText
+    )
+
+    if (-not $Path -or -not (Test-Path -LiteralPath (Join-Path $Path ".git"))) {
+        return "GPT_AUDIT_WORKTREE_MISSING"
+    }
+
+    $wtHead = "$(Invoke-Git @('-C', $Path, 'rev-parse', 'HEAD'))".Trim()
+
+    if ($LASTEXITCODE -ne 0 -or $wtHead -ne $ExpectedHead) {
+        return "GPT_AUDIT_WORKTREE_HEAD_MISMATCH"
+    }
+
+    if (Invoke-Git @("-C", $Path, "status", "--porcelain")) {
+        return "GPT_AUDIT_WORKTREE_DIRTY"
+    }
+
+    $named = [regex]::Match("$PacketText", '(?m)^EXACT_PR_HEAD=([0-9a-f]{40})\s*$')
+
+    if (-not $named.Success -or $named.Groups[1].Value -ne $ExpectedHead) {
+        return "GPT_PACKET_HEAD_MISMATCH"
+    }
+
+    return $null
+}
+
 function Invoke-GptCall {
     param(
         [string]$Prompt,
         [string]$OutPath,
-        [string]$ErrPath
+        [string]$ErrPath,
+        [string]$WorkingDirectory
     )
 
     Remove-Item $OutPath -Force -ErrorAction SilentlyContinue
@@ -2094,7 +2138,7 @@ function Invoke-GptCall {
         $ErrorActionPreference = "Continue"
 
         $Prompt | codex exec `
-            -C $hostRoot `
+            -C $WorkingDirectory `
             -s read-only `
             --ephemeral `
             --model gpt-5.6-sol `
@@ -2115,7 +2159,7 @@ function Invoke-GptCall {
 
 Write-Host "[1/2] GPT packet-only audit... calls=$($auditCalls.Count)"
 
-$useGptCache = Test-PassCache -Path $gptCache
+$useGptCache = Test-PassCache -Path $gptCache -Auditor "GPT"
 
 if ($useGptCache) {
     Write-Host "GPT_CACHE=HIT (PASS, same HEAD + packet digest, evidence covered)"
@@ -2131,10 +2175,23 @@ else {
 
         $errPath = Join-Path $logDir "pr-$PrNumber-gpt-call$($call.Index)-$ts.stderr.txt"
 
+        $cwdRefusal = Test-GptAuditWorktree -Path $auditWorktree -ExpectedHead $prHead -PacketText $call.Text
+
+        if ($cwdRefusal) {
+            Write-Host ""
+            Write-Output "GPT_AUDIT=NOT_RUN"
+            Write-Host "GPT_CALL=$($call.Index)"
+            Write-Host "CLAUDE_AUDIT=SKIPPED"
+            Remove-Item $gptCache, $gptResultPath -Force -ErrorAction SilentlyContinue
+            Write-Output "AUDIT_BLOCKED=$cwdRefusal"
+            return
+        }
+
         $ok = Invoke-GptCall `
             -Prompt (New-GptPrompt -PacketText $call.Text) `
             -OutPath $outPath `
-            -ErrPath $errPath
+            -ErrPath $errPath `
+            -WorkingDirectory $auditWorktree
 
         if (-not $ok) {
             Write-Host ""
@@ -2262,7 +2319,7 @@ function Invoke-ClaudeCall {
 
 Write-Host "[2/2] Claude packet-only independent cross-audit... calls=$($auditCalls.Count)"
 
-$useClaudeCache = Test-PassCache -Path $claudeCache
+$useClaudeCache = Test-PassCache -Path $claudeCache -Auditor "CLAUDE"
 
 if ($useClaudeCache) {
     Write-Host "CLAUDE_CACHE=HIT (PASS, same HEAD + packet digest, evidence covered)"
