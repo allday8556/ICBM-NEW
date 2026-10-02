@@ -152,8 +152,14 @@ class ReadinessService:
         return status.available, f"{status.backend} ({status.detail})"
 
     def _mode(self) -> tuple[bool, str]:
-        mode = self._execution_mode.state().mode
-        return mode is ExecutionMode.DRY_RUN, f"{mode} (external writes disabled)"
+        state = self._execution_mode.state()
+        if state.mode is ExecutionMode.DRY_RUN:
+            return True, f"{state.mode} (external writes disabled)"
+        # A bounded LIVE window (ADR-0018 §2) is a healthy state; it permits no mutation by itself.
+        return state.live_until is not None, (
+            f"{state.mode} until {state.live_until} (every mutation still gated by the send-time"
+            " stack)"
+        )
 
     def _egress_guard(self) -> tuple[bool, str]:
         snapshot = self._egress.snapshot()

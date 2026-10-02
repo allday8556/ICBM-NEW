@@ -28,6 +28,8 @@ class HealthResponse(BaseModel):
 class ExecutionModeChangeRequest(BaseModel):
     target_mode: ExecutionMode
     reason: str | None = Field(default=None, max_length=500)
+    # A LIVE request opens a bounded window only when it names its duration (ADR-0018 §2).
+    window_s: int | None = None
 
 
 @router.get("/api/health")
@@ -53,9 +55,14 @@ def execution_mode(container: ContainerDep) -> ExecutionModeState:
 def request_execution_mode(
     body: ExecutionModeChangeRequest, container: ContainerDep
 ) -> ExecutionModeState:
-    """Protected action: audited, and always denied during M0."""
+    """Protected action, audited before the decision. DRY_RUN closes an open LIVE window; LIVE
+    opens one only as a bounded window inside an approved bounded LIVE mutation scope (a live
+    grant), and the mode alone is never authority for a mutation (ADR-0018 §2, §4.3)."""
     return container.execution_mode.request_change(
-        body.target_mode, actor=container.config.operator_actor, reason=body.reason
+        body.target_mode,
+        actor=container.config.operator_actor,
+        reason=body.reason,
+        window_s=body.window_s,
     )
 
 
