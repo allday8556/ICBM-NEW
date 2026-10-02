@@ -298,3 +298,10 @@ def security_gate(html: str, *, boundary_of: BoundaryOf) -> GateResult:
     scan.feed(html)
     scan.close()
     return GateResult(blocking=tuple(scan.blocking), notes=tuple(scan.notes))
+
+
+def locator_holds_secret(url: str) -> bool:
+    """Whether one URL carries what §6.1 refuses in an image locator — credentials, a secret query
+    key, a token shape, or a secret anywhere in it, percent-decoded too. A discovered product link
+    is judged by exactly this rule (ADR-0019 §8.1)."""
+    return _locator_problem(url) in _SECURITY_REFERENCE or _holds_secret(url, _SECRET_IN_REFERENCE)

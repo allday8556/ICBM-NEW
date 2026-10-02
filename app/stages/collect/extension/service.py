@@ -125,6 +125,23 @@ class CapturedDocumentRecorder(Protocol):
     def after_recorded(self, collection_run_id: str) -> None: ...
 
 
+class QueueTickets(Protocol):
+    """The list-queue owner, as the ingest uses it (ADR-0019 §8.1).
+
+    A ticketed capture claims its issued item and names its run, in the ingest's own write unit. A
+    single click waits while a queue read is out. A ticketed capture that is refused spends its read
+    and stops its queue.
+    """
+
+    def claim(self, session: Session, *, supplier_key: str, ticket: str, url: str) -> str: ...
+
+    def attach(self, session: Session, item_id: str, collection_run_id: str) -> None: ...
+
+    def read_in_flight(self, session: Session, supplier_key: str) -> bool: ...
+
+    def refuse(self, ticket: str) -> None: ...
+
+
 class ExtensionCeilingExceeded(PolicyBlockedError):
     """A capture crosses a ceiling. The whole ingest is refused; nothing is truncated."""
 
@@ -188,6 +205,7 @@ class ExtensionCaptureService:
         recorder: CapturedDocumentRecorder,
         collections: Sequence[RegisteredCollection] = (),
         report_sink: ReportSink | None = None,
+        queue_tickets: QueueTickets | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -203,6 +221,8 @@ class ExtensionCaptureService:
         # The collection owner records the document: this owner appends nothing itself.
         self._recorder = recorder
         self._report_sink = report_sink
+        # The list-queue owner: a ticketed capture claims its issued item (ADR-0019 §8.1).
+        self._queue_tickets = queue_tickets
 
     # ------------------------------------------------------------------ the policy read
 
@@ -215,7 +235,20 @@ class ExtensionCaptureService:
     # ------------------------------------------------------------------ the ingest (steps 5–8)
 
     def ingest(self, envelope: CaptureEnvelope) -> AcceptedCapture:
-        """Accept one authenticated capture and open its canonical run, or refuse it whole."""
+        """Accept one authenticated capture and open its canonical run, or refuse it whole.
+
+        A queue read's capture that is refused, for any reason, spends its read and stops its queue:
+        a queue never goes on past a refused capture (ADR-0019 §8.1, AC-30).
+        """
+        try:
+            return self._ingest(envelope)
+        except Exception:
+            if envelope.queue_ticket is not None and self._queue_tickets is not None:
+                # The ticket alone names its read: nothing else the capture says is trusted here.
+                self._queue_tickets.refuse(envelope.queue_ticket)
+            raise
+
+    def _ingest(self, envelope: CaptureEnvelope) -> AcceptedCapture:
         if not self._worker_in_process:
             raise PolicyBlockedError(
                 "EXTENSION_WORKER_NOT_IN_PROCESS",
@@ -258,6 +291,9 @@ class ExtensionCaptureService:
         try:
             with self._db.write() as session:
                 self._require_free(session=session)
+                # A queue read: its ticket is claimed for exactly this URL, once, or the whole
+                # ingest is refused and nothing is written (ADR-0019 §8.1).
+                item_id = self._claim(session, envelope, supplier_key)
                 job = self._jobs.enqueue(
                     EXTENSION_CAPTURE_JOB,
                     # Identifiers and provenance only. The capture itself is never durable.
@@ -280,6 +316,9 @@ class ExtensionCaptureService:
                         TransportKind.EXTENSION, policy.revision, policy.digest
                     ),
                 )
+                if item_id is not None:
+                    assert self._queue_tickets is not None
+                    self._queue_tickets.attach(session, item_id, run_id)
                 self._buffer.put(run_id, BufferedCapture(envelope.html, evidence))
         except BaseException:
             if run_id is not None:
@@ -299,6 +338,27 @@ class ExtensionCaptureService:
             },
         )
         return AcceptedCapture(run_id, job.job_id, job.correlation_id)
+
+    def _claim(self, session: Session, envelope: CaptureEnvelope, supplier_key: str) -> str | None:
+        if envelope.queue_ticket is None:
+            # A single click is serialized with the queue: it waits while a queue read is out.
+            if self._queue_tickets is not None and self._queue_tickets.read_in_flight(
+                session, supplier_key
+            ):
+                raise ExtensionIngestBusy(
+                    "EXTENSION_QUEUE_READ_IN_FLIGHT", "a queue read of this supplier is still out"
+                )
+            return None
+        if self._queue_tickets is None:
+            raise PolicyBlockedError(
+                "EXTENSION_QUEUE_TICKET_REFUSED", "this ticket answers no issued queue read"
+            )
+        return self._queue_tickets.claim(
+            session,
+            supplier_key=supplier_key,
+            ticket=envelope.queue_ticket,
+            url=envelope.transport.url,
+        )
 
     def _require_free(self, *, session: Session | None = None) -> None:
         """One capture at a time, and the minimum interval between two accepted ones. Both are

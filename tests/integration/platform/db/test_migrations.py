@@ -132,8 +132,11 @@ CANONICAL_TABLES = (
     "registration_authoring_revisions",
     # The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106).
     "canary_eligibility_records",
+    # The extension list queue (ADR-0019 §8.1, E3): queues and their items.
+    "extension_queues",
+    "extension_queue_items",
 )
-HEAD = "0034_collect_transport_provenance"
+HEAD = "0035_extension_list_queue"
 
 
 def _url(path: Path) -> str:

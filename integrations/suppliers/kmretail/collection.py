@@ -33,6 +33,7 @@ from integrations.suppliers.collection import (
     CollectionLimits,
     CollectionProfile,
     DocumentView,
+    QueueLimits,
     SourceIdentity,
     SourceIdentityResult,
     SupplierCollection,
@@ -58,6 +59,15 @@ MAX_IMAGE_REQUESTS_PER_RUN = 30
 MAX_NEW_IMAGE_BYTES_PER_RUN = 24 * 1024 * 1024
 # ADR-0010 §4: at least 60 s between real reads of the same product.
 SAME_PRODUCT_INTERVAL_S = 60.0
+# The list queue (ADR-0019 §8.1). These are declared bounds, not observations: a queue starts small
+# and slow, and a later benchmark may change them by review, never by default. One discovery
+# submits at most 200 links; one queue reads at most 20 products, at least 10 s apart (above the
+# 2.0 s request interval and the 5 s extension ingest interval); an issued read the extension has
+# not captured within 120 s expires and still counts.
+QUEUE_MAX_DISCOVERED_LINKS = 200
+QUEUE_MAX_PRODUCTS = 20
+QUEUE_MIN_INTERVAL_S = 10.0
+QUEUE_ISSUE_TTL_S = 120.0
 
 
 def _identity(document: DocumentView, source_url: str) -> SourceIdentityResult:
@@ -101,6 +111,12 @@ def build_profile(*, image_hosts: frozenset[str] = IMAGE_HOSTS) -> CollectionPro
             max_image_requests_per_run=MAX_IMAGE_REQUESTS_PER_RUN,
             max_new_image_bytes_per_run=MAX_NEW_IMAGE_BYTES_PER_RUN,
             same_product_interval_s=SAME_PRODUCT_INTERVAL_S,
+        ),
+        queue_limits=QueueLimits(
+            max_discovered_links=QUEUE_MAX_DISCOVERED_LINKS,
+            max_queue_products=QUEUE_MAX_PRODUCTS,
+            min_queue_interval_s=QUEUE_MIN_INTERVAL_S,
+            issue_ttl_s=QUEUE_ISSUE_TTL_S,
         ),
     )
 

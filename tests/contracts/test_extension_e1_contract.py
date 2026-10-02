@@ -1,10 +1,11 @@
-"""Repository pins of the extension capture transport (ADR-0019 §10: E1, then E2; Issue #126
-rulings 5906290729 and 5906712259; owner amendment 5907095955 of the E1 specification 5907009512).
+"""Repository pins of the extension capture transport (ADR-0019 §10: E1, then E2, then the E3 list
+queue of §8.1; Issue #126 rulings 5906290729 and 5906712259; owner amendment 5907095955 of the E1
+specification 5907009512).
 
-These read the repository as text and structure. They hold what the transport is allowed to be: two
-routes and no CORS, a client with no storage or download reach, a job that is never replayed, and
-an ingest owner that writes nothing itself — from E2 it hands the captured document to the
-collection owner, which is the only way to a revision.
+These read the repository as text and structure. They hold what the transport is allowed to be:
+exactly its routes and no CORS, a client with no storage or download reach, a job that is never
+replayed, and an ingest owner that writes nothing itself — from E2 it hands the captured document to
+the collection owner, which is the only way to a revision.
 """
 
 import ast
@@ -178,7 +179,7 @@ def test_the_side_panel_previews_only_what_icbm_recorded() -> None:
 # ---------------------------------------------------------------- the surface
 
 
-def test_the_extension_surface_is_two_routes_and_their_preflight() -> None:
+def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> None:
     tree = ast.parse(_read(ROUTER))
     routes = sorted(
         (decorator.func.attr, ast.unparse(decorator.args[0]))  # type: ignore[attr-defined]
@@ -187,15 +188,36 @@ def test_the_extension_surface_is_two_routes_and_their_preflight() -> None:
         for decorator in node.decorator_list
         if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
     )
+    # E1: the policy read and the capture. E3 (ADR-0019 §8.1): the queue policy read, the
+    # declaration, the queue read, the server-issued next read and the cancel. Each has its own
+    # preflight and nothing else does.
     assert routes == [
         ("get", "POLICY_PATH"),
+        ("get", "QUEUE_PATH"),
+        ("get", "QUEUE_POLICY_PATH"),
         ("options", "CAPTURE_PATH"),
         ("options", "POLICY_PATH"),
+        ("options", "QUEUES_PATH"),
+        ("options", "QUEUE_CANCEL_PATH"),
+        ("options", "QUEUE_NEXT_PATH"),
+        ("options", "QUEUE_PATH"),
+        ("options", "QUEUE_POLICY_PATH"),
         ("post", "CAPTURE_PATH"),
+        ("post", "QUEUES_PATH"),
+        ("post", "QUEUE_CANCEL_PATH"),
+        ("post", "QUEUE_NEXT_PATH"),
     ]
     source = _read(ROUTER)
     assert 'POLICY_PATH = "/api/v1/collect/extension/capture-policies/{supplier_key}"' in source
     assert 'CAPTURE_PATH = "/api/v1/collect/extension/captures"' in source
+    for path in (
+        'QUEUE_POLICY_PATH = "/api/v1/collect/extension/queue-policies/{supplier_key}"',
+        'QUEUES_PATH = "/api/v1/collect/extension/queues"',
+        'QUEUE_PATH = "/api/v1/collect/extension/queues/{queue_id}"',
+        'QUEUE_NEXT_PATH = "/api/v1/collect/extension/queues/{queue_id}/next"',
+        'QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"',
+    ):
+        assert path in source, path
 
 
 def test_the_application_gains_no_cors() -> None:
@@ -227,6 +249,7 @@ def test_the_ingest_owner_writes_nothing_itself_and_reaches_no_network() -> None
         "nonces.py",
         "pairing.py",
         "policy.py",
+        "queue.py",
         "service.py",
     }
     forbidden = {
@@ -372,9 +395,10 @@ def test_the_acceptance_record_is_accepted_and_hides_nothing() -> None:
     assert "**E2 — one click, recorded — is implemented provider-zero**" in roadmap
     e2_line = roadmap.split("**E2 —", 1)[1].split("\n", 1)[0]
     assert "**E2 is accepted**" in e2_line and "`PENDING`" not in e2_line
-    assert "E3 and the extension-transport Phase C are later slices and are not implemented" in (
-        roadmap
-    )
+    assert "**E3 — the list queue — is in progress** (ADR-0019 §8.1)" in roadmap
+    assert "**E3's server half is implemented provider-zero:**" in roadmap
+    assert "E3's real acceptance needs the user's own grant" in roadmap
+    assert "The extension-transport Phase C is a later slice and is not implemented" in roadmap
 
 
 def test_the_e2_acceptance_record_is_accepted() -> None:

@@ -339,3 +339,94 @@ class CollectionRun(Base):
     transport_kind: Mapped[str | None] = mapped_column(String(10))
     capture_policy_revision: Mapped[str | None] = mapped_column(String(64))
     capture_policy_digest: Mapped[str | None] = mapped_column(String(64))
+
+
+class QueueState(StrEnum):
+    """Where one extension list queue stands (ADR-0019 §8.1)."""
+
+    OPEN = "OPEN"
+    FINISHED = "FINISHED"
+    STOPPED = "STOPPED"
+    CANCELLED = "CANCELLED"
+
+
+class QueueItemState(StrEnum):
+    """One queue item's own state axis (ADR-0019 §8.1, AC-31). It is never a run outcome: a
+    ``CAPTURED`` item names its run, and the run keeps its own outcome, facts status and code."""
+
+    WAITING = "WAITING"
+    ISSUED = "ISSUED"
+    CAPTURED = "CAPTURED"
+    SKIPPED = "SKIPPED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+
+
+class ExtensionQueue(Base):
+    """One operator-declared list queue (ADR-0019 §8.1). It holds the operator's bounds and the
+    time of its last issued read; it never holds the list page, its URL or any page content."""
+
+    __tablename__ = "extension_queues"
+    __table_args__ = (
+        CheckConstraint(_in("state", QueueState), name="state_valid"),
+        CheckConstraint("max_products >= 1", name="max_products_positive"),
+        CheckConstraint("interval_s > 0", name="interval_positive"),
+        CheckConstraint("(state = 'OPEN') = (finished_at IS NULL)", name="finished_when_closed"),
+        CheckConstraint("(state = 'STOPPED') = (stop_reason IS NOT NULL)", name="stop_has_reason"),
+        Index("ix_extension_queues_supplier", "supplier_key", "state"),
+    )
+
+    queue_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    state: Mapped[str] = mapped_column(String(10))
+    max_products: Mapped[int] = mapped_column(Integer)
+    interval_s: Mapped[float] = mapped_column()
+    skip_collected: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    last_issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Why a STOPPED queue stopped: a code of ours, never page content.
+    stop_reason: Mapped[str | None] = mapped_column(String(64))
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class ExtensionQueueItem(Base):
+    """One product of a queue: its URL, its state and, once captured, its run. Only a ticket's
+    SHA-256 is stored, never the ticket."""
+
+    __tablename__ = "extension_queue_items"
+    __table_args__ = (
+        CheckConstraint(_in("state", QueueItemState), name="state_valid"),
+        CheckConstraint("source_url LIKE 'https://%'", name="source_url_https"),
+        CheckConstraint(_hex64("ticket_sha256", nullable=True), name="ticket_sha256_hex"),
+        CheckConstraint(
+            "(state IN ('WAITING', 'SKIPPED', 'CANCELLED')) = (issued_at IS NULL)",
+            name="issued_when_read",
+        ),
+        CheckConstraint(
+            "(issued_at IS NULL) = (ticket_sha256 IS NULL AND expires_at IS NULL)",
+            name="ticket_when_issued",
+        ),
+        CheckConstraint(
+            "(state = 'CAPTURED') = (collection_run_id IS NOT NULL)", name="run_when_captured"
+        ),
+        UniqueConstraint("queue_id", "position"),
+        UniqueConstraint("queue_id", "product_key"),
+        Index("ix_extension_queue_items_ticket", "ticket_sha256", unique=True),
+        Index("ix_extension_queue_items_pacing", "supplier_key", "product_key", "issued_at"),
+    )
+
+    item_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    queue_id: Mapped[str] = mapped_column(String(36), ForeignKey("extension_queues.queue_id"))
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    position: Mapped[int] = mapped_column(Integer)
+    source_url: Mapped[str] = mapped_column(Text)
+    # What the same-product interval is measured on: the source product the URL names, or its
+    # normalized URL when the supplier's URL form names none (ADR-0010 §4).
+    product_key: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(10))
+    ticket_sha256: Mapped[str | None] = mapped_column(String(64))
+    issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    collection_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("collection_runs.collection_run_id")
+    )

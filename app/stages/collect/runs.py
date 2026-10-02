@@ -289,6 +289,11 @@ class CollectionRunStore:
         with self._db.read() as session:
             return _remaining(_last_read(session, key), self._clock.now(), interval_s)
 
+    def last_product_read(self, session: Session, key: PacingKey) -> datetime | None:
+        """The most recent real server read of this product, inside the caller's own unit. The list
+        queue counts it before it issues a read of the same product (ADR-0019 §8.1)."""
+        return _last_read(session, key)
+
     def note_identity(self, run_id: str, *, source_product_id: str) -> None:
         """Record what the document identified, so later reads are paced on the product itself.
 
