@@ -288,15 +288,16 @@ class ExtensionQueues:
             session.flush()
             position = 0
             for product_key, (link, key) in candidates.items():
+                # The queue holds at most its declared number of products, skipped ones included.
+                if position >= max_products:
+                    beyond += 1
+                    continue
                 if declaration.skip_collected and _collected(session, key):
                     state = QueueItemState.SKIPPED
                     skipped += 1
-                elif queued < max_products:
+                else:
                     state = QueueItemState.WAITING
                     queued += 1
-                else:
-                    beyond += 1
-                    continue
                 position += 1
                 session.add(
                     ExtensionQueueItem(
@@ -359,6 +360,10 @@ class ExtensionQueues:
             in_flight = _in_flight(session, queue_id)
             if in_flight is not None:
                 return QueueAnswer("WAIT", state, wait_s=_in_flight_wait(session, in_flight, now))
+            # One issued read per supplier, across its queues: a cancelled queue's read still out
+            # holds a new queue too.
+            if self.read_in_flight(session, queue.supplier_key):
+                return QueueAnswer("WAIT", state, wait_s=SETTLING_WAIT_S)
             waiting = session.scalars(
                 select(ExtensionQueueItem)
                 .where(

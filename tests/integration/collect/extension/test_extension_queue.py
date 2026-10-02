@@ -241,6 +241,22 @@ def test_a_queue_holds_at_most_its_declared_products(container: Container) -> No
     assert (created.count.queued, created.count.beyond_cap) == (2, 3)
 
 
+def test_skipped_products_count_toward_the_declared_size(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    run_id = _capture(container, "9001", None)
+    container.runner.run_next()
+    assert container.collection.run(run_id).outcome is CollectionOutcome.RECORDED
+    links = [_url(str(9001 + n)) for n in range(5)]
+    created = _declare(container, links, max_products=2, skip_collected=True)
+    assert [item.state for item in created.view.items] == [
+        QueueItemState.SKIPPED,
+        QueueItemState.WAITING,
+    ]
+    assert (created.count.skipped, created.count.queued, created.count.beyond_cap) == (1, 1, 3)
+    assert _count(config, "extension_queue_items") == 2
+
+
 def test_no_acceptable_link_opens_no_queue(container: Container, config: AppConfig) -> None:
     _refused(
         lambda: _declare(container, ["https://kmretail.co.kr/product/list.html"]),
@@ -430,7 +446,7 @@ def test_a_collected_product_is_skipped_without_a_read_when_the_operator_asks(
 
 
 def test_one_open_queue_per_supplier_and_cancel_settles_every_unissued_read(
-    container: Container,
+    container: Container, clock: FakeClock
 ) -> None:
     queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
     _refused(lambda: _declare(container, [_url("9003")]), "EXTENSION_QUEUE_BUSY")
@@ -440,8 +456,13 @@ def test_one_open_queue_per_supplier_and_cancel_settles_every_unissued_read(
     # The issued read was already counted and stays what it is; the unissued one is cancelled.
     assert [item.state for item in view.items] == [QueueItemState.ISSUED, QueueItemState.CANCELLED]
     assert container.extension_queues.next(queue_id).kind == "DONE"
-    # A cancelled queue no longer holds the supplier.
-    assert _declare(container, [_url("9003")]).view.state is QueueState.OPEN
+    # A cancelled queue no longer holds the supplier, but its read still out does: the new queue
+    # waits until that read is settled or has expired.
+    replacement = _declare(container, [_url("9003")]).view
+    assert replacement.state is QueueState.OPEN
+    assert container.extension_queues.next(replacement.queue_id).kind == "WAIT"
+    clock.advance(QUEUE_ISSUE_TTL_S)
+    assert _issue(container, replacement.queue_id).item is not None
 
 
 @contextlib.contextmanager
