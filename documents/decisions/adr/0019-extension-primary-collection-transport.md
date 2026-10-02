@@ -243,6 +243,85 @@ run) for the extension transport.
 - **Performance** is a later benchmark, never an acceptance promise; correctness and bounded
   behaviour come first. "500 products in under an hour" is an example of such a target.
 
+### 8.1 The E3 queue contract (the user's instruction, 2026-10-02)
+
+The user ordered E3 after the security gate (§6.1) merged. This section is the contract E3 is built
+and audited against. It adds no read, host, path or query to any supplier and changes no E1 or E2
+rule.
+
+**Discovery reads nothing.**
+- The operator opens a supplier list page in their own Chrome and asks the side panel to find its
+  products. The extension reads only that already-loaded page: every anchor whose resolved URL is
+  on the supplier's storefront host, in document order.
+- Only the scheme, host and path of each link leave the browser, with the list page's own scheme,
+  host and path as a label. No HTML, anchor text, credentials, query or fragment is sent or kept, so
+  a secret a link carries never leaves the page. A product named only in a query is not discovered.
+- **The server judges every link.** A link is a queue candidate only if `check_target` accepts it
+  as a product read of that supplier (the reviewed `CollectionProfile` product path and host
+  rules). Links are deduplicated by the product the URL names. A refused link is counted, never
+  stored or logged by value. The extension's own filtering is a convenience and never decides.
+- No list-page topology is added to a supplier. Reconnaissance never observed one, and a value is
+  never added because it seems likely. A later, observed list region may narrow discovery; it may
+  never widen it.
+
+**The bounds are declared, twice, and never defaulted.**
+- The supplier's `CollectionProfile` declares its queue limits (it owns pacing, AC-11):
+  - the most links one discovery may submit;
+  - the most products one queue may hold;
+  - the shortest interval between two queue reads. It is never below the supplier's request
+    interval or the extension ingest interval;
+  - how long an issued read may stay open.
+
+  A supplier without them has no list queue: discovery and every queue call refuse fail-closed.
+- The operator declares each queue's own bounds in the side panel: the number of products and the
+  interval between them. An absent or out-of-range value refuses the queue before it exists. There
+  is no "unlimited", and nothing falls back to a code default.
+- Concurrency is one: a supplier has at most one issued, unsettled queue read. It is serialized
+  with the single-click path by the existing one-pending-extension-run rule.
+
+**Every read is server-issued work, reserved durably before it happens.**
+- The extension asks the server for the next item. The server answers with exactly one of:
+  - **wait**, with the seconds left: the queue interval, the same-product interval or an unsettled
+    run;
+  - **issue**: one item, its product URL and a random, single-use ticket. The issue is written
+    before the answer is sent, and it counts against the queue's budget;
+  - **done**: the queue is finished, cancelled or stopped.
+
+  The extension's clock never decides.
+- **The same-product interval of ADR-0010 §4 holds for queue reads.** Before an issue it counts
+  every read of the product: the server's own reads, issued queue reads and extension captures. A
+  single click stays the operator's own read under the E1 rules and is never refused by it.
+- One item is one read. An item is never reissued or retried. An issued item that is never captured
+  expires after the declared time and still counts.
+- **The queue stops, and never skips forward, at the first item that does not end `RECORDED` or
+  `NO_REVISION`.** That covers a refused capture, an expired ticket and a `FAILED` run. The operator
+  decides what follows; a new queue is a new declaration.
+- The operator may pause, by not asking, or cancel. Cancelling settles every unissued item.
+
+**Every product is an ordinary run.**
+- The extension navigates the operator's own tab to the issued URL, captures it with the unchanged
+  E1 capture, and sends it through the unchanged ingest with its ticket. The server accepts a
+  ticketed capture only for that item's exact URL, once, before the ticket expires.
+- From there it is the E2 pipeline: the §6.1 security gate, the KM extractor and a
+  `ProductFactsRevision`. An E3 run differs from a single-click run only in naming its queue item.
+- **"Skip collected products"** is an operator choice per queue. It skips, without a read, a product
+  that already has a `RECORDED` run for the supplier.
+
+**State and UI.**
+- The queue and its items are durable server state, so a restart loses no issued read. An item has
+  its own state axis: waiting, issued, captured, skipped, expired or cancelled. This axis is never a
+  run outcome. A captured item names its run, and the run keeps its own outcome, facts status and
+  code (§12.3).
+- The side panel shows discovery and queue progress (§12.1) as the approved prototype board
+  `확장 — 목록 발견과 대기열` draws them, with two corrections where a canonical rule wins:
+  - a row's chip is the item state or the run outcome, never `REVIEW` (AC-21);
+  - there is no supplier-session indicator the extension cannot know.
+- Collection Management shows every E3 run as it shows any run.
+
+**The real acceptance needs its own grant.** It needs one list page, a queue no larger than the
+user grants, and the declared interval, with the user's own click. Until then the slice runs only
+against local fixtures, with zero supplier reads.
+
 ### 9. No legacy extension code
 
 The old ICBM extension implementation is **not inspected, copied or transplanted** (CLAUDE.md §2).
@@ -368,6 +447,11 @@ AC-23  The extension may preview a sanitized candidate image reference, role and
 AC-24  A disconnected ICBM never causes authenticated whole-DOM local persistence; a retry buffer needs its own separately defined capture-envelope, sanitization and retention contract, and without it the extension fails closed
 AC-25  The EXTENSION area of the Collection Management start screen is connection and entry guidance and recent intake or status, never an in-app capture button; DIRECT_URL is the actionable fallback form
 AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics the bounded KM single-click acceptance requires; documents/contracts/ui/UI_SOURCE_OF_TRUTH.md changes only when an approved prototype revision and its fingerprint are recorded under its own process
+AC-27  List discovery reads only the operator's already-loaded page and sends only the scheme, host and path of storefront links and of the list page; the server judges every link with check_target, and no list-page topology is added without reconnaissance (§8.1)
+AC-28  A list queue exists only when the supplier's CollectionProfile declares its queue limits and the operator declares the queue's size and interval within them; a missing or out-of-range bound refuses before any read
+AC-29  Every queue read is server-issued work, written durably before the read and counted against the queue budget, never reissued or retried; the same-product interval counts server reads, issued queue reads and extension captures
+AC-30  A queue stops, never skipping forward, at the first item that does not end RECORDED or NO_REVISION; every queued product is an ordinary EXTENSION run through the unchanged ingest, security gate and extractor
+AC-31  A queue item's state is its own axis and never a run outcome; the side panel shows no REVIEW chip and no supplier-session indicator the extension cannot know
 ```
 
 ## Consequences
