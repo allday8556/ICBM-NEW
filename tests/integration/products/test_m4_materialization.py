@@ -976,6 +976,13 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
         "/api/v1/products/{product_group_id}/detail": {"get"},
         "/api/v1/products/{product_group_id}/registration-target": {"get"},
         "/api/v1/products/by-source/{supplier_key}/{source_product_id}": {"get"},
+        # The operator's image decisions (owner decision 2026-10-03): reads of the current bound
+        # revision's images, and the image owner's two operator entry points. Still no Product
+        # is ever written by a request.
+        "/api/v1/products/items/{item_id}/image-candidates": {"get"},
+        "/api/v1/products/items/{item_id}/images/{sha256}": {"get"},
+        "/api/v1/products/items/{item_id}/image-selection": {"post"},
+        "/api/v1/products/image-qa": {"post"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404
