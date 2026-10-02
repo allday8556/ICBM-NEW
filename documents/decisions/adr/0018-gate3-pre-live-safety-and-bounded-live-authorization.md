@@ -115,16 +115,19 @@ needs every check of §4.3.
 > this section anticipates replaces `M0_DRY_RUN_ONLY` under this contract (G3-01), and nothing
 > else changes. `DRY_RUN` stays the configured boot default — the configuration and the
 > execution-mode owner both refuse to start in `LIVE` — and is the state every restart returns
-> to, with or without a grant. `LIVE` is one bounded window held in the running process's
-> memory: it opens only on a request that names the user's GitHub approval by content-bound
-> identity (`github_issue_comment:<id>@<sha256>`) and a duration of at most four hours, lapses
-> to `DRY_RUN` by itself, is never widened while open and closes on a `DRY_RUN` request. Every
-> request is written to the audit log before its decision, and a `LIVE` request that names no
-> window is still refused with `M0_LIVE_FORBIDDEN`. In an open window `live_writes_permitted`
-> is `true`: that is the execution-mode layer's own answer (§4.3 layer 1) and nothing more —
-> the brake, the stage's grant and every other layer still decide, so the mode permits no
-> mutation by itself. Opening a real window stays the user's bounded LIVE decision
-> (`CLAUDE.md` §7.2).
+> to, with or without a grant. `LIVE` is one bounded window held in the running process's memory,
+> opened only inside an approved bounded LIVE mutation scope: a request names a duration of at
+> most four hours, and the window opens only while a live grant (§3) exists, never outlasts it,
+> lapses to `DRY_RUN` by itself when its time is up or no live grant remains, is never widened
+> while open and closes on a `DRY_RUN` request. Opening that scope — issuing the grant — is the
+> protected action that carries the user's approval (`CLAUDE.md` §7.2): the user approves the
+> product and execution decision, and recording its GitHub evidence is the agent's bookkeeping
+> (ADR-0022 §3). The mode switch therefore asks for no approval or evidence identity of its own,
+> and nothing inside an approved scope is approved again per item. Every request is written to
+> the audit log before its decision, and a `LIVE` request that names no window is still refused
+> with `M0_LIVE_FORBIDDEN`. In an open window `live_writes_permitted` is `true`: that is the
+> execution-mode layer's own answer (§4.3 layer 1) and nothing more — the brake, the stage's
+> grant and every other layer still decide, so the mode permits no mutation by itself.
 
 ### 3. The bounded LIVE grant (D1)
 
@@ -519,6 +522,11 @@ now       never resend while the outcome is unknown
   > body digest. The existing §10 layer reads it for the stage's own account; a missing, malformed,
   > wrong-scope or stale proof refuses. No acceptance is recorded by this note, and the proof still
   > authorizes nothing: every other layer of both stages decides as before.
+  >
+  > **Amendment note (operating authority, ADR-0022 §3; PR #197).** Accepting the residual risk is
+  > the user's decision (`CLAUDE.md` §7.2). The GitHub comments that record it, their ids and their
+  > body digests are evidence bookkeeping, written and digested by the agent and the Host, never by
+  > the user: the user decides, and nothing here asks the user to author, find or hash a comment.
 
 ### 7. Backup and restore: a proven drill, not a declaration (D5)
 

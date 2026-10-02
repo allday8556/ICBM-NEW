@@ -28,8 +28,7 @@ class HealthResponse(BaseModel):
 class ExecutionModeChangeRequest(BaseModel):
     target_mode: ExecutionMode
     reason: str | None = Field(default=None, max_length=500)
-    # A LIVE request opens a bounded window only when it names both (ADR-0018 §2).
-    approval_reference: str | None = Field(default=None, max_length=200)
+    # A LIVE request opens a bounded window only when it names its duration (ADR-0018 §2).
     window_s: int | None = None
 
 
@@ -57,13 +56,12 @@ def request_execution_mode(
     body: ExecutionModeChangeRequest, container: ContainerDep
 ) -> ExecutionModeState:
     """Protected action, audited before the decision. DRY_RUN closes an open LIVE window; LIVE
-    opens one only as a bounded window naming the user's GitHub approval, and the mode alone is
-    never authority for a mutation (ADR-0018 §2, §4.3)."""
+    opens one only as a bounded window inside an approved bounded LIVE mutation scope (a live
+    grant), and the mode alone is never authority for a mutation (ADR-0018 §2, §4.3)."""
     return container.execution_mode.request_change(
         body.target_mode,
         actor=container.config.operator_actor,
         reason=body.reason,
-        approval_reference=body.approval_reference,
         window_s=body.window_s,
     )
 

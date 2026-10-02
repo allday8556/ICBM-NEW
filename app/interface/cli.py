@@ -117,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     visual.add_argument("--report", required=True, type=Path, help="the harness report JSON")
     visual.add_argument("--approved-by", required=True, help="the reviewer who accepted it")
     visual.add_argument(
-        "--authorization-ref", required=True, help="the GitHub comment id that accepted it"
+        "--authorization-ref", required=True, help="the GitHub comment id recording the acceptance"
     )
     visual.add_argument("--actor", required=True, help="who runs this command")
     _add_operator_commands(live_commands)
@@ -170,12 +170,14 @@ def _add_operator_commands(live_commands: Any) -> None:
     accept.add_argument(
         "--user-acceptance",
         required=True,
-        help="the user's GitHub acceptance comment: github_issue_comment:<id>@<sha256 of body>",
+        help="the GitHub comment recording the user's acceptance, written by the agent:"
+        " github_issue_comment:<id>@<sha256 of body>",
     )
     accept.add_argument(
         "--architect-acceptance",
         required=True,
-        help="the architect's GitHub acceptance comment: github_issue_comment:<id>@<sha256>",
+        help="the GitHub comment recording the architect's acceptance:"
+        " github_issue_comment:<id>@<sha256>",
     )
     accept.add_argument("--actor", required=True, help="the operator who records it")
     asset = live_commands.add_parser(
@@ -205,7 +207,9 @@ def _add_operator_commands(live_commands: Any) -> None:
     release.add_argument("--actor", required=True)
     release.add_argument("--reason-code", required=True)
     release.add_argument(
-        "--authorization-ref", required=True, help="the GitHub comment id that approved it"
+        "--authorization-ref",
+        required=True,
+        help="the GitHub comment id recording the user's approval (agent bookkeeping)",
     )
     engage = live_commands.add_parser(
         "engage-brake", help="re-engage the protected-write brake (ADR-0018 §4.1)"
@@ -241,7 +245,9 @@ def _add_window(command: argparse.ArgumentParser) -> None:
     command.add_argument("--expires-at", required=True, help="ISO-8601 with an explicit offset")
     command.add_argument("--approved-by", required=True)
     command.add_argument(
-        "--authorization-ref", required=True, help="the GitHub comment id that approved it"
+        "--authorization-ref",
+        required=True,
+        help="the GitHub comment id recording the user's approval (agent bookkeeping)",
     )
 
 

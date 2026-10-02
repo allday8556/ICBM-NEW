@@ -3,8 +3,10 @@
 Opening any real canary under the §6.1 strategy needs an explicit user and architect acceptance of
 its residual risk, **recorded in GitHub**. GitHub holds that decision. This owner holds only the
 durable proof the existing send-time layer ``RESIDUAL_RISK_ACCEPTED`` reads: for one canonical
-account and one exact risk contract, the user's and the architect's acceptance comment, each by
-its GitHub id and the SHA-256 of its body. It never decides, interprets or replaces the decision.
+account and one exact risk contract, the GitHub comment recording the user's acceptance and the one
+recording the architect's, each by its id and the SHA-256 of its body. It never decides, interprets
+or replaces the decision. The user only decides: writing and digesting those comments is evidence
+bookkeeping the agent and the Host do (ADR-0022 §3).
 
 - **Evidence is a content-bound GitHub identity**, ``github_issue_comment:<id>@<sha256 of the
   body>``, the form the Agent Host uses for every cited source. Any other form is refused; the two

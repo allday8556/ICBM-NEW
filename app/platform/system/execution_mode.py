@@ -1,6 +1,6 @@
 import logging
-import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
@@ -20,17 +20,15 @@ M0_POLICY = "M0_DRY_RUN_ONLY"
 # ADR-0018 §2: the policy of an open bounded LIVE window.
 LIVE_POLICY: Final = "ADR0018_BOUNDED_LIVE"
 
-# A LIVE window is bounded: it names the user's GitHub approval by content-bound identity and
-# lasts at most this long, then lapses back to DRY_RUN by itself.
+# A LIVE window is bounded: it lasts at most this long, never past the approved bounded LIVE
+# mutation scope it is opened inside, then lapses back to DRY_RUN by itself.
 LIVE_WINDOW_MAX_S: Final = 4 * 60 * 60
-APPROVAL_FORM: Final = "github_issue_comment:<id>@<sha256>"
-_APPROVAL = re.compile(r"^github_issue_comment:([0-9]{6,20})@([0-9a-f]{64})$")
 
 # A LIVE request that names no bounded window at all keeps the refusal it always had.
 UNBOUNDED_LIVE_FORBIDDEN: Final = "M0_LIVE_FORBIDDEN"
-APPROVAL_UNSUPPORTED: Final = "LIVE_APPROVAL_REFERENCE_UNSUPPORTED"
 WINDOW_OUT_OF_BOUNDS: Final = "LIVE_WINDOW_OUT_OF_BOUNDS"
 WINDOW_ALREADY_OPEN: Final = "LIVE_WINDOW_ALREADY_OPEN"
+SCOPE_NOT_APPROVED: Final = "LIVE_SCOPE_NOT_APPROVED"
 WINDOW_OPENED: Final = "LIVE_WINDOW_OPENED"
 WINDOW_CLOSED: Final = "LIVE_WINDOW_CLOSED"
 
@@ -42,12 +40,14 @@ class ExecutionModeState(BaseModel):
     live_writes_permitted: bool
     policy: str
     live_until: datetime | None = None
-    approval_reference: str | None = None
+
+
+# Until when an approved bounded LIVE mutation scope exists — a live grant (ADR-0018 §3) — or None.
+ScopeSource = Callable[[], datetime | None]
 
 
 @dataclass(frozen=True)
 class _LiveWindow:
-    approval_reference: str
     until: datetime
     audit_event_id: str
 
@@ -59,20 +59,34 @@ class ExecutionModeService:
     to the append-only audit log before a decision is returned.
 
     ``DRY_RUN`` is the configured boot default and the only state a process starts in. ``LIVE``
-    exists only as one **bounded window** held in this process's memory: a request opens it only
-    when it names the user's GitHub approval (``github_issue_comment:<id>@<sha256>``) and a duration
-    of at most ``LIVE_WINDOW_MAX_S``; it lapses to ``DRY_RUN`` by itself when that time is up, it
-    can be closed at any time, it is never widened while open, and a restart never restores it.
+    exists only as one **bounded window** held in this process's memory, opened inside an approved
+    bounded LIVE mutation scope: a request names a duration of at most ``LIVE_WINDOW_MAX_S``, and
+    the window opens only while a live grant exists (``scope``, the grant owner's read). Opening
+    that scope is the protected action that carries the user's approval (rule §7.2, ADR-0022) —
+    the grant, issued by an explicit operator action — so the mode switch asks for no approval of
+    its own and no evidence identity. The window never outlasts the scope, and it lapses to
+    ``DRY_RUN`` by itself the moment its time is up or no live grant remains — revoked, exhausted,
+    expired or unreadable. It can be closed at any time, it is never widened while open, and a
+    restart never restores it, with or without a grant.
     **The mode alone is never authority for a mutation**: in ``LIVE`` the protected-write brake,
     the stage's grant and every other layer of the send-time stack still decide (ADR-0018 §4.3).
     """
 
-    def __init__(self, mode: ExecutionMode, audit: AuditLog, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        mode: ExecutionMode,
+        audit: AuditLog,
+        clock: Clock | None = None,
+        *,
+        scope: ScopeSource | None = None,
+    ) -> None:
         if mode is not ExecutionMode.DRY_RUN:
             # AppConfig already refuses it; the owner never starts in anything else.
             raise ValueError("the execution mode always boots DRY_RUN")
         self._audit = audit
         self._clock = clock or SystemClock()
+        # No scope source means no approved scope ever exists: LIVE never opens.
+        self._scope = scope
         self._lock = threading.Lock()
         self._window: _LiveWindow | None = None
 
@@ -88,7 +102,6 @@ class ExecutionModeService:
             live_writes_permitted=True,
             policy=LIVE_POLICY,
             live_until=window.until,
-            approval_reference=window.approval_reference,
         )
 
     def request_change(
@@ -97,25 +110,37 @@ class ExecutionModeService:
         *,
         actor: str,
         reason: str | None,
-        approval_reference: str | None = None,
         window_s: int | None = None,
     ) -> ExecutionModeState:
         if target is ExecutionMode.DRY_RUN:
             self._close(actor=actor, reason=reason)
         else:
-            self._open(
-                actor=actor, reason=reason, approval_reference=approval_reference, window_s=window_s
-            )
+            self._open(actor=actor, reason=reason, window_s=window_s)
         return self.state()
 
     # ------------------------------------------------------------------ transitions
 
     def _current(self) -> _LiveWindow | None:
-        """The open window, or None once it has lapsed. The caller holds the lock."""
+        """The open window, or None once it has lapsed: its time is up, or no approved scope
+        remains. The caller holds the lock."""
         window = self._window
-        if window is not None and self._clock.now() >= window.until:
-            self._window = window = None
+        if window is None:
+            return None
+        now = self._clock.now()
+        scope = self._scope_until()
+        if now >= window.until or scope is None or now >= scope:
+            self._window = None
+            return None
         return window
+
+    def _scope_until(self) -> datetime | None:
+        if self._scope is None:
+            return None
+        try:
+            return self._scope()
+        except Exception:  # an unreadable scope is no scope, never an error
+            logger.warning("execution_mode.scope_unreadable", extra={"action": ACTION})
+            return None
 
     def _close(self, *, actor: str, reason: str | None) -> None:
         with self._lock:
@@ -131,7 +156,6 @@ class ExecutionModeService:
                 details={
                     "requested_mode": ExecutionMode.DRY_RUN,
                     "reason": reason,
-                    "approval_reference": window.approval_reference,
                     "opened_by_audit_event_id": window.audit_event_id,
                     "live_until": window.until.isoformat(),
                 },
@@ -142,28 +166,26 @@ class ExecutionModeService:
             extra={"action": ACTION, "reason_code": WINDOW_CLOSED, "audit_event_id": event_id},
         )
 
-    def _open(
-        self,
-        *,
-        actor: str,
-        reason: str | None,
-        approval_reference: str | None,
-        window_s: int | None,
-    ) -> None:
+    def _open(self, *, actor: str, reason: str | None, window_s: int | None) -> None:
         with self._lock:
             current = self._current()
-            refusal = _refusal(current, approval_reference, window_s)
             mode = ExecutionMode.DRY_RUN if current is None else ExecutionMode.LIVE
             details: dict[str, Any] = {
                 "requested_mode": ExecutionMode.LIVE,
                 "reason": reason,
-                "approval_reference": approval_reference,
                 "window_s": window_s,
                 "policy": M0_POLICY if current is None else LIVE_POLICY,
             }
-            if refusal is None and approval_reference is not None and window_s is not None:
-                until = self._clock.now() + timedelta(seconds=window_s)
+            now = self._clock.now()
+            refusal = _refusal(current, window_s)
+            scope = self._scope_until() if refusal is None else None
+            if refusal is None and (scope is None or now >= scope):
+                refusal = SCOPE_NOT_APPROVED
+            if refusal is None and scope is not None and isinstance(window_s, int):
+                # Never past the approved scope the window is opened inside.
+                until = min(now + timedelta(seconds=window_s), scope)
                 details["live_until"] = until.isoformat()
+                details["scope_until"] = scope.isoformat()
                 # Recorded before the decision takes effect: a failed append opens nothing.
                 event_id = self._record(
                     AuditOutcome.ALLOWED,
@@ -173,7 +195,7 @@ class ExecutionModeService:
                     after=ExecutionMode.LIVE,
                     details=details,
                 )
-                self._window = _LiveWindow(approval_reference.strip(), until, event_id)
+                self._window = _LiveWindow(until, event_id)
                 denied = ""
             else:
                 denied = refusal or WINDOW_OUT_OF_BOUNDS
@@ -231,19 +253,13 @@ class ExecutionModeService:
         return record.event_id
 
 
-def _refusal(
-    current: _LiveWindow | None, approval_reference: str | None, window_s: int | None
-) -> str | None:
-    """Why a LIVE request opens nothing, or None when it opens a bounded window."""
-    if approval_reference is None and window_s is None:
+def _refusal(current: _LiveWindow | None, window_s: int | None) -> str | None:
+    """Why a LIVE request opens nothing before the scope is read, or None."""
+    if window_s is None:
         return UNBOUNDED_LIVE_FORBIDDEN
     if current is not None:
         # Never widened while open: closing it first is its own audited change.
         return WINDOW_ALREADY_OPEN
-    if not isinstance(approval_reference, str) or not _APPROVAL.fullmatch(
-        approval_reference.strip()
-    ):
-        return APPROVAL_UNSUPPORTED
     if (
         not isinstance(window_s, int)
         or isinstance(window_s, bool)
@@ -255,11 +271,14 @@ def _refusal(
 
 _MESSAGES: Final = {
     UNBOUNDED_LIVE_FORBIDDEN: (
-        "DRY_RUN is the default. LIVE opens only as a bounded window that names the user's GitHub "
-        f"approval ({APPROVAL_FORM}) and a duration of at most {LIVE_WINDOW_MAX_S} seconds "
-        "(ADR-0018 §2, CLAUDE.md §7.1)."
+        "DRY_RUN is the default. LIVE opens only as a bounded window of at most "
+        f"{LIVE_WINDOW_MAX_S} seconds inside an approved bounded LIVE mutation scope "
+        "(ADR-0018 §2, CLAUDE.md §7)."
     ),
     WINDOW_ALREADY_OPEN: "a LIVE window is already open; close it before opening another",
-    APPROVAL_UNSUPPORTED: f"the LIVE approval must be a GitHub comment identity {APPROVAL_FORM}",
     WINDOW_OUT_OF_BOUNDS: f"a LIVE window lasts 1 to {LIVE_WINDOW_MAX_S} seconds",
+    SCOPE_NOT_APPROVED: (
+        "no approved bounded LIVE mutation scope exists: a LIVE window opens only while a live "
+        "grant does (ADR-0018 §2, §3; CLAUDE.md §7.2)"
+    ),
 }
