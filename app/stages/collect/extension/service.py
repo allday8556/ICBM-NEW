@@ -139,7 +139,7 @@ class QueueTickets(Protocol):
 
     def read_in_flight(self, session: Session, supplier_key: str) -> bool: ...
 
-    def refuse(self, *, supplier_key: str, ticket: str) -> None: ...
+    def refuse(self, ticket: str) -> None: ...
 
 
 class ExtensionCeilingExceeded(PolicyBlockedError):
@@ -244,9 +244,8 @@ class ExtensionCaptureService:
             return self._ingest(envelope)
         except Exception:
             if envelope.queue_ticket is not None and self._queue_tickets is not None:
-                self._queue_tickets.refuse(
-                    supplier_key=envelope.supplier_key, ticket=envelope.queue_ticket
-                )
+                # The ticket alone names its read: nothing else the capture says is trusted here.
+                self._queue_tickets.refuse(envelope.queue_ticket)
             raise
 
     def _ingest(self, envelope: CaptureEnvelope) -> AcceptedCapture:

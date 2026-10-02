@@ -317,6 +317,8 @@ def test_a_ticket_claims_once_and_an_unknown_ticket_changes_nothing(
         ("9002", {}, "EXTENSION_QUEUE_TICKET_REFUSED"),
         # The right product, cut with a policy that is no longer the reviewed one.
         ("9001", {"policy": {"revision": "stale", "digest": "0" * 64}}, "CAPTURE_POLICY_MISMATCH"),
+        # The right product, claimed for another supplier: the ticket alone names the read.
+        ("9001", {"supplier_key": "synthetic-other"}, "COLLECT_SUPPLIER_UNKNOWN"),
     ],
 )
 def test_a_refused_capture_spends_its_read_and_stops_the_queue(

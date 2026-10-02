@@ -527,20 +527,18 @@ class ExtensionQueues:
         )
         return bool(held)
 
-    def refuse(self, *, supplier_key: str, ticket: str) -> None:
-        """A ticketed capture was refused: its issued read is spent and its queue stops. A ticket
-        that answers no issued read of this supplier changes nothing."""
+    def refuse(self, ticket: str) -> None:
+        """A ticketed capture was refused: its issued read is spent and its queue stops. The ticket
+        alone names the read — a random 256-bit value issued once — so nothing else the refused
+        capture claims, its supplier included, can keep the read open. A ticket that answers no
+        issued read changes nothing."""
         with self._db.write() as session:
             item = session.scalar(
                 select(ExtensionQueueItem).where(
                     ExtensionQueueItem.ticket_sha256 == _ticket_digest(ticket)
                 )
             )
-            if (
-                item is None
-                or item.supplier_key != supplier_key
-                or item.state != QueueItemState.ISSUED.value
-            ):
+            if item is None or item.state != QueueItemState.ISSUED.value:
                 return
             now = self._clock.now()
             assert item.expires_at is not None
