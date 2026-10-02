@@ -296,7 +296,9 @@ rule.
   every read of the product: the server's own reads, issued queue reads and extension captures. A
   single click stays the operator's own read under the E1 rules and is never refused by it.
 - One item is one read. An item is never reissued or retried. An issued item that is never captured
-  expires after the declared time and still counts.
+  expires after the declared time and still counts; the extension gives such a read back the moment
+  it knows it cannot capture it (the page did not load, or the cut refused it before anything was
+  sent), and a given-back read is spent the same way, so the queue goes on at once.
 - **A queue goes on past an item that fails** (the user's rule of 2026-10-02, replacing the first
   contract's stop at the first failure). An expired ticket, a refused capture and a `FAILED` run
   leave their item as it ended — `EXPIRED`, or captured with its run's own outcome — and the queue

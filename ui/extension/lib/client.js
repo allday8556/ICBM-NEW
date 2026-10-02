@@ -169,3 +169,13 @@ export function readQueue(pairing, extensionId, queueId) {
 export function cancelQueue(pairing, extensionId, queueId) {
   return signedJson(pairing, extensionId, { method: "POST", path: `${QUEUE_PATH(queueId)}/cancel` });
 }
+
+// Give back an issued read this browser could not capture, so ICBM goes on to the next item at
+// once instead of waiting for the read to run out. The ticket is sent once and kept nowhere.
+export function releaseRead(pairing, extensionId, queueId, ticket) {
+  return signedJson(pairing, extensionId, {
+    method: "POST",
+    path: `${QUEUE_PATH(queueId)}/release`,
+    body: JSON.stringify({ ticket }),
+  });
+}

@@ -17,6 +17,8 @@ The list-queue routes (ADR-0019 §8.1, E3):
 - ``GET  /api/v1/collect/extension/queues/{queue_id}`` — the queue as it stands.
 - ``POST /api/v1/collect/extension/queues/{queue_id}/next`` — wait, one issued read, or done.
 - ``POST /api/v1/collect/extension/queues/{queue_id}/cancel`` — cancel every unissued read.
+- ``POST /api/v1/collect/extension/queues/{queue_id}/release`` — give back an issued read the
+  extension could not capture, so the queue goes on at once.
 
 Every route requires everything together: the loopback host (``TrustedHostMiddleware``), the
 ``X-ICBM-Client`` header, the pinned extension origin when an ``Origin`` is present, and the
@@ -78,6 +80,7 @@ QUEUES_PATH = "/api/v1/collect/extension/queues"
 QUEUE_PATH = "/api/v1/collect/extension/queues/{queue_id}"
 QUEUE_NEXT_PATH = "/api/v1/collect/extension/queues/{queue_id}/next"
 QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"
+QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"
 POLICY_REVISION_HEADER = "X-ICBM-Capture-Policy-Revision"
 POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest"
 # The whole request: the capture, JSON-escaped at worst, and its small envelope. It bounds what is
@@ -204,6 +207,14 @@ async def submit_capture(request: Request, container: ContainerDep) -> Response:
 
 
 # ---------------------------------------------------------------------------- the list queue (E3)
+
+
+class ReleaseRequest(BaseModel):
+    """The ticket of the issued read the extension gives back. Nothing else."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ticket: StrictStr = Field(repr=False, pattern=r"^[A-Za-z0-9_-]{43}$")
 
 
 class QueueRequest(BaseModel):
@@ -347,6 +358,16 @@ def cancel_queue(queue_id: str, request: Request, container: ContainerDep) -> Re
     return _json(request, sender, _queue(container.extension_queues.cancel(queue_id)))
 
 
+@router.post(QUEUE_RELEASE_PATH)
+async def release_read(queue_id: str, request: Request, container: ContainerDep) -> Response:
+    """Give back an issued read the extension could not capture. The ticket is never logged."""
+    sender = await run_in_threadpool(_authenticate, request, container.extension_pairing)
+    body = await _bounded_body(request, MAX_QUEUE_REQUEST_BYTES)
+    release = await run_in_threadpool(_signed, body, sender, ReleaseRequest, "release")
+    view = await run_in_threadpool(container.extension_queues.release, queue_id, release.ticket)
+    return _json(request, sender, _queue(view))
+
+
 def _preflight(request: Request, container: ContainerDep, method: str) -> Response:
     """The only preflight answers this application gives: these exact paths, the paired origin."""
     paired = container.extension_pairing.current()
@@ -405,4 +426,9 @@ def next_read_preflight(queue_id: str, request: Request, container: ContainerDep
 
 @router.options(QUEUE_CANCEL_PATH)
 def cancel_queue_preflight(queue_id: str, request: Request, container: ContainerDep) -> Response:
+    return _preflight(request, container, "POST")
+
+
+@router.options(QUEUE_RELEASE_PATH)
+def release_read_preflight(queue_id: str, request: Request, container: ContainerDep) -> Response:
     return _preflight(request, container, "POST")
