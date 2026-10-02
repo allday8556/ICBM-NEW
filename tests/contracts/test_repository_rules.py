@@ -1583,17 +1583,32 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         .split()
     )
     for element in (
-        "the standing authorization does **not** cover any of them",
         "production ASSET sender",
         "`app/container.py` wires `SmartStoreAssetSender` with no committed session",
-        "the sender and the committed session because a real provider transport is not"
-        " provider-zero",
+        # ADR-0022 §7, rule §14.5: wiring the session is implementation, and a committed-session
+        # read-back is a routine read-only operation; the side-effecting use stays the user's.
+        "Wiring both to the existing committed session is implementation, item 4 above",
+        "A committed-session read-back is a routine read-only provider operation, not a separate"
+        " user approval",
+        "a real image upload and a real CREATE are real external actions (ADR-0022 §2 D)",
+        "opened as the bounded LIVE action on the final main",
+        "**The residual-risk acceptance proof** (ADR-0018 §6.1, ADR-0014 §28.7) — `HIGH_RISK`",
+        "**The committed-session bearer seam** — `HIGH_RISK`",
+        "**The bounded LIVE runtime transition of ADR-0018** — `HIGH_RISK`",
+        "~~**The user-facing registration read state** (ADR-0014 §28.5, M5-35)~~ — **done**",
         "**executable committed-session read-back**",
         "`READBACK_EXECUTABLE` stays unproven",
         "The read-back is the remaining half of ADR-0014 §11's own success proof",
         "a comparison that proves published state, is closed by its own slice below",
     ):
         assert element in ordering, element
+    # The stale classifications are gone (post-ADR-0022 structure audit, F5).
+    for stale in (
+        "no provider-zero M5 slice remains in this order",
+        "the standing authorization does **not** cover any of them",
+        "ADR-0022 leaves this unchanged",
+    ):
+        assert stale not in ordering, stale
     later = "Only then do the residual-risk acceptance, the bounded LIVE grant use,"
     assert later in ordering
     assert ordering.index("ASSET sender") < ordering.index(later)
