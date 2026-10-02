@@ -121,6 +121,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_NOTICE_TYPES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice` | Notice-type discovery | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_NOTICE_TYPE_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | Notice-type read | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_PRODUCT_DELETE_V2` | `ADOPTED` | DELETE slice (ADR-0018 §3.5) | `DELETE` | `/v2/products/origin-products/{originProductNo}` | Delete one ICBM-confirmed origin product (§4.1.3) | `OWN_STORE_SELF` | `상품` | Yes; destructive. Only an `ACTIVE` ICBM-confirmed registration, under its exact DELETE grant, inside a bounded LIVE window with the brake released; an `UNKNOWN` is never resent |
 
 The remaining M5 rows are planning metadata only. Presence does not imply eventual adoption.
 
@@ -385,6 +386,27 @@ prerequisite. The provider-evidence verdict stays `INSUFFICIENT` (ADR-0014 §17.
 needs no deterministic lookup and assumes none. The search is **never** a duplicate lookup —
 duplicate evidence stays fail-closed (`lookup.py`; ADR-0014 §13) — and an `UNKNOWN` CREATE is still
 never resent.
+
+### 4.1.3 DELETE adoption (ADR-0018 §3.5; owner decision 2026-10-03)
+
+**Amendment note, not a rewrite.** The `SMARTSTORE_PRODUCT_DELETE_V2` row is added to §4 as
+`ADOPTED`, and the mapping revision is bumped to `m5-delete-r1` with its own fingerprint in the
+same change. The slice touched **its own endpoint only**: every other row of §4 is unchanged.
+
+| Field | `SMARTSTORE_PRODUCT_DELETE_V2` |
+| --- | --- |
+| Method / path | `DELETE /v2/products/origin-products/{originProductNo}` (`originProductNo` `integer<int64>`) |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, group `상품` |
+| Request | no query, no body |
+| Success | HTTP `200` with the common response object; nothing of it is retained |
+| Everything else | `UNKNOWN` — a 4xx after the handoff (the provider refuses a deletion while an order or a claim is open or the product is under a sale ban), a 5xx, a redirect, a timeout, a 200 that is not a JSON object — never resent; only an origin read-back resolves it |
+| `NOT_APPLIED_PROVEN` | only the transmission-precluded whitelist (§15.1 of `ERRORS.md`) |
+| Bulk | none; one product per call |
+| Evidence | `documents/evidence/marketplace-apis/PRODUCT_DELETE.md` § SmartStore |
+
+Adoption is never authority: a deletion runs only through `RegistrationDeletionService` and the
+send-time stack (ADR-0018 §3.5), for one `ACTIVE` ICBM-confirmed registration, under its exact
+DELETE grant, inside a bounded LIVE window with the brake released.
 
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 

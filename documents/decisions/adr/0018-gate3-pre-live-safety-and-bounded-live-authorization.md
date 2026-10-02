@@ -316,6 +316,43 @@ that slice's:
     adopted reuse/rebind path; nothing here adopts one, so until one is adopted a fresh upload in
     that scope stays blocked. This is deliberately over-conservative (see Consequences).
 
+#### 3.5 The DELETE stage — removing one ICBM-confirmed listing
+
+> **Amendment (owner decision 2026-10-03; PR #200).** The user decided that the canary test
+> listings are removed through ICBM itself, recorded and audited, rather than outside it. This adds
+> a third mutation stage. It changes nothing of §3.1–§3.4: the canary is still exactly its ASSET
+> and CREATE stages, and a deletion is never part of that order.
+
+- **What may be deleted.** Exactly one registration ICBM itself created and confirmed by read-back
+  (ADR-0014 §11): an `ACTIVE` row of `marketplace_registrations`, through the provider identity its
+  confirmed Intent recorded. Nothing else — no listing ICBM did not register, no unconfirmed or
+  `UNKNOWN` CREATE, no bulk deletion (the provider offers none; one product per call).
+- **The DELETE grant.** Issued only by the protected operator command `icbm live
+  issue-delete-grant`, like every grant (§3.2): it binds the exact registration through its
+  Intent and Snapshot, names no CREATE idempotency key or attempt number and no ASSET binding, has
+  a finite window and a budget of exactly 1, and is refused while any deletion of that
+  registration is in flight, applied, or unknown without a read-back that shows the listing still
+  there.
+- **The layers.** A deletion starts only when the execution mode is `LIVE` (§2), the
+  protected-write brake is `RELEASED` (§4.1), the exact live DELETE grant matches, the DELETE
+  endpoint is adopted, and evidence retention is proven (§8) — checked at send time in the one
+  unit that opens the attempt and spends the grant (§4.3). The canary-only rows of §10 —
+  non-regulated eligibility (§5), the restore drill (§7), the populated visual acceptance (§9) and
+  the residual-risk acceptance of an ambiguous CREATE (§6.1) — are not causally relevant to
+  removing a confirmed listing and are not layers of it (rule §14.5.1).
+- **The durable attempt owner.** `registration_deletions` (migration `0037`) records every
+  attempt, append-only: opened `STARTED` before any byte is sent, ended exactly once —
+  `APPLIED_PROVEN` only on the documented success, `NOT_APPLIED_PROVEN` only when transmission was
+  provably precluded, `UNKNOWN` otherwise — and never deleted. At most one open attempt per
+  registration; **an `UNKNOWN` deletion is never resent.**
+- **Verification.** After a possibly applied attempt the origin product is read back. The
+  documented sale status `DELETE` confirms the deletion; any other documented sale status shows
+  the listing still there; a failed or unreadable read-back records nothing. Only a read-back that
+  shows the listing still there resolves an `UNKNOWN` attempt and opens the way to a new grant.
+- **What it never does.** It never changes a registration's lifecycle, an Intent, an attempt, a
+  read-back or any other evidence; it never deletes local data; and the mode, the grant and the
+  brake each stay one layer — none of them authorizes a deletion by itself.
+
 ### 4. The protected-write brake — the kill switch (D4)
 
 #### 4.1 The brake

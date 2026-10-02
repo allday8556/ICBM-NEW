@@ -28,7 +28,8 @@ class ListingShape(StrEnum):
 
 
 class Operation(StrEnum):
-    """ADR-0014 §8: UPDATE and DELETE are not authorized in M5's first vertical."""
+    """ADR-0014 §8: an Intent is a CREATE. UPDATE is not authorized in M5's first vertical, and a
+    deletion is never an Intent: it is its own owner (ADR-0018 §3.5, ``registration_deletions``)."""
 
     CREATE = "CREATE"
 
