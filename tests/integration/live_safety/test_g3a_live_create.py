@@ -368,9 +368,8 @@ def test_the_unaccepted_residual_risk_alone_refuses_the_create_and_spends_nothin
     """Post-merge full audit of main ``6c6a39784f55``: the residual-risk acceptance of ADR-0018 §6.1
     is a mandatory row of both §10 stage columns (G3-30), so it is a layer of the send-time stack
     and not only a line of the canary summary. With every other layer satisfied the CREATE is still
-    refused before transmission, and the production proof source can never satisfy it: the
-    acceptance is not recorded, and that decision is recorded in GitHub with no durable owner
-    here."""
+    refused before transmission. The production proof source answers it only from a durable proof
+    of the GitHub acceptance (migration 0036), and none is recorded here."""
     from app.capabilities.live_safety.proofs import DurableStageProofs
 
     ready = prepare(container, sources, store, account, prep)
@@ -384,15 +383,17 @@ def test_the_unaccepted_residual_risk_alone_refuses_the_create_and_spends_nothin
     assert store.attempts(ready.intent_id) == () and run.sender.calls == []
     grant = container.live_authority.grant_record(grant_id)
     assert grant is not None and (grant.budget_used, grant.state) == (0, GrantState.ACTIVE)
-    # No proof source production wires answers it, whatever drill, retention or visual exists.
+    # The production proof source answers it only from a recorded proof, whatever drill,
+    # retention or visual exists; none is recorded for this account.
     assert (
         DurableStageProofs(
             store=LiveAuthorityStore(container.db, container.clock, container.audit),
             retention=container.retention,
             visual=container.visual_acceptance,
             eligibility=container.canary_eligibility,
+            residual_risk=container.residual_risk,
             schema_head=lambda: "head",
-        ).residual_risk_accepted()
+        ).residual_risk_accepted(MARKET, account)
         is False
     )
 
@@ -841,3 +842,43 @@ def test_a_preparation_revised_after_the_candidate_read_refuses_the_upload(
     assert sender.calls == [] and count(container.config, "asset_upload_attempts") == 0
     kept = live.grant_record(granted.grant_id)
     assert kept is not None and kept.budget_used == 0
+
+
+def test_a_recorded_acceptance_satisfies_only_its_own_create_layer(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    """ADR-0018 §6.1, G3-30: the production stack consumes the durable acceptance proof of the
+    Intent's own account. It satisfies the residual-risk layer and nothing else: the CREATE is
+    still refused before transmission by every other unproven layer, and nothing is spent."""
+    from app.capabilities.live_safety.residual_risk import RESIDUAL_RISK_CONTRACT_VERSION
+
+    ready = prepare(container, sources, store, account, prep)
+    grant_id = create_grant(container, ready.intent_id)
+    release(container)
+    container.residual_risk.record(
+        marketplace_key=MARKET,
+        marketplace_account_id=account,
+        risk_contract=RESIDUAL_RISK_CONTRACT_VERSION,
+        user_acceptance="github_issue_comment:5950000001@" + "a" * 64,
+        architect_acceptance="github_issue_comment:5950000002@" + "b" * 64,
+        actor="operator",
+        correlation_id=CID,
+    )
+    run = execution(container, prep, authority=container.safety_stack)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.run(context(ready))
+    assert refused.value.code == live_model.MODE_NOT_LIVE
+    reasons = {layer["reason"] for layer in refused.value.details["layers"]}
+    assert live_model.RESIDUAL_RISK_UNACCEPTED not in reasons
+    assert {
+        live_model.MODE_NOT_LIVE,
+        live_model.RESTORE_PROOF_ABSENT,
+        live_model.RECONCILE_PATH_NOT_ADOPTED,
+    } <= reasons
+    assert store.attempts(ready.intent_id) == () and run.sender.calls == []
+    grant = container.live_authority.grant_record(grant_id)
+    assert grant is not None and (grant.budget_used, grant.state) == (0, GrantState.ACTIVE)

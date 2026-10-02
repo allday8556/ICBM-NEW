@@ -451,6 +451,7 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "canary_eligibility_records",
         "extension_queues",
         "extension_queue_items",
+        "residual_risk_acceptances",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

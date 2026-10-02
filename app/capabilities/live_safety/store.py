@@ -58,6 +58,7 @@ from app.capabilities.live_safety.models import (
     CanaryEligibilityRecord,
     LiveGrant,
     ProtectedWriteBrake,
+    ResidualRiskAcceptance,
     RestoreDrill,
     RetentionProof,
     VisualAcceptance,
@@ -65,13 +66,14 @@ from app.capabilities.live_safety.models import (
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
-from app.stages.connect.accounts import require_bound
+from app.stages.connect.accounts import AccountBinding, binding_state, require_bound
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.register.model import CREATE_ENDPOINT_GROUP
 from app.stages.register.sanitize import require_clean, safe_provider_reference
 
 GLOBAL_BRAKE = "GLOBAL"
 _COMMENT_ID = re.compile(r"^[0-9]{6,20}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _FILE_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _MEDIA_TYPE = re.compile(r"^[a-z]+/[a-z0-9.+-]{1,48}$")
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
@@ -1075,6 +1077,105 @@ class LiveUnit:
         """The current record of exactly this scope: its highest ``seq``, or none."""
         records = self.eligibility_records(binding)
         return records[-1] if records else None
+
+    # ------------------------------------------------------------------ residual risk (§6.1)
+
+    def record_residual_risk_acceptance(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        risk_contract_version: str,
+        risk_statement_digest: str,
+        user_comment_id: str,
+        user_comment_digest: str,
+        architect_comment_id: str,
+        architect_comment_digest: str,
+        actor: str,
+        correlation_id: str,
+    ) -> ResidualRiskAcceptance:
+        """Append one residual-risk acceptance proof (ADR-0018 §6.1, G3-30). The only writer of
+        ``residual_risk_acceptances``.
+
+        The decision is the user's and the architect's, in GitHub; this row only points at their
+        two comments, each by id and body digest, for one account and one risk contract. ``seq``
+        is the next of that exact scope; nothing is ever rewritten."""
+        if not actor.strip() or not correlation_id.strip():
+            raise _invalid("an acceptance proof names who recorded it")
+        if not risk_contract_version.strip() or not _HEX64.match(risk_statement_digest):
+            raise _invalid("an acceptance proof names the exact risk contract it accepted")
+        for comment_id, digest in (
+            (user_comment_id, user_comment_digest),
+            (architect_comment_id, architect_comment_digest),
+        ):
+            if not _COMMENT_ID.match(comment_id) or not _HEX64.match(digest):
+                raise _invalid(
+                    "each acceptance is a GitHub comment identity: its id and its body digest"
+                )
+        if user_comment_id == architect_comment_id:
+            raise _invalid("the user's and the architect's acceptances are two distinct comments")
+        if (
+            binding_state(self.session, marketplace_key, marketplace_account_id)
+            is AccountBinding.UNKNOWN_ACCOUNT
+        ):
+            raise NotFoundError("LIVE_ACCOUNT_NOT_FOUND", "no such canonical marketplace account")
+        previous = self.residual_risk_acceptances(
+            marketplace_key, marketplace_account_id, risk_contract_version
+        )
+        row = ResidualRiskAcceptance(
+            acceptance_id=str(uuid.uuid4()),
+            marketplace_key=marketplace_key,
+            marketplace_account_id=marketplace_account_id,
+            risk_contract_version=risk_contract_version,
+            risk_statement_digest=risk_statement_digest,
+            seq=previous[-1].seq + 1 if previous else 1,
+            user_comment_id=user_comment_id,
+            user_comment_digest=user_comment_digest,
+            architect_comment_id=architect_comment_id,
+            architect_comment_digest=architect_comment_digest,
+            recorded_by=actor,
+            recorded_at=self._clock.now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._event(
+            AuditEventType.RESIDUAL_RISK_ACCEPTANCE_RECORDED,
+            "record_residual_risk_acceptance",
+            actor,
+            correlation_id,
+            f"residual_risk_acceptance:{row.acceptance_id}",
+            after={
+                "acceptance_id": row.acceptance_id,
+                "seq": row.seq,
+                "risk_contract_version": row.risk_contract_version,
+                "risk_statement_digest": row.risk_statement_digest,
+            },
+            details={
+                "marketplace_key": row.marketplace_key,
+                "marketplace_account_id": row.marketplace_account_id,
+                "user_comment_id": row.user_comment_id,
+                "user_comment_digest": row.user_comment_digest,
+                "architect_comment_id": row.architect_comment_id,
+                "architect_comment_digest": row.architect_comment_digest,
+            },
+        )
+        return row
+
+    def residual_risk_acceptances(
+        self, marketplace_key: str, marketplace_account_id: str, risk_contract_version: str
+    ) -> tuple[ResidualRiskAcceptance, ...]:
+        """Every acceptance proof of exactly this account and risk contract, oldest first."""
+        return tuple(
+            self.session.scalars(
+                select(ResidualRiskAcceptance)
+                .where(
+                    ResidualRiskAcceptance.marketplace_key == marketplace_key,
+                    ResidualRiskAcceptance.marketplace_account_id == marketplace_account_id,
+                    ResidualRiskAcceptance.risk_contract_version == risk_contract_version,
+                )
+                .order_by(ResidualRiskAcceptance.seq)
+            ).all()
+        )
 
     # ------------------------------------------------------------------ audit
 

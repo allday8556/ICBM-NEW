@@ -476,6 +476,7 @@ def test_validation_strength_is_risk_scoped_without_weakening_live_safety() -> N
         "app/platform/db/migrations/versions/0030_g3_visual_acceptance.py",
         "app/platform/db/migrations/versions/0031_m5_registration_reconcile.py",
         "app/platform/db/migrations/versions/0033_m5_canary_eligibility.py",
+        "app/platform/db/migrations/versions/0036_g3_residual_risk_acceptance.py",
         "integrations/marketplaces/*",
         "documents/rules/06-immutable-domain-rules.md",
         "documents/rules/07-execution-safety.md",
@@ -1786,6 +1787,46 @@ def test_a_visual_acceptance_is_recorded_only_through_the_verified_command() -> 
     for page in (REPO_ROOT / "ui/web").rglob("*.js"):
         text = page.read_text("utf-8")
         assert "visual-acceptance" not in text and "record-visual" not in text, page
+
+
+def test_the_residual_risk_acceptance_has_one_recording_path() -> None:
+    """ADR-0018 §6.1, G3-30: the store's one writer of ``residual_risk_acceptances`` is called only
+    by the residual-risk owner, whose ``record`` is called only by the ``icbm live
+    record-residual-risk-acceptance`` command: no route, page or other module records or asserts
+    an acceptance, and the stage proofs only read it."""
+    modules = _production_modules()
+    writers = {
+        path
+        for path, tree in modules.items()
+        for call in _calls(tree)
+        if _callee(call) == "record_residual_risk_acceptance"
+    }
+    assert writers == {"app/capabilities/live_safety/residual_risk.py"}
+    recorders = {
+        path
+        for path, tree in modules.items()
+        for call in _calls(tree)
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "record"
+        and isinstance(call.func.value, ast.Attribute)
+        and call.func.value.attr == "residual_risk"
+    }
+    assert recorders == {"app/interface/cli.py"}
+    importers = {
+        path
+        for path, tree in modules.items()
+        if "app.capabilities.live_safety.residual_risk" in _imported_modules(tree)
+    }
+    assert importers <= {"app/container.py", "app/capabilities/live_safety/proofs.py"}, importers
+    for page in (REPO_ROOT / "ui/web").rglob("*.js"):
+        text = page.read_text("utf-8")
+        assert "residual-risk" not in text and "residual_risk" not in text, page
+    # The stage proofs answer only from the owner, for the stage's own account.
+    proofs = _read(REPO_ROOT / "app" / "capabilities" / "live_safety" / "proofs.py")
+    assert "return self._residual_risk.accepted(marketplace_key, marketplace_account_id)" in proofs
+    assert (
+        "return False" not in proofs.split("def residual_risk_accepted", 1)[1].split("def ", 1)[0]
+    )
 
 
 def test_only_the_live_owner_writes_the_live_tables() -> None:
@@ -3649,6 +3690,7 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # happens. Collection state; no product fact and no page content.
         "extension_queues",
         "extension_queue_items",
+        "residual_risk_acceptances",
     }
     offenders = [
         path
