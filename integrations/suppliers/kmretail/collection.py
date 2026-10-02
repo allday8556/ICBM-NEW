@@ -59,13 +59,13 @@ MAX_IMAGE_REQUESTS_PER_RUN = 30
 MAX_NEW_IMAGE_BYTES_PER_RUN = 24 * 1024 * 1024
 # ADR-0010 §4: at least 60 s between real reads of the same product.
 SAME_PRODUCT_INTERVAL_S = 60.0
-# The list queue (ADR-0019 §8.1). These are declared bounds, not observations: a queue starts small
-# and slow, and a later benchmark may change them by review, never by default. One discovery
-# submits at most 200 links; one queue reads at most 20 products, at least 10 s apart (above the
-# 2.0 s request interval and the 5 s extension ingest interval); an issued read the extension has
-# not captured within 120 s expires and still counts.
-QUEUE_MAX_DISCOVERED_LINKS = 200
-QUEUE_MAX_PRODUCTS = 20
+# The list queue (ADR-0019 §8.1). The user set these bounds on 2026-10-02: one queue reads at most
+# 500 products (the design's own target, "500 products in under an hour"), at least 10 s apart
+# (above the 2.0 s request interval and the 5 s extension ingest interval); one discovery submits
+# at most 1000 links, which is also the most a queue holds; an issued read the extension has not
+# captured within 120 s expires and still counts. They change by review, never by default.
+QUEUE_MAX_DISCOVERED_LINKS = 1000
+QUEUE_MAX_PRODUCTS = 500
 QUEUE_MIN_INTERVAL_S = 10.0
 QUEUE_ISSUE_TTL_S = 120.0
 

@@ -241,9 +241,12 @@ def test_a_queue_holds_at_most_its_declared_products(container: Container) -> No
     assert (created.count.queued, created.count.beyond_cap) == (2, 3)
 
 
-def test_skipped_products_count_toward_the_declared_size(
+def test_a_skipped_product_takes_no_read_slot(
     container: Container, config: AppConfig, clock: FakeClock
 ) -> None:
+    # The user's rule (2026-10-02): the operator's number bounds reads, so a second pass over a
+    # list reaches the products a first pass did not; what a queue holds is bounded by the link
+    # bound, skipped products included.
     run_id = _capture(container, "9001", None)
     container.runner.run_next()
     assert container.collection.run(run_id).outcome is CollectionOutcome.RECORDED
@@ -252,9 +255,11 @@ def test_skipped_products_count_toward_the_declared_size(
     assert [item.state for item in created.view.items] == [
         QueueItemState.SKIPPED,
         QueueItemState.WAITING,
+        QueueItemState.WAITING,
     ]
-    assert (created.count.skipped, created.count.queued, created.count.beyond_cap) == (1, 1, 3)
-    assert _count(config, "extension_queue_items") == 2
+    assert [item.source_url for item in created.view.items][1:] == links[1:3]
+    assert (created.count.skipped, created.count.queued, created.count.beyond_cap) == (1, 2, 2)
+    assert _count(config, "extension_queue_items") == 3
 
 
 def test_no_acceptable_link_opens_no_queue(container: Container, config: AppConfig) -> None:
