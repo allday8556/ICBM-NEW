@@ -7,7 +7,7 @@ Create Date: 2026-10-03
 **``live_grants`` admits a third stage.** A DELETE grant binds the exact confirmed registration
 through its Intent and Snapshot, names no CREATE idempotency key or attempt number and no ASSET
 binding, and has a budget of exactly 1. SQLite cannot alter a CHECK in place, so the table is
-rebuilt — exactly as 0005 did for its CHECK — from its own stored definition, with only the stage
+rebuilt — like 0005 did for its CHECK — from its own stored definition, with only the stage
 list and the stage binding widened and the one new budget check added. Every row, index and
 trigger is kept: they are read back from ``sqlite_master`` before the old table is dropped and
 recreated unchanged. ``asset_upload_attempts`` keeps a foreign key to the table, so the rebuild runs
@@ -39,7 +39,7 @@ depends_on: str | Sequence[str] | None = None
 GRANTS = "live_grants"
 DELETIONS = "registration_deletions"
 REGISTRATIONS = "marketplace_registrations"
-REBUILT = f"{GRANTS}_0037"
+SAVED = f"{GRANTS}_0037_saved"
 
 # Frozen with this revision.
 _ASSET_BOUND = (
@@ -145,16 +145,16 @@ def _rebuild_grants(*, widen: bool) -> None:
         new_sql = _replace_once(table_sql, f"CHECK ({_STAGES_0037})", f"CHECK ({_STAGES_0026})")
         new_sql = _replace_once(new_sql, f"CHECK ({_BINDING_0037})", f"CHECK ({_BINDING_0026})")
         new_sql = _replace_once(new_sql, f"{_CREATE_BUDGET}, \n\t{_DELETE_BUDGET}", _CREATE_BUDGET)
-    # SQLite stores the name quoted once a table has been renamed into place.
-    header = re.compile(rf'^CREATE TABLE "?{GRANTS}"? \(')
-    if not header.match(new_sql):
+    if not re.match(rf"^CREATE TABLE {GRANTS} \(", new_sql):
         raise RuntimeError(f"{GRANTS}: unexpected stored definition header")
-    new_sql = header.sub(f"CREATE TABLE {REBUILT} (", new_sql, count=1)
     count = bind.execute(sa.text(f"SELECT COUNT(*) FROM {GRANTS}")).scalar_one()
-    bind.exec_driver_sql(new_sql)
-    bind.exec_driver_sql(f"INSERT INTO {REBUILT} SELECT * FROM {GRANTS}")
+    # Set the rows aside, drop the table and create it again under its own name, so its stored
+    # definition stays exactly the original except for the changed CHECKs (no rename, no quoting).
+    bind.exec_driver_sql(f"CREATE TEMP TABLE {SAVED} AS SELECT * FROM {GRANTS}")
     bind.exec_driver_sql(f"DROP TABLE {GRANTS}")
-    bind.exec_driver_sql(f"ALTER TABLE {REBUILT} RENAME TO {GRANTS}")
+    bind.exec_driver_sql(new_sql)
+    bind.exec_driver_sql(f"INSERT INTO {GRANTS} SELECT * FROM {SAVED}")
+    bind.exec_driver_sql(f"DROP TABLE {SAVED}")
     for statement in extras:
         bind.exec_driver_sql(statement)
     if bind.execute(sa.text(f"SELECT COUNT(*) FROM {GRANTS}")).scalar_one() != count:

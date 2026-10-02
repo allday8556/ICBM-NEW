@@ -1215,6 +1215,8 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
         "marketplace_registrations",
         # Migration 0034 adds the transport provenance columns to the run and the revision.
         "product_facts_revisions",
+        # Migration 0037 admits the DELETE stage in the grant's stage CHECKs (ADR-0018 §3.5).
+        "live_grants",
     }
     assert {"adaptive_capture_requests", "adaptive_capture_candidates"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0026_g3_live_authority")
