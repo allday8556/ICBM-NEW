@@ -325,6 +325,10 @@ LIST_PAGE = (
     "<a href='/product/synthetic-sample/9007/'>화면 밖</a></li>"
     "<li><a href='/product/synthetic-sample/9008/'"
     " style='display:block;width:0;height:0;overflow:hidden'>크기 없음</a></li>"
+    "<li style='width:0;height:0;overflow:hidden'>"
+    "<a href='/product/synthetic-sample/9009/' style='display:block;width:200px'>잘린 상품</a></li>"
+    "<li><a href='/product/synthetic-sample/9010/' style='position:absolute;width:1px;height:1px;"
+    "overflow:hidden;clip:rect(0,0,0,0)'>시각적 숨김</a></li>"
     "<li><a href='/product/list.html?cate_no=23'>다음 쪽</a></li>"
     "<li><a href='https://elsewhere.invalid/product/synthetic-sample/9004/'>다른 곳</a></li>"
     "</ul></body></html>"
@@ -336,7 +340,18 @@ def _list_page(context: BrowserContext) -> Page:
     extension navigates this same tab to each product ICBM issues."""
     products = {
         _product(number): FIXTURE.read_text("utf-8").replace(PRODUCT_NUMBER, number)
-        for number in ("9001", "9002", "9003", "9004", "9005", "9006", "9007", "9008")
+        for number in (
+            "9001",
+            "9002",
+            "9003",
+            "9004",
+            "9005",
+            "9006",
+            "9007",
+            "9008",
+            "9009",
+            "9010",
+        )
     }
 
     def answer(route: Route) -> None:

@@ -25,19 +25,48 @@ export function discoverInPage(rule) {
     }
     return null;
   };
+  // The part of a box an ancestor lets through: every ancestor that clips (overflow, clip-path or
+  // the legacy clip) cuts the box down to its own; a box cut to nothing is clipped away.
+  const unclipped = (rect, anchor) => {
+    let left = rect.left;
+    let top = rect.top;
+    let right = rect.right;
+    let bottom = rect.bottom;
+    for (let el = anchor.parentElement; el && el !== document.body; el = el.parentElement) {
+      const style = getComputedStyle(el);
+      const clips =
+        style.overflowX !== "visible" ||
+        style.overflowY !== "visible" ||
+        style.clipPath !== "none" ||
+        style.clip !== "auto";
+      if (!clips) continue;
+      const own = el.getBoundingClientRect();
+      left = Math.max(left, own.left);
+      top = Math.max(top, own.top);
+      right = Math.min(right, own.right);
+      bottom = Math.min(bottom, own.bottom);
+      if (right <= left || bottom <= top) return null;
+    }
+    const style = getComputedStyle(anchor);
+    if (style.clipPath !== "none" || style.clip !== "auto") return null;
+    return { left, top, right, bottom };
+  };
   // Whether the operator can see this anchor: the browser's own visibility check (display,
   // visibility, content-visibility and opacity, ancestors included; Chrome 105+, the manifest pins
-  // 114), a painted box, and that box inside the page the operator can scroll to.
+  // 114), a painted box, that box not clipped away by an ancestor, and inside the page the
+  // operator can scroll to.
   const shown = (anchor) => {
     if (!anchor.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
-    const rect = box(anchor);
+    const painted = box(anchor);
+    if (!painted) return false;
+    const rect = unclipped(painted, anchor);
     if (!rect) return false;
     const root = document.documentElement;
     const left = rect.left + window.scrollX;
     const top = rect.top + window.scrollY;
     return (
-      left + rect.width > 0 &&
-      top + rect.height > 0 &&
+      rect.right + window.scrollX > 0 &&
+      rect.bottom + window.scrollY > 0 &&
       left < root.scrollWidth &&
       top < root.scrollHeight
     );
