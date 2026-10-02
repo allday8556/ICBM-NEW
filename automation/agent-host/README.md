@@ -151,3 +151,6 @@ fails on any other ending. They cover:
 - a new product feature, a LIVE step, an auditor's or a fixer's product-decision stop and the
   owner's hold file: `HUMAN_DECISION_REQUIRED`, and nothing else ever is.
 - `packet-many-files`: a PR whose changed-file manifest alone exceeds the 42K call limit.
+- `gpt-audit-cwd` (Issue #185): the per-PR GPT audit runs in the exact-HEAD audit worktree
+  under a non-git Host root; a wrong-HEAD, missing or dirty worktree or a packet naming another
+  HEAD is refused with no GPT call, and a result without the Host's own stamp is never reused.
