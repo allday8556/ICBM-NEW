@@ -111,6 +111,21 @@ outer switch, and `DRY_RUN` stays the default and the state every restart withou
 returns to. **The mode alone is never authority for a mutation**: in `LIVE`, a mutation still
 needs every check of §4.3.
 
+> **Amendment note (bounded LIVE runtime transition; ROADMAP §14 item 5, PR #197).** The slice
+> this section anticipates replaces `M0_DRY_RUN_ONLY` under this contract (G3-01), and nothing
+> else changes. `DRY_RUN` stays the configured boot default — the configuration and the
+> execution-mode owner both refuse to start in `LIVE` — and is the state every restart returns
+> to, with or without a grant. `LIVE` is one bounded window held in the running process's
+> memory: it opens only on a request that names the user's GitHub approval by content-bound
+> identity (`github_issue_comment:<id>@<sha256>`) and a duration of at most four hours, lapses
+> to `DRY_RUN` by itself, is never widened while open and closes on a `DRY_RUN` request. Every
+> request is written to the audit log before its decision, and a `LIVE` request that names no
+> window is still refused with `M0_LIVE_FORBIDDEN`. In an open window `live_writes_permitted`
+> is `true`: that is the execution-mode layer's own answer (§4.3 layer 1) and nothing more —
+> the brake, the stage's grant and every other layer still decide, so the mode permits no
+> mutation by itself. Opening a real window stays the user's bounded LIVE decision
+> (`CLAUDE.md` §7.2).
+
 ### 3. The bounded LIVE grant (D1)
 
 A **LIVE grant** is the only authority for a marketplace mutation. It is a durable, audited,
