@@ -238,7 +238,6 @@ def _queue(view: QueueView) -> dict[str, Any]:
         "queue_id": view.queue_id,
         "supplier_key": view.supplier_key,
         "state": view.state.value,
-        "stop_reason": view.stop_reason,
         "max_products": view.max_products,
         "interval_s": view.interval_s,
         "skip_collected": view.skip_collected,

@@ -377,21 +377,22 @@ async function runQueue(control) {
     tell({ type: "issued", item });
     const limit = Math.min(LOAD_LIMIT_MS, Math.max(0, answer.expires_in_s * 1000 - SEND_MARGIN_MS));
     if (!(await load(target.tabId, item.source_url, limit))) {
-      // Nothing was captured: the issued read expires at ICBM, still counted, and stops the queue.
-      code = "QUEUE_PAGE_NOT_LOADED";
-      break;
+      // Nothing was captured: the issued read expires at ICBM, still counted and never reissued,
+      // and the queue goes on to the next item once ICBM issues it.
+      tell({
+        type: "result",
+        item_id: item.item_id,
+        result: { state: "REFUSED", code: "QUEUE_PAGE_NOT_LOADED" },
+      });
+      continue;
     }
     const result = await captureTab(paired, target, answer.ticket, (state, runId) =>
       tell({ type: "progress", item_id: item.item_id, state, collection_run_id: runId || null }),
     );
     tell({ type: "result", item_id: item.item_id, result });
     await showQueue(paired, control.queueId, tell);
-    // A refused or unknown capture ends this worker's part: ICBM stops the queue for it, and the
-    // operator decides what follows.
-    if (result.state !== "READ_BACK") {
-      code = result.code || result.state;
-      break;
-    }
+    // A refused or unknown capture is that item's own failure, shown in the queue; ICBM has spent
+    // its read, and the queue goes on (the user's rule of 2026-10-02).
   }
   await showQueue(paired, control.queueId, tell);
   tell({ type: code ? "stopped" : "finished", code });

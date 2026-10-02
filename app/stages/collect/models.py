@@ -346,6 +346,8 @@ class QueueState(StrEnum):
 
     OPEN = "OPEN"
     FINISHED = "FINISHED"
+    # Written by no path since the user's rule of 2026-10-02 (a queue goes on past an item that
+    # fails); migration 0035's column ``stop_reason`` and its CHECK stay as they are.
     STOPPED = "STOPPED"
     CANCELLED = "CANCELLED"
 

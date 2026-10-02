@@ -367,7 +367,7 @@ const QUEUE_LABELS = {
   WAITING: "ICBM이 정한 간격을 기다리는 중",
   PAUSED: "일시정지됨 · 새 상품을 요청하지 않습니다",
   FINISHED: "대기열을 마쳤습니다",
-  STOPPED: "대기열이 멈췄습니다 · 건너뛰지 않습니다",
+  STOPPED: "진행을 멈췄습니다 · 재개할 수 있습니다",
   CANCELLED: "대기열을 취소했습니다",
   OPEN: "열려 있는 대기열이 있습니다 · 재개하거나 취소합니다",
 };
@@ -415,7 +415,7 @@ function itemNote(item) {
   if (item.state === "WAITING") return `대기열 ${item.position}번`;
   if (item.state === "SKIPPED") return "이미 수집한 상품";
   if (item.state === "ISSUED") return "상세 페이지 캡처 중";
-  if (item.state === "EXPIRED") return "읽기가 끝났습니다 · 다시 읽지 않습니다";
+  if (item.state === "EXPIRED") return "읽지 못했습니다 · 다시 읽지 않습니다";
   if (item.state === "CANCELLED") return "취소됨";
   return item.run_detail || `run ${item.collection_run_id || "—"}`;
 }
