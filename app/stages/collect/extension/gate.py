@@ -58,7 +58,12 @@ _VOID = frozenset(
         "wbr",
     }
 )
-_NOT_A_REFERENCE = frozenset({"id", "class", "style"})
+# An ``<img>`` attribute whose name says it points at an image: ``src``, ``srcset``, or a lazy-load
+# name such as ``data-src``, ``ec-data-src`` or ``data-original``. Only such a locator is judged as
+# one; any other attribute (``alt``, ``title``) is read like every other value. The size bound
+# counts every ``<img>`` attribute but ``id``, ``class`` and ``style`` (``capture.py``), which only
+# errs toward a smaller capture.
+_REFERENCE_NAME = re.compile(r"^(?:src|srcset|(?:[a-z][a-z0-9]*-)+(?:src|srcset|original))$")
 _DESCRIPTOR = re.compile(r"^\d+(?:\.\d+)?[wx]$")
 _UNSAFE_IN_LOCATOR = re.compile(r"[\s<>\"'\\^`{|}\x00-\x1f\x7f]")
 
@@ -144,7 +149,7 @@ def _reference_problems(name: str, value: str) -> list[str]:
     an empty ``srcset`` entry names no image, so it is no reference: the supplier's image owner
     (``integrations/suppliers/kmretail/collect/images.py``) skips both the same way, and a Cafe24
     lazy-load ``<img>`` leaves ``src`` empty and names its image in ``ec-data-src``."""
-    if name != "srcset":
+    if not name.endswith("srcset"):
         problem = _locator_problem(value.strip()) if value.strip() else None
         return [] if problem is None else [problem]
     problems: list[str] = []
@@ -230,7 +235,7 @@ class _Scan(HTMLParser):
             quoted = safe_token(name)
             if _SECRET_NAME.search(name):
                 self.blocking.setdefault(f"SECRET_ATTRIBUTE:{quoted}@{boundary}")
-            reference = tag == "img" and name not in _NOT_A_REFERENCE
+            reference = tag == "img" and _REFERENCE_NAME.match(name) is not None
             refused = False
             if reference:
                 for problem in _reference_problems(name, value):

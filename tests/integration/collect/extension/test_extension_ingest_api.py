@@ -347,9 +347,13 @@ def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
         "<!-- session=synthetic -->",
     ):
         assert gate(frame(body=BODY + addition)).blocking, addition
-    # Any other <img> attribute is read for a secret too, whatever a policy allows.
-    blocking = gate(frame(body=BODY + '<img alt="token=synthetic-value-1234">')).blocking
-    assert any(kind.startswith("SECRET_VALUE:alt@") for kind in blocking), blocking
+    # Any other <img> attribute is no locator: it is read like every other value, a long hex run
+    # included, whatever a policy allows. The hash allowance is for an image locator only.
+    hexed = "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    for alt in ("token=synthetic-value-1234", hexed):
+        blocking = gate(frame(body=BODY + f'<img alt="{alt}">')).blocking
+        assert blocking == (f"SECRET_VALUE:alt@{blocking[0].split('@')[1]}",), blocking
+    assert gate(frame(body=BODY + f'<img data-srcset="/{hexed}.jpg 2x">')) == GateResult()
     # An attribute name is read with the same secret words as a query key and a name=value text.
     for name in ("data-cookie", "data-access-key", "data-private_key", "data-csrf", "data-auth"):
         blocking = gate(frame(body=BODY + f'<p {name}="1">x</p>')).blocking
