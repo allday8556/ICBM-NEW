@@ -251,15 +251,18 @@ rule.
 
 **Discovery reads nothing.**
 - The operator opens a supplier list page in their own Chrome and asks the side panel to find its
-  products. The extension reads only that already-loaded page: every anchor whose resolved URL is
-  on the supplier's storefront host, in document order.
-- Only the scheme, host and path of each link leave the browser, with the list page's own scheme,
-  host and path as a label. No HTML, anchor text, credentials, query or fragment is sent or kept, so
-  a secret a link carries never leaves the page. A product named only in a query is not discovered.
-- **The server judges every link.** A link is a queue candidate only if `check_target` accepts it
-  as a product read of that supplier (the reviewed `CollectionProfile` product path and host
-  rules). Links are deduplicated by the product the URL names. A refused link is counted, never
-  stored or logged by value. The extension's own filtering is a convenience and never decides.
+  products. The extension reads only that already-loaded page: its anchors, in document order.
+- **Only a product URL leaves the browser.** The server gives the extension the supplier's reviewed
+  product path form from its `CollectionProfile`. The extension sends a link only when it is on the
+  storefront host and its path fully matches that form, and it sends only its scheme, host and
+  path. No other link, and nothing of the list page itself (its URL, HTML or anchor text), is sent
+  or kept, and no credentials, query or fragment ever are. A product link carries what a single
+  click on that product would already send (E1), and nothing more. A product named only in a query
+  is not discovered.
+- **The server judges every link again.** A link is a queue candidate only if `check_target`
+  accepts it as a product read of that supplier and the §6.1 secret rules find nothing in it.
+  Links are deduplicated by the product the URL names. A refused link is counted, never stored or
+  logged by value. The browser filter keeps material in the page; it never decides what is read.
 - No list-page topology is added to a supplier. Reconnaissance never observed one, and a value is
   never added because it seems likely. A later, observed list region may narrow discovery; it may
   never widen it.
@@ -447,7 +450,7 @@ AC-23  The extension may preview a sanitized candidate image reference, role and
 AC-24  A disconnected ICBM never causes authenticated whole-DOM local persistence; a retry buffer needs its own separately defined capture-envelope, sanitization and retention contract, and without it the extension fails closed
 AC-25  The EXTENSION area of the Collection Management start screen is connection and entry guidance and recent intake or status, never an in-app capture button; DIRECT_URL is the actionable fallback form
 AC-26  E1 exposes no general BrowserCapturePolicy editor, only the diagnostics the bounded KM single-click acceptance requires; documents/contracts/ui/UI_SOURCE_OF_TRUTH.md changes only when an approved prototype revision and its fingerprint are recorded under its own process
-AC-27  List discovery reads only the operator's already-loaded page and sends only the scheme, host and path of storefront links and of the list page; the server judges every link with check_target, and no list-page topology is added without reconnaissance (§8.1)
+AC-27  List discovery reads only the operator's already-loaded page and sends only the scheme, host and path of links that fully match the supplier's reviewed product path form, nothing of the list page itself; the server judges every link with check_target and the secret rules, and no list-page topology is added without reconnaissance (§8.1)
 AC-28  A list queue exists only when the supplier's CollectionProfile declares its queue limits and the operator declares the queue's size and interval within them; a missing or out-of-range bound refuses before any read
 AC-29  Every queue read is server-issued work, written durably before the read and counted against the queue budget, never reissued or retried; the same-product interval counts server reads, issued queue reads and extension captures
 AC-30  A queue stops, never skipping forward, at the first item that does not end RECORDED or NO_REVISION; every queued product is an ordinary EXTENSION run through the unchanged ingest, security gate and extractor

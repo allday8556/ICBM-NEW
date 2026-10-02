@@ -1157,6 +1157,8 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
     # every read is server-issued and durable, a queue stops and never skips forward.
     assert "reads only the operator's already-loaded page" in invariants["AC-27"]
     assert "the server judges every link with check_target" in invariants["AC-27"]
+    assert "fully match the supplier's reviewed product path form" in invariants["AC-27"]
+    assert "nothing of the list page itself" in invariants["AC-27"]
     assert "CollectionProfile declares its queue limits" in invariants["AC-28"]
     assert "a missing or out-of-range bound refuses before any read" in invariants["AC-28"]
     assert "written durably before the read" in invariants["AC-29"]
