@@ -87,12 +87,17 @@ class SupplierSessionStore:
             os.fsync(handle.fileno())
         os.replace(staging, path)
 
-    def load(self, key: str) -> bytes | None:
-        path = self.path(key)
+    def peek(self, key: str) -> bytes | None:
+        """The session, decrypted, or None — a reader's read. Unlike :meth:`load` it never clears
+        an unreadable session: deciding to discard one belongs to the session's owner, never to
+        a reader that only asks whether a session is usable now."""
         try:
-            blob = path.read_bytes()
+            blob = self.path(key).read_bytes()
         except FileNotFoundError:
             return None
+        return self._decrypt(key, blob)
+
+    def _decrypt(self, key: str, blob: bytes) -> bytes | None:
         secret = self._key(key, create=False)
         if secret is not None and blob.startswith(_MAGIC):
             nonce = blob[len(_MAGIC) : len(_MAGIC) + _NONCE_BYTES]
@@ -100,6 +105,17 @@ class SupplierSessionStore:
                 return AESGCM(secret).decrypt(
                     nonce, blob[len(_MAGIC) + _NONCE_BYTES :], self._aad(key)
                 )
+        return None
+
+    def load(self, key: str) -> bytes | None:
+        path = self.path(key)
+        try:
+            blob = path.read_bytes()
+        except FileNotFoundError:
+            return None
+        decrypted = self._decrypt(key, blob)
+        if decrypted is not None:
+            return decrypted
         if self._namespace == "supplier":
             logger.warning("supplier.session.discarded", extra=safe_payload(supplier_key=key))
         else:

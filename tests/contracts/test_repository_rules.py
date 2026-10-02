@@ -1727,7 +1727,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "AuthoringRevisionStore(db, clock, audit)" in _read(REPO_ROOT / "app" / "container.py")
     # And ADR-0014 §11's two halves: production wires no session to read back with, which keeps
     # that row open, while the comparison can prove the published state (5915900049 D1).
-    assert "bearer=lambda: None" in _read(REPO_ROOT / "app" / "container.py")
+    # ROADMAP §14 item 4: the seams read one canonical bearer source, the CONNECT owner's
+    # read-only committed bearer; none is a hard-coded absent session any more.
+    container = _read(REPO_ROOT / "app" / "container.py")
+    assert "committed_bearer = smartstore.committed_bearer" in container
+    assert container.count("bearer=committed_bearer") == 4
+    assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
     # A Snapshot that cannot be projected still expects nothing, so nothing is proven for it.
@@ -1896,9 +1901,9 @@ def test_the_live_owners_reach_no_provider() -> None:
 
 
 def test_the_container_wires_the_deny_by_default_stack_and_a_sessionless_sender() -> None:
-    """At this main the stack reads the M0 execution-mode owner and no proof exists; the CREATE
-    owner is wired to that stack, and the ASSET path to the adopted sender with no committed
-    session, which sends nothing."""
+    """At this main the stack reads the M0 execution-mode owner; the CREATE owner is wired to that
+    stack, and the ASSET path to the adopted sender, whose bearer is the CONNECT owner's read-only
+    committed bearer (ROADMAP §14 item 4). A bearer permits nothing: the stack still refuses."""
     tree = ast.parse((REPO_ROOT / "app/container.py").read_text("utf-8"))
     (stack,) = _calls(tree, "SafetyStack")
     mode, proofs = _keyword(stack, "mode"), _keyword(stack, "proofs")
@@ -1937,9 +1942,29 @@ def test_the_container_wires_the_deny_by_default_stack_and_a_sessionless_sender(
     (uploads,) = _calls(tree, "AssetUploadService")
     sender = _keyword(uploads, "sender")
     assert isinstance(sender, ast.Call) and _callee(sender) == "SmartStoreAssetSender"
-    # Like every provider seam production wires, it is given no session.
+    # Like every provider seam production wires, its bearer is the one canonical source.
     bearer = _keyword(sender, "bearer")
-    assert isinstance(bearer, ast.Lambda) and ast.unparse(bearer.body) == "None"
+    assert isinstance(bearer, ast.Name) and bearer.id == "committed_bearer"
+    for seam in ("SmartStoreCreateSender", "SmartStoreReadback", "SmartStoreReconcileLookup"):
+        (built,) = _calls(tree, seam)
+        source = _keyword(built, "bearer")
+        assert isinstance(source, ast.Name) and source.id == "committed_bearer", seam
+    connect = inspect.getsource(
+        importlib.import_module(
+            "app.stages.connect.smartstore.service"
+        ).SmartStoreConnectService.committed_bearer
+    )
+    # Read-only: it never issues, renews or commits a token, and never clears a session.
+    for forbidden in (
+        "self._session_for(",
+        "self._issue(",
+        "self._commit(",
+        "self._sessions.load(",
+        "self._sessions.save(",
+        "self._sessions.clear(",
+    ):
+        assert forbidden not in connect, forbidden
+    assert "self._sessions.peek(KEY)" in connect
     # No production module can build a permitting mode, a proven proof or an admitting authority.
     for path, module in _production_modules().items():
         defined = {n.name for n in ast.walk(module) if isinstance(n, ast.ClassDef)}
