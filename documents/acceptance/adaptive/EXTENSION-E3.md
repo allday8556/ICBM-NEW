@@ -16,8 +16,8 @@ decides every read.
 
 1. **Discovery reads nothing.** The side panel asks ICBM for the supplier's reviewed product path
    form and its declared queue limits. The extension then reads the list page the operator already
-   loaded and returns only links that fully match that form, as their scheme, host and path
-   (`ui/extension/lib/discover.js`). Nothing of the list page itself, and no credentials, query or
+   loaded and returns only the links the operator can see that fully match that form, as their
+   scheme, host and path (`ui/extension/lib/discover.js`). A hidden anchor is never discovered. Nothing of the list page itself, and no credentials, query or
    fragment, is sent.
 2. **The bounds are declared twice.** The supplier's `CollectionProfile` declares its
    `QueueLimits`; the operator declares the queue's number of products and its interval inside

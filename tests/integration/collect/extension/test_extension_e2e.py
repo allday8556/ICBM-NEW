@@ -317,6 +317,9 @@ LIST_PAGE = (
     "<li><a href='/product/synthetic-sample/9002/'>합성 상품 둘</a></li>"
     "<li><a href='/product/synthetic-sample/9001/'>합성 상품 하나 (다시)</a></li>"
     f"<li><a href='/product/synthetic-sample/9003/?token={SECRET}#{SECRET}'>질의 링크</a></li>"
+    # Links the operator cannot see are not the operator's list (a real KM list page held one).
+    "<li style='display:none'><a href='/product/synthetic-sample/9004/'>숨은 상품</a></li>"
+    "<li><a href='/product/synthetic-sample/9005/' style='visibility:hidden'>숨은 상품</a></li>"
     "<li><a href='/product/list.html?cate_no=23'>다음 쪽</a></li>"
     "<li><a href='https://elsewhere.invalid/product/synthetic-sample/9004/'>다른 곳</a></li>"
     "</ul></body></html>"
@@ -328,7 +331,7 @@ def _list_page(context: BrowserContext) -> Page:
     extension navigates this same tab to each product ICBM issues."""
     products = {
         _product(number): FIXTURE.read_text("utf-8").replace(PRODUCT_NUMBER, number)
-        for number in ("9001", "9002", "9003")
+        for number in ("9001", "9002", "9003", "9004", "9005")
     }
 
     def answer(route: Route) -> None:

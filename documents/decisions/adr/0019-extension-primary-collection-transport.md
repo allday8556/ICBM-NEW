@@ -251,7 +251,8 @@ rule.
 
 **Discovery reads nothing.**
 - The operator opens a supplier list page in their own Chrome and asks the side panel to find its
-  products. The extension reads only that already-loaded page: its anchors, in document order.
+  products. The extension reads only that already-loaded page: the anchors the operator can see,
+  in document order. A hidden anchor is not the operator's list and is never discovered.
 - **Only a product URL leaves the browser.** The server gives the extension the supplier's reviewed
   product path form from its `CollectionProfile`. The extension sends a link only when it is on the
   storefront host and its path fully matches that form, and it sends only its scheme, host and
