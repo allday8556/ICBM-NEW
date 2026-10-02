@@ -11,7 +11,8 @@ provider-listing unit is prepared from, evaluate them against current truth thro
 owner, and freeze a Snapshot only through the owners that already decide READY and freshness.
 
 No route here can reach a marketplace mutation: the adopted CREATE contract is never a call
-(execution stays DRY_RUN and production wires no committed session), and the canary readiness
+(execution stays DRY_RUN and the send-time stack refuses every mutation even with a committed
+session), and the canary readiness
 result is derived and read-only — it authorizes nothing.
 """
 

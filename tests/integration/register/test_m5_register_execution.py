@@ -807,7 +807,7 @@ def test_an_unknown_outcome_is_never_retried_and_never_resent(
 
 
 class _Bearer:
-    """A committed session, as CONNECT would hand one over. Production wires none."""
+    """A committed session, as CONNECT would hand one over (``committed_bearer``)."""
 
     access_token = "fixture-access-token-Qx7"
     credential_generation = 3
@@ -2536,9 +2536,10 @@ def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # 4 + 25: the container's own CREATE seam — read from the container, exactly as production
-    # wires it, never a hand-built one — is the SmartStore sender over the registry caller with no
-    # committed session. Its contract is adopted, so it reports the endpoint adopted, and it still
-    # cannot reach a marketplace: every request is refused before a transport exists. A local
+    # wires it, never a hand-built one — is the SmartStore sender over the registry caller, and no
+    # CONNECT session exists here, so it has no committed bearer. Its contract is adopted, so it
+    # reports the endpoint adopted, and it still cannot reach a marketplace: every request is
+    # refused before a transport exists. A local
     # refusal is transmission-precluded, so it is NOT_APPLIED_PROVEN and FATAL: nothing was applied
     # and nothing is automatically retried (ERRORS.md §15.1, ADR-0014 §9).
     sender = container.registration_execution._sender
@@ -2568,7 +2569,7 @@ def test_the_production_wiring_cannot_reach_a_marketplace_mutation(
         assert handoff.marketplace_product_id is None
         assert handoff.details["transmission_phase"] == "LOCAL_PREFLIGHT"
     assert touched == []
-    # The adopted reconcile lookup, as the container wires it: no committed session, so every
+    # The adopted reconcile lookup, as the container wires it, with no CONNECT session: every
     # lookup is UNAVAILABLE — nothing is read and nothing is proven (ADR-0014 §28.2).
     lookup = container.registration_execution._lookup
     assert type(lookup) is SmartStoreReconcileLookup

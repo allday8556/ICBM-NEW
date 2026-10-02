@@ -1486,12 +1486,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
 def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite() -> None:
     """ADR-0020 §4 (post-merge audits of main ``a523c55add2b``, ``a10e4b79dbd3`` and
     ``cfb0aa4f3af1``): the standing authorization selects the next slice from this order, so the
-    order may never omit a mandatory pre-canary prerequisite. Two are still missing at this main
-    — a production ASSET sender that can transmit (the adapter is wired with no committed session
-    and sends nothing) and an executable committed-session read-back, the open half of ADR-0014
-    §11's success proof — and neither is authorized by ADR-0020. Three were closed by their own
-    slices, each under its own architect resolution, and the order records them as closed rather
-    than dropping them: the ADR-0014 §27 authoring-revision owners (5907626428, ADR-0014 §27.1),
+    order may never omit a mandatory pre-canary prerequisite. Every one is closed by its own
+    slice, and the order records each as closed rather than dropping it: a production ASSET sender
+    that can transmit and an executable committed-session read-back, the second half of ADR-0014
+    §11's success proof, by the committed-session bearer seam (ROADMAP §14 item 4, under ADR-0022
+    §7 — neither was authorized by ADR-0020), and three under their own architect resolutions:
+    the ADR-0014 §27 authoring-revision owners (5907626428, ADR-0014 §27.1),
     the durable canary-eligibility owner (5910018106, ADR-0018 §5.1) and the comparison that
     proves published state (5915900049 D1, ADR-0014 §11 amendment note)."""
     from app.capabilities.live_safety.proofs import DurableStageProofs
@@ -1508,9 +1508,11 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "the mutation-stage prerequisites of ADR-0018 §10 and the read-back success proof of"
         " ADR-0014 §11",
         "This ADR authorizes none of them, and none may be skipped",
-        "the **production ASSET sender** — `app/container.py` wires `SmartStoreAssetSender`",
-        "**with no committed session**: it is unavailable and refuses every send"
-        " (`LIVE_SENDER_NOT_WIRED`)",
+        "~~the **production ASSET sender** (ADR-0018 §10)~~ — **closed by its own slice**"
+        " (ROADMAP §14 item 4, PR #196; ADR-0022 §7)",
+        "`app/container.py` wires `SmartStoreAssetSender`",
+        "**to the CONNECT owner's read-only committed bearer**",
+        "without one it is unavailable and refuses every send (`LIVE_SENDER_NOT_WIRED`)",
         "`ASSET_MUTATION_READY` is a mandatory send-time layer (ADR-0018 §10, G3-19)",
         "a sender that transmits to the provider is not provider-zero",
         "The wired adapter transmits nothing; giving it a committed session is that user decision",
@@ -1534,7 +1536,12 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         ' decision"',
         "never this standing authorization",
         "the **executable committed-session read-back** (ADR-0014 §11)",
-        "`SmartStoreReadback.available()` is `False` and `verify` refuses",
+        "~~the **executable committed-session read-back** (ADR-0014 §11)~~ — **closed by its own"
+        " slice** (ROADMAP §14 item 4, PR #196; ADR-0022 §7)",
+        "otherwise it is `False`, `verify` refuses",
+        "**Amendment note (committed-session bearer seam; ROADMAP §14 item 4, PR #196).**",
+        "No row of the second table is still missing",
+        "a bearer exists only while CONNECT holds a proven current committed session",
         "~~a **read-back comparison that proves published state** (ADR-0014 §11)~~ — **closed by"
         " its own slice** (ADR-0014 §11 amendment note; Issue #89 architect resolution"
         " `5915900049` D1)",
@@ -1570,7 +1577,11 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     # user decision that fixes their order relative to each other.
     assert re.search(r"^\| still-missing prerequisite \|", order, re.M)
     assert not re.search(r"^\|\s*[34]\s*\|", order, re.M)
-    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 2
+    assert len(re.findall(r"^\| (?:the|a) \*\*", order, re.M)) == 0
+    assert len(re.findall(r"^\| ~~the \*\*production ASSET sender\*\*", order, re.M)) == 1
+    assert (
+        len(re.findall(r"^\| ~~the \*\*executable committed-session read-back", order, re.M)) == 1
+    )
     assert len(re.findall(r"^\| ~~a \*\*read-back comparison that proves", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*authoring-revision owners\*\*", order, re.M)) == 1
     assert len(re.findall(r"^\| ~~the \*\*durable canary-eligibility owner\*\*", order, re.M)) == 1
@@ -1583,8 +1594,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "never omits a mandatory pre-canary prerequisite of ADR-0018 §10 or ADR-0014 §11",
         "the ADR-0014 §27 authoring-revision owners were closed by their own slice, ADR-0014 §27.1",
         "the durable canary-eligibility owner by its own, ADR-0018 §5.1",
-        "the production ASSET sender and the executable committed-session read-back are still"
-        " missing, are not authorized here",
+        "the production ASSET sender and the executable committed-session read-back were not"
+        " authorized here and were closed by their own slice, ROADMAP §14 item 4 under ADR-0022 §7",
         "a read-back comparison that proves published state by its own, the ADR-0014 §11"
         " amendment note",
         "canary stays BLOCKED until every condition of ADR-0018 §6 and §10 and the ADR-0014 §11"
@@ -1601,7 +1612,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     )
     for element in (
         "production ASSET sender",
-        "`app/container.py` wires `SmartStoreAssetSender` with no committed session",
+        "`app/container.py` wires `SmartStoreAssetSender`, `SmartStoreReadback` and the CREATE and"
+        " SEARCH seams to the CONNECT owner's committed bearer",
         # ADR-0022 §7, rule §14.5: wiring the session is implementation, and a committed-session
         # read-back is a routine read-only operation; the side-effecting use stays the user's.
         "Wiring both to the existing committed session is implementation, item 4 above",
@@ -1609,12 +1621,16 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         " user approval",
         "a real image upload and a real CREATE are real external actions (ADR-0022 §2 D)",
         "opened as the bounded LIVE action on the final main",
-        "**The residual-risk acceptance proof** (ADR-0018 §6.1, ADR-0014 §28.7) — `HIGH_RISK`",
-        "**The committed-session bearer seam** — `HIGH_RISK`",
+        "~~**The residual-risk acceptance proof** (ADR-0018 §6.1, ADR-0014 §28.7)~~ — **done**"
+        " (PR #192, `HIGH_RISK`)",
+        "~~**The committed-session bearer seam**~~ — **done** (PR #196, `HIGH_RISK`)",
         "**The bounded LIVE runtime transition of ADR-0018** — `HIGH_RISK`",
         "~~**The user-facing registration read state** (ADR-0014 §28.5, M5-35)~~ — **done**",
         "**executable committed-session read-back**",
-        "`READBACK_EXECUTABLE` stays unproven",
+        "`READBACK_EXECUTABLE` is unproven",
+        "**Pre-canary prerequisite closed — the committed-session bearer seam** (item 4; PR #196,",
+        "It is read-only: it never issues, renews or commits a token and never clears a session",
+        "A bearer permits no mutation",
         "The read-back is the remaining half of ADR-0014 §11's own success proof",
         "a comparison that proves published state, is closed by its own slice below",
     ):
@@ -1682,7 +1698,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "mutation-stage prerequisites of ADR-0018 §10 that no slice has closed",
         "a **production ASSET sender** for the ASSET stage that can transmit"
         " (`SmartStoreAssetSender`",
-        "is wired with no committed session and refuses every send with `LIVE_SENDER_NOT_WIRED`",
+        "reads the CONNECT owner's committed bearer since §14 item 4: without a proven current"
+        " committed session it refuses every send with `LIVE_SENDER_NOT_WIRED`",
         "which is not authorized by the ADR-0020 standing authorization",
         "The **durable canary-eligibility owner** (ADR-0018 §5) is closed by its own slice"
         " (ADR-0018 §5.1)",
@@ -1691,15 +1708,16 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "**owners for the category-mapping and detail-composition authoring revisions** — is"
         " closed by its own slice (ADR-0014 §27.1)",
         "still has to be `READY` on every other rule",
-        "the **read-back success proof of ADR-0014 §11**, of which one half is still open",
+        "the **read-back success proof of ADR-0014 §11**, of which both halves are closed by their"
+        " own slices",
         "an **executable committed-session read-back**",
         "a **comparison that proves published state**, is closed by its own slice (ADR-0014 §11"
         " amendment note; architect resolution `5915900049` D1)",
         "A CREATE that cannot be read back and compared is never `CONFIRMED`",
     ):
         assert element in preconditions, element
-    # The runtime facts behind the rows. The ASSET sender is the adopted upload with no committed
-    # session, so it is unavailable and its prerequisite — a sender that transmits — stays open.
+    # The runtime facts behind the rows. The ASSET sender is the adopted upload; without a
+    # committed session it is unavailable (production now hands it the committed bearer).
     # The authoring-revision owner exists and is wired;
     # a client still names neither revision. The eligibility owner exists and is the only thing
     # the durable proof source reads.
@@ -1725,8 +1743,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
         "DETAIL_COMPOSITION",
     ]
     assert "AuthoringRevisionStore(db, clock, audit)" in _read(REPO_ROOT / "app" / "container.py")
-    # And ADR-0014 §11's two halves: production wires no session to read back with, which keeps
-    # that row open, while the comparison can prove the published state (5915900049 D1).
+    # And ADR-0014 §11's two halves: the read-back reads the committed bearer, and the comparison
+    # can prove the published state (5915900049 D1).
     # ROADMAP §14 item 4: the seams read one canonical bearer source, the CONNECT owner's
     # read-only committed bearer; none is a hard-coded absent session any more.
     container = _read(REPO_ROOT / "app" / "container.py")

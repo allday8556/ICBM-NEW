@@ -124,7 +124,7 @@ def test_the_image_upload_and_the_create_are_the_only_adopted_mutating_contracts
 
 def test_the_adopted_reconcile_lookup_without_a_session_proves_nothing() -> None:
     # ADR-0020 SA-09: the positive-only reconcile is its own slice after CREATE. Its lookup is
-    # adopted, but with no committed session (production wires none) a lookup is UNAVAILABLE:
+    # adopted, but with no committed session (no CONNECT session) a lookup is UNAVAILABLE:
     # it raises nothing, names no candidate and never proves absence (ADR-0014 §17.2, §28.2).
     from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
     from integrations.marketplaces.smartstore.execution import SmartStoreReconcileLookup
