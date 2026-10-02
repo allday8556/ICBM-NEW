@@ -16,9 +16,32 @@
 // and never decides what is read.
 
 export function discoverInPage(rule) {
-  // Whether the operator can see this anchor: it is laid out and not hidden by style.
-  const shown = (anchor) =>
-    anchor.getClientRects().length > 0 && getComputedStyle(anchor).visibility !== "hidden";
+  // The box an anchor paints: its own, or its first painted descendant's when the anchor itself
+  // is an empty inline around block children.
+  const box = (anchor) => {
+    for (const element of [anchor, ...anchor.querySelectorAll("*")]) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return rect;
+    }
+    return null;
+  };
+  // Whether the operator can see this anchor: the browser's own visibility check (display,
+  // visibility, content-visibility and opacity, ancestors included; Chrome 105+, the manifest pins
+  // 114), a painted box, and that box inside the page the operator can scroll to.
+  const shown = (anchor) => {
+    if (!anchor.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+    const rect = box(anchor);
+    if (!rect) return false;
+    const root = document.documentElement;
+    const left = rect.left + window.scrollX;
+    const top = rect.top + window.scrollY;
+    return (
+      left + rect.width > 0 &&
+      top + rect.height > 0 &&
+      left < root.scrollWidth &&
+      top < root.scrollHeight
+    );
+  };
   let form;
   try {
     form = new RegExp(`^(?:${rule.productPath})$`);
