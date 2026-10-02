@@ -73,8 +73,8 @@ The grant names, before anything runs:
 
 - the exact main the acceptance runs on;
 - one KM통상 list page, opened by the user;
-- the number of products and the interval, within KM's declared limits (20 products, at least
-  10 s apart);
+- the number of products and the interval, within KM's declared limits (500 products, at least
+  10 s apart; the user's bounds of 2026-10-02);
 - whether collected products are skipped.
 
 The operator's procedure:

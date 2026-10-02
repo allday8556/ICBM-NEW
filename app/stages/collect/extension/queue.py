@@ -309,16 +309,18 @@ class ExtensionQueues:
             session.flush()
             position = 0
             for product_key, (link, key) in candidates.items():
-                # The queue holds at most its declared number of products, skipped ones included.
-                if position >= max_products:
-                    beyond += 1
-                    continue
                 if declaration.skip_collected and _collected(session, key):
+                    # Skipped without a read, and taking no read slot: the operator's number bounds
+                    # the reads, and the supplier's link bound (checked above) bounds what a queue
+                    # holds, skipped products included.
                     state = QueueItemState.SKIPPED
                     skipped += 1
-                else:
+                elif queued < max_products:
                     state = QueueItemState.WAITING
                     queued += 1
+                else:
+                    beyond += 1
+                    continue
                 position += 1
                 session.add(
                     ExtensionQueueItem(

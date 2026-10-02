@@ -80,9 +80,9 @@ class QueueLimits:
     operator declares each queue's own size and interval inside these.
     """
 
-    # The most product links one discovery may submit.
+    # The most product links one discovery may submit, and so the most items one queue holds.
     max_discovered_links: int
-    # The most products one queue may read.
+    # The most products one queue may read. A skipped product takes no read.
     max_queue_products: int
     # The shortest interval between two queue reads. Never below the supplier's request interval;
     # the queue owner also refuses one below the extension ingest interval.
