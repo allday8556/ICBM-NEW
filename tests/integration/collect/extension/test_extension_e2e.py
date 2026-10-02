@@ -479,7 +479,10 @@ def test_a_closed_panel_finds_its_open_queue_again_and_cancels_it(
     with _served(config) as (app, origin, _server):
         panel, queue_id = _start_and_close_after_one(chromium, app, origin)
         panel.locator("[data-action='queue-cancel']").dispatch_event("click")
-        expect(panel.locator(_role("queue-status"))).to_contain_text("취소", timeout=TIMEOUT_MS)
+        # The open-queue line already offers to cancel ("취소합니다"): wait for the cancelled one.
+        expect(panel.locator(_role("queue-status"))).to_contain_text(
+            "취소했습니다", timeout=TIMEOUT_MS
+        )
         assert app.extension_queues.read(queue_id).state.value == "CANCELLED"
         # The unread product stays unread.
         runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
