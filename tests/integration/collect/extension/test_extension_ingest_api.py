@@ -304,6 +304,40 @@ def test_the_gate_names_kinds_and_boundaries_and_never_a_value() -> None:
         assert gate(frame(body=BODY + addition)).blocking == (), addition
 
 
+def test_a_secret_in_a_name_refuses_and_is_never_quoted() -> None:
+    # PR #187 audit: a boundary quotes the page's own id and class tokens, so a secret carried by a
+    # name must refuse and must be masked wherever a finding names it.
+    gate = _server_final_scan
+    for addition, secret in (
+        ('<div id="token=synthetic-value-1234">x</div>', "synthetic-value"),
+        ('<p class="price eyJhbGciOiJIUzI1NiJ9abcdef">x</p>', "eyJhbG"),
+        ('<p class="0a1b2c3d4e5f60718293a4b5c6d7e8f9">x</p>', "0a1b2c3d"),
+    ):
+        result = gate(frame(body=BODY + addition))
+        assert result.blocking, addition
+        for kind in (*result.blocking, *result.notes):
+            assert secret not in kind, (addition, kind)
+    # A plain identifier is still named as it is.
+    assert gate(frame(body=BODY + '<p class="member_price">1</p>')).notes == (
+        "MEMBER_NAMED@p#.member_price",
+    )
+
+
+def test_a_policy_violation_never_logs_a_secret_shaped_name(
+    client: TestClient, paired: PairingRecord, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The same rule for the structure check: an attribute name the policy does not allow is logged
+    # by name only when the name is a plain identifier.
+    secret_name = "data-token-0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    with caplog.at_level(logging.INFO):
+        response = post_capture(client, paired, _with(f'<p {secret_name}="1">x</p>'))
+        run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_CAPTURE_POLICY_VIOLATION")
+    [failed] = [r for r in caplog.records if r.getMessage() == "collect.extension_failed"]
+    assert "ATTRIBUTE_NOT_ALLOWED:p[?]" in vars(failed)["violations"]
+    assert "0a1b2c3d" not in _logged(caplog)
+
+
 def test_the_gate_reads_every_region_alike() -> None:
     # One pass over every element: a navigation, banner or related-products region is read like
     # the rest of the capture, so nothing hides a secret by sitting in one.

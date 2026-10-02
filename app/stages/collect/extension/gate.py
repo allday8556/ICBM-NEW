@@ -152,6 +152,32 @@ def _tokens(values: Mapping[str, str]) -> set[str]:
     return {*values.get("class", "").lower().split(), values.get("id", "").lower()} - {""}
 
 
+# What a finding, a note or a logged violation may quote of the page's own names: a tag, an
+# attribute name, an id or a class token. A plain identifier is quoted; anything else — a token that
+# carries a value (``token=…``), a secret or contact shape, or an odd character — is masked, so a
+# record never repeats a secret the gate found in a name.
+_PLAIN_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+MASKED = "?"
+
+
+def safe_token(token: str) -> str:
+    """``token`` when it is a plain identifier with no secret or contact shape, else ``MASKED``."""
+    plain = _PLAIN_NAME.match(token) is not None
+    if not plain or _SECRET_VALUE.search(token) or _TOKEN_IN_LOCATOR.search(token):
+        return MASKED
+    return MASKED if _CONTACT.search(token) else token
+
+
+def _safe_boundary(boundary_of: BoundaryOf, tag: str, values: Mapping[str, str]) -> str:
+    """The boundary as the capture owner names it, built from the page's names made safe."""
+    identifier = values.get("id", "").strip()
+    named = {
+        "id": safe_token(identifier) if identifier else "",
+        "class": " ".join(safe_token(token) for token in values.get("class", "").split()),
+    }
+    return boundary_of({"tag": safe_token(tag), "attrs": named})
+
+
 class _Scan(HTMLParser):
     """One pass over every element, attribute and text of the capture."""
 
@@ -167,7 +193,7 @@ class _Scan(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name.lower(): value or "" for name, value in attrs}
-        boundary = self._boundary_of({"tag": tag, "attrs": values})
+        boundary = _safe_boundary(self._boundary_of, tag, values)
         tokens = _tokens(values)
         if any(token.startswith(_IDENTITY_PREFIXES) for token in tokens):
             self.blocking.setdefault(f"MEMBER_IDENTITY@{boundary}")
@@ -176,20 +202,21 @@ class _Scan(HTMLParser):
         if any(token.startswith(_MEMBER_PREFIX) for token in tokens):
             self.notes.setdefault(f"MEMBER_NAMED@{boundary}")
         for name, value in values.items():
+            quoted = safe_token(name)
             if _SECRET_NAME.search(name):
-                self.blocking.setdefault(f"SECRET_ATTRIBUTE:{name}@{boundary}")
+                self.blocking.setdefault(f"SECRET_ATTRIBUTE:{quoted}@{boundary}")
             if tag == "img" and name not in _NOT_A_REFERENCE:
                 for problem in _reference_problems(name, value):
-                    finding = f"IMAGE_REFERENCE_{problem}:{name}@{boundary}"
+                    finding = f"IMAGE_REFERENCE_{problem}:{quoted}@{boundary}"
                     if problem in _SECURITY_REFERENCE:
                         self.blocking.setdefault(finding)
                     else:
                         self.notes.setdefault(finding)
                 continue
-            if _SECRET_VALUE.search(value):
-                self.blocking.setdefault(f"SECRET_VALUE:{name}@{boundary}")
+            if _SECRET_VALUE.search(value) or _SECRET_VALUE.search(name):
+                self.blocking.setdefault(f"SECRET_VALUE:{quoted}@{boundary}")
             elif _CONTACT.search(value):
-                self.notes.setdefault(f"CONTACT:{name}@{boundary}")
+                self.notes.setdefault(f"CONTACT:{quoted}@{boundary}")
         if tag not in _VOID:
             self._open.append((tag, boundary))
 
