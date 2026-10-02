@@ -1073,7 +1073,9 @@ def test_the_extension_transport_contract_is_recorded_and_pinned() -> None:
         "**E2 is implemented: one click, recorded**",
         "**the supplier's canonical extractor is its revision writer**",
         "Both transports write a revision through the one pipeline after capture",
-        "E3 and every later slice (ADR-0019 §10) are separate slices",
+        "**E3's server half is implemented: the list queue**",
+        "every queue read is issued by the server, durably, before it happens",
+        "The E3 extension half (discovery and the queue panel) and every later slice",
         "**One pipeline after capture (ADR-0019 §2, E2).**",
         "The application gains no CORS",
         "pairing replaces none",
@@ -3643,6 +3645,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # The canary-eligibility owner (ADR-0018 §5.1; Issue #89 5910018106): the append-only
         # eligibility record of one exact canary lineage; never a COMPLIANCE PASS.
         "canary_eligibility_records",
+        # The extension list queue (ADR-0019 §8.1, E3): each queue read issued durably before it
+        # happens. Collection state; no product fact and no page content.
+        "extension_queues",
+        "extension_queue_items",
     }
     offenders = [
         path

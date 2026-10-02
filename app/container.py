@@ -79,6 +79,7 @@ from app.stages.collect.extension.gate import GateResult, security_gate
 from app.stages.collect.extension.nonces import NonceCache
 from app.stages.collect.extension.pairing import ExtensionPairing
 from app.stages.collect.extension.policy import CapturePolicySource
+from app.stages.collect.extension.queue import ExtensionQueues
 from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
 from app.stages.collect.readback import SourceTruthReadback
@@ -187,6 +188,7 @@ class Container:
     collection: ProductCollectionService
     extension_pairing: ExtensionPairing
     extension_capture: ExtensionCaptureService
+    extension_queues: ExtensionQueues
     product_store: ProductFoundationStore
     products: ProductsService
     materializer: ProductMaterializer
@@ -430,6 +432,11 @@ def build_container(
     # collection owner records its document through the one pipeline a direct run uses: the
     # server reads no product page for it, and fetches its images through the policed gateway.
     extension_pairing = ExtensionPairing(secrets, clock, NonceCache(clock))
+    # ADR-0019 §8.1 (E3): the list queue. Every queue read is issued here, durably, before it
+    # happens; a ticketed capture claims its item in the ingest's own write unit.
+    extension_queues = ExtensionQueues(
+        db=db, clock=clock, runs=runs, collections=registered_collections
+    )
     extension_capture = ExtensionCaptureService(
         db=db,
         clock=clock,
@@ -443,6 +450,7 @@ def build_container(
         recorder=collection,
         collections=registered_collections,
         report_sink=extension_report_sink,
+        queue_tickets=extension_queues,
     )
     registry.register(extension_capture.job_definition())
 
@@ -729,6 +737,7 @@ def build_container(
         collection=collection,
         extension_pairing=extension_pairing,
         extension_capture=extension_capture,
+        extension_queues=extension_queues,
         product_store=product_store,
         products=products,
         materializer=materializer,
