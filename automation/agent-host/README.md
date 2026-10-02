@@ -110,13 +110,13 @@ the Host is installed. This keeps V3 and narrows when it is invoked; it is not a
 | `resume-orchestrator-v1.3.ps1` | entry: resume wrapper | `5f07194f107ac3d48a40dced8e5a028cec701dfade5b8aca9252b1f56c807e73` |
 | `orchestrator-v1.3.ps1` | control loop, hold classes, supervisor, MERGE_GUARD, merge, POST_MERGE_VERIFY | `59fdaf52c6cdcf3610202b8bbae865a4979ea3addee7a62a6a9a672a785d1c8f` |
 | `agent-host-authority-v2.ps1` | marker grammar, write guard, hold taxonomy, citation grammar | `f56d9065edbefff894e9d4f84fed441740adda47709849b4501af2eb1aac1162` |
-| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `49e797f5b9ef1b9172acbc1c9fbb9f66b69b9af9ef7375f909f45adae833a94f` |
+| `run-audit-v1.1.ps1` | packet generator, GPT/Claude audit runner | `cf9ce3498bbb3454911032a1c8c8328188fe9c7c82aa9a56b5331fc8f3e38262` |
 | `run-repair-v1.1.ps1` | fixer, implementer, I2 guard | `c06283c96ec98be585e49f333e4fba6407ff35454c16b39481323f5e9fda79ba` |
 | `run-full-audit-v1.ps1` | strong/final-main audit | `992b2a5f2bdf727374ebb7b57871187a396c9923bc6307ef8cafcd980efa8896` |
 | `run-lookahead-main-v1.ps1` | next-slice selector | `2091ce4ff46d2827470bae26cc449baf474e3efb2736114ef32a9d5917fc4495` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `1933f292db4abd7b06daf6215b222d56547a08826959fd332ebe970d20a13b50` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `9adba88f023ea654eace86077570d5cbda05600a7753388f382bbda6233ea83d` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 
