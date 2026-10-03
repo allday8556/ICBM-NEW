@@ -334,7 +334,7 @@ def test_no_source_sku_is_fabricated_and_the_generic_prices_are_not_relied_on(
         "source_bindings",
         "audit_events",
     }
-    assert not [table for table in metadata.tables if "sku" in table]
+    assert "source_skus" not in metadata.tables
     with contextlib.closing(raw(config)) as connection:
         bindings = connection.execute(
             "SELECT binding_kind, quantity_offer_id, provenance_fields FROM source_bindings"

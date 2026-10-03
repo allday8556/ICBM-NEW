@@ -156,8 +156,10 @@ CANONICAL_TABLES = (
     "atomic_sku_revision_members",
     "atomic_sku_revision_selection_evidence",
     "current_atomic_sku_set_moves",
+    # Additive Item identities qualified by stable AtomicSKU identity.
+    "atomic_sku_product_items",
 )
-HEAD = "0041_source_proven_atomic_skus"
+HEAD = "0042_atomic_sku_product_items"
 
 
 def _url(path: Path) -> str:

@@ -213,7 +213,8 @@ SYNTHETIC = "0038_synthetic_test_products"
 COMMON_OPTIONS = "0039_common_sales_option_owner"
 COMMON_OPTION_FACT_MAPPING = "0040_common_option_fact_mapping"
 ATOMIC_SKUS = "0041_source_proven_atomic_skus"
-SCHEMA_HEAD = ATOMIC_SKUS
+ATOMIC_SKU_ITEMS = "0042_atomic_sku_product_items"
+SCHEMA_HEAD = ATOMIC_SKU_ITEMS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -236,6 +237,7 @@ AFTER_M5 = (
     COMMON_OPTIONS,
     COMMON_OPTION_FACT_MAPPING,
     ATOMIC_SKUS,
+    ATOMIC_SKU_ITEMS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
