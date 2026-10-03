@@ -78,6 +78,9 @@ M5_ADOPTED = frozenset(
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_SEARCH",
         "SMARTSTORE_PRODUCT_DELETE_V2",
+        # Notice coverage S0 (owner directive 2026-10-03): the two official 상품정보제공고시 reads.
+        "SMARTSTORE_NOTICE_TYPES",
+        "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -87,11 +90,9 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
         "SMARTSTORE_STANDARD_OPTIONS",
-        "SMARTSTORE_NOTICE_TYPES",
-        "SMARTSTORE_NOTICE_TYPE_READ",
     }
 )
-M5_MAPPING_REVISION = "m5-delete-r1"
+M5_MAPPING_REVISION = "m5-notice-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:

@@ -320,8 +320,8 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     matrix = _section(_read(smartstore / "ENDPOINT_MATRIX.md"), r"^4\. Master registry")
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
     # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
-    # and the DELETE slice (ADR-0018 §3.5)
-    assert len(adopted) == 8, adopted
+    # the DELETE slice (ADR-0018 §3.5) and the two notice reads (notice coverage S0)
+    assert len(adopted) == 10, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -1751,8 +1751,8 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     container = _read(REPO_ROOT / "app" / "container.py")
     assert "committed_bearer = smartstore.committed_bearer" in container
     # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
-    # (ADR-0018 §3.5): six seams, one source.
-    assert container.count("bearer=committed_bearer") == 6
+    # (ADR-0018 §3.5), and the notice-schema capture (notice coverage S0): seven seams, one source.
+    assert container.count("bearer=committed_bearer") == 7
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True

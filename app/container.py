@@ -150,6 +150,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreReconcileLookup,
 )
 from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
+from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import SupplierCollection
@@ -215,6 +216,7 @@ class Container:
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
     registration_deletions: RegistrationDeletionService
+    notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
     visual_acceptance: VisualAcceptanceService
@@ -651,6 +653,12 @@ def build_container(
     # ADR-0018 §3.5: the deletion of one ICBM-confirmed registration, through the same send-time
     # stack and the same canonical bearer source. Its exact DELETE grant is the only authority for
     # it, an unknown deletion is never resent, and only a read-back confirms or resolves one.
+    # Notice coverage S0 (owner directive 2026-10-03): a read-only capture of the official
+    # 상품정보제공고시 schema with the same canonical bearer source. It reads and stores nothing.
+    notice_catalog = SmartStoreNoticeCatalog(
+        caller=smartstore_caller or SmartStoreEndpointCaller(),
+        bearer=committed_bearer,
+    )
     registration_deletions = RegistrationDeletionService(
         registrations=registrations,
         sender=SmartStoreDeleteSender(
@@ -805,6 +813,7 @@ def build_container(
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
         registration_deletions=registration_deletions,
+        notice_catalog=notice_catalog,
         restore_drills=restore_drills,
         retention=retention,
         visual_acceptance=visual_acceptance,

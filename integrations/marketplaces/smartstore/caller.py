@@ -85,6 +85,10 @@ _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
 _PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
+_NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
+_NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
+# An official 상품정보제공고시 type code: upper-case words joined by underscores.
+_NOTICE_TYPE_CODE = re.compile(r"^[A-Z][A-Z_]{1,39}$")
 # The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
 # of an ICBM listing identity (ruling R1), 30 lowercase hexadecimal characters. A search is never
 # made with an operator's text, a product name or the 37-character internal identity.
@@ -163,6 +167,17 @@ class ProductDeleteRequest:
 
 
 @dataclass(frozen=True)
+class NoticeCatalogRequest:
+    """Read the official 상품정보제공고시 type list (``notice_type`` is ``None``) or one type's
+    content fields (notice coverage S0). No query, no body; the bearer exists only for this call."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    notice_type: str | None = None
+
+
+@dataclass(frozen=True)
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
@@ -226,6 +241,17 @@ class ProductReadback:
 
     endpoint_id: EndpointId
     product_no: str
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class NoticeCatalogResponse:
+    """A notice read reduced to its retained-field allow-list. A JSON array body is retained under
+    ``items``."""
+
+    endpoint_id: EndpointId
+    notice_type: str | None
     retained: Mapping[str, object]
     http_status: int
 
@@ -404,6 +430,20 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         (placeholder,) = contract.path_params
         return _Wire(_path(contract, **{placeholder: request.product_no}), headers, {})
+    if contract.endpoint_id in (_NOTICE_LIST, _NOTICE_TYPE):
+        if not isinstance(request, NoticeCatalogRequest):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        if contract.endpoint_id is _NOTICE_LIST:
+            if request.notice_type is not None:
+                raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+            return _Wire(contract.path, headers, {})
+        if request.notice_type is None or not _NOTICE_TYPE_CODE.fullmatch(request.notice_type):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        (placeholder,) = contract.path_params
+        return _Wire(_path(contract, **{placeholder: request.notice_type}), headers, {})
     if contract.endpoint_id is _PRODUCT_DELETE:
         if not isinstance(request, ProductDeleteRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -506,6 +546,7 @@ _Result = (
     | ProductReadback
     | ProductCreateResponse
     | ProductDeleteResponse
+    | NoticeCatalogResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -513,6 +554,15 @@ _Result = (
 
 def _result(contract: EndpointContract, request: object, body: object, status: int) -> _Result:
     """The typed result of a response that passed the endpoint's success predicate."""
+    if contract.endpoint_id in (_NOTICE_LIST, _NOTICE_TYPE):
+        assert isinstance(request, NoticeCatalogRequest)
+        wrapped = body if isinstance(body, dict) else {"items": body}
+        return NoticeCatalogResponse(
+            endpoint_id=contract.endpoint_id,
+            notice_type=request.notice_type,
+            retained=retain(contract, wrapped),
+            http_status=status,
+        )
     fields = cast(dict[str, object], body)
     if contract.endpoint_id is _PRODUCT_DELETE:
         assert isinstance(request, ProductDeleteRequest)
@@ -610,6 +660,15 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_DELETE_V2],
         request: ProductDeleteRequest,
     ) -> ProductDeleteResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[
+            EndpointId.SMARTSTORE_NOTICE_TYPES, EndpointId.SMARTSTORE_NOTICE_TYPE_READ
+        ],
+        request: NoticeCatalogRequest,
+    ) -> NoticeCatalogResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...

@@ -168,6 +168,22 @@ def product_delete_succeeded(status: int, body: object) -> bool:
     return status == 200 and isinstance(body, dict)
 
 
+def notice_catalog_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND a JSON array or object: the official 상품정보제공고시 type list. Which members
+    survive is decided by the retention profile; nothing here asserts the list's shape."""
+    return status == 200 and isinstance(body, list | dict)
+
+
+def notice_type_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 AND a JSON object carrying the official ``productInfoProvidedNoticeContents`` array
+    of one 상품정보제공고시 type (the owner-verified single-type schema, 2026-10-03)."""
+    return (
+        status == 200
+        and isinstance(body, dict)
+        and isinstance(body.get("productInfoProvidedNoticeContents"), list)
+    )
+
+
 def _int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -297,6 +313,20 @@ _PRODUCT_SEARCH_FIELDS = frozenset(
 # Category and notice metadata: only the identifiers and labels a selection is made of. The packet
 # names 카테고리 and 상품군 reads but no response field, so nothing else survives retention.
 
+# The 상품정보제공고시 reads (owner directive 2026-10-03, notice coverage S0): the type identity
+# and name, and each content field's documented members. Nothing else is kept.
+_NOTICE_FIELDS = frozenset(
+    {
+        "productInfoProvidedNoticeType",
+        "productInfoProvidedNoticeTypeName",
+        "fieldType",
+        "fieldName",
+        "fieldDescription",
+        "fieldAddDescription",
+        "fieldMaxLength",
+    }
+)
+
 
 ADOPTED: Mapping[EndpointId, EndpointContract] = {
     EndpointId.SMARTSTORE_AUTH_TOKEN: EndpointContract(
@@ -418,6 +448,38 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         success_predicate=product_delete_succeeded,
         predicate_revision="m5-delete-r1",
     ),
+    # ---- Notice coverage S0 (owner directive 2026-10-03): the two official 상품정보제공고시 reads,
+    # read only to capture the provider's notice schema. A read, never a mutation.
+    EndpointId.SMARTSTORE_NOTICE_TYPES: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_NOTICE_TYPES,
+        method=Method.GET,
+        path="/v1/products-for-provided-notice",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=15.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=notice_catalog_succeeded,
+        predicate_revision="m5-notice-types-r1",
+        retained_response_fields=_NOTICE_FIELDS,
+    ),
+    EndpointId.SMARTSTORE_NOTICE_TYPE_READ: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_NOTICE_TYPE_READ,
+        method=Method.GET,
+        path="/v1/products-for-provided-notice/{productInfoProvidedNoticeType}",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=15.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=notice_type_succeeded,
+        predicate_revision="m5-notice-type-r1",
+        retained_response_fields=_NOTICE_FIELDS,
+    ),
     # ---- M5 IMAGE UPLOAD amendment (official Commerce API 2.89.0, 2026-09-15).
     EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD,
@@ -463,8 +525,6 @@ ADOPTION_GAPS: Mapping[EndpointId, str] = {
     # data (PR-C ``RegistrationMetadataSource``) until a response contract is proven.
     EndpointId.SMARTSTORE_CATEGORY_LIST: _NO_RESPONSE_CONTRACT,
     EndpointId.SMARTSTORE_CATEGORY_READ: _NO_RESPONSE_CONTRACT,
-    EndpointId.SMARTSTORE_NOTICE_TYPES: _NO_RESPONSE_CONTRACT,
-    EndpointId.SMARTSTORE_NOTICE_TYPE_READ: _NO_RESPONSE_CONTRACT,
 }
 
 
@@ -504,7 +564,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-delete-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-notice-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -533,6 +593,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m5-published-state-r1": "c20e9369999e1c38db61df874d47ea354670f41f6180cec7bce0dc36e8ced138",
     # The DELETE slice adopts DELETE /v2/products/origin-products/{originProductNo} (ADR-0018 §3.5).
     "m5-delete-r1": "6b23aeaf7d315c87fc97ddc7c431e4e6e7b3ae2e09074f87191012ed2ae0869f",
+    # Notice coverage S0 adopts the two official 상품정보제공고시 reads (owner directive
+    # 2026-10-03).
+    "m5-notice-r1": "e6c90c610dc86026be1acf5cec1bcb297567ade0e2932af3aa3c6799c8da023a",
 }
 
 
