@@ -3744,6 +3744,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "residual_risk_acceptances",
         "registration_deletions",
         "synthetic_test_products",
+        # The operator's decisions on supplier common images (Issue #219).
+        "supplier_common_image_decisions",
     }
     offenders = [
         path

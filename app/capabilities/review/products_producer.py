@@ -48,6 +48,7 @@ from app.stages.products.images import (
     IMAGE_QA_REVIEW_REQUIRED,
     IMAGE_SELECTION_EMPTY,
     IMAGE_SELECTION_MISSING,
+    IMAGE_SELECTION_RECHECK_REQUIRED,
 )
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing_service import (
@@ -83,6 +84,8 @@ MAPPING: Final[Mapping[str, tuple[ReviewKind, str]]] = {
     IMAGE_SELECTION_EMPTY: (ReviewKind.COLLECT_EVIDENCE, _IMAGES),
     IMAGE_QA_MISSING: (ReviewKind.COLLECT_EVIDENCE, _IMAGE),
     IMAGE_QA_REVIEW_REQUIRED: (ReviewKind.COLLECT_EVIDENCE, _IMAGE),
+    # Issue #219 §2.3: a rule selection uses a file that became a blocked common image.
+    IMAGE_SELECTION_RECHECK_REQUIRED: (ReviewKind.COLLECT_EVIDENCE, _IMAGE),
     MEMBERSHIP_REVISION_MISSING: (ReviewKind.SOURCE_CHANGE, _MEMBERSHIP),
     MEMBERSHIP_REVISION_NOT_CURRENT: (ReviewKind.SOURCE_CHANGE, _MEMBERSHIP),
     GROUP_CANDIDATE_PENDING: (ReviewKind.SOURCE_CHANGE, _CANDIDATES),

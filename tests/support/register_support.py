@@ -13,7 +13,7 @@ from typing import Any
 
 from app.config import AppConfig
 from app.container import Container
-from app.stages.collect.facts import FieldFact, ImageRole, QuantityTier, QuantityTiersValue
+from app.stages.collect.facts import FieldFact, QuantityTier, QuantityTiersValue
 from app.stages.collect.revisions import StoredRevision
 from app.stages.connect.marketplace.capability import (
     AuthStatus,
@@ -30,6 +30,7 @@ from app.stages.connect.marketplace.contracts import (
     WriteView,
 )
 from app.stages.products.image_model import (
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SourceDecision,
@@ -274,7 +275,7 @@ def select_and_pass(container: Container, item_id: str, revision: StoredRevision
         decisions=[
             SourceDecision(image.role, image.ordinal, image.sha256, SourceDecisionKind.USE_SOURCE)
         ],
-        outputs=[SelectedOutput(ImageRole.REPRESENTATIVE, image.role, image.ordinal)],
+        outputs=[SelectedOutput(OutputRole.REPRESENTATIVE, image.role, image.ordinal)],
         decided_by=OPERATOR,
     )
     selection = container.images.current_selection(item_id)

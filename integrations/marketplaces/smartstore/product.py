@@ -749,7 +749,14 @@ def _image_references(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
                 )
             if not isinstance(reference, str) or not safe_provider_reference(reference):
                 raise WireContractError("WIRE_IMAGE_REFERENCE_UNSAFE", "unsafe image reference")
-            if asset.get("role") == "REPRESENTATIVE" and representative is None:
+            role = asset.get("role")
+            if role == "DETAIL":
+                # A detail-body image is never a gallery image (Issue #219 §2.2); until the detail
+                # composition places images there is no place for it in this request.
+                raise WireContractError(
+                    "WIRE_DETAIL_IMAGE_NOT_PLACEABLE", "a detail-body image is not a gallery image"
+                )
+            if role == "REPRESENTATIVE" and representative is None:
                 representative = reference
             elif reference not in others:
                 others.append(reference)

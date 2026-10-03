@@ -438,6 +438,50 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 > complete selection, and an exact-binary QA verdict. The owner decides every rule as before;
 > nothing is selected by default and no route selects on an operator's behalf.
 
+> **Amendment note (supplier common images; Issue #219, owner decision 2026-10-03).** A
+> supplier common image is a file — keyed by its supplier and its SHA-256 — that the supplier
+> repeats across products' detail pages: a shipping notice, a seller warning, a contact card, a
+> blank spacer or a brand banner. Its own owner (`app/stages/products/common_images.py`,
+> migration `0039`) records the operator's `BLOCK` or `KEEP` for one key, append-only and
+> remembered, and derives the verdict of a key in this order: the operator's newest decision; the
+> owner's own decisions of Issue #219 §1 on eight KM통상 files (code, `OWNER_SEED`); `REVIEW` when
+> the file appears in the detail images of three or more different products over the supplier's
+> whole collection history (`supplier-common-image-detection/v1`), treated as blocked until an
+> operator decides; otherwise none. It reads file fingerprints, the collection history and
+> decisions only — never an image's content — and it alters no source asset or reference. A
+> synthetic test product reads its template supplier's verdicts and never counts towards
+> detection. The operator reads and decides through
+> `GET/POST /api/v1/products/supplier-common-images/{supplier_key}[/{sha256}]`. This owner decides
+> no selection by itself.
+
+> **Amendment note (image auto-selection; Issue #219, owner decision 2026-10-03).** This
+> amends "nothing is selected by default" above, the operator image API note's "nothing is
+> selected by default and no route selects on an operator's behalf", and `DecisionOrigin`'s
+> "never a derived default". An Item's selection may now be the image auto-selection rule's
+> (`app/stages/products/auto_images.py`, `image-auto-selection/v1`), recorded as
+> `DecisionOrigin.RULE` with the rule version as its author and, in its audit, why each image
+> was placed or left out. An operator's selection always supersedes it, and the rule never moves
+> an operator's selection. The rule reads only the CONFIRMED source images of the current bound
+> revision — a failed image is never a candidate — and the place each one has on the supplier's
+> page, from the role-rule name the supplier's own classifier recorded (`provenance`) looked up in
+> the table that supplier publishes; a host, a path or the order alone never decide it, and an
+> unknown rule name leaves the Item unselected with the reason shown
+> (`IMAGE_AUTO_SELECTION_ROLE_RULE_UNKNOWN`). It places the first representative image, the
+> byte-distinct additional images in page order up to nine (`OutputRole.ADDITIONAL`, a new output
+> role), and the byte-distinct detail images in page order that are not a blocked or undecided
+> supplier common image (`OutputRole.DETAIL`); one SHA-256 is used once. A selected detail image is
+> never sent as a gallery image: until the detail composition places images, a unit carrying one
+> is `PUBLICATION_DETAIL_IMAGES_UNPLACED` (`BLOCKED`) and the CREATE projection refuses it. A rule
+> selection that now uses a file which has since become a blocked or undecided supplier common
+> image is never changed silently: it reads `IMAGE_SELECTION_RECHECK_REQUIRED`. **QA** (Issue #219
+> §4, owner decision 2026-10-03): each image the rule selects gets an automatic rule QA
+> (`image-qa-auto/v1`) from its stored file facts only — stored bytes, an image media type, a byte
+> size within the collection bound and decoded dimensions — `PASS` or `REVIEW_REQUIRED` with the
+> failed checks as findings, never the image's content. Readiness reads the verdict under the rule
+> in force (`image-qa/v1`) and, without one, the automatic QA of a source image; an operator verdict
+> always supersedes it. Migration `0040` widens the two CHECKs and the current-move trigger this
+> needs and nothing else.
+
 ### 10. The AI and enrichment boundary
 
 - **M4 works with no AI provider configured.** ADR-0012 §9 and §14 apply: AI is a capability, and its failure blocks no COLLECT, `ProductFactsRevision` or canonical DB.
