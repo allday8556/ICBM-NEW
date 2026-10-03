@@ -595,3 +595,86 @@ def test_only_a_failed_run_offers_to_be_put_back_in_the_form(
         _outcome(page, "RECORDED")
         assert page.locator(f"{FOCUS} [data-action='refill-url']").count() == 0
     assert len(wire.posts()) == 2
+
+
+# ------------------------------------------------ A-UX2: up to 50 URLs, each its own single request
+
+
+def test_each_url_of_the_box_is_its_own_single_url_request_and_run(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    lines = [
+        product_url("61"),
+        product_url("62"),
+        product_url("61"),
+        "not a url",
+        product_url("63"),
+    ]
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        page.locator("#collect-url").fill("\n".join(lines))
+        summary = page.locator("[data-role='intake-summary']")
+        assert (
+            summary.get_attribute("data-lines"),
+            summary.get_attribute("data-duplicates"),
+            summary.get_attribute("data-invalid"),
+            summary.get_attribute("data-planned"),
+        ) == ("5", "1", "1", "3")
+        assert page.locator("[data-role='invalid-lines'] li").inner_text() == "not a url"
+        page.locator("[data-action='submit-collection']").click()
+        page.wait_for_selector("[data-role='intake-results'] li[data-state]:nth-child(3)")
+        rows = page.locator("[data-role='intake-results'] li[data-state]")
+        assert [
+            (rows.nth(i).get_attribute("data-url"), rows.nth(i).get_attribute("data-state"))
+            for i in range(rows.count())
+        ] == [
+            (product_url("61"), "accepted"),
+            (product_url("62"), "accepted"),
+            (product_url("63"), "accepted"),
+        ]
+        # One request per URL, each the one-product body; the invalid line was never sent.
+        bodies = [json.loads(body or b"{}") for _, _, body in wire.posts()]
+        assert bodies == [
+            {"supplier_key": SUPPLIER_KEY, "product_url": product_url(n)}
+            for n in ("61", "62", "63")
+        ]
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        runs = {rows.nth(i).get_attribute("data-run") for i in range(rows.count())}
+        assert len(runs) == 3
+        assert {served_container.collection.run(r).source_url for r in runs if r} == {
+            product_url(n) for n in ("61", "62", "63")
+        }
+        assert page.locator("#collect-url").input_value() == ""
+        _no_browser_truth(page)
+
+
+def test_more_than_fifty_lines_is_refused_before_anything_is_sent(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        page.locator("#collect-url").fill("\n".join(product_url(str(n)) for n in range(100, 151)))
+        page.locator("[data-action='submit-collection']").click()
+        page.wait_for_selector("[data-role='submit-refusal'] [data-reason='INTAKE_TOO_MANY']")
+    assert wire.posts() == []
+
+
+def test_a_refused_url_keeps_its_line_and_the_others_go_on(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    foreign = "https://elsewhere.invalid/product/sample/70/"
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        page.locator("#collect-url").fill("\n".join([foreign, product_url("71")]))
+        page.locator("[data-action='submit-collection']").click()
+        page.wait_for_selector("[data-role='intake-results'] li[data-state='accepted']")
+        refused = page.locator("[data-role='intake-results'] li[data-state='refused']")
+        assert refused.get_attribute("data-url") == foreign
+        assert refused.get_attribute("data-reason") == "COLLECT_URL_REFUSED"
+        # The server refused it; nothing was made for it, and its line waits for the operator.
+        assert page.locator("#collect-url").input_value() == foreign
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        assert [r.source_url for r in served_container.collection.recent_runs()] == [
+            product_url("71")
+        ]
+    assert len(wire.posts()) == 2

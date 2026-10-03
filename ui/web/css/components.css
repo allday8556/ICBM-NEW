@@ -905,6 +905,30 @@ body.has-registration-status .content {
   background: var(--color-info-bg);
 }
 
+/* A-UX2: the URL box takes one URL per line; each line is its own request and run. */
+.collect-submit textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--color-input);
+  font: inherit;
+  resize: vertical;
+}
+
+.collect-submit [data-role='intake-summary'],
+.collect-submit .intake-results {
+  margin-top: var(--space-3);
+}
+
+.collect-submit .intake-invalid,
+.collect-submit .intake-results {
+  margin: var(--space-2) 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
 .collect-runs .inner-tabs,
 .collect-runs [data-role='runs-count'] {
   margin-top: var(--space-4);

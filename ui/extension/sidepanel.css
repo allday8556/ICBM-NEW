@@ -839,6 +839,18 @@ h1 {
   color: var(--ink-3);
 }
 
+/* A discovered row's selection (A-UX2 F-9): what goes into the queue, never its bound. */
+.queue-row .row-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.select-buttons {
+  margin-top: 8px;
+}
+
 /* A row's run, opened in ICBM Collection Management (A-UX3 F-8). */
 .queue-row .row-open {
   align-self: flex-start;

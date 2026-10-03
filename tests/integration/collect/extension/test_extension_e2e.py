@@ -659,3 +659,41 @@ def test_recovery_rediscovers_the_list_and_icbm_skips_what_it_recorded(
             _product("9003"),
         ]
         assert table_counts(config)["extension_queues"] == 2
+
+
+# ---------------------------------------------------------------- A-UX2: choosing found products
+
+
+def test_only_the_chosen_products_are_queued_and_the_bound_stays_the_operators(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        _discover(panel, chromium)
+        chosen = panel.locator(_role("list-selected"))
+        expect(chosen).to_have_text("4")
+        start = panel.locator("[data-action='queue-start']")
+        panel.locator("[data-action='select-none']").dispatch_event("click")
+        expect(chosen).to_have_text("0")
+        assert start.is_disabled()
+        panel.locator("[data-action='select-all']").dispatch_event("click")
+        expect(chosen).to_have_text("4")
+        for number in ("9001", "9015"):
+            panel.locator(f"[data-select='{_product(number)}']").uncheck()
+        expect(chosen).to_have_text("2")
+        # A choice is not the bound: the bound is the operator's own and still empty.
+        assert panel.locator("#queue-max").input_value() == ""
+        panel.locator("#queue-max").fill("2")
+        panel.locator("#queue-interval").select_option("10")
+        start.dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
+        rows = panel.locator("[data-role='queue-rows'] .queue-row")
+        assert rows.count() == 2
+        runs = sorted(
+            (run for run in app.collection.recent_runs() if run.provenance is not None),
+            key=lambda run: run.requested_at,
+        )
+        assert [(run.source_url, run.outcome) for run in runs] == [
+            (_product("9002"), CollectionOutcome.RECORDED),
+            (_product("9003"), CollectionOutcome.RECORDED),
+        ]

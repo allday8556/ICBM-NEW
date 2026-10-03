@@ -270,7 +270,9 @@ function supplierCard(supplier, ctx) {
 
 // ---------------------------------------------------------------- 수집 (Gate 1 G1-E)
 //
-// One product URL, submitted through POST /api/v1/collect/collections and then only read back.
+// Product URLs, each submitted on its own through POST /api/v1/collect/collections and then only
+// read back. The form takes up to 50 lines (A-UX2 D1); each URL is still one ordinary single-URL
+// request and its own run, sent one after another through the one submit call below.
 // Every state shown is the durable run's own outcome: the page decides no outcome, never submits
 // again on its own, and keeps nothing in browser storage. A reload or a return to this view
 // follows the same durable runs — the run named in the route, and the newest runs the server
@@ -334,8 +336,11 @@ const REVIEW_OUTCOME = {
   CONDITION_PERSISTS: '원천이 아직 확인 필요 상태라 항목은 열린 채로 남습니다. 해결 기록은 남았습니다.',
   SUPERSEDED: '원천이 새 리비전으로 바뀌어 새 검토 항목이 열렸습니다.',
 };
+// The operator's own input bound (A-UX2 D1): a convenience for typing URLs in, never the E3 list
+// queue's bound and never a batch. Every line is its own single-URL request.
+const INTAKE_MAX = 50;
 const SUBMIT_HELP =
-  '상품 상세 URL 하나만 받습니다. 목록·카테고리 수집은 하지 않으며, 요청은 서버가 URL과 같은 상품 재수집 간격을 확인한 뒤 수집 작업 하나로 접수합니다.';
+  '상품 상세 URL을 한 줄에 하나씩, 최대 50개까지 받습니다. 목록·카테고리 수집은 하지 않으며, URL마다 따로 서버가 URL과 같은 상품 재수집 간격을 확인한 뒤 수집 작업 하나로 접수합니다.';
 const RUNS_HELP =
   '서버에 기록된 최근 수집을 최신순으로 보여줍니다. 진행 중인 수집은 화면을 벗어났다 돌아와도 같은 기록을 다시 읽어 이어서 표시합니다. ' +
   '필터는 서버가 전체 기록에서 먼저 고른 뒤 최신순으로 나눠 보여줍니다.';
@@ -378,25 +383,71 @@ function supplierLabel(key, suppliers) {
   return suppliers.find((s) => s.supplier_key === key)?.display_name ?? key;
 }
 
-function submitCard(view, ctx) {
+// The lines of the URL box as the operator typed them: each non-empty line is one URL. A line the
+// browser cannot read as an http(s) URL is shown as invalid and never sent; the same URL twice is
+// sent once. Whether a URL is a product page of the supplier is the server's to decide.
+function intakeLines(text) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const planned = [];
+  const invalid = [];
+  let duplicates = 0;
+  for (const line of lines) {
+    let parsed = null;
+    try {
+      parsed = new URL(line);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+      invalid.push(line);
+    } else if (planned.includes(parsed.href)) {
+      duplicates += 1;
+    } else {
+      planned.push(parsed.href);
+    }
+  }
+  return { lines, planned, invalid, duplicates };
+}
+
+function submitCard(view, ctx, onSubmitted = () => {}) {
   const keys = view.collection_supplier_keys;
   const select = h(
     'select',
     { id: 'collect-supplier', name: 'supplier_key', disabled: !keys.length },
     ...keys.map((key) => h('option', { value: key }, supplierLabel(key, view.suppliers))),
   );
-  const url = h('input', {
+  const url = h('textarea', {
     id: 'collect-url',
-    type: 'url',
     name: 'product_url',
-    required: true,
-    maxlength: '2048',
+    rows: '3',
     autocomplete: 'off',
-    placeholder: '상품 상세 페이지 URL 하나',
+    spellcheck: 'false',
+    placeholder: '상품 URL을 입력하세요. 여러 개는 줄바꿈 (최대 50개)',
   });
   const button = h('button', { type: 'submit', class: 'btn blue', 'data-action': 'submit-collection', disabled: !keys.length }, '수집 요청');
   const connection = h('div', { 'data-role': 'supplier-connection' });
   const refusal = h('div', { 'data-role': 'submit-refusal' });
+  const summary = h('div', { class: 'mini', 'data-role': 'intake-summary' });
+  const results = h('div', { 'data-role': 'intake-results' });
+
+  // What will be sent, counted from the box as it stands. It decides nothing about the URLs.
+  const showSummary = () => {
+    const intake = intakeLines(url.value);
+    summary.dataset.lines = String(intake.lines.length);
+    summary.dataset.duplicates = String(intake.duplicates);
+    summary.dataset.invalid = String(intake.invalid.length);
+    summary.dataset.planned = String(intake.planned.length);
+    summary.replaceChildren(
+      intake.lines.length
+        ? `입력 ${intake.lines.length}줄 · 중복 ${intake.duplicates} · 잘못된 URL ${intake.invalid.length} · 수집 예정 ${intake.planned.length}`
+        : '',
+      ...(intake.invalid.length
+        ? [h('ul', { class: 'intake-invalid', 'data-role': 'invalid-lines' }, ...intake.invalid.map((line) => h('li', { class: 'mono' }, line)))]
+        : []),
+    );
+    return intake;
+  };
+  url.addEventListener('input', showSummary);
 
   // CONNECT's own verdict for the chosen supplier, shown as it is. It never decides whether the
   // form may be sent: the server does.
@@ -432,23 +483,91 @@ function submitCard(view, ctx) {
     h('div', { class: 'form-row' }, h('label', { for: 'collect-supplier' }, '공급처'), select),
     connection,
     h('div', { class: 'form-row' }, h('label', { for: 'collect-url' }, '상품 URL'), url),
+    summary,
     refusal,
     h('div', { class: 'supplier-actions' }, button),
+    results,
   );
+
+  // The one submit call: one URL, one request, answered with that run's identity or a refusal.
+  const submitOne = (supplierKey, productUrl) => sendJson('POST', RUNS, { supplier_key: supplierKey, product_url: productUrl });
+
+  // More than one URL: each is sent on its own, one after another, and each answer is shown beside
+  // its URL. A refused URL made no run; its line stays in the box for the operator to correct.
+  const submitEach = async (supplierKey, planned) => {
+    const rows = [];
+    const refused = [];
+    for (const productUrl of planned) {
+      try {
+        const submitted = await submitOne(supplierKey, productUrl);
+        rows.push(
+          h(
+            'li',
+            { 'data-url': productUrl, 'data-state': 'accepted', 'data-run': submitted.collection_run_id },
+            h('span', { class: 'mono' }, productUrl),
+            ' · ',
+            h('button', { type: 'button', class: 'btn', 'data-action': 'open-run', onclick: () => ctx.navigate('collect', { view: 'jobs', run: submitted.collection_run_id }) }, `수집 ${short(submitted.collection_run_id)}`),
+          ),
+        );
+      } catch (error) {
+        const code = error?.error?.code ?? null;
+        refused.push(productUrl);
+        rows.push(
+          h(
+            'li',
+            { 'data-url': productUrl, 'data-state': 'refused', 'data-reason': code ?? '' },
+            h('span', { class: 'mono' }, productUrl),
+            ' · ',
+            codeCopy(code, error?.error?.message ?? String(error?.message ?? error)),
+          ),
+        );
+      }
+    }
+    const accepted = rows.length - refused.length;
+    results.replaceChildren(
+      h('div', { class: 'note' }, `접수 ${accepted}건 · 거절 ${refused.length}건. 거절된 URL은 입력란에 남겨 두었습니다.`),
+      h('ul', { class: 'intake-results' }, ...rows),
+    );
+    url.value = refused.join('\n');
+    showSummary();
+    if (accepted) toast('수집 요청 접수', `${accepted}건을 각각 수집 작업으로 접수했습니다.`);
+    onSubmitted();
+  };
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    // One submit, one request: a second click or Enter while the first is on the wire does nothing.
+    // One submit: a second click while the first is on the wire does nothing.
     if (inFlight) return;
-    const productUrl = url.value.trim();
-    if (!productUrl || !select.value) {
+    const intake = showSummary();
+    results.replaceChildren();
+    if (!intake.lines.length || !select.value) {
       refusal.replaceChildren(h('div', { class: 'note' }, '공급처와 상품 URL을 입력하세요.'));
+      return;
+    }
+    if (intake.lines.length > INTAKE_MAX) {
+      refusal.replaceChildren(h('div', { class: 'note', 'data-reason': 'INTAKE_TOO_MANY' }, `한 번에 최대 ${INTAKE_MAX}개 URL까지 입력할 수 있습니다. 지금 ${intake.lines.length}줄입니다.`));
+      return;
+    }
+    if (!intake.planned.length) {
+      refusal.replaceChildren(h('div', { class: 'note', 'data-reason': 'INTAKE_NO_VALID_URL' }, '보낼 수 있는 URL이 없습니다. 잘못된 URL을 고쳐 주세요.'));
       return;
     }
     inFlight = true;
     button.disabled = true;
     refusal.replaceChildren();
+    if (intake.planned.length > 1) {
+      try {
+        await submitEach(select.value, intake.planned);
+      } finally {
+        inFlight = false;
+        button.disabled = false;
+      }
+      return;
+    }
+    // One URL: the one-product path exactly as before, followed into its run.
+    const productUrl = intake.planned[0];
     try {
-      const submitted = await sendJson('POST', RUNS, { supplier_key: select.value, product_url: productUrl });
+      const submitted = await submitOne(select.value, productUrl);
       url.value = '';
       toast('수집 요청 접수', `수집 ${short(submitted.collection_run_id)} · 작업 ${short(submitted.job_id)}`);
       ctx.navigate('collect', { view: 'jobs', run: submitted.collection_run_id });
@@ -721,7 +840,7 @@ function jobsView(view, ctx) {
     refresh();
   });
 
-  root.append(submitCard(view, ctx), focus, runsPanel);
+  root.append(submitCard(view, ctx, () => refresh()), focus, runsPanel);
   refresh();
   return root;
 }

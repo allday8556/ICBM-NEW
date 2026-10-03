@@ -206,6 +206,18 @@ Small additions beside the approved boards, in their existing visual language:
   one submit path and its server rules (the target check and the same-product interval included);
   the failed run stays as recorded. `NO_REVISION` and `RECORDED` runs offer no such control.
 
+## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
+
+- Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per
+  line, at most 50. Under the box the screen counts `입력 n줄 · 중복 n · 잘못된 URL n · 수집 예정 n` and
+  lists the lines it cannot read as an http(s) URL; those are never sent, and a repeated URL is sent
+  once. Each planned URL is sent on its own through the one submit call, one after another, and its
+  answer — a run or the server's refusal — is shown beside it; refused lines stay in the box. One
+  URL behaves exactly as before and opens its run.
+- The extension's list mode shows a checkbox on each found product, `선택 n` beside the found
+  count, and `전체 선택 / 전체 해제`. Only the chosen links are declared. The queue bound is never
+  filled from the selection (the board's no-pre-filled-bound rule above still holds).
+
 ## Rules
 
 - This HTML prototype is the visual/product UI reference for ICBM-NEW.
