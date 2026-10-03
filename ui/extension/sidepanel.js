@@ -407,6 +407,18 @@ function queueRow(item) {
   const note = element("div", "queue-note");
   note.append(element("span", "mono", item.product_key || "—"), ` · ${itemNote(item)}`);
   row.append(line, note);
+  // A captured item names its run: open that run in ICBM Collection Management, which owns runs
+  // and their history (ADR-0019 §12.2). Nothing is sent to the supplier and nothing is read again.
+  if (item.collection_run_id) {
+    const open = element("button", "row-open", "수집관리에서 결과 보기");
+    open.type = "button";
+    open.dataset.action = "open-run";
+    open.dataset.run = item.collection_run_id;
+    open.addEventListener("click", () =>
+      chrome.runtime.sendMessage({ type: "open-icbm", collection_run_id: item.collection_run_id }),
+    );
+    row.append(open);
+  }
   return row;
 }
 
@@ -470,6 +482,10 @@ function renderList() {
   action("queue-pause").textContent = control === "PAUSED" ? "재개" : "일시정지";
   action("queue-cancel").hidden = !queue || queue.state !== "OPEN" || control === "RUNNING";
   action("product-mode").disabled = control === "RUNNING" || control === "PAUSED";
+  // Recovery (A-UX3 F-10) is explained once this queue has ended and ICBM holds no open one: the
+  // operator goes back to the list page and finds it again, and ICBM skips what it recorded. The
+  // ended queue is never reissued, and nothing here navigates the supplier's pages.
+  show("queue-recovery", control === "ENDED" && Boolean(queue) && queue.state !== "OPEN");
 }
 
 function listMessage(message) {

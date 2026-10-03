@@ -548,3 +548,50 @@ def test_the_run_list_is_filtered_on_the_server_and_counts_what_it_selected(
             page.wait_for_selector("[data-role='runs-count'][data-total='4']")
             _no_browser_truth(page)
     assert wire.posts() == []
+
+
+# ------------------------------------------- A-UX3: recovery fills the form, never submits
+
+
+def test_a_failed_run_can_be_put_back_in_the_form_and_only_the_operator_submits(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        _submit(page, FAILED_ID)
+        failed_id = _outcome(page, "FAILED")
+        assert page.locator("#collect-url").input_value() == ""
+        page.locator(f"{FOCUS} [data-action='refill-url']").click()
+        # The run's own URL and supplier are back in the form; nothing was sent.
+        assert page.locator("#collect-url").input_value() == product_url(FAILED_ID)
+        assert page.locator("#collect-supplier").input_value() == SUPPLIER_KEY
+        page.wait_for_timeout(1000)
+        assert len(wire.posts()) == 1
+        # The operator's own submit goes through the one submit path and its server rules: the
+        # same product read moments ago is refused by the same-product interval, so no run is made
+        # and the failed run stays as recorded.
+        page.locator("[data-action='submit-collection']").click()
+        page.wait_for_selector(
+            "[data-role='submit-refusal'] [data-reason='COLLECT_SAME_PRODUCT_TOO_SOON']"
+        )
+        assert len(wire.posts()) == 2
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        assert served_container.collection.run(failed_id).outcome.value == "FAILED"
+        assert [r.collection_run_id for r in served_container.collection.recent_runs()] == [
+            failed_id
+        ]
+        _no_browser_truth(page)
+
+
+def test_only_a_failed_run_offers_to_be_put_back_in_the_form(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        _submit(page, NO_REVISION_ID)
+        _outcome(page, "NO_REVISION")
+        assert page.locator(f"{FOCUS} [data-action='refill-url']").count() == 0
+        _submit(page, "4242")
+        _outcome(page, "RECORDED")
+        assert page.locator(f"{FOCUS} [data-action='refill-url']").count() == 0
+    assert len(wire.posts()) == 2
