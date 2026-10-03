@@ -60,7 +60,8 @@ class FieldValueType(StrEnum):
     YEAR_MONTH = "YEAR_MONTH"  # text in the form yyyy-MM
     DATE = "DATE"  # text in the form yyyy-MM-dd
     BOOLEAN = "BOOLEAN"
-    INTEGER = "INTEGER"
+    INTEGER = "INTEGER"  # a signed 32-bit integer (OpenAPI int32)
+    LONG = "LONG"  # a signed 64-bit integer (OpenAPI int64)
 
 
 # The value types whose value is text, and so may be empty, long or of the wrong form.

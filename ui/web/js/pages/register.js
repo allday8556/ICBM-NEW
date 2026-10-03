@@ -295,7 +295,9 @@ function authoringForm(unit, onDone) {
     } else {
       control = field(label, `${kind}.${rule.key}`,
         current?.value === undefined ? undefined : String(current.value));
-      const placeholder = { YEAR_MONTH: 'yyyy-MM', DATE: 'yyyy-MM-dd', INTEGER: '정수' }[valueType];
+      const placeholder = {
+        YEAR_MONTH: 'yyyy-MM', DATE: 'yyyy-MM-dd', INTEGER: '정수', LONG: '정수',
+      }[valueType];
       if (placeholder) control.querySelector('input').placeholder = placeholder;
     }
     const input = control.querySelector('input, select');
@@ -449,7 +451,9 @@ function authoringForm(unit, onDone) {
         const raw = control?.input.value.trim() ?? '';
         let value = raw;
         if (control?.valueType === 'BOOLEAN') value = raw === 'true';
-        else if (control?.valueType === 'INTEGER' && /^-?[0-9]+$/.test(raw)) value = Number(raw);
+        else if (['INTEGER', 'LONG'].includes(control?.valueType) && /^-?[0-9]+$/.test(raw)) {
+          value = Number(raw);
+        }
         return raw ? [[rule.key, {
           value,
           provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',

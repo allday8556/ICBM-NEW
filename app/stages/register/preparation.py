@@ -894,8 +894,11 @@ def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Rea
 # The documented text forms of the YEAR_MONTH and DATE value types.
 _YEAR_MONTH_FORM: Final = re.compile(r"\A[0-9]{4}-(0[1-9]|1[0-2])\Z")
 _DATE_FORM: Final = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
-# A JSON integer ICBM sends is a signed 64-bit one.
-_INTEGER_BOUND: Final = 2**63
+# The width of each integer value type: a signed 32-bit and a signed 64-bit integer.
+_INTEGER_BOUNDS: Final[Mapping[FieldValueType, int]] = {
+    FieldValueType.INTEGER: 2**31,
+    FieldValueType.LONG: 2**63,
+}
 
 
 def _of_type(value_type: FieldValueType, value: object) -> bool:
@@ -937,7 +940,8 @@ def _value_reasons(subject: str, rule: FieldRule | None, value: FieldValue) -> l
     if isinstance(raw, bool):
         return reasons
     if isinstance(raw, int):
-        if not -_INTEGER_BOUND <= raw < _INTEGER_BOUND:
+        bound = _INTEGER_BOUNDS[value_type]
+        if not -bound <= raw < bound:
             reasons.append(Reason(FIELD_VALUE_FORM_INVALID, _R, subject))
         return reasons
     if not raw.strip():

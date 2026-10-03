@@ -92,7 +92,7 @@ def test_the_gift_card_one_of_group_and_the_integer_fields() -> None:
     rules = {rule.key: rule for rule in notice_policy("GIFT_CARD").fields}
     group = ("useStorePlace", "useStoreAddressId", "useStoreUrl")
     assert all(rules[name].one_of == group for name in group)
-    assert rules["useStoreAddressId"].value_type is FieldValueType.INTEGER
+    assert rules["useStoreAddressId"].value_type is FieldValueType.LONG
     assert rules["periodDays"].value_type is FieldValueType.INTEGER
     assert rules["periodDays"].max_length is None
 

@@ -106,7 +106,7 @@ class FieldRuleView(_Strict):
     # Notice coverage S2. Each has the meaning a rule without it always had — a text value, no
     # omission default, no condition — so a revision recorded before them reads unchanged, and they
     # are stored only when they say something else.
-    value_type: Literal["TEXT", "YEAR_MONTH", "DATE", "BOOLEAN", "INTEGER"] = "TEXT"
+    value_type: Literal["TEXT", "YEAR_MONTH", "DATE", "BOOLEAN", "INTEGER", "LONG"] = "TEXT"
     omitted_default: StrictBool = False
     required_without: list[StrictStr] = Field(default_factory=list)
     one_of: list[StrictStr] = Field(default_factory=list)

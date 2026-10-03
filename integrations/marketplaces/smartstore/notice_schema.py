@@ -430,7 +430,7 @@ _RULE_VALUE_TYPES: Final[Mapping[NoticeValueType, FieldValueType]] = MappingProx
         NoticeValueType.DATE: FieldValueType.DATE,
         NoticeValueType.BOOLEAN: FieldValueType.BOOLEAN,
         NoticeValueType.INTEGER: FieldValueType.INTEGER,
-        NoticeValueType.LONG: FieldValueType.INTEGER,
+        NoticeValueType.LONG: FieldValueType.LONG,
     }
 )
 

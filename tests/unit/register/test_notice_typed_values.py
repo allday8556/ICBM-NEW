@@ -117,10 +117,25 @@ def test_a_text_value_outside_its_documented_form_is_never_reformatted(
     }
 
 
-def test_an_integer_outside_a_signed_64_bit_value_is_invalid() -> None:
-    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**63)}) == {
+def test_an_integer_outside_its_width_is_invalid() -> None:
+    # INTEGER is a signed 32-bit integer, LONG a signed 64-bit one.
+    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**31)}) == {
         ("FIELD_VALUE_FORM_INVALID", "notice:periodDays")
     }
+    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**31 - 1)}) == set()
+    wide = replace(
+        TYPED,
+        notice=NoticePolicy(
+            "notice-type-long",
+            (FieldRule("addressId", required=True, value_type=_T.LONG),),
+        ),
+    )
+    for value, expected in ((2**31, set()), (2**63, {"FIELD_VALUE_FORM_INVALID"})):
+        result = candidate(
+            request(listing=replace(LISTING, notices={"addressId": FieldValue(value)})),
+            resolved(metadata=wide),
+        )
+        assert {r.code for r in result.reasons} == expected
 
 
 def test_a_required_field_whose_omission_is_the_marketplace_default_is_never_missing() -> None:
