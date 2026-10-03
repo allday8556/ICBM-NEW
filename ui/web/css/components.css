@@ -929,6 +929,12 @@ body.has-registration-status .content {
   overflow-wrap: anywhere;
 }
 
+.collect-facts .field-value-full pre {
+  margin: var(--space-2) 0 var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Product DB (Gate 1 G1-C) ---------- */
 /* The prototype's DB layout: a search toolbar, the product list beside one detail panel, and
    the detail's title/group rhythm. Everything else is the shared panel/table/chip/kv system. */

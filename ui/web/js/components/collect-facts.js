@@ -60,7 +60,8 @@ function clip(text) {
   return text.length > VALUE_LIMIT ? `${text.slice(0, VALUE_LIMIT)}…` : text;
 }
 
-// The stored canonical value, worded. Unknown shapes are shown as the stored JSON itself.
+// The stored canonical value, worded for the summary row. The summary may be shortened; the full
+// stored value is always one click away in the field's detail row (fullValue below).
 function valueText(valueJson) {
   if (valueJson === null || valueJson === undefined) return '—';
   let value;
@@ -78,10 +79,27 @@ function valueText(valueJson) {
   if (Array.isArray(value.tiers)) return clip(value.tiers.map((t) => `${t.quantity}개 ${won(t.total_price_krw)}`).join(' · '));
   if (typeof value.policy_text === 'string') return clip(value.policy_text);
   if (typeof value.availability === 'string') return AVAILABILITY_LABEL[value.availability] ?? value.availability;
-  if (Array.isArray(value.axes)) return `옵션 축 ${value.axes.length}개 · 구성 ${(value.configurations ?? []).length}개`;
-  if (Array.isArray(value.items)) return `${value.items.length}개 항목`;
-  if (Array.isArray(value.references)) return `참조 ${value.references.length}개`;
+  if (Array.isArray(value.axes)) {
+    if (!value.axes.length) return '옵션 없음';
+    const axes = value.axes.map((axis) => `${axis.name}: ${axis.values.join(', ')}`).join(' / ');
+    return clip(`${axes}${value.configurations?.length ? ` · 구성 ${value.configurations.length}개` : ''}`);
+  }
+  if (Array.isArray(value.items)) return clip(value.items.map((item) => `${item.label}: ${item.text}`).join(' · '));
+  if (Array.isArray(value.references)) {
+    return clip(value.references.map((ref) => `${ROLE_LABEL[ref.role] ?? ref.role} ${ref.ordinal} ${DISPOSITION_LABEL[ref.disposition] ?? ref.status}`).join(' · '));
+  }
   return clip(JSON.stringify(value));
+}
+
+// The whole stored value, exactly as the revision holds it: never shortened.
+function fullValue(valueJson) {
+  let text = valueJson;
+  try {
+    text = JSON.stringify(JSON.parse(valueJson), null, 2);
+  } catch {
+    text = valueJson;
+  }
+  return h('div', { class: 'field-value-full' }, h('div', { class: 'mini' }, '저장된 값 (전체)'), h('pre', { class: 'mono', 'data-role': 'field-value-full' }, text));
 }
 
 function evidenceTable(evidence) {
@@ -114,12 +132,17 @@ function fieldRows(field) {
   const detail = h(
     'tr',
     { class: 'evidence-row', 'data-evidence-for': field.key, hidden: true },
-    h('td', { colspan: '4' }, evidenceTable(field.evidence)),
+    h(
+      'td',
+      { colspan: '4' },
+      field.status === 'CONFIRMED' && field.value_json !== null ? fullValue(field.value_json) : null,
+      evidenceTable(field.evidence),
+    ),
   );
   const toggle = h(
     'button',
     { type: 'button', class: 'btn', 'data-action': 'toggle-evidence', 'aria-expanded': 'false' },
-    `근거 ${field.evidence.length}`,
+    field.status === 'CONFIRMED' ? `값·근거 ${field.evidence.length}` : `근거 ${field.evidence.length}`,
   );
   toggle.addEventListener('click', () => {
     detail.hidden = !detail.hidden;

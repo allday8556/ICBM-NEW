@@ -464,12 +464,27 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             if field["status"] != "CONFIRMED":
                 value = facts.locator(f"tr[data-field='{field['key']}'] [data-role='field-value']")
                 assert value.inner_text() == "—"
+        # Collapsed, an absent part renders as nothing. (An opened value is the stored JSON itself,
+        # where null is the value's own word for a part the source did not state.)
+        _no_absent_text(page)
         # The evidence is the field's own, opened on demand.
         first = revision["fields"][0]
         evidence = facts.locator(f"tr[data-evidence-for='{first['key']}']")
         assert evidence.is_hidden()
         facts.locator(f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']").click()
         assert evidence.is_visible()
+        # A CONFIRMED field's whole stored value is there too, never shortened.
+        if first["status"] == "CONFIRMED":
+            full = evidence.locator("[data-role='field-value-full']").inner_text()
+            assert json.loads(full) == json.loads(first["value_json"])
+        for field in revision["fields"]:
+            if field["status"] == "CONFIRMED" and field["key"] != first["key"]:
+                row = facts.locator(f"tr[data-field='{field['key']}']")
+                row.locator("[data-action='toggle-evidence']").click()
+                shown = facts.locator(
+                    f"tr[data-evidence-for='{field['key']}'] [data-role='field-value-full']"
+                ).inner_text()
+                assert json.loads(shown) == json.loads(field["value_json"]), field["key"]
         entries = evidence.locator("[data-role='evidence'] tbody tr")
         assert [
             entries.nth(i).get_attribute("data-evidence-kind") for i in range(entries.count())
@@ -484,7 +499,6 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             == revision["facts_status"]
         )
         assert "%" not in facts.inner_text(), "no confidence number is shown"
-        _no_absent_text(page)
         _no_browser_truth(page)
     # Reading the revision sent nothing: the one POST is the operator's submit.
     assert len(wire.posts()) == 1
