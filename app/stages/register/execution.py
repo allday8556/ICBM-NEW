@@ -329,8 +329,12 @@ def encode_field(value: FieldValue) -> dict[str, Any]:
 
 
 def decode_field(value: Mapping[str, Any]) -> FieldValue:
+    raw = value["value"]
+    if not isinstance(raw, str | bool | int):
+        # Text, a boolean or an integer (notice coverage S2); anything else was never encoded.
+        raise ValueError("a recorded field value is text, a boolean or an integer")
     return FieldValue(
-        value=value["value"],
+        value=raw,
         provenance=Provenance(value["provenance"]),
         detail_page_reference=value["detail_page_reference"],
     )
