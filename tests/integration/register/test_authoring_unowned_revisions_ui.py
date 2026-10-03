@@ -214,3 +214,61 @@ def test_the_screen_authors_typed_notice_values_and_never_forces_a_provider_defa
     assert notices["importDeclarationCheck"]["value"] is True
     assert notices["consumptionDate"]["value"] == "2027-01-31"
     assert "noRefundReason" not in notices
+
+
+GIFT_CARD_TEXT = {
+    "issuer": "합성 발행자",
+    "termsOfUse": "유효기간 경과 시 70% 환급",
+    "refundPolicy": "잔액 60% 이상 사용 시 환급",
+    "customerServicePhoneNumber": "합성 상담 번호",
+    "periodDays": "365",
+}
+
+
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [
+        # Within JavaScript's exact range: sent as the integer it is.
+        ("9007199254740991", 9007199254740991),
+        # Beyond it: never rounded into another identifier, kept as the operator's own text.
+        ("9007199254740993", "9007199254740993"),
+    ],
+)
+def test_the_screen_never_rounds_a_long_identifier(
+    browser: Browser,
+    api: TestClient,
+    config: AppConfig,
+    draft: tuple[str, str],  # noqa: F811 - the imported fixture
+    typed: str,
+    stored: int | str,
+) -> None:
+    draft_id, _ = draft
+    current = api.get(
+        f"/api/v1/settings/category-metadata/{MARKET}/{TAXONOMY}/{CATEGORY}",
+        headers={"X-ICBM-Client": "operator"},
+    ).json()["current"]["metadata_revision"]
+    record_reviewed_metadata(api, notice_type="GIFT_CARD", expected=current)
+    calls: list[tuple[str, str, int]] = []
+    with _page(browser, api, calls) as page:
+        unit = page.locator(f".register-unit[data-draft='{draft_id}']")
+        unit.locator("input[name='category_id']").fill(CATEGORY)
+        unit.locator("input[name='category_id']").press("Tab")
+        unit.locator("input[name='notice.useStoreAddressId']").wait_for(timeout=10_000)
+        unit.locator("input[name='name']").fill("합성 상품")
+        unit.locator("input[name='attribute.brand']").fill("합성 브랜드")
+        for key, text in GIFT_CARD_TEXT.items():
+            unit.locator(f"input[name='notice.{key}']").fill(text)
+        unit.locator("input[name='notice.useStoreAddressId']").fill(typed)
+        unit.locator("textarea[name='detail_body']").fill("상세 본문")
+        unit.locator("button[data-action='SAVE_PREPARATION']").click()
+        page.wait_for_function(
+            "() => document.querySelector('.register-authoring')?.dataset.preparation !== ''"
+        )
+    with contextlib.closing(raw(config)) as connection:
+        (listing_json,) = connection.execute(
+            "SELECT listing_json FROM registration_preparation_revisions"
+        ).fetchone()
+    notices = json.loads(listing_json)["notices"]
+    assert notices["periodDays"]["value"] == 365
+    assert notices["useStoreAddressId"]["value"] == stored
+    assert type(notices["useStoreAddressId"]["value"]) is type(stored)

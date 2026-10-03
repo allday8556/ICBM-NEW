@@ -452,7 +452,11 @@ function authoringForm(unit, onDone) {
         let value = raw;
         if (control?.valueType === 'BOOLEAN') value = raw === 'true';
         else if (['INTEGER', 'LONG'].includes(control?.valueType) && /^-?[0-9]+$/.test(raw)) {
-          value = Number(raw);
+          // Only an integer a JavaScript number holds exactly is sent as a number. A larger one
+          // stays the operator's own text, which the server refuses as the wrong type — it is
+          // never rounded into another value.
+          const number = Number(raw);
+          if (Number.isSafeInteger(number) && BigInt(raw) === BigInt(number)) value = number;
         }
         return raw ? [[rule.key, {
           value,
