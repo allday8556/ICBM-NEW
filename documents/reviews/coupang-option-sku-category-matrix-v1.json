@@ -1,0 +1,149 @@
+{
+  "audit_identity": "track-c-coupang-option-sku/2026-10-03/v1",
+  "state": "OFFICIAL_GUIDE_SAMPLE_NOT_FULL_INVENTORY",
+  "base_sha": "0875cd64354af6689af18bba62747278ea955bf1",
+  "observed_at": "2026-10-03",
+  "provider_adoption": "NOT_ADOPTED",
+  "runtime_verification": "UNVERIFIED",
+  "authenticated_provider_requests_made": false,
+  "coverage": {
+    "full_category_tree": "NOT_CAPTURED",
+    "active_leaf_metadata": "NOT_CAPTURED",
+    "sample_rows": "OFFICIAL_GUIDE_SAMPLE"
+  },
+  "inventory_schema": {
+    "taxonomy_observed_at": "RFC3339 timestamp",
+    "category_code": "string",
+    "category_path": "string array",
+    "category_status": "ACTIVE | READY | DISABLED | provider-new-value",
+    "leaf_valid": "boolean | null",
+    "metadata_fingerprint": "sha256 | null",
+    "metadata_observed_at": "RFC3339 timestamp | null",
+    "is_allow_single_item": "boolean | null",
+    "attribute_type_name": "string",
+    "role": "PURCHASE_OPTION | SEARCH_ATTRIBUTE | AMBIGUOUS",
+    "required": "MANDATORY | OPTIONAL | provider-new-value",
+    "group_number": "NONE | 1 | 2 | provider-new-value",
+    "data_type": "string",
+    "input_type": "INPUT | SELECT | provider-new-value | NOT_CAPTURED",
+    "input_values": "string array",
+    "basic_unit": "string | null",
+    "usable_units": "string array",
+    "classification": "REQUIRED_AXIS | REQUIRED_AXIS_CHOICE | OPTIONAL_AXIS | SEARCH_ATTRIBUTE | AMBIGUOUS",
+    "classification_evidence": "official URL plus exact raw fields"
+  },
+  "classification_contract": {
+    "required_axis": {
+      "required": "MANDATORY",
+      "group_number": "NONE",
+      "exposed": "EXPOSED"
+    },
+    "required_axis_choice_captured": {
+      "required": "MANDATORY",
+      "group_number": "1",
+      "exposed": "EXPOSED"
+    },
+    "ambiguities": [
+      "The English listing guide says OPTIONAL for group 1 while the Korean guide and FAQ say MANDATORY.",
+      "The metadata reference defines group 2 but does not independently prove that every group 2 is a required choice."
+    ]
+  },
+  "sources": {
+    "metadata": "https://developers.coupang.com/en/api/categories/category-metadata-query",
+    "korean_guide": "https://developers.coupang.com/ko/getting-started/guide-to-creating-product-listings",
+    "english_guide": "https://developers.coupang.com/en/getting-started/guide-to-creating-product-listings",
+    "faq": "https://developers.coupang.com/en/faq/how-can-i-check-the-required-purchase-options-and-attribute-values-available-for"
+  },
+  "sample_categories": [
+    {
+      "category_code": "27742",
+      "category_label": "비타민",
+      "source_kind": "OFFICIAL_GUIDE_SAMPLE",
+      "current_live_metadata": false,
+      "is_allow_single_item": null,
+      "attributes": [
+        {
+          "attribute_type_name": "개당 캡슐/정",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "1",
+          "data_type": "NUMBER",
+          "input_type": "NOT_CAPTURED",
+          "input_values": [],
+          "basic_unit": "개",
+          "usable_units": ["캡슐", "정", "회분"],
+          "classification": "REQUIRED_AXIS_CHOICE"
+        },
+        {
+          "attribute_type_name": "개당 중량",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "1",
+          "data_type": "NUMBER",
+          "input_type": "NOT_CAPTURED",
+          "input_values": [],
+          "basic_unit": "g",
+          "usable_units": ["mg", "g", "kg", "oz", "lb"],
+          "classification": "REQUIRED_AXIS_CHOICE"
+        },
+        {
+          "attribute_type_name": "개당 용량",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "1",
+          "data_type": "NUMBER",
+          "input_type": "NOT_CAPTURED",
+          "input_values": [],
+          "basic_unit": "ml",
+          "usable_units": ["ml", "L", "cc"],
+          "classification": "REQUIRED_AXIS_CHOICE"
+        },
+        {
+          "attribute_type_name": "수량",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "NONE",
+          "data_type": "NUMBER",
+          "input_type": "NOT_CAPTURED",
+          "input_values": [],
+          "basic_unit": "개",
+          "usable_units": ["개", "세트", "박스"],
+          "classification": "REQUIRED_AXIS"
+        }
+      ]
+    },
+    {
+      "category_code": "62676",
+      "category_label": "휴대폰 악세서리",
+      "source_kind": "OFFICIAL_GUIDE_SAMPLE",
+      "current_live_metadata": false,
+      "is_allow_single_item": false,
+      "attributes": [
+        {
+          "attribute_type_name": "색상",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "NONE",
+          "data_type": "STRING",
+          "input_type": "INPUT",
+          "input_values": [],
+          "basic_unit": "없음",
+          "usable_units": [],
+          "classification": "REQUIRED_AXIS"
+        },
+        {
+          "attribute_type_name": "수량",
+          "role": "PURCHASE_OPTION",
+          "required": "MANDATORY",
+          "group_number": "NONE",
+          "data_type": "NUMBER",
+          "input_type": "INPUT",
+          "input_values": [],
+          "basic_unit": "개",
+          "usable_units": ["개", "개입", "세트"],
+          "classification": "REQUIRED_AXIS"
+        }
+      ]
+    }
+  ]
+}
