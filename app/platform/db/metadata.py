@@ -15,6 +15,9 @@ from app.stages.connect import account_models as _account_models  # noqa: F401
 from app.stages.connect import models as _connect_models  # noqa: F401
 from app.stages.connect.marketplace import models as _marketplace_models  # noqa: F401
 from app.stages.connect.smartstore import models as _smartstore_models  # noqa: F401
+from app.stages.products import (
+    common_option_mapping_models as _common_option_mapping_models,  # noqa: F401
+)
 from app.stages.products import common_option_models as _common_option_models  # noqa: F401
 from app.stages.products import image_models as _image_models  # noqa: F401
 from app.stages.products import models as _product_models  # noqa: F401

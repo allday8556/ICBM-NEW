@@ -458,6 +458,10 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "common_sales_option_axes",
         "common_sales_option_values",
         "current_common_sales_option_revision_moves",
+        "common_option_fact_mapping_revisions",
+        "common_option_fact_axis_mappings",
+        "common_option_fact_value_mappings",
+        "current_common_option_fact_mapping_moves",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

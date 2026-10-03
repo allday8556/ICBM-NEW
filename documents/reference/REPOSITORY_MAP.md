@@ -52,16 +52,19 @@ The current 2.90.0 reference's notice children are retained beside them as
 `smartstore-notice-schema-2.90.0-2026-10-03.json`.
 Notice coverage S1 added `integrations/marketplaces/smartstore/notice_schema.py`, the derived data
 `notice_schema.json` beside it and one unit suite.
+The Common Sales Option C1/C2 owner added three PRODUCT DB modules, migration `0039` and one
+integration and one unit suite. Its reviewed Product Fact correspondence slice added three more
+PRODUCT DB modules, migration `0040` and one integration and one unit suite.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 264 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 268 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 42 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 22 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 69 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 126 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 70 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 129 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -83,13 +86,13 @@ Notice coverage S1 added `integrations/marketplaces/smartstore/notice_schema.py`
 | `integrations/` | 42 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 21 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 252 | tests |
+| `tests/` | 254 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 100 | integration tests by runtime owner |
+| `tests/integration/` | 101 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 86 | unit tests by runtime owner |
+| `tests/unit/` | 87 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 45 | the served web client |
