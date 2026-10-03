@@ -1,6 +1,6 @@
 # Coupang Option/SKU contract and common-core audit
 
-> Audit identity: `track-c-coupang-option-sku/2026-10-03/v1`
+> Audit identity: `track-c-coupang-option-sku/2026-10-03/v2`
 >
 > State: `RESEARCH_COMPLETE / COMMON_CORE_PROPOSAL_UNDER_REVIEW`
 >
@@ -27,14 +27,56 @@ composition_signature`. Two option combinations with the same seller composition
 no distinct canonical Item identity and would also collide in `registration_item_key/v1`.
 
 The problem is a common-core gap, not a reason to copy Coupang's schema into Product Core. The
-recommended repair is a provider-neutral, source-proven Atomic SKU owner; reviewed marketplace
-option-requirement revisions and projections remain in REGISTER; Coupang IDs remain provider
-identities. No missing axis or value may be generated to satisfy Coupang.
+corrected product requirement adds a provider-neutral **Common Sales Option** decision before
+Atomic SKU materialization. A Coupang category-required purchase-option rule is an input to the
+minimum common option requirement; when a semantically corresponding Product Fact is proven, that
+fact-backed axis/value is promoted once to Common Sales Option authoring. NAVER, Coupang and later
+11st then project the same Common Sales Option and Atomic SKU structure instead of independently
+authoring marketplace option truths.
+
+The recommended repair is therefore a provider-neutral, fact-backed Common Sales Option owner and
+a source-proven Atomic SKU owner. Reviewed marketplace requirement revisions, requirement-to-common
+mappings and projections remain distinct records; Coupang IDs remain provider identities. No
+missing fact, axis, value or configuration may be generated to satisfy Coupang.
 
 Track B finding: **structural for a future optionful cross-market path, but not a blocker for the
 current bounded SmartStore no-positive-option vertical**. Track B must not be changed by this
 packet. If Track B expands to a positive-option listing before the common-core ADR is accepted,
 that expansion is blocked.
+
+## Product requirement correction and evidence boundary
+
+This section is an ICBM product decision supplied by the product owner. It is **not** a claim that
+Coupang officially requires other marketplaces to copy its options.
+
+| Layer | Meaning | Truth owner |
+| --- | --- | --- |
+| Product Fact | Observed product data such as `300 mg`, `60 tablets`, or `red` | `ProductFactsRevision` plus canonical fact acceptance |
+| Common Sales Option | A customer-facing sales axis/value authored once for the product | Product Core common-option model |
+| Atomic SKU | One source-proven combination of Common Sales Option values | Product Core Atomic SKU model |
+| Product Information Notice | Statutory/product disclosure projection | Notice contract and marketplace adapter |
+| Marketplace Attribute | Search/category/product attribute projection | Marketplace metadata revision and adapter |
+
+The official Coupang evidence proves what Coupang requires for its category. The ICBM product
+policy makes a separate, explicit decision to use a fact-backed Coupang required purchase option
+as a **minimum requirement for common sales-option authoring**. The same fact may feed multiple
+projections, but notices, search attributes, Common Sales Options and provider renderings never
+become aliases of one another.
+
+The decision flow is:
+
+```text
+Coupang required purchase-option rule (official provider evidence)
+  -> semantic mapping to an existing canonical Product Fact
+  -> Common Sales Option requirement candidate
+  -> confirm Common Sales Option axes and values once
+  -> materialize only source-proven Atomic SKU configurations
+  -> NAVER / Coupang / 11st marketplace projections
+```
+
+An absent or ambiguous semantic match is `REVIEW_REQUIRED`. It never creates a Product Fact or a
+default option value. An axis value set also never proves its Cartesian combinations: only an
+explicit source configuration/SKU observation can materialize an Atomic SKU.
 
 ## C0 — reconciliation and owner map
 
@@ -42,9 +84,11 @@ that expansion is blocked.
 | --- | --- | --- |
 | Source observations | `ProductFactsRevision`, including `OptionsValue.axes/configurations` | Keeps exact ordered source evidence; no fabrication |
 | Canonical product | `ProductGroup` | One product spine; reusable |
+| Common sales-option authoring | no implemented canonical owner found | Missing; marketplace-authored display values are not a common truth |
+| Fact-to-common-option mapping | no implemented canonical owner found | Missing; must be evidence-backed and reviewable |
 | Sellable unit | `ProductItem = ProductGroup + ListingComposition` | Does not identify an option combination |
 | Current procurement | `SourceBinding` | Has no positive SourceSKU path in current implementation |
-| Marketplace authoring | `RegistrationDraft` and authored `options[item_id][dimension]` | Display values only, not canonical option identity |
+| Marketplace authoring | `RegistrationDraft` and authored `options[item_id][dimension]` | Display values only; must consume common options rather than own a second truth |
 | Frozen outbound evidence | `RegistrationSnapshot` / `RegistrationItemSnapshot` | Reusable; outbound values and revisions are immutable |
 | Pre-create item correlation | `registration_item_key/v1` | Reusable concept; input identity must be versioned and extended |
 | Provider registration | `MarketplaceRegistration` / `MarketplaceRegistrationItem` | Reusable group/item link; provider identity multiplicity needs extension |
@@ -202,6 +246,11 @@ evidence and not safe for category-wide registration.
 | `bundleType=AB` disallows options and becomes immutable | AB bundle is a separate compatibility rule, not an Atomic SKU model |
 | Free/open purchase options are disallowed by the current policy notice | No free-axis fallback when a canonical axis cannot map |
 
+Under the corrected ICBM product policy, a required Coupang purchase-option rule contributes a
+minimum Common Sales Option requirement only after it maps to a real Product Fact. This consequence
+is an ICBM policy layered on the official contract; it is not a Coupang statement about NAVER or
+11st.
+
 ICBM must enumerate only source-proven atomic configurations. It must not create the Cartesian
 product of axis values merely because axes list those values. For the example `color × quantity`,
 four Atomic SKUs exist only when the source evidence proves all four configurations.
@@ -290,6 +339,8 @@ complete.
 | Requested concept | Verdict | Evidence and required action |
 | --- | --- | --- |
 | `ProductGroup` | `KEEP` | Correct one-product canonical spine |
+| Common sales option | `MISSING` | Add one fact-backed authoring owner before Atomic SKU; marketplace drafts must consume it |
+| Product Fact -> common option mapping | `MISSING` | Add a versioned semantic mapping with evidence/confidence/review state; no guessed values |
 | `Item` | `CONFLICT` | Identity is only group + composition; extend to include Atomic SKU without fabricating a base SKU |
 | source options | `KEEP + EXTEND` | Collection preserves axes/configurations; add accepted materialization and source binding |
 | atomic SKU | `MISSING` | Frozen design names it; current DB intentionally materializes none |
@@ -298,6 +349,7 @@ complete.
 | `SEPARATE_LISTINGS` | `KEEP` | Valid projection choice; not a substitute for missing SKU identity |
 | `required_option_mapping` | `MISSING` | Frozen design only; current authored option text is not a reviewed mapping |
 | `required_option_revision` | `EXTEND` | Category metadata revision exists, but its option policy stores only supported/count/dimensions |
+| marketplace requirement -> common requirement | `MISSING` | Add a reviewed mapping; Coupang required options set the common minimum only under the product policy |
 | `registration_item_key` | `CONFLICT` | v1 input omits Atomic SKU and collides for equal compositions |
 | `MarketplaceRegistrationItem` | `KEEP + EXTEND` | Correct correspondence owner; needs typed multiple provider identities |
 | `marketplace_option_id` | `KEEP + EXTEND` | Suitable for Coupang `vendorItemId`; insufficient for `sellerProductItemId` and volatile exposure IDs |
@@ -312,27 +364,68 @@ Current implementation: **No, not for a source with positive option configuratio
 exercise the bounded no-positive-option path and manually authored registration option display
 values. Those values do not establish canonical SKU identity.
 
-Target after §J is accepted: **Yes.** One Product Core record such as `sku-red-2` owns selections
-`color=red`, `quantity=2`. A SmartStore registration item and a Coupang vendor item both point to
-that same Item/Atomic SKU. Their provider IDs and rendered labels differ, but an order from either
-resolves back to `sku-red-2`. No marketplace owns a second SKU truth.
+Target after §J is accepted: **Yes.** Common Sales Options are authored once from accepted Product
+Facts under the minimum requirement mapping. One Product Core record such as `sku-red-2` owns
+selections `color=red`, `quantity=2`. A SmartStore registration item and a Coupang vendor item both
+point to that same Item/Atomic SKU. Their provider IDs and rendered labels differ, but an order
+from either resolves back to `sku-red-2`. No marketplace owns a second option or SKU truth.
 
 ## J. Proposed common-core changes
 
-### J1. Product Core owners
+The corrected Track C design requests map to the proposed owners as follows:
+
+| Requested design | Proposed owner/contract |
+| --- | --- |
+| C1 `CommonSalesOptionAxis` | §J1 Product Core entity |
+| C2 `CommonSalesOptionValue` | §J1 Product Core entity |
+| C3 `AtomicSKU` | §J2 source-proven canonical identity |
+| C4 Product Fact -> Common Sales Option | §J1 versioned semantic mapping |
+| C5 Coupang required option -> common requirement | §J4 marketplace-requirement mapping with explicit ICBM policy basis |
+| C6 `registration_item_key/v2` | §J6 additive identity version |
+| C7 marketplace projection | §J5 shared-input compatibility and rendering contract |
+| C8 provider SKU/option identity | §J7 typed aliases owned by registration correspondence |
+| C9 marketplace order line -> Atomic SKU | §J8 identity-first resolution record |
+
+All nine contracts extend the existing `ProductGroup`/`ProductItem` spine. They do not introduce a
+parallel product truth.
+
+### J1. Common Sales Option owners
 
 ```text
-ProductOptionAxis
+CommonSalesOptionAxis
   axis_id, product_group_id, semantic_key, ordinal
+  lifecycle_state, decision_revision_id
 
-ProductOptionValue
+CommonSalesOptionValue
   value_id, axis_id, typed canonical value, unit semantics, display evidence
+
+ProductFactCommonSalesOptionMapping
+  mapping_revision_id, product_group_id
+  product_fact_revision_id, fact_locator
+  axis_id, value_id
+  semantic_rule_id, evidence, decision_state
+```
+
+- Common Sales Options are authored once per canonical product and are never owned by a
+  marketplace adapter.
+- A mapping may become `CONFIRMED` only when the source fact and semantic/unit correspondence are
+  proven under a versioned rule or explicit review. Ambiguous or absent correspondence is
+  `REVIEW_REQUIRED`.
+- Mapping promotes a fact into a customer-facing sales option; it does not mutate the Product Fact
+  or turn a product-information notice/search attribute into a purchase option.
+- A required axis with a single proven value remains part of the canonical common structure. Each
+  adapter must explicitly prove that its API can render that structure; it may not silently drop or
+  rewrite the axis.
+
+### J2. Atomic SKU owners
+
+```text
 
 AtomicSKU
   atomic_sku_id, product_group_id, selection_signature, created_at
 
 AtomicSKUSelection
-  atomic_sku_id, axis_id, value_id
+  atomic_sku_id, common_axis_id, common_value_id
 
 AtomicSKUSourceBinding
   atomic_sku_id, group_member_id, source_revision_id
@@ -347,7 +440,7 @@ AtomicSKUSourceBinding
   `source_configuration_key` is not presented as a supplier ID.
 - A no-option product keeps the existing base-product path and has no synthetic Atomic SKU.
 
-### J2. Product Item identity
+### J3. Product Item identity
 
 Extend ProductItem to one sellable composition of either a proven Atomic SKU or the existing
 no-option base product:
@@ -364,7 +457,7 @@ ProductItem
 Use separate uniqueness constraints for atomic and base paths. `item_identity_signature/v2`
 includes the Atomic SKU identity when present. Do not reinterpret or rewrite existing v1 Items.
 
-### J3. Marketplace requirement revision and projection
+### J4. Marketplace requirement to common requirement mapping
 
 Extend the reviewed, append-only category metadata content with provider-neutral option-rule rows:
 
@@ -376,19 +469,48 @@ MarketplaceOptionRequirementRevision
   rules[]: provider_key, role, requiredness, choice_group,
            data_type, input_type, allowed_values, basic_unit, usable_units
 
+MarketplaceCommonOptionRequirementMapping
+  mapping_revision_id
+  marketplace_requirement_revision_id, provider rule key
+  common semantic key / candidate common axis id
+  policy_basis, semantic rule id, evidence, decision state
+
 RequiredOptionProjection
   metadata_revision_id
   atomic_sku_id
-  canonical_axis/value ids
+  common axis/value ids
   provider rule key and exact rendered value
   decision provenance / review state
 ```
 
-Purchase options, search attributes and product-information notices remain distinct projections.
-They may reference the same canonical fact but never share an owner. A missing required axis/value
-is `REVIEW_REQUIRED`, not an authored guess.
+For Coupang, a required purchase-option rule supplies a minimum common requirement under the ICBM
+product policy. It becomes a Common Sales Option only when §J1 resolves it to a canonical Product
+Fact. Provider optional options do not automatically enlarge the common structure. Purchase
+options, search attributes and product-information notices remain distinct projections. They may
+reference the same canonical fact but never share an owner. A missing or ambiguous required
+axis/value is `REVIEW_REQUIRED`, not an authored guess.
 
-### J4. Registration identity versioning
+### J5. Marketplace projection contract
+
+Every selected marketplace consumes the same immutable common authoring revision and Atomic SKU
+set. An adapter may map semantic keys, units, labels and provider IDs, but may not add an axis,
+invent an Atomic SKU, or change the canonical combination set.
+
+```text
+MarketplaceOptionProjection
+  marketplace, category, metadata_revision_id
+  common_authoring_revision_id
+  atomic_sku_id, common axis/value ids
+  provider rule keys / exact wire rendering
+  compatibility_state, decision provenance
+```
+
+If a marketplace cannot express the common structure because of axis, value, combination or item
+limits, that marketplace's REGISTER readiness is `REVIEW_REQUIRED`. Other marketplace projections
+and the canonical common structure remain unchanged. Multi-market registration therefore performs
+one option-authoring decision followed by N compatibility/preflight projections.
+
+### J6. Registration identity versioning
 
 - Keep existing `registration_item_key/v1` immutable for existing snapshots.
 - Define v2 from `listing_identity + item_identity_signature/v2` (or the immutable `item_id` if the
@@ -398,16 +520,28 @@ is `REVIEW_REQUIRED`, not an authored guess.
 - Add a provider-neutral typed alias collection for secondary/volatile provider identities. Keep
   the one primary operational ID in `marketplace_option_id`; for Coupang that is `vendorItemId`.
 
-### J5. Order resolution owner
+### J7. Provider SKU/option identity aliases
+
+Keep one primary operational provider option ID on `MarketplaceRegistrationItem` and add typed
+aliases for every secondary or volatile identity. For Coupang, `vendorItemId` is the primary option
+identity, `sellerProductItemId` is a modification identity, and exposure IDs remain typed read
+evidence. Every alias resolves through the registration item to the same canonical Item/Atomic SKU.
+
+### J8. Order resolution owner
 
 Add an immutable order-line provider identity record and a resolution record naming exactly one
 `MarketplaceRegistrationItem`/Item/Atomic SKU, its evidence, resolver version and review state.
 Conflicting seller code and provider option ID is never auto-resolved.
 
-### J6. ADR and migration boundary
+NAVER and Coupang lines for the same Common Sales Option selection must resolve to the same
+Atomic SKU. Price, stock, procurement, sold-out state, cost, invoice and delivery workflows consume
+that resolved identity rather than marketplace labels.
+
+### J9. ADR and migration boundary
 
 An accepted common-core ADR is required. Its minimum decisions are Atomic SKU ownership and
-lifecycle, Item identity v2, registration key coexistence, category option-requirement schema,
+lifecycle, Common Sales Option ownership, fact mapping, marketplace-requirement mapping, sparse
+combination evidence, Item identity v2, registration key coexistence, projection compatibility,
 typed provider identities, drift behavior, and order-line resolution. Migrations must be additive;
 existing no-option Items, snapshots and keys remain readable and unchanged.
 
@@ -419,15 +553,20 @@ No slice below authorizes a provider call.
    capture external SKU wire limits and read-after-write behavior, register read-only endpoints.
 2. **CP-1 category inventory:** adopted read-only hierarchy/validity/metadata client, conservative
    pacing, checkpointing, raw sanitized evidence and revision diff.
-3. **CP-2 requirement mapper:** metadata rows to reviewed provider-neutral requirements; no product
-   projection yet.
-4. **CP-3 projection/preflight:** Atomic SKUs to Coupang `items[]`; enforce required axes, values,
+3. **CP-2 requirement mapper:** metadata rows to reviewed provider-neutral requirements and
+   marketplace-to-common requirement candidates; no guessed fact mapping or product projection.
+4. **CC-1 common authoring:** reviewed Product Fact semantic matching, Common Sales Option
+   confirmation and source-configuration-only Atomic SKU materialization.
+5. **CP-3 projection/preflight:** the shared Common Sales Options/Atomic SKUs to Coupang `items[]`;
+   enforce required axes, values,
    units, 200-item limit, unique names/codes, AB exclusion and no open-option fallback. Dry-run only.
-5. **CP-4 read-back:** product query normalizer, exact seller-code item-set comparison, typed ID
+6. **MP-1 cross-market compatibility:** project the identical canonical structure to every selected
+   marketplace; an inexpressible structure produces marketplace-local `REVIEW_REQUIRED`.
+7. **CP-4 read-back:** product query normalizer, exact seller-code item-set comparison, typed ID
    capture and MOTA/error-item handling.
-6. **CP-5 order resolver:** ordersheet read-only ingestion and identity-first Atomic SKU resolution.
-7. **CP-6 claim resolver:** return/exchange read-only ingestion correlated to immutable order lines.
-8. **CP-7 mutation adoption:** CREATE, approval, price, stock or cancellation only under separate
+8. **CP-5 order resolver:** ordersheet read-only ingestion and identity-first Atomic SKU resolution.
+9. **CP-6 claim resolver:** return/exchange read-only ingestion correlated to immutable order lines.
+10. **CP-7 mutation adoption:** CREATE, approval, price, stock or cancellation only under separate
    evidence, safety, authorization and bounded LIVE work. This packet grants none.
 
 ## L. Contract-test matrix
@@ -436,6 +575,10 @@ No slice below authorizes a provider call.
 | --- | --- |
 | Source evidence | Axes without configurations create zero Atomic SKUs |
 | Source evidence | Only explicit configurations materialize; missing Cartesian combinations stay missing |
+| Sparse combinations | Values `300 mg`, `500 mg`, `30`, `60` with evidence only for `300 mg+30` and `500 mg+60` create exactly two Atomic SKUs |
+| Fact mapping | Exact reviewed semantic/unit match creates a common-option candidate; ambiguous or absent fact becomes REVIEW_REQUIRED |
+| Separation | A notice/search attribute sharing the fact does not become or own a Common Sales Option |
+| Common authoring | Selecting NAVER+Coupang+11st performs one common option/SKU confirmation, not three marketplace authoring flows |
 | Identity | Same selections in different axis order cannot silently alias; canonical order is revisioned |
 | Identity | Different count/grade/pack remain different even at equal weight/total |
 | No-option compatibility | Existing ABSENT-option base Item gains no synthetic Atomic SKU |
@@ -445,6 +588,8 @@ No slice below authorizes a provider call.
 | Requirement metadata | Unknown enums and the MANDATORY/OPTIONAL group contradiction become REVIEW_REQUIRED |
 | Drift | A moved current metadata revision stales preflight; a frozen Snapshot keeps its old revision |
 | Projection | Missing required canonical axis/value blocks; no default or AI fabrication |
+| Projection | Every marketplace consumes the same Atomic SKU set; adapter-local axis/SKU creation fails the contract |
+| Projection | One marketplace limit conflict marks only that marketplace REVIEW_REQUIRED and does not mutate common authoring |
 | Projection | 201 items block; 200 pass if every other rule passes |
 | Projection | Duplicate external SKU, duplicate itemName and invalid unit/value block |
 | CREATE parse | Response returns only sellerProductId; no item ID is invented |
@@ -468,8 +613,46 @@ TRACK_B_POSITIVE_OPTION_EXPANSION_BLOCKER = true
 
 Reason: current Track B can continue within its accepted no-positive-option M4/M5 boundary. The
 finding becomes blocking only if it claims that manually authored option display text is a shared
-canonical Atomic SKU, or attempts a positive-option listing before the common-core ADR and Product
-Core materialization are accepted. Track C makes no Track B change and requests no main freeze.
+canonical Common Sales Option/Atomic SKU, or attempts a positive-option listing before the
+common-core ADR and Product Core materialization are accepted. Track C makes no Track B change and
+requests no main freeze. Coupang REGISTER is likewise blocked until the common authoring and
+projection contracts are implemented; research and dry-run design remain allowed.
+
+## Corrected product acceptance examples
+
+### Single proven configuration
+
+```text
+Product Facts: 300 mg, 60 tablets
+Coupang category requirements: per-unit weight/volume REQUIRED, quantity REQUIRED
+Common Sales Options: per-unit weight/volume=300 mg, quantity=60 tablets
+AtomicSKU-A: 300 mg + 60 tablets
+NAVER projection -> AtomicSKU-A
+Coupang projection -> AtomicSKU-A
+NAVER order / Coupang order -> the same AtomicSKU-A
+```
+
+This is a product-policy acceptance case. The category requirement is official evidence; promotion
+to a shared Common Sales Option is ICBM policy. Adapter preflight still independently checks whether
+the selected category/API can render a single-value required axis without violating its current
+contract.
+
+### Sparse proven configurations
+
+```text
+Observed values: 300 mg, 500 mg; 30 tablets, 60 tablets
+Source-proven configurations:
+  - 300 mg + 30 tablets
+  - 500 mg + 60 tablets
+
+Atomic SKUs created: exactly those two
+Forbidden fabrication:
+  - 300 mg + 60 tablets
+  - 500 mg + 30 tablets
+```
+
+PASS requires every marketplace projection and order resolver to preserve those same two identities.
+The presence of two axes and four values is never evidence for four combinations.
 
 ## Residual unknowns before implementation
 
