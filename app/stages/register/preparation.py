@@ -30,8 +30,10 @@ difference is ``STALE``, never a silent re-read or a re-price.
 """
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 from typing import Any, Final
 
@@ -56,9 +58,11 @@ from app.stages.register.model import ListingShape, canonical_json, valid_listin
 from app.stages.register.policy import (
     SATISFYING,
     STRONG_KEYS,
+    TEXT_VALUE_TYPES,
     CategoryMetadata,
     DuplicateKeyKind,
     FieldRule,
+    FieldValueType,
     Provenance,
     TargetPolicy,
 )
@@ -117,6 +121,10 @@ NOTICE_POLICY_MISSING: Final = "NOTICE_POLICY_MISSING"
 FIELD_UNDECLARED: Final = "FIELD_UNDECLARED"
 FIELD_VALUE_EMPTY: Final = "FIELD_VALUE_EMPTY"
 FIELD_VALUE_TOO_LONG: Final = "FIELD_VALUE_TOO_LONG"
+# Notice coverage S2: a value of another type than its rule declares, and a text value outside the
+# rule's documented form (yyyy-MM, yyyy-MM-dd). Neither is ever coerced or reformatted.
+FIELD_VALUE_TYPE_MISMATCH: Final = "FIELD_VALUE_TYPE_MISMATCH"
+FIELD_VALUE_FORM_INVALID: Final = "FIELD_VALUE_FORM_INVALID"
 FIELD_AI_SUGGESTION_UNCONFIRMED: Final = "FIELD_AI_SUGGESTION_UNCONFIRMED"
 FIELD_DETAIL_REFERENCE_NOT_PERMITTED: Final = "FIELD_DETAIL_REFERENCE_NOT_PERMITTED"
 OPTIONS_NOT_SUPPORTED: Final = "OPTIONS_NOT_SUPPORTED"
@@ -198,6 +206,8 @@ REASON_CODES: Final = frozenset(
         FIELD_UNDECLARED,
         FIELD_VALUE_EMPTY,
         FIELD_VALUE_TOO_LONG,
+        FIELD_VALUE_TYPE_MISMATCH,
+        FIELD_VALUE_FORM_INVALID,
         FIELD_AI_SUGGESTION_UNCONFIRMED,
         FIELD_DETAIL_REFERENCE_NOT_PERMITTED,
         OPTIONS_NOT_SUPPORTED,
@@ -248,9 +258,12 @@ class PreflightStage(StrEnum):
 @dataclass(frozen=True)
 class FieldValue:
     """One outbound value and its provenance. ``detail_page_reference`` states the value is the
-    "상세페이지 참조" representation, allowed only where the field's rule permits it."""
+    "상세페이지 참조" representation, allowed only where the field's rule permits it.
 
-    value: str = ""
+    ``value`` keeps its own JSON type — text, a boolean or an integer (notice coverage S2) — and the
+    field's rule decides which type it must be; nothing is coerced between them."""
+
+    value: str | bool | int = ""
     provenance: Provenance = Provenance.OPERATOR_CONFIRMED
     detail_page_reference: bool = False
 
@@ -874,6 +887,35 @@ def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Rea
     return reasons
 
 
+# The documented text forms of the YEAR_MONTH and DATE value types.
+_YEAR_MONTH_FORM: Final = re.compile(r"\A[0-9]{4}-(0[1-9]|1[0-2])\Z")
+_DATE_FORM: Final = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+# A JSON integer ICBM sends is a signed 64-bit one.
+_INTEGER_BOUND: Final = 2**63
+
+
+def _of_type(value_type: FieldValueType, value: object) -> bool:
+    """Whether a value has its rule's JSON type. A boolean is never an integer here."""
+    if value_type in TEXT_VALUE_TYPES:
+        return isinstance(value, str)
+    if value_type is FieldValueType.BOOLEAN:
+        return isinstance(value, bool)
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _form_valid(value_type: FieldValueType, text: str) -> bool:
+    if value_type is FieldValueType.YEAR_MONTH:
+        return bool(_YEAR_MONTH_FORM.match(text))
+    if value_type is FieldValueType.DATE:
+        if not _DATE_FORM.match(text):
+            return False
+        try:
+            date.fromisoformat(text)
+        except ValueError:
+            return False
+    return True
+
+
 def _value_reasons(subject: str, rule: FieldRule | None, value: FieldValue) -> list[Reason]:
     reasons: list[Reason] = []
     if value.provenance not in SATISFYING:
@@ -883,10 +925,23 @@ def _value_reasons(subject: str, rule: FieldRule | None, value: FieldValue) -> l
             status = rule.missing_status if rule is not None and rule.required else _R
             reasons.append(Reason(FIELD_DETAIL_REFERENCE_NOT_PERMITTED, status, subject))
         return reasons
-    if not value.value.strip():
+    value_type = FieldValueType.TEXT if rule is None else rule.value_type
+    raw = value.value
+    if not _of_type(value_type, raw):
+        reasons.append(Reason(FIELD_VALUE_TYPE_MISMATCH, _R, subject))
+        return reasons
+    if isinstance(raw, bool):
+        return reasons
+    if isinstance(raw, int):
+        if not -_INTEGER_BOUND <= raw < _INTEGER_BOUND:
+            reasons.append(Reason(FIELD_VALUE_FORM_INVALID, _R, subject))
+        return reasons
+    if not raw.strip():
         reasons.append(Reason(FIELD_VALUE_EMPTY, _R, subject))
-    elif rule is not None and rule.max_length is not None and len(value.value) > rule.max_length:
+    elif rule is not None and rule.max_length is not None and len(raw) > rule.max_length:
         reasons.append(Reason(FIELD_VALUE_TOO_LONG, _R, subject))
+    elif not _form_valid(value_type, raw):
+        reasons.append(Reason(FIELD_VALUE_FORM_INVALID, _R, subject))
     return reasons
 
 
@@ -894,7 +949,11 @@ def _declared_reasons(
     kind: str, missing_code: str, rules: Sequence[FieldRule], values: Mapping[str, FieldValue]
 ) -> list[Reason]:
     """Required fields come from the versioned metadata only; an absent optional field stays
-    absent, and a value for a field the metadata does not declare is never sent silently."""
+    absent, and a value for a field the metadata does not declare is never sent silently.
+
+    A required field whose omission is the marketplace's documented default is never missing, a
+    field required without others is missing only when all of them are absent too, and a one-of
+    group is missing — once, under its first key — only when none of its fields is present."""
     declared = {rule.key: rule for rule in rules}
     reasons = [
         Reason(FIELD_UNDECLARED, _R, f"{kind}:{key}")
@@ -905,7 +964,12 @@ def _declared_reasons(
         rule = declared[key]
         value = values.get(key)
         if value is None:
-            if rule.required:
+            missing = rule.required and not rule.omitted_default
+            if rule.required_without and not any(k in values for k in rule.required_without):
+                missing = True
+            if rule.one_of and min(rule.one_of) == key:
+                missing = missing or not any(k in values for k in rule.one_of)
+            if missing:
                 reasons.append(Reason(missing_code, rule.missing_status, f"{kind}:{key}"))
             continue
         reasons.extend(_value_reasons(f"{kind}:{key}", rule, value))
@@ -916,12 +980,18 @@ def _listing_reasons(request: PreflightRequest, metadata: CategoryMetadata | Non
     listing = request.listing
     reasons: list[Reason] = []
     name = listing.name
-    if name is None or (not name.detail_page_reference and not name.value.strip()):
+    if name is None or (
+        not name.detail_page_reference and isinstance(name.value, str) and not name.value.strip()
+    ):
         reasons.append(Reason(LISTING_NAME_MISSING, _R, "name"))
     else:
         name_rule = FieldRule("name", required=True, max_length=None)
         reasons.extend(_value_reasons("name", name_rule, name))
-        if metadata is not None and len(name.value) > metadata.name_max_length:
+        if (
+            metadata is not None
+            and isinstance(name.value, str)
+            and len(name.value) > metadata.name_max_length
+        ):
             reasons.append(Reason(LISTING_NAME_TOO_LONG, _R, "name"))
     if metadata is None:
         return reasons

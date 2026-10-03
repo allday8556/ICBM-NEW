@@ -13,7 +13,7 @@ proved it (§9), and no payload value, credential, URL or provider response text
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool, StrictInt, StrictStr
 
 from app.platform.core.errors import ErrorClass
 from app.stages.connect.accounts import AccountBinding
@@ -184,9 +184,12 @@ class CategoryView(BaseModel):
 
 
 class FieldValueView(BaseModel):
-    """One authored outbound value and its provenance (§4). The operator's own, read back."""
+    """One authored outbound value and its provenance (§4). The operator's own, read back.
 
-    value: str = ""
+    ``value`` keeps its JSON type: text, a boolean or an integer (notice coverage S2). Nothing is
+    coerced — ``"true"`` stays text — and the field's rule decides which type it must be."""
+
+    value: StrictStr | StrictBool | StrictInt = ""
     provenance: str = "OPERATOR_CONFIRMED"
     detail_page_reference: bool = False
 
@@ -208,6 +211,12 @@ class AuthoringFieldView(BaseModel):
     key: str
     required: bool
     detail_page_reference_allowed: bool = False
+    # Notice coverage S2: the value type the form collects, whether omitting the field is the
+    # marketplace's own default, and the conditions under which it is required.
+    value_type: str = "TEXT"
+    omitted_default: bool = False
+    required_without: tuple[str, ...] = ()
+    one_of: tuple[str, ...] = ()
 
 
 class AuthoringMetadataView(BaseModel):

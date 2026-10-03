@@ -35,7 +35,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    model_serializer,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -55,6 +64,7 @@ from app.stages.register.model import RegistrationConflictError, canonical_json,
 from app.stages.register.policy import (
     CategoryMetadata,
     FieldRule,
+    FieldValueType,
     NoticePolicy,
     OptionPolicy,
     Provenance,
@@ -91,6 +101,30 @@ class FieldRuleView(_Strict):
     detail_page_reference_allowed: StrictBool
     missing_status: Literal["REVIEW_REQUIRED", "BLOCKED"]
     max_length: StrictInt | None
+    # Notice coverage S2. Each has the meaning a rule without it always had — a text value, no
+    # omission default, no condition — so a revision recorded before them reads unchanged, and they
+    # are stored only when they say something else.
+    value_type: Literal["TEXT", "YEAR_MONTH", "DATE", "BOOLEAN", "INTEGER"] = "TEXT"
+    omitted_default: StrictBool = False
+    required_without: list[StrictStr] = Field(default_factory=list)
+    one_of: list[StrictStr] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _without_unchanged_defaults(self, handler: SerializerFunctionWrapHandler) -> Any:
+        # The same shape the stored rule has: an S2 key appears only when it says something.
+        data = handler(self)
+        for key, default in _S2_RULE_DEFAULTS.items():
+            if data.get(key) == default:
+                del data[key]
+        return data
+
+
+_S2_RULE_DEFAULTS: Final[Mapping[str, Any]] = {
+    "value_type": "TEXT",
+    "omitted_default": False,
+    "required_without": [],
+    "one_of": [],
+}
 
 
 class NoticePolicyView(_Strict):
@@ -195,15 +229,34 @@ def _rules(rules: list[FieldRuleView], field: str) -> list[dict[str, Any]]:
     for rule in rules:
         if rule.max_length is not None and rule.max_length < 1:
             raise _invalid("a length limit is at least one", f"{field}.{rule.key}.max_length")
-        encoded.append(
-            {
-                "key": rule.key,
-                "required": rule.required,
-                "detail_page_reference_allowed": rule.detail_page_reference_allowed,
-                "missing_status": rule.missing_status,
-                "max_length": rule.max_length,
-            }
-        )
+        named = set(rule.required_without) | set(rule.one_of)
+        if not named <= set(keys):
+            raise _invalid("a rule names a field the rules do not declare", f"{field}.{rule.key}")
+        record: dict[str, Any] = {
+            "key": rule.key,
+            "required": rule.required,
+            "detail_page_reference_allowed": rule.detail_page_reference_allowed,
+            "missing_status": rule.missing_status,
+            "max_length": rule.max_length,
+        }
+        if rule.value_type != FieldValueType.TEXT.value:
+            record["value_type"] = rule.value_type
+        if rule.omitted_default:
+            record["omitted_default"] = True
+        if rule.required_without:
+            record["required_without"] = list(rule.required_without)
+        if rule.one_of:
+            record["one_of"] = list(rule.one_of)
+        try:
+            _field_rule(record)
+        except ValueError as refused:
+            raise _invalid(str(refused), f"{field}.{rule.key}") from refused
+        encoded.append(record)
+    groups = {tuple(r["one_of"]) for r in encoded if "one_of" in r}
+    for group in groups:
+        members = [r for r in encoded if r["key"] in group]
+        if any(tuple(r.get("one_of", ())) != group for r in members):
+            raise _invalid("every field of a one-of group names the same group", field)
     return encoded
 
 
@@ -289,6 +342,10 @@ def _field_rule(rule: Mapping[str, Any]) -> FieldRule:
         detail_page_reference_allowed=bool(rule["detail_page_reference_allowed"]),
         missing_status=ReadinessStatus(str(rule["missing_status"])),
         max_length=None if rule["max_length"] is None else int(rule["max_length"]),
+        value_type=FieldValueType(str(rule.get("value_type", FieldValueType.TEXT.value))),
+        omitted_default=rule.get("omitted_default") is True,
+        required_without=tuple(str(k) for k in rule.get("required_without", ())),
+        one_of=tuple(str(k) for k in rule.get("one_of", ())),
     )
 
 
