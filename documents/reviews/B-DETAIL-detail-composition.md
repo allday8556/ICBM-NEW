@@ -17,7 +17,8 @@ functional prerequisite, not a UI improvement.
 
 ## 2. Owner decisions (2026-10-04)
 
-- **D1** The v1 section order is `DETAIL_IMAGES` → `BODY`. Top/bottom guidance (Issue #61), video and
+- **D1** The first image-placing section order is `DETAIL_IMAGES` → `BODY` (profile content v2;
+  content v1 stays `BODY`-only). Top/bottom guidance (Issue #61), video and
   an option table are not implemented; only the section vocabulary stays extensible.
 - **D2** `BODY` (operator text) is optional when `DETAIL_IMAGES` holds at least one image. COLLECT's
   `detail_description` (a 200-character truncated text) is never used to fill `BODY`.
@@ -66,7 +67,10 @@ contract.** No provider-specific limit or HTML claim is made until official evid
 ### 5.1 Two layers, both existing owners
 
 The profile is marketplace-scoped (§4), so it cannot hold one product's images. The composition is
-therefore split across the two owners that already exist:
+therefore split across the two owners that already exist, and the two layers are never mixed in one
+profile row: the profile holds the section vocabulary and order, the renderer/template version and
+the rendering policy; the product-specific immutable plan holds the selected `DETAIL` asset
+identities, the optional `BODY` and the exact authoring/preparation revision inputs.
 
 - **Profile (DETAIL_COMPOSITION, content v2, per marketplace):** which sections exist and in what
   order, the BODY format and the pinned renderer version:
@@ -124,6 +128,14 @@ v2 is appended by the server like v1 (`ensure`) once the slice ships; a target-p
 it. Preparations authored against v1 then read `AUTHORING_REVISIONS_UNOWNED` and are re-authored —
 the existing no-backfill rule. A unit without detail images under v2 behaves as under v1 (BODY
 required, nothing else rendered), so the no-image first-vertical contract is preserved.
+
+### 5.6 Temporal rule
+
+Every amendment recorded with this design (ADR-0014 §6, §19, §27.1; ADR-0013 §9; ARCHITECTURE;
+GLOSSARY; M5 acceptance) takes effect only once the B-DETAIL implementation slice is accepted and
+landed. Until then the current rule holds unchanged: the composition is content v1 `BODY`-only, a
+unit with detail images stays `BLOCKED` by `PUBLICATION_DETAIL_IMAGES_UNPLACED`, and the CREATE
+projection refuses it. The PRODUCT_CREATE G-1 row is evidence, not a rule change.
 
 ## 6. Invariants and their tests
 

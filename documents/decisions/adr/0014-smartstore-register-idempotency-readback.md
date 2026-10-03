@@ -172,9 +172,11 @@ RegistrationSnapshot               immutable, one per provider-listing unit
   preflight rule version + dependency fingerprint
   category / taxonomy mapping revision
   platform policy and Settings revisions (shipping, returns, templates)
-  detail composition revision (§19) — with B-DETAIL also the ordered sections, the detail image
-                                   asset identities, the operator BODY text and the renderer version,
-                                   never a provider URL (§19 amendment note)
+  detail composition revision (§19) — until the B-DETAIL implementation slice is accepted and
+                                   landed, exactly as today; from then also the URL-free plan: the
+                                   ordered sections, the ordered detail image asset identities, the
+                                   optional operator BODY text and the renderer version, never a
+                                   provider URL (§19 amendment note)
   sanitizer / safe-query-key profile version (§15)
   payload_hash                     SHA-256 of the sanitized canonical evidence representation (§15), never of wire bytes
   asset hashes                     the exact local artifact SHA-256s
@@ -601,7 +603,8 @@ remains `UNVERIFIED`, the canary remains `BLOCKED` on every other prerequisite, 
 
 > **Amendment note (B-DETAIL; owner decision 2026-10-04).** The detail composition places the
 > selected detail-body images (ADR-0013 §9, Issue #219). Its sections are a closed, versioned
-> vocabulary; v2 is `DETAIL_IMAGES` → `BODY`, and Detail Guidance, video and an option table stay
+> vocabulary; profile content v2 orders `DETAIL_IMAGES` → `BODY` (the owner's first image-placing
+> section set), content v1 stays `BODY`-only, and Detail Guidance, video and an option table stay
 > unimplemented. `BODY` is operator plain text — never HTML, a URL or markup — and is optional when
 > detail images exist; COLLECT's truncated `detail_description` never fills it. The composition and
 > the Snapshot hold no provider URL: the **trusted REGISTER renderer** alone produces the provider
@@ -609,7 +612,7 @@ remains `UNVERIFIED`, the canary remains `BLOCKED` on every other prerequisite, 
 > the already-uploaded provider asset identities of that same Snapshot. This is a typed boundary
 > beside the outbound sanitizer, which is not relaxed: no operator-authored string may carry a URL.
 > No provider limit or HTML rule is assumed without official evidence (G-1 `INSUFFICIENT`), and a
-> provider incompatibility never edits the canonical composition. Decided by the owner on 2026-10-04; it takes effect with the B-DETAIL implementation slice (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
+> provider incompatibility never edits the canonical composition. Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
 
 ### 20. Supplier resale-price advisory is UI only
 
@@ -722,7 +725,11 @@ One durable owner holds both authoring revisions, in one append-only table — `
 > detail images stay the M4 selection's `DETAIL` outputs and its `BODY` stays in the preparation
 > revision; the preparation's sections are derived from the profile, never sent by a client. v2 is
 > appended by `ensure` like v1; preparations authored against v1 are re-authored under the
-> no-backfill rule above. No migration is needed. Decided by the owner on 2026-10-04; it takes effect with the B-DETAIL implementation slice (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
+> no-backfill rule above. No migration is needed. The two layers are never mixed in one profile
+> row: the marketplace profile holds only the section vocabulary and order, the renderer/template
+> version and the rendering policy; the product-specific immutable plan — the selected `DETAIL` asset
+> identities, the optional `BODY` and the exact authoring/preparation revision inputs — is frozen in
+> the Snapshot (§6). Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
 
 ### 28. Positive-only reconcile, recovered provider identity and the registration read state (architect decision `5845062336`)
 
