@@ -326,3 +326,76 @@ def test_the_follow_up_reads_write_nothing(api: TestClient, config: AppConfig) -
         api.get(f"{RUNS}/{run['collection_run_id']}/product", headers=CLIENT)
         api.get("/api/v1/screens/collect", headers=CLIENT)
     assert everything(config) == before
+
+
+# ---------------------------------------------------------------- A-UX1: filtered run list (D3)
+
+
+def _db_runs(config: AppConfig, where: str = "1 = 1") -> list[str]:
+    with contextlib.closing(raw(config)) as connection:
+        return [
+            row[0]
+            for row in connection.execute(
+                f"SELECT collection_run_id FROM collection_runs WHERE {where}"
+                " ORDER BY requested_at DESC, collection_run_id DESC"
+            )
+        ]
+
+
+def test_a_filter_selects_runs_before_the_list_is_ordered_and_bounded(
+    api: TestClient, config: AppConfig
+) -> None:
+    # The FAILED run is the oldest: a filter applied after the bound would never reach it.
+    failed = settled(api, submit(api, FAILED_ID).json()["collection_run_id"])
+    for number in ("21", "22", "23"):
+        settled(api, submit(api, number).json()["collection_run_id"])
+    newest = api.get(RUNS, params={"limit": 1}, headers=CLIENT).json()
+    assert newest["runs"][0]["outcome"] == "RECORDED"
+    only = api.get(RUNS, params={"limit": 1, "outcome": "FAILED"}, headers=CLIENT).json()
+    assert [r["collection_run_id"] for r in only["runs"]] == [failed["collection_run_id"]]
+    assert (only["outcome"], only["total"], only["next_before"]) == ("FAILED", 1, None)
+    # Facts status is its own axis, on RECORDED runs only, counted where the runs are held.
+    for status in ("CONFIRMED", "REVIEW_REQUIRED"):
+        expected = _db_runs(config, f"facts_status = '{status}'")
+        listed = api.get(RUNS, params={"facts_status": status}, headers=CLIENT).json()
+        assert [r["collection_run_id"] for r in listed["runs"]] == expected
+        assert listed["total"] == len(expected) and listed["facts_status"] == status
+        assert {r["outcome"] for r in listed["runs"]} <= {"RECORDED"}
+    unfiltered = api.get(RUNS, headers=CLIENT).json()
+    assert unfiltered["total"] == len(_db_runs(config)) == 4
+    assert (unfiltered["outcome"], unfiltered["facts_status"]) == (None, None)
+
+
+def test_the_filtered_list_pages_in_the_same_total_order(
+    api: TestClient, config: AppConfig
+) -> None:
+    for number in ("31", "32", "33"):
+        settled(api, submit(api, number).json()["collection_run_id"])
+    settled(api, submit(api, NO_REVISION_ID).json()["collection_run_id"])
+    expected = _db_runs(config, "outcome = 'RECORDED'")
+    seen: list[str] = []
+    before: str | None = None
+    while True:
+        params: dict[str, Any] = {"limit": 1, "outcome": "RECORDED"}
+        if before is not None:
+            params["before"] = before
+        page = api.get(RUNS, params=params, headers=CLIENT).json()
+        assert page["total"] == len(expected)
+        seen += [r["collection_run_id"] for r in page["runs"]]
+        before = page["next_before"]
+        if before is None:
+            break
+    assert seen == expected
+
+
+def test_a_bad_filter_or_cursor_is_refused_and_writes_nothing(
+    api: TestClient, config: AppConfig
+) -> None:
+    settled(api, submit(api, "41").json()["collection_run_id"])
+    before = everything(config)
+    for params in ({"outcome": "DONE"}, {"facts_status": "ABSENT"}):
+        assert api.get(RUNS, params=params, headers=CLIENT).status_code == 422
+    unknown = api.get(RUNS, params={"before": "not-a-run"}, headers=CLIENT)
+    assert unknown.status_code == 422
+    assert unknown.json()["error"]["code"] == "COLLECT_RUN_CURSOR_INVALID"
+    assert everything(config) == before

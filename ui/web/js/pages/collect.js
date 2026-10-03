@@ -11,6 +11,7 @@ import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
+import { collectFactsBlock } from '../components/collect-facts.js';
 import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 
@@ -306,7 +307,19 @@ const COLLECT_COPY = {
   COLLECT_RUN_UNKNOWN: '해당 수집 기록을 찾을 수 없습니다.',
   COLLECT_RUN_NOT_RECORDED: '기록된 수집만 통합DB 상품과 연결됩니다.',
   COLLECT_RUN_LIMIT_INVALID: '최근 수집 목록 개수가 올바르지 않습니다.',
+  COLLECT_RUN_CURSOR_INVALID: '목록 위치가 올바르지 않아 처음부터 다시 불러와야 합니다.',
+  COLLECT_REVISION_UNKNOWN: '해당 원천 리비전을 찾을 수 없습니다.',
 };
+// The list filters the server applies before it orders and bounds the runs (A-UX1 D3). A run's
+// outcome and its facts status stay two axes: 확인 필요 selects by facts status, the others by outcome.
+const RUN_FILTERS = [
+  ['all', '전체', {}],
+  ['review', '원천 확인 필요', { facts_status: 'REVIEW_REQUIRED' }],
+  ['failed', '실패', { outcome: 'FAILED' }],
+  ['no_revision', '기록할 식별자 없음', { outcome: 'NO_REVISION' }],
+];
+const RUN_PAGE = 20;
+const TRANSPORT_LABEL = { DIRECT_URL: '직접 URL', EXTENSION: '확장 수집' };
 const HANDOFF_COPY = {
   NOT_YET_VISIBLE: '원천 리비전은 기록됐지만 통합DB 상품에는 아직 반영되지 않았습니다.',
   CURRENT_REVISION_DIFFERS: '통합DB 상품이 이 수집이 아닌 다른 원천 리비전을 현재로 가리키고 있습니다.',
@@ -324,7 +337,8 @@ const REVIEW_OUTCOME = {
 const SUBMIT_HELP =
   '상품 상세 URL 하나만 받습니다. 목록·카테고리 수집은 하지 않으며, 요청은 서버가 URL과 같은 상품 재수집 간격을 확인한 뒤 수집 작업 하나로 접수합니다.';
 const RUNS_HELP =
-  '서버에 기록된 최근 수집을 최신순으로 보여줍니다. 진행 중인 수집은 화면을 벗어났다 돌아와도 같은 기록을 다시 읽어 이어서 표시합니다.';
+  '서버에 기록된 최근 수집을 최신순으로 보여줍니다. 진행 중인 수집은 화면을 벗어났다 돌아와도 같은 기록을 다시 읽어 이어서 표시합니다. ' +
+  '필터는 서버가 전체 기록에서 먼저 고른 뒤 최신순으로 나눠 보여줍니다.';
 
 function short(id) {
   return id ? id.slice(0, 8) : '—';
@@ -453,20 +467,45 @@ function submitCard(view, ctx) {
 
 function jobsView(view, ctx) {
   const focusId = ctx.params.get('run');
+  const filterKey = RUN_FILTERS.some(([key]) => key === ctx.params.get('filter')) ? ctx.params.get('filter') : 'all';
+  const filterQuery = RUN_FILTERS.find(([key]) => key === filterKey)[2];
   const root = h('div', { class: 'collect-jobs', 'data-role': 'collect-jobs' });
   const focus = h('section', { class: 'panel collect-run', 'data-role': 'run-focus', hidden: !focusId });
   const listBody = h('tbody', {});
   const recheck = h('button', { type: 'button', class: 'btn', 'data-action': 'recheck-runs', hidden: true }, '상태 다시 확인');
+  const listCount = h('div', { class: 'mini', 'data-role': 'runs-count' });
+  const more = h('button', { type: 'button', class: 'btn', 'data-action': 'more-runs', hidden: true }, '더 보기');
+  // The filter lives in the route, never in browser storage; changing it keeps the focused run.
+  const filters = h(
+    'div',
+    { class: 'inner-tabs', role: 'tablist', 'aria-label': '최근 수집 필터', 'data-role': 'run-filters' },
+    RUN_FILTERS.map(([key, label]) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          role: 'tab',
+          'data-filter': key,
+          'aria-selected': String(key === filterKey),
+          onclick: () => ctx.navigate('collect', { view: 'jobs', ...(focusId ? { run: focusId } : {}), ...(key === 'all' ? {} : { filter: key }) }),
+        },
+        label,
+      ),
+    ),
+  );
   const runsPanel = h(
     'section',
-    { class: 'panel collect-runs', 'data-role': 'recent-runs' },
+    { class: 'panel collect-runs', 'data-role': 'recent-runs', 'data-filter': filterKey },
     h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '최근 수집'), RUNS_HELP), recheck),
+    filters,
+    listCount,
     h(
       'table',
       { class: 'table' },
-      h('thead', {}, h('tr', {}, ...['요청 시각', '공급처', '상태', '결과', ''].map((label) => h('th', {}, label)))),
+      h('thead', {}, h('tr', {}, ...['요청 시각', '공급처', '수집 결과', '원천 리비전 · 사실 상태', ''].map((label) => h('th', {}, label)))),
       listBody,
     ),
+    h('div', { class: 'supplier-actions' }, more),
   );
   let polls = 0;
   let timer = null;
@@ -489,7 +528,7 @@ function jobsView(view, ctx) {
       h(
         'td',
         {},
-        h('button', { type: 'button', class: 'btn', 'data-action': 'open-run', onclick: () => ctx.navigate('collect', { view: 'jobs', run: run.collection_run_id }) }, '보기'),
+        h('button', { type: 'button', class: 'btn', 'data-action': 'open-run', onclick: () => ctx.navigate('collect', { view: 'jobs', run: run.collection_run_id, ...(filterKey === 'all' ? {} : { filter: filterKey }) }) }, '보기'),
       ),
     );
   }
@@ -546,6 +585,7 @@ function jobsView(view, ctx) {
       }
     }
     const handoff = run.outcome === 'RECORDED' ? await handoffBlock(run) : null;
+    const facts = run.outcome === 'RECORDED' && run.revision_id ? await collectFactsBlock(run.revision_id, run, codeCopy) : null;
     const review = handoff?.source ? await reviewBlock(handoff.source) : null;
     if (!root.isConnected && polls > 0) return false; // the operator left; nothing to render into
     focus.dataset.run = run.collection_run_id;
@@ -560,6 +600,9 @@ function jobsView(view, ctx) {
       kv('상품 URL', run.source_url),
       kv('요청 시각', dotDateTime(run.requested_at)),
       run.finished_at ? kv('종료 시각', dotDateTime(run.finished_at)) : null,
+      run.transport_kind ? kv('수집 경로', TRANSPORT_LABEL[run.transport_kind] ?? run.transport_kind) : null,
+      // The run's own outcome, on its own axis: never merged with the facts status below.
+      h('div', { class: 'kv', 'data-role': 'run-outcome' }, h('span', {}, '수집 결과'), outcomeChip(run.outcome)),
       job
         ? h(
             'div',
@@ -573,26 +616,64 @@ function jobsView(view, ctx) {
       run.outcome === 'NO_REVISION' || run.outcome === 'FAILED'
         ? h('div', { class: 'kv' }, h('span', {}, run.outcome === 'FAILED' ? '실패 사유' : '사유'), h('b', { 'data-role': 'run-detail' }, run.detail ?? '—'))
         : null,
+      run.outcome === 'NO_REVISION'
+        ? h('div', { class: 'note', 'data-reason': 'NO_REVISION' }, '수집은 끝났지만 원천이 상품 식별자를 밝히지 않아 기록할 리비전이 없습니다. 실패가 아니며, 사실 상태도 없습니다.')
+        : null,
       handoff,
+      facts,
       review,
     ));
     return run.outcome === 'PENDING';
   }
 
+  function listUrl(before) {
+    const query = new URLSearchParams({ limit: String(RUN_PAGE), ...filterQuery });
+    if (before) query.set('before', before);
+    return `${RUNS}?${query}`;
+  }
+
+  // The server's page and its count of everything the filter selects: a page is never shown as
+  // the whole list.
+  function showPage(listed, shown) {
+    const label = RUN_FILTERS.find(([key]) => key === filterKey)[1];
+    const total = listed.total ?? null;
+    listCount.dataset.total = total === null ? '' : String(total);
+    listCount.dataset.shown = String(shown);
+    listCount.textContent = total === null ? '' : `${label} ${total}건 중 ${shown}건 표시`;
+    more.hidden = !listed.next_before;
+    more.dataset.before = listed.next_before ?? '';
+  }
+
   async function renderList() {
     try {
-      const listed = await getJson(`${RUNS}?limit=10`);
+      const listed = await getJson(listUrl(null));
       listBody.replaceChildren(
         ...(listed.runs.length
           ? listed.runs.map(runRow)
-          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, '아직 수집 기록이 없습니다.'))]),
+          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, filterKey === 'all' ? '아직 수집 기록이 없습니다.' : '이 조건에 맞는 수집 기록이 없습니다.'))]),
       );
+      showPage(listed, listed.runs.length);
       return listed.runs.some((run) => run.outcome === 'PENDING');
     } catch (error) {
       listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
+      more.hidden = true;
       return false;
     }
   }
+
+  // The next page after the last run shown. Read-only, like everything in this list.
+  more.addEventListener('click', async () => {
+    more.disabled = true;
+    try {
+      const listed = await getJson(listUrl(more.dataset.before));
+      listBody.append(...listed.runs.map(runRow));
+      showPage(listed, listBody.querySelectorAll('tr[data-run]').length);
+    } catch (error) {
+      listBody.append(h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
+      more.hidden = true;
+    }
+    more.disabled = false;
+  });
 
   // Reads only. While a run is still PENDING the same reads repeat, a bounded number of times and
   // only while this view is on screen; nothing here ever sends a collection.
