@@ -144,6 +144,18 @@ def test_the_screen_authors_with_null_revisions_and_leaves_freeze_disabled(
         unit = page.locator(f".register-unit[data-draft='{draft_id}']")
         assert unit.locator(f"[data-reason='{AUTHORING_REVISIONS_UNOWNED}']").count() == 1
         assert unit.locator("button[data-action='FREEZE']").is_disabled()
+        # B-UX1: the reason carries its owner's status and its areas, grouped under its first
+        # area, and the readiness summary is the server's own count of the pre-send population.
+        unowned = unit.locator(f".register-preflight [data-reason='{AUTHORING_REVISIONS_UNOWNED}']")
+        assert unowned.get_attribute("data-reason-status") == "REVIEW_REQUIRED"
+        assert unowned.get_attribute("data-areas") == "CATEGORY DETAIL"
+        assert unit.locator(".register-reason-area[data-area='CATEGORY']").count() == 1
+        summary = page.locator(".register-readiness")
+        served = api.get("/api/v1/register/readiness", headers={"X-ICBM-Client": "pytest"}).json()
+        assert summary.get_attribute("data-population") == str(served["population"]) == "1"
+        for status, count in served["statuses"].items():
+            shown = summary.locator(f"[data-status-count='{status}']").inner_text()
+            assert shown == f"{status} {count}"
     assert not any(path.endswith("/freeze") for _, path, _ in calls)
     assert not any(status >= 500 for _, _, status in calls)
     assert counts(config) == dict.fromkeys(FROZEN_ROWS, 0)
