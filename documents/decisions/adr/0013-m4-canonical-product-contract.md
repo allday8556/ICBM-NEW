@@ -482,6 +482,12 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 > always supersedes it. Migration `0040` widens the two CHECKs and the current-move trigger this
 > needs and nothing else.
 
+> **Amendment note (B-DETAIL; owner decision 2026-10-04).** "Until the detail composition places
+> images" means: `PUBLICATION_DETAIL_IMAGES_UNPLACED` is released for a unit whose owned detail
+> composition profile places `DETAIL_IMAGES` (ADR-0014 §19, §27.1 amendment notes), and every
+> selected detail image must still be uploaded before the unit can be sent. M4 keeps owning which
+> images are detail images and their order; REGISTER only renders them. Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
+
 ### 10. The AI and enrichment boundary
 
 - **M4 works with no AI provider configured.** ADR-0012 §9 and §14 apply: AI is a capability, and its failure blocks no COLLECT, `ProductFactsRevision` or canonical DB.

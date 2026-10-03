@@ -430,6 +430,11 @@ source URL
 
 Detail-page embedded images used in published content are rehosted as part of the same pipeline.
 
+> **Amendment note (B-DETAIL; owner decision 2026-10-04).** The detail body is composed from the
+> selected detail images and plain operator text; only the trusted REGISTER renderer writes the
+> provider `detailContent`, from uploaded provider asset identities, never from a source URL or an
+> operator-authored string (ADR-0014 §19 amendment note). Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
+
 COLLECT covers only the first three steps for *source* assets (ADR-0010 §9):
 - It keeps the original bytes unmodified, with role/order, dimensions, MIME type, size and SHA-256.
 - It never transforms them.
