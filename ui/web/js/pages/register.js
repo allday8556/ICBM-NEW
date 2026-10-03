@@ -25,6 +25,9 @@ const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
 const CANARY = '/api/v1/register/canary';
 const LIVE = '/api/v1/register/live';
+// B-UX1: the readiness of every pre-send unit, evaluated by the server now.
+const READINESS = '/api/v1/register/readiness';
+const READINESS_STATUSES = ['READY', 'REVIEW_REQUIRED', 'BLOCKED', 'DUPLICATE', 'STALE', 'NOT_EVALUATED'];
 const TITLE = '등록관리';
 const HELP =
   '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
@@ -180,11 +183,98 @@ function won(amount) {
   return amount === null || amount === undefined ? '—' : `${amount.toLocaleString('ko-KR')}원`;
 }
 
-function statusChip(status, codes) {
+// One reason exactly as its owner returned it (B-UX1): the code is shown, and its status, subject
+// and areas travel as attributes. Nothing here judges a reason.
+function reasonNode(tag, reason) {
+  return h(
+    tag,
+    {
+      class: 'mini',
+      'data-reason': reason.code,
+      'data-reason-status': reason.status,
+      'data-areas': (reason.areas ?? []).join(' '),
+      title: [reason.status, reason.subject].filter(Boolean).join(' · '),
+    },
+    reason.code,
+  );
+}
+
+function statusChip(status, codes, reasons) {
   if (!status) return '—';
+  const structured = reasons ?? [];
   return fragment(
     chip(status, status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
-    ...(codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, code)),
+    ...(structured.length
+      ? structured.map((reason) => reasonNode('span', reason))
+      : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, code))),
+  );
+}
+
+// B-UX1: a unit's reasons grouped under the first area the server gave each; a reason is listed
+// once, and an area the server could not classify keeps its real code under UNCLASSIFIED.
+function reasonGroups(reasons, labels) {
+  const groups = new Map();
+  for (const reason of reasons) {
+    const area = (reason.areas ?? [])[0] ?? 'UNCLASSIFIED';
+    if (!groups.has(area)) groups.set(area, []);
+    groups.get(area).push(reason);
+  }
+  return [...groups.entries()].map(([area, members]) =>
+    h(
+      'div',
+      { class: 'register-reason-area', 'data-area': area },
+      h('span', { class: 'mini' }, labels?.[area] ?? area),
+      ...members.map((reason) => reasonNode('div', reason)),
+    ),
+  );
+}
+
+// B-UX1: the readiness of the whole pre-send population, as the server counted it now.
+function readinessPanel(readiness) {
+  if (!readiness) return null;
+  const areas = (readiness.areas ?? []).filter((area) => area.units > 0);
+  const notEvaluated = Object.entries(readiness.not_evaluated ?? {});
+  return h(
+    'div',
+    {
+      class: 'register-readiness',
+      'data-readiness': readiness.summary_version,
+      'data-population': String(readiness.population),
+    },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 현황'), chip(`전체 ${readiness.population}`)),
+    h(
+      'div',
+      { class: 'supplier-head-row' },
+      ...READINESS_STATUSES.map((status) =>
+        h(
+          'span',
+          { class: 'mini', 'data-status-count': status },
+          `${status} ${readiness.statuses?.[status] ?? 0}`,
+        ),
+      ),
+    ),
+    notEvaluated.length
+      ? h(
+          'div',
+          { class: 'supplier-head-row' },
+          ...notEvaluated.map(([code, count]) =>
+            h('span', { class: 'mini', 'data-not-evaluated': code }, `${code} ${count}`),
+          ),
+        )
+      : null,
+    areas.length
+      ? h(
+          'div',
+          { class: 'supplier-head-row' },
+          ...areas.map((area) =>
+            h(
+              'span',
+              { class: 'mini', 'data-area-count': area.area, title: area.codes.join(', ') },
+              `${area.label} ${area.units}`,
+            ),
+          ),
+        )
+      : null,
   );
 }
 
@@ -209,8 +299,8 @@ function itemRow(item) {
       won(item.current_sale_price_krw),
       item.price_pin_current === false ? chip('고정가 아님', 'warn') : null,
     ),
-    h('td', {}, statusChip(item.base_status, item.base_reason_codes)),
-    h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes)),
+    h('td', {}, statusChip(item.base_status, item.base_reason_codes, item.base_reasons)),
+    h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes, item.pricing_reasons)),
     h('td', {}, item.registration_item_key ?? '—'),
     h(
       'td',
@@ -514,7 +604,7 @@ function authoringForm(unit, onDone) {
   return form;
 }
 
-function preflightBlock(unit) {
+function preflightBlock(unit, labels) {
   if (!unit.preflight) {
     return h(
       'div',
@@ -534,7 +624,9 @@ function preflightBlock(unit) {
       chip(preflight.status, preflight.status === 'READY' ? 'good' : 'warn'),
       preflight.fingerprint_matches_snapshot === false ? chip('스냅샷과 다름', 'warn') : null,
     ),
-    ...preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, code)),
+    ...((preflight.reasons ?? []).length
+      ? reasonGroups(preflight.reasons, labels)
+      : preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, code))),
   );
 }
 
@@ -704,7 +796,7 @@ function actionCell(unit, action, onDone) {
   return h('div', { class: 'register-action' }, button, action.enabled ? null : reason(action.reason_code));
 }
 
-function unitPanel(unit, onDone) {
+function unitPanel(unit, onDone, labels) {
   const intent = unit.intent;
   return h(
     'section',
@@ -736,7 +828,7 @@ function unitPanel(unit, onDone) {
     unit.category ? categoryBlock(unit.category) : null,
     unit.snapshot ? null : authoringForm(unit, onDone),
     unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
-    preflightBlock(unit),
+    preflightBlock(unit, labels),
     unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
     table(
       ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],
@@ -882,17 +974,29 @@ export default {
     let overview;
     let canary;
     let live;
+    let readiness;
     try {
-      [screen, overview, canary, live] = await Promise.all([
+      [screen, overview, canary, live, readiness] = await Promise.all([
         getJson(SCREEN),
         getJson(OVERVIEW),
         getJson(CANARY),
         getJson(LIVE),
+        // The summary is its own read: when it is refused the page still shows every unit, and
+        // says the summary is unavailable with the server's code.
+        getJson(READINESS).catch((error) => ({
+          unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
+        })),
       ]);
     } catch (error) {
       return fragment(head, errorState(error));
     }
     const reload = () => ctx.navigate('register');
+    const areaLabels = Object.fromEntries(
+      (readiness?.areas ?? []).map((area) => [area.area, area.label]),
+    );
+    const readinessBlock = readiness?.unavailable
+      ? h('div', { class: 'register-readiness', 'data-readiness': 'UNAVAILABLE' }, reason(readiness.unavailable))
+      : readinessPanel(readiness);
     const statusPanel = registrationStatusPanel(overview.registration_status, reload);
     // Opened from the registration status card: its detail panel is brought into view.
     if (statusPanel && ctx.params.get('status') === 'open') {
@@ -916,7 +1020,7 @@ export default {
     // read from the server like every other unit.
     const focusDraft = ctx.params.get('draft');
     const panels = overview.units.map((unit) => {
-      const panel = unitPanel(unit, reload);
+      const panel = unitPanel(unit, reload, areaLabels);
       if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
       return panel;
     });
@@ -937,6 +1041,7 @@ export default {
         kv('등록 완료', String(screen.registrations_total)),
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
+      readinessBlock,
       statusPanel,
       canaryPanel(canary),
       livePanel(live),

@@ -157,6 +157,12 @@ only its own producers' owner-derived conditions and their coverage (ADR-0016, `
 §9). Any later list/filter, queue or count over these states needs its own contract and
 authorization.
 
+> **B-UX1 (owner directive 2026-10-04).** The registration readiness summary is such a count, under
+> its own contract (ADR-0014 §22 amendment note): the pre-send registration units only, evaluated at
+> read time by the preflight owner, with `NOT_EVALUATED` kept apart from the five readiness
+> statuses. It is not a review count, a review queue or a ComplianceGate surface, and it adds
+> nothing to the Gate 2 review path.
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`

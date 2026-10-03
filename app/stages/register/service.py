@@ -52,6 +52,7 @@ from app.stages.register.canary import (
 from app.stages.register.contracts import (
     ActionResult,
     ActionView,
+    AreaCountView,
     AssetView,
     AttemptView,
     AuthoredInputsView,
@@ -69,8 +70,10 @@ from app.stages.register.contracts import (
     PreparationView,
     ReadStateCounts,
     ReadStateView,
+    ReasonView,
     RegisterAction,
     RegisterOverview,
+    RegisterReadinessView,
     RegistrationBatchStatus,
     RegistrationStatusEntry,
     RegistrationStatusView,
@@ -109,6 +112,15 @@ from app.stages.register.read_state import (
     classify,
     counts,
 )
+from app.stages.register.reason_areas import (
+    AREA_LABELS,
+    M4_BASE_PREFIX,
+    M4_PRICING_PREFIX,
+    REASON_AREA_VERSION,
+    ReasonArea,
+    areas,
+    m4_areas,
+)
 from app.stages.register.store import (
     AttemptRecord,
     DraftItemRecord,
@@ -146,6 +158,17 @@ ACCOUNT_NOT_BOUND = "REGISTER_ACCOUNT_NOT_BOUND"
 PREFLIGHT_INPUTS_NOT_DURABLE = "REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE"
 PREFLIGHT_OWNER_ABSENT = "REGISTER_PREFLIGHT_NOT_WIRED"
 PREPARATION_ABSENT = "REGISTER_PREPARATION_ABSENT"
+# B-UX1: the readiness summary of the pre-send population, and its sixth bucket.
+READINESS_SUMMARY_VERSION = "register-readiness-summary/v1"
+NOT_EVALUATED = "NOT_EVALUATED"
+READINESS_SUMMARY_STATUSES = (
+    "READY",
+    "REVIEW_REQUIRED",
+    "BLOCKED",
+    "DUPLICATE",
+    "STALE",
+    NOT_EVALUATED,
+)
 PREFLIGHT_NOT_READY = "REGISTER_PREFLIGHT_NOT_READY"
 ALREADY_FROZEN = "REGISTER_UNIT_ALREADY_FROZEN"
 # The exact metadata revision a Snapshot froze cannot be resolved within its own key (G1-09).
@@ -225,6 +248,60 @@ class RegisterService:
             units=units,
             paused_scopes=tuple(self._scope_view(scope) for scope in store.paused_scopes()),
             registration_status=self.registration_status(limit=limit),
+        )
+
+    # ------------------------------------------------------------------ readiness (B-UX1)
+
+    def readiness_summary(self) -> RegisterReadinessView:
+        """The readiness of every pre-send provider-listing unit, evaluated now (B-UX1).
+
+        The population is every unit of every Draft that no Intent names (see
+        :class:`RegisterReadinessView`); each is evaluated by the preflight owner exactly as the
+        screen evaluates it, so a count can never disagree with a unit's own panel."""
+        store = self._require_store()
+        drafts = store.drafts(limit=None)
+        intents = {i.registration_snapshot_id: i for i in store.intents(limit=None)}
+        population = [
+            unit
+            for draft in drafts
+            for unit in self._units_of(draft, intents)
+            if unit.intent is None
+        ]
+        statuses = dict.fromkeys(READINESS_SUMMARY_STATUSES, 0)
+        not_evaluated: dict[str, int] = {}
+        units_by_area: dict[str, set[str]] = {}
+        reasons_by_area: dict[str, int] = {}
+        codes_by_area: dict[str, set[str]] = {}
+        for unit in population:
+            key = f"{unit.draft_id}|{unit.unit_ref}"
+            if unit.preflight is None:
+                statuses[NOT_EVALUATED] += 1
+                code = unit.preflight_unavailable_reason or PREFLIGHT_OWNER_ABSENT
+                not_evaluated[code] = not_evaluated.get(code, 0) + 1
+                continue
+            statuses[unit.preflight.status] += 1
+            for reason in unit.preflight.reasons:
+                for area in reason.areas:
+                    units_by_area.setdefault(area, set()).add(key)
+                    reasons_by_area[area] = reasons_by_area.get(area, 0) + 1
+                    codes_by_area.setdefault(area, set()).add(reason.code)
+        return RegisterReadinessView(
+            summary_version=READINESS_SUMMARY_VERSION,
+            area_version=REASON_AREA_VERSION,
+            evaluated_at=self._clock.now(),
+            population=len(population),
+            statuses=statuses,
+            not_evaluated=dict(sorted(not_evaluated.items())),
+            areas=tuple(
+                AreaCountView(
+                    area=area.value,
+                    label=AREA_LABELS[area],
+                    units=len(units_by_area.get(area.value, ())),
+                    reasons=reasons_by_area.get(area.value, 0),
+                    codes=tuple(sorted(codes_by_area.get(area.value, ()))),
+                )
+                for area in ReasonArea
+            ),
         )
 
     # ------------------------------------------------------------------ read state (§28.5)
@@ -1029,6 +1106,8 @@ class RegisterService:
             base_reason_codes=() if fact is None else _codes(fact.base),
             pricing_status=None if fact is None else fact.pricing.status.value,
             pricing_reason_codes=() if fact is None else _codes(fact.pricing),
+            base_reasons=() if fact is None else _m4_reasons(fact.base, M4_BASE_PREFIX),
+            pricing_reasons=() if fact is None else _m4_reasons(fact.pricing, M4_PRICING_PREFIX),
         )
 
     def _item_facts(
@@ -1318,6 +1397,7 @@ def _preflight_view(result: Any, *, source: str, matches: bool | None) -> Prefli
         stage=result.stage.value,
         source=source,
         reason_codes=tuple(sorted(set(result.codes))),
+        reasons=tuple(_reason_view(reason, areas(reason.code)) for reason in result.reasons),
         rule_version=result.rule_version,
         dependency_fingerprint=result.dependency_fingerprint,
         fingerprint_matches_snapshot=matches,
@@ -1385,6 +1465,24 @@ def _field_view(value: Any) -> FieldValueView:
 def _unit_items(snapshot: SnapshotRecord) -> tuple[str, ...]:
     """The Items one provider-listing unit holds: its identity within a Draft (§2, §7)."""
     return tuple(sorted(item.item_id for item in snapshot.items))
+
+
+def _reason_view(reason: Any, of: tuple[ReasonArea, ...]) -> ReasonView:
+    """One owner reason as it was returned, with its areas (B-UX1). Nothing is re-judged."""
+    return ReasonView(
+        code=reason.code,
+        status=reason.status.value,
+        subject=reason.subject,
+        areas=tuple(area.value for area in of),
+    )
+
+
+def _m4_reasons(readiness: Any, layer_prefix: str) -> tuple[ReasonView, ...]:
+    """Every reason an M4 owner returned for one Item, in its own order, structured."""
+    return tuple(
+        _reason_view(reason, m4_areas(reason.code, layer_prefix=layer_prefix))
+        for reason in readiness.reasons
+    )
 
 
 def _codes(readiness: Any) -> tuple[str, ...]:

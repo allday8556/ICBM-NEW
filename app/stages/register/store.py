@@ -639,11 +639,11 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.execution_scope(marketplace_key, marketplace_account_id, endpoint_group)
 
-    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+    def drafts(self, *, limit: int | None = 200) -> tuple[DraftRecord, ...]:
         with self.reading() as unit:
             return unit.drafts(limit=limit)
 
-    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+    def intents(self, *, limit: int | None = 200) -> tuple[IntentRecord, ...]:
         with self.reading() as unit:
             return unit.intents(limit=limit)
 
@@ -857,7 +857,7 @@ class RegistrationUnit:
 
     # ------------------------------------------------------------------ operator reads (§22)
 
-    def drafts(self, *, limit: int = 200) -> tuple[DraftRecord, ...]:
+    def drafts(self, *, limit: int | None = 200) -> tuple[DraftRecord, ...]:
         """Every Draft, newest first. A read for the operator surface: it decides nothing."""
         rows = self.session.scalars(
             select(RegistrationDraft)
@@ -878,7 +878,7 @@ class RegistrationUnit:
             or 0
         )
 
-    def intents(self, *, limit: int = 200) -> tuple[IntentRecord, ...]:
+    def intents(self, *, limit: int | None = 200) -> tuple[IntentRecord, ...]:
         rows = self.session.scalars(
             select(RegistrationIntent)
             .order_by(RegistrationIntent.created_at.desc(), RegistrationIntent.intent_id)
