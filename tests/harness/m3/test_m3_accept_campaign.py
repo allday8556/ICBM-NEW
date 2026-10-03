@@ -277,8 +277,13 @@ def test_arming_refuses_a_budget_that_is_not_the_production_profile(
 ) -> None:
     from integrations.suppliers.kmretail.collection import COLLECTION as KM
 
-    # The frozen budget and KM's production profile agree; the campaign changes neither.
-    assert profile_problems(KM, M3_ACCEPT_01_BUDGET) == []
+    # The campaign changes neither the frozen budget nor KM's production profile. They agreed when
+    # M3-ACCEPT-01 ran; since kmretail-2 (the user's 4 MiB per image, 2026-10-03) that closed
+    # campaign can no longer be armed against the production profile, which is what this check is
+    # for.
+    assert profile_problems(KM, M3_ACCEPT_01_BUDGET) == [
+        "the per-image byte bound differs from the production profile"
+    ]
     narrower = fake_shop.collection(max_image_requests=30)  # 1 MiB images, 4 MiB per run
     assert len(profile_problems(narrower, M3_ACCEPT_01_BUDGET)) == 2
 

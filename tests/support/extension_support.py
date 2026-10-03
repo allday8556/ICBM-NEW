@@ -58,7 +58,7 @@ HEAD = (
 BODY = (
     '<div class="xans-product-detail">'
     '<div class="xans-product-image"><div class="keyImg">'
-    '<img src="/web/product/big/synthetic-9001.jpg"></div></div>'
+    '<img class="BigImage" src="/web/product/big/synthetic-9001.jpg"></div></div>'
     '<div class="infoArea"><table><tbody>'
     "<tr><th>상품명</th><td>합성 샘플 상품 1kg</td></tr>"
     "<tr><th>판매가</th><td>12,000원</td></tr>"
