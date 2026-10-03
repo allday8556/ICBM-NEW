@@ -118,6 +118,9 @@ LISTING_NAME_TOO_LONG: Final = "LISTING_NAME_TOO_LONG"
 ATTRIBUTE_REQUIRED_MISSING: Final = "ATTRIBUTE_REQUIRED_MISSING"
 NOTICE_REQUIRED_MISSING: Final = "NOTICE_REQUIRED_MISSING"
 NOTICE_POLICY_MISSING: Final = "NOTICE_POLICY_MISSING"
+# Notice coverage S3: the marketplace's notice contract documents no child for the reviewed type,
+# so no notice can be sent for it and none is ever taken from another type.
+NOTICE_TYPE_UNDOCUMENTED: Final = "NOTICE_TYPE_UNDOCUMENTED"
 FIELD_UNDECLARED: Final = "FIELD_UNDECLARED"
 FIELD_VALUE_EMPTY: Final = "FIELD_VALUE_EMPTY"
 FIELD_VALUE_TOO_LONG: Final = "FIELD_VALUE_TOO_LONG"
@@ -203,6 +206,7 @@ REASON_CODES: Final = frozenset(
         ATTRIBUTE_REQUIRED_MISSING,
         NOTICE_REQUIRED_MISSING,
         NOTICE_POLICY_MISSING,
+        NOTICE_TYPE_UNDOCUMENTED,
         FIELD_UNDECLARED,
         FIELD_VALUE_EMPTY,
         FIELD_VALUE_TOO_LONG,
@@ -890,8 +894,11 @@ def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Rea
 # The documented text forms of the YEAR_MONTH and DATE value types.
 _YEAR_MONTH_FORM: Final = re.compile(r"\A[0-9]{4}-(0[1-9]|1[0-2])\Z")
 _DATE_FORM: Final = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
-# A JSON integer ICBM sends is a signed 64-bit one.
-_INTEGER_BOUND: Final = 2**63
+# The width of each integer value type: a signed 32-bit and a signed 64-bit integer.
+_INTEGER_BOUNDS: Final[Mapping[FieldValueType, int]] = {
+    FieldValueType.INTEGER: 2**31,
+    FieldValueType.LONG: 2**63,
+}
 
 
 def _of_type(value_type: FieldValueType, value: object) -> bool:
@@ -933,7 +940,8 @@ def _value_reasons(subject: str, rule: FieldRule | None, value: FieldValue) -> l
     if isinstance(raw, bool):
         return reasons
     if isinstance(raw, int):
-        if not -_INTEGER_BOUND <= raw < _INTEGER_BOUND:
+        bound = _INTEGER_BOUNDS[value_type]
+        if not -bound <= raw < bound:
             reasons.append(Reason(FIELD_VALUE_FORM_INVALID, _R, subject))
         return reasons
     if not raw.strip():
@@ -1003,6 +1011,10 @@ def _listing_reasons(request: PreflightRequest, metadata: CategoryMetadata | Non
     if metadata.notice is None:
         if listing.notices:
             reasons.append(Reason(NOTICE_POLICY_MISSING, _R, "notice"))
+    elif not metadata.notice.documented:
+        reasons.append(
+            Reason(NOTICE_TYPE_UNDOCUMENTED, _B, f"notice:{metadata.notice.notice_type}")
+        )
     else:
         reasons.extend(
             _declared_reasons(
@@ -1267,6 +1279,13 @@ def _metadata_canonical(metadata: CategoryMetadata | None) -> dict[str, object] 
         "reviewed": metadata.reviewed,
         "leaf": metadata.leaf,
         "registrable": metadata.registrable,
+        # The marketplace notice contract the fields were derived from (S3), named only when one
+        # was, so the fingerprint of metadata without a contract is unchanged.
+        **(
+            {"notice_contract": metadata.notice.contract}
+            if metadata.notice is not None and metadata.notice.contract is not None
+            else {}
+        ),
     }
 
 

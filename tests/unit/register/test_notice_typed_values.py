@@ -22,8 +22,6 @@ from app.stages.register.execution import decode_field, encode_field
 from app.stages.register.payload import build_payload
 from app.stages.register.policy import FieldRule, FieldValueType, NoticePolicy
 from app.stages.register.preparation import FieldValue
-from integrations.marketplaces.smartstore import product
-from integrations.marketplaces.smartstore.product import WireContractError
 from tests.unit.register.test_m5_preflight_rules import (
     LISTING,
     METADATA,
@@ -119,10 +117,25 @@ def test_a_text_value_outside_its_documented_form_is_never_reformatted(
     }
 
 
-def test_an_integer_outside_a_signed_64_bit_value_is_invalid() -> None:
-    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**63)}) == {
+def test_an_integer_outside_its_width_is_invalid() -> None:
+    # INTEGER is a signed 32-bit integer, LONG a signed 64-bit one.
+    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**31)}) == {
         ("FIELD_VALUE_FORM_INVALID", "notice:periodDays")
     }
+    assert _reasons({**TYPED_NOTICES, "periodDays": FieldValue(2**31 - 1)}) == set()
+    wide = replace(
+        TYPED,
+        notice=NoticePolicy(
+            "notice-type-long",
+            (FieldRule("addressId", required=True, value_type=_T.LONG),),
+        ),
+    )
+    for value, expected in ((2**31, set()), (2**63, {"FIELD_VALUE_FORM_INVALID"})):
+        result = candidate(
+            request(listing=replace(LISTING, notices={"addressId": FieldValue(value)})),
+            resolved(metadata=wide),
+        )
+        assert {r.code for r in result.reasons} == expected
 
 
 def test_a_required_field_whose_omission_is_the_marketplace_default_is_never_missing() -> None:
@@ -263,15 +276,3 @@ def test_a_text_rule_is_stored_exactly_as_before_and_a_typed_rule_round_trips() 
 def test_an_inconsistent_typed_rule_is_refused_whole(fields: list[dict[str, Any]]) -> None:
     with pytest.raises(InputValidationError):
         _save(fields)
-
-
-# ---------------------------------------------------------------- the wire, until S3
-
-
-def test_the_create_projection_still_refuses_a_non_text_notice_value() -> None:
-    # The CREATE table projects text members only; typed members are aligned in S3, never guessed.
-    req = request(listing=replace(LISTING, notices=TYPED_NOTICES))
-    payload = build_payload(final(req, resolved(metadata=TYPED))).payload
-    with pytest.raises(WireContractError) as refused:
-        product.project(payload)
-    assert refused.value.code == "WIRE_VALUE_NOT_TEXT"

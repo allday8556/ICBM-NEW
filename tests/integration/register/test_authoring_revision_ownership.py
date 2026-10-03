@@ -37,6 +37,7 @@ from app.stages.register.preparation import (
     PreflightRequest,
 )
 from tests.conftest import LOCAL
+from tests.support.gate1_support import ETC_NOTICES
 from tests.support.product_support import Collections, raw
 from tests.support.register_support import (
     CATEGORY,
@@ -115,10 +116,7 @@ def inputs(mapping: str | None, composition: str | None) -> dict[str, Any]:
         "name": {"value": "authored listing name", "provenance": "OPERATOR_CONFIRMED"},
         "tags": [],
         "attributes": {"brand": {"value": "authored brand"}},
-        "notices": {
-            "manufacturer": {"value": "authored maker"},
-            "origin": {"detail_page_reference": True},
-        },
+        "notices": ETC_NOTICES,
         "options": {},
         "detail_composition_revision": composition,
         "detail_body": "authored body text",

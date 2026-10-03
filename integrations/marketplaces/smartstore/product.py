@@ -62,15 +62,17 @@ with the Snapshot's projection and never derived from the provider or a session:
   a sold-out source is ``BLOCKED`` by the M4 readiness it consumes — and the read-back compares the
   seed exactly (``readback.compare``). No source quantity is fabricated.
 * D2.3 — the ``productInfoProvidedNotice`` child is selected from the reviewed
-  ``CategoryMetadata`` notice type through the pinned 2.90.0 table below (evidence packet
-  ``5916962285``), never by casing a string. Only the Snapshot's own reviewed values are projected;
-  the category rules decide which are required and which may be left to the product detail. A
-  notice type whose child is not captured stays a named *gap*, and never falls back to another
+  ``CategoryMetadata`` notice type through the provider notice schema
+  (:mod:`integrations.marketplaces.smartstore.notice_schema`,
+  ``smartstore-notice-schema/2.90.0-r1``; notice coverage S3), never by casing a string. Only the
+  Snapshot's own reviewed values are projected, each with its own JSON type; the schema decides
+  which fields exist, which are required and which the provider fills when they are omitted. A
+  notice type without a documented child stays a named *gap*, and never falls back to another
   child.
 
 The gap that still holds for every Snapshot shape: for an option listing, whether an option
-combination's price is absolute or a difference. A single-Item listing whose notice type is
-captured and whose notice satisfies the child's documented members is **sendable**.
+combination's price is absolute or a difference. A single-Item listing whose notice type has a
+documented child and whose notice satisfies that child's schema is **sendable**.
 
 Seller-controlled identities are deterministic and stable. The listing's provider management code
 is the ``smartstore-seller-management-code/v1`` projection of the listing identity (architect
@@ -89,15 +91,25 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from types import MappingProxyType
 from typing import Any, Final
 
 from app.stages.register.model import ListingShape
 from app.stages.register.sanitize import safe_provider_reference
+from integrations.marketplaces.smartstore.notice_schema import (
+    NoticeFieldSchema,
+    NoticePresence,
+    NoticeValueType,
+    emittable,
+    load_notice_schema,
+)
 
 # v3: the document carries smartstoreChannelProduct with the owned display status (5915900049 D1).
 # v4: the owned naverShoppingRegistration, registration stockQuantity and notice child (D2).
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v4"
+# v5: the notice child of every documented type, with typed values, from the provider notice schema
+# (notice coverage S3).
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v5"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -164,8 +176,8 @@ _OPTION_NAME_KEYS: Final = ("optionName1", "optionName2", "optionName3")
 # names the exact path it blocks; none is ever filled with a default, a guess or an ICBM preference.
 GAP_NOTICE_TYPE_CHILD: Final = (
     f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_NOTICE}: required on registration, but"
-    " the reviewed notice type has no captured request child in the pinned 2.90.0 table, so no"
-    " notice is emitted and none is ever guessed or taken from another type"
+    " the reviewed notice type has no documented request child in the provider notice schema, so"
+    " no notice is emitted and none is ever guessed or taken from another type"
 )
 GAP_OPTION_PRICE_SEMANTICS: Final = (
     f"{FIELD_OPTION_COMBINATIONS}[].price: whether an option combination price is absolute or a"
@@ -176,184 +188,32 @@ GAP_OPTION_PRICE_SEMANTICS: Final = (
 
 # ----------------------------------------------------- the product-information notice (D2.3)
 #
-# The pinned 2.90.0 contract of ``originProduct.detailAttribute.productInfoProvidedNotice``
-# (evidence packet 5916962285, ``원상품 정보 구조체``): a required ``productInfoProvidedNoticeType``
-# and exactly one sibling child object carrying that type's members.
-NOTICE_SCHEMA_REVISION: Final = "smartstore-notice-children/2.90.0-r1"
+# ``originProduct.detailAttribute.productInfoProvidedNotice`` is a required
+# ``productInfoProvidedNoticeType`` and exactly one sibling child object carrying that type's
+# fields. The provider notice schema owns both: the type → child mapping and every child's fields,
+# value types, presence rules and length bounds (notice coverage S1, derived from the retained
+# 2.90.0 reference and live capture). A deprecated field, and a field whose wire type the sources
+# disagree on, is never emitted.
+NOTICE_SCHEMA_REVISION: Final = load_notice_schema().revision
 
-# Every type → child member mapping the official schema states explicitly ("<TYPE>(…), <member>
-# 필드에 정보 입력"). The enum values LODGMENT_RESERVATION, TRAVEL_PACKAGE, AIRLINE_TICKET and
-# RENT_CAR carry no documented member and are absent, never derived from their names.
+# Every type the schema documents a child for. The enum values LODGMENT_RESERVATION,
+# TRAVEL_PACKAGE, AIRLINE_TICKET and RENT_CAR carry no documented child and are absent, never
+# derived from their names.
 NOTICE_TYPE_MEMBERS: Final[Mapping[str, str]] = MappingProxyType(
-    {
-        "WEAR": "wear",
-        "SHOES": "shoes",
-        "BAG": "bag",
-        "FASHION_ITEMS": "fashionItems",
-        "SLEEPING_GEAR": "sleepingGear",
-        "FURNITURE": "furniture",
-        "IMAGE_APPLIANCES": "imageAppliances",
-        "HOME_APPLIANCES": "homeAppliances",
-        "SEASON_APPLIANCES": "seasonAppliances",
-        "OFFICE_APPLIANCES": "officeAppliances",
-        "OPTICS_APPLIANCES": "opticsAppliances",
-        "MICROELECTRONICS": "microElectronics",
-        "CELLPHONE": "cellPhone",
-        "NAVIGATION": "navigation",
-        "CAR_ARTICLES": "carArticles",
-        "MEDICAL_APPLIANCES": "medicalAppliances",
-        "KITCHEN_UTENSILS": "kitchenUtensils",
-        "COSMETIC": "cosmetic",
-        "JEWELLERY": "jewellery",
-        "FOOD": "food",
-        "GENERAL_FOOD": "generalFood",
-        "DIET_FOOD": "dietFood",
-        "KIDS": "kids",
-        "MUSICAL_INSTRUMENT": "musicalInstrument",
-        "SPORTS_EQUIPMENT": "sportsEquipment",
-        "BOOKS": "books",
-        "RENTAL_HA": "rentalHa",
-        "RENTAL_ETC": "rentalEtc",
-        "DIGITAL_CONTENTS": "digitalContents",
-        "GIFT_CARD": "giftCard",
-        "MOBILE_COUPON": "mobileCoupon",
-        "MOVIE_SHOW": "movieShow",
-        "ETC_SERVICE": "etcService",
-        "BIOCHEMISTRY": "biochemistry",
-        "BIOCIDAL": "biocidal",
-        "ETC": "etc",
-    }
-)
-
-
-@dataclass(frozen=True)
-class NoticeMember:
-    """One documented text member of a notice child.
-
-    ``required`` is the schema's own badge. ``detail_default`` marks the documented rule "미입력 시
-    상품상세 참조로 입력됩니다": leaving the member out is the provider's own default, so an omitted
-    one is never filled in. ``required_without`` is the documented "<other>를 입력하지 않은 경우에는
-    필수": the member is required when the named one is absent. ``year_month`` is the documented
-    ``'yyyy-MM'`` form, validated and never reformatted.
-    """
-
-    required: bool = False
-    max_length: int | None = None
-    detail_default: bool = False
-    required_without: str | None = None
-    year_month: bool = False
-
-
-# The five members every captured child repeats: required, with the documented detail default and
-# no documented length bound.
-_COMMON_NOTICE_MEMBERS: Final[Mapping[str, NoticeMember]] = MappingProxyType(
-    {
-        name: NoticeMember(required=True, detail_default=True)
-        for name in (
-            "returnCostReason",
-            "noRefundReason",
-            "qualityAssuranceStandard",
-            "compensationProcedure",
-            "troubleShootingContents",
-        )
-    }
-)
-
-
-def _child(**members: NoticeMember) -> Mapping[str, NoticeMember]:
-    return MappingProxyType({**_COMMON_NOTICE_MEMBERS, **members})
-
-
-_R200 = NoticeMember(required=True, max_length=200)
-_R1500 = NoticeMember(required=True, max_length=1500)
-_R50 = NoticeMember(required=True, max_length=50)
-
-# The captured text members of each child whose whole field set the packet records. A type absent
-# here is not sendable: its member names may be documented, its members are not captured.
-# GENERAL_FOOD is recorded but absent on purpose: its required members geneticallyModified and
-# importDeclarationCheck are JSON booleans, and the reviewed notice values are text, so no owned
-# typed value exists for them. KITCHEN_UTENSILS' optional boolean importDeclaration is likewise not
-# a text member, so it is never emitted.
-NOTICE_CHILDREN: Final[Mapping[str, Mapping[str, NoticeMember]]] = MappingProxyType(
-    {
-        "WEAR": _child(
-            material=_R1500,
-            color=_R200,
-            size=_R200,
-            manufacturer=_R200,
-            caution=_R1500,
-            packDate=NoticeMember(max_length=300, year_month=True),
-            packDateText=NoticeMember(max_length=300, required_without="packDate"),
-            warrantyPolicy=_R1500,
-            afterServiceDirector=_R200,
-        ),
-        "SHOES": _child(
-            material=_R1500,
-            color=_R200,
-            size=_R200,
-            height=NoticeMember(max_length=200),
-            manufacturer=_R200,
-            caution=_R1500,
-            warrantyPolicy=_R1500,
-            afterServiceDirector=_R200,
-        ),
-        "HOME_APPLIANCES": _child(
-            itemName=_R50,
-            modelName=_R50,
-            certificationType=_R200,
-            ratedVoltage=NoticeMember(max_length=200),
-            powerConsumption=NoticeMember(max_length=200),
-            energyEfficiencyRating=NoticeMember(max_length=200),
-            releaseDate=NoticeMember(max_length=300, year_month=True),
-            releaseDateText=NoticeMember(max_length=300, required_without="releaseDate"),
-            manufacturer=_R200,
-            size=_R200,
-            additionalCost=_R200,
-            warrantyPolicy=_R1500,
-            afterServiceDirector=_R200,
-        ),
-        "KITCHEN_UTENSILS": _child(
-            itemName=_R50,
-            modelName=_R50,
-            material=_R200,
-            component=NoticeMember(required=True, max_length=500),
-            size=_R200,
-            releaseDate=NoticeMember(max_length=300, year_month=True),
-            releaseDateText=NoticeMember(max_length=300, required_without="releaseDate"),
-            manufacturer=_R200,
-            producer=_R200,
-            warrantyPolicy=_R1500,
-            afterServiceDirector=_R200,
-        ),
-        "COSMETIC": _child(
-            capacity=_R200,
-            specification=_R1500,
-            expirationDate=NoticeMember(max_length=300, year_month=True),
-            expirationDateText=NoticeMember(max_length=300, required_without="expirationDate"),
-            usage=_R1500,
-            manufacturer=_R200,
-            producer=_R200,
-            distributor=_R200,
-            customizedDistributor=NoticeMember(max_length=200),
-            mainIngredient=_R1500,
-            certificationType=_R200,
-            caution=_R1500,
-            warrantyPolicy=_R1500,
-            customerServicePhoneNumber=NoticeMember(required=True, max_length=30),
-        ),
-        "ETC": _child(
-            itemName=_R50,
-            modelName=_R50,
-            certificateDetails=NoticeMember(max_length=500),
-            manufacturer=_R200,
-            afterServiceDirector=NoticeMember(max_length=200),
-            customerServicePhoneNumber=NoticeMember(
-                max_length=30, required_without="afterServiceDirector"
-            ),
-        ),
-    }
+    {notice_type: schema.child for notice_type, schema in load_notice_schema().types.items()}
 )
 _YEAR_MONTH: Final = re.compile(r"\A[0-9]{4}-(0[1-9]|1[0-2])\Z")
+_DATE: Final = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+_INTEGER_BOUNDS: Final[Mapping[NoticeValueType, int]] = MappingProxyType(
+    {NoticeValueType.INTEGER: 2**31, NoticeValueType.LONG: 2**63}
+)
+
+
+def _emittable_fields(notice_type: str) -> Mapping[str, NoticeFieldSchema] | None:
+    schema = load_notice_schema().types.get(notice_type)
+    if schema is None:
+        return None
+    return {f.name: f for f in schema.fields if emittable(f)}
 
 
 class WireContractError(ValueError):
@@ -527,17 +387,43 @@ def _validate_option_info(value: Any, path: str) -> None:
         raise WireContractError("WIRE_ITEM_CODES_NOT_DISTINCT", f"{row_path}: a code repeats")
 
 
+def _notice_value(member: NoticeFieldSchema, value: Any, path: str) -> None:
+    """One field value of its documented type, bound and form — validated, never reformatted."""
+    value_type = member.value_type
+    if value_type in (NoticeValueType.TEXT, NoticeValueType.YEAR_MONTH, NoticeValueType.DATE):
+        text = _string(value, path, limit=member.max_length)
+        if value_type is NoticeValueType.YEAR_MONTH and not _YEAR_MONTH.match(text):
+            raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not yyyy-MM")
+        if value_type is NoticeValueType.DATE:
+            try:
+                valid = bool(_DATE.match(text)) and date.fromisoformat(text) is not None
+            except ValueError:
+                valid = False
+            if not valid:
+                raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not yyyy-MM-dd")
+        return
+    if value_type is NoticeValueType.BOOLEAN:
+        if not isinstance(value, bool):
+            raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not a boolean")
+        return
+    bound = _INTEGER_BOUNDS.get(value_type) if value_type is not None else None
+    if bound is None or isinstance(value, bool) or not isinstance(value, int):
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is not an integer")
+    if not -bound <= value < bound:
+        raise WireContractError("WIRE_DOCUMENT_VALUE_INVALID", f"{path} is out of range")
+
+
 def _validate_notice(value: Any, path: str) -> None:
-    """The notice of the pinned 2.90.0 contract: a captured type, exactly its own child, and only
-    that child's documented text members within their documented bounds and forms, with every
-    member it requires present."""
+    """The notice of the provider notice schema: a documented type, exactly its own child, only
+    that child's emittable fields with values of their documented type, bound and form, and every
+    field the schema requires present — the ones the provider fills when omitted excepted."""
     notice = _object(value, path, frozenset({FIELD_NOTICE_TYPE, *NOTICE_TYPE_MEMBERS.values()}))
     _required(notice, path, (FIELD_NOTICE_TYPE,))
     notice_type = notice[FIELD_NOTICE_TYPE]
-    members = NOTICE_CHILDREN.get(notice_type) if isinstance(notice_type, str) else None
+    members = _emittable_fields(notice_type) if isinstance(notice_type, str) else None
     if members is None:
         raise WireContractError(
-            "WIRE_NOTICE_TYPE_NOT_CAPTURED", f"{path}.{FIELD_NOTICE_TYPE} has no captured child"
+            "WIRE_NOTICE_TYPE_NOT_CAPTURED", f"{path}.{FIELD_NOTICE_TYPE} has no documented child"
         )
     child_key = NOTICE_TYPE_MEMBERS[notice_type]
     if set(notice) != {FIELD_NOTICE_TYPE, child_key}:
@@ -545,23 +431,21 @@ def _validate_notice(value: Any, path: str) -> None:
         raise WireContractError("WIRE_NOTICE_CHILD_MISMATCH", f"{path} is not exactly {child_key}")
     child_path = f"{path}.{child_key}"
     child = _object(notice[child_key], child_path, frozenset(members))
-    for name, text in child.items():
-        member = members[name]
-        _string(text, f"{child_path}.{name}", limit=member.max_length)
-        if member.year_month and not _YEAR_MONTH.match(text):
-            raise WireContractError(
-                "WIRE_DOCUMENT_VALUE_INVALID", f"{child_path}.{name} is not yyyy-MM"
-            )
+    for name, field_value in child.items():
+        _notice_value(members[name], field_value, f"{child_path}.{name}")
     for name, member in members.items():
         if name in child:
             continue
-        if member.required and not member.detail_default:
+        missing = member.presence is NoticePresence.REQUIRED
+        if member.presence is NoticePresence.REQUIRED_WITHOUT:
+            # A condition naming only fields that are never emitted leaves this field required.
+            missing = not any(other in child for other in member.required_without)
+        if member.presence is NoticePresence.ONE_OF and name == min(
+            n for n in member.one_of if n in members
+        ):
+            missing = not any(other in child for other in member.one_of)
+        if missing:
             raise WireContractError("WIRE_DOCUMENT_FIELD_MISSING", f"{child_path}.{name}")
-        if member.required_without is not None and member.required_without not in child:
-            raise WireContractError(
-                "WIRE_DOCUMENT_FIELD_MISSING",
-                f"{child_path}.{name} (required without {member.required_without})",
-            )
 
 
 def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
@@ -751,9 +635,9 @@ class WireProjection:
     image_references: tuple[str, ...]
     gaps: tuple[str, ...]
     # The reviewed notice the Snapshot owns. It is emitted as the child of its type when that type
-    # is captured (D2.3), and kept here either way as the evidence it was projected from.
+    # has a documented child (D2.3), and kept here either way as the evidence it was projected from.
     notice_type: str | None = None
-    notice_fields: Mapping[str, str] = field(default_factory=dict)
+    notice_fields: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def sendable(self) -> bool:
@@ -892,13 +776,13 @@ def _images(references: Sequence[str]) -> dict[str, Any]:
     return images
 
 
-def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
+def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     """The reviewed notice the Snapshot owns: its type and the fields the operator supplied.
 
-    Only fields the Snapshot carries are read, each under the key the reviewed metadata named.
-    Nothing is added to "complete" the notice, and a field the operator left to the product detail
-    stays out: the evidence states the notice fields are category-specific, that a value may be
-    left to the product detail, and that conditional fields are omitted when they do not apply.
+    Only fields the Snapshot carries are read, each under the key the reviewed metadata named and
+    with its own JSON type — text, a boolean or an integer. Nothing is added to "complete" the
+    notice, and a field the operator left to the product detail stays out: the provider fills those
+    with "상품상세 참조" itself, and conditional fields are omitted when they do not apply.
 
     The provider requires a notice for registration, so a Snapshot that owns none is refused here.
     Projecting it is :func:`_notice_document`'s question.
@@ -914,12 +798,16 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
         raise WireContractError("WIRE_NOTICE_MISSING", "the notice carries no reviewed field")
     if not all(isinstance(key, str) and key.strip() for key in fields):
         raise WireContractError("WIRE_VALUE_NOT_TEXT", "a notice field name is not text")
-    reviewed: dict[str, str] = {}
+    reviewed: dict[str, Any] = {}
     for key, value in sorted(fields.items()):
         if not isinstance(value, Mapping):
             raise WireContractError("WIRE_VALUE_NOT_TEXT", f"notice.{key}")
         if value.get("detail_page_reference"):
             # "미입력 시 상품상세 참조": the value is left out, never filled with a placeholder.
+            continue
+        raw = value.get("value")
+        if isinstance(raw, bool | int):
+            reviewed[key] = raw
             continue
         reviewed[key] = _text(value, f"notice.{key}")
     if not reviewed:
@@ -927,18 +815,16 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
     return notice_type, reviewed
 
 
-def _notice_document(notice_type: str, fields: Mapping[str, str]) -> dict[str, Any] | None:
-    """The notice child of the reviewed type, or ``None`` when the type has no captured child.
+def _notice_document(notice_type: str, fields: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The notice child of the reviewed type, or ``None`` when the type has no documented child.
 
-    The type is looked up in the pinned table exactly as reviewed — never cased, trimmed or
-    matched loosely — and only the child of that type is built, from the Snapshot's own reviewed
-    text values under their reviewed member names. A value the operator left to the product detail
-    is already out (:func:`_notice`): for the five members with the documented detail default that
-    *is* the documented behaviour, and for any other required member the document validation
-    refuses the request as incomplete rather than send it. Unknown members, values out of bound and
-    missing required members are all refused by :func:`create_document`.
+    The type is looked up in the provider notice schema exactly as reviewed — never cased, trimmed
+    or matched loosely — and only the child of that type is built, from the Snapshot's own reviewed
+    values under their reviewed field names. A value the operator left to the product detail is
+    already out (:func:`_notice`). Unknown or never-emitted fields, values of the wrong type, bound
+    or form, and missing required fields are all refused by :func:`create_document`.
     """
-    if notice_type not in NOTICE_CHILDREN:
+    if notice_type not in NOTICE_TYPE_MEMBERS:
         return None
     return {FIELD_NOTICE_TYPE: notice_type, NOTICE_TYPE_MEMBERS[notice_type]: dict(fields)}
 

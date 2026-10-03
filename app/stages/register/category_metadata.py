@@ -66,8 +66,10 @@ from app.stages.register.policy import (
     FieldRule,
     FieldValueType,
     NoticePolicy,
+    NoticeRuleSource,
     OptionPolicy,
     Provenance,
+    notice_aligned,
 )
 from app.stages.register.target_policy import EditableSurface
 
@@ -104,7 +106,7 @@ class FieldRuleView(_Strict):
     # Notice coverage S2. Each has the meaning a rule without it always had — a text value, no
     # omission default, no condition — so a revision recorded before them reads unchanged, and they
     # are stored only when they say something else.
-    value_type: Literal["TEXT", "YEAR_MONTH", "DATE", "BOOLEAN", "INTEGER"] = "TEXT"
+    value_type: Literal["TEXT", "YEAR_MONTH", "DATE", "BOOLEAN", "INTEGER", "LONG"] = "TEXT"
     omitted_default: StrictBool = False
     required_without: list[StrictStr] = Field(default_factory=list)
     one_of: list[StrictStr] = Field(default_factory=list)
@@ -673,10 +675,17 @@ class DurableRegistrationMetadata:
     """The production ``RegistrationMetadataSource``: the **current** revision of exactly this
     marketplace, taxonomy revision and category, read on every call. Never another marketplace,
     never another taxonomy revision, and never an older reviewed revision in place of an
-    unreviewed current one."""
+    unreviewed current one.
 
-    def __init__(self, store: CategoryMetadataStore) -> None:
+    With ``notice_rules`` (notice coverage S3), a governed marketplace's notice fields are its
+    notice contract's own for the reviewed notice type, so metadata, preflight and wire read one
+    contract."""
+
+    def __init__(
+        self, store: CategoryMetadataStore, notice_rules: NoticeRuleSource | None = None
+    ) -> None:
         self._store = store
+        self._notice_rules = notice_rules
 
     def category(
         self, marketplace_key: str, taxonomy_revision: str, category_id: str
@@ -684,7 +693,11 @@ class DurableRegistrationMetadata:
         current = self._store.current(marketplace_key, taxonomy_revision, category_id)
         if current is None:
             return None
-        return category_metadata_of(current.metadata_revision, current.reviewed, current.content)
+        return notice_aligned(
+            self._notice_rules,
+            marketplace_key,
+            category_metadata_of(current.metadata_revision, current.reviewed, current.content),
+        )
 
     def revision(
         self, marketplace_key: str, taxonomy_revision: str, category_id: str, metadata_revision: str
@@ -695,7 +708,11 @@ class DurableRegistrationMetadata:
         )
         if found is None:
             return None
-        return category_metadata_of(found.metadata_revision, found.reviewed, found.content)
+        return notice_aligned(
+            self._notice_rules,
+            marketplace_key,
+            category_metadata_of(found.metadata_revision, found.reviewed, found.content),
+        )
 
 
 # ------------------------------------------------------------------ the operator application owner

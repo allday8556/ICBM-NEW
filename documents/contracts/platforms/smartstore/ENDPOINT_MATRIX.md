@@ -299,26 +299,27 @@ from the provider or a session:
   fabricated. The read-back compares it exactly at `originProduct.stockQuantity`
   (`smartstore-readback-normalizer/v3`, `smartstore-readback-comparison/v4`): a different or
   missing value is `STOCK_QUANTITY_MISMATCH`, never a confirmation.
-- **The `productInfoProvidedNotice` child** (D2.3) — selected from the reviewed
-  `CategoryMetadata.notice.notice_type` through the pinned table `smartstore-notice-children/2.90.0-r1`
-  (`NAVER-P0-NOTICE-CHILD-290`, evidence packet `5916962285`): the 36 type → member mappings the
-  schema states explicitly, and the captured text members of `WEAR`, `SHOES`, `HOME_APPLIANCES`,
-  `KITCHEN_UTENSILS`, `COSMETIC` and `ETC`. No child name is derived by casing a string; the four
-  enum values with no documented member, every type whose members are not captured, and
-  `GENERAL_FOOD` — whose required members `geneticallyModified` and `importDeclarationCheck` are
-  JSON booleans with no owned typed value — stay a named gap and never fall back to another child.
-  Only the Snapshot's own reviewed text values are projected, under their reviewed member names;
-  a member the child does not document is refused. The category rules decide which values are
-  required and which may be left to the product detail; a member left to the detail is omitted,
-  which is the documented provider default ("미입력 시 상품상세 참조로 입력됩니다") only for the five
-  members every child repeats — for any other required member the document is refused as
-  incomplete. The documented `yyyy-MM` form, the documented length bounds and the documented
-  "required when the other is absent" pairs are enforced, never repaired. Notice coverage S1 holds
-  the provider notice schema of all 36 documented children as data
-  (`integrations/marketplaces/smartstore/notice_schema.json`, `smartstore-notice-schema/2.90.0-r1`,
-  derived from the retained 2.90.0 reference and live capture); its tests prove it agrees with
-  this pinned table on every child the table projects. The projection still reads the pinned
-  table until the metadata ↔ preflight ↔ wire alignment slice (S3).
+- **The `productInfoProvidedNotice` child** (D2.3; notice coverage S3, wire
+  `smartstore-register-wire/v5`) — selected from the reviewed `CategoryMetadata.notice.notice_type`
+  through the provider notice schema `smartstore-notice-schema/2.90.0-r1`
+  (`integrations/marketplaces/smartstore/notice_schema.json`, derived mechanically from the retained
+  2.90.0 `원상품 정보 구조체` reference and the live notice capture; inventory in
+  `documents/evidence/marketplace-apis/NOTICE_SMARTSTORE_S0.md`). The schema documents a child for
+  36 types; the four enum values without one (`LODGMENT_RESERVATION`, `TRAVEL_PACKAGE`,
+  `AIRLINE_TICKET`, `RENT_CAR`) stay a named gap, are `NOTICE_TYPE_UNDOCUMENTED` (`BLOCKED`) in the
+  preflight, and never fall back to another child. No child name is derived by casing a string.
+  The same contract drives the three layers: the durable category metadata of a SmartStore
+  category selects the notice type and takes that type's fields from the schema — hand-recorded
+  notice rules beside it are superseded — so the preflight checks, and the projection validates,
+  one set of fields. Only the Snapshot's own reviewed values are projected, each in its own JSON
+  type (text, boolean, integer), under their reviewed field names. Deprecated fields and the three
+  `releaseDate` fields whose wire form the sources disagree on (`SEASON_APPLIANCES`,
+  `OFFICE_APPLIANCES`, `SPORTS_EQUIPMENT`) are never declared or sent; their text alternative
+  `releaseDateText` is then required. A field the provider fills when it is omitted — the
+  "미입력 시 상품상세 참조로 입력됩니다" fields and `KITCHEN_UTENSILS.importDeclaration`'s stated
+  `false` — is never required input and is omitted rather than filled. The documented forms
+  (`yyyy-MM`, `yyyy-MM-dd`), length bounds, integer widths (int32, int64), "required when the other
+  is absent" pairs and the `GIFT_CARD` one-of store group are enforced, never repaired.
 
 `sellerManagementCode` is the ICBM projection `smartstore-seller-management-code/v1` (architect
 ruling R1, Issue #89 `5861607665`): the first 30 lowercase hexadecimal characters of

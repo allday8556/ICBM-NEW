@@ -180,11 +180,21 @@ def test_the_operator_records_then_reviews_metadata_and_it_survives_reload_and_r
             MARKETPLACE, "taxonomy-ui-1", "50000803"
         )
         assert materialized is not None and materialized.reviewed is True
-        assert materialized.notice is not None
-        assert [rule.missing_status.value for rule in materialized.notice.fields] == [
+        # The recorded rules are stored exactly as the operator recorded them.
+        recorded = client.get(
+            f"/api/v1/settings/category-metadata/{MARKETPLACE}/{KEY}",
+            headers={"X-ICBM-Client": "operator"},
+        ).json()["content"]["notice"]
+        assert [rule["missing_status"] for rule in recorded["fields"]] == [
             "BLOCKED",
             "REVIEW_REQUIRED",
         ]
+        # A SmartStore category's notice fields are the provider notice schema's own for the
+        # reviewed type (notice coverage S3): this synthetic type has no documented child, so the
+        # preflight blocks it and nothing is ever sent for it.
+        assert materialized.notice is not None
+        assert materialized.notice.notice_type == recorded["notice_type"]
+        assert materialized.notice.documented is False and materialized.notice.fields == ()
     with _served(config) as client, _page(browser, client, []) as page:
         page.wait_for_selector(f"{PANEL} [data-metadata-key='{KEY}'][data-meta-reviewed='true']")
         assert _entry(page) == reviewed

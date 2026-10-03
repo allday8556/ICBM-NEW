@@ -205,7 +205,7 @@ def test_the_server_builds_a_deterministic_packet_from_the_owners(
     assert text["name"] == {"value": "합성 상품", "provenance": "OPERATOR_CONFIRMED"}
     assert text["detail"] == {"sections": ["BODY"], "body": "상세 본문"}
     assert text["attributes"]["brand"]["value"] == "합성 브랜드"
-    assert text["notices"]["origin"]["detail_page_reference"] is True
+    assert text["notices"]["returnCostReason"]["detail_page_reference"] is True
     assert first.binding == EligibilityBinding(
         unit_ref=asset_unit_ref(revision_id),
         marketplace_key=MARKET,

@@ -59,6 +59,7 @@ from tests.support.collect_submit_support import served
 from tests.support.gate1_support import (
     CATEGORY,
     CLIENT,
+    ETC_NOTICES,
     MARKET,
     OPERATOR,
     TAXONOMY,
@@ -92,10 +93,7 @@ def authored_inputs(
         "name": {"value": "합성 상품", "provenance": "OPERATOR_CONFIRMED"},
         "tags": [],
         "attributes": {"brand": {"value": "합성 브랜드"}},
-        "notices": {
-            "manufacturer": {"value": "합성 제조사"},
-            "origin": {"detail_page_reference": True},
-        },
+        "notices": ETC_NOTICES,
         "options": {},
         "detail_composition_revision": revisions[1],
         "detail_body": body,

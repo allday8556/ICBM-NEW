@@ -15,7 +15,7 @@ Pure and provider-neutral: no database, no provider, no I/O. Nothing here is Sma
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol
 
@@ -60,7 +60,8 @@ class FieldValueType(StrEnum):
     YEAR_MONTH = "YEAR_MONTH"  # text in the form yyyy-MM
     DATE = "DATE"  # text in the form yyyy-MM-dd
     BOOLEAN = "BOOLEAN"
-    INTEGER = "INTEGER"
+    INTEGER = "INTEGER"  # a signed 32-bit integer (OpenAPI int32)
+    LONG = "LONG"  # a signed 64-bit integer (OpenAPI int64)
 
 
 # The value types whose value is text, and so may be empty, long or of the wrong form.
@@ -110,10 +111,21 @@ class FieldRule:
 
 @dataclass(frozen=True)
 class NoticePolicy:
-    """The product-information disclosure type and its declared fields."""
+    """The product-information disclosure type and its declared fields.
+
+    ``contract`` names the marketplace's own notice contract revision when the fields are derived
+    from it (notice coverage S3) rather than recorded with the category metadata; ``documented`` is
+    false when that contract documents no child for this type, so nothing can be sent for it.
+    """
 
     notice_type: str
     fields: tuple[FieldRule, ...] = ()
+    contract: str | None = None
+    documented: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.documented and (self.contract is None or self.fields):
+            raise ValueError("only a marketplace contract states that a type is undocumented")
 
 
 @dataclass(frozen=True)
@@ -238,6 +250,36 @@ class StaticRegistrationMetadata:
     ) -> CategoryMetadata | None:
         entry = self.category(marketplace_key, taxonomy_revision, category_id)
         return entry if entry is not None and entry.metadata_revision == metadata_revision else None
+
+
+class NoticeRuleSource(Protocol):
+    """A marketplace's own product-information-notice contract (notice coverage S3).
+
+    Where a marketplace has one, the notice fields a category's metadata declares are that
+    contract's fields for the reviewed notice type — never rules recorded by hand beside it — so
+    the metadata, the preflight and the wire read one contract."""
+
+    def governs(self, marketplace_key: str) -> bool:
+        """Whether this marketplace's notice fields come from this contract."""
+        ...
+
+    def notice_policy(self, marketplace_key: str, notice_type: str) -> NoticePolicy:
+        """The contract's policy of one notice type of a governed marketplace: its derived fields,
+        or ``documented=False`` when the contract has no child for the type."""
+        ...
+
+
+def notice_aligned(
+    rules: NoticeRuleSource | None, marketplace_key: str, entry: CategoryMetadata | None
+) -> CategoryMetadata | None:
+    """The metadata with its notice fields taken from the marketplace's notice contract (S3).
+
+    For a governed marketplace, the reviewed metadata selects the notice type and the contract
+    supplies that type's fields. Every other part of the reviewed metadata — and the metadata of an
+    ungoverned marketplace — is returned exactly as its owner holds it."""
+    if rules is None or entry is None or entry.notice is None or not rules.governs(marketplace_key):
+        return entry
+    return replace(entry, notice=rules.notice_policy(marketplace_key, entry.notice.notice_type))
 
 
 class StaticRegistrationPolicy:

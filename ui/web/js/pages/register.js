@@ -277,10 +277,30 @@ function authoringForm(unit, onDone) {
   const fieldControls = new Map();
   let metadata = null;
 
+  // A field the marketplace fills itself when it is omitted ("상품상세 참조", a stated default) is
+  // never a field the operator must type, whatever its required badge. A boolean is chosen, not
+  // typed, and an integer is sent as a number: the server never coerces a value's type.
   function authoredField(rule, kind, current) {
-    const control = field(rule.required ? `${rule.key} (필수)` : rule.key,
-      `${kind}.${rule.key}`, current?.value);
-    const input = control.querySelector('input');
+    const mustType = rule.required && !rule.omitted_default;
+    const valueType = rule.value_type ?? 'TEXT';
+    const label = mustType ? `${rule.key} (필수)` : rule.key;
+    let control;
+    if (valueType === 'BOOLEAN') {
+      const select = h('select', { name: `${kind}.${rule.key}` },
+        h('option', { value: '' }, '—'),
+        h('option', { value: 'true' }, '예'),
+        h('option', { value: 'false' }, '아니오'));
+      select.value = current?.value === true ? 'true' : current?.value === false ? 'false' : '';
+      control = h('label', { class: 'kv' }, h('span', {}, label), select);
+    } else {
+      control = field(label, `${kind}.${rule.key}`,
+        current?.value === undefined ? undefined : String(current.value));
+      const placeholder = {
+        YEAR_MONTH: 'yyyy-MM', DATE: 'yyyy-MM-dd', INTEGER: '정수', LONG: '정수',
+      }[valueType];
+      if (placeholder) control.querySelector('input').placeholder = placeholder;
+    }
+    const input = control.querySelector('input, select');
     let reference = null;
     if (rule.detail_page_reference_allowed) {
       reference = h('input', {
@@ -292,16 +312,16 @@ function authoringForm(unit, onDone) {
       reference.checked = current?.detail_page_reference === true;
       const sync = () => {
         input.disabled = reference.checked;
-        input.required = rule.required && !reference.checked;
+        input.required = mustType && !reference.checked;
         if (reference.checked) input.value = '';
       };
       reference.addEventListener('change', sync);
       control.append(h('span', { class: 'mini' }, reference, ' 상세페이지 참조'));
       sync();
     } else {
-      input.required = rule.required;
+      input.required = mustType;
     }
-    fieldControls.set(`${kind}:${rule.key}`, { input, reference, current });
+    fieldControls.set(`${kind}:${rule.key}`, { input, reference, current, valueType });
     return control;
   }
 
@@ -428,8 +448,17 @@ function authoringForm(unit, onDone) {
             provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
           }]];
         }
-        const value = control?.input.value.trim() ?? '';
-        return value ? [[rule.key, {
+        const raw = control?.input.value.trim() ?? '';
+        let value = raw;
+        if (control?.valueType === 'BOOLEAN') value = raw === 'true';
+        else if (['INTEGER', 'LONG'].includes(control?.valueType) && /^-?[0-9]+$/.test(raw)) {
+          // Only an integer a JavaScript number holds exactly is sent as a number. A larger one
+          // stays the operator's own text, which the server refuses as the wrong type — it is
+          // never rounded into another value.
+          const number = Number(raw);
+          if (Number.isSafeInteger(number) && BigInt(raw) === BigInt(number)) value = number;
+        }
+        return raw ? [[rule.key, {
           value,
           provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
         }]] : [];

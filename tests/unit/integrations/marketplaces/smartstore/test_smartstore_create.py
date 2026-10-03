@@ -814,12 +814,11 @@ def test_the_production_caller_refuses_every_create_document_as_incomplete() -> 
 
 def test_completeness_is_read_from_the_body_not_declared() -> None:
     # A body that carries a required part no longer names that part's gap: the gate is a function
-    # of the document, so a forged notice closes it — and the schema, which admits only a captured
+    # of the document, so a forged notice closes it — and the schema, which admits only a documented
     # child, still refuses the forged body, so it never reaches the wire either way.
     body = json.loads(FROZEN.canonical_json)
     body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"] = {
-        "productInfoProvidedNoticeType": "BAG",
-        "bag": {"material": "가죽"},
+        "productInfoProvidedNoticeType": "RENT_CAR",
     }
     forged = product.CreateDocument(
         encoding_version=product.WIRE_ENCODING_VERSION,

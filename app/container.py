@@ -151,6 +151,7 @@ from integrations.marketplaces.smartstore.execution import (
 )
 from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
+from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import SupplierCollection
@@ -525,7 +526,10 @@ def build_container(
         pricing=pricing,
         images=images,
         capability=marketplace_capability,
-        metadata=DurableRegistrationMetadata(category_metadata_store),
+        # Notice coverage S3: a SmartStore category's notice fields are the provider notice
+        # schema's own for the reviewed notice type, so metadata, preflight and wire read one
+        # contract.
+        metadata=DurableRegistrationMetadata(category_metadata_store, SmartStoreNoticeRules()),
         policies=DurableRegistrationPolicy(target_policy_store),
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the

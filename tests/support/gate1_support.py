@@ -117,21 +117,52 @@ def _rule(key: str, **overrides: Any) -> dict[str, Any]:
     return values
 
 
-def record_reviewed_metadata(api: TestClient) -> str:
+# A reviewed ETC (기타 재화) notice the API stores: every field the provider schema requires,
+# and one field left to the provider's own "상품상세 참조".
+ETC_NOTICES: dict[str, Any] = {
+    "itemName": {"value": "합성 품명"},
+    "modelName": {"value": "합성 모델"},
+    "manufacturer": {"value": "합성 제조사"},
+    "afterServiceDirector": {"value": "합성 A/S 책임자"},
+    "returnCostReason": {"detail_page_reference": True},
+}
+# The ETC fields the provider notice schema declares, in its order.
+ETC_NOTICE_KEYS: list[str] = [
+    "returnCostReason",
+    "noRefundReason",
+    "qualityAssuranceStandard",
+    "compensationProcedure",
+    "troubleShootingContents",
+    "itemName",
+    "modelName",
+    "certificateDetails",
+    "manufacturer",
+    "afterServiceDirector",
+    "customerServicePhoneNumber",
+]
+
+
+def fill_etc_notice(unit: Any) -> None:
+    """Fill the reviewed ETC notice on the authoring screen of one unit."""
+    for key in ("itemName", "modelName", "manufacturer", "afterServiceDirector"):
+        unit.locator(f"input[name='notice.{key}']").fill(ETC_NOTICES[key]["value"])
+    unit.locator("input[data-detail-reference='notice'][data-field-key='returnCostReason']").check()
+
+
+def record_reviewed_metadata(
+    api: TestClient, notice_type: str = "ETC", expected: str | None = None
+) -> str:
     """Operator-reviewed metadata of the one category, through the durable G1-B owner; its
-    current metadata revision. A non-regulated synthetic category: this is no compliance claim."""
+    current metadata revision. A synthetic category: this is no compliance claim. ``expected`` is
+    the current revision a further save edits from."""
     content = {
         "leaf": True,
         "registrable": True,
         "name_max_length": 100,
         "attributes": [_rule("brand", required=True), _rule("color")],
-        "notice": {
-            "notice_type": "notice-g1-1",
-            "fields": [
-                _rule("manufacturer", required=True),
-                _rule("origin", required=True, detail_page_reference_allowed=True),
-            ],
-        },
+        # A SmartStore category's notice fields are the provider notice schema's own for the
+        # reviewed type (notice coverage S3); the type is what the reviewed metadata selects.
+        "notice": {"notice_type": notice_type, "fields": []},
         "options": {"options_supported": True, "max_options": 5, "max_dimensions": 1},
         "required_templates": ["returns", "shipping"],
     }
@@ -139,7 +170,7 @@ def record_reviewed_metadata(api: TestClient) -> str:
         f"/api/v1/settings/category-metadata/{MARKET}/{TAXONOMY}/{CATEGORY}/revisions",
         json={
             "actor": OPERATOR,
-            "expected_current_revision": None,
+            "expected_current_revision": expected,
             "content_provenance": "OPERATOR_CONFIRMED",
             "evidence_reference": "seller-center/category-50000803/rehearsal",
             "reviewed": True,
