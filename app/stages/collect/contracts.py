@@ -163,7 +163,16 @@ class CollectionRunView(BaseModel):
 
 
 class CollectionRunListView(BaseModel):
-    """The newest runs, newest first (Gate 1 G1-E): durable rows only, never a second history."""
+    """The newest runs, newest first (Gate 1 G1-E): durable rows only, never a second history.
+
+    ``outcome`` and ``facts_status`` echo the filter the server applied before the bound, and
+    ``total`` is how many runs that filter selects in all, so a page is never mistaken for the whole
+    list. ``next_before`` names the run to continue after, or is ``None`` on the last page.
+    """
 
     runs: tuple[CollectionRunView, ...]
     limit: int
+    outcome: CollectionOutcome | None = None
+    facts_status: FactsStatus | None = None
+    total: int | None = None
+    next_before: str | None = None

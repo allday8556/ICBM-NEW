@@ -166,6 +166,24 @@ evidence for that canary alone, never a `COMPLIANCE PASS` verdict.
 
 It must never be folded into a generic successful/failed state in the domain model.
 
+## Collection Management — 수집 사실 and the run filters (A-UX1, owner decision 2026-10-04)
+
+v29 shows the source-evidence comparison (`수집 근거 / 정규화 비교`: per field, source → normalized
+→ status) inside the product editor modal, and a `수집 미리보기` beside the collection list. The app
+reproduces that structure in the focused run of 수집관리, where the run's revision is read back:
+
+- per field: its status (`확정` / `없음` / `확인 필요`), its stored value only when `CONFIRMED`, and its
+  stored evidence on demand (kind, locator, observed, normalized, status, digest), plus the
+  extractor revision, the transport and the image count included / total, all as the revision holds
+  them;
+- the prototype's percentage chip (`94%`) is demo content and is **not** reproduced: no confidence
+  number is shown, and the screen decides no status and changes no fact;
+- the run's outcome and the revision's facts status stay two labelled axes, and `NO_REVISION` is
+  shown as its own answer with no facts status;
+- the recent-runs list offers `전체 / 원천 확인 필요 / 실패 / 기록할 식별자 없음`. The server applies the
+  filter before it orders and bounds the list, reports how many runs the filter selects in all, and
+  pages on with `더 보기`; a page is never shown as the whole list.
+
 ## Rules
 
 - This HTML prototype is the visual/product UI reference for ICBM-NEW.
