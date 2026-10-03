@@ -61,7 +61,7 @@ def _item(key: str, price: int, options: dict[str, str] | None = None) -> dict[s
         "options": options or {},
         "publication_assets": [
             _asset("REPRESENTATIVE", "1" * 64, REF_MAIN),
-            _asset("DETAIL", "2" * 64, REF_DETAIL),
+            _asset("ADDITIONAL", "2" * 64, REF_DETAIL),
         ],
     }
 
@@ -480,7 +480,7 @@ def test_a_listing_without_a_representative_image_is_refused() -> None:
         items=[
             {
                 **_item(KEY_A, 19900),
-                "publication_assets": [_asset("DETAIL", "2" * 64, REF_DETAIL)],
+                "publication_assets": [_asset("ADDITIONAL", "2" * 64, REF_DETAIL)],
             }
         ]
     )
@@ -491,7 +491,8 @@ def test_a_listing_without_a_representative_image_is_refused() -> None:
 
 def test_more_images_than_the_provider_allows_is_refused() -> None:
     many = [_asset("REPRESENTATIVE", "1" * 64, REF_MAIN)] + [
-        _asset("DETAIL", f"{i}" * 64, f"https://shop-phinf.example/a/{i}.jpg") for i in range(10)
+        _asset("ADDITIONAL", f"{i}" * 64, f"https://shop-phinf.example/a/{i}.jpg")
+        for i in range(10)
     ]
     with pytest.raises(product.WireContractError) as refused:
         product.project(payload(items=[{**_item(KEY_A, 19900), "publication_assets": many}]))
@@ -998,3 +999,14 @@ def test_a_malformed_snapshot_is_only_ever_a_wire_contract_refusal(
     # error; never a KeyError, TypeError or AttributeError.
     with contextlib.suppress(product.WireContractError):
         product.project(broken)
+
+
+def test_a_detail_body_image_is_never_sent_as_a_gallery_image() -> None:
+    # Issue #219 §2.2: until the detail composition places images, a detail-body image has no
+    # place in the CREATE request; it is refused, never moved into optionalImages.
+    detail = _asset("DETAIL", "3" * 64, "https://shop-phinf.pstatic.net/detail.jpg")
+    item = {**_item(KEY_A, 19900)}
+    item["publication_assets"] = [*item["publication_assets"], detail]
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(payload(items=[item]))
+    assert refused.value.code == "WIRE_DETAIL_IMAGE_NOT_PLACEABLE"

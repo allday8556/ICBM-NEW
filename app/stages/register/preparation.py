@@ -37,7 +37,6 @@ from datetime import date
 from enum import StrEnum
 from typing import Any, Final
 
-from app.stages.collect.facts import ImageRole
 from app.stages.connect.accounts import AccountBinding
 from app.stages.connect.marketplace.capability import (
     AuthStatus,
@@ -45,7 +44,7 @@ from app.stages.connect.marketplace.capability import (
     WorkflowState,
     WriteScopeStatus,
 )
-from app.stages.products.image_model import ImageAssetKind, QaVerdict
+from app.stages.products.image_model import ImageAssetKind, OutputRole, QaVerdict
 from app.stages.products.model import (
     READINESS_PRECEDENCE,
     ReadinessStatus,
@@ -149,6 +148,9 @@ AUTHORING_REVISIONS_UNOWNED: Final = "AUTHORING_REVISIONS_UNOWNED"
 PUBLICATION_ASSETS_MISSING: Final = "PUBLICATION_ASSETS_MISSING"
 PUBLICATION_ASSET_COUNT_EXCEEDED: Final = "PUBLICATION_ASSET_COUNT_EXCEEDED"
 PUBLICATION_REPRESENTATIVE_MISSING: Final = "PUBLICATION_REPRESENTATIVE_MISSING"
+# Issue #219: a selected detail-body image has no place in the listing until the detail
+# composition places images; it is never sent as a gallery image instead.
+PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
 PREPARED_ASSET_CANDIDATE_MISMATCH: Final = "PREPARED_ASSET_CANDIDATE_MISMATCH"
@@ -228,6 +230,7 @@ REASON_CODES: Final = frozenset(
         PUBLICATION_ASSETS_MISSING,
         PUBLICATION_ASSET_COUNT_EXCEEDED,
         PUBLICATION_REPRESENTATIVE_MISSING,
+        PUBLICATION_DETAIL_IMAGES_UNPLACED,
         PUBLICATION_ASSET_QA_NOT_PASSED,
         PROVIDER_ASSET_IDENTITY_MISSING,
         PREPARED_ASSET_CANDIDATE_MISMATCH,
@@ -557,7 +560,7 @@ class BindingCopy:
 class PublicationImage:
     """One currently selected M4 image of an Item, with its exact-binary QA."""
 
-    role: ImageRole
+    role: OutputRole
     position: int
     asset_kind: ImageAssetKind
     sha256: str
@@ -1110,14 +1113,21 @@ def _publication_reasons(target: TargetPolicy, unit: ResolvedUnit) -> list[Reaso
     reasons: list[Reason] = []
     for item in unit.items:
         images = item.images
-        if len(images) < max(policy.min_images, 1):
+        # The listing's gallery: its representative image and the additional ones. A detail-body
+        # image is never one of them (Issue #219 §2.2).
+        gallery = [image for image in images if image.role is not OutputRole.DETAIL]
+        if len(gallery) < max(policy.min_images, 1):
             reasons.append(Reason(PUBLICATION_ASSETS_MISSING, _R, _subject(item.item_id, "images")))
-        if len(images) > policy.max_images:
+        if len(gallery) > policy.max_images:
             reasons.append(
                 Reason(PUBLICATION_ASSET_COUNT_EXCEEDED, _R, _subject(item.item_id, "images"))
             )
+        if len(gallery) != len(images):
+            reasons.append(
+                Reason(PUBLICATION_DETAIL_IMAGES_UNPLACED, _B, _subject(item.item_id, "images"))
+            )
         if policy.requires_representative and not any(
-            image.role is ImageRole.REPRESENTATIVE for image in images
+            image.role is OutputRole.REPRESENTATIVE for image in images
         ):
             reasons.append(
                 Reason(PUBLICATION_REPRESENTATIVE_MISSING, _R, _subject(item.item_id, "images"))

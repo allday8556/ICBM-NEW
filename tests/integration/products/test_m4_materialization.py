@@ -986,6 +986,10 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
         # Issue #219: the operator's supplier common images, read, and one decision per file.
         "/api/v1/products/supplier-common-images/{supplier_key}": {"get"},
         "/api/v1/products/supplier-common-images/{supplier_key}/{sha256}": {"post"},
+        # Issue #219: the image auto-selection rule, for one Item or every bound Item. It records
+        # the rule's own selection and never moves an operator's.
+        "/api/v1/products/items/{item_id}/image-auto-selection": {"post"},
+        "/api/v1/products/image-auto-selection": {"post"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404

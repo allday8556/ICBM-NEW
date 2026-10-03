@@ -17,15 +17,19 @@ against that same revision. The deterministic identity is the recipe, its canoni
 provenance and its output: a retry of one completed derivation is one, while another recipe or
 another completed execution producing equal bytes is another derivation sharing one artifact.
 
-**Selection** is an operator decision, never a default: nothing selects an image when a Product
-materializes. It accounts for every CONFIRMED source image of the Item's current bound revision,
-one decision each (use it, replace it with a derived artifact traced to it, or exclude it), and
-orders the images the Item uses. A selection revision, its current-pointer move and both audit
-events commit together.
+**Selection** is an operator's decision or the image auto-selection rule's (Issue #219, owner
+decision 2026-10-03; ADR-0013 §9 amendment), recorded with its origin. It accounts for every
+CONFIRMED source image of the Item's current bound revision, one decision each (use it, replace it
+with a derived artifact traced to it, or exclude it), and orders the images the Item uses, each as
+the representative image, an additional image or a detail-body image. An operator's selection
+always supersedes the rule's. A selection revision, its current-pointer move and both audit events
+commit together.
 
 **QA** is bound to one exact binary — kind, SHA, derivation where derived — under one validated
 source revision, one QA rule version and one input fingerprint. A verdict never transfers to
-another SHA, another derivation or another revision, and one exact input has one verdict.
+another SHA, another derivation or another revision, and one exact input has one verdict. Readiness
+reads the verdict under the rule in force, and without one the automatic rule QA of an
+auto-selected source image (``image-qa-auto/v1``, Issue #219 §4).
 """
 
 import logging
@@ -38,9 +42,12 @@ from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
 from app.stages.collect.models import ProductFactsRevision, SourceAsset
+from app.stages.products.common_images import EXCLUDED, effective_supplier, verdicts
 from app.stages.products.image_model import (
+    AUTO_QA_RULE_VERSION,
     DEFAULT_QA_RULE_VERSION,
     CompletedDerivation,
+    DecisionOrigin,
     ImageAssetKind,
     ImageError,
     QaVerdict,
@@ -79,6 +86,9 @@ IMAGE_QA_STALE = "IMAGE_QA_STALE"
 IMAGE_QA_REVIEW_REQUIRED = "IMAGE_QA_REVIEW_REQUIRED"
 IMAGE_QA_FAILED = "IMAGE_QA_FAILED"
 IMAGE_FINDING_PREFIX = "IMAGE_FINDING_"
+# Issue #219 §2.3: a rule's selection uses a file that is now a blocked, or an undecided, supplier
+# common image. It is never changed silently; the operator rechecks it.
+IMAGE_SELECTION_RECHECK_REQUIRED = "IMAGE_SELECTION_RECHECK_REQUIRED"
 
 
 class ImageQaConflictError(AppError):
@@ -284,73 +294,100 @@ class ProductImageService:
         correlation_id: str | None = None,
     ) -> tuple[SelectionRecord, SelectionMove]:
         """Record an operator's full image decision for one Item and make it current, atomically."""
-        correlation = correlation_id or get_correlation_id() or new_correlation_id()
         if not decided_by:
             raise _refusal("PRODUCTS_IMAGE_SELECTION_ACTOR", "a selection names its operator")
         with self._store.transaction() as unit:
-            procurement = current_procurement(unit, item_id)
-            binding = procurement.binding
-            if (
-                binding is None
-                or binding.provenance_revision_id != source_revision_id
-                or procurement.current_revision_id != source_revision_id
-            ):
-                raise _refusal(
-                    "PRODUCTS_IMAGE_SELECTION_NOT_CURRENT",
-                    "a selection reviews the current bound source revision of the Item",
-                )
-            images = self._images(unit)
-            refs = {
-                (ref.role, ref.ordinal): ref for ref in images.confirmed_refs(source_revision_id)
-            }
-            decided: dict[tuple[object, int], SourceDecision] = {}
-            for decision in decisions:
-                key = (decision.role, decision.ordinal)
-                ref = refs.get(key)
-                if key in decided:
-                    raise _refusal("PRODUCTS_IMAGE_SELECTION_DUPLICATE", "one decision per image")
-                if ref is None or ref.sha256 != decision.sha256:
-                    raise _refusal(
-                        "PRODUCTS_IMAGE_SELECTION_UNKNOWN_SOURCE",
-                        "a decision names a CONFIRMED source image of the reviewed revision",
-                    )
-                self._check_decision(images, decision, source_revision_id)
-                decided[key] = decision
-            if set(decided) != set(refs):
-                # Leaving an image out is not an exclusion: every image is decided explicitly.
-                raise _refusal(
-                    "PRODUCTS_IMAGE_SELECTION_INCOMPLETE",
-                    "every CONFIRMED source image needs an explicit decision",
-                )
-            chosen = self._resolve_outputs(images, outputs, decided)
-            fingerprint = source_decision_fingerprint(list(refs.values()))
-            selection = images.record_selection(
-                item_id=item_id,
-                product_group_id=procurement.item.product_group_id,
+            return self.record_selection_in(
+                unit,
+                item_id,
                 source_revision_id=source_revision_id,
-                source_decision_fingerprint=fingerprint,
-                selection_fingerprint=digest(
-                    {
-                        "source_revision_id": source_revision_id,
-                        "source_decision_fingerprint": fingerprint,
-                        "decisions": [
-                            [d.role.value, d.ordinal, d.sha256, d.decision.value, d.derivation_id]
-                            for d in decisions
-                        ],
-                        "outputs": [
-                            [o.role.value, kind.value, sha, derivation]
-                            for o, kind, sha, derivation in chosen
-                        ],
-                    }
-                ),
-                decisions=list(decided.values()),
-                outputs=chosen,
+                decisions=decisions,
+                outputs=outputs,
                 decided_by=decided_by,
                 reason=reason,
-                correlation_id=correlation,
+                origin=DecisionOrigin.OPERATOR,
+                correlation_id=correlation_id,
             )
-            move = images.record_move(selection, decided_by=decided_by, correlation_id=correlation)
-            self._audit_selection(unit, selection, move, correlation)
+
+    def record_selection_in(
+        self,
+        unit: ProductFoundationUnit,
+        item_id: str,
+        *,
+        source_revision_id: str,
+        decisions: Sequence[SourceDecision],
+        outputs: Sequence[SelectedOutput],
+        decided_by: str,
+        reason: str | None,
+        origin: DecisionOrigin,
+        correlation_id: str | None = None,
+        notes: Sequence[Sequence[object]] = (),
+    ) -> tuple[SelectionRecord, SelectionMove]:
+        """Record one full image decision for one Item in the caller's unit and make it current.
+        The operator's and the rule's selections are held to exactly the same rules."""
+        correlation = correlation_id or get_correlation_id() or new_correlation_id()
+        procurement = current_procurement(unit, item_id)
+        binding = procurement.binding
+        if (
+            binding is None
+            or binding.provenance_revision_id != source_revision_id
+            or procurement.current_revision_id != source_revision_id
+        ):
+            raise _refusal(
+                "PRODUCTS_IMAGE_SELECTION_NOT_CURRENT",
+                "a selection reviews the current bound source revision of the Item",
+            )
+        images = self._images(unit)
+        refs = {(ref.role, ref.ordinal): ref for ref in images.confirmed_refs(source_revision_id)}
+        decided: dict[tuple[object, int], SourceDecision] = {}
+        for decision in decisions:
+            key = (decision.role, decision.ordinal)
+            ref = refs.get(key)
+            if key in decided:
+                raise _refusal("PRODUCTS_IMAGE_SELECTION_DUPLICATE", "one decision per image")
+            if ref is None or ref.sha256 != decision.sha256:
+                raise _refusal(
+                    "PRODUCTS_IMAGE_SELECTION_UNKNOWN_SOURCE",
+                    "a decision names a CONFIRMED source image of the reviewed revision",
+                )
+            self._check_decision(images, decision, source_revision_id)
+            decided[key] = decision
+        if set(decided) != set(refs):
+            # Leaving an image out is not an exclusion: every image is decided explicitly.
+            raise _refusal(
+                "PRODUCTS_IMAGE_SELECTION_INCOMPLETE",
+                "every CONFIRMED source image needs an explicit decision",
+            )
+        chosen = self._resolve_outputs(images, outputs, decided)
+        fingerprint = source_decision_fingerprint(list(refs.values()))
+        selection = images.record_selection(
+            item_id=item_id,
+            product_group_id=procurement.item.product_group_id,
+            source_revision_id=source_revision_id,
+            source_decision_fingerprint=fingerprint,
+            selection_fingerprint=digest(
+                {
+                    "source_revision_id": source_revision_id,
+                    "source_decision_fingerprint": fingerprint,
+                    "decisions": [
+                        [d.role.value, d.ordinal, d.sha256, d.decision.value, d.derivation_id]
+                        for d in decisions
+                    ],
+                    "outputs": [
+                        [o.role.value, kind.value, sha, derivation]
+                        for o, kind, sha, derivation in chosen
+                    ],
+                }
+            ),
+            decisions=list(decided.values()),
+            outputs=chosen,
+            decided_by=decided_by,
+            reason=reason,
+            correlation_id=correlation,
+            decision_origin=origin,
+        )
+        move = images.record_move(selection, decided_by=decided_by, correlation_id=correlation)
+        self._audit_selection(unit, selection, move, correlation, notes)
         return selection, move
 
     @staticmethod
@@ -426,6 +463,7 @@ class ProductImageService:
         selection: SelectionRecord,
         move: SelectionMove,
         correlation: str,
+        notes: Sequence[Sequence[object]] = (),
     ) -> None:
         self._audit.append(
             AuditEntry(
@@ -449,6 +487,8 @@ class ProductImageService:
                         [o.position, o.role.value, o.asset_kind.value, o.sha256, o.derivation_id]
                         for o in selection.outputs
                     ],
+                    # What a rule placed or left out, and why (Issue #219 §2.4).
+                    **({"notes": [list(note) for note in notes]} if notes else {}),
                 },
                 correlation_id=correlation,
             ),
@@ -496,19 +536,8 @@ class ProductImageService:
             found: list[CandidateImage] = []
             for ref in images.confirmed_refs(revision) if revision is not None else ():
                 assert revision is not None
-                qa = images.qa_by_input(
-                    asset_kind=ImageAssetKind.SOURCE_ASSET,
-                    sha256=ref.sha256,
-                    derivation_id=None,
-                    validated_source_revision_id=revision,
-                    qa_rule_version=self.qa_rule_version,
-                    qa_input_fingerprint=qa_input_fingerprint(
-                        asset_kind=ImageAssetKind.SOURCE_ASSET,
-                        sha256=ref.sha256,
-                        derivation_id=None,
-                        validated_source_revision_id=revision,
-                        qa_rule_version=self.qa_rule_version,
-                    ),
+                qa = self._effective_qa(
+                    images, ImageAssetKind.SOURCE_ASSET, ref.sha256, None, revision
                 )
                 found.append(
                     CandidateImage(
@@ -662,29 +691,55 @@ class ProductImageService:
         derivation_id: str | None,
         validated_source_revision_id: str,
     ) -> QaRecord | None:
-        """The verdict for this exact binary under the current QA rule, if one exists."""
+        """The verdict for this exact binary under the QA rule in force, else its automatic rule
+        QA (a source image only), if one exists."""
         with self._store.reading() as unit:
-            return self._images(unit).qa_by_input(
+            return self._effective_qa(
+                self._images(unit), asset_kind, sha256, derivation_id, validated_source_revision_id
+            )
+
+    def _effective_qa(
+        self,
+        images: ImageUnit,
+        asset_kind: ImageAssetKind,
+        sha256: str,
+        derivation_id: str | None,
+        revision_id: str,
+    ) -> QaRecord | None:
+        """The operator's verdict under the rule in force supersedes the automatic rule QA, which
+        only ever covers a source image (Issue #219 §4)."""
+        rules = [self.qa_rule_version]
+        if asset_kind is ImageAssetKind.SOURCE_ASSET:
+            rules.append(AUTO_QA_RULE_VERSION)
+        for rule in rules:
+            found = images.qa_by_input(
                 asset_kind=asset_kind,
                 sha256=sha256,
                 derivation_id=derivation_id,
-                validated_source_revision_id=validated_source_revision_id,
-                qa_rule_version=self.qa_rule_version,
+                validated_source_revision_id=revision_id,
+                qa_rule_version=rule,
                 qa_input_fingerprint=qa_input_fingerprint(
                     asset_kind=asset_kind,
                     sha256=sha256,
                     derivation_id=derivation_id,
-                    validated_source_revision_id=validated_source_revision_id,
-                    qa_rule_version=self.qa_rule_version,
+                    validated_source_revision_id=revision_id,
+                    qa_rule_version=rule,
                 ),
             )
+            if found is not None:
+                return found
+        return None
 
     # ------------------------------------------------------------------ readiness input
 
     def readiness_truth(self, unit: ProductFoundationUnit) -> dict[str, object]:
         """What :meth:`image_state` can read, as a state that never returns to an earlier value:
         every image table's row count, and the QA rule it evaluates under (Gate 2 G2-C)."""
-        return {"qa_rule_version": self.qa_rule_version, **self._images(unit).readiness_truth()}
+        return {
+            "qa_rule_version": self.qa_rule_version,
+            "auto_qa_rule_version": AUTO_QA_RULE_VERSION,
+            **self._images(unit).readiness_truth(),
+        }
 
     def image_state(
         self, unit: ProductFoundationUnit, item_id: str, current_revision_id: str | None
@@ -705,7 +760,12 @@ class ProductImageService:
             "selection_source_revision_id": selection.source_revision_id,
             "current_source_revision_id": current_revision_id,
             "qa_rule_version": self.qa_rule_version,
-            "outputs": [[o.asset_kind.value, o.sha256, o.derivation_id] for o in selection.outputs],
+            "auto_qa_rule_version": AUTO_QA_RULE_VERSION,
+            "decision_origin": selection.decision_origin.value,
+            "outputs": [
+                [o.role.value, o.asset_kind.value, o.sha256, o.derivation_id]
+                for o in selection.outputs
+            ],
         }
         current_refs = (
             () if current_revision_id is None else images.confirmed_refs(current_revision_id)
@@ -739,6 +799,15 @@ class ProductImageService:
         reasons: list[Reason] = []
         if not selection.outputs:
             reasons.append(Reason(IMAGE_SELECTION_EMPTY, ReadinessStatus.REVIEW_REQUIRED, "images"))
+        if selection.decision_origin is DecisionOrigin.RULE:
+            # The rule never places a blocked or undecided supplier common image; one in its
+            # selection now became one afterwards. It is shown, never changed silently.
+            recheck = self._now_excluded(images, current_revision_id, selection)
+            fingerprint["recheck"] = recheck
+            reasons.extend(
+                Reason(IMAGE_SELECTION_RECHECK_REQUIRED, ReadinessStatus.REVIEW_REQUIRED, subject)
+                for subject in recheck
+            )
         verdicts: list[object] = []
         for output in selection.outputs:
             subject = f"{output.role.value}:{output.position}"
@@ -749,19 +818,8 @@ class ProductImageService:
                     or derivation.validated_source_revision_id != current_revision_id
                 ):
                     reasons.append(Reason(IMAGE_DERIVATION_STALE, ReadinessStatus.STALE, subject))
-            qa = images.qa_by_input(
-                asset_kind=output.asset_kind,
-                sha256=output.sha256,
-                derivation_id=output.derivation_id,
-                validated_source_revision_id=current_revision_id,
-                qa_rule_version=self.qa_rule_version,
-                qa_input_fingerprint=qa_input_fingerprint(
-                    asset_kind=output.asset_kind,
-                    sha256=output.sha256,
-                    derivation_id=output.derivation_id,
-                    validated_source_revision_id=current_revision_id,
-                    qa_rule_version=self.qa_rule_version,
-                ),
+            qa = self._effective_qa(
+                images, output.asset_kind, output.sha256, output.derivation_id, current_revision_id
             )
             if qa is None:
                 verdicts.append(None)
@@ -792,3 +850,18 @@ class ProductImageService:
             )
         fingerprint["qa"] = verdicts
         return ImageState(tuple(reasons), fingerprint)
+
+    @staticmethod
+    def _now_excluded(images: ImageUnit, revision_id: str, selection: SelectionRecord) -> list[str]:
+        """The outputs of a selection whose file is now a blocked or undecided supplier common
+        image of the revision's supplier."""
+        revision = images.session.get(ProductFactsRevision, revision_id)
+        if revision is None:
+            return []
+        supplier = effective_supplier(images.session, revision)
+        found = verdicts(images.session, supplier, [o.sha256 for o in selection.outputs])
+        return [
+            f"{o.role.value}:{o.position}"
+            for o in selection.outputs
+            if found.get(o.sha256) in EXCLUDED
+        ]

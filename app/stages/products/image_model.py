@@ -23,6 +23,11 @@ QA_INPUT_VERSION: Final = "image-qa-input/v1"
 CURRENT_SELECTION_RULE_VERSION: Final = "current-image-selection-rule/v1"
 # The QA rule in force. A different version recorded on a result makes it stale for readiness.
 DEFAULT_QA_RULE_VERSION: Final = "image-qa/v1"
+# The automatic rule QA of an auto-selected source image (Issue #219 §4, owner decision
+# 2026-10-03): file checks only — stored bytes, an image media type, a byte size and decoded
+# dimensions — never the image's content. An operator verdict under the rule in force always
+# supersedes it.
+AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v1"
 
 MAX_INPUTS: Final = 16
 MAX_OPERATIONS: Final = 16
@@ -67,9 +72,21 @@ class SourceDecisionKind(StrEnum):
 
 
 class DecisionOrigin(StrEnum):
-    """A selection is an operator decision, never a derived default."""
+    """Who made a selection: an operator, or the image auto-selection rule (Issue #219, owner
+    decision 2026-10-03). A rule's selection is recorded as the rule's, never as an operator's,
+    and an operator's selection always supersedes it."""
 
     OPERATOR = "OPERATOR"
+    RULE = "RULE"
+
+
+class OutputRole(StrEnum):
+    """What a selected image is for: the listing's representative image, an additional (gallery)
+    image, or an image of the detail body (Issue #219 §2.2)."""
+
+    REPRESENTATIVE = "REPRESENTATIVE"
+    ADDITIONAL = "ADDITIONAL"
+    DETAIL = "DETAIL"
 
 
 class SelectionMoveReason(StrEnum):
@@ -330,7 +347,7 @@ class SelectedOutput:
     """One image the Item uses now, in order: the decision it comes from and the role it plays.
     Its exact binary follows from that decision, so it cannot disagree with it."""
 
-    role: ImageRole
+    role: OutputRole
     source_role: ImageRole
     source_ordinal: int
 

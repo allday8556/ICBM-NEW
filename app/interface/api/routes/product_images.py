@@ -23,6 +23,7 @@ from app.stages.products.common_images import (
 )
 from app.stages.products.image_model import (
     ImageAssetKind,
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SourceDecision,
@@ -41,7 +42,7 @@ class SourceDecisionRequest(BaseModel):
 
 
 class SelectedOutputRequest(BaseModel):
-    role: ImageRole
+    role: OutputRole
     source_role: ImageRole
     source_ordinal: int
 
@@ -52,6 +53,10 @@ class ImageSelectionRequest(BaseModel):
     outputs: list[SelectedOutputRequest]
     actor: str = Field(min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class AutoSelectionRequest(BaseModel):
+    item_ids: list[str] | None = Field(default=None, max_length=1000)
 
 
 class CommonImageDecisionRequest(BaseModel):
@@ -120,6 +125,27 @@ def image_candidates(item_id: str, container: ContainerDep) -> dict[str, Any]:
             for image in found.images
         ],
         "current_selection": _selection(found.current_selection),
+        # Issue #219: what the image auto-selection would select here, or why it would not.
+        "auto_selection": _preview(container.auto_images.preview(item_id)),
+    }
+
+
+def _preview(found: Any) -> dict[str, Any]:
+    return {
+        "blocked": None if found.blocked is None else found.blocked.value,
+        "detail": found.detail,
+        "outputs": [
+            {
+                "role": o.role.value,
+                "source_role": o.source_role.value,
+                "source_ordinal": o.source_ordinal,
+            }
+            for o in found.outputs
+        ],
+        "notes": [
+            {"source_role": role, "source_ordinal": ordinal, "note": note}
+            for role, ordinal, note in found.notes
+        ],
     }
 
 
@@ -235,3 +261,32 @@ def decide_supplier_common_image(
         supplier_key, sha256, request.verdict, decided_by=request.actor, reason=request.reason
     )
     return {"supplier_key": supplier_key, "sha256": sha256, **(_common_decision(decision) or {})}
+
+
+# ---------------------------------------------------------------- image auto-selection (#219)
+
+
+def _auto(result: Any) -> dict[str, Any]:
+    return {
+        "item_id": result.item_id,
+        "status": result.status.value,
+        "blocked": None if result.blocked is None else result.blocked.value,
+        "detail": result.detail,
+        "selection": _selection(result.selection),
+    }
+
+
+@router.post("/api/v1/products/items/{item_id}/image-auto-selection")
+def auto_select_images(item_id: str, container: ContainerDep) -> dict[str, Any]:
+    """The image auto-selection rule for one Item (Issue #219). An operator's selection is never
+    moved; a rule that cannot select says why."""
+    return _auto(container.auto_images.auto_select(item_id))
+
+
+@router.post("/api/v1/products/image-auto-selection")
+def auto_select_all_images(
+    request: AutoSelectionRequest, container: ContainerDep
+) -> dict[str, Any]:
+    """The rule over the named Items, or every Item with an open source binding."""
+    results = container.auto_images.auto_select_all(request.item_ids)
+    return {"results": [_auto(result) for result in results]}

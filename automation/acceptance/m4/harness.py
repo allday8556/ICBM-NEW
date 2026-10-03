@@ -46,6 +46,7 @@ from app.stages.products.image_model import (
     ImageAssetKind,
     OperationOutcome,
     OperationRecord,
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SourceDecision,
@@ -338,7 +339,8 @@ def _select_and_qa(
     recording it again returns the same verdict."""
     o = run.owners
     outputs = [
-        SelectedOutput(role=d.role, source_role=d.role, source_ordinal=d.ordinal) for d in decisions
+        SelectedOutput(role=OutputRole(d.role.value), source_role=d.role, source_ordinal=d.ordinal)
+        for d in decisions
     ]
     selection, move = operator.scripted_selection(
         o.images,

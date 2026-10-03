@@ -38,6 +38,7 @@ from app.stages.products.image_model import (
     MAX_SPEC_BYTES,
     DecisionOrigin,
     ImageAssetKind,
+    OutputRole,
     QaVerdict,
     SelectionMoveReason,
     SourceDecisionKind,
@@ -247,7 +248,7 @@ class ImageSelectionOutput(Base):
     __table_args__ = (
         UniqueConstraint("selection_revision_id", "source_role", "source_ordinal"),
         CheckConstraint("position >= 0", name="position_non_negative"),
-        CheckConstraint(_in("role", ImageRole), name="role_valid"),
+        CheckConstraint(_in("role", OutputRole), name="role_valid"),
         CheckConstraint(_in("asset_kind", ImageAssetKind), name="asset_kind_valid"),
         CheckConstraint(_hex64("sha256"), name="sha256_hex"),
         CheckConstraint(_kind("asset_kind", "derivation_id"), name="derived_names_derivation"),
