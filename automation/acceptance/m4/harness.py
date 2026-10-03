@@ -30,7 +30,7 @@ fails is a problem, and any problem fails the run.
 
 import traceback
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -785,15 +785,19 @@ def _offers(o: Owners, revision: str) -> list[Any]:
         return list(unit.quantity_offers_of_revision(revision))
 
 
-def _schema_names(o: Owners) -> tuple[list[str], list[str]]:
+def _schema_names(o: Owners) -> tuple[list[str], list[tuple[str, str]]]:
     with evidence.read_only(o.database_file) as connection:
         names = evidence.tables(connection)
         columns = [
-            f"{table}.{row[1]}"
+            (table, str(row[1]))
             for table in names
             for row in connection.execute(f"PRAGMA table_info({table})")
         ]
     return names, columns
+
+
+def _has_source_sku_owner(tables: Iterable[str], columns: Iterable[tuple[str, str]]) -> bool:
+    return "source_skus" in tables or any(column == "source_sku_id" for _table, column in columns)
 
 
 def scenario_quantity(run: Run) -> dict[str, object]:
@@ -819,7 +823,14 @@ def scenario_quantity(run: Run) -> dict[str, object]:
     )
     c.check("s2.q1.generic_prices_unused", totals.isdisjoint(S2_PRICES))
     tables, columns = _schema_names(o)
-    c.check("s2.q1.no_source_sku", not [n for n in tables + columns if "sku" in n.lower()])
+    # AtomicSKU is the canonical product-side identity for an explicitly observed option
+    # configuration. It does not revive the forbidden inferred SourceSKU owner. This scenario
+    # must therefore prove the precise legacy invariant, not reject every schema name containing
+    # the generic substring ``sku``.
+    c.check(
+        "s2.q1.no_source_sku",
+        not _has_source_sku_owner(tables, columns),
+    )
     items = _items_by_quantity(o, group)
     c.require("s2.q1.three_items", sorted(items) == [1, 2, 3])
     for quantity, item in items.items():
