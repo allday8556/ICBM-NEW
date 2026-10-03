@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.capabilities.jobs.models import Job
@@ -376,19 +376,67 @@ class CollectionRunStore:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             return _record(row)
 
-    def recent(self, *, limit: int) -> tuple[CollectionRunRecord, ...]:
+    def recent(
+        self,
+        *,
+        limit: int,
+        outcome: CollectionOutcome | None = None,
+        facts_status: FactsStatus | None = None,
+        before: CollectionRunRecord | None = None,
+    ) -> tuple[CollectionRunRecord, ...]:
         """The newest runs, newest first, exactly as the database holds them (Gate 1 G1-E).
 
         Ordered by request time and then by identifier, so the order is total and a reload shows
         the same list. These rows are the only run history: nothing is copied anywhere else.
+
+        A filter narrows the rows **before** they are ordered and bounded, so a page of
+        REVIEW_REQUIRED runs is the newest REVIEW_REQUIRED runs, never the REVIEW_REQUIRED ones
+        among the newest runs. ``before`` continues after a run already shown, in the same order.
         """
+        query = select(CollectionRun).where(*self._filters(outcome, facts_status))
+        if before is not None:
+            query = query.where(
+                or_(
+                    CollectionRun.requested_at < before.requested_at,
+                    (CollectionRun.requested_at == before.requested_at)
+                    & (CollectionRun.collection_run_id < before.collection_run_id),
+                )
+            )
         with self._db.read() as session:
             rows = session.scalars(
-                select(CollectionRun)
-                .order_by(CollectionRun.requested_at.desc(), CollectionRun.collection_run_id.desc())
-                .limit(limit)
+                query.order_by(
+                    CollectionRun.requested_at.desc(), CollectionRun.collection_run_id.desc()
+                ).limit(limit)
             ).all()
             return tuple(_record(row) for row in rows)
+
+    def count(
+        self,
+        *,
+        outcome: CollectionOutcome | None = None,
+        facts_status: FactsStatus | None = None,
+    ) -> int:
+        """How many runs a filter selects, counted where they are held."""
+        with self._db.read() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(CollectionRun)
+                    .where(*self._filters(outcome, facts_status))
+                )
+                or 0
+            )
+
+    @staticmethod
+    def _filters(
+        outcome: CollectionOutcome | None, facts_status: FactsStatus | None
+    ) -> list[ColumnElement[bool]]:
+        filters: list[ColumnElement[bool]] = []
+        if outcome is not None:
+            filters.append(CollectionRun.outcome == outcome.value)
+        if facts_status is not None:
+            filters.append(CollectionRun.facts_status == facts_status.value)
+        return filters
 
     def unsettled_job_ids(
         self, terminal_states: Sequence[str], *, limit: int = 500
