@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.config import AppConfig, database_path
 from app.container import Container
@@ -985,6 +986,45 @@ def test_atomic_sku_items_extend_legacy_items_without_reinterpreting_them(
         ):
             with pytest.raises(sqlite3.IntegrityError, match="append-only"):
                 raw.execute(statement)
+
+
+def test_atomic_sku_item_requires_an_active_product_group(
+    config: AppConfig, container: Container
+) -> None:
+    group, revision, common = _foundation(container)
+    atomic_set = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, revision, 0, ("300mg", "30정")),),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    atomic_sku = atomic_set.atomic_skus[0]
+
+    with contextlib.closing(_raw(config)) as raw:
+        raw.execute(
+            "UPDATE product_groups SET status = 'RETIRED',"
+            " retired_at = '2026-10-04 00:00:00' WHERE product_group_id = ?",
+            (group,),
+        )
+        raw.commit()
+
+    with pytest.raises(IntegrityError, match="ACTIVE group"):
+        container.atomic_sku_items.item(group, composition.composition_id, atomic_sku.atomic_sku_id)
+
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="ACTIVE group"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            atomic_sku.atomic_sku_id,
+            atomic_sku.selection_signature,
+        )
 
 
 def test_atomic_sku_item_requires_current_membership(container: Container) -> None:
