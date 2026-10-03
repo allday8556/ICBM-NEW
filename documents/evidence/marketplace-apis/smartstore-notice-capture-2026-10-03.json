@@ -1,0 +1,5525 @@
+{
+ "list": {
+  "items": [
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldAddDescription": "섬유의 조성 또는 혼용율을 백분율로 표시, 기능성인 경우 성적서 또는 허가서",
+      "fieldDescription": "제품 소재",
+      "fieldMaxLength": 1500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "치수",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "세탁 방법 및 취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조연월",
+      "fieldMaxLength": 300,
+      "fieldName": "packDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "제조연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "packDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "WEAR",
+    "productInfoProvidedNoticeTypeName": "의류"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldAddDescription": "운동화인 경우에는 겉감, 안감을 구분하여 표시",
+      "fieldDescription": "제품의 주 소재",
+      "fieldMaxLength": 1500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "해외사이즈 표기 시 국내사이즈 병행 표기(단위: mm)",
+      "fieldDescription": "발길이",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "굽 재료를 사용하는 여성화에 한함(단위: cm)",
+      "fieldDescription": "굽높이",
+      "fieldMaxLength": 200,
+      "fieldName": "height",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "SHOES",
+    "productInfoProvidedNoticeTypeName": "구두/신발"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "종류",
+      "fieldMaxLength": 200,
+      "fieldName": "type",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소재",
+      "fieldMaxLength": 1500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "BAG",
+    "productInfoProvidedNoticeTypeName": "가방"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "종류",
+      "fieldMaxLength": 200,
+      "fieldName": "type",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소재",
+      "fieldMaxLength": 1500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "치수",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "FASHION_ITEMS",
+    "productInfoProvidedNoticeTypeName": "패션잡화(모자/벨트/액세서리 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldAddDescription": "섬유의 조성 또는 혼용율을 백분율로 표시, 충전재를 사용한 제품은 충전재를 함께 표기",
+      "fieldDescription": "제품 소재",
+      "fieldMaxLength": 1500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "치수",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품 구성",
+      "fieldMaxLength": 1000,
+      "fieldName": "components",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "세탁 방법 및 취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "SLEEPING_GEAR",
+    "productInfoProvidedNoticeTypeName": "침구류/커튼"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 공급자적합성확인대상제품에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "구성품",
+      "fieldMaxLength": 500,
+      "fieldName": "components",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "주요 소재",
+      "fieldMaxLength": 500,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "구성품별 제조자(사)가 다른 경우 각 구성품의 제조자(사)",
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입품의 경우 수입자를 함께 표시. 구성품별 제조자가 다른 경우 각 구성품의 수입자",
+      "fieldDescription": "수입자",
+      "fieldMaxLength": 200,
+      "fieldName": "importer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "구성품별 제조국이 다른 경우 각 구성품의 제조국",
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "배송 설치 비용",
+      "fieldMaxLength": 200,
+      "fieldName": "installedCharge",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "재공급(리퍼브) 가구의 경우 재공급 사유 및 하자 부위 표시(예: 전시 상품으로 식탁 상판 등에 미세한 흠집 있음)",
+      "fieldDescription": "재공급 사유 및 하자",
+      "fieldMaxLength": 200,
+      "fieldName": "refurb",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "FURNITURE",
+    "productInfoProvidedNoticeTypeName": "가구(침대/소파/싱크대/DIY제품 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+      "fieldDescription": "에너지소비효율등급",
+      "fieldMaxLength": 200,
+      "fieldName": "energyEfficiencyRating",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월일 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기, 형태",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "추가 설치 비용",
+      "fieldMaxLength": 200,
+      "fieldName": "additionalCost",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "화면 크기, 해상도, 화면 비율 등",
+      "fieldDescription": "화면 사양",
+      "fieldMaxLength": 200,
+      "fieldName": "displaySpecification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "IMAGE_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "영상가전(TV류)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+      "fieldDescription": "에너지소비효율등급",
+      "fieldMaxLength": 200,
+      "fieldName": "energyEfficiencyRating",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월일 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기, 용량, 형태",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "추가 설치 비용",
+      "fieldMaxLength": 200,
+      "fieldName": "additionalCost",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "HOME_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "가정용전기제품(냉장고/세탁기/식기세척기/전자레인지 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+      "fieldDescription": "에너지소비효율등급",
+      "fieldMaxLength": 200,
+      "fieldName": "energyEfficiencyRating",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "실외기 포함",
+      "fieldDescription": "크기, 형태",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "냉난방 면적",
+      "fieldMaxLength": 200,
+      "fieldName": "area",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "추가 설치 비용",
+      "fieldMaxLength": 500,
+      "fieldName": "installedCharge",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "SEASON_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "계절가전(에어컨/온풍기 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+      "fieldDescription": "에너지소비효율등급",
+      "fieldMaxLength": 200,
+      "fieldName": "energyEfficiencyRating",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "무게는 노트북 등 휴대형 기기에 한함",
+      "fieldDescription": "무게",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등.",
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "OFFICE_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "사무용기기(컴퓨터/노트북/프린터 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "무게",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등.",
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "OPTICS_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "광학기기(디지털카메라/캠코더 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "무게",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "MICROELECTRONICS",
+    "productInfoProvidedNoticeTypeName": "소형전자(MP3/전자사전 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 200,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "무게",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "맵 업데이트 비용",
+      "fieldMaxLength": 200,
+      "fieldName": "updateCost",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "무상 기간",
+      "fieldMaxLength": 200,
+      "fieldName": "freeCostPeriod",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "NAVIGATION",
+    "productInfoProvidedNoticeTypeName": "내비게이션"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢자동차관리법｣에 따른 부품자기인증 대상 자동차부품 ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "연료절감장치에 한함",
+      "fieldDescription": "제품 사용으로 인한 위험 및 유의사항",
+      "fieldMaxLength": 200,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "적용 차종",
+      "fieldMaxLength": 1000,
+      "fieldName": "applyModel",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢대기환경보전법｣에 따른 첨가제·촉매제에 한함",
+      "fieldDescription": "검사합격증 번호",
+      "fieldMaxLength": 50,
+      "fieldName": "roadWorthyCertification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "CAR_ARTICLES",
+    "productInfoProvidedNoticeTypeName": "자동차용품 (자동차부품/기타 자동차용품 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢의료기기법｣에 따른 허가·인증·신고 대상 의료기기에 한함",
+      "fieldDescription": "허가·인증·신고번호",
+      "fieldMaxLength": 30,
+      "fieldName": "licenceNo",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "광고사전심의 필 유무",
+      "fieldMaxLength": 200,
+      "fieldName": "advertisingCertificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "전기용품에 한함",
+      "fieldDescription": "정격전압",
+      "fieldMaxLength": 1500,
+      "fieldName": "ratedVoltage",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "전기용품에 한함",
+      "fieldDescription": "소비전력",
+      "fieldMaxLength": 200,
+      "fieldName": "powerConsumption",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품의 사용 목적",
+      "fieldMaxLength": 500,
+      "fieldName": "purpose",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용 방법",
+      "fieldMaxLength": 500,
+      "fieldName": "usage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취급 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "MEDICAL_APPLIANCES",
+    "productInfoProvidedNoticeTypeName": "의료기기"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "재질",
+      "fieldMaxLength": 200,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "구성품",
+      "fieldMaxLength": 500,
+      "fieldName": "component",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢수입식품안전관리 특별법｣에 따른 수입기구 또는 용기·포장의 경우",
+      "fieldDescription": "수입식품안전관리특별법에 따른 수입신고",
+      "fieldName": "importDeclaration",
+      "fieldType": "Boolean"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "KITCHEN_UTENSILS",
+    "productInfoProvidedNoticeTypeName": "주방용품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "내용물의 용량 및 중량",
+      "fieldMaxLength": 200,
+      "fieldName": "capacity",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "피부 타입, 색상(호, 번) 등",
+      "fieldDescription": "제품 주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용기한 또는 개봉 후 사용기간",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "사용기한 또는 개봉 후 사용기간 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용 방법",
+      "fieldMaxLength": 1500,
+      "fieldName": "usage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "화장품 제조업자",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "화장품책임판매업자",
+      "fieldMaxLength": 200,
+      "fieldName": "distributor",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "맞춤형 화장품판매업자",
+      "fieldMaxLength": 200,
+      "fieldName": "customizedDistributor",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분",
+      "fieldMaxLength": 1500,
+      "fieldName": "mainIngredient",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "화장품법에 따른 기능성 화장품 심사(또는 보고)를 필함",
+      "fieldDescription": "｢화장품법｣에 따른 기능성 화장품(미백, 주름개선, 자외선 차단제품 등)의 경우",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용할 때의 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "COSMETIC",
+    "productInfoProvidedNoticeTypeName": "화장품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "소재",
+      "fieldMaxLength": 200,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "순도",
+      "fieldMaxLength": 200,
+      "fieldName": "purity",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "시계의 경우",
+      "fieldDescription": "밴드 재질",
+      "fieldMaxLength": 200,
+      "fieldName": "bandMaterial",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "중량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "원산지, 가공지 등이 다를 경우 함께 표기",
+      "fieldDescription": "제조국(원산지, 가공지 등이 다를 경우)",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "치수",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "착용 시 주의사항",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "귀금속, 보석류의 경우 등급, 시계의 경우 기능, 방수 등",
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 1500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "보증서 제공 여부",
+      "fieldMaxLength": 200,
+      "fieldName": "provideWarranty",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "JEWELLERY",
+    "productInfoProvidedNoticeTypeName": "귀금속/보석/시계류"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품목 또는 명칭",
+      "fieldMaxLength": 200,
+      "fieldName": "foodItem",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 용량(중량), 수량, 크기",
+      "fieldMaxLength": 50,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 수량",
+      "fieldMaxLength": 200,
+      "fieldName": "amount",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조연월일",
+      "fieldMaxLength": 300,
+      "fieldName": "packDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "제조연월일 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "packDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유통기한",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "유통기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비기한 또는 품질유지기한",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "소비기한 또는 품질유지기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "생산자",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "농산물\n- ｢농수산물 품질관리법｣에 따른 유전자변형농수산물 표시, 지리적 표시 축산물\n- 축산법에 따른 등급 표시 등급(1++ 국내산 쇠고기의 경우 ｢소·돼지 식육의 표시방법 및 부위 구분기준｣에 따라 근내지방도 정보를 포함하여 표시), ｢가축 및 축산물 이력관리에 관한 법률｣에 따른 이력관리대상축산물 유무 수입 농수축산물\n- 수입식품안전관리특별법에 따른 수입신고를 필함",
+      "fieldDescription": "세부 품목군별 표시사항",
+      "fieldMaxLength": 200,
+      "fieldName": "relevantLawContent",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상품 구성",
+      "fieldMaxLength": 200,
+      "fieldName": "productComposition",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "보관 방법 또는 취급 방법",
+      "fieldMaxLength": 500,
+      "fieldName": "keep",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+      "fieldDescription": "소비자 안전을 위한 주의사항",
+      "fieldMaxLength": 500,
+      "fieldName": "adCaution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "FOOD",
+    "productInfoProvidedNoticeTypeName": "식품(농.축.수산물)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "제품명",
+      "fieldMaxLength": 200,
+      "fieldName": "productName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "식품의 유형",
+      "fieldMaxLength": 200,
+      "fieldName": "foodType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "생산자",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입품의 경우 생산자, 수입자 및 제조국",
+      "fieldDescription": "소재지",
+      "fieldMaxLength": 200,
+      "fieldName": "location",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조연월일",
+      "fieldMaxLength": 300,
+      "fieldName": "packDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "제조연월일 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "packDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유통기한",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "유통기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비기한 또는 품질유지기한",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "소비기한 또는 품질유지기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 내용물의 용량(중량), 수량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 수량",
+      "fieldMaxLength": 200,
+      "fieldName": "amount",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "단, 함량의 경우에는 원재료 함량 표시대상 식품에 한함",
+      "fieldDescription": "원재료명(｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량",
+      "fieldMaxLength": 1000,
+      "fieldName": "ingredients",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "영양성분 표시대상 식품에 한함",
+      "fieldDescription": "영양 성분",
+      "fieldMaxLength": 1000,
+      "fieldName": "nutritionFacts",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유전자변형식품에 해당하는 경우의 표시",
+      "fieldName": "geneticallyModified",
+      "fieldType": "Boolean"
+     },
+     {
+      "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+      "fieldDescription": "소비자안전을 위한 주의사항",
+      "fieldMaxLength": 500,
+      "fieldName": "consumerSafetyCaution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "수입식품의 경우 신고 필 유무",
+      "fieldName": "importDeclarationCheck",
+      "fieldType": "Boolean"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "GENERAL_FOOD",
+    "productInfoProvidedNoticeTypeName": "가공식품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "제품명",
+      "fieldMaxLength": 200,
+      "fieldName": "productName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조업소",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입품의 경우 수입업소명, 제조업소명 및 수출국명",
+      "fieldDescription": "소재지",
+      "fieldMaxLength": 200,
+      "fieldName": "location",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유통기한",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "유통기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비기한",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "소비기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "consumptionDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "보관방법",
+      "fieldMaxLength": 200,
+      "fieldName": "storageMethod",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 내용물의 용량(중량), 수량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "포장 단위별 수량",
+      "fieldMaxLength": 200,
+      "fieldName": "amount",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함",
+      "fieldDescription": "원료명 및 함량",
+      "fieldMaxLength": 1000,
+      "fieldName": "ingredients",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "영양 정보",
+      "fieldMaxLength": 1000,
+      "fieldName": "nutritionFacts",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "기능 정보",
+      "fieldMaxLength": 1000,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "섭취량, 섭취 방법 및 섭취 시 주의사항",
+      "fieldMaxLength": 1000,
+      "fieldName": "cautionAndSideEffect",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "질병의 예방 및 치료를 위한 의약품이 아니라는 내용의 문구",
+      "fieldMaxLength": 200,
+      "fieldName": "nonMedicinalUsesMessage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유전자변형건강기능식품에 해당하는 경우의 표시",
+      "fieldName": "geneticallyModified",
+      "fieldType": "Boolean"
+     },
+     {
+      "fieldDescription": "수입 건강기능식품에 해당하는 경우",
+      "fieldName": "importDeclarationCheck",
+      "fieldType": "Boolean"
+     },
+     {
+      "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+      "fieldDescription": "소비자안전을 위한 주의사항",
+      "fieldMaxLength": 500,
+      "fieldName": "consumerSafetyCaution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "DIET_FOOD",
+    "productInfoProvidedNoticeTypeName": "건강기능식품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢어린이제품 안전 특별법｣에 따른 안전인증·안전확인·공급자적합성확인대상 어린이제품에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "섬유제품 등의 경우 치수 정보로 대체 가능",
+      "fieldDescription": "중량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "섬유의 경우 혼용율",
+      "fieldDescription": "재질",
+      "fieldMaxLength": 200,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용 연령 또는 권장 사용 연령",
+      "fieldMaxLength": 30,
+      "fieldName": "recommendedAge",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취급방법 및 취급 시 주의사항, 안전표시(주의, 경고 등)",
+      "fieldMaxLength": 1500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "착용 또는 탑승용 어린이제품과 같이 크기·체중에 제한이 있는 품목의 경우 반드시 표시",
+      "fieldDescription": "크기·체중의 한계",
+      "fieldMaxLength": 200,
+      "fieldName": "numberLimit",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "KIDS",
+    "productInfoProvidedNoticeTypeName": "어린이제품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "재질",
+      "fieldMaxLength": 200,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품 구성",
+      "fieldMaxLength": 1000,
+      "fieldName": "components",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상품별 세부 사양",
+      "fieldMaxLength": 1000,
+      "fieldName": "detailContent",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "MUSICAL_INSTRUMENT",
+    "productInfoProvidedNoticeTypeName": "악기"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 200,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "중량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "색상",
+      "fieldMaxLength": 200,
+      "fieldName": "color",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "재질",
+      "fieldMaxLength": 200,
+      "fieldName": "material",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품 구성",
+      "fieldMaxLength": 1000,
+      "fieldName": "components",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상품별 세부 사양",
+      "fieldMaxLength": 1000,
+      "fieldName": "detailContent",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 1500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "SPORTS_EQUIPMENT",
+    "productInfoProvidedNoticeTypeName": "스포츠용품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "도서명",
+      "fieldMaxLength": 200,
+      "fieldName": "title",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "저자",
+      "fieldMaxLength": 200,
+      "fieldName": "author",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "출판사",
+      "fieldMaxLength": 200,
+      "fieldName": "publisher",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 200,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "쪽수",
+      "fieldMaxLength": 30,
+      "fieldName": "pages",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "전집 또는 세트일경우 낱권 구성, CD 등",
+      "fieldDescription": "제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등)",
+      "fieldMaxLength": 1000,
+      "fieldName": "components",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외",
+      "fieldDescription": "발행일",
+      "fieldMaxLength": 200,
+      "fieldName": "publishDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldAddDescription": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외",
+      "fieldDescription": "발행일 직접 입력",
+      "fieldMaxLength": 200,
+      "fieldName": "publishDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "아동용 학습교재의 경우 사용 연령을 포함",
+      "fieldDescription": "목차 또는 책 소개",
+      "fieldMaxLength": 1000,
+      "fieldName": "description",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "BOOKS",
+    "productInfoProvidedNoticeTypeName": "서적"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시",
+      "fieldDescription": "소유권 이전 조건",
+      "fieldMaxLength": 500,
+      "fieldName": "ownershipTransferCondition",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상품의 고장, 분실, 훼손 시 소비자 책임",
+      "fieldMaxLength": 200,
+      "fieldName": "payingForLossOrDamage",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "중도 해약 시 환불 기준",
+      "fieldMaxLength": 500,
+      "fieldName": "refundPolicyForCancel",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "RENTAL_ETC",
+    "productInfoProvidedNoticeTypeName": "물품대여서비스(서적,유아용품,행사용품 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "유지 보수 조건",
+      "fieldName": "maintenance",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품 사양",
+      "fieldName": "specification",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "RENTAL_HA",
+    "productInfoProvidedNoticeTypeName": "물품대여서비스(정수기,비데,공기청정기 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "제작자 또는 공급자",
+      "fieldMaxLength": 50,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이용 조건",
+      "fieldMaxLength": 500,
+      "fieldName": "termsOfUse",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이용 기간",
+      "fieldMaxLength": 200,
+      "fieldName": "usePeriod",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "CD, 다운로드, 실시간 스트리밍 등",
+      "fieldDescription": "상품 제공 방식",
+      "fieldMaxLength": 30,
+      "fieldName": "medium",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "최소 시스템 사양, 필수 소프트웨어",
+      "fieldMaxLength": 200,
+      "fieldName": "requirement",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "청약철회 및 계약의 해제, 해지에 따른 효과",
+      "fieldMaxLength": 500,
+      "fieldName": "cancelationPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "DIGITAL_CONTENTS",
+    "productInfoProvidedNoticeTypeName": "디지털콘텐츠(음원,게임,인터넷강의 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "발행자",
+      "fieldMaxLength": 20,
+      "fieldName": "issuer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "유효기간 시작일",
+      "fieldMaxLength": 200,
+      "fieldName": "periodStartDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "유효기간 종료일",
+      "fieldMaxLength": 200,
+      "fieldName": "periodEndDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldDescription": "유효기간(구매일로부터 00일)",
+      "fieldMaxLength": 200,
+      "fieldName": "periodDays",
+      "fieldType": "Integer"
+     },
+     {
+      "fieldAddDescription": "유효기간 경과 시 보상 기준, 사용 제한 품목 제한 및 기간 등",
+      "fieldDescription": "이용 조건",
+      "fieldMaxLength": 200,
+      "fieldName": "termsOfUse",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이용 가능 매장(장소)",
+      "fieldMaxLength": 330,
+      "fieldName": "useStorePlace",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이용 가능 매장(판매자 주소 ID)",
+      "fieldName": "useStoreAddressId",
+      "fieldType": "Long"
+     },
+     {
+      "fieldDescription": "이용 가능 매장(URL)",
+      "fieldMaxLength": 330,
+      "fieldName": "useStoreUrl",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "잔액 환급 조건",
+      "fieldMaxLength": 500,
+      "fieldName": "refundPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "GIFT_CARD",
+    "productInfoProvidedNoticeTypeName": "상품권/쿠폰"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "발행자",
+      "fieldMaxLength": 20,
+      "fieldName": "issuer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "유효기간 경과 시 보상 기준 포함",
+      "fieldDescription": "유효기간, 이용 조건",
+      "fieldMaxLength": 200,
+      "fieldName": "usableCondition",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이용 가능 매장",
+      "fieldMaxLength": 330,
+      "fieldName": "usableStore",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "환불 조건 및 방법",
+      "fieldMaxLength": 200,
+      "fieldName": "cancelationPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "MOBILE_COUPON",
+    "productInfoProvidedNoticeTypeName": "모바일쿠폰"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldAddDescription": "공연에 한함",
+      "fieldDescription": "주최 또는 기획",
+      "fieldMaxLength": 200,
+      "fieldName": "sponsor",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "공연에 한함",
+      "fieldDescription": "주연",
+      "fieldMaxLength": 200,
+      "fieldName": "actor",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "관람 등급",
+      "fieldMaxLength": 200,
+      "fieldName": "rating",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상영ㆍ공연 시간",
+      "fieldMaxLength": 200,
+      "fieldName": "showTime",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "상영ㆍ공연 장소",
+      "fieldMaxLength": 200,
+      "fieldName": "showPlace",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "예매 취소 조건",
+      "fieldMaxLength": 200,
+      "fieldName": "cancelationCondition",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취소ㆍ환불 방법",
+      "fieldMaxLength": 200,
+      "fieldName": "cancelationPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "MOVIE_SHOW",
+    "productInfoProvidedNoticeTypeName": "영화/공연"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "서비스 제공 사업자",
+      "fieldMaxLength": 200,
+      "fieldName": "serviceProvider",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "법에 의한 인증ㆍ허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+      "fieldMaxLength": 200,
+      "fieldName": "certificateDetails",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "이용 가능 기간·장소, 추가 비용 등",
+      "fieldDescription": "이용 조건",
+      "fieldMaxLength": 200,
+      "fieldName": "usableCondition",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취소ㆍ중도해약ㆍ해지 조건 및 환불 기준",
+      "fieldMaxLength": 200,
+      "fieldName": "cancelationStandard",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "취소ㆍ환불 방법",
+      "fieldMaxLength": 200,
+      "fieldName": "cancelationPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "ETC_SERVICE",
+    "productInfoProvidedNoticeTypeName": "기타 용역"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품목 및 제품명",
+      "fieldMaxLength": 200,
+      "fieldName": "productName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "표백제의 경우 계열을 함께 표시",
+      "fieldDescription": "용도 및 제형",
+      "fieldMaxLength": 200,
+      "fieldName": "dosageForm",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조연월",
+      "fieldMaxLength": 300,
+      "fieldName": "packDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "제조연월 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "packDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "해당 사항이 없으면 생략하고 expirationDateText에 '해당사항 없음' 입력",
+      "fieldDescription": "유통기한",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldAddDescription": "해당 사항이 없으면 '해당사항 없음' 입력",
+      "fieldDescription": "유통기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "중량·용량·매수·크기",
+      "fieldMaxLength": 1500,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "승인 대상 생활화학제품에 한함",
+      "fieldDescription": "효능ㆍ효과",
+      "fieldMaxLength": 200,
+      "fieldName": "effect",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입제품에 한함",
+      "fieldDescription": "수입자",
+      "fieldMaxLength": 200,
+      "fieldName": "importer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "어린이보호포장 대상 제품 여부",
+      "fieldMaxLength": 200,
+      "fieldName": "childProtection",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢안전확인대상 생활화학제품 지정 및 안전·표시기준｣ [별표6]에 따른 표시대상 화학물질로서 주요물질, 보존제, 알레르기반응가능물질 등의 명칭",
+      "fieldDescription": "제품에 사용된 화학 물질 명칭",
+      "fieldMaxLength": 200,
+      "fieldName": "chemicals",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용상 주의사항",
+      "fieldMaxLength": 500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "화학제품안전법 시행일(경과조치 기간 포함) 이전에 생산·수입된 위해우려제품의 경우 종전 법에 따른 자가 검사번호를 표시",
+      "fieldDescription": "안전기준적합확인신고번호 또는 안전확인대상 생활화학제품승인번호",
+      "fieldMaxLength": 200,
+      "fieldName": "safeCriterionNo",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "BIOCHEMISTRY",
+    "productInfoProvidedNoticeTypeName": "생활화학제품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "제품명 및 살생물제품유형",
+      "fieldMaxLength": 200,
+      "fieldName": "productName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "중량 또는 용량 및 표준 사용량",
+      "fieldMaxLength": 200,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "효능ㆍ효과",
+      "fieldMaxLength": 200,
+      "fieldName": "effect",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용 대상자 및 사용 범위",
+      "fieldMaxLength": 200,
+      "fieldName": "rangeOfUse",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입제품에 한함",
+      "fieldDescription": "수입자",
+      "fieldMaxLength": 200,
+      "fieldName": "importer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "어린이보호포장 대상 제품 여부",
+      "fieldMaxLength": 200,
+      "fieldName": "childProtection",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "살생물물질, 나노물질, 유해화학물질(또는 중점관리물질)의 명칭",
+      "fieldMaxLength": 200,
+      "fieldName": "harmfulChemicalSubstance",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제품 유해성ㆍ위해성 표시",
+      "fieldMaxLength": 200,
+      "fieldName": "maleficence",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "사용 방법 및 사용상 주의사항",
+      "fieldMaxLength": 500,
+      "fieldName": "caution",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "승인번호",
+      "fieldMaxLength": 200,
+      "fieldName": "approvalNumber",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자상담 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "'yyyy-MM-dd' 형식 입력",
+      "fieldDescription": "유통기한",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDate",
+      "fieldType": "LocalDate"
+     },
+     {
+      "fieldAddDescription": "expirationDate를 입력하지 않은 경우에는 필수",
+      "fieldDescription": "유통기한 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "expirationDateText",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "BIOCIDAL",
+    "productInfoProvidedNoticeTypeName": "살생물제품"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품목",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+      "fieldDescription": "KC 인증정보",
+      "fieldMaxLength": 50,
+      "fieldName": "certificationType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "동일 모델의 출시연월",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDate",
+      "fieldType": "YearMonth"
+     },
+     {
+      "fieldDescription": "동일 모델 출시연월일 직접 입력",
+      "fieldMaxLength": 300,
+      "fieldName": "releaseDateText",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "수입품의 경우 수입자를 함께 표시",
+      "fieldDescription": "수입자",
+      "fieldMaxLength": 200,
+      "fieldName": "importer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조국",
+      "fieldMaxLength": 200,
+      "fieldName": "producer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "크기",
+      "fieldMaxLength": 50,
+      "fieldName": "size",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "무게",
+      "fieldMaxLength": 50,
+      "fieldName": "weight",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "이동통신사",
+      "fieldMaxLength": 50,
+      "fieldName": "telecomType",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "가입절차",
+      "fieldMaxLength": 50,
+      "fieldName": "joinProcess",
+      "fieldType": "String"
+     },
+     {
+      "fieldAddDescription": "가입비, 유심카드 구입비 등 추가로 부담하여야 할 금액, 부가서비스, 의무사용기간, 위약금 등",
+      "fieldDescription": "소비자의 추가적인 부담사항",
+      "fieldMaxLength": 50,
+      "fieldName": "extraBurden",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "주요 사양",
+      "fieldMaxLength": 500,
+      "fieldName": "specification",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "품질 보증 기준",
+      "fieldMaxLength": 500,
+      "fieldName": "warrantyPolicy",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자와 전화번호",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "CELLPHONE",
+    "productInfoProvidedNoticeTypeName": "휴대폰 통신기기(휴대폰/태블릿 등)"
+   },
+   {
+    "productInfoProvidedNoticeContents": [
+     {
+      "fieldDescription": "품명",
+      "fieldMaxLength": 50,
+      "fieldName": "itemName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "모델명",
+      "fieldMaxLength": 50,
+      "fieldName": "modelName",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+      "fieldMaxLength": 500,
+      "fieldName": "certificateDetails",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "제조자(사)",
+      "fieldMaxLength": 200,
+      "fieldName": "manufacturer",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "A/S 책임자",
+      "fieldMaxLength": 200,
+      "fieldName": "afterServiceDirector",
+      "fieldType": "String"
+     },
+     {
+      "fieldDescription": "소비자 상담 관련 전화번호",
+      "fieldMaxLength": 30,
+      "fieldName": "customerServicePhoneNumber",
+      "fieldType": "String"
+     }
+    ],
+    "productInfoProvidedNoticeType": "ETC",
+    "productInfoProvidedNoticeTypeName": "기타 재화"
+   }
+  ]
+ },
+ "runs": [
+  {
+   "finished_at": "2026-10-03T08:32:51.299539+00:00",
+   "mapping_revision": "m5-notice-r1",
+   "started_at": "2026-10-03T08:32:40.680915+00:00"
+  },
+  {
+   "finished_at": "2026-10-03T08:34:23.099411+00:00",
+   "mapping_revision": "m5-notice-r1",
+   "started_at": "2026-10-03T08:34:12.673810+00:00"
+  },
+  {
+   "finished_at": "2026-10-03T09:14:53.499773+00:00",
+   "mapping_revision": "m5-notice-r1",
+   "started_at": "2026-10-03T09:14:06.827998+00:00"
+  }
+ ],
+ "types": {
+  "BAG": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "종류",
+     "fieldMaxLength": 200,
+     "fieldName": "type",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소재",
+     "fieldMaxLength": 1500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "BAG",
+   "productInfoProvidedNoticeTypeName": "가방"
+  },
+  "BIOCHEMISTRY": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품목 및 제품명",
+     "fieldMaxLength": 200,
+     "fieldName": "productName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "표백제의 경우 계열을 함께 표시",
+     "fieldDescription": "용도 및 제형",
+     "fieldMaxLength": 200,
+     "fieldName": "dosageForm",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조연월",
+     "fieldMaxLength": 300,
+     "fieldName": "packDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "제조연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "packDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "해당 사항이 없으면 생략하고 expirationDateText에 '해당사항 없음' 입력",
+     "fieldDescription": "유통기한",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldAddDescription": "해당 사항이 없으면 '해당사항 없음' 입력",
+     "fieldDescription": "유통기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "중량·용량·매수·크기",
+     "fieldMaxLength": 1500,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "승인 대상 생활화학제품에 한함",
+     "fieldDescription": "효능ㆍ효과",
+     "fieldMaxLength": 200,
+     "fieldName": "effect",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입제품에 한함",
+     "fieldDescription": "수입자",
+     "fieldMaxLength": 200,
+     "fieldName": "importer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "어린이보호포장 대상 제품 여부",
+     "fieldMaxLength": 200,
+     "fieldName": "childProtection",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢안전확인대상 생활화학제품 지정 및 안전·표시기준｣ [별표6]에 따른 표시대상 화학물질로서 주요물질, 보존제, 알레르기반응가능물질 등의 명칭",
+     "fieldDescription": "제품에 사용된 화학 물질 명칭",
+     "fieldMaxLength": 200,
+     "fieldName": "chemicals",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용상 주의사항",
+     "fieldMaxLength": 500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "화학제품안전법 시행일(경과조치 기간 포함) 이전에 생산·수입된 위해우려제품의 경우 종전 법에 따른 자가 검사번호를 표시",
+     "fieldDescription": "안전기준적합확인신고번호 또는 안전확인대상 생활화학제품승인번호",
+     "fieldMaxLength": 200,
+     "fieldName": "safeCriterionNo",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "BIOCHEMISTRY",
+   "productInfoProvidedNoticeTypeName": "생활화학제품"
+  },
+  "BIOCIDAL": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "제품명 및 살생물제품유형",
+     "fieldMaxLength": 200,
+     "fieldName": "productName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "중량 또는 용량 및 표준 사용량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "효능ㆍ효과",
+     "fieldMaxLength": 200,
+     "fieldName": "effect",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용 대상자 및 사용 범위",
+     "fieldMaxLength": 200,
+     "fieldName": "rangeOfUse",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입제품에 한함",
+     "fieldDescription": "수입자",
+     "fieldMaxLength": 200,
+     "fieldName": "importer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "어린이보호포장 대상 제품 여부",
+     "fieldMaxLength": 200,
+     "fieldName": "childProtection",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "살생물물질, 나노물질, 유해화학물질(또는 중점관리물질)의 명칭",
+     "fieldMaxLength": 200,
+     "fieldName": "harmfulChemicalSubstance",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품 유해성ㆍ위해성 표시",
+     "fieldMaxLength": 200,
+     "fieldName": "maleficence",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용 방법 및 사용상 주의사항",
+     "fieldMaxLength": 500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "승인번호",
+     "fieldMaxLength": 200,
+     "fieldName": "approvalNumber",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자상담 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "'yyyy-MM-dd' 형식 입력",
+     "fieldDescription": "유통기한",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldAddDescription": "expirationDate를 입력하지 않은 경우에는 필수",
+     "fieldDescription": "유통기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "BIOCIDAL",
+   "productInfoProvidedNoticeTypeName": "살생물제품"
+  },
+  "BOOKS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "도서명",
+     "fieldMaxLength": 200,
+     "fieldName": "title",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "저자",
+     "fieldMaxLength": 200,
+     "fieldName": "author",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "출판사",
+     "fieldMaxLength": 200,
+     "fieldName": "publisher",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "쪽수",
+     "fieldMaxLength": 30,
+     "fieldName": "pages",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "전집 또는 세트일경우 낱권 구성, CD 등",
+     "fieldDescription": "제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등)",
+     "fieldMaxLength": 1000,
+     "fieldName": "components",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외",
+     "fieldDescription": "발행일",
+     "fieldMaxLength": 200,
+     "fieldName": "publishDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldAddDescription": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외",
+     "fieldDescription": "발행일 직접 입력",
+     "fieldMaxLength": 200,
+     "fieldName": "publishDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "아동용 학습교재의 경우 사용 연령을 포함",
+     "fieldDescription": "목차 또는 책 소개",
+     "fieldMaxLength": 1000,
+     "fieldName": "description",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "BOOKS",
+   "productInfoProvidedNoticeTypeName": "서적"
+  },
+  "CAR_ARTICLES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢자동차관리법｣에 따른 부품자기인증 대상 자동차부품 ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "연료절감장치에 한함",
+     "fieldDescription": "제품 사용으로 인한 위험 및 유의사항",
+     "fieldMaxLength": 200,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "적용 차종",
+     "fieldMaxLength": 1000,
+     "fieldName": "applyModel",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢대기환경보전법｣에 따른 첨가제·촉매제에 한함",
+     "fieldDescription": "검사합격증 번호",
+     "fieldMaxLength": 50,
+     "fieldName": "roadWorthyCertification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "CAR_ARTICLES",
+   "productInfoProvidedNoticeTypeName": "자동차용품 (자동차부품/기타 자동차용품 등)"
+  },
+  "CELLPHONE": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품목",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 50,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월일 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입품의 경우 수입자를 함께 표시",
+     "fieldDescription": "수입자",
+     "fieldMaxLength": 200,
+     "fieldName": "importer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 50,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "무게",
+     "fieldMaxLength": 50,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이동통신사",
+     "fieldMaxLength": 50,
+     "fieldName": "telecomType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "가입절차",
+     "fieldMaxLength": 50,
+     "fieldName": "joinProcess",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "가입비, 유심카드 구입비 등 추가로 부담하여야 할 금액, 부가서비스, 의무사용기간, 위약금 등",
+     "fieldDescription": "소비자의 추가적인 부담사항",
+     "fieldMaxLength": 50,
+     "fieldName": "extraBurden",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "CELLPHONE",
+   "productInfoProvidedNoticeTypeName": "휴대폰 통신기기(휴대폰/태블릿 등)"
+  },
+  "COSMETIC": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "내용물의 용량 및 중량",
+     "fieldMaxLength": 200,
+     "fieldName": "capacity",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "피부 타입, 색상(호, 번) 등",
+     "fieldDescription": "제품 주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용기한 또는 개봉 후 사용기간",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "사용기한 또는 개봉 후 사용기간 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용 방법",
+     "fieldMaxLength": 1500,
+     "fieldName": "usage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "화장품 제조업자",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "화장품책임판매업자",
+     "fieldMaxLength": 200,
+     "fieldName": "distributor",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "맞춤형 화장품판매업자",
+     "fieldMaxLength": 200,
+     "fieldName": "customizedDistributor",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분",
+     "fieldMaxLength": 1500,
+     "fieldName": "mainIngredient",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "화장품법에 따른 기능성 화장품 심사(또는 보고)를 필함",
+     "fieldDescription": "｢화장품법｣에 따른 기능성 화장품(미백, 주름개선, 자외선 차단제품 등)의 경우",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용할 때의 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "COSMETIC",
+   "productInfoProvidedNoticeTypeName": "화장품"
+  },
+  "DIET_FOOD": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "제품명",
+     "fieldMaxLength": 200,
+     "fieldName": "productName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조업소",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입품의 경우 수입업소명, 제조업소명 및 수출국명",
+     "fieldDescription": "소재지",
+     "fieldMaxLength": 200,
+     "fieldName": "location",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유통기한",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "유통기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비기한",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "소비기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "보관방법",
+     "fieldMaxLength": 200,
+     "fieldName": "storageMethod",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 내용물의 용량(중량), 수량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 수량",
+     "fieldMaxLength": 200,
+     "fieldName": "amount",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함",
+     "fieldDescription": "원료명 및 함량",
+     "fieldMaxLength": 1000,
+     "fieldName": "ingredients",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "영양 정보",
+     "fieldMaxLength": 1000,
+     "fieldName": "nutritionFacts",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "기능 정보",
+     "fieldMaxLength": 1000,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "섭취량, 섭취 방법 및 섭취 시 주의사항",
+     "fieldMaxLength": 1000,
+     "fieldName": "cautionAndSideEffect",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "질병의 예방 및 치료를 위한 의약품이 아니라는 내용의 문구",
+     "fieldMaxLength": 200,
+     "fieldName": "nonMedicinalUsesMessage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유전자변형건강기능식품에 해당하는 경우의 표시",
+     "fieldName": "geneticallyModified",
+     "fieldType": "Boolean"
+    },
+    {
+     "fieldDescription": "수입 건강기능식품에 해당하는 경우",
+     "fieldName": "importDeclarationCheck",
+     "fieldType": "Boolean"
+    },
+    {
+     "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+     "fieldDescription": "소비자안전을 위한 주의사항",
+     "fieldMaxLength": 500,
+     "fieldName": "consumerSafetyCaution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "DIET_FOOD",
+   "productInfoProvidedNoticeTypeName": "건강기능식품"
+  },
+  "DIGITAL_CONTENTS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "제작자 또는 공급자",
+     "fieldMaxLength": 50,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이용 조건",
+     "fieldMaxLength": 500,
+     "fieldName": "termsOfUse",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이용 기간",
+     "fieldMaxLength": 200,
+     "fieldName": "usePeriod",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "CD, 다운로드, 실시간 스트리밍 등",
+     "fieldDescription": "상품 제공 방식",
+     "fieldMaxLength": 30,
+     "fieldName": "medium",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "최소 시스템 사양, 필수 소프트웨어",
+     "fieldMaxLength": 200,
+     "fieldName": "requirement",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "청약철회 및 계약의 해제, 해지에 따른 효과",
+     "fieldMaxLength": 500,
+     "fieldName": "cancelationPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "DIGITAL_CONTENTS",
+   "productInfoProvidedNoticeTypeName": "디지털콘텐츠(음원,게임,인터넷강의 등)"
+  },
+  "ETC": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+     "fieldMaxLength": 500,
+     "fieldName": "certificateDetails",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "ETC",
+   "productInfoProvidedNoticeTypeName": "기타 재화"
+  },
+  "ETC_SERVICE": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "서비스 제공 사업자",
+     "fieldMaxLength": 200,
+     "fieldName": "serviceProvider",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "법에 의한 인증ㆍ허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+     "fieldMaxLength": 200,
+     "fieldName": "certificateDetails",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "이용 가능 기간·장소, 추가 비용 등",
+     "fieldDescription": "이용 조건",
+     "fieldMaxLength": 200,
+     "fieldName": "usableCondition",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취소ㆍ중도해약ㆍ해지 조건 및 환불 기준",
+     "fieldMaxLength": 200,
+     "fieldName": "cancelationStandard",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취소ㆍ환불 방법",
+     "fieldMaxLength": 200,
+     "fieldName": "cancelationPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "ETC_SERVICE",
+   "productInfoProvidedNoticeTypeName": "기타 용역"
+  },
+  "FASHION_ITEMS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "종류",
+     "fieldMaxLength": 200,
+     "fieldName": "type",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소재",
+     "fieldMaxLength": 1500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "치수",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "FASHION_ITEMS",
+   "productInfoProvidedNoticeTypeName": "패션잡화(모자/벨트/액세서리 등)"
+  },
+  "FOOD": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품목 또는 명칭",
+     "fieldMaxLength": 200,
+     "fieldName": "foodItem",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 용량(중량), 수량, 크기",
+     "fieldMaxLength": 50,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 수량",
+     "fieldMaxLength": 200,
+     "fieldName": "amount",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조연월일",
+     "fieldMaxLength": 300,
+     "fieldName": "packDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "제조연월일 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "packDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유통기한",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "유통기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비기한 또는 품질유지기한",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "소비기한 또는 품질유지기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "생산자",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "농산물\n- ｢농수산물 품질관리법｣에 따른 유전자변형농수산물 표시, 지리적 표시 축산물\n- 축산법에 따른 등급 표시 등급(1++ 국내산 쇠고기의 경우 ｢소·돼지 식육의 표시방법 및 부위 구분기준｣에 따라 근내지방도 정보를 포함하여 표시), ｢가축 및 축산물 이력관리에 관한 법률｣에 따른 이력관리대상축산물 유무 수입 농수축산물\n- 수입식품안전관리특별법에 따른 수입신고를 필함",
+     "fieldDescription": "세부 품목군별 표시사항",
+     "fieldMaxLength": 200,
+     "fieldName": "relevantLawContent",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상품 구성",
+     "fieldMaxLength": 200,
+     "fieldName": "productComposition",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "보관 방법 또는 취급 방법",
+     "fieldMaxLength": 500,
+     "fieldName": "keep",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+     "fieldDescription": "소비자 안전을 위한 주의사항",
+     "fieldMaxLength": 500,
+     "fieldName": "adCaution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "FOOD",
+   "productInfoProvidedNoticeTypeName": "식품(농.축.수산물)"
+  },
+  "FURNITURE": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 공급자적합성확인대상제품에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "구성품",
+     "fieldMaxLength": 500,
+     "fieldName": "components",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "주요 소재",
+     "fieldMaxLength": 500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "구성품별 제조자(사)가 다른 경우 각 구성품의 제조자(사)",
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입품의 경우 수입자를 함께 표시. 구성품별 제조자가 다른 경우 각 구성품의 수입자",
+     "fieldDescription": "수입자",
+     "fieldMaxLength": 200,
+     "fieldName": "importer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "구성품별 제조국이 다른 경우 각 구성품의 제조국",
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "배송 설치 비용",
+     "fieldMaxLength": 200,
+     "fieldName": "installedCharge",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "재공급(리퍼브) 가구의 경우 재공급 사유 및 하자 부위 표시(예: 전시 상품으로 식탁 상판 등에 미세한 흠집 있음)",
+     "fieldDescription": "재공급 사유 및 하자",
+     "fieldMaxLength": 200,
+     "fieldName": "refurb",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "FURNITURE",
+   "productInfoProvidedNoticeTypeName": "가구(침대/소파/싱크대/DIY제품 등)"
+  },
+  "GENERAL_FOOD": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "제품명",
+     "fieldMaxLength": 200,
+     "fieldName": "productName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "식품의 유형",
+     "fieldMaxLength": 200,
+     "fieldName": "foodType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "생산자",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "수입품의 경우 생산자, 수입자 및 제조국",
+     "fieldDescription": "소재지",
+     "fieldMaxLength": 200,
+     "fieldName": "location",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조연월일",
+     "fieldMaxLength": 300,
+     "fieldName": "packDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "제조연월일 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "packDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유통기한",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "유통기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "expirationDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비기한 또는 품질유지기한",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "소비기한 또는 품질유지기한 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "consumptionDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 내용물의 용량(중량), 수량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "포장 단위별 수량",
+     "fieldMaxLength": 200,
+     "fieldName": "amount",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "단, 함량의 경우에는 원재료 함량 표시대상 식품에 한함",
+     "fieldDescription": "원재료명(｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량",
+     "fieldMaxLength": 1000,
+     "fieldName": "ingredients",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "영양성분 표시대상 식품에 한함",
+     "fieldDescription": "영양 성분",
+     "fieldMaxLength": 1000,
+     "fieldName": "nutritionFacts",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유전자변형식품에 해당하는 경우의 표시",
+     "fieldName": "geneticallyModified",
+     "fieldType": "Boolean"
+    },
+    {
+     "fieldAddDescription": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함",
+     "fieldDescription": "소비자안전을 위한 주의사항",
+     "fieldMaxLength": 500,
+     "fieldName": "consumerSafetyCaution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "수입식품의 경우 신고 필 유무",
+     "fieldName": "importDeclarationCheck",
+     "fieldType": "Boolean"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "GENERAL_FOOD",
+   "productInfoProvidedNoticeTypeName": "가공식품"
+  },
+  "GIFT_CARD": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "발행자",
+     "fieldMaxLength": 20,
+     "fieldName": "issuer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "유효기간 시작일",
+     "fieldMaxLength": 200,
+     "fieldName": "periodStartDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "유효기간 종료일",
+     "fieldMaxLength": 200,
+     "fieldName": "periodEndDate",
+     "fieldType": "LocalDate"
+    },
+    {
+     "fieldDescription": "유효기간(구매일로부터 00일)",
+     "fieldMaxLength": 200,
+     "fieldName": "periodDays",
+     "fieldType": "Integer"
+    },
+    {
+     "fieldAddDescription": "유효기간 경과 시 보상 기준, 사용 제한 품목 제한 및 기간 등",
+     "fieldDescription": "이용 조건",
+     "fieldMaxLength": 200,
+     "fieldName": "termsOfUse",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이용 가능 매장(장소)",
+     "fieldMaxLength": 330,
+     "fieldName": "useStorePlace",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이용 가능 매장(판매자 주소 ID)",
+     "fieldName": "useStoreAddressId",
+     "fieldType": "Long"
+    },
+    {
+     "fieldDescription": "이용 가능 매장(URL)",
+     "fieldMaxLength": 330,
+     "fieldName": "useStoreUrl",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "잔액 환급 조건",
+     "fieldMaxLength": 500,
+     "fieldName": "refundPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "GIFT_CARD",
+   "productInfoProvidedNoticeTypeName": "상품권/쿠폰"
+  },
+  "HOME_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+     "fieldDescription": "에너지소비효율등급",
+     "fieldMaxLength": 200,
+     "fieldName": "energyEfficiencyRating",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월일 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기, 용량, 형태",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "추가 설치 비용",
+     "fieldMaxLength": 200,
+     "fieldName": "additionalCost",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "HOME_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "가정용전기제품(냉장고/세탁기/식기세척기/전자레인지 등)"
+  },
+  "IMAGE_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+     "fieldDescription": "에너지소비효율등급",
+     "fieldMaxLength": 200,
+     "fieldName": "energyEfficiencyRating",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월일 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기, 형태",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "추가 설치 비용",
+     "fieldMaxLength": 200,
+     "fieldName": "additionalCost",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "화면 크기, 해상도, 화면 비율 등",
+     "fieldDescription": "화면 사양",
+     "fieldMaxLength": 200,
+     "fieldName": "displaySpecification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "IMAGE_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "영상가전(TV류)"
+  },
+  "JEWELLERY": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "소재",
+     "fieldMaxLength": 200,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "순도",
+     "fieldMaxLength": 200,
+     "fieldName": "purity",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "시계의 경우",
+     "fieldDescription": "밴드 재질",
+     "fieldMaxLength": 200,
+     "fieldName": "bandMaterial",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "중량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "원산지, 가공지 등이 다를 경우 함께 표기",
+     "fieldDescription": "제조국(원산지, 가공지 등이 다를 경우)",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "치수",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "착용 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "귀금속, 보석류의 경우 등급, 시계의 경우 기능, 방수 등",
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "보증서 제공 여부",
+     "fieldMaxLength": 200,
+     "fieldName": "provideWarranty",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "JEWELLERY",
+   "productInfoProvidedNoticeTypeName": "귀금속/보석/시계류"
+  },
+  "KIDS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢어린이제품 안전 특별법｣에 따른 안전인증·안전확인·공급자적합성확인대상 어린이제품에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "섬유제품 등의 경우 치수 정보로 대체 가능",
+     "fieldDescription": "중량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "섬유의 경우 혼용율",
+     "fieldDescription": "재질",
+     "fieldMaxLength": 200,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용 연령 또는 권장 사용 연령",
+     "fieldMaxLength": 30,
+     "fieldName": "recommendedAge",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취급방법 및 취급 시 주의사항, 안전표시(주의, 경고 등)",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "착용 또는 탑승용 어린이제품과 같이 크기·체중에 제한이 있는 품목의 경우 반드시 표시",
+     "fieldDescription": "크기·체중의 한계",
+     "fieldMaxLength": 200,
+     "fieldName": "numberLimit",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "KIDS",
+   "productInfoProvidedNoticeTypeName": "어린이제품"
+  },
+  "KITCHEN_UTENSILS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "재질",
+     "fieldMaxLength": 200,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "구성품",
+     "fieldMaxLength": 500,
+     "fieldName": "component",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조국",
+     "fieldMaxLength": 200,
+     "fieldName": "producer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢수입식품안전관리 특별법｣에 따른 수입기구 또는 용기·포장의 경우",
+     "fieldDescription": "수입식품안전관리특별법에 따른 수입신고",
+     "fieldName": "importDeclaration",
+     "fieldType": "Boolean"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "KITCHEN_UTENSILS",
+   "productInfoProvidedNoticeTypeName": "주방용품"
+  },
+  "MEDICAL_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢의료기기법｣에 따른 허가·인증·신고 대상 의료기기에 한함",
+     "fieldDescription": "허가·인증·신고번호",
+     "fieldMaxLength": 30,
+     "fieldName": "licenceNo",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "광고사전심의 필 유무",
+     "fieldMaxLength": 200,
+     "fieldName": "advertisingCertificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "전기용품에 한함",
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 1500,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "전기용품에 한함",
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품의 사용 목적",
+     "fieldMaxLength": 500,
+     "fieldName": "purpose",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "사용 방법",
+     "fieldMaxLength": 500,
+     "fieldName": "usage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "MEDICAL_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "의료기기"
+  },
+  "MICROELECTRONICS": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "무게",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "MICROELECTRONICS",
+   "productInfoProvidedNoticeTypeName": "소형전자(MP3/전자사전 등)"
+  },
+  "MOBILE_COUPON": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "발행자",
+     "fieldMaxLength": 20,
+     "fieldName": "issuer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "유효기간 경과 시 보상 기준 포함",
+     "fieldDescription": "유효기간, 이용 조건",
+     "fieldMaxLength": 200,
+     "fieldName": "usableCondition",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "이용 가능 매장",
+     "fieldMaxLength": 330,
+     "fieldName": "usableStore",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "환불 조건 및 방법",
+     "fieldMaxLength": 200,
+     "fieldName": "cancelationPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "MOBILE_COUPON",
+   "productInfoProvidedNoticeTypeName": "모바일쿠폰"
+  },
+  "MOVIE_SHOW": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldAddDescription": "공연에 한함",
+     "fieldDescription": "주최 또는 기획",
+     "fieldMaxLength": 200,
+     "fieldName": "sponsor",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "공연에 한함",
+     "fieldDescription": "주연",
+     "fieldMaxLength": 200,
+     "fieldName": "actor",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "관람 등급",
+     "fieldMaxLength": 200,
+     "fieldName": "rating",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상영ㆍ공연 시간",
+     "fieldMaxLength": 200,
+     "fieldName": "showTime",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상영ㆍ공연 장소",
+     "fieldMaxLength": 200,
+     "fieldName": "showPlace",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "예매 취소 조건",
+     "fieldMaxLength": 200,
+     "fieldName": "cancelationCondition",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취소ㆍ환불 방법",
+     "fieldMaxLength": 200,
+     "fieldName": "cancelationPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "MOVIE_SHOW",
+   "productInfoProvidedNoticeTypeName": "영화/공연"
+  },
+  "MUSICAL_INSTRUMENT": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "재질",
+     "fieldMaxLength": 200,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품 구성",
+     "fieldMaxLength": 1000,
+     "fieldName": "components",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상품별 세부 사양",
+     "fieldMaxLength": 1000,
+     "fieldName": "detailContent",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "MUSICAL_INSTRUMENT",
+   "productInfoProvidedNoticeTypeName": "악기"
+  },
+  "NAVIGATION": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "무게",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "맵 업데이트 비용",
+     "fieldMaxLength": 200,
+     "fieldName": "updateCost",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "무상 기간",
+     "fieldMaxLength": 200,
+     "fieldName": "freeCostPeriod",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "NAVIGATION",
+   "productInfoProvidedNoticeTypeName": "내비게이션"
+  },
+  "OFFICE_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+     "fieldDescription": "에너지소비효율등급",
+     "fieldMaxLength": 200,
+     "fieldName": "energyEfficiencyRating",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "무게는 노트북 등 휴대형 기기에 한함",
+     "fieldDescription": "무게",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등.",
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "OFFICE_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "사무용기기(컴퓨터/노트북/프린터 등)"
+  },
+  "OPTICS_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "무게",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등.",
+     "fieldDescription": "주요 사양",
+     "fieldMaxLength": 1500,
+     "fieldName": "specification",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "OPTICS_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "광학기기(디지털카메라/캠코더 등)"
+  },
+  "RENTAL_ETC": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시",
+     "fieldDescription": "소유권 이전 조건",
+     "fieldMaxLength": 500,
+     "fieldName": "ownershipTransferCondition",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상품의 고장, 분실, 훼손 시 소비자 책임",
+     "fieldMaxLength": 200,
+     "fieldName": "payingForLossOrDamage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "중도 해약 시 환불 기준",
+     "fieldMaxLength": 500,
+     "fieldName": "refundPolicyForCancel",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비자 상담 관련 전화번호",
+     "fieldMaxLength": 30,
+     "fieldName": "customerServicePhoneNumber",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "RENTAL_ETC",
+   "productInfoProvidedNoticeTypeName": "물품대여서비스(서적,유아용품,행사용품 등)"
+  },
+  "RENTAL_HA": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "유지 보수 조건",
+     "fieldName": "maintenance",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품 사양",
+     "fieldName": "specification",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "RENTAL_HA",
+   "productInfoProvidedNoticeTypeName": "물품대여서비스(정수기,비데,공기청정기 등)"
+  },
+  "SEASON_APPLIANCES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "정격전압",
+     "fieldMaxLength": 200,
+     "fieldName": "ratedVoltage",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "소비전력",
+     "fieldMaxLength": 200,
+     "fieldName": "powerConsumption",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함",
+     "fieldDescription": "에너지소비효율등급",
+     "fieldMaxLength": 200,
+     "fieldName": "energyEfficiencyRating",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "실외기 포함",
+     "fieldDescription": "크기, 형태",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "냉난방 면적",
+     "fieldMaxLength": 200,
+     "fieldName": "area",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "추가 설치 비용",
+     "fieldMaxLength": 500,
+     "fieldName": "installedCharge",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "SEASON_APPLIANCES",
+   "productInfoProvidedNoticeTypeName": "계절가전(에어컨/온풍기 등)"
+  },
+  "SHOES": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldAddDescription": "운동화인 경우에는 겉감, 안감을 구분하여 표시",
+     "fieldDescription": "제품의 주 소재",
+     "fieldMaxLength": 1500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "해외사이즈 표기 시 국내사이즈 병행 표기(단위: mm)",
+     "fieldDescription": "발길이",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "굽 재료를 사용하는 여성화에 한함(단위: cm)",
+     "fieldDescription": "굽높이",
+     "fieldMaxLength": 200,
+     "fieldName": "height",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "SHOES",
+   "productInfoProvidedNoticeTypeName": "구두/신발"
+  },
+  "SLEEPING_GEAR": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldAddDescription": "섬유의 조성 또는 혼용율을 백분율로 표시, 충전재를 사용한 제품은 충전재를 함께 표기",
+     "fieldDescription": "제품 소재",
+     "fieldMaxLength": 1500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "치수",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품 구성",
+     "fieldMaxLength": 1000,
+     "fieldName": "components",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "세탁 방법 및 취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "SLEEPING_GEAR",
+   "productInfoProvidedNoticeTypeName": "침구류/커튼"
+  },
+  "SPORTS_EQUIPMENT": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldDescription": "품명",
+     "fieldMaxLength": 50,
+     "fieldName": "itemName",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "모델명",
+     "fieldMaxLength": 50,
+     "fieldName": "modelName",
+     "fieldType": "String"
+    },
+    {
+     "fieldAddDescription": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품에 한함",
+     "fieldDescription": "KC 인증정보",
+     "fieldMaxLength": 200,
+     "fieldName": "certificationType",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "크기",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "중량",
+     "fieldMaxLength": 200,
+     "fieldName": "weight",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "재질",
+     "fieldMaxLength": 200,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제품 구성",
+     "fieldMaxLength": 1000,
+     "fieldName": "components",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "동일 모델의 출시연월",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "동일 모델 출시연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "releaseDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "상품별 세부 사양",
+     "fieldMaxLength": 1000,
+     "fieldName": "detailContent",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "SPORTS_EQUIPMENT",
+   "productInfoProvidedNoticeTypeName": "스포츠용품"
+  },
+  "WEAR": {
+   "productInfoProvidedNoticeContents": [
+    {
+     "fieldAddDescription": "섬유의 조성 또는 혼용율을 백분율로 표시, 기능성인 경우 성적서 또는 허가서",
+     "fieldDescription": "제품 소재",
+     "fieldMaxLength": 1500,
+     "fieldName": "material",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "색상",
+     "fieldMaxLength": 200,
+     "fieldName": "color",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "치수",
+     "fieldMaxLength": 200,
+     "fieldName": "size",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조자(사)",
+     "fieldMaxLength": 200,
+     "fieldName": "manufacturer",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "세탁 방법 및 취급 시 주의사항",
+     "fieldMaxLength": 1500,
+     "fieldName": "caution",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "제조연월",
+     "fieldMaxLength": 300,
+     "fieldName": "packDate",
+     "fieldType": "YearMonth"
+    },
+    {
+     "fieldDescription": "제조연월 직접 입력",
+     "fieldMaxLength": 300,
+     "fieldName": "packDateText",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "품질 보증 기준",
+     "fieldMaxLength": 1500,
+     "fieldName": "warrantyPolicy",
+     "fieldType": "String"
+    },
+    {
+     "fieldDescription": "A/S 책임자와 전화번호",
+     "fieldMaxLength": 200,
+     "fieldName": "afterServiceDirector",
+     "fieldType": "String"
+    }
+   ],
+   "productInfoProvidedNoticeType": "WEAR",
+   "productInfoProvidedNoticeTypeName": "의류"
+  }
+ }
+}
