@@ -414,14 +414,44 @@ class ProductCollectionService:
             raise InputValidationError("COLLECT_URL_REFUSED", refused.message) from None
         return pacing_key(registered.collection, product_url).url
 
-    def recent_runs(self, limit: int | None = None) -> tuple[CollectionRunRecord, ...]:
-        """The newest runs, newest first: what the COLLECT screen follows after a reload."""
+    def recent_runs(
+        self,
+        limit: int | None = None,
+        *,
+        outcome: CollectionOutcome | None = None,
+        facts_status: FactsStatus | None = None,
+        before: str | None = None,
+    ) -> tuple[CollectionRunRecord, ...]:
+        """The newest runs, newest first: what the COLLECT screen follows after a reload.
+
+        ``outcome`` and ``facts_status`` select runs by what the run itself recorded, before the
+        bound; ``before`` names the last run already shown. Reads only.
+        """
         size = RECENT_RUNS_DEFAULT if limit is None else limit
         if isinstance(size, bool) or not 1 <= size <= RECENT_RUNS_MAX:
             raise InputValidationError(
                 "COLLECT_RUN_LIMIT_INVALID", f"between 1 and {RECENT_RUNS_MAX} runs are listed"
             )
-        return self._runs.recent(limit=size)
+        after = None
+        if before is not None:
+            try:
+                after = self._runs.get(before)
+            except NotFoundError:
+                raise InputValidationError(
+                    "COLLECT_RUN_CURSOR_INVALID", "the list continues after a run it showed"
+                ) from None
+        return self._runs.recent(
+            limit=size, outcome=outcome, facts_status=facts_status, before=after
+        )
+
+    def run_count(
+        self,
+        *,
+        outcome: CollectionOutcome | None = None,
+        facts_status: FactsStatus | None = None,
+    ) -> int:
+        """How many runs the same filter selects in all, so a page never stands for the whole."""
+        return self._runs.count(outcome=outcome, facts_status=facts_status)
 
     def recorded_source(self, collection_run_id: str) -> RecordedSource:
         """The source identity and revision a RECORDED run appended, read from that revision.

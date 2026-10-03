@@ -426,3 +426,111 @@ def test_a_submitted_run_is_followed_through_its_not_yet_visible_window(
             gate.set()
     # Every recheck was a read: the one POST is the operator's submit.
     assert len(wire.posts()) == 1
+
+
+# ------------------------------------------------------- A-UX1: 수집 사실 and the run filters
+
+
+def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+        _submit(page, "4242")
+        run_id = _outcome(page, "RECORDED")
+        facts = page.locator(f"{FOCUS} [data-role='collect-facts'][data-state='ready']")
+        facts.wait_for()
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        run = served_container.collection.run(run_id)
+        assert run.revision_id is not None
+        revision = client.get(
+            f"/api/v1/collect/revisions/{run.revision_id}", headers={"X-ICBM-Client": "pytest"}
+        ).json()
+        # Every field, in the revision's order, with the status the revision holds.
+        rows = facts.locator("[data-role='field-summary'] tr[data-field]")
+        assert [
+            (rows.nth(i).get_attribute("data-field"), rows.nth(i).get_attribute("data-status"))
+            for i in range(rows.count())
+        ] == [(f["key"], f["status"]) for f in revision["fields"]]
+        for status in ("CONFIRMED", "ABSENT", "REVIEW_REQUIRED"):
+            counted = facts.locator(f"[data-count-status='{status}']").get_attribute("data-count")
+            assert counted == str(sum(f["status"] == status for f in revision["fields"]))
+        included = sum(i["disposition"] == "INCLUDED" for i in revision["images"])
+        count = facts.locator("[data-role='image-count']")
+        assert count.get_attribute("data-included") == str(included)
+        assert count.get_attribute("data-total") == str(len(revision["images"]))
+        # A field the source did not confirm shows no value: only its status.
+        for field in revision["fields"]:
+            if field["status"] != "CONFIRMED":
+                value = facts.locator(f"tr[data-field='{field['key']}'] [data-role='field-value']")
+                assert value.inner_text() == "—"
+        # The evidence is the field's own, opened on demand.
+        first = revision["fields"][0]
+        evidence = facts.locator(f"tr[data-evidence-for='{first['key']}']")
+        assert evidence.is_hidden()
+        facts.locator(f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']").click()
+        assert evidence.is_visible()
+        entries = evidence.locator("[data-role='evidence'] tbody tr")
+        assert [
+            entries.nth(i).get_attribute("data-evidence-kind") for i in range(entries.count())
+        ] == [e["kind"] for e in first["evidence"]]
+        # Two axes, never merged: the run's outcome and the revision's facts status.
+        assert (
+            page.locator(f"{FOCUS} [data-role='run-outcome'] [data-outcome='RECORDED']").count()
+            == 1
+        )
+        assert (
+            page.locator(f"{FOCUS} [data-facts-status]").first.get_attribute("data-facts-status")
+            == revision["facts_status"]
+        )
+        assert "%" not in facts.inner_text(), "no confidence number is shown"
+        _no_absent_text(page)
+        _no_browser_truth(page)
+    # Reading the revision sent nothing: the one POST is the operator's submit.
+    assert len(wire.posts()) == 1
+
+
+def test_the_run_list_is_filtered_on_the_server_and_counts_what_it_selected(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client:
+        made = []
+        for number in (FAILED_ID, "51", NO_REVISION_ID, "52"):
+            response = client.post(
+                RUNS,
+                json={"supplier_key": SUPPLIER_KEY, "product_url": product_url(number)},
+                headers={"X-ICBM-Client": "pytest"},
+            )
+            made.append(response.json()["collection_run_id"])
+        for run_id in made:
+            for _ in range(300):
+                state = client.get(f"{RUNS}/{run_id}", headers={"X-ICBM-Client": "pytest"}).json()
+                if state["outcome"] != "PENDING":
+                    break
+                threading.Event().wait(0.05)
+        with _page(browser, client, wire, f"{JOBS}&filter=failed") as page:
+            panel = page.locator("[data-role='recent-runs'][data-filter='failed']")
+            panel.wait_for()
+            page.wait_for_selector("[data-role='runs-count'][data-total='1']")
+            rows = page.locator("[data-role='recent-runs'] tr[data-run]")
+            assert [rows.nth(i).get_attribute("data-outcome") for i in range(rows.count())] == [
+                "FAILED"
+            ]
+            # The server applied the filter: the page asked for it, and never for a bare page.
+            listed = [u for m, u, _ in wire.requests if m == "GET" and urlsplit(u).path == RUNS]
+            assert listed and all("outcome=FAILED" in u for u in listed)
+            # A NO_REVISION run is its own answer: no facts status, no facts block.
+            page.locator("[data-filter='no_revision']").click()
+            page.wait_for_selector("[data-role='recent-runs'][data-filter='no_revision']")
+            page.wait_for_selector("[data-role='runs-count'][data-total='1']")
+            page.locator("[data-action='open-run']").click()
+            _outcome(page, "NO_REVISION")
+            assert page.locator(f"{FOCUS} [data-reason='NO_REVISION']").count() == 1
+            assert page.locator(f"{FOCUS} [data-role='collect-facts']").count() == 0
+            assert page.locator(f"{FOCUS} [data-facts-status]").count() == 0
+            # 전체 lists every run the server holds.
+            page.locator("[data-filter='all']").click()
+            page.wait_for_selector("[data-role='runs-count'][data-total='4']")
+            _no_browser_truth(page)
+    assert wire.posts() == []
