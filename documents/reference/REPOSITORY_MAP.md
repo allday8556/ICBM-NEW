@@ -57,6 +57,8 @@ Notice coverage S3 (one notice contract for metadata, preflight and wire) added 
 `tests/unit/integrations/marketplaces/smartstore/`.
 Notice coverage S4 added the contract matrix of every documented SmartStore notice child, with its pinned
 wire forms `notice_children.golden.json`, beside them.
+The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집관리 component
+`ui/web/js/components/collect-facts.js`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -95,6 +97,6 @@ wire forms `notice_children.golden.json`, beside them.
 | `tests/integration/` | 99 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 89 | unit tests by runtime owner |
-| `ui/` | 54 | operator clients: the served web client and the capture extension |
+| `ui/` | 55 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 45 | the served web client |
+| `ui/web/` | 46 | the served web client |
