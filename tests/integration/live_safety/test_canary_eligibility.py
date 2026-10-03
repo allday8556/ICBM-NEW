@@ -949,6 +949,7 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "atomic_sku_revision_members",
         "atomic_sku_revision_selection_evidence",
         "current_atomic_sku_set_moves",
+        "atomic_sku_product_items",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

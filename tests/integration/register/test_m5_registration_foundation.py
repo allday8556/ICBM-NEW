@@ -519,6 +519,7 @@ ADAPTIVE_TABLES = (
     "atomic_sku_revision_members",
     "atomic_sku_revision_selection_evidence",
     "current_atomic_sku_set_moves",
+    "atomic_sku_product_items",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
