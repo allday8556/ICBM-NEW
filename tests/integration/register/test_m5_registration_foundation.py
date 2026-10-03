@@ -509,6 +509,10 @@ ADAPTIVE_TABLES = (
     "common_sales_option_axes",
     "common_sales_option_values",
     "current_common_sales_option_revision_moves",
+    "common_option_fact_mapping_revisions",
+    "common_option_fact_axis_mappings",
+    "common_option_fact_value_mappings",
+    "current_common_option_fact_mapping_moves",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
