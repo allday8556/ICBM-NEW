@@ -88,6 +88,7 @@ from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
 from app.stages.collect.service import CollectService
 from app.stages.collect.sourceassets import SourceAssetRecorder
+from app.stages.collect.synthetic import SyntheticTestProductService
 from app.stages.connect.accounts import MarketplaceAccountStore
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
@@ -189,6 +190,7 @@ class Container:
     revisions: ProductFactsRevisionStore
     source_truth: SourceTruthReadback
     collection: ProductCollectionService
+    synthetic_products: SyntheticTestProductService
     extension_pairing: ExtensionPairing
     extension_capture: ExtensionCaptureService
     extension_queues: ExtensionQueues
@@ -417,6 +419,17 @@ def build_container(
                     {"supplier_key": run.supplier_key, "source_product_id": run.source_product_id},
                 )
 
+    # Owner decision 2026-10-03: an operator's labelled synthetic test product, a copy of one
+    # collected revision's facts under the reserved icbm-synthetic namespace; it materializes like
+    # any RECORDED run.
+    synthetic_products = SyntheticTestProductService(
+        db=db,
+        runs=runs,
+        revisions=revisions,
+        audit=audit,
+        clock=clock,
+        after_recorded=after_recorded,
+    )
     # One operator-submitted product at a time, as a durable collect.* job. The transport is
     # deferred: composing the application opens no connection, and under CI it cannot.
     collection = ProductCollectionService(
@@ -767,6 +780,7 @@ def build_container(
         revisions=revisions,
         source_truth=SourceTruthReadback(revisions, source_assets),
         collection=collection,
+        synthetic_products=synthetic_products,
         extension_pairing=extension_pairing,
         extension_capture=extension_capture,
         extension_queues=extension_queues,

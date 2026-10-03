@@ -185,6 +185,14 @@ If the page exposes more images than the budget allows, the count is recorded an
 - if a stable source identity cannot be proven, stop for architecture review. Never invent one;
 - no generic wildcard egress host to make assets "just work".
 
+> **Amendment note (synthetic test products; owner decision 2026-10-03).** One identity is not
+> proven from a source: an operator's synthetic test product (`app/stages/collect/synthetic.py`,
+> migration `0038`). It lives only in the reserved `icbm-synthetic` supplier namespace, which no
+> supplier is registered under, so it can never collide with or stand in for a source identity, and
+> every one is labelled durably (`synthetic_test_products`) before anything of it exists. Its facts
+> are one collected revision's, copied unchanged through `ProductFactsRevisionStore.append`; no
+> fact is invented, and the identity rules above stay exactly as they are for every source.
+
 ### 6. ProductFactsRevision contract
 
 > **Amendment note (ADR-0017 §5).** A revision produced by profile-interpreted (Adaptive) extraction

@@ -432,3 +432,52 @@ class ExtensionQueueItem(Base):
     collection_run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("collection_runs.collection_run_id")
     )
+
+
+# The reserved supplier namespace of an operator's synthetic test product (owner decision
+# 2026-10-03). No supplier is registered under it, so every acquisition entry point refuses it and
+# a real collection can never share an identity with a test product.
+SYNTHETIC_SUPPLIER_KEY = "icbm-synthetic"
+
+
+class SyntheticTestProduct(Base):
+    """One operator-created synthetic test product (owner decision 2026-10-03; migration 0038).
+
+    A copy of one collected revision's facts — unchanged — under a new identity in the reserved
+    ``icbm-synthetic`` namespace, so a test listing can go through the whole pipeline without
+    touching a real collected product. This row is the durable, append-only label that says so:
+    which revision was copied, under which label, by whom and why. It is written in the unit that
+    opens the copy's collection run, before anything else of the copy exists.
+    """
+
+    __tablename__ = "synthetic_test_products"
+    __table_args__ = (
+        CheckConstraint(f"supplier_key = '{SYNTHETIC_SUPPLIER_KEY}'", name="reserved_namespace"),
+        CheckConstraint("source_product_id <> ''", name="source_product_present"),
+        CheckConstraint(
+            f"template_supplier_key <> '{SYNTHETIC_SUPPLIER_KEY}'", name="template_is_collected"
+        ),
+        CheckConstraint("length(label) BETWEEN 1 AND 40", name="label_bounded"),
+        CheckConstraint("created_by <> ''", name="actor_present"),
+        CheckConstraint("correlation_id <> ''", name="correlation_present"),
+        UniqueConstraint("supplier_key", "source_product_id"),
+        UniqueConstraint("label"),
+        UniqueConstraint("collection_run_id"),
+    )
+
+    synthetic_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    source_product_id: Mapped[str] = mapped_column(String(200))
+    template_revision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("product_facts_revisions.revision_id")
+    )
+    template_supplier_key: Mapped[str] = mapped_column(String(40))
+    template_source_product_id: Mapped[str] = mapped_column(String(200))
+    collection_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_runs.collection_run_id")
+    )
+    label: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)

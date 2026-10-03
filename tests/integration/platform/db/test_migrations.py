@@ -138,8 +138,9 @@ CANONICAL_TABLES = (
     # The residual-risk acceptance proof (ADR-0018 §6.1, G3-30).
     "residual_risk_acceptances",
     "registration_deletions",
+    "synthetic_test_products",
 )
-HEAD = "0037_g3_delete_stage"
+HEAD = "0038_synthetic_test_products"
 
 
 def _url(path: Path) -> str:

@@ -939,6 +939,7 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "extension_queue_items",
         "residual_risk_acceptances",
         "registration_deletions",
+        "synthetic_test_products",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

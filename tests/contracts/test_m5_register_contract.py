@@ -205,7 +205,10 @@ EXTENSION_QUEUE = "0035_extension_list_queue"
 G3_RESIDUAL_RISK = "0036_g3_residual_risk_acceptance"
 # ADR-0018 §3.5: the DELETE stage of live_grants and the deletion-attempt owner.
 G3_DELETE = "0037_g3_delete_stage"
-SCHEMA_HEAD = G3_DELETE
+# Owner decision 2026-10-03: the durable label of an operator's synthetic test product. COLLECT
+# state, never registration state.
+SYNTHETIC = "0038_synthetic_test_products"
+SCHEMA_HEAD = SYNTHETIC
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -224,6 +227,7 @@ AFTER_M5 = (
     EXTENSION_QUEUE,
     G3_RESIDUAL_RISK,
     G3_DELETE,
+    SYNTHETIC,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
