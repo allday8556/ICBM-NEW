@@ -103,6 +103,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.service import OperateService
+from app.stages.products.common_images import SupplierCommonImageService
 from app.stages.products.image_store import DerivedImageStore
 from app.stages.products.images import ProductImageService
 from app.stages.products.materialization import ProductMaterializer
@@ -201,6 +202,7 @@ class Container:
     materializer: ProductMaterializer
     pricing: ProductPricingService
     images: ProductImageService
+    common_images: SupplierCommonImageService
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
@@ -494,6 +496,9 @@ def build_container(
         audit=audit,
         clock=clock,
     )
+    # Issue #219: the operator's BLOCK / KEEP decisions on supplier common images and their
+    # detection over each supplier's collection history.
+    common_images = SupplierCommonImageService(db, audit, clock)
     product_readiness = ProductReadinessService(
         store=product_store, revisions=revisions, pricing=pricing, images=images
     )
@@ -773,6 +778,7 @@ def build_container(
         collection_suppliers=collection.supplier_keys(),
     )
     return Container(
+        common_images=common_images,
         config=config,
         clock=clock,
         db=db,

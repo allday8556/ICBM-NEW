@@ -16,6 +16,11 @@ from pydantic import BaseModel, Field
 from app.interface.api.deps import ContainerDep
 from app.platform.core.errors import NotFoundError
 from app.stages.collect.facts import ImageRole
+from app.stages.products.common_images import (
+    DETECTION_MIN_PRODUCTS,
+    DETECTION_RULE_VERSION,
+    CommonImageVerdict,
+)
 from app.stages.products.image_model import (
     ImageAssetKind,
     QaVerdict,
@@ -47,6 +52,12 @@ class ImageSelectionRequest(BaseModel):
     outputs: list[SelectedOutputRequest]
     actor: str = Field(min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class CommonImageDecisionRequest(BaseModel):
+    verdict: CommonImageVerdict
+    actor: str = Field(min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=200)
 
 
 class ImageQaRequest(BaseModel):
@@ -176,3 +187,51 @@ def record_image_qa(request: ImageQaRequest, container: ContainerDep) -> dict[st
         "verdict": record.verdict.value,
         "findings": list(record.findings),
     }
+
+
+# ---------------------------------------------------------------- supplier common images (#219)
+
+
+def _common_decision(decision: Any) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    return {
+        "decision_id": decision.decision_id,
+        "revision_no": decision.revision_no,
+        "verdict": decision.verdict.value,
+        "reason": decision.reason,
+        "decided_by": decision.decided_by,
+    }
+
+
+@router.get("/api/v1/products/supplier-common-images/{supplier_key}")
+def supplier_common_images(supplier_key: str, container: ContainerDep) -> dict[str, Any]:
+    """Every decided file and every detection candidate of one supplier (Issue #219). A
+    candidate no operator has decided is ``REVIEW`` and is treated as blocked."""
+    images = container.common_images.images(supplier_key)
+    return {
+        "supplier_key": supplier_key,
+        "detection_min_products": DETECTION_MIN_PRODUCTS,
+        "detection_rule_version": DETECTION_RULE_VERSION,
+        "images": [
+            {
+                "sha256": image.sha256,
+                "verdict": image.verdict.value,
+                "decided": image.decided,
+                "product_count": image.product_count,
+                "decision": _common_decision(image.decision),
+            }
+            for image in images
+        ],
+    }
+
+
+@router.post("/api/v1/products/supplier-common-images/{supplier_key}/{sha256}")
+def decide_supplier_common_image(
+    supplier_key: str, sha256: str, request: CommonImageDecisionRequest, container: ContainerDep
+) -> dict[str, Any]:
+    """The operator's BLOCK or KEEP for one supplier common image; it is remembered."""
+    decision = container.common_images.decide(
+        supplier_key, sha256, request.verdict, decided_by=request.actor, reason=request.reason
+    )
+    return {"supplier_key": supplier_key, "sha256": sha256, **(_common_decision(decision) or {})}

@@ -983,6 +983,9 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
         "/api/v1/products/items/{item_id}/images/{sha256}": {"get"},
         "/api/v1/products/items/{item_id}/image-selection": {"post"},
         "/api/v1/products/image-qa": {"post"},
+        # Issue #219: the operator's supplier common images, read, and one decision per file.
+        "/api/v1/products/supplier-common-images/{supplier_key}": {"get"},
+        "/api/v1/products/supplier-common-images/{supplier_key}/{sha256}": {"post"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404

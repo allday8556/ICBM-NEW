@@ -438,6 +438,22 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 > complete selection, and an exact-binary QA verdict. The owner decides every rule as before;
 > nothing is selected by default and no route selects on an operator's behalf.
 
+> **Amendment note (supplier common images; Issue #219, owner decision 2026-10-03).** A
+> supplier common image is a file — keyed by its supplier and its SHA-256 — that the supplier
+> repeats across products' detail pages: a shipping notice, a seller warning, a contact card, a
+> blank spacer or a brand banner. Its own owner (`app/stages/products/common_images.py`,
+> migration `0039`) records the operator's `BLOCK` or `KEEP` for one key, append-only and
+> remembered, and derives the verdict of a key in this order: the operator's newest decision; the
+> owner's own decisions of Issue #219 §1 on eight KM통상 files (code, `OWNER_SEED`); `REVIEW` when
+> the file appears in the detail images of three or more different products over the supplier's
+> whole collection history (`supplier-common-image-detection/v1`), treated as blocked until an
+> operator decides; otherwise none. It reads file fingerprints, the collection history and
+> decisions only — never an image's content — and it alters no source asset or reference. A
+> synthetic test product reads its template supplier's verdicts and never counts towards
+> detection. The operator reads and decides through
+> `GET/POST /api/v1/products/supplier-common-images/{supplier_key}[/{sha256}]`. This owner decides
+> no selection by itself.
+
 ### 10. The AI and enrichment boundary
 
 - **M4 works with no AI provider configured.** ADR-0012 §9 and §14 apply: AI is a capability, and its failure blocks no COLLECT, `ProductFactsRevision` or canonical DB.

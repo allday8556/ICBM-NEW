@@ -361,3 +361,38 @@ class ImageQaResult(Base):
     decided_by: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class SupplierCommonImageDecision(Base):
+    """One operator decision on one supplier common image (Issue #219; migration 0039).
+
+    A supplier common image is a file — keyed by its supplier and its SHA-256 — that the supplier
+    repeats across products' detail pages, such as a shipping notice, a seller warning, a contact
+    card or a brand banner. Each row is one decision, ``BLOCK`` or ``KEEP``; the newest revision of
+    a key is its current decision, and earlier ones stay as they were.
+    """
+
+    __tablename__ = "supplier_common_image_decisions"
+    __table_args__ = (
+        UniqueConstraint("supplier_key", "sha256", "revision_no"),
+        CheckConstraint(_present("supplier_key"), name="supplier_present"),
+        CheckConstraint("supplier_key <> 'icbm-synthetic'", name="supplier_is_collected"),
+        CheckConstraint(_hex64("sha256"), name="sha256_hex"),
+        CheckConstraint("revision_no >= 1", name="revision_no_positive"),
+        CheckConstraint("verdict IN ('BLOCK', 'KEEP')", name="verdict_valid"),
+        CheckConstraint(
+            "reason IS NULL OR (reason <> '' AND length(reason) <= 200)", name="reason_bounded"
+        ),
+        CheckConstraint(_present("decided_by"), name="decided_by_present"),
+        CheckConstraint(_present("correlation_id"), name="correlation_present"),
+    )
+
+    decision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    sha256: Mapped[str] = mapped_column(String(64))
+    revision_no: Mapped[int] = mapped_column(Integer)
+    verdict: Mapped[str] = mapped_column(String(10))
+    reason: Mapped[str | None] = mapped_column(String(200))
+    decided_by: Mapped[str] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)

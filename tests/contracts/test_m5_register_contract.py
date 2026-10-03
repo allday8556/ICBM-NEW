@@ -209,7 +209,10 @@ G3_DELETE = "0037_g3_delete_stage"
 # Owner decision 2026-10-03: the durable label of an operator's synthetic test product. COLLECT
 # state, never registration state.
 SYNTHETIC = "0038_synthetic_test_products"
-SCHEMA_HEAD = SYNTHETIC
+# Issue #219 (owner decision 2026-10-03): the operator's decisions on supplier common images.
+# Product image state, never registration state.
+COMMON_IMAGES = "0039_supplier_common_images"
+SCHEMA_HEAD = COMMON_IMAGES
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -229,6 +232,7 @@ AFTER_M5 = (
     G3_RESIDUAL_RISK,
     G3_DELETE,
     SYNTHETIC,
+    COMMON_IMAGES,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
