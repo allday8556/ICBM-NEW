@@ -1,0 +1,6368 @@
+{
+ "source": {
+  "kind": "OFFICIAL_API_DOC",
+  "document": "원상품 정보 구조체 (originProduct schema), detailAttribute.productInfoProvidedNotice",
+  "url": "https://apicenter.commerce.naver.com/docs/commerce-api/current/schemas/%EC%9B%90%EC%83%81%ED%92%88-%EC%A0%95%EB%B3%B4-%EA%B5%AC%EC%A1%B0%EC%B2%B4",
+  "observed": "2026-10-03",
+  "api_version": "2.90.0",
+  "html_sha256": "fe3604b02f293754ae72eca85547f6de4b3a5c7c00e3d3f873d61e0ae9bbdaf5"
+ },
+ "notice_types": [
+  "WEAR",
+  "SHOES",
+  "BAG",
+  "FASHION_ITEMS",
+  "SLEEPING_GEAR",
+  "FURNITURE",
+  "IMAGE_APPLIANCES",
+  "HOME_APPLIANCES",
+  "SEASON_APPLIANCES",
+  "OFFICE_APPLIANCES",
+  "OPTICS_APPLIANCES",
+  "MICROELECTRONICS",
+  "CELLPHONE",
+  "NAVIGATION",
+  "CAR_ARTICLES",
+  "MEDICAL_APPLIANCES",
+  "KITCHEN_UTENSILS",
+  "COSMETIC",
+  "JEWELLERY",
+  "FOOD",
+  "GENERAL_FOOD",
+  "DIET_FOOD",
+  "KIDS",
+  "MUSICAL_INSTRUMENT",
+  "SPORTS_EQUIPMENT",
+  "BOOKS",
+  "LODGMENT_RESERVATION",
+  "TRAVEL_PACKAGE",
+  "AIRLINE_TICKET",
+  "RENT_CAR",
+  "RENTAL_HA",
+  "RENTAL_ETC",
+  "DIGITAL_CONTENTS",
+  "GIFT_CARD",
+  "MOBILE_COUPON",
+  "MOVIE_SHOW",
+  "ETC_SERVICE",
+  "BIOCHEMISTRY",
+  "BIOCIDAL",
+  "ETC"
+ ],
+ "type_to_child": {
+  "WEAR": "wear",
+  "SHOES": "shoes",
+  "BAG": "bag",
+  "FASHION_ITEMS": "fashionItems",
+  "SLEEPING_GEAR": "sleepingGear",
+  "FURNITURE": "furniture",
+  "IMAGE_APPLIANCES": "imageAppliances",
+  "HOME_APPLIANCES": "homeAppliances",
+  "SEASON_APPLIANCES": "seasonAppliances",
+  "OFFICE_APPLIANCES": "officeAppliances",
+  "OPTICS_APPLIANCES": "opticsAppliances",
+  "MICROELECTRONICS": "microElectronics",
+  "NAVIGATION": "navigation",
+  "CAR_ARTICLES": "carArticles",
+  "MEDICAL_APPLIANCES": "medicalAppliances",
+  "KITCHEN_UTENSILS": "kitchenUtensils",
+  "COSMETIC": "cosmetic",
+  "JEWELLERY": "jewellery",
+  "FOOD": "food",
+  "GENERAL_FOOD": "generalFood",
+  "DIET_FOOD": "dietFood",
+  "KIDS": "kids",
+  "MUSICAL_INSTRUMENT": "musicalInstrument",
+  "SPORTS_EQUIPMENT": "sportsEquipment",
+  "BOOKS": "books",
+  "RENTAL_ETC": "rentalEtc",
+  "RENTAL_HA": "rentalHa",
+  "DIGITAL_CONTENTS": "digitalContents",
+  "GIFT_CARD": "giftCard",
+  "MOBILE_COUPON": "mobileCoupon",
+  "MOVIE_SHOW": "movieShow",
+  "ETC_SERVICE": "etcService",
+  "BIOCHEMISTRY": "biochemistry",
+  "BIOCIDAL": "biocidal",
+  "CELLPHONE": "cellPhone",
+  "ETC": "etc"
+ },
+ "children": {
+  "wear": {
+   "label": "의류 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "material",
+     "label": "제품 소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "섬유의 조성 또는 혼용율을 백분율로 표시, 기능성인 경우 성적서 또는 허가서"
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "치수",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "세탁 방법 및 취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "packDate",
+     "label": "제조연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "packDateText",
+     "label": "제조연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "packDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "shoes": {
+   "label": "구두/신발 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "material",
+     "label": "제품의 주 소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "운동화인 경우에는 겉감, 안감을 구분하여 표시"
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "발길이",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "해외사이즈 표기 시 국내사이즈 병행 표기(단위: mm)"
+    },
+    {
+     "name": "height",
+     "label": "굽높이",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "굽 재료를 사용하는 여성화에 한함(단위: cm)"
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "bag": {
+   "label": "가방 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "type",
+     "label": "종류",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "fashionItems": {
+   "label": "패션잡화(모자/벨트/액세서리) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "type",
+     "label": "종류",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "치수",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "sleepingGear": {
+   "label": "침구류/커튼 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "material",
+     "label": "제품 소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "섬유의 조성 또는 혼용율을 백분율로 표시, 충전재를 사용한 제품은 충전재를 함께 표기"
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "치수",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "components",
+     "label": "제품 구성",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "세탁 방법 및 취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "furniture": {
+   "label": "가구(침대/소파/싱크대/DIY제품) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 공급자적합성확인대상제품에 한함"
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "components",
+     "label": "구성품",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "주요 소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "구성품별 제조자(사)가 다른 경우 각 구성품의 제조자(사)"
+    },
+    {
+     "name": "importer",
+     "label": "수입자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입품의 경우 수입자를 함께 표시. 구성품별 제조자가 다른 경우 각 구성품의 수입자"
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "구성품별 제조국이 다른 경우 각 구성품의 제조국"
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "installedCharge",
+     "label": "배송 설치 비용",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "refurb",
+     "label": "재공급 사유 및 하자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "재공급(리퍼브) 가구의 경우 재공급 사유 및 하자 부위 표시(예: 전시 상품으로 식탁 상판 등에 미세한 흠집 있음)"
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "imageAppliances": {
+   "label": "영상가전(TV류) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "energyEfficiencyRating",
+     "label": "에너지소비효율등급",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월일 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기, 형태",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "additionalCost",
+     "label": "추가 설치 비용",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "displaySpecification",
+     "label": "화면 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "화면 크기, 해상도, 화면 비율 등"
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "homeAppliances": {
+   "label": "가정용 전기제품(냉장고/세탁기/식기세척기/전자레인지) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "energyEfficiencyRating",
+     "label": "에너지소비효율등급",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월일 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기, 용량, 형태",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "additionalCost",
+     "label": "추가 설치 비용",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "seasonAppliances": {
+   "label": "계절가전(에어컨/온풍기) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "energyEfficiencyRating",
+     "label": "에너지소비효율등급",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "object",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null,
+     "members": [
+      {
+       "name": "year",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "month",
+       "label": null,
+       "wire_type": "string",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "monthValue",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "leapYear",
+       "label": null,
+       "wire_type": "boolean",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      }
+     ]
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기, 형태",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "실외기 포함"
+    },
+    {
+     "name": "area",
+     "label": "냉난방 면적",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "installedCharge",
+     "label": "추가 설치 비용",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "officeAppliances": {
+   "label": "사무용기기(컴퓨터/노트북/프린터) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "energyEfficiencyRating",
+     "label": "에너지소비효율등급",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "object",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null,
+     "members": [
+      {
+       "name": "year",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "month",
+       "label": null,
+       "wire_type": "string",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "monthValue",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "leapYear",
+       "label": null,
+       "wire_type": "boolean",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      }
+     ]
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "무게",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "무게는 노트북 등 휴대형 기기에 한함"
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등."
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "opticsAppliances": {
+   "label": "광학기기(디지털카메라/캠코더) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "무게",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등."
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "microElectronics": {
+   "label": "소형전자(MP3/전자사전 등) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "무게",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "navigation": {
+   "label": "내비게이션 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "무게",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "updateCost",
+     "label": "맵 업데이트 비용",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "freeCostPeriod",
+     "label": "무상 기간",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "carArticles": {
+   "label": "자동차용품(자동차부품/기타 자동차용품) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢자동차관리법｣에 따른 부품자기인증 대상 자동차부품 ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "caution",
+     "label": "제품 사용으로 인한 위험 및 유의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "연료절감장치에 한함"
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "applyModel",
+     "label": "적용 차종",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "roadWorthyCertification",
+     "label": "검사합격증 번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": "｢대기환경보전법｣에 따른 첨가제·촉매제에 한함"
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "medicalAppliances": {
+   "label": "의료기기 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "licenceNo",
+     "label": "허가·인증·신고번호",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 30,
+     "description": "｢의료기기법｣에 따른 허가·인증·신고 대상 의료기기에 한함"
+    },
+    {
+     "name": "advertisingCertificationType",
+     "label": "광고사전심의 필 유무",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "ratedVoltage",
+     "label": "정격전압",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "전기용품에 한함"
+    },
+    {
+     "name": "powerConsumption",
+     "label": "소비전력",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "전기용품에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "purpose",
+     "label": "제품의 사용 목적",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "usage",
+     "label": "사용 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "취급 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "kitchenUtensils": {
+   "label": "주방용품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "재질",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "component",
+     "label": "구성품",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "importDeclaration",
+     "label": "수입식품안전관리특별법에 따른 수입신고",
+     "wire_type": "boolean",
+     "type_note": "미입력 시 false로 설정됩니다. true: 수입식품안전관리특별법에 따른 수입신고를 필함. false: 해당 사항 없음",
+     "required": false,
+     "deprecated": false,
+     "max_length": null,
+     "description": "｢수입식품안전관리 특별법｣에 따른 수입기구 또는 용기·포장의 경우"
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "cosmetic": {
+   "label": "화장품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "capacity",
+     "label": "내용물의 용량 및 중량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "제품 주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "피부 타입, 색상(호, 번) 등"
+    },
+    {
+     "name": "expirationDate",
+     "label": "사용기한 또는 개봉 후 사용기간",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDateText",
+     "label": "사용기한 또는 개봉 후 사용기간 직접 입력",
+     "wire_type": "string",
+     "type_note": "expirationDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "usage",
+     "label": "사용 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "화장품 제조업자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "distributor",
+     "label": "화장품책임판매업자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customizedDistributor",
+     "label": "맞춤형 화장품판매업자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "mainIngredient",
+     "label": "｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "｢화장품법｣에 따른 기능성 화장품(미백, 주름개선, 자외선 차단제품 등)의 경우",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "화장품법에 따른 기능성 화장품 심사(또는 보고)를 필함"
+    },
+    {
+     "name": "caution",
+     "label": "사용할 때의 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "jewellery": {
+   "label": "귀금속/보석/시계류 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "material",
+     "label": "소재",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "purity",
+     "label": "순도",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "bandMaterial",
+     "label": "밴드 재질",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "시계의 경우"
+    },
+    {
+     "name": "weight",
+     "label": "중량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "제조국(원산지, 가공지 등이 다를 경우)",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "원산지, 가공지 등이 다를 경우 함께 표기"
+    },
+    {
+     "name": "size",
+     "label": "치수",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "착용 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": "귀금속, 보석류의 경우 등급, 시계의 경우 기능, 방수 등"
+    },
+    {
+     "name": "provideWarranty",
+     "label": "보증서 제공 여부",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "food": {
+   "label": "식품(농.축.수산물) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "foodItem",
+     "label": "품목 또는 명칭",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "포장 단위별 용량(중량), 수량, 크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "amount",
+     "label": "포장 단위별 수량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "포장 단위별 크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "packDate",
+     "label": "제조연월일",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "packDateText",
+     "label": "제조연월일 직접 입력",
+     "wire_type": "string",
+     "type_note": "packDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDate",
+     "label": "유통기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDateText",
+     "label": "유통기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "expirationDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDate",
+     "label": "소비기한 또는 품질유지기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDateText",
+     "label": "소비기한 또는 품질유지기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "consumptionDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "생산자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "relevantLawContent",
+     "label": "세부 품목군별 표시사항",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "농산물\n｢농수산물 품질관리법｣에 따른 유전자변형농수산물 표시, 지리적 표시 축산물\n축산법에 따른 등급 표시 등급(1++ 국내산 쇠고기의 경우 ｢소·돼지 식육의 표시방법 및 부위 구분기준｣에 따라 근내지방도 정보를 포함하여 표시), ｢가축 및 축산물 이력관리에 관한 법률｣에 따른 이력관리대상축산물 유무 수입 농수축산물\n수입식품안전관리특별법에 따른 수입신고를 필함"
+    },
+    {
+     "name": "productComposition",
+     "label": "상품 구성",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "keep",
+     "label": "보관 방법 또는 취급 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "adCaution",
+     "label": "소비자 안전을 위한 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함"
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "generalFood": {
+   "label": "가공식품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "productName",
+     "label": "제품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "foodType",
+     "label": "식품의 유형",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "생산자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "location",
+     "label": "소재지",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입품의 경우 생산자, 수입자 및 제조국"
+    },
+    {
+     "name": "packDate",
+     "label": "제조연월일",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "packDateText",
+     "label": "제조연월일 직접 입력",
+     "wire_type": "string",
+     "type_note": "packDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDate",
+     "label": "유통기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDateText",
+     "label": "유통기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "expirationDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDate",
+     "label": "소비기한 또는 품질유지기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDateText",
+     "label": "소비기한 또는 품질유지기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "consumptionDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "포장 단위별 내용물의 용량(중량), 수량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "amount",
+     "label": "포장 단위별 수량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "ingredients",
+     "label": "원재료명(｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": "단, 함량의 경우에는 원재료 함량 표시대상 식품에 한함"
+    },
+    {
+     "name": "nutritionFacts",
+     "label": "영양 성분",
+     "wire_type": "string",
+     "type_note": null,
+     "required": false,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": "영양성분 표시대상 식품에 한함"
+    },
+    {
+     "name": "geneticallyModified",
+     "label": "유전자변형식품에 해당하는 경우의 표시",
+     "wire_type": "boolean",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "consumerSafetyCaution",
+     "label": "소비자안전을 위한 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함"
+    },
+    {
+     "name": "importDeclarationCheck",
+     "label": "수입식품의 경우 신고 필 유무",
+     "wire_type": "boolean",
+     "type_note": "- true: 수입식품안전관리특별법에 따른 수입 신고를 필함\n- false: 해당 사항 없음",
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "dietFood": {
+   "label": "건강기능식품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "productName",
+     "label": "제품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "producer",
+     "label": "제조업소",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "location",
+     "label": "소재지",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입품의 경우 수입업소명, 제조업소명 및 수출국명"
+    },
+    {
+     "name": "expirationDate",
+     "label": "유통기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDateText",
+     "label": "유통기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "expirationDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": true,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDate",
+     "label": "소비기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "consumptionDateText",
+     "label": "소비기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "consumptionDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "storageMethod",
+     "label": "보관방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "포장 단위별 내용물의 용량(중량), 수량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "amount",
+     "label": "포장 단위별 수량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "ingredients",
+     "label": "원료명 및 함량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": "｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함"
+    },
+    {
+     "name": "nutritionFacts",
+     "label": "영양 정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "기능 정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "cautionAndSideEffect",
+     "label": "섭취량, 섭취 방법 및 섭취 시 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "nonMedicinalUsesMessage",
+     "label": "질병의 예방 및 치료를 위한 의약품이 아니라는 내용의 문구",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "geneticallyModified",
+     "label": "유전자변형건강기능식품에 해당하는 경우의 표시",
+     "wire_type": "boolean",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "importDeclarationCheck",
+     "label": "수입 건강기능식품에 해당하는 경우",
+     "wire_type": "boolean",
+     "type_note": "- true: 수입식품안전관리특별법에 따른 수입 신고를 필함\n- false: 해당 사항 없음",
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "consumerSafetyCaution",
+     "label": "소비자안전을 위한 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": "｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함"
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "kids": {
+   "label": "영유아용품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢어린이제품 안전 특별법｣에 따른 안전인증·안전확인·공급자적합성확인대상 어린이제품에 한함"
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "중량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "섬유제품 등의 경우 치수 정보로 대체 가능"
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "재질",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "섬유의 경우 혼용율"
+    },
+    {
+     "name": "recommendedAge",
+     "label": "사용 연령 또는 권장 사용 연령",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "취급방법 및 취급 시 주의사항, 안전표시(주의, 경고 등)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "numberLimit",
+     "label": "크기·체중의 한계",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "착용 또는 탑승용 어린이제품과 같이 크기·체중에 제한이 있는 품목의 경우 반드시 표시"
+    }
+   ]
+  },
+  "musicalInstrument": {
+   "label": "악기 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "재질",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "components",
+     "label": "제품 구성",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "detailContent",
+     "label": "상품별 세부 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "sportsEquipment": {
+   "label": "스포츠용품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품에 한함"
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "중량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "color",
+     "label": "색상",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "material",
+     "label": "재질",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "components",
+     "label": "제품 구성",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "object",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null,
+     "members": [
+      {
+       "name": "year",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "month",
+       "label": null,
+       "wire_type": "string",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "monthValue",
+       "label": null,
+       "wire_type": "integer",
+       "type_note": "int32",
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      },
+      {
+       "name": "leapYear",
+       "label": null,
+       "wire_type": "boolean",
+       "type_note": null,
+       "required": false,
+       "deprecated": false,
+       "max_length": null,
+       "description": null
+      }
+     ]
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "detailContent",
+     "label": "상품별 세부 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "books": {
+   "label": "서적 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "title",
+     "label": "도서명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "author",
+     "label": "저자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "publisher",
+     "label": "출판사",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "pages",
+     "label": "쪽수",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    },
+    {
+     "name": "components",
+     "label": "제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등)",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": "전집 또는 세트일경우 낱권 구성, CD 등"
+    },
+    {
+     "name": "publishDate",
+     "label": "발행일",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외"
+    },
+    {
+     "name": "publishDateText",
+     "label": "발행일 직접 입력",
+     "wire_type": "string",
+     "type_note": "publishDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외"
+    },
+    {
+     "name": "description",
+     "label": "목차 또는 책 소개",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1000,
+     "description": "아동용 학습교재의 경우 사용 연령을 포함"
+    }
+   ]
+  },
+  "rentalEtc": {
+   "label": "물품대여 서비스(서적, 유아용품, 행사용품 등) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "ownershipTransferCondition",
+     "label": "소유권 이전 조건",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 500,
+     "description": "소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시"
+    },
+    {
+     "name": "payingForLossOrDamage",
+     "label": "상품의 고장, 분실, 훼손 시 소비자 책임",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "refundPolicyForCancel",
+     "label": "중도 해약 시 환불 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "rentalHa": {
+   "label": "물품대여 서비스(정수기, 비데, 공기청정기 등) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "ownershipTransferCondition",
+     "label": "소유권 이전 조건",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 500,
+     "description": "소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시"
+    },
+    {
+     "name": "payingForLossOrDamage",
+     "label": "상품의 고장, 분실, 훼손 시 소비자 책임",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "refundPolicyForCancel",
+     "label": "중도 해약 시 환불 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    },
+    {
+     "name": "maintenance",
+     "label": "유지 보수 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": false,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "specification",
+     "label": "제품 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": false,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    }
+   ]
+  },
+  "digitalContents": {
+   "label": "디지털 콘텐츠(음원, 게임, 인터넷강의 등) 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "producer",
+     "label": "제작자 또는 공급자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "termsOfUse",
+     "label": "이용 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "usePeriod",
+     "label": "이용 기간",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "medium",
+     "label": "상품 제공 방식",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": "CD, 다운로드, 실시간 스트리밍 등"
+    },
+    {
+     "name": "requirement",
+     "label": "최소 시스템 사양, 필수 소프트웨어",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "cancelationPolicy",
+     "label": "청약철회 및 계약의 해제, 해지에 따른 효과",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "giftCard": {
+   "label": "상품권/쿠폰 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "issuer",
+     "label": "발행자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 20,
+     "description": null
+    },
+    {
+     "name": "periodStartDate",
+     "label": "유효기간 시작일",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "periodEndDate",
+     "label": "유효기간 종료일",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "periodDays",
+     "label": "유효기간(구매일로부터 00일)",
+     "wire_type": "integer",
+     "type_note": "int32",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "termsOfUse",
+     "label": "이용 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "유효기간 경과 시 보상 기준, 사용 제한 품목 제한 및 기간 등"
+    },
+    {
+     "name": "useStorePlace",
+     "label": "이용 가능 매장(장소)",
+     "wire_type": "string",
+     "type_note": "useStorePlace, useStoreAddressId, useStoreUrl 셋 중 하나는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 330,
+     "description": null
+    },
+    {
+     "name": "useStoreAddressId",
+     "label": "이용 가능 매장(판매자 주소 ID)",
+     "wire_type": "integer",
+     "type_note": "int64",
+     "required": false,
+     "deprecated": false,
+     "max_length": null,
+     "description": null
+    },
+    {
+     "name": "useStoreUrl",
+     "label": "이용 가능 매장(URL)",
+     "wire_type": "string",
+     "type_note": "useStorePlace, useStoreAddressId, useStoreUrl 셋 중 하나는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 330,
+     "description": null
+    },
+    {
+     "name": "refundPolicy",
+     "label": "잔액 환급 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "mobileCoupon": {
+   "label": "모바일 쿠폰 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "issuer",
+     "label": "발행자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 20,
+     "description": null
+    },
+    {
+     "name": "usableCondition",
+     "label": "유효기간, 이용 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "유효기간 경과 시 보상 기준 포함"
+    },
+    {
+     "name": "usableStore",
+     "label": "이용 가능 매장",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 330,
+     "description": null
+    },
+    {
+     "name": "cancelationPolicy",
+     "label": "환불 조건 및 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "movieShow": {
+   "label": "영화/공연 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "sponsor",
+     "label": "주최 또는 기획",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "공연에 한함"
+    },
+    {
+     "name": "actor",
+     "label": "주연",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "공연에 한함"
+    },
+    {
+     "name": "rating",
+     "label": "관람 등급",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "showTime",
+     "label": "상영ㆍ공연 시간",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "showPlace",
+     "label": "상영ㆍ공연 장소",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "cancelationCondition",
+     "label": "예매 취소 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "cancelationPolicy",
+     "label": "취소ㆍ환불 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "etcService": {
+   "label": "기타 용역 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "serviceProvider",
+     "label": "서비스 제공 사업자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "certificateDetails",
+     "label": "법에 의한 인증ㆍ허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "usableCondition",
+     "label": "이용 조건",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "이용 가능 기간·장소, 추가 비용 등"
+    },
+    {
+     "name": "cancelationStandard",
+     "label": "취소ㆍ중도해약ㆍ해지 조건 및 환불 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "cancelationPolicy",
+     "label": "취소ㆍ환불 방법",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "biochemistry": {
+   "label": "생활화학제품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "productName",
+     "label": "품목 및 제품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "dosageForm",
+     "label": "용도 및 제형",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "표백제의 경우 계열을 함께 표시"
+    },
+    {
+     "name": "packDate",
+     "label": "제조연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "packDateText",
+     "label": "제조연월 직접 입력",
+     "wire_type": "string",
+     "type_note": "packDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "expirationDate",
+     "label": "유통기한",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": "해당 사항이 없으면 생략하고 expirationDateText에 '해당사항 없음' 입력"
+    },
+    {
+     "name": "expirationDateText",
+     "label": "유통기한 직접 입력",
+     "wire_type": "string",
+     "type_note": "expirationDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": "해당 사항이 없으면 '해당사항 없음' 입력"
+    },
+    {
+     "name": "weight",
+     "label": "중량·용량·매수·크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 1500,
+     "description": null
+    },
+    {
+     "name": "effect",
+     "label": "효능ㆍ효과",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "승인 대상 생활화학제품에 한함"
+    },
+    {
+     "name": "importer",
+     "label": "수입자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입제품에 한함"
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "childProtection",
+     "label": "어린이보호포장 대상 제품 여부",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "chemicals",
+     "label": "제품에 사용된 화학 물질 명칭",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "｢안전확인대상 생활화학제품 지정 및 안전·표시기준｣ [별표6]에 따른 표시대상 화학물질로서 주요물질, 보존제, 알레르기반응가능물질 등의 명칭"
+    },
+    {
+     "name": "caution",
+     "label": "사용상 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "safeCriterionNo",
+     "label": "안전기준적합확인신고번호 또는 안전확인대상 생활화학제품승인번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "화학제품안전법 시행일(경과조치 기간 포함) 이전에 생산·수입된 위해우려제품의 경우 종전 법에 따른 자가 검사번호를 표시"
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  },
+  "biocidal": {
+   "label": "살생물제품 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "productName",
+     "label": "제품명 및 살생물제품유형",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "중량 또는 용량 및 표준 사용량",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "effect",
+     "label": "효능ㆍ효과",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "rangeOfUse",
+     "label": "사용 대상자 및 사용 범위",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "importer",
+     "label": "수입자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입제품에 한함"
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "childProtection",
+     "label": "어린이보호포장 대상 제품 여부",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "harmfulChemicalSubstance",
+     "label": "살생물물질, 나노물질, 유해화학물질(또는 중점관리물질)의 명칭",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "maleficence",
+     "label": "제품 유해성ㆍ위해성 표시",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "caution",
+     "label": "사용 방법 및 사용상 주의사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "approvalNumber",
+     "label": "승인번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자상담 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    },
+    {
+     "name": "expirationDate",
+     "label": "유통기한",
+     "wire_type": "string",
+     "type_note": "date",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": "'yyyy-MM-dd' 형식 입력"
+    },
+    {
+     "name": "expirationDateText",
+     "label": "유통기한 직접 입력",
+     "wire_type": "string",
+     "type_note": null,
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": "expirationDate를 입력하지 않은 경우에는 필수"
+    }
+   ]
+  },
+  "cellPhone": {
+   "label": "휴대폰 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품목",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificationType",
+     "label": "KC 인증정보",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": "｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함"
+    },
+    {
+     "name": "releaseDate",
+     "label": "동일 모델의 출시연월",
+     "wire_type": "string",
+     "type_note": "'yyyy-MM' 형식 입력",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "releaseDateText",
+     "label": "동일 모델 출시연월일 직접 입력",
+     "wire_type": "string",
+     "type_note": "releaseDate를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 300,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "importer",
+     "label": "수입자",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": "수입품의 경우 수입자를 함께 표시"
+    },
+    {
+     "name": "producer",
+     "label": "제조국",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "size",
+     "label": "크기",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "weight",
+     "label": "무게",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "telecomType",
+     "label": "이동통신사",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "joinProcess",
+     "label": "가입절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "extraBurden",
+     "label": "소비자의 추가적인 부담사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": "가입비, 유심카드 구입비 등 추가로 부담하여야 할 금액, 부가서비스, 의무사용기간, 위약금 등"
+    },
+    {
+     "name": "specification",
+     "label": "주요 사양",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "warrantyPolicy",
+     "label": "품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자와 전화번호",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    }
+   ]
+  },
+  "etc": {
+   "label": "기타 재화 상품정보제공고시",
+   "fields": [
+    {
+     "name": "returnCostReason",
+     "label": "제품하자/오배송에 따른 청약철회 조항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "noRefundReason",
+     "label": "제품하자가 아닌 소비자의 단순변심에 따른 청약철회가 불가능한 경우 그 구체적 사유와 근거",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "qualityAssuranceStandard",
+     "label": "재화 등의 교환ㆍ반품ㆍ보증 조건 및 품질 보증 기준",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "compensationProcedure",
+     "label": "대금을 환불받기 위한 방법과 환불이 지연될 경우 지연배상금을 지급받을 수 있다는 사실 및 배상금 지급의 구체적인 조건·절차",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (주문취소 및 대금의 환불은 네이버페이 마이페이지에서 신청할 수 있으며, 전자상거래 등에서의 소비자보호에 관한 법률에 따라 소비자의 청약철회 후 판매자가 재화 등을 반환 받은 날로부터 3영업일 이내에 지급받은 대금의 환급을 정당한 사유 없이 지연하는 때에는 소비자는 지연기간에 대해서 연 15%의 지연배상금을 판매자에게 청구할 수 있습니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "troubleShootingContents",
+     "label": "소비자피해보상의 처리, 재화 등에 대한 불만 처리 및 소비자와 사업자 사이의 분쟁 처리에 관한 사항",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": null,
+     "description": "미입력 시 상품상세 참조로 입력됩니다.\n0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.)\n1 (상품상세 참조)"
+    },
+    {
+     "name": "itemName",
+     "label": "품명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "modelName",
+     "label": "모델명",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 50,
+     "description": null
+    },
+    {
+     "name": "certificateDetails",
+     "label": "법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항",
+     "wire_type": "string",
+     "type_note": "해당 사항이 없으면 이 요소를 삭제하고 전송합니다.",
+     "required": false,
+     "deprecated": false,
+     "max_length": 500,
+     "description": null
+    },
+    {
+     "name": "manufacturer",
+     "label": "제조자(사)",
+     "wire_type": "string",
+     "type_note": null,
+     "required": true,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "afterServiceDirector",
+     "label": "A/S 책임자",
+     "wire_type": "string",
+     "type_note": null,
+     "required": false,
+     "deprecated": false,
+     "max_length": 200,
+     "description": null
+    },
+    {
+     "name": "customerServicePhoneNumber",
+     "label": "소비자 상담 관련 전화번호",
+     "wire_type": "string",
+     "type_note": "afterServiceDirector를 입력하지 않은 경우에는 필수",
+     "required": false,
+     "deprecated": false,
+     "max_length": 30,
+     "description": null
+    }
+   ]
+  }
+ }
+}
