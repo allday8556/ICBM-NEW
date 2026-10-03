@@ -35,6 +35,7 @@ from app.stages.register.contracts import (
     AuthoringMetadataView,
     PreparationView,
     RegisterOverview,
+    RegisterReadinessView,
     RegistrationStatusView,
     UnitView,
 )
@@ -82,6 +83,14 @@ def _correlation() -> str:
 @router.get("/overview")
 def overview(container: ContainerDep) -> RegisterOverview:
     return container.register.overview()
+
+
+@router.get("/readiness")
+def readiness(container: ContainerDep) -> RegisterReadinessView:
+    """B-UX1: the readiness of every pre-send provider-listing unit, evaluated now by the
+    preflight owner — five statuses plus NOT_EVALUATED with the owner's refusal code, and the
+    areas the reasons belong to. Read-only and derived: nothing is stored."""
+    return container.register.readiness_summary()
 
 
 @router.get("/status")
