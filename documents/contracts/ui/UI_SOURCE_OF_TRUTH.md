@@ -184,6 +184,22 @@ reproduces that structure in the focused run of 수집관리, where the run's re
   filter before it orders and bounds the list, reports how many runs the filter selects in all, and
   pages on with `더 보기`; a page is never shown as the whole list.
 
+## Navigation and recovery (A-UX3, owner decision 2026-10-04)
+
+Small additions beside the approved boards, in their existing visual language:
+
+- Extension list mode: a captured row offers `수집관리에서 결과 보기`, which opens that row's own run in
+  Collection Management (`#/collect?view=jobs&run=…`) through the same worker path as the
+  single-capture `수집관리에서 보기`, which stays as it is.
+- Extension list mode: once a queue has ended and ICBM holds no open queue, a note explains recovery —
+  go back to the list page yourself, `목록 찾기` again with `이미 수집한 상품 건너뛰기` on. ICBM skips what
+  it recorded and declares a new queue; the ended queue is never reissued, the bound is typed again
+  (never pre-filled), and the extension never navigates to the list page itself.
+- Collection Management: a `FAILED` run offers `다시 수집`, which puts the run's supplier and URL back
+  into the submit form and sends nothing. Only the operator's own submit makes a new run, through the
+  one submit path and its server rules (the target check and the same-product interval included);
+  the failed run stays as recorded. `NO_REVISION` and `RECORDED` runs offer no such control.
+
 ## Rules
 
 - This HTML prototype is the visual/product UI reference for ICBM-NEW.

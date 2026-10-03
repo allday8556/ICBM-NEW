@@ -565,6 +565,23 @@ function jobsView(view, ctx) {
     return holder;
   }
 
+  // Recovery (A-UX3 F-10): a FAILED run's own supplier and URL go back into the form, and the
+  // operator decides whether to submit. Nothing is sent from here, the failed run stays as it was
+  // recorded, and a new submit is an ordinary new run through the one submit path.
+  function refill(run) {
+    const select = document.getElementById('collect-supplier');
+    const input = document.getElementById('collect-url');
+    if (!select || !input) return;
+    if ([...select.options].some((option) => option.value === run.supplier_key)) {
+      select.value = run.supplier_key;
+      select.dispatchEvent(new Event('change'));
+    }
+    input.value = run.source_url;
+    input.scrollIntoView({ block: 'center' });
+    input.focus();
+    toast('다시 수집', 'URL을 입력란에 채웠습니다. 수집 요청을 눌러야 새로 수집합니다.');
+  }
+
   async function renderFocus() {
     if (!focusId) return false;
     let run;
@@ -615,6 +632,13 @@ function jobsView(view, ctx) {
       run.outcome === 'RECORDED' ? h('div', { class: 'kv' }, h('span', {}, '사실 상태'), factsChip(run.facts_status)) : null,
       run.outcome === 'NO_REVISION' || run.outcome === 'FAILED'
         ? h('div', { class: 'kv' }, h('span', {}, run.outcome === 'FAILED' ? '실패 사유' : '사유'), h('b', { 'data-role': 'run-detail' }, run.detail ?? '—'))
+        : null,
+      run.outcome === 'FAILED'
+        ? h(
+            'div',
+            { class: 'supplier-actions' },
+            h('button', { type: 'button', class: 'btn', 'data-action': 'refill-url', onclick: () => refill(run) }, '다시 수집'),
+          )
         : null,
       run.outcome === 'NO_REVISION'
         ? h('div', { class: 'note', 'data-reason': 'NO_REVISION' }, '수집은 끝났지만 원천이 상품 식별자를 밝히지 않아 기록할 리비전이 없습니다. 실패가 아니며, 사실 상태도 없습니다.')

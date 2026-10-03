@@ -838,3 +838,20 @@ h1 {
   background: var(--neutral-bg);
   color: var(--ink-3);
 }
+
+/* A row's run, opened in ICBM Collection Management (A-UX3 F-8). */
+.queue-row .row-open {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: #1f4e79;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Recovery after a queue ended (A-UX3 F-10): how to rediscover with recorded products skipped. */
+.recovery {
+  margin-top: 10px;
+}
