@@ -225,6 +225,20 @@ def test_the_minimum_sale_price_is_read_only_when_the_page_states_it() -> None:
     assert unstated["minimum_sale_price"].value is None, "never derived from the sale price"
 
 
+@pytest.mark.parametrize("cell", ["자율", "판매가 자율", "판매가자율"])
+def test_a_minimum_price_row_that_says_the_price_is_free_states_no_minimum(cell: str) -> None:
+    # The user's rule of 2026-10-03: 자율 means the reseller sets the price; there is no minimum.
+    fact = fields(rows=row("판매가", "39,000원") + row("최저지도가", cell))["minimum_sale_price"]
+    assert fact.status is FieldStatus.ABSENT and fact.value is None
+    assert [(e.status, e.observed) for e in fact.evidence] == [(FieldStatus.ABSENT, cell)]
+
+
+@pytest.mark.parametrize("cell", ["문의", "별도 협의", "-"])
+def test_a_minimum_price_row_with_other_words_stays_under_review(cell: str) -> None:
+    fact = fields(rows=row("판매가", "39,000원") + row("최저판매가", cell))["minimum_sale_price"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED and fact.value is None
+
+
 def test_shipping_keeps_the_page_s_own_policy_words() -> None:
     fact = fields(rows=row("배송방법", "택배") + row("배송비", "3,000원"))["shipping"]
     assert fact.status is FieldStatus.CONFIRMED

@@ -16,7 +16,8 @@ field                read from
 ===================  ====================================================================
 original_name        ``og:title``, agreeing with the 상품명 row
 prices               every price row, each with the exact label the page used
-minimum_sale_price   the 최저지도가 row, only when the page states it
+minimum_sale_price   the 최저지도가 row, only when the page states an amount; a row that says
+                     the price is free (자율) states that there is no minimum
 shipping             the 배송방법 and 배송비 rows, kept as the page's own words
 stock                the purchase controls the reader can see, and a visible sold-out mark
 options              the option control, when the document itself carries its values
@@ -54,6 +55,9 @@ from integrations.suppliers.kmretail.collect.dom import Node, meta, read
 NAME_LABELS = ("상품명",)
 PRICE_LABELS = ("판매가", "소비자가", "정가", "공급가")
 MINIMUM_PRICE_LABELS = ("최저지도가", "최저판매가")
+# The word this storefront writes in the minimum-price row when the reseller sets the price freely
+# (판매가 자율): the page states that there is no minimum. The user's rule of 2026-10-03.
+NO_MINIMUM_WORD = "자율"
 SHIPPING_METHOD_LABELS = ("배송방법",)
 SHIPPING_FEE_LABELS = ("배송비",)
 BRAND_LABELS = ("브랜드",)
@@ -201,6 +205,20 @@ def _minimum_sale_price(rows: Sequence[tuple[str, str, Node]]) -> FieldFact:
         return _absent("th:최저지도가 + td")
     label, value, _ = stated[0]
     amount = _won(value)
+    if amount is None and NO_MINIMUM_WORD in value.replace(" ", ""):
+        # Stated, and what it states is that the price is free: no minimum, read from the page.
+        return FieldFact(
+            FieldStatus.ABSENT,
+            None,
+            (
+                Evidence(
+                    EvidenceKind.DOM_TEXT,
+                    f"th:{label} + td",
+                    FieldStatus.ABSENT,
+                    observed=_quote(value),
+                ),
+            ),
+        )
     if amount is None:
         return _review(f"th:{label} + td")
     return FieldFact(
