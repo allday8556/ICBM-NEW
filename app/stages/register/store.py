@@ -101,6 +101,7 @@ from app.stages.register.models import (
     RegistrationSnapshotPreparation,
 )
 from app.stages.register.preparation import listing_identity as expected_listing_identity
+from app.stages.register.read_state import applied_attempt
 from app.stages.register.sanitize import problems
 
 # ---------------------------------------------------------------- records
@@ -482,6 +483,19 @@ class IntentReviewRecord:
     verification_evidence_digest: str | None
 
 
+@dataclass(frozen=True)
+class VerificationReviewRecord:
+    """An applied, not yet verified Intent (``SENT``, ``APPLIED_PROVEN``, ``NOT_VERIFIED``), with
+    the Attempt whose applied outcome the verification deadline runs from (ADR-0014 §28.5)."""
+
+    intent_id: str
+    marketplace_key: str
+    marketplace_account_id: str
+    draft_id: str
+    applied_attempt_id: str
+    applied_at: datetime
+
+
 def visible_snapshots(
     snapshots: Iterable[SnapshotRecord], intents: Mapping[str, IntentRecord]
 ) -> list[tuple[SnapshotRecord, IntentRecord | None]]:
@@ -674,6 +688,12 @@ class RegistrationStore:
     ) -> tuple[IntentReviewRecord, ...]:
         with self.reading() as unit:
             return unit.review_intents(account)
+
+    def review_awaiting_verification(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[VerificationReviewRecord, ...]:
+        with self.reading() as unit:
+            return unit.review_awaiting_verification(account)
 
     def review_paused_scopes(
         self, account: tuple[str, str] | None = None
@@ -975,6 +995,48 @@ class RegistrationUnit:
                     verification_state=VerificationState(row.verification_state),
                     latest_attempt_id=None if latest is None else latest.attempt_id,
                     verification_evidence_digest=row.verification_evidence_digest,
+                )
+            )
+        return tuple(found)
+
+    def review_awaiting_verification(
+        self, account: tuple[str, str] | None = None
+    ) -> tuple[VerificationReviewRecord, ...]:
+        """Every applied, unverified Intent, of one account or of all, with the Attempt its
+        verification deadline runs from: no limit. Whether one is overdue is decided by the
+        caller's clock (``read_state.verification_overdue``), never stored."""
+        query = (
+            select(RegistrationIntent, RegistrationSnapshot.draft_id)
+            .join(
+                RegistrationSnapshot,
+                RegistrationSnapshot.registration_snapshot_id
+                == RegistrationIntent.registration_snapshot_id,
+            )
+            .where(
+                RegistrationIntent.state == IntentState.SENT.value,
+                RegistrationIntent.remote_outcome == RemoteOutcome.APPLIED_PROVEN.value,
+                RegistrationIntent.verification_state == VerificationState.NOT_VERIFIED.value,
+            )
+            .order_by(RegistrationIntent.intent_id)
+        )
+        if account is not None:
+            query = query.where(
+                RegistrationIntent.marketplace_key == account[0],
+                RegistrationIntent.marketplace_account_id == account[1],
+            )
+        found = []
+        for row, draft_id in self.session.execute(query).all():
+            applied = applied_attempt(self.attempts(row.intent_id))
+            if applied is None:  # pragma: no cover - an applied outcome names its Attempt
+                continue
+            found.append(
+                VerificationReviewRecord(
+                    intent_id=row.intent_id,
+                    marketplace_key=row.marketplace_key,
+                    marketplace_account_id=row.marketplace_account_id,
+                    draft_id=draft_id,
+                    applied_attempt_id=applied[0],
+                    applied_at=applied[1],
                 )
             )
         return tuple(found)

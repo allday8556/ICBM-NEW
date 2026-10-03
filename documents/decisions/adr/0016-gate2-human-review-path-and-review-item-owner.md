@@ -113,6 +113,15 @@ conditions of the REGISTER execution producer (architect decision `5845062336`).
 condition to that producer is a producer change inside this kind, never a new kind, and it follows
 this ADR's producer, recovery and coverage rules unchanged.
 
+> **Amendment note (B-UX2; owner directive 2026-10-04).** The overdue verification is now produced:
+> `verification` / `REGISTER_READ_VERIFICATION_OVERDUE` on the Intent's scope, sourced by the applied
+> Attempt, decided by the one deadline rule its 재확인필요 read state uses
+> (`read_state.verification_overdue`). It is the first condition that becomes true with the clock
+> alone, so the producer's truth token also names the set of Intents overdue now: crossing the
+> deadline moves the token, coverage is no longer current (§7) and a pass is requested, so the
+> REGISTRATION_ERROR count is never authoritative while such an item is missing. The G2-02 import
+> check now names the review owner's real package (`app.capabilities.review`).
+
 **What every ReviewItem references.** Every ReviewItem references, from its producing owner only:
 - the **kind**;
 - the **producer**: which owner derivation opened it;
