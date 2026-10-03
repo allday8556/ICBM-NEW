@@ -149,8 +149,15 @@ CANONICAL_TABLES = (
     "common_option_fact_axis_mappings",
     "common_option_fact_value_mappings",
     "current_common_option_fact_mapping_moves",
+    # Source-proven Atomic SKU set revisions; no inferred option Cartesian products.
+    "atomic_sku_set_revisions",
+    "atomic_skus",
+    "atomic_sku_selections",
+    "atomic_sku_revision_members",
+    "atomic_sku_revision_selection_evidence",
+    "current_atomic_sku_set_moves",
 )
-HEAD = "0040_common_option_fact_mapping"
+HEAD = "0041_source_proven_atomic_skus"
 
 
 def _url(path: Path) -> str:

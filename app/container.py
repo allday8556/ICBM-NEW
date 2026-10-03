@@ -103,6 +103,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.service import OperateService
+from app.stages.products.atomic_sku_store import AtomicSKUStore
 from app.stages.products.common_option_mapping_store import CommonOptionFactMappingStore
 from app.stages.products.common_option_store import CommonSalesOptionStore
 from app.stages.products.image_store import DerivedImageStore
@@ -200,6 +201,7 @@ class Container:
     product_store: ProductFoundationStore
     common_sales_options: CommonSalesOptionStore
     common_option_fact_mappings: CommonOptionFactMappingStore
+    atomic_skus: AtomicSKUStore
     products: ProductsService
     materializer: ProductMaterializer
     pricing: ProductPricingService
@@ -375,6 +377,7 @@ def build_container(
     product_store = ProductFoundationStore(db, clock)
     common_sales_options = CommonSalesOptionStore(db, clock)
     common_option_fact_mappings = CommonOptionFactMappingStore(db, clock)
+    atomic_skus = AtomicSKUStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
     registered_collections = (
         tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
@@ -801,6 +804,7 @@ def build_container(
         product_store=product_store,
         common_sales_options=common_sales_options,
         common_option_fact_mappings=common_option_fact_mappings,
+        atomic_skus=atomic_skus,
         products=products,
         materializer=materializer,
         pricing=pricing,
