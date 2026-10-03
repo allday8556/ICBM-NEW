@@ -34,6 +34,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
 
+from app.stages.register.policy import (
+    TEXT_VALUE_TYPES,
+    FieldRule,
+    FieldValueType,
+    NoticePolicy,
+)
+
 NOTICE_SCHEMA_FILE: Final = "notice_schema.json"
 NOTICE_SCHEMA_DATA_REVISION: Final = "smartstore-notice-schema/2.90.0-r1"
 NOTICE_SCHEMA_API_VERSION: Final = "2.90.0"
@@ -411,3 +418,81 @@ def load_notice_schema() -> ProviderNoticeSchema:
     """The packaged provider notice schema. The file is immutable package data."""
     path = Path(__file__).with_name(NOTICE_SCHEMA_FILE)
     return parse_notice_schema(json.loads(path.read_text(encoding="utf-8")))
+
+
+# ----------------------------------------------------------------- the REGISTER notice rules (S3)
+
+NOTICE_MARKETPLACE_KEY: Final = "smartstore"
+_RULE_VALUE_TYPES: Final[Mapping[NoticeValueType, FieldValueType]] = MappingProxyType(
+    {
+        NoticeValueType.TEXT: FieldValueType.TEXT,
+        NoticeValueType.YEAR_MONTH: FieldValueType.YEAR_MONTH,
+        NoticeValueType.DATE: FieldValueType.DATE,
+        NoticeValueType.BOOLEAN: FieldValueType.BOOLEAN,
+        NoticeValueType.INTEGER: FieldValueType.INTEGER,
+        NoticeValueType.LONG: FieldValueType.INTEGER,
+    }
+)
+
+
+def emittable(field: NoticeFieldSchema) -> bool:
+    """Whether ICBM may ever send this field: not deprecated, and its wire type confirmed."""
+    return not field.deprecated and field.value_type is not None
+
+
+def notice_policy(notice_type: str) -> NoticePolicy:
+    """The provider-neutral REGISTER policy of one notice type, derived from the provider schema.
+
+    Only emittable fields are declared, so a value for a deprecated or unconfirmed field is an
+    undeclared value, never sent. A condition naming only fields that can never be sent is resolved
+    the only way it can be: "required without ``releaseDate``" for a ``releaseDate`` whose wire
+    form is unconfirmed is simply required. A field the provider fills when it is omitted
+    ("상품상세 참조", a stated default value) is never missing; only a "상품상세 참조" field may be
+    marked as left to the product detail.
+    """
+    schema = load_notice_schema()
+    notice = schema.types.get(notice_type)
+    if notice is None:
+        return NoticePolicy(notice_type, (), contract=schema.revision, documented=False)
+    sendable = {f.name for f in notice.fields if emittable(f)}
+    rules = []
+    for item in notice.fields:
+        if item.name not in sendable or item.value_type is None:
+            continue
+        value_type = _RULE_VALUE_TYPES[item.value_type]
+        without = tuple(name for name in item.required_without if name in sendable)
+        group = tuple(name for name in item.one_of if name in sendable)
+        required = item.provider_required
+        if item.presence is NoticePresence.REQUIRED_WITHOUT and not without:
+            required = True
+        if item.presence is NoticePresence.ONE_OF and len(group) < 2:
+            required, group = True, ()
+        rules.append(
+            FieldRule(
+                key=item.name,
+                required=required,
+                detail_page_reference_allowed=(
+                    item.presence is NoticePresence.DETAIL_REFERENCE_DEFAULT
+                ),
+                max_length=item.max_length if value_type in TEXT_VALUE_TYPES else None,
+                value_type=value_type,
+                omitted_default=item.presence
+                in (NoticePresence.DETAIL_REFERENCE_DEFAULT, NoticePresence.PROVIDER_DEFAULT),
+                required_without=() if required else without,
+                one_of=group,
+            )
+        )
+    return NoticePolicy(notice_type, tuple(rules), contract=schema.revision)
+
+
+class SmartStoreNoticeRules:
+    """The SmartStore ``NoticeRuleSource``: every notice field the REGISTER owner declares for a
+    SmartStore category is the provider schema's own (notice coverage S3)."""
+
+    def governs(self, marketplace_key: str) -> bool:
+        return marketplace_key == NOTICE_MARKETPLACE_KEY
+
+    def notice_policy(self, marketplace_key: str, notice_type: str) -> NoticePolicy:
+        if not self.governs(marketplace_key):
+            raise ValueError(f"{marketplace_key} is not governed by the SmartStore notice schema")
+        return notice_policy(notice_type)

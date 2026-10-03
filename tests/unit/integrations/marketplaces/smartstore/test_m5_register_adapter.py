@@ -17,6 +17,7 @@ import pytest
 
 from app.stages.products.image_model import ImageAssetKind
 from integrations.marketplaces.smartstore import assets, lookup, product, readback
+from integrations.marketplaces.smartstore.notice_schema import NoticePresence, load_notice_schema
 from integrations.marketplaces.smartstore.registry import ADOPTED, EndpointId, resolve
 from integrations.marketplaces.smartstore.retention import retain, retained_query
 
@@ -139,7 +140,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v4"
+    assert projected.encoding_version == "smartstore-register-wire/v5"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -265,25 +266,16 @@ def _etc_notice(**fields: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def test_the_pinned_table_maps_only_documented_types_to_their_documented_child() -> None:
+def test_the_child_mapping_is_the_provider_notice_schemas() -> None:
     members = product.NOTICE_TYPE_MEMBERS
-    # Every explicit mapping of the 2.90.0 schema (evidence packet 5916962285), and no other.
+    # Every child the provider notice schema documents (notice coverage S3), and no other.
     assert len(members) == 36
     assert members["ETC"] == "etc" and members["GENERAL_FOOD"] == "generalFood"
-    assert members["SPORTS_EQUIPMENT"] == "sportsEquipment"
+    assert members["SPORTS_EQUIPMENT"] == "sportsEquipment" and members["RENTAL_HA"] == "rentalHa"
     assert members["CELLPHONE"] == "cellPhone" and members["MICROELECTRONICS"] == "microElectronics"
     for undocumented in ("LODGMENT_RESERVATION", "TRAVEL_PACKAGE", "AIRLINE_TICKET", "RENT_CAR"):
         assert undocumented not in members
-    # Only the children whose whole member set is captured are projectable.
-    assert set(product.NOTICE_CHILDREN) == {
-        "WEAR",
-        "SHOES",
-        "HOME_APPLIANCES",
-        "KITCHEN_UTENSILS",
-        "COSMETIC",
-        "ETC",
-    }
-    assert product.NOTICE_SCHEMA_REVISION == "smartstore-notice-children/2.90.0-r1"
+    assert product.NOTICE_SCHEMA_REVISION == "smartstore-notice-schema/2.90.0-r1"
     common = {
         "returnCostReason",
         "noRefundReason",
@@ -291,9 +283,12 @@ def test_the_pinned_table_maps_only_documented_types_to_their_documented_child()
         "compensationProcedure",
         "troubleShootingContents",
     }
-    for child in product.NOTICE_CHILDREN.values():
-        assert common <= set(child)
-        assert all(child[name].detail_default for name in common)
+    for schema in load_notice_schema().types.values():
+        fields = {f.name: f for f in schema.fields}
+        assert common <= set(fields)
+        assert all(
+            fields[name].presence is NoticePresence.DETAIL_REFERENCE_DEFAULT for name in common
+        )
 
 
 def test_a_captured_notice_makes_a_single_item_listing_sendable() -> None:
@@ -319,7 +314,7 @@ def test_a_captured_notice_makes_a_single_item_listing_sendable() -> None:
 
 @pytest.mark.parametrize(
     "notice_type",
-    ["Wear2023", "etc", "Etc", " ETC", "BAG", "GENERAL_FOOD", "LODGMENT_RESERVATION", "기타"],
+    ["Wear2023", "etc", "Etc", " ETC", "RENT_CAR", "LODGMENT_RESERVATION", "기타"],
 )
 def test_an_uncaptured_notice_type_stays_a_gap_and_never_falls_back(notice_type: str) -> None:
     notice = _etc_notice()
@@ -419,7 +414,8 @@ def test_a_notice_document_names_exactly_its_own_child() -> None:
             {"productInfoProvidedNoticeType": "WEAR", "etc": notice["etc"]},
             "WIRE_NOTICE_CHILD_MISMATCH",
         ),
-        ({"productInfoProvidedNoticeType": "BAG", "bag": {}}, "WIRE_NOTICE_TYPE_NOT_CAPTURED"),
+        ({"productInfoProvidedNoticeType": "RENT_CAR"}, "WIRE_NOTICE_TYPE_NOT_CAPTURED"),
+        ({"productInfoProvidedNoticeType": "BAG", "bag": {}}, "WIRE_DOCUMENT_FIELD_MISSING"),
         ({"etc": notice["etc"]}, "WIRE_DOCUMENT_FIELD_MISSING"),
     ):
         body["originProduct"]["detailAttribute"]["productInfoProvidedNotice"] = broken

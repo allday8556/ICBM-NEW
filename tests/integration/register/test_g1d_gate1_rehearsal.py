@@ -45,7 +45,13 @@ from tests.support.collect_submit_support import (
     sellable_registered,
     served,
 )
-from tests.support.gate1_support import CATEGORY, MARKET, record_reviewed_metadata, save_policy
+from tests.support.gate1_support import (
+    CATEGORY,
+    MARKET,
+    fill_etc_notice,
+    record_reviewed_metadata,
+    save_policy,
+)
 from tests.support.product_support import raw
 from tests.support.register_support import establish
 
@@ -201,8 +207,7 @@ def test_gate1_from_a_fresh_data_root_through_reload_and_restart(
             unit.locator("input[name='category_id']").fill(CATEGORY)
             unit.locator("input[name='name']").fill("리허설 합성 상품")
             unit.locator("input[name='attribute.brand']").fill("합성 브랜드")
-            unit.locator("input[name='notice.manufacturer']").fill("합성 제조사")
-            unit.locator("input[data-detail-reference='notice'][data-field-key='origin']").check()
+            fill_etc_notice(unit)
             unit.locator("textarea[name='detail_body']").fill("리허설 상세 본문")
             unit.locator("input[data-option-dimension]").fill("수량")
             for index, item_id in enumerate(items):

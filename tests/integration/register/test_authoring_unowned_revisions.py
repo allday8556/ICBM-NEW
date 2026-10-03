@@ -40,6 +40,8 @@ from tests.conftest import LOCAL
 from tests.support.gate1_support import (
     CATEGORY,
     CLIENT,
+    ETC_NOTICE_KEYS,
+    ETC_NOTICES,
     MARKET,
     OPERATOR,
     TAXONOMY,
@@ -119,10 +121,7 @@ def inputs(*, brand: str | None = "합성 브랜드", body: str = "상세 본문
         "name": {"value": "합성 상품", "provenance": "OPERATOR_CONFIRMED"},
         "tags": [],
         "attributes": {} if brand is None else {"brand": {"value": brand}},
-        "notices": {
-            "manufacturer": {"value": "합성 제조사"},
-            "origin": {"detail_page_reference": True},
-        },
+        "notices": ETC_NOTICES,
         "options": {},
         "detail_composition_revision": None,
         "detail_body": body,
@@ -178,7 +177,8 @@ def test_the_authoring_metadata_answers_with_both_revisions_null(
         ("brand", True),
         ("color", False),
     ]
-    assert [f["key"] for f in metadata["notice_fields"]] == ["manufacturer", "origin"]
+    # The notice fields are the provider notice schema's own for the reviewed ETC type.
+    assert [f["key"] for f in metadata["notice_fields"]] == ETC_NOTICE_KEYS
     assert metadata["options_supported"] is True
 
 

@@ -165,25 +165,6 @@ def test_rental_ha_has_its_documented_child_beyond_the_live_list() -> None:
     assert {f.name for f in rental.fields if f.listed_live} == {"maintenance", "specification"}
 
 
-def test_the_data_agrees_with_every_child_the_create_table_already_projects() -> None:
-    schema = load_notice_schema()
-    for notice_type, members in product.NOTICE_CHILDREN.items():
-        fields = schema.types[notice_type].fields
-        # The table carries the text members; a non-text member is the table's documented gap.
-        text = {f.name: f for f in fields if f.value_type is not NoticeValueType.BOOLEAN}
-        assert set(members) == set(text), notice_type
-        for name, member in members.items():
-            field = text[name]
-            assert member.required == field.provider_required, (notice_type, name)
-            assert member.max_length == field.max_length, (notice_type, name)
-            assert member.detail_default == (
-                field.presence is NoticePresence.DETAIL_REFERENCE_DEFAULT
-            ), (notice_type, name)
-            assert member.year_month == (field.value_type is NoticeValueType.YEAR_MONTH)
-            assert len(field.required_without) <= 1, (notice_type, name)
-            assert member.required_without == next(iter(field.required_without), None), name
-
-
 def _first_field(document: dict[str, Any], notice_type: str, name: str) -> dict[str, Any]:
     return next(f for f in document["types"][notice_type]["fields"] if f["name"] == name)
 

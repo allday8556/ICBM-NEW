@@ -22,8 +22,6 @@ from app.stages.register.execution import decode_field, encode_field
 from app.stages.register.payload import build_payload
 from app.stages.register.policy import FieldRule, FieldValueType, NoticePolicy
 from app.stages.register.preparation import FieldValue
-from integrations.marketplaces.smartstore import product
-from integrations.marketplaces.smartstore.product import WireContractError
 from tests.unit.register.test_m5_preflight_rules import (
     LISTING,
     METADATA,
@@ -263,15 +261,3 @@ def test_a_text_rule_is_stored_exactly_as_before_and_a_typed_rule_round_trips() 
 def test_an_inconsistent_typed_rule_is_refused_whole(fields: list[dict[str, Any]]) -> None:
     with pytest.raises(InputValidationError):
         _save(fields)
-
-
-# ---------------------------------------------------------------- the wire, until S3
-
-
-def test_the_create_projection_still_refuses_a_non_text_notice_value() -> None:
-    # The CREATE table projects text members only; typed members are aligned in S3, never guessed.
-    req = request(listing=replace(LISTING, notices=TYPED_NOTICES))
-    payload = build_payload(final(req, resolved(metadata=TYPED))).payload
-    with pytest.raises(WireContractError) as refused:
-        product.project(payload)
-    assert refused.value.code == "WIRE_VALUE_NOT_TEXT"
