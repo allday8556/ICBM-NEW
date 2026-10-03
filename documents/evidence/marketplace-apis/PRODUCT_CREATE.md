@@ -50,7 +50,7 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `originProduct` | required object | — | FIELDS |
 | `originProduct.statusType` | required string | on registration only `SALE` may be entered; `SUSPENSION` supplied on registration is registered as `SALE`; a stock of 0 registers the product `OUTOFSTOCK` regardless of the requested status. Schema values: `WAIT`, `SALE`, `OUTOFSTOCK`, `UNADMISSION`, `REJECTION`, `SUSPENSION`, `CLOSE`, `PROHIBITION`, `DELETE`; the endpoint-specific registration rule controls | REQ, REG, VALUES (E2) |
 | `originProduct.name` | required | — | PACKET, REQ |
-| `originProduct.detailContent` | required | — | PACKET, REQ |
+| `originProduct.detailContent` | required string | G-1 (2026-10-04) **INSUFFICIENT** beyond "required string": allowed HTML, sanitization, maximum length, maximum body images, body-image host rules and whether a body image must be an upload-API URL are not established by official evidence and are not adopted; a group product takes its detail through `commonDetailContent` or `detailContentTempId` | PACKET, REQ |
 | `originProduct.images` | required object | — | PACKET, FIELDS, REQ |
 | `originProduct.images.representativeImage` | required object | — | FIELDS, REQ |
 | `originProduct.images.representativeImage.url` | required string | must be a URL returned by the product-image upload API ([IMAGE_UPLOAD](IMAGE_UPLOAD.md#smartstore)); recommended image size 1000×1000 | PACKET, FIELDS, REQ |
