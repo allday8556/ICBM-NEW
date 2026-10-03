@@ -42,6 +42,7 @@ include = ["app*", "integrations*"]
 
 [tool.setuptools.package-data]
 app = ["db/migrations/script.py.mako"]
+integrations = ["marketplaces/smartstore/notice_schema.json"]
 
 [tool.ruff]
 target-version = "py312"

@@ -313,7 +313,12 @@ from the provider or a session:
   which is the documented provider default ("미입력 시 상품상세 참조로 입력됩니다") only for the five
   members every child repeats — for any other required member the document is refused as
   incomplete. The documented `yyyy-MM` form, the documented length bounds and the documented
-  "required when the other is absent" pairs are enforced, never repaired.
+  "required when the other is absent" pairs are enforced, never repaired. Notice coverage S1 holds
+  the provider notice schema of all 36 documented children as data
+  (`integrations/marketplaces/smartstore/notice_schema.json`, `smartstore-notice-schema/2.90.0-r1`,
+  derived from the retained 2.90.0 reference and live capture); its tests prove it agrees with
+  this pinned table on every child the table projects. The projection still reads the pinned
+  table until the metadata ↔ preflight ↔ wire alignment slice (S3).
 
 `sellerManagementCode` is the ICBM projection `smartstore-seller-management-code/v1` (architect
 ruling R1, Issue #89 `5861607665`): the first 30 lowercase hexadecimal characters of
