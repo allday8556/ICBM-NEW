@@ -22,8 +22,8 @@ frozen ceiling (``CAMPAIGN`` over the stage, ``ATTEMPT`` over the run's attempt)
 bound to that campaign. A refused or failed reservation records a refusal and raises; nothing is
 sent. A retry, a restart and a second run of the campaign all consume the same ceilings.
 
-The existing per-image (2 MiB) and per-attempt new-byte (24 MiB) limits of the collection profile
-remain the underlying byte enforcement; this owner counts sends and never replaces them.
+The existing per-image and per-attempt new-byte limits of the collection profile remain the
+underlying byte enforcement; this owner counts sends and never replaces them.
 """
 
 import hashlib

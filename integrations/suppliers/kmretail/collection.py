@@ -19,7 +19,9 @@ safe query keys               none. The product URL carried no query at all, so 
 
 The limits are bounded by what was actually observed, with headroom and nothing more: the page
 references 32 images, of which the role rules recognise 13 as product evidence, and the largest
-image phase B fetched was 1,437,349 bytes.
+image phase B fetched was 1,437,349 bytes. The E3 real run (2026-10-02, 27 products of one list
+page) then met description images over 2 MiB on 9 of them, and the user set the per-image bound to
+4 MiB on 2026-10-03 (``kmretail-2``); the per-run total stays 24 MiB.
 
 This module performs nothing. It holds no client, opens no connection, computes no checksum and
 writes no row; the run, the fetch, the asset store, the revision and the job belong to generic
@@ -52,8 +54,9 @@ TERMS_PATH = "/member/agreement.html"
 STOREFRONT_HOST = "kmretail.co.kr"
 # The image hosts phase B was approved for, and no others.
 IMAGE_HOSTS = frozenset({STOREFRONT_HOST, "onewbio.diskn.com"})
-# Observed: largest sampled image 1,437,349 bytes; 32 references, 13 of them product evidence.
-MAX_IMAGE_BYTES = 2 * 1024 * 1024
+# Observed: largest sampled image 1,437,349 bytes; 32 references, 13 of them product evidence;
+# the E3 real run met images over 2 MiB, and the user set 4 MiB (2026-10-03).
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_REFS = 30
 MAX_IMAGE_REQUESTS_PER_RUN = 30
 MAX_NEW_IMAGE_BYTES_PER_RUN = 24 * 1024 * 1024
