@@ -211,7 +211,8 @@ G3_DELETE = "0037_g3_delete_stage"
 SYNTHETIC = "0038_synthetic_test_products"
 # ADR-0013 owner amendment C1/C2: Product Core state, never registration state.
 COMMON_OPTIONS = "0039_common_sales_option_owner"
-SCHEMA_HEAD = COMMON_OPTIONS
+COMMON_OPTION_FACT_MAPPING = "0040_common_option_fact_mapping"
+SCHEMA_HEAD = COMMON_OPTION_FACT_MAPPING
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -232,6 +233,7 @@ AFTER_M5 = (
     G3_DELETE,
     SYNTHETIC,
     COMMON_OPTIONS,
+    COMMON_OPTION_FACT_MAPPING,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

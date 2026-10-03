@@ -76,6 +76,42 @@ OFFER_FIELDS = ("options", "quantity_tiers")
 NAME_FIELD = "original_name"
 
 
+def current_revision_for_confirmed_member(
+    session: Session,
+    product_group_id: str,
+    supplier_key: str,
+    source_product_id: str,
+) -> tuple[bool, str | None]:
+    """Read membership through its sole persistence owner.
+
+    The result distinguishes a non-member from a confirmed member that does not yet have a
+    current revision.  The caller cannot write membership or infer it from a fact revision.
+    """
+    source_uid = session.scalar(
+        select(SourceProduct.source_product_uid)
+        .join(
+            GroupMember,
+            GroupMember.source_product_uid == SourceProduct.source_product_uid,
+        )
+        .where(
+            SourceProduct.supplier_key == supplier_key,
+            SourceProduct.source_product_id == source_product_id,
+            GroupMember.product_group_id == product_group_id,
+            GroupMember.status == MemberStatus.CONFIRMED.value,
+        )
+    )
+    if source_uid is None:
+        return False, None
+    return (
+        True,
+        session.scalar(
+            select(CurrentSourceRevisionMove.revision_id)
+            .where(CurrentSourceRevisionMove.source_product_uid == source_uid)
+            .order_by(CurrentSourceRevisionMove.sequence.desc())
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class SourceProductRecord:
     source_product_uid: str
