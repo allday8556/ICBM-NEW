@@ -502,6 +502,10 @@ ADAPTIVE_TABLES = (
     "residual_risk_acceptances",
     "registration_deletions",
     "synthetic_test_products",
+    "common_sales_option_revisions",
+    "common_sales_option_axes",
+    "common_sales_option_values",
+    "current_common_sales_option_revision_moves",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
