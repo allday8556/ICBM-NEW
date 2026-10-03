@@ -578,6 +578,7 @@ SELECTION_OWNERS = frozenset(
 SELECTION_NAMES = frozenset(
     {
         "record_selection",
+        "record_selection_in",
         "record_operator_selection",
         "ImageSelectionRevision",
         "ImageSelectionSourceDecision",
@@ -599,6 +600,10 @@ SELECTION_OPERATORS = {
     # The operator's own route to the owner's operator entry point (owner decision 2026-10-03):
     # it hands over an operator's complete decision and never selects on anyone's behalf.
     "app/interface/api/routes/product_images.py": frozenset({"record_operator_selection"}),
+    # The image auto-selection rule (Issue #219, owner decision 2026-10-03; ADR-0013 §9
+    # amendment): it records the rule's own selection through the owner's shared entry point,
+    # as DecisionOrigin.RULE, and never moves an operator's.
+    "app/stages/products/auto_images.py": frozenset({"record_selection_in"}),
 }
 SOURCE_TRUTH_WRITERS = frozenset({"SourceAssetStore", "SourceAssetRecorder"})
 SOURCE_TRUTH_MODELS = frozenset({"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"})

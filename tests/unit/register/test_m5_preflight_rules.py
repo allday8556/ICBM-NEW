@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from app.stages.collect.facts import ImageRole
 from app.stages.connect.accounts import AccountBinding
 from app.stages.connect.marketplace.capability import (
     AuthStatus,
@@ -20,7 +19,7 @@ from app.stages.connect.marketplace.capability import (
     WorkflowState,
     WriteScopeStatus,
 )
-from app.stages.products.image_model import ImageAssetKind, QaVerdict
+from app.stages.products.image_model import ImageAssetKind, OutputRole, QaVerdict
 from app.stages.products.model import ReadinessStatus, Reason
 from app.stages.products.pricing import PriceBasis, PriceGuard, PricingContextInput, Rounding
 from app.stages.register import sanitize
@@ -167,7 +166,7 @@ def item(item_id: str, ordinal: int, group: str, signature: str, **overrides: An
         "selection_revision_id": f"selection-{item_id}",
         "images": (
             PublicationImage(
-                ImageRole.REPRESENTATIVE,
+                OutputRole.REPRESENTATIVE,
                 0,
                 ImageAssetKind.SOURCE_ASSET,
                 f"{ordinal}" * 64,

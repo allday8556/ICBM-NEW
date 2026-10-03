@@ -502,6 +502,7 @@ ADAPTIVE_TABLES = (
     "residual_risk_acceptances",
     "registration_deletions",
     "synthetic_test_products",
+    "supplier_common_image_decisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -1,5 +1,6 @@
 """Explicit composition root: every service is built here and nowhere else."""
 
+import logging
 import os
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
@@ -103,9 +104,16 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.service import OperateService
+from app.stages.products.auto_images import (
+    ImageAutoSelector,
+    ImageSlot,
+    StaticSupplierImageRoles,
+    slot_table,
+)
+from app.stages.products.common_images import SupplierCommonImageService
 from app.stages.products.image_store import DerivedImageStore
 from app.stages.products.images import ProductImageService
-from app.stages.products.materialization import ProductMaterializer
+from app.stages.products.materialization import Materialization, ProductMaterializer
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
@@ -154,11 +162,17 @@ from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNotice
 from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
 from integrations.suppliers.extraction import supplier_manifest
+from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
+from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
+from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
 from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
+
+logger = logging.getLogger("icbm.container")
 
 # Where the supplier packages, and with them each reviewed capture policy, live.
 SUPPLIER_PACKAGES = Path(supplier_packages.__file__).resolve().parent
@@ -201,6 +215,8 @@ class Container:
     materializer: ProductMaterializer
     pricing: ProductPricingService
     images: ProductImageService
+    common_images: SupplierCommonImageService
+    auto_images: ImageAutoSelector
     product_readiness: ProductReadinessService
     accounts: MarketplaceAccountStore
     registrations: RegistrationStore
@@ -237,6 +253,23 @@ class Container:
     phase_c_commands: PhaseCCommandStore
     phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
+
+
+def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
+    """Each supplier's published image role rules, as the image auto-selection reads them
+    (Issue #219): rule name → slot. A layout or unrecognised role is no product image."""
+    slot_of = {
+        SupplierImageRole.PRIMARY.value: ImageSlot.REPRESENTATIVE,
+        SupplierImageRole.THUMBNAIL.value: ImageSlot.ADDITIONAL,
+        SupplierImageRole.DETAIL.value: ImageSlot.DETAIL,
+        SupplierImageRole.PRODUCT_AUX.value: ImageSlot.AUXILIARY,
+    }.get
+    return {
+        KM_PROFILE.supplier_key: slot_table(
+            ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
+            slot_of,
+        )
+    }
 
 
 def build_container(
@@ -407,13 +440,26 @@ def build_container(
         db, clock, shadow_freezer=shadow_switch.freeze, capture_freezer=capture_store.freeze
     )
 
+    def _auto_select(materialized: Materialization) -> None:
+        """Issue #219: the image auto-selection of every Item the run materialized. It never
+        raises into the run; a refusal is logged, and the Item stays unselected until retried."""
+        item_ids = dict.fromkeys(
+            i for i in (materialized.item_id, *materialized.quantity_item_ids) if i is not None
+        )
+        for item_id in item_ids:
+            try:
+                auto_images.auto_select(item_id)
+            except Exception:
+                logger.exception("image auto-selection failed for %s", item_id)
+
     def after_recorded(collection_run_id: str) -> None:
         """What follows a durably RECORDED run: the Product, then the review fast path. The review
         step never raises into the run; a failure there is a recorded known failure (§4). The
         fast path also asks for a full pass, which covers what the materialization moved in M4
         (G2-C); until it completes, M4's coverage is not current."""
         try:
-            materializer.materialize_run(collection_run_id)
+            materialized = materializer.materialize_run(collection_run_id)
+            _auto_select(materialized)
         finally:
             run = runs.get(collection_run_id)
             if run is not None and run.source_product_id is not None:
@@ -491,6 +537,18 @@ def build_container(
     images = ProductImageService(
         store=product_store,
         artifacts=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        audit=audit,
+        clock=clock,
+    )
+    # Issue #219: the operator's BLOCK / KEEP decisions on supplier common images and their
+    # detection over each supplier's collection history.
+    common_images = SupplierCommonImageService(db, audit, clock)
+    # Issue #219: the image auto-selection rule over each supplier's own published role rules, and
+    # its automatic QA. An operator's selection always supersedes it.
+    auto_images = ImageAutoSelector(
+        store=product_store,
+        images=images,
+        roles=StaticSupplierImageRoles(supplier_image_roles()),
         audit=audit,
         clock=clock,
     )
@@ -773,6 +831,8 @@ def build_container(
         collection_suppliers=collection.supplier_keys(),
     )
     return Container(
+        auto_images=auto_images,
+        common_images=common_images,
         config=config,
         clock=clock,
         db=db,

@@ -44,6 +44,10 @@ The operator image API (ADR-0013 §9 amendment note) added
 The operator's synthetic test products (owner decision 2026-10-03) added
 `app/stages/collect/synthetic.py`, `app/interface/api/routes/synthetic_products.py`, migration
 `0038` and one integration suite.
+Issue #219 (supplier common images) added `app/stages/products/common_images.py`, migration `0039`
+and one integration suite.
+Issue #219 (image auto-selection) added `app/stages/products/auto_images.py`, migration `0040`, one
+integration suite and two unit suites.
 Notice coverage S0 (owner directive 2026-10-03) added
 `integrations/marketplaces/smartstore/notice_catalog.py` and one unit suite.
 Its capture (2026-10-03) added the S0 inventory `NOTICE_SMARTSTORE_S0.md` and the retained
@@ -62,11 +66,11 @@ wire forms `notice_children.golden.json`, beside them.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 260 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 264 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 42 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 22 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 68 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 123 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 70 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 125 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -88,13 +92,13 @@ wire forms `notice_children.golden.json`, beside them.
 | `integrations/` | 42 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 21 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 254 | tests |
+| `tests/` | 258 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 99 | integration tests by runtime owner |
+| `tests/integration/` | 101 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 89 | unit tests by runtime owner |
+| `tests/unit/` | 91 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 45 | the served web client |

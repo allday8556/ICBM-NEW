@@ -39,6 +39,7 @@ from app.stages.products.image_model import (
     DerivationInput,
     ImageAssetKind,
     OperationRecord,
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SelectionMoveReason,
@@ -193,7 +194,7 @@ class DerivationRecord:
 @dataclass(frozen=True)
 class SelectedImage:
     position: int
-    role: ImageRole
+    role: OutputRole
     source_role: ImageRole
     source_ordinal: int
     asset_kind: ImageAssetKind
@@ -285,6 +286,17 @@ class ImageUnit:
         return tuple(
             sorted(refs, key=lambda ref: (ref.role != ImageRole.REPRESENTATIVE, ref.ordinal))
         )
+
+    def confirmed_provenance(self, revision_id: str) -> dict[tuple[ImageRole, int], str]:
+        """The provenance — the supplier's role-rule name — of every CONFIRMED reference of one
+        revision, by role and ordinal. Read only."""
+        rows = self.session.scalars(
+            select(ProductFactsImageRef).where(
+                ProductFactsImageRef.revision_id == revision_id,
+                ProductFactsImageRef.status == FieldStatus.CONFIRMED.value,
+            )
+        ).all()
+        return {(ImageRole(row.role), row.ordinal): row.provenance for row in rows if row.sha256}
 
     # ------------------------------------------------------------------ derivations
 
@@ -448,7 +460,7 @@ class ImageUnit:
         outputs = tuple(
             SelectedImage(
                 o.position,
-                ImageRole(o.role),
+                OutputRole(o.role),
                 ImageRole(o.source_role),
                 o.source_ordinal,
                 ImageAssetKind(o.asset_kind),
@@ -488,6 +500,7 @@ class ImageUnit:
         decided_by: str,
         reason: str | None,
         correlation_id: str,
+        decision_origin: DecisionOrigin = DecisionOrigin.OPERATOR,
     ) -> SelectionRecord:
         last = self.session.scalar(
             select(ImageSelectionRevision.revision_no)
@@ -505,7 +518,7 @@ class ImageUnit:
                 revision_no=(last or 0) + 1,
                 source_decision_fingerprint=source_decision_fingerprint,
                 selection_fingerprint=selection_fingerprint,
-                decision_origin=DecisionOrigin.OPERATOR.value,
+                decision_origin=decision_origin.value,
                 decision_count=len(decisions),
                 output_count=len(outputs),
                 decided_by=decided_by,

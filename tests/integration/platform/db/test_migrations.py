@@ -139,8 +139,10 @@ CANONICAL_TABLES = (
     "residual_risk_acceptances",
     "registration_deletions",
     "synthetic_test_products",
+    # The operator's decisions on supplier common images (Issue #219).
+    "supplier_common_image_decisions",
 )
-HEAD = "0038_synthetic_test_products"
+HEAD = "0040_image_auto_selection"
 
 
 def _url(path: Path) -> str:
