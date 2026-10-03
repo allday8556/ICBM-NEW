@@ -267,6 +267,11 @@ rule.
 - No list-page topology is added to a supplier. Reconnaissance never observed one, and a value is
   never added because it seems likely. A later, observed list region may narrow discovery; it may
   never widen it.
+- **The operator may leave found products out** (owner decision 2026-10-04, A-UX2 D2). The side
+  panel shows `발견 N · 선택 M` and declares the queue with the chosen links only. A choice only
+  narrows the links sent: it is no authorization (the server judges every chosen link exactly as
+  above) and never the queue's bound — `M` is not written into the bound, which the operator still
+  types and the server still refuses when it is missing.
 
 **The bounds are declared, twice, and never defaulted.**
 - The supplier's `CollectionProfile` declares its queue limits (it owns pacing, AC-11):
