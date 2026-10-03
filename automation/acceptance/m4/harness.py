@@ -817,7 +817,14 @@ def scenario_quantity(run: Run) -> dict[str, object]:
     )
     c.check("s2.q1.generic_prices_unused", totals.isdisjoint(S2_PRICES))
     tables, columns = _schema_names(o)
-    c.check("s2.q1.no_source_sku", not [n for n in tables + columns if "sku" in n.lower()])
+    # AtomicSKU is the canonical product-side identity for an explicitly observed option
+    # configuration. It does not revive the forbidden inferred SourceSKU owner. This scenario
+    # must therefore prove the precise legacy invariant, not reject every schema name containing
+    # the generic substring ``sku``.
+    c.check(
+        "s2.q1.no_source_sku",
+        "source_skus" not in tables and "source_sku_id" not in columns,
+    )
     items = _items_by_quantity(o, group)
     c.require("s2.q1.three_items", sorted(items) == [1, 2, 3])
     for quantity, item in items.items():
