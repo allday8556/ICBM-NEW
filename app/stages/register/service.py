@@ -503,6 +503,10 @@ class RegisterService:
                     key=rule.key,
                     required=rule.required,
                     detail_page_reference_allowed=rule.detail_page_reference_allowed,
+                    value_type=rule.value_type.value,
+                    omitted_default=rule.omitted_default,
+                    required_without=rule.required_without,
+                    one_of=rule.one_of,
                 )
                 for rule in rules
             )

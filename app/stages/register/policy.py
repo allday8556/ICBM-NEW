@@ -52,6 +52,23 @@ STRONG_KEYS: frozenset[DuplicateKeyKind] = frozenset(
 )
 
 
+class FieldValueType(StrEnum):
+    """The value type of one declared field (notice coverage S2). A value of another type is never
+    coerced: ``"true"`` is text, not a boolean."""
+
+    TEXT = "TEXT"
+    YEAR_MONTH = "YEAR_MONTH"  # text in the form yyyy-MM
+    DATE = "DATE"  # text in the form yyyy-MM-dd
+    BOOLEAN = "BOOLEAN"
+    INTEGER = "INTEGER"
+
+
+# The value types whose value is text, and so may be empty, long or of the wrong form.
+TEXT_VALUE_TYPES: frozenset[FieldValueType] = frozenset(
+    {FieldValueType.TEXT, FieldValueType.YEAR_MONTH, FieldValueType.DATE}
+)
+
+
 @dataclass(frozen=True)
 class FieldRule:
     """One attribute or notice field the category metadata declares.
@@ -59,6 +76,13 @@ class FieldRule:
     ``missing_status`` is the versioned rule's own answer when a required value is absent:
     ``REVIEW_REQUIRED`` or ``BLOCKED``. ``detail_page_reference_allowed`` is true only where the
     reviewed metadata states the marketplace accepts "상세페이지 참조" for this field.
+
+    ``required`` is the marketplace's badge, not "the operator must type a value":
+    ``omitted_default`` states that leaving the field out is the marketplace's own documented
+    default (for example "미입력 시 상품상세 참조로 입력됩니다"), so an absent value is never
+    missing.
+    ``required_without`` makes the field required when every field it names is absent, and
+    ``one_of`` names a group — this field included — of which at least one is present.
     """
 
     key: str
@@ -66,10 +90,22 @@ class FieldRule:
     detail_page_reference_allowed: bool = False
     missing_status: ReadinessStatus = ReadinessStatus.REVIEW_REQUIRED
     max_length: int | None = None
+    value_type: FieldValueType = FieldValueType.TEXT
+    omitted_default: bool = False
+    required_without: tuple[str, ...] = ()
+    one_of: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.missing_status not in (ReadinessStatus.REVIEW_REQUIRED, ReadinessStatus.BLOCKED):
             raise ValueError("a missing required field is REVIEW_REQUIRED or BLOCKED")
+        if self.key in self.required_without:
+            raise ValueError("a field is never required without itself")
+        if self.one_of and (self.key not in self.one_of or len(set(self.one_of)) < 2):
+            raise ValueError("a one-of group names this field and at least one other")
+        if self.max_length is not None and self.value_type not in TEXT_VALUE_TYPES:
+            raise ValueError("only a text value has a length bound")
+        if self.detail_page_reference_allowed and self.value_type is not FieldValueType.TEXT:
+            raise ValueError("only a text field may be left to the detail page")
 
 
 @dataclass(frozen=True)
