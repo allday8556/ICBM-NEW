@@ -24,9 +24,11 @@
 
 ## Coupang
 
-- **Locators:** https://developers.coupang.com/en/api/shipments ; orders by minute https://developers.coupang.com/en/api/shipments/po-list-query-by-minute — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** the Shipments & Orders family includes daily and per-minute order lists and a single-order lookup; `GET .../vendors/{vendorId}/ordersheets` is indexed (path prefix elided in the capture).
-- **Missing:** full paths, query parameters, response fields, paging, errors, rate limit.
+- **Locators:** family index https://developers.coupang.com/en/api/shipments ; minute query https://developers.coupang.com/en/api/shipments/po-list-query-by-minute — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Method / path:** `GET /v2/providers/openapi/apis/api/v5/vendors/{vendorId}/ordersheets` for per-minute and daily/paged queries; the minute query accepts at most a 24-hour time window.
+- **Item identity:** every `data[].orderItems[]` includes `vendorItemId`; it also carries `productId`, `vendorItemName`, `shippingCount`, `sellerProductId`, `sellerProductName`, `sellerProductItemName`, and `firstSellerProductItemName`. `externalVendorSkuCode` is present only optionally.
+- **Canonical resolution consequence:** resolve the optional seller code exactly when present and cross-check the persisted `vendorItemId`; otherwise resolve by the unique persisted vendor ID. Names and exposure `productId` are not identity. A disagreement or non-unique match is `REVIEW_REQUIRED`.
+- **Missing:** a complete query/paging/error contract, order-line read-after-write timing, full retention/sanitization profile and endpoint-specific rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -24,8 +24,11 @@
 
 ## Coupang
 
-- **Captured (https://developers.coupang.com/en/api/returns, 2026-09-28):** the Returns family includes list and single read, approval, receive confirmation and pickup waybill.
-- **Missing:** method/paths and fields.
+- **Locator:** https://developers.coupang.com/en/api/returns/return-cancellation-request-list-query — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Method / path:** `GET /v2/providers/openapi/apis/api/v6/vendors/{vendorId}/returnRequests` lists return/cancellation requests.
+- **Item identity:** `data[].returnItems[]` includes `vendorItemId` (the page states return requests are submitted by it), `vendorItemName`, `cancelCount`, `purchaseCount`, `shipmentBoxId`, `sellerProductId` and seller product name. Partial return is possible, so the return quantity must be retained.
+- **Canonical consequence:** the immutable provider option ID resolves to exactly one persisted MarketplaceRegistrationItem; product and option names are diagnostics only.
+- **Missing:** complete query/paging/error contract, single-return read details, processing mutations, idempotency and rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

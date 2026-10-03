@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (origin and channel read-backs) | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -51,9 +51,12 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** the Products family contains product, list and item reads.
-- **Missing:** the method/path and every request/response fact of a single-product read.
+- **Locator:** https://developers.coupang.com/en/api/products/querying-product — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Method / path:** `GET /v2/providers/seller_api/apis/api/v1/marketplace/seller-products/{sellerProductId}`.
+- **Identity response:** each `data.items[]` exposes `sellerProductItemId` (needed to modify option values), `vendorItemId` (immutable lowest-level option ID; null while temporarily saved), `externalVendorSku`, and provider exposure IDs including `productId`/`itemId`. `productId` can change through merge/separation and is not a canonical key.
+- **Option/value response:** item name, prices, stock and attributes are returned; attribute rows include `exposed` and `editable`. The page warns that query results can include auto-extracted/recommended attributes and empty recommended values.
+- **Comparison consequence:** compare the expected seller-controlled item-code set and intended purchase-option values through a Coupang-specific normalizer; do not require raw full-attribute-array equality. A null `vendorItemId` cannot complete operational item identity.
+- **Missing:** read-after-write/approval timing, complete response nesting retained by an adapter, absence semantics, all errors and rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

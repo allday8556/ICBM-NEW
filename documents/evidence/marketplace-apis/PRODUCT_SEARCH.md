@@ -9,7 +9,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (positive-only reconcile; `ENDPOINT_MATRIX.md` §4.1.2) | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -63,9 +63,11 @@ Below, `SEARCH` = 5904349289.
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28; list paging page https://developers.coupang.com/en/api/products/product-list-paging-query (research packet 1).
-- **Captured:** the official index exposes product list paging and a lookup by `externalVendorSkuCode`.
-- **Missing:** method/path and request/response of both; uniqueness/completeness/freshness semantics (do not infer them from endpoint existence).
+- **Locators:** external seller-code query https://developers.coupang.com/en/api/products/query-a-summary-of-product-info ; list paging https://developers.coupang.com/en/api/products/product-list-paging-query — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Seller-code method / path:** `GET /v2/providers/seller_api/apis/api/v1/marketplace/seller-products/external-vendor-sku-codes/{externalVendorSkuCode}`. Coupang says to wait at least one minute after product creation.
+- **Response:** `data` is an array of vendor products, including `sellerProductId`, product name, display category, vendor, sale dates, brand and status (`IN_REVIEW | SAVED | APPROVING | APPROVED | PARTIAL_APPROVED | DENIED | DELETED`).
+- **Safety consequence:** an array result does not establish uniqueness; no complete freshness or zero-result absence guarantee is documented. At most it supplies positive candidates that still require provider-ID product read and Snapshot comparison.
+- **Missing:** uniqueness, completeness, zero-result meaning, stable freshness/read-after-write beyond the one-minute minimum, errors and rate limit; Track C did not complete the general list-paging contract.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st
