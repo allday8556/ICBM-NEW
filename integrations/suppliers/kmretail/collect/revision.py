@@ -6,6 +6,10 @@ A semantic change to any of them advances this string, and the repository pin re
 whose files changed without it.
 
 It advances from ``kmretail-images-1``, which covered image-role classification alone.
+
+``kmretail-2`` (2026-10-03, the user's decision after the E3 real run): only the product module's
+``BigImage`` inside ``keyImg`` is the representative image, and the rest of that container is
+layout furniture; and the profile's per-image bound is 4 MiB.
 """
 
-EXTRACTION_REVISION = "kmretail-1"
+EXTRACTION_REVISION = "kmretail-2"

@@ -97,16 +97,22 @@ class RoleRule:
     """One piece of site knowledge: what a container means for the images inside it.
 
     ``marker`` names the container itself. ``within`` names outer containers the marker must sit
-    inside, for a marker that is only meaningful in one place.
+    inside, for a marker that is only meaningful in one place. ``reference`` names a mark the
+    referencing element itself must carry, for a container that holds more than its own image.
     """
 
     rule_id: str
     role: ImageRole
     marker: str
     within: tuple[str, ...] = ()
+    reference: str = ""
 
-    def matches(self, chain: Sequence[Element], element: Element) -> bool:
-        return element.marks(self.marker) and (not self.within or _within(chain, *self.within))
+    def matches(self, chain: Sequence[Element], element: Element, reference: Element) -> bool:
+        return (
+            element.marks(self.marker)
+            and (not self.within or _within(chain, *self.within))
+            and (not self.reference or reference.marks(self.reference))
+        )
 
 
 # The innermost recognised container decides, so a rule is never fooled by an outer container that
@@ -114,8 +120,21 @@ class RoleRule:
 # its community boards and the hosting popup sit inside it as a parser sees the document.
 # Within one container, the first rule listed decides.
 ROLE_RULES: tuple[RoleRule, ...] = (
-    # The representative image of the product module.
-    RoleRule("km.primary.key_image", ImageRole.PRIMARY, "keyImg", ("xans-product-image",)),
+    # The representative image of the product module: the module's own ``BigImage`` and nothing
+    # else in its container. The page the operator's browser shows (ADR-0019) carries more there
+    # than the served document did — the platform's image-zoom script writes its own assets and a
+    # copy of the image into ``keyImg`` — and none of that is the product's representative image
+    # (the E3 real run, 2026-10-02: 27 of 27 products). Positive selection still: a mark the
+    # element carries, never a host or a path.
+    RoleRule(
+        "km.primary.key_image",
+        ImageRole.PRIMARY,
+        "keyImg",
+        ("xans-product-image",),
+        reference="BigImage",
+    ),
+    # Everything else the representative image's container holds is the platform's furniture.
+    RoleRule("km.ui.key_image_furniture", ImageRole.UI_COMMON, "keyImg", ("xans-product-image",)),
     # The additional-image list of the same module.
     RoleRule("km.thumbnail.additional", ImageRole.THUMBNAIL, "xans-product-addimage"),
     # The ordered description sequence, lazy-loaded or not.
@@ -189,7 +208,7 @@ class _References(HTMLParser):
         for depth in range(len(ancestry) - 1, -1, -1):
             container = ancestry[depth]
             for rule in ROLE_RULES:
-                if rule.matches(ancestry[: depth + 1], container):
+                if rule.matches(ancestry[: depth + 1], container, element):
                     # The last link is the referencing element itself: it opens no scope, so its
                     # proof cannot be left hanging by a missing close.
                     proof = None if depth == len(ancestry) - 1 else container.frame
