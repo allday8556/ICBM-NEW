@@ -55,6 +55,8 @@ Notice coverage S1 added `integrations/marketplaces/smartstore/notice_schema.py`
 Notice coverage S2 (typed notice values and field rules) added one unit suite under `tests/unit/register/`.
 Notice coverage S3 (one notice contract for metadata, preflight and wire) added one unit suite under
 `tests/unit/integrations/marketplaces/smartstore/`.
+Notice coverage S4 added the contract matrix of every documented SmartStore notice child, with its pinned
+wire forms `notice_children.golden.json`, beside them.
 
 | path | files | role |
 | --- | --- | --- |
@@ -86,13 +88,13 @@ Notice coverage S3 (one notice contract for metadata, preflight and wire) added 
 | `integrations/` | 42 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 21 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 252 | tests |
+| `tests/` | 254 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 99 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 87 | unit tests by runtime owner |
+| `tests/unit/` | 89 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 45 | the served web client |
