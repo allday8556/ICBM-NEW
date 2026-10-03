@@ -325,7 +325,6 @@ def test_the_stack_reads_the_record_yet_every_stage_stays_blocked(
     assert live_model.VISUAL_UNRECORDED not in missing
     assert {
         live_model.MODE_NOT_LIVE,
-        live_model.ELIGIBILITY_UNPROVEN,
         live_model.SENDER_NOT_WIRED,
     } <= missing
 

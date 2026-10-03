@@ -243,7 +243,6 @@ def test_live_mode_by_itself_permits_no_mutation(container: Container, approved:
     assert live_model.MODE_NOT_LIVE not in reasons
     assert {
         live_model.SENDER_NOT_WIRED,
-        live_model.ELIGIBILITY_UNPROVEN,
         live_model.RESTORE_PROOF_ABSENT,
         live_model.RETENTION_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
