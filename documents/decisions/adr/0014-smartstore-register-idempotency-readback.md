@@ -620,6 +620,18 @@ Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is
 - **The operator-facing outcome is the §28.5 read state** (등록중, 등록성공, 재확인필요, 등록실패), derived by one server-side partition. Its reconcile action is "등록확인 재시도", a read-only reconcile; there is no "register again" action for 재확인필요.
 - After a reload, the screen reconstructs the same durable Draft, Intent, Attempt and Registration state from the server.
 
+> **Amendment note (B-UX1; owner directive 2026-10-04).** Every reason reaches the screen
+> structured, exactly as its owner returned it: code, status and subject, plus the **areas** it
+> belongs to (`app/stages/register/reason_areas.py`, `register-reason-area/v1`). Area and status are
+> orthogonal: a reason keeps its owner's status and may belong to several areas, and a code the
+> table does not know is `UNCLASSIFIED` with its real code — never dropped or re-labelled. The
+> readiness of the **pre-send population** (every provider-listing unit of every Draft that no
+> Intent names; a unit with an Intent is counted by the §28.5 partition instead) is one derived,
+> read-time evaluation by the preflight owner (`GET /api/v1/register/readiness`,
+> `register-readiness-summary/v1`): the five readiness statuses plus `NOT_EVALUATED`, which carries
+> the owner's real refusal code and is never one of the five; the six counts always sum to the
+> population. Nothing is stored or cached, and the screen never recomputes a status.
+
 ### 23. The M5 / M6 boundary
 
 - **M5 read-back is registration and reconcile proof.** It covers the CREATE of a provider listing, the reconcile of an ambiguous CREATE, the verification against the Snapshot, and the explicit reconcile of a known registration (§14).

@@ -136,7 +136,8 @@ def _preflight_codes(page: Page, draft_id: str) -> tuple[str | None, list[str]]:
         for code in block.locator("[data-reason]").all()
         if code.get_attribute("data-reason")
     ]
-    return block.get_attribute("data-preflight"), sorted(codes)
+    # B-UX1: one row per reason, so a code repeats once per subject; the codes are compared.
+    return block.get_attribute("data-preflight"), sorted(set(codes))
 
 
 def _durable(container: Container, draft_id: str) -> dict[str, Any]:
