@@ -26,6 +26,7 @@ from app.interface.api.routes import (
     review,
     screens,
     settings,
+    synthetic_products,
     system,
 )
 from app.platform.core.egress import EGRESS
@@ -163,6 +164,7 @@ def create_app(
     app.include_router(connect.router)
     app.include_router(collect.router)
     app.include_router(collect_extension.router)
+    app.include_router(synthetic_products.router)
     app.include_router(products.router)
     app.include_router(product_images.router)
     app.include_router(register.router)

@@ -160,14 +160,15 @@ class CollectionRunStore:
         correlation_id: str,
         supplier_key: str,
         source_url: str,
-        provenance: RunProvenance = DIRECT_URL,
+        provenance: RunProvenance | None = DIRECT_URL,
     ) -> str:
         """Record a submitted collection in the caller's unit of work and return its identity.
 
         ``provenance`` is how the run's document is acquired (ADR-0019 §4). It is written here,
         once, and nothing later changes it. The default is the server gateway's own transport,
         which is what every run was before the extension existed; the extension ingest always
-        names its own.
+        names its own. ``None`` states that no document was acquired at all: only an operator's
+        synthetic test product (``synthetic.py``), a copy of an already collected revision, says so.
         """
         run_id = str(uuid.uuid4())
         session.add(
@@ -186,9 +187,13 @@ class CollectionRunStore:
                 pacing_key=None,
                 source_product_id=None,
                 finished_at=None,
-                transport_kind=provenance.transport_kind.value,
-                capture_policy_revision=provenance.capture_policy_revision,
-                capture_policy_digest=provenance.capture_policy_digest,
+                transport_kind=None if provenance is None else provenance.transport_kind.value,
+                capture_policy_revision=None
+                if provenance is None
+                else provenance.capture_policy_revision,
+                capture_policy_digest=None
+                if provenance is None
+                else provenance.capture_policy_digest,
             )
         )
         session.flush()

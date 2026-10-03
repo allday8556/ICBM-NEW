@@ -462,6 +462,14 @@ AC-30  A queue goes on past an item that fails, never reissuing or retrying it; 
 AC-31  A queue item's state is its own axis and never a run outcome; the side panel shows no REVIEW chip and no supplier-session indicator the extension cannot know
 ```
 
+> **Amendment note (synthetic test products; owner decision 2026-10-03).** AC-01 and AC-05 are
+> unchanged for every acquired document: the two transports are still the only way a document is
+> acquired, and the KM extractor is still the only writer of an acquired revision. One more owner
+> appends a revision without acquiring anything — an operator's labelled synthetic test product
+> (`app/stages/collect/synthetic.py`), a copy of one collected revision's facts in the reserved
+> `icbm-synthetic` namespace. Its run states no `TransportKind` (`NULL`), because no transport
+> acquired a document; the closed set of AC-01 gains no member.
+
 ## Consequences
 
 - The operator gets the Collector they asked for: the extension as the normal capture UX, and

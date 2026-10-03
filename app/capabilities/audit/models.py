@@ -55,6 +55,8 @@ class AuditEventType(StrEnum):
     # M5 PR-B registration foundation (ADR-0014): identifiers, enums, versions and sanitized
     # digests only. Never a payload value, a URL, a credential or provider response content.
     REGISTRATION_DRAFT_RECORDED = "REGISTRATION_DRAFT_RECORDED"
+    # Owner decision 2026-10-03: an operator created a labelled synthetic test product.
+    SYNTHETIC_TEST_PRODUCT_RECORDED = "SYNTHETIC_TEST_PRODUCT_RECORDED"
     REGISTRATION_SNAPSHOT_FROZEN = "REGISTRATION_SNAPSHOT_FROZEN"
     REGISTRATION_INTENT_RECORDED = "REGISTRATION_INTENT_RECORDED"
     REGISTRATION_ATTEMPT_RECORDED = "REGISTRATION_ATTEMPT_RECORDED"
