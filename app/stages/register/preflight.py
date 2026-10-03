@@ -14,7 +14,9 @@ What it reads, and from whom:
 - base and target pricing readiness, the current price for the target context and the current
   procurement: the M4 readiness and pricing owners; the selected images and their exact-binary QA:
   the M4 image owner. Nothing is priced, selected or recorded here;
-- the category metadata: a :class:`~app.stages.register.policy.RegistrationMetadataSource`.
+- the category metadata: a :class:`~app.stages.register.policy.RegistrationMetadataSource`;
+- the detail-composition profile the target names (B-DETAIL): the authoring-revision owner,
+  through :class:`DetailProfileSource`.
 
 No provider is called: no duplicate lookup, no upload, no marketplace read. Provider duplicate
 evidence and prepared provider assets are inputs a later adapter supplies.
@@ -30,6 +32,7 @@ from app.stages.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.stages.products.images import ProductImageService
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService, Readiness
+from app.stages.register.detail import DetailProfile
 from app.stages.register.model import ListingShape
 from app.stages.register.policy import (
     CategoryMetadata,
@@ -67,6 +70,13 @@ class CapabilityReader(Protocol):
     def capability(self, marketplace_key: str) -> MarketplaceCapabilityView: ...
 
 
+class DetailProfileSource(Protocol):
+    """The authoring-revision owner's read of one ``DETAIL_COMPOSITION`` revision
+    (``AuthoringRevisionStore.detail_profile``)."""
+
+    def detail_profile(self, revision_id: str) -> DetailProfile | None: ...
+
+
 def _readiness(readiness: Readiness) -> ReadinessInput:
     return ReadinessInput(
         status=readiness.status,
@@ -87,8 +97,10 @@ class RegistrationPreflightService:
         capability: CapabilityReader,
         metadata: RegistrationMetadataSource,
         policies: RegistrationPolicySource,
+        detail_profiles: DetailProfileSource | None = None,
     ) -> None:
         self._registrations = registrations
+        self._detail_profiles = detail_profiles
         self._readiness = readiness
         self._pricing = pricing
         self._images = images
@@ -231,7 +243,15 @@ class RegistrationPreflightService:
             live_registrations=tuple(LiveRegistration(r) for r in live),
             metadata=metadata,
             target=target,
+            detail_profile=self.detail_profile(target.detail_composition_revision),
         )
+
+    def detail_profile(self, revision_id: str | None) -> DetailProfile | None:
+        """The profile a target's detail-composition revision names, as its owner holds it; none
+        without a revision or a wired source (the composition is then BODY-only)."""
+        if revision_id is None or self._detail_profiles is None:
+            return None
+        return self._detail_profiles.detail_profile(revision_id)
 
     def prospective_units(self, draft_id: str) -> tuple[tuple[str, ...], ...]:
         """The provider-listing units this Draft's open Items would form under its shape (§2, R3).

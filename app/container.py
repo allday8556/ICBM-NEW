@@ -589,6 +589,8 @@ def build_container(
         # contract.
         metadata=DurableRegistrationMetadata(category_metadata_store, SmartStoreNoticeRules()),
         policies=DurableRegistrationPolicy(target_policy_store),
+        # B-DETAIL: the detail-composition profile each target names.
+        detail_profiles=authoring_revisions,
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4

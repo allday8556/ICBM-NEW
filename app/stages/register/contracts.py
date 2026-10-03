@@ -245,6 +245,9 @@ class AuthoringMetadataView(BaseModel):
     taxonomy_revision: str
     metadata_revision: str
     detail_composition_revision: str | None
+    # The sections of that profile (B-DETAIL), which an authored composition sends back exactly;
+    # ``BODY`` alone without a profile or under content v1.
+    detail_sections: tuple[str, ...] = ("BODY",)
     notice_type: str | None = None
     attributes: tuple[AuthoringFieldView, ...] = ()
     notice_fields: tuple[AuthoringFieldView, ...] = ()
