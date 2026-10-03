@@ -12,6 +12,9 @@
 
 - 실제 조회는 세 번 했다. 첫 두 번은 간격 없이 읽어 일부 유형이 `429 RATE_LIMITED`였고, 세 번째는
   1초 간격으로 36개 전부를 읽었다. 세 번 모두 유형 목록이 같았고, 겹쳐 읽힌 유형의 내용도 같았다.
+  이 실행 이력과 계정 이름은 수집 당시의 운영 기록이며, 보존 파일에는 실행별 시작·종료 시각과
+  매핑 리비전, 합친 응답만 남아 있다. 명세의 '마지막 변경' 날짜는 저장소 git 커밋 기록에서 읽었다
+  (명세 본문의 변경 이력에서 가장 늦은 날짜는 2022-07-25).
 - 실제 조회 응답이 주는 것: 유형, 유형 이름, 각 항목의 `fieldType`, `fieldName`, `fieldDescription`,
   `fieldAddDescription`, `fieldMaxLength`. **필수 여부는 주지 않는다.**
 - 공식 명세가 주는 것: 각 유형 하위 구조체(wire)의 필드, wire 타입, 필수 목록, 설명(생략 시 의미), 폐기 표시.
@@ -26,9 +29,22 @@
 - 실제 조회의 `fieldType` 값과 개수: `Boolean` 5, `Integer` 1, `LocalDate` 12, `Long` 1, `String` 374, `YearMonth` 18 (합계 411).
 - 명세에만 있는 필드 207개, 실제 목록에만 있는 필드 2개.
   명세에만 있는 필드는 대부분 공통 '생략 시 상품상세 참조' 필드(반품비용, 청약철회 제한, 품질보증, 보상, 분쟁처리)와
-  입력 방식 선택 필드(`*DateType`)다. 실제 목록은 판매자가 채우는 항목만 보여 준다.
+  입력 방식 선택 필드(`*DateType`)이고, 나머지 3개는 `DIET_FOOD`의 폐기 필드(`foodType`, `packDate`, `packDateText`)다.
+  실제 목록이 이 필드들을 왜 보여 주지 않는지는 출처가 말하지 않는다.
 - '필수'와 '사용자 입력 필수'는 다르다. 명세가 필수로 표시해도 설명이 '미입력 시 상품상세 참조로 입력됩니다'인
   필드는 생략하면 공급자가 그 값을 넣는다. 아래 표의 '생략 시 의미' 열이 이를 따로 적는다.
+
+## 독립 2차 판독 (2026-10-03)
+
+- 생성 스크립트를 쓰지 않은 별도 판독자가 두 1차 출처를 직접 파싱해 618행 전부를 대조했다.
+- 유형 수, 필드 수, 실제 타입, 명세 필수, 폐기, 최대 길이, 실제 목록 여부, 출처 해시는 모두 일치했다.
+- 불일치는 '생략 시 의미' 열과 출처 서술에 있었고, 이 판에서 고쳤다.
+  - `GIFT_CARD.periodDays`의 조건부 필수를 반영했다.
+  - `GIFT_CARD`의 사용처 3필드는 셋 중 하나가 필수임을 반영했다.
+  - `KITCHEN_UTENSILS.importDeclaration`의 기본값 `false`를 반영했다.
+  - '해당 사항이 없으면 삭제하고 전송' 필드 29개를 따로 표시했다.
+  - 명세 `format`을 함께 표기하고, `BIOCIDAL.expirationDate`의 명세 내부 불일치를 표시했다.
+  - 확인할 수 없는 출처 서술은 그 출처를 밝히거나 삭제했다.
 
 ## 열의 뜻
 
@@ -36,13 +52,13 @@
 | --- | --- |
 | 필드 | wire 필드 이름(`fieldName`) |
 | 실제 타입 | 실제 조회의 `fieldType` |
-| 명세 타입 | 공식 명세의 wire 타입(열거값·형식 포함) |
+| 명세 타입 | 공식 명세의 wire 타입, `format`, 열거값, 설명에 적힌 입력 형식. 명세의 `format`과 설명 형식이 어긋나면 그대로 표시한다 |
 | 명세 필수 | 2.0.0-RC 명세의 `required` 목록 포함 여부 |
-| 생략 시 의미 | 명세 설명에서 읽은 생략 의미: 반드시 전송 / 선택 / '상품상세 참조' 기본 / 공급자 기본값 / 다른 필드 생략 시 필수 |
+| 생략 시 의미 | 명세 설명에서 읽은 생략 의미: 반드시 전송 / 선택 / 생략 시 '상품상세 참조' / 생략 시 공급자 기본값(값이 적혀 있으면 그 값) / 다른 필드 생략 시 필수 / 여러 필드 중 하나는 필수 / 해당하면 전송, 해당 없으면 생략 |
 | 폐기 | 명세의 `deprecated` |
 | 최대 길이 | 실제 조회의 `fieldMaxLength` |
 | 실제 목록 | 실제 조회 목록에 그 필드가 있는지 |
-| 설명 | 실제 조회의 `fieldDescription`(없으면 명세 설명), 덧붙임 설명 |
+| 설명 | 실제 조회의 `fieldDescription`(없으면 명세 `description`, 그것도 없으면 명세 `title`), 덧붙임 설명 |
 
 ## `WEAR` — 의류
 
@@ -55,7 +71,7 @@
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 치수 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `caution` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 세탁 방법 및 취급 시 주의사항 |
-| `packDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 제조연월 |
+| `packDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 제조연월 |
 | `packDateText` | String | string | 아니오 | `packDate` 생략 시 필수 |  | 300 | 예 | 제조연월 직접 입력 |
 | `warrantyPolicy` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 품질 보증 기준 |
 | `afterServiceDirector` | String | string | 예 | 반드시 전송 |  | 200 | 예 | A/S 책임자와 전화번호 |
@@ -75,7 +91,7 @@
 | `material` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 제품의 주 소재 — 운동화인 경우에는 겉감, 안감을 구분하여 표시 |
 | `color` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 색상 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 발길이 — 해외사이즈 표기 시 국내사이즈 병행 표기(단위: mm) |
-| `height` | String | string | 아니오 | 선택 |  | 200 | 예 | 굽높이 — 굽 재료를 사용하는 여성화에 한함(단위: cm) |
+| `height` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 굽높이 — 굽 재료를 사용하는 여성화에 한함(단위: cm) |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `caution` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 취급 시 주의사항 |
 | `warrantyPolicy` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 품질 보증 기준 |
@@ -157,12 +173,12 @@
 | `components` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 구성품 |
 | `material` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 주요 소재 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) — 구성품별 제조자(사)가 다른 경우 각 구성품의 제조자(사) |
-| `importer` | String | string | 아니오 | 선택 |  | 200 | 예 | 수입자 — 수입품의 경우 수입자를 함께 표시. 구성품별 제조자가 다른 경우 각 구성품의 수입자 |
+| `importer` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 수입자 — 수입품의 경우 수입자를 함께 표시. 구성품별 제조자가 다른 경우 각 구성품의 수입자 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 — 구성품별 제조국이 다른 경우 각 구성품의 제조국 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
 | `installedCharge` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 배송 설치 비용 |
 | `warrantyPolicy` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 품질 보증 기준 |
-| `refurb` | String | string | 아니오 | 선택 |  | 200 | 예 | 재공급 사유 및 하자 — 재공급(리퍼브) 가구의 경우 재공급 사유 및 하자 부위 표시(예: 전시 상품으로 식탁 상판 등에 미세한 흠집 있음) |
+| `refurb` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 재공급 사유 및 하자 — 재공급(리퍼브) 가구의 경우 재공급 사유 및 하자 부위 표시(예: 전시 상품으로 식탁 상판 등에 미세한 흠집 있음) |
 | `afterServiceDirector` | String | string | 예 | 반드시 전송 |  | 200 | 예 | A/S 책임자와 전화번호 |
 | `returnCostReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.) - 1 (상품상세 참조) |
 | `noRefundReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.) - 1 (상품상세 참조) |
@@ -179,10 +195,10 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `ratedVoltage` | String | string | 아니오 | 선택 |  | 200 | 예 | 정격전압 |
-| `powerConsumption` | String | string | 아니오 | 선택 |  | 200 | 예 | 소비전력 |
-| `energyEfficiencyRating` | String | string | 아니오 | 선택 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `ratedVoltage` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 정격전압 |
+| `powerConsumption` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 소비전력 |
+| `energyEfficiencyRating` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월일 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기, 형태 |
@@ -206,10 +222,10 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `ratedVoltage` | String | string | 아니오 | 선택 |  | 200 | 예 | 정격전압 |
-| `powerConsumption` | String | string | 아니오 | 선택 |  | 200 | 예 | 소비전력 |
-| `energyEfficiencyRating` | String | string | 아니오 | 선택 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `ratedVoltage` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 정격전압 |
+| `powerConsumption` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 소비전력 |
+| `energyEfficiencyRating` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월일 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기, 용량, 형태 |
@@ -232,10 +248,10 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `ratedVoltage` | String | string | 아니오 | 선택 |  | 200 | 예 | 정격전압 |
-| `powerConsumption` | String | string | 아니오 | 선택 |  | 200 | 예 | 소비전력 |
-| `energyEfficiencyRating` | String | string | 아니오 | 선택 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `ratedVoltage` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 정격전압 |
+| `powerConsumption` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 소비전력 |
+| `energyEfficiencyRating` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기, 형태 — 실외기 포함 |
@@ -259,14 +275,14 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `ratedVoltage` | String | string | 아니오 | 선택 |  | 200 | 예 | 정격전압 |
-| `powerConsumption` | String | string | 아니오 | 선택 |  | 200 | 예 | 소비전력 |
-| `energyEfficiencyRating` | String | string | 아니오 | 선택 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `ratedVoltage` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 정격전압 |
+| `powerConsumption` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 소비전력 |
+| `energyEfficiencyRating` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 에너지소비효율등급 — ｢에너지이용 합리화법｣에 따른 에너지소비효율등급 표시대상 기자재에 한함 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
-| `weight` | String | string | 아니오 | 선택 |  | 200 | 예 | 무게 — 무게는 노트북 등 휴대형 기기에 한함 |
+| `weight` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 무게 — 무게는 노트북 등 휴대형 기기에 한함 |
 | `specification` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 주요 사양 — 컴퓨터와 노트북의 경우 성능, 용량, 운영체제 포함 여부 등. 프린터의 경우 인쇄 속도 등. |
 | `warrantyPolicy` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 품질 보증 기준 |
 | `afterServiceDirector` | String | string | 예 | 반드시 전송 |  | 200 | 예 | A/S 책임자와 전화번호 |
@@ -286,7 +302,7 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
@@ -312,7 +328,7 @@
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
 | `ratedVoltage` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 정격전압 |
 | `powerConsumption` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 소비전력 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
@@ -338,7 +354,7 @@
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
 | `ratedVoltage` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 정격전압 |
 | `powerConsumption` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 소비전력 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
@@ -363,7 +379,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | KC 인증정보 — ｢자동차관리법｣에 따른 부품자기인증 대상 자동차부품 ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
 | `caution` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제품 사용으로 인한 위험 및 유의사항 — 연료절감장치에 한함 |
@@ -388,11 +404,11 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
-| `licenceNo` | String | string | 아니오 | 선택 |  | 30 | 예 | 허가·인증·신고번호 — ｢의료기기법｣에 따른 허가·인증·신고 대상 의료기기에 한함 |
+| `licenceNo` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 30 | 예 | 허가·인증·신고번호 — ｢의료기기법｣에 따른 허가·인증·신고 대상 의료기기에 한함 |
 | `advertisingCertificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 광고사전심의 필 유무 |
-| `ratedVoltage` | String | string | 아니오 | 선택 |  | 1500 | 예 | 정격전압 — 전기용품에 한함 |
-| `powerConsumption` | String | string | 아니오 | 선택 |  | 200 | 예 | 소비전력 — 전기용품에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
+| `ratedVoltage` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 1500 | 예 | 정격전압 — 전기용품에 한함 |
+| `powerConsumption` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 소비전력 — 전기용품에 한함 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `purpose` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 제품의 사용 목적 |
@@ -418,11 +434,11 @@
 | `material` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 재질 |
 | `component` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 구성품 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 |
-| `importDeclaration` | Boolean | boolean | 아니오 | 선택 |  |  | 예 | 수입식품안전관리특별법에 따른 수입신고 — ｢수입식품안전관리 특별법｣에 따른 수입기구 또는 용기·포장의 경우 |
+| `importDeclaration` | Boolean | boolean | 아니오 | 생략 시 공급자 기본값 `false` |  |  | 예 | 수입식품안전관리특별법에 따른 수입신고 — ｢수입식품안전관리 특별법｣에 따른 수입기구 또는 용기·포장의 경우 |
 | `warrantyPolicy` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 품질 보증 기준 |
 | `afterServiceDirector` | String | string | 예 | 반드시 전송 |  | 200 | 예 | A/S 책임자와 전화번호 |
 | `returnCostReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.) - 1 (상품상세 참조) |
@@ -440,13 +456,13 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `capacity` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 내용물의 용량 및 중량 |
 | `specification` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 제품 주요 사양 — 피부 타입, 색상(호, 번) 등 |
-| `expirationDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 사용기한 또는 개봉 후 사용기간 |
+| `expirationDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 사용기한 또는 개봉 후 사용기간 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 |  | 300 | 예 | 사용기한 또는 개봉 후 사용기간 직접 입력 |
 | `usage` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 사용 방법 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 화장품 제조업자 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 |
 | `distributor` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 화장품책임판매업자 |
-| `customizedDistributor` | String | string | 아니오 | 선택 |  | 200 | 예 | 맞춤형 화장품판매업자 |
+| `customizedDistributor` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 맞춤형 화장품판매업자 |
 | `mainIngredient` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | ｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | ｢화장품법｣에 따른 기능성 화장품(미백, 주름개선, 자외선 차단제품 등)의 경우 — 화장품법에 따른 기능성 화장품 심사(또는 보고)를 필함 |
 | `caution` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 사용할 때의 주의사항 |
@@ -467,10 +483,10 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `material` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 소재 |
 | `purity` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 순도 |
-| `bandMaterial` | String | string | 아니오 | 선택 |  | 200 | 예 | 밴드 재질 — 시계의 경우 |
+| `bandMaterial` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 밴드 재질 — 시계의 경우 |
 | `weight` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 중량 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
-| `producer` | String | string | 아니오 | 선택 |  | 200 | 예 | 제조국(원산지, 가공지 등이 다를 경우) — 원산지, 가공지 등이 다를 경우 함께 표기 |
+| `producer` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 제조국(원산지, 가공지 등이 다를 경우) — 원산지, 가공지 등이 다를 경우 함께 표기 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 치수 |
 | `caution` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 착용 시 주의사항 |
 | `specification` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 주요 사양 — 귀금속, 보석류의 경우 등급, 시계의 경우 기능, 방수 등 |
@@ -493,14 +509,14 @@
 | `weight` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 포장 단위별 용량(중량), 수량, 크기 |
 | `amount` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 포장 단위별 수량 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 포장 단위별 크기 |
-| `packDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 제조연월일 |
+| `packDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 제조연월일 |
 | `packDateText` | String | string | 아니오 | `packDate` 생략 시 필수 |  | 300 | 예 | 제조연월일 직접 입력 |
-| `expirationDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
+| `expirationDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 | 예 | 300 | 예 | 유통기한 직접 입력 |
-| `consumptionDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 또는 품질유지기한 |
+| `consumptionDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 또는 품질유지기한 |
 | `consumptionDateText` | String | string | 아니오 | `consumptionDate` 생략 시 필수 |  | 300 | 예 | 소비기한 또는 품질유지기한 직접 입력 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 생산자 |
-| `relevantLawContent` | String | string | 아니오 | 선택 |  | 200 | 예 | 세부 품목군별 표시사항 — 농산물 - ｢농수산물 품질관리법｣에 따른 유전자변형농수산물 표시, 지리적 표시 축산물 - 축산법에 따른 등급 표시 등급(1++ 국내산 쇠고기의 경우 ｢소·돼지 식육의 표시방법 및 부위 구분기준｣에 따라 근내지방도 정보를 포함하여 표시), ｢가축 및 축산물 이력관리에 관한 법률｣에 따른 이력관리대상축산물 유무 수입 농수축산물 - 수입식품안전관리특별법에 따른 수입신고를 필함 |
+| `relevantLawContent` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 세부 품목군별 표시사항 — 농산물 - ｢농수산물 품질관리법｣에 따른 유전자변형농수산물 표시, 지리적 표시 축산물 - 축산법에 따른 등급 표시 등급(1++ 국내산 쇠고기의 경우 ｢소·돼지 식육의 표시방법 및 부위 구분기준｣에 따라 근내지방도 정보를 포함하여 표시), ｢가축 및 축산물 이력관리에 관한 법률｣에 따른 이력관리대상축산물 유무 수입 농수축산물 - 수입식품안전관리특별법에 따른 수입신고를 필함 |
 | `productComposition` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 상품 구성 |
 | `keep` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 보관 방법 또는 취급 방법 |
 | `adCaution` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 소비자 안전을 위한 주의사항 — ｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함 |
@@ -524,11 +540,11 @@
 | `foodType` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 식품의 유형 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 생산자 |
 | `location` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 소재지 — 수입품의 경우 생산자, 수입자 및 제조국 |
-| `packDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 제조연월일 |
+| `packDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 제조연월일 |
 | `packDateText` | String | string | 아니오 | `packDate` 생략 시 필수 |  | 300 | 예 | 제조연월일 직접 입력 |
-| `expirationDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
+| `expirationDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 | 예 | 300 | 예 | 유통기한 직접 입력 |
-| `consumptionDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 또는 품질유지기한 |
+| `consumptionDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 또는 품질유지기한 |
 | `consumptionDateText` | String | string | 아니오 | `consumptionDate` 생략 시 필수 |  | 300 | 예 | 소비기한 또는 품질유지기한 직접 입력 |
 | `weight` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 포장 단위별 내용물의 용량(중량), 수량 |
 | `amount` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 포장 단위별 수량 |
@@ -556,9 +572,9 @@
 | `productName` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제품명 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조업소 |
 | `location` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 소재지 — 수입품의 경우 수입업소명, 제조업소명 및 수출국명 |
-| `expirationDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
+| `expirationDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 | 예 | 300 | 예 | 유통기한 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 | 예 | 300 | 예 | 유통기한 직접 입력 |
-| `consumptionDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 |
+| `consumptionDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 소비기한 |
 | `consumptionDateText` | String | string | 아니오 | `consumptionDate` 생략 시 필수 |  | 300 | 예 | 소비기한 직접 입력 |
 | `storageMethod` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 보관방법 |
 | `weight` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 포장 단위별 내용물의 용량(중량), 수량 |
@@ -579,7 +595,7 @@
 | `troubleShootingContents` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 미입력 시 상품상세 참조로 입력됩니다. - 0 (소비자분쟁해결기준(공정거래위원회 고시) 및 관계법령에 따릅니다.) - 1 (상품상세 참조) |
 | `foodType` |  | string | 예 | 반드시 전송 | 예 |  | 아니오 | 식품의 유형 |
 | `packDateType` |  | string (CALENDER, DIRECT) | 아니오 | 생략 시 공급자 기본값 | 예 |  | 아니오 | 입력하지 않으면 캘린더(CALENDER) 방식이 선택됩니다. |
-| `packDate` |  | string `yyyy-MM-dd` | 아니오 | 선택 | 예 |  | 아니오 | 'yyyy-MM-dd' 형식 입력 |
+| `packDate` |  | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 | 예 |  | 아니오 | 'yyyy-MM-dd' 형식 입력 |
 | `packDateText` |  | string | 아니오 | `packDate` 생략 시 필수 | 예 |  | 아니오 | packDate를 입력하지 않은 경우에는 필수 |
 | `expirationDateType` |  | string (CALENDER, DIRECT) | 아니오 | 생략 시 공급자 기본값 | 예 |  | 아니오 | 입력하지 않으면 캘린더(CALENDER) 방식이 선택됩니다. |
 | `consumptionDateType` |  | string (CALENDER, DIRECT) | 아니오 | 생략 시 공급자 기본값 |  |  | 아니오 | 입력하지 않으면 캘린더(CALENDER) 방식이 선택됩니다. |
@@ -598,7 +614,7 @@
 | `color` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 색상 |
 | `material` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 재질 — 섬유의 경우 혼용율 |
 | `recommendedAge` | String | string | 예 | 반드시 전송 |  | 30 | 예 | 사용 연령 또는 권장 사용 연령 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `caution` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 취급방법 및 취급 시 주의사항, 안전표시(주의, 경고 등) |
@@ -624,7 +640,7 @@
 | `color` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 색상 |
 | `material` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 재질 |
 | `components` | String | string | 예 | 반드시 전송 |  | 1000 | 예 | 제품 구성 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `detailContent` | String | string | 예 | 반드시 전송 |  | 1000 | 예 | 상품별 세부 사양 |
@@ -651,7 +667,7 @@
 | `color` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 색상 |
 | `material` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 재질 |
 | `components` | String | string | 예 | 반드시 전송 |  | 1000 | 예 | 제품 구성 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `detailContent` | String | string | 예 | 반드시 전송 |  | 1000 | 예 | 상품별 세부 사양 |
@@ -675,8 +691,8 @@
 | `publisher` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 출판사 |
 | `size` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 크기 |
 | `pages` | String | string | 예 | 반드시 전송 |  | 30 | 예 | 쪽수 |
-| `components` | String | string | 아니오 | 선택 |  | 1000 | 예 | 제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등) — 전집 또는 세트일경우 낱권 구성, CD 등 |
-| `publishDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 발행일 — ｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외 |
+| `components` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 1000 | 예 | 제품 구성(전집 또는 세트일 경우 낱권 구성, CD 등) — 전집 또는 세트일경우 낱권 구성, CD 등 |
+| `publishDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 발행일 — ｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외 |
 | `publishDateText` | String | string | 아니오 | `publishDate` 생략 시 필수 |  | 200 | 예 | 발행일 직접 입력 — ｢출판문화산업 진흥법｣ 제2조 및 제22조의 규정에 따른 것으로, 매 판을 처음 인쇄한 날을 말함. 단, 매 판을 구분할 때에 오탈자의 변경 등 경미한 변경에 따라 다시 인쇄하는 경우는 제외 |
 | `description` | String | string | 예 | 반드시 전송 |  | 1000 | 예 | 목차 또는 책 소개 — 아동용 학습교재의 경우 사용 연령을 포함 |
 | `returnCostReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.) - 1 (상품상세 참조) |
@@ -694,7 +710,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
-| `ownershipTransferCondition` | String | string | 아니오 | 선택 |  | 500 | 예 | 소유권 이전 조건 — 소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시 |
+| `ownershipTransferCondition` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 500 | 예 | 소유권 이전 조건 — 소유권이 이전되는 경우에 한하며, 소유권 이전에 필요한 렌탈 기간 또는 총 렌탈 금액 등 요건을 구체적으로 명시 |
 | `payingForLossOrDamage` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 상품의 고장, 분실, 훼손 시 소비자 책임 |
 | `refundPolicyForCancel` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 중도 해약 시 환불 기준 |
 | `customerServicePhoneNumber` | String | string | 예 | 반드시 전송 |  | 30 | 예 | 소비자 상담 관련 전화번호 |
@@ -739,13 +755,13 @@
 | 필드 | 실제 타입 | 명세 타입 | 명세 필수 | 생략 시 의미 | 폐기 | 최대 길이 | 실제 목록 | 설명 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `issuer` | String | string | 예 | 반드시 전송 |  | 20 | 예 | 발행자 |
-| `periodStartDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 유효기간 시작일 |
-| `periodEndDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 유효기간 종료일 |
-| `periodDays` | Integer | integer | 아니오 | 선택 |  | 200 | 예 | 유효기간(구매일로부터 00일) |
+| `periodStartDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 유효기간 시작일 |
+| `periodEndDate` | LocalDate | string `format: date` 설명 형식 `yyyy-MM-dd` | 아니오 | 선택 |  | 200 | 예 | 유효기간 종료일 |
+| `periodDays` | Integer | integer `format: int32` | 아니오 | `periodStartDate`, `periodEndDate` 생략 시 필수 |  | 200 | 예 | 유효기간(구매일로부터 00일) |
 | `termsOfUse` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 이용 조건 — 유효기간 경과 시 보상 기준, 사용 제한 품목 제한 및 기간 등 |
-| `useStorePlace` | String | string | 아니오 | 선택 |  | 330 | 예 | 이용 가능 매장(장소) |
-| `useStoreAddressId` | Long | integer | 아니오 | 선택 |  |  | 예 | 이용 가능 매장(판매자 주소 ID) |
-| `useStoreUrl` | String | string | 아니오 | 선택 |  | 330 | 예 | 이용 가능 매장(URL) |
+| `useStorePlace` | String | string | 아니오 | `useStorePlace`, `useStoreAddressId`, `useStoreUrl` 중 하나는 필수 |  | 330 | 예 | 이용 가능 매장(장소) |
+| `useStoreAddressId` | Long | integer `format: int64` | 아니오 | `useStorePlace`, `useStoreAddressId`, `useStoreUrl` 중 하나는 필수 |  |  | 예 | 이용 가능 매장(판매자 주소 ID) |
+| `useStoreUrl` | String | string | 아니오 | `useStorePlace`, `useStoreAddressId`, `useStoreUrl` 중 하나는 필수 |  | 330 | 예 | 이용 가능 매장(URL) |
 | `refundPolicy` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 잔액 환급 조건 |
 | `customerServicePhoneNumber` | String | string | 예 | 반드시 전송 |  | 30 | 예 | 소비자 상담 관련 전화번호 |
 | `returnCostReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.) - 1 (상품상세 참조) |
@@ -817,13 +833,13 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `productName` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 품목 및 제품명 |
 | `dosageForm` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 용도 및 제형 — 표백제의 경우 계열을 함께 표시 |
-| `packDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 제조연월 |
+| `packDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 제조연월 |
 | `packDateText` | String | string | 아니오 | `packDate` 생략 시 필수 |  | 300 | 예 | 제조연월 직접 입력 |
-| `expirationDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 유통기한 — 해당 사항이 없으면 생략하고 expirationDateText에 '해당사항 없음' 입력 |
+| `expirationDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 유통기한 — 해당 사항이 없으면 생략하고 expirationDateText에 '해당사항 없음' 입력 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 |  | 300 | 예 | 유통기한 직접 입력 — 해당 사항이 없으면 '해당사항 없음' 입력 |
 | `weight` | String | string | 예 | 반드시 전송 |  | 1500 | 예 | 중량·용량·매수·크기 |
 | `effect` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 효능ㆍ효과 — 승인 대상 생활화학제품에 한함 |
-| `importer` | String | string | 아니오 | 선택 |  | 200 | 예 | 수입자 — 수입제품에 한함 |
+| `importer` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 수입자 — 수입제품에 한함 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `childProtection` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 어린이보호포장 대상 제품 여부 |
@@ -849,7 +865,7 @@
 | `weight` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 중량 또는 용량 및 표준 사용량 |
 | `effect` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 효능ㆍ효과 |
 | `rangeOfUse` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 사용 대상자 및 사용 범위 |
-| `importer` | String | string | 아니오 | 선택 |  | 200 | 예 | 수입자 — 수입제품에 한함 |
+| `importer` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 수입자 — 수입제품에 한함 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `childProtection` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 어린이보호포장 대상 제품 여부 |
@@ -858,7 +874,7 @@
 | `caution` | String | string | 예 | 반드시 전송 |  | 500 | 예 | 사용 방법 및 사용상 주의사항 |
 | `approvalNumber` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 승인번호 |
 | `customerServicePhoneNumber` | String | string | 예 | 반드시 전송 |  | 30 | 예 | 소비자상담 전화번호 |
-| `expirationDate` | LocalDate | string `yyyy-MM-dd` | 아니오 | 선택 |  | 300 | 예 | 유통기한 — 'yyyy-MM-dd' 형식 입력 |
+| `expirationDate` | LocalDate | string `format: yearmonth` 설명 형식 `yyyy-MM-dd` **(명세 내부 불일치)** | 아니오 | 선택 |  | 300 | 예 | 유통기한 — 'yyyy-MM-dd' 형식 입력 |
 | `expirationDateText` | String | string | 아니오 | `expirationDate` 생략 시 필수 |  | 300 | 예 | 유통기한 직접 입력 — expirationDate를 입력하지 않은 경우에는 필수 |
 | `returnCostReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 제품하자ㆍ오배송 등에 따른 청약철회 등의 경우 청약철회 등의 기한 및 통신판매업자가 부담하는 반품 비용 등에 관한 정보. 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래등에서의소비자보호에관한법률 등에 의한 제품의 하자 또는 오배송 등으로 인한 청약철회의 경우에는 상품 수령 후 3개월 이내, 그 사실을 안 날 또는 알 수 있었던 날로부터 30일 이내에 청약철회를 할 수 있으며, 반품 비용은 통신판매업자가 부담합니다.) - 1 (상품상세 참조) |
 | `noRefundReason` |  | string | 예 | 생략 시 '상품상세 참조' |  |  | 아니오 | 미입력 시 상품상세 참조로 입력됩니다. - 0 (전자상거래 등에서의 소비자보호에 관한 법률 등에 의한 청약철회 제한 사유에 해당하는 경우 및 기타 객관적으로 이에 준하는 것으로 인정되는 경우 청약철회가 제한될 수 있습니다.) - 1 (상품상세 참조) |
@@ -876,10 +892,10 @@
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품목 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
 | `certificationType` | String | string | 예 | 반드시 전송 |  | 50 | 예 | KC 인증정보 — ｢전기용품 및 생활용품 안전관리법｣에 따른 안전인증·안전확인·공급자적합성확인대상 제품 및 ｢전파법｣에 따른 적합인증·적합등록 대상 기자재에 한함 |
-| `releaseDate` | YearMonth | string `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
+| `releaseDate` | YearMonth | string `format: yearmonth` 설명 형식 `yyyy-MM` | 아니오 | 선택 |  | 300 | 예 | 동일 모델의 출시연월 |
 | `releaseDateText` | String | string | 아니오 | `releaseDate` 생략 시 필수 |  | 300 | 예 | 동일 모델 출시연월일 직접 입력 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
-| `importer` | String | string | 아니오 | 선택 |  | 200 | 예 | 수입자 — 수입품의 경우 수입자를 함께 표시 |
+| `importer` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 200 | 예 | 수입자 — 수입품의 경우 수입자를 함께 표시 |
 | `producer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조국 |
 | `size` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 크기 |
 | `weight` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 무게 |
@@ -904,7 +920,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `itemName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 품명 |
 | `modelName` | String | string | 예 | 반드시 전송 |  | 50 | 예 | 모델명 |
-| `certificateDetails` | String | string | 아니오 | 선택 |  | 500 | 예 | 법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항 |
+| `certificateDetails` | String | string | 아니오 | 해당하면 전송, 해당 없으면 생략 |  | 500 | 예 | 법에 의한 인증, 허가 등을 받았음을 확인할 수 있는 경우 그에 대한 사항 |
 | `manufacturer` | String | string | 예 | 반드시 전송 |  | 200 | 예 | 제조자(사) |
 | `afterServiceDirector` | String | string | 아니오 | 선택 |  | 200 | 예 | A/S 책임자 |
 | `customerServicePhoneNumber` | String | string | 아니오 | `afterServiceDirector` 생략 시 필수 |  | 30 | 예 | 소비자 상담 관련 전화번호 |
