@@ -32,6 +32,7 @@ from app.stages.products.atomic_sku_models import (
     CurrentAtomicSKUSetMove,
 )
 from app.stages.products.common_option_mapping_models import (
+    CommonOptionFactAxisMapping,
     CommonOptionFactMappingRevision,
     CommonOptionFactValueMapping,
     CurrentCommonOptionFactMappingMove,
@@ -416,8 +417,23 @@ class AtomicSKUStore:
         )
         if not members:
             return None
-        for member in members:
-            fact_revision = session.get(ProductFactsRevision, member.source_revision_id)
+        dependency_revision_ids = {member.source_revision_id for member in members}
+        dependency_revision_ids.update(
+            session.scalars(
+                select(CommonOptionFactAxisMapping.source_revision_id).where(
+                    CommonOptionFactAxisMapping.mapping_revision_id == mapping.mapping_revision_id
+                )
+            )
+        )
+        dependency_revision_ids.update(
+            session.scalars(
+                select(CommonOptionFactValueMapping.source_revision_id).where(
+                    CommonOptionFactValueMapping.mapping_revision_id == mapping.mapping_revision_id
+                )
+            )
+        )
+        for source_revision_id in dependency_revision_ids:
+            fact_revision = session.get(ProductFactsRevision, source_revision_id)
             if fact_revision is None:
                 return None
             is_member, current_revision = current_revision_for_confirmed_member(
@@ -426,7 +442,7 @@ class AtomicSKUStore:
                 fact_revision.supplier_key,
                 fact_revision.source_product_id,
             )
-            if not is_member or current_revision != member.source_revision_id:
+            if not is_member or current_revision != source_revision_id:
                 return None
         return row
 

@@ -531,6 +531,65 @@ def test_current_for_use_fails_closed_when_common_options_advance(
     assert container.atomic_skus.current_for_use(group) is None
 
 
+def test_current_for_use_fails_closed_when_mapping_evidence_source_advances(
+    container: Container,
+) -> None:
+    group, configuration_revision_id, common = _foundation(container)
+    mapping_revision = container.revisions.append(
+        collected(
+            fields=_option_fields(),
+            images=(),
+            supplier_key="mapping-source",
+            source_product_id="5678",
+            source_url="https://mapping.example/products/5678",
+        )
+    )
+    mapping_source = container.product_store.source_product("mapping-source", "5678")
+    container.product_store.record_move(
+        mapping_source.source_product_uid,
+        mapping_revision.revision_id,
+        reason=MoveReason.INITIAL,
+        decided_by="owner",
+        correlation_id="mapping-source-initial",
+    )
+    container.product_store.confirm_new_member(
+        group,
+        mapping_source.source_product_uid,
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="mapping-source-member",
+    )
+    _record_mapping_for_common(container, group, common, mapping_revision.revision_id)
+    historical = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, configuration_revision_id, 0, ("300mg", "30정")),),
+        reason="cross-source proof",
+        decided_by="owner",
+        correlation_id="cross-source-atomic",
+    )
+    assert container.atomic_skus.current_for_use(group) == historical
+
+    replacement = container.revisions.append(
+        collected(
+            fields=_option_fields(),
+            images=(),
+            supplier_key="mapping-source",
+            source_product_id="5678",
+            source_url="https://mapping.example/products/5678",
+        )
+    )
+    container.product_store.record_move(
+        mapping_source.source_product_uid,
+        replacement.revision_id,
+        reason=MoveReason.NEWER_REVISION,
+        decided_by="owner",
+        correlation_id="mapping-source-advanced",
+    )
+
+    assert container.atomic_skus.current(group) == historical
+    assert container.atomic_skus.current_for_use(group) is None
+
+
 def test_current_for_use_fails_closed_when_mapping_advances(
     container: Container,
 ) -> None:
