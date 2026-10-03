@@ -5,12 +5,14 @@ official type — never added type by type and never guessed. This reads the off
 (``GET /v1/products-for-provided-notice``) and then each listed type's content fields
 (``GET /v1/products-for-provided-notice/{type}``), in order, once each, with the committed bearer.
 
-It is a read and nothing else: no retry, no write, no mutation, and nothing is stored here. What
-comes back is the retained, allow-listed part of each response (the type identity and name and each
+It is a read and nothing else, one read a second (``READ_INTERVAL_S``): no retry, no write, no
+mutation, and nothing is stored here. What comes back is the retained, allow-listed part of each
+response (the type identity and name and each
 content field's documented members), with the mapping revision it was read under. A type whose read
 fails is reported with its code; nothing is filled in for it.
 """
 
+import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +29,9 @@ from integrations.marketplaces.smartstore.registry import (
 
 BearerSource = Callable[[], Any]
 TYPE_KEY = "productInfoProvidedNoticeType"
+# ICBM policy, never a provider fact: one read a second keeps a full capture under the provider's
+# request-rate limit, which answered 429 to unspaced reads (2026-10-03).
+READ_INTERVAL_S = 1.0
 
 
 def _listed_types(retained: Mapping[str, Any]) -> list[str]:
@@ -49,9 +54,20 @@ def _listed_types(retained: Mapping[str, Any]) -> list[str]:
 
 
 class SmartStoreNoticeCatalog:
-    def __init__(self, caller: SmartStoreEndpointCaller, bearer: BearerSource) -> None:
+    def __init__(
+        self,
+        caller: SmartStoreEndpointCaller,
+        bearer: BearerSource,
+        *,
+        interval_s: float = READ_INTERVAL_S,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._caller = caller
         self._bearer = bearer
+        # The provider limits the request rate (429 RATE_LIMITED): the reads are spaced, never
+        # retried.
+        self._interval_s = interval_s
+        self._pause = pause
 
     def capture(self) -> dict[str, Any]:
         bearer = self._bearer()
@@ -74,6 +90,7 @@ class SmartStoreNoticeCatalog:
         types: dict[str, Any] = {}
         failures: dict[str, Any] = {}
         for code in _listed_types(listed.retained):
+            self._pause(self._interval_s)
             try:
                 read = self._caller.call(EndpointId.SMARTSTORE_NOTICE_TYPE_READ, request(code))
             except SmartStoreCallError as failure:
