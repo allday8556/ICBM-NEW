@@ -19,11 +19,10 @@ failing layer, and its code is the first failing one, so this order decides the 
    architect's in GitHub, and its durable proof (migration 0036) binds the stage's own account and
    the exact risk contract; without such a proof this layer refuses (G3-30). It authorizes nothing
    by itself: every other layer still decides;
-6. canary eligibility, a current restore proof, evidence retention and visual acceptance are
-   proven — production wires :class:`~app.capabilities.live_safety.proofs.DurableStageProofs`, whose
-   restore, retention
-   and visual answers come from the area 2 and area 3 owners while canary eligibility (§5) still
-   has no owner and therefore refuses on its own;
+6. a current restore proof, evidence retention and visual acceptance are proven — production
+   wires :class:`~app.capabilities.live_safety.proofs.DurableStageProofs`, whose answers come from
+   the area 2 and area 3 owners. Canary eligibility (§5) is not a layer: a regulated category is
+   the seller's risk, not ICBM's to judge (owner decision 2026-10-03);
 7. for a CREATE: the positive-only reconcile path is adopted (§10, ADR-0014 §28) — the second half
    of the CREATE endpoint-adoption row, named on its own — and ADR-0014 §26's CREATE-only
    execution-scope brake is ``ACTIVE``, read in this same unit (the REGISTER execution owner also
@@ -61,7 +60,6 @@ from app.capabilities.live_safety.model import (
     CANDIDATE_DRIFT,
     CANDIDATE_NOT_READY,
     CREATE_STAGE_GATE_NOT_READY,
-    ELIGIBILITY_UNPROVEN,
     ENDPOINT_NOT_ADOPTED,
     GRANT_MISSING,
     MODE_NOT_LIVE,
@@ -645,11 +643,9 @@ class SafetyStack:
                 proofs.residual_risk_accepted(*account),
                 RESIDUAL_RISK_UNACCEPTED,
             ),
-            _layer(
-                Layer.CANARY_NON_REGULATED,
-                proofs.canary_non_regulated(stage, unit_ref, eligibility),
-                ELIGIBILITY_UNPROVEN,
-            ),
+            # ADR-0018 §5 amendment (owner decision 2026-10-03): whether a product falls in a
+            # regulated category is the seller's risk, not ICBM's to judge, so canary eligibility
+            # is no longer a layer. Its owner still records a review when one is wanted.
             _layer(
                 Layer.RESTORE_PROOF,
                 bool(target_digest) and proofs.restore_proof(stage, target_digest),

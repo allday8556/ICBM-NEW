@@ -45,7 +45,7 @@ from app.capabilities.live_safety.eligibility import (
     create_unit_ref,
 )
 from app.capabilities.live_safety.gates import create_stage_gate
-from app.capabilities.live_safety.model import Layer, MutationRefused, MutationStage
+from app.capabilities.live_safety.model import Layer, MutationStage
 from app.capabilities.live_safety.stack import SafetyStack, Verdict
 from app.config import AppConfig
 from app.container import Container
@@ -161,8 +161,9 @@ def frozen_counts(config: AppConfig) -> dict[str, int]:
 
 
 def eligibility_layer(readiness: Any) -> bool:
-    (layer,) = [view for view in readiness.layers if view.layer is Layer.CANARY_NON_REGULATED]
-    return bool(layer.satisfied)
+    """Whether the stack still has an eligibility layer. ADR-0018 §5 amendment (owner decision
+    2026-10-03): a regulated category is the seller's risk, so it has none."""
+    return any(view.layer is Layer.CANARY_NON_REGULATED for view in readiness.layers)
 
 
 # ------------------------------------------------------------------ the review packet
@@ -301,10 +302,10 @@ def test_a_fully_reviewed_lineage_proves_the_asset_stage(
     # The record does not move the candidate it was reviewed for: the same lineage is derived.
     assert asset_binding(container, unit["preparation_id"]) == binding
     assert asset_proven(container, binding)
-    # The production stack reads it: the eligibility layer holds, and every other layer of this
-    # main still refuses, so the stage is not ready.
+    # The production stack no longer has an eligibility layer (ADR-0018 §5 amendment): the record
+    # stays evidence the owner answers, and every other layer of this main still refuses.
     readiness = container.asset_uploads.readiness(grant_id)
-    assert eligibility_layer(readiness)
+    assert not eligibility_layer(readiness)
     assert readiness.verdict is not Verdict.READY
     assert live_model.ELIGIBILITY_UNPROVEN not in readiness.missing
     assert live_model.MODE_NOT_LIVE in readiness.missing
@@ -660,7 +661,9 @@ def test_the_create_stage_reads_the_same_record_through_the_intents_lineage(
         scope=_scope(container, intent),
         stage_gate=gate,
     )
-    assert eligibility_layer(readiness) and readiness.verdict is not Verdict.READY
+    # The owner still proves the record (above); the stack has no eligibility layer any more
+    # (ADR-0018 §5 amendment), and every other layer of this main still refuses.
+    assert not eligibility_layer(readiness) and readiness.verdict is not Verdict.READY
     # Another Intent, another authored revision or the ASSET unit never stands in for it.
     other_intent = replace(binding, unit_ref=create_unit_ref("another-intent"))
     assert not stage_proofs.canary_non_regulated(
@@ -695,8 +698,9 @@ def test_an_unreviewed_create_lineage_is_unproven(
         scope=_scope(container, intent),
         stage_gate=gate,
     )
+    # Unreviewed, and still no refusal on it: eligibility is not a layer any more.
     assert not eligibility_layer(readiness)
-    assert live_model.ELIGIBILITY_UNPROVEN in readiness.missing
+    assert live_model.ELIGIBILITY_UNPROVEN not in readiness.missing
 
 
 class _EligibilityFromTheOwner(ProvenProofs):
@@ -761,24 +765,11 @@ def test_admission_proves_eligibility_inside_the_unit_that_opens_the_attempt(
                 **lineage,
             )
 
-    # Without the lineage the CREATE path hands over, eligibility is unproven whatever exists.
-    for lineage in (
-        {},
-        {"send_gate": copy.final},
-        {"preparation_revision_id": frozen.preparation_revision_id},
-        {"send_gate": copy.final, "preparation_revision_id": "another-revision"},
-    ):
-        with pytest.raises(MutationRefused) as refused:
-            admit(**lineage)
-        assert refused.value.code == live_model.ELIGIBILITY_UNPROVEN
-    lineage = {"send_gate": copy.final, "preparation_revision_id": frozen.preparation_revision_id}
-    if not review:
-        with pytest.raises(MutationRefused) as refused:
-            admit(**lineage)
-        assert refused.value.code == live_model.ELIGIBILITY_UNPROVEN
-        return
-    # The record is read inside the write unit, and the matching grant is spent there.
-    grant = admit(**lineage)
+    # ADR-0018 §5 amendment (owner decision 2026-10-03): admission no longer reads eligibility,
+    # reviewed or not, with or without the lineage — every other layer still decides, and the
+    # matching grant is spent in the write unit.
+    del copy
+    grant = admit()
     assert grant.budget_used == 1
 
 

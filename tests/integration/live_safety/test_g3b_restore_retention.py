@@ -656,7 +656,6 @@ def test_the_production_stack_now_reads_the_durable_proofs_but_stays_blocked(
     assert live_model.RETENTION_UNPROVEN not in missing
     assert {
         live_model.MODE_NOT_LIVE,
-        live_model.ELIGIBILITY_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
         live_model.SENDER_NOT_WIRED,
     } <= missing

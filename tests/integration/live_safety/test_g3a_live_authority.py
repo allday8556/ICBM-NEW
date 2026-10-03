@@ -249,7 +249,6 @@ def test_the_production_upload_path_refuses_every_upload_at_this_main(
     assert {
         live_model.MODE_NOT_LIVE,
         live_model.SENDER_NOT_WIRED,
-        live_model.ELIGIBILITY_UNPROVEN,
         live_model.RESTORE_PROOF_ABSENT,
         live_model.RETENTION_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
@@ -419,7 +418,6 @@ def test_an_engaged_brake_and_every_unproven_prerequisite_refuse_before_transmis
     refused(live_model.BRAKE_ENGAGED, lambda: service.upload(request(grant_id, DERIVED_A)))
     release(container)
     for missing, code in (
-        ("eligibility", live_model.ELIGIBILITY_UNPROVEN),
         # §10's residual-risk row is a mandatory layer of this stage too, and it refuses alone.
         ("residual_risk", live_model.RESIDUAL_RISK_UNACCEPTED),
         ("restore", live_model.RESTORE_PROOF_ABSENT),
@@ -1132,7 +1130,6 @@ def test_a_recorded_acceptance_satisfies_only_its_own_asset_layer(
     assert {
         live_model.MODE_NOT_LIVE,
         live_model.SENDER_NOT_WIRED,
-        live_model.ELIGIBILITY_UNPROVEN,
         live_model.RESTORE_PROOF_ABSENT,
         live_model.RETENTION_UNPROVEN,
         live_model.VISUAL_UNRECORDED,
