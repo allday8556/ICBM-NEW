@@ -5,6 +5,8 @@ account observation, the explicit first binding and workflow resolution — each
 route over the owning service, behind the loopback binding and the client-header CSRF guard, with
 the configured operator as the audited actor."""
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -229,6 +231,14 @@ def observe_smartstore_account(container: ContainerDep) -> SmartStoreObservation
     """One CONNECT pass: token, durable session commit, seller-account read, capability evidence.
     It returns the observed account to the operator's screen and never binds a first account."""
     return SmartStoreObservationView.of(container.smartstore.connect())
+
+
+@router.post(f"{SMARTSTORE}/notice-catalog/capture")
+def capture_notice_catalog(container: ContainerDep) -> dict[str, Any]:
+    """Notice coverage S0 (owner directive 2026-10-03): read the official 상품정보제공고시 type list
+    and each listed type's content fields, once each, with the committed session. A read only: it
+    writes and stores nothing, and returns the retained, allow-listed responses."""
+    return container.notice_catalog.capture()
 
 
 @router.post(f"{SMARTSTORE}/bind")

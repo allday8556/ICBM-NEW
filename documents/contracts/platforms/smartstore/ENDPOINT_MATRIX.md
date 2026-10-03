@@ -118,8 +118,8 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attribute-values` | Attribute-value discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_STANDARD_OPTIONS` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/options/standard-options` | Standard-option discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
-| `SMARTSTORE_NOTICE_TYPES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice` | Notice-type discovery | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_NOTICE_TYPE_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | Notice-type read | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_NOTICE_TYPES` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice` | Official 상품정보제공고시 type list, read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_NOTICE_TYPE_READ` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | One type's official content fields (`productInfoProvidedNoticeContents[]`: `fieldType`, `fieldName`, `fieldDescription`, `fieldAddDescription`, `fieldMaxLength`), read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_DELETE_V2` | `ADOPTED` | DELETE slice (ADR-0018 §3.5) | `DELETE` | `/v2/products/origin-products/{originProductNo}` | Delete one ICBM-confirmed origin product (§4.1.3) | `OWN_STORE_SELF` | `상품` | Yes; destructive. Only an `ACTIVE` ICBM-confirmed registration, under its exact DELETE grant, inside a bounded LIVE window with the brake released; an `UNKNOWN` is never resent |
 
@@ -138,7 +138,7 @@ never a call: the application remains `DRY_RUN`/provider-zero, `product_registra
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
-| `SMARTSTORE_CATEGORY_LIST` / `_READ`, `SMARTSTORE_NOTICE_TYPES` / `_TYPE_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
+| `SMARTSTORE_CATEGORY_LIST` / `_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
 
 **The CREATE and reconcile evidence review closed `INSUFFICIENT`** (Issue #89 `5768247290` →
 `5768312853` → `5768347233`; ADR-0014 §17.2). Beyond the packet gaps above, the official contract

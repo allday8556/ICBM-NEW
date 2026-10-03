@@ -554,8 +554,9 @@ def test_the_production_wiring_supplies_the_identity_and_the_revision(p: Contain
     # The attestation context names whichever mapping revision the registry currently binds; the
     # CREATE adoption slice bumped it when it adopted POST /v2/products and reconciled it to the
     # value-level packet, the SEARCH slice when it adopted POST /v1/products/search, and the
-    # DELETE slice (ADR-0018 §3.5) when it adopted the origin-product delete.
-    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-delete-r1"
+    # DELETE slice (ADR-0018 §3.5) when it adopted the origin-product delete, and notice coverage
+    # S0 when it adopted the two official 상품정보제공고시 reads.
+    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-notice-r1"
 
 
 @pytest.mark.parametrize(

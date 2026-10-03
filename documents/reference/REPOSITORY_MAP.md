@@ -44,6 +44,8 @@ The operator image API (ADR-0013 §9 amendment note) added
 The operator's synthetic test products (owner decision 2026-10-03) added
 `app/stages/collect/synthetic.py`, `app/interface/api/routes/synthetic_products.py`, migration
 `0038` and one integration suite.
+Notice coverage S0 (owner directive 2026-10-03) added
+`integrations/marketplaces/smartstore/notice_catalog.py` and one unit suite.
 
 | path | files | role |
 | --- | --- | --- |
@@ -72,16 +74,16 @@ The operator's synthetic test products (owner decision 2026-10-03) added
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 39 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 18 |  |
+| `integrations/` | 40 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 19 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 248 | tests |
+| `tests/` | 249 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 99 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 83 | unit tests by runtime owner |
+| `tests/unit/` | 84 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 45 | the served web client |

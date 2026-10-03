@@ -41,8 +41,6 @@ STILL_NOT_ADOPTED = {
     "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
     "SMARTSTORE_STANDARD_OPTIONS",
-    "SMARTSTORE_NOTICE_TYPES",
-    "SMARTSTORE_NOTICE_TYPE_READ",
 }
 
 
@@ -59,6 +57,8 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         CREATE,
         EndpointId.SMARTSTORE_PRODUCT_SEARCH,
         EndpointId.SMARTSTORE_PRODUCT_DELETE_V2,
+        EndpointId.SMARTSTORE_NOTICE_TYPES,
+        EndpointId.SMARTSTORE_NOTICE_TYPE_READ,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -358,7 +358,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-delete-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-notice-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -369,6 +369,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-search-r1",
         "m5-published-state-r1",
         "m5-delete-r1",
+        "m5-notice-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2
