@@ -719,6 +719,7 @@ def test_current_for_use_fails_closed_when_common_options_advance(
 
 
 def test_current_for_use_fails_closed_when_mapping_evidence_source_advances(
+    config: AppConfig,
     container: Container,
 ) -> None:
     group, configuration_revision_id, common = _foundation(container)
@@ -775,6 +776,23 @@ def test_current_for_use_fails_closed_when_mapping_evidence_source_advances(
 
     assert container.atomic_skus.current(group) == historical
     assert container.atomic_skus.current_for_use(group) is None
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, historical.atomic_skus[0].atomic_sku_id
+        )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            historical.atomic_skus[0].atomic_sku_id,
+            historical.atomic_skus[0].selection_signature,
+        )
 
 
 def test_current_for_use_fails_closed_when_mapping_advances(
