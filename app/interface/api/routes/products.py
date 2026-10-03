@@ -5,7 +5,8 @@ truth by the product owner, never from a request. What comes back is persisted c
 with no price, no readiness and no marketplace shape.
 
 G1-C adds the operator's list, detail and registration-target check. Every one is a GET: the
-selection check revalidates what the operator chose and records nothing.
+selection check revalidates what the operator chose and records nothing. The operator's image
+decisions have their own routes (``product_images.py``).
 """
 
 from typing import Annotated

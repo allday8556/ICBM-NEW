@@ -432,6 +432,12 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 - **pHash.** A perceptual hash may be stored beside an asset's hash to generate grouping candidates (v3.1 §6.2). It is never an auto-merge signal.
 - **Out of M4:** marketplace upload, marketplace asset identity, and publication that no longer depends on supplier hotlinks are M5. No transformation or upload to a marketplace is authorized by M4.
 
+> **Amendment note (operator image API; owner decision 2026-10-03).** The operator reaches the image
+> owner through its own routes (`app/interface/api/routes/product_images.py`): the CONFIRMED
+> source images of an Item's current bound revision and the bytes of exactly those, an explicit
+> complete selection, and an exact-binary QA verdict. The owner decides every rule as before;
+> nothing is selected by default and no route selects on an operator's behalf.
+
 ### 10. The AI and enrichment boundary
 
 - **M4 works with no AI provider configured.** ADR-0012 §9 and §14 apply: AI is a capability, and its failure blocks no COLLECT, `ProductFactsRevision` or canonical DB.
