@@ -95,6 +95,9 @@ from datetime import date
 from types import MappingProxyType
 from typing import Any, Final
 
+from app.stages.register.detail import DetailPlan, DetailPlanError, UploadedProviderAsset
+from app.stages.register.detail import plan_of as _plan_of
+from app.stages.register.detail import render as _render_detail
 from app.stages.register.model import ListingShape
 from app.stages.register.sanitize import safe_provider_reference
 from integrations.marketplaces.smartstore.notice_schema import (
@@ -109,7 +112,10 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # v4: the owned naverShoppingRegistration, registration stockQuantity and notice child (D2).
 # v5: the notice child of every documented type, with typed values, from the provider notice schema
 # (notice coverage S3).
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v5"
+# v6: B-DETAIL — a plan Snapshot's detailContent is rendered by the trusted REGISTER renderer from
+# the frozen plan and the Snapshot's uploaded provider asset identities; its detail images are
+# placed there and never in the gallery. A BODY-only Snapshot projects exactly as under v5.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v6"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -689,7 +695,70 @@ def _text(value: object, path: str) -> str:
     return text
 
 
-def _detail_content(payload: Mapping[str, Any]) -> str:
+# B-DETAIL: the renderer's refusals, by the wire code each one is.
+_DETAIL_WIRE_CODES: Final = MappingProxyType(
+    {
+        "DETAIL_PLAN_MALFORMED": "WIRE_DETAIL_PLAN_MALFORMED",
+        "DETAIL_RENDERER_UNKNOWN": "WIRE_DETAIL_RENDERER_UNKNOWN",
+        "DETAIL_IMAGE_NOT_UPLOADED": "WIRE_IMAGE_NOT_PREPARED",
+        "DETAIL_ASSET_REFERENCE_UNSAFE": "WIRE_IMAGE_REFERENCE_UNSAFE",
+        "DETAIL_CONTENT_EMPTY": "WIRE_DETAIL_CONTENT_MISSING",
+    }
+)
+
+
+def _detail_plan(payload: Mapping[str, Any]) -> DetailPlan | None:
+    """The frozen B-DETAIL plan of a ``registration-payload/v2`` Snapshot, or ``None`` for a
+    BODY-only one. A v2 detail that is not exactly a plan is refused, never read as a body."""
+    detail = payload.get("detail")
+    if not isinstance(detail, Mapping) or "renderer" not in detail:
+        return None
+    try:
+        return _plan_of(detail)
+    except DetailPlanError as refused:
+        raise WireContractError(_DETAIL_WIRE_CODES[refused.code], refused.detail) from refused
+
+
+def _uploaded_detail_assets(
+    items: Sequence[Mapping[str, Any]], plan: DetailPlan
+) -> dict[tuple[str, str, str], UploadedProviderAsset]:
+    """The trusted rendering path's only input besides the plan: the uploaded provider identity of
+    each detail image the Snapshot froze. The plan's images and the Snapshot's ``DETAIL`` assets
+    must be the same set; a detail image without an uploaded identity is not encodable."""
+    uploaded: dict[tuple[str, str, str], UploadedProviderAsset] = {}
+    for item in items:
+        for asset in item.get("publication_assets") or ():
+            if not isinstance(asset, Mapping) or asset.get("role") != "DETAIL":
+                continue
+            key = (
+                str(asset.get("asset_kind")),
+                str(asset.get("sha256")),
+                str(asset.get("derivation_id") or ""),
+            )
+            reference = asset.get("provider_asset_ref")
+            if reference is None:
+                raise WireContractError(
+                    "WIRE_IMAGE_NOT_PREPARED", "a detail image has no provider reference yet"
+                )
+            try:
+                uploaded[key] = UploadedProviderAsset(reference)
+            except DetailPlanError as refused:
+                raise WireContractError("WIRE_IMAGE_REFERENCE_UNSAFE", refused.detail) from refused
+    if set(uploaded) != {image.key for image in plan.images}:
+        raise WireContractError(
+            "WIRE_DETAIL_PLAN_MISMATCH", "the plan's images are not the Snapshot's detail images"
+        )
+    return uploaded
+
+
+def _detail_content(payload: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> str:
+    plan = _detail_plan(payload)
+    if plan is not None:
+        try:
+            return _render_detail(plan, _uploaded_detail_assets(items, plan))
+        except DetailPlanError as refused:
+            raise WireContractError(_DETAIL_WIRE_CODES[refused.code], refused.detail) from refused
+    # A BODY-only Snapshot (content v1): its frozen body, exactly as before B-DETAIL.
     detail = payload.get("detail")
     body = detail.get("body") if isinstance(detail, Mapping) else None
     if not isinstance(body, str) or not body.strip():
@@ -729,10 +798,14 @@ def _sale_price(items: Sequence[Mapping[str, Any]]) -> int:
     return price
 
 
-def _image_references(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
-    """The provider references of the listing's images, representative first, deduplicated in
-    Item and position order. Every one must already be a prepared, sanitized provider reference:
-    an image the provider does not yet hold is not encodable (ADR-0014 §3 B2)."""
+def _image_references(
+    items: Sequence[Mapping[str, Any]], *, detail_placed: bool = False
+) -> tuple[str, ...]:
+    """The provider references of the listing's gallery images, representative first,
+    deduplicated in Item and position order. Every one must already be a prepared, sanitized
+    provider reference: an image the provider does not yet hold is not encodable (ADR-0014 §3 B2).
+    A detail image is never a gallery image: it is placed by a plan (``detail_placed``) or
+    refused."""
     representative: str | None = None
     others: list[str] = []
     for item in items:
@@ -750,9 +823,12 @@ def _image_references(items: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
             if not isinstance(reference, str) or not safe_provider_reference(reference):
                 raise WireContractError("WIRE_IMAGE_REFERENCE_UNSAFE", "unsafe image reference")
             role = asset.get("role")
+            if role == "DETAIL" and detail_placed:
+                # B-DETAIL: the plan places it in detailContent (_detail_content).
+                continue
             if role == "DETAIL":
-                # A detail-body image is never a gallery image (Issue #219 §2.2); until the detail
-                # composition places images there is no place for it in this request.
+                # A detail-body image is never a gallery image (Issue #219 §2.2); without a plan
+                # that places it there is no place for it in this request.
                 raise WireContractError(
                     "WIRE_DETAIL_IMAGE_NOT_PLACEABLE", "a detail-body image is not a gallery image"
                 )
@@ -907,7 +983,8 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
             "WIRE_PAYLOAD_MALFORMED", "the payload names no listing shape"
         ) from exc
     codes = seller_codes(payload)
-    references = _image_references(items)
+    plan = _detail_plan(payload)
+    references = _image_references(items, detail_placed=plan is not None and plan.places_images)
     notice_type, notice_fields = _notice(payload)
     gaps: list[str] = []
 
@@ -928,7 +1005,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         # E2: the only status the CREATE endpoint accepts on registration.
         FIELD_STATUS_TYPE: CREATE_STATUS_TYPE,
         FIELD_NAME: _text(payload.get("name"), "name"),
-        FIELD_DETAIL: _detail_content(payload),
+        FIELD_DETAIL: _detail_content(payload, items),
         FIELD_IMAGES: _images(references),
         FIELD_SALE_PRICE: _sale_price(items),
         # D2.2: the registration seed, never a source quantity.

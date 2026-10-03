@@ -138,8 +138,9 @@ def test_a_saved_policy_is_stamped_with_real_owner_revisions(
         ("CATEGORY_MAPPING", MARKET, TAXONOMY, 1, mapping.revision_id),
         ("DETAIL_COMPOSITION", MARKET, None, 1, composition.revision_id),
     ]
-    # Real rows with the strictly typed v1 content — operator-confirmed selection only, and
-    # BODY-only — and the fingerprint of exactly that content. Never a label or a sentinel.
+    # Real rows with the strictly typed content — operator-confirmed selection only, and the
+    # B-DETAIL v2 composition profile (sections, body format and renderer; no product content) —
+    # and the fingerprint of exactly that content. Never a label or a sentinel.
     assert mapping.content == {
         "content_version": CATEGORY_MAPPING_CONTENT_VERSION,
         "kind": "CATEGORY_MAPPING",
@@ -152,7 +153,9 @@ def test_a_saved_policy_is_stamped_with_real_owner_revisions(
         "content_version": DETAIL_COMPOSITION_CONTENT_VERSION,
         "kind": "DETAIL_COMPOSITION",
         "marketplace_key": MARKET,
-        "sections": ["BODY"],
+        "sections": ["DETAIL_IMAGES", "BODY"],
+        "body_format": "PLAIN_TEXT",
+        "renderer": "detail-renderer/v1",
         "guidance": False,
     }
     for record in (mapping, composition):
@@ -624,7 +627,8 @@ def test_an_otherwise_valid_unit_is_ready_and_freezes_with_the_owners_revisions(
         category=CategorySelection(
             CATEGORY, mapping, TAXONOMY, CategoryConfirmation.OPERATOR_CONFIRMED
         ),
-        detail=DetailComposition(composition, "invented body text"),
+        # Exactly the owned profile's sections (B-DETAIL content v2).
+        detail=DetailComposition(composition, "invented body text", ("DETAIL_IMAGES", "BODY")),
     )
     req = replace(req, duplicate_evidence=no_match(preflight.candidate(req)))
     candidate = preflight.candidate(req)
@@ -647,6 +651,9 @@ def test_an_otherwise_valid_unit_is_ready_and_freezes_with_the_owners_revisions(
             detail=DetailComposition(detail_revision, "invented body text"),
         )
         assert AUTHORING_REVISIONS_UNOWNED in preflight.candidate(other).codes
+    # Sections other than the owned profile's are never owner-held either (B-DETAIL).
+    body_only = replace(req, detail=DetailComposition(composition, "invented body text"))
+    assert AUTHORING_REVISIONS_UNOWNED in preflight.candidate(body_only).codes
 
     builder = RegistrationSnapshotBuilder(
         preflight=preflight, registrations=container.registrations
