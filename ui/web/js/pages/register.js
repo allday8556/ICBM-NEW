@@ -559,7 +559,14 @@ function authoringForm(unit, onDone) {
     field('상품명', 'name', inputs.name?.value),
     dynamicFields,
     optionFields,
-    field('상세 본문', 'detail_body', inputs.detail_body, 'textarea'),
+    // B-DETAIL: the selected detail images come first; the text after them is optional when the
+    // unit has detail images (the server decides, never this page).
+    field(
+      '상세 본문 (상세 이미지 뒤, 상세 이미지가 있으면 선택)',
+      'detail_body',
+      inputs.detail_body,
+      'textarea',
+    ),
     h(
       'button',
       {
@@ -638,8 +645,11 @@ function authoringForm(unit, onDone) {
           notices,
           options,
           detail_composition_revision: approved?.detail_composition_revision ?? null,
-          detail_body: values.detail_body || null,
-          detail_sections: inputs.detail_sections ?? ['BODY'],
+          // Under a profile that places detail images an empty body is still a composition.
+          detail_body: (approved?.detail_sections ?? []).includes('DETAIL_IMAGES')
+            ? (values.detail_body ?? '')
+            : (values.detail_body || null),
+          detail_sections: approved?.detail_sections ?? inputs.detail_sections ?? ['BODY'],
         },
       };
       if (authored) {
