@@ -21,6 +21,8 @@ from app.stages.collect.contracts import (
     RevisionView,
     SubmittedCollectionView,
 )
+from app.stages.collect.facts import FactsStatus
+from app.stages.collect.models import CollectionOutcome
 from app.stages.collect.runs import CollectionRunRecord
 from app.stages.products.contracts import SourceHandoffView
 
@@ -62,11 +64,32 @@ def submit(request: CollectionRequest, container: ContainerDep) -> SubmittedColl
 
 
 @router.get("/api/v1/collect/collections")
-def recent_runs(container: ContainerDep, limit: int | None = None) -> CollectionRunListView:
-    runs = container.collection.recent_runs(limit)
+def recent_runs(
+    container: ContainerDep,
+    limit: int | None = None,
+    outcome: CollectionOutcome | None = None,
+    facts_status: FactsStatus | None = None,
+    before: str | None = None,
+) -> CollectionRunListView:
+    """The newest runs. A filter selects runs by what each run recorded before the list is
+    ordered and bounded; ``before`` continues after a run already shown. Read-only."""
+    size = RECENT_RUNS_DEFAULT if limit is None else limit
+    runs = container.collection.recent_runs(
+        limit, outcome=outcome, facts_status=facts_status, before=before
+    )
+    total = container.collection.run_count(outcome=outcome, facts_status=facts_status)
+    more = len(runs) == size and bool(
+        container.collection.recent_runs(
+            1, outcome=outcome, facts_status=facts_status, before=runs[-1].collection_run_id
+        )
+    )
     return CollectionRunListView(
         runs=tuple(_run_view(run) for run in runs),
-        limit=RECENT_RUNS_DEFAULT if limit is None else limit,
+        limit=size,
+        outcome=outcome,
+        facts_status=facts_status,
+        total=total,
+        next_before=runs[-1].collection_run_id if more else None,
     )
 
 
