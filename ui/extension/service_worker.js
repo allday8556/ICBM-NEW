@@ -22,6 +22,7 @@ import {
   readQueue,
   readRevision,
   readRun,
+  releaseRead,
   sendCapture,
 } from "./lib/client.js";
 import { discoverInPage } from "./lib/discover.js";
@@ -377,22 +378,25 @@ async function runQueue(control) {
     tell({ type: "issued", item });
     const limit = Math.min(LOAD_LIMIT_MS, Math.max(0, answer.expires_in_s * 1000 - SEND_MARGIN_MS));
     if (!(await load(target.tabId, item.source_url, limit))) {
-      // Nothing was captured: the issued read expires at ICBM, still counted and never reissued,
-      // and the queue goes on to the next item once ICBM issues it.
-      tell({
-        type: "result",
-        item_id: item.item_id,
-        result: { state: "REFUSED", code: "QUEUE_PAGE_NOT_LOADED" },
-      });
+      // Nothing was captured: the read is given back at once — spent, counted, never reissued —
+      // and the queue goes on to the next item.
+      const result = { state: "REFUSED", code: "QUEUE_PAGE_NOT_LOADED" };
+      tell({ type: "result", item_id: item.item_id, result });
+      await giveBack(paired, control.queueId, answer.ticket, tell);
       continue;
     }
     const result = await captureTab(paired, target, answer.ticket, (state, runId) =>
       tell({ type: "progress", item_id: item.item_id, state, collection_run_id: runId || null }),
     );
     tell({ type: "result", item_id: item.item_id, result });
-    await showQueue(paired, control.queueId, tell);
-    // A refused or unknown capture is that item's own failure, shown in the queue; ICBM has spent
-    // its read, and the queue goes on (the user's rule of 2026-10-02).
+    // A capture refused in this browser sent nothing: its read is given back at once. A capture
+    // ICBM refused has already spent its read there; an unknown or accepted one is ICBM's. Either
+    // way the item's failure is its own, and the queue goes on (the user's rule of 2026-10-02).
+    if (result.state === "REFUSED" && result.code !== "ICBM_DISCONNECTED") {
+      await giveBack(paired, control.queueId, answer.ticket, tell);
+    } else {
+      await showQueue(paired, control.queueId, tell);
+    }
   }
   await showQueue(paired, control.queueId, tell);
   tell({ type: code ? "stopped" : "finished", code });
@@ -404,6 +408,16 @@ function drive(control) {
   runQueue(control).finally(() => {
     if (active === control) active = null;
   });
+}
+
+// Give an issued read back to ICBM. A release that cannot reach ICBM changes nothing: the read
+// then runs out there, still counted, and the queue goes on after it.
+async function giveBack(paired, queueId, ticket, tell) {
+  try {
+    tell({ type: "queue", queue: await releaseRead(paired, chrome.runtime.id, queueId, ticket) });
+  } catch {
+    await showQueue(paired, queueId, tell);
+  }
 }
 
 async function showQueue(paired, queueId, tell) {

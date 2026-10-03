@@ -88,6 +88,29 @@ class ImageQaConflictError(AppError):
 
 
 @dataclass(frozen=True)
+class CandidateImage:
+    """One CONFIRMED source image of the Item's current bound revision, and its QA verdict under
+    the current rule, if one is recorded for exactly that input."""
+
+    role: str
+    ordinal: int
+    sha256: str
+    qa_verdict: QaVerdict | None
+
+
+@dataclass(frozen=True)
+class ImageCandidates:
+    """What an operator decides over: the Item's current bound source revision, every CONFIRMED
+    source image of it, and the current selection. Read only; it decides nothing."""
+
+    item_id: str
+    source_revision_id: str | None
+    qa_rule_version: str
+    images: tuple[CandidateImage, ...]
+    current_selection: SelectionRecord | None
+
+
+@dataclass(frozen=True)
 class ImageState:
     """The image input to base readiness: every reason and what they were computed against."""
 
@@ -451,6 +474,63 @@ class ProductImageService:
             ),
             session=unit.session,
         )
+
+    def candidates(self, item_id: str) -> ImageCandidates:
+        """The images an operator decides over for one Item (read only).
+
+        Exactly the CONFIRMED source images of the Item's **current bound** source revision — the
+        one a selection must review — each with its verdict under the current QA rule when one is
+        recorded for exactly that input, and the current selection. With no bound revision there is
+        nothing to decide over.
+        """
+        with self._store.reading() as unit:
+            procurement = current_procurement(unit, item_id)
+            binding = procurement.binding
+            revision = (
+                binding.provenance_revision_id
+                if binding is not None
+                and binding.provenance_revision_id == procurement.current_revision_id
+                else None
+            )
+            images = self._images(unit)
+            found: list[CandidateImage] = []
+            for ref in images.confirmed_refs(revision) if revision is not None else ():
+                assert revision is not None
+                qa = images.qa_by_input(
+                    asset_kind=ImageAssetKind.SOURCE_ASSET,
+                    sha256=ref.sha256,
+                    derivation_id=None,
+                    validated_source_revision_id=revision,
+                    qa_rule_version=self.qa_rule_version,
+                    qa_input_fingerprint=qa_input_fingerprint(
+                        asset_kind=ImageAssetKind.SOURCE_ASSET,
+                        sha256=ref.sha256,
+                        derivation_id=None,
+                        validated_source_revision_id=revision,
+                        qa_rule_version=self.qa_rule_version,
+                    ),
+                )
+                found.append(
+                    CandidateImage(
+                        role=ref.role.value,
+                        ordinal=ref.ordinal,
+                        sha256=ref.sha256,
+                        qa_verdict=None if qa is None else qa.verdict,
+                    )
+                )
+            move = images.current_move(item_id)
+            selection = None if move is None else images.selection(move.selection_revision_id)
+        return ImageCandidates(
+            item_id=item_id,
+            source_revision_id=revision,
+            qa_rule_version=self.qa_rule_version,
+            images=tuple(found),
+            current_selection=selection,
+        )
+
+    def is_candidate(self, item_id: str, sha256: str) -> bool:
+        """Whether ``sha256`` is a CONFIRMED source image of the Item's current bound revision."""
+        return any(image.sha256 == sha256 for image in self.candidates(item_id).images)
 
     def current_selection(self, item_id: str) -> SelectionRecord | None:
         with self._store.reading() as unit:

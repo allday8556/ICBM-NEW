@@ -98,7 +98,7 @@ Owns source evidence and source facts. Collection is supplier-generic (`document
 
 The extension transport as implemented by E1 and E2:
 - **Owners.** The client is `ui/extension/`: MV3, plain ES modules, no build step, host permissions for the reviewed supplier host and the loopback only, Chrome 114 or later (the side panel is its only surface), and the pairing is the only thing it stores. The server owner is `app/stages/collect/extension/`. The extension is transport and capture UX; it writes no database row, revision, pointer or asset. The server owner writes none either: the revision, its source assets and the shadow record are the collection owner's, through the stores a direct run uses.
-- **Surface.** Exactly these routes, on their own router: the capture routes `GET /api/v1/collect/extension/capture-policies/{supplier_key}` and `POST /api/v1/collect/extension/captures`, and the list-queue routes `GET /api/v1/collect/extension/queue-policies/{supplier_key}`, `POST /api/v1/collect/extension/queues`, `GET /api/v1/collect/extension/queues/{queue_id}`, `POST …/queues/{queue_id}/next` and `POST …/queues/{queue_id}/cancel`. The application gains no CORS: only these paths answer a preflight, and only for the paired extension's origin. The DIRECT_URL submit is unchanged.
+- **Surface.** Exactly these routes, on their own router: the capture routes `GET /api/v1/collect/extension/capture-policies/{supplier_key}` and `POST /api/v1/collect/extension/captures`, and the list-queue routes `GET /api/v1/collect/extension/queue-policies/{supplier_key}`, `POST /api/v1/collect/extension/queues`, `GET /api/v1/collect/extension/queues/{queue_id}`, `POST …/queues/{queue_id}/next`, `POST …/queues/{queue_id}/cancel` and `POST …/queues/{queue_id}/release`. The application gains no CORS: only these paths answer a preflight, and only for the paired extension's origin. The DIRECT_URL submit is unchanged.
 - **List queue (ADR-0019 §8.1, E3).**
   - **Owner.** `app/stages/collect/extension/queue.py`, with migration 0035 (`extension_queues`, `extension_queue_items`).
   - **Discovery.** It judges each discovered product URL with `check_target` and the §6.1 secret rules, and deduplicates by product. A refused link is counted, never stored or logged.
@@ -106,7 +106,7 @@ The extension transport as implemented by E1 and E2:
   - **Issued reads.** It answers each `next` with a wait, one issued read or done. An issue is written before the answer, with only its single-use ticket's SHA-256.
   - **Pacing.** The same-product interval counts server reads, issued queue reads and extension captures.
   - **Ticketed capture.** A ticketed capture claims its item for exactly that URL, once and in time, in the unchanged ingest's own write unit.
-  - **Going on.** The queue goes on past an expired read, a refused queue capture or a `FAILED` run; the item keeps how it ended and is never reissued.
+  - **Going on.** The queue goes on past an expired read, a refused queue capture or a `FAILED` run; the item keeps how it ended and is never reissued. A read the extension could not capture is given back at once (`…/queues/{queue_id}/release`), spent the same way, so the queue does not wait for the issue lifetime.
   - **Serialization.** A single click waits while a queue read of the supplier is out.
   - **Client.** `ui/extension/lib/discover.js` reads the operator's loaded list page and returns only links that fully match the supplier's reviewed product path form, as scheme, host and path.
     - The service worker asks for the next read and waits as ICBM says.

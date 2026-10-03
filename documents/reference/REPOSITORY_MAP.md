@@ -39,6 +39,8 @@ The bounded LIVE runtime transition (ROADMAP §14 item 5) added one integration 
 The deletion of one ICBM-confirmed registration (ADR-0018 §3.5) added
 `app/stages/register/deletion.py`, `integrations/marketplaces/smartstore/deletion.py`, migration
 `0037`, one integration suite and one unit suite.
+The operator image API (ADR-0013 §9 amendment note) added
+`app/interface/api/routes/product_images.py` and one integration suite.
 The operator's synthetic test products (owner decision 2026-10-03) added
 `app/stages/collect/synthetic.py`, `app/interface/api/routes/synthetic_products.py`, migration
 `0038` and one integration suite.
@@ -47,9 +49,9 @@ The operator's synthetic test products (owner decision 2026-10-03) added
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 259 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 260 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 42 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 21 | operator surfaces: HTTP api, screens, cli |
+| `app/interface/` | 22 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 68 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 123 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
@@ -73,11 +75,11 @@ The operator's synthetic test products (owner decision 2026-10-03) added
 | `integrations/` | 39 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 18 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 247 | tests |
+| `tests/` | 248 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 98 | integration tests by runtime owner |
+| `tests/integration/` | 99 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 83 | unit tests by runtime owner |
 | `ui/` | 54 | operator clients: the served web client and the capture extension |

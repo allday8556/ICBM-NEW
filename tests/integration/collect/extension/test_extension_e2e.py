@@ -315,6 +315,8 @@ LIST_PAGE = (
     "<!doctype html><html><head><title>합성 카테고리</title></head><body><ul class='prdList'>"
     "<li><a href='/product/synthetic-sample/9001/'>합성 상품 하나</a></li>"
     "<li><a href='/product/synthetic-sample/9002/'>합성 상품 둘</a></li>"
+    # A product the storefront no longer serves, still on the list (as on the real page).
+    "<li><a href='/product/synthetic-sample/9015/'>없어진 상품</a></li>"
     "<li><a href='/product/synthetic-sample/9001/'>합성 상품 하나 (다시)</a></li>"
     f"<li><a href='/product/synthetic-sample/9003/?token={SECRET}#{SECRET}'>질의 링크</a></li>"
     # Links the operator cannot see are not the operator's list (a real KM list page held one).
@@ -371,6 +373,8 @@ def _list_page(context: BrowserContext) -> Page:
         url = route.request.url
         if url == LIST_URL:
             route.fulfill(status=200, content_type="text/html; charset=utf-8", body=LIST_PAGE)
+        elif url == _product("9015"):
+            route.fulfill(status=404, content_type="text/html; charset=utf-8", body="<html></html>")
         elif url in products:
             route.fulfill(status=200, content_type="text/html; charset=utf-8", body=products[url])
         else:
@@ -409,7 +413,7 @@ def _discover(panel: Page, context: BrowserContext) -> Page:
     for attempt in range(3):
         panel.locator("[data-action='discover']").dispatch_event("click")
         try:
-            expect(found).to_have_text("3", timeout=TIMEOUT_MS // 2)
+            expect(found).to_have_text("4", timeout=TIMEOUT_MS // 2)
             return listing
         except AssertionError:
             if attempt == 2:
@@ -428,7 +432,7 @@ def test_a_list_page_queue_is_read_by_read_as_icbm_issues_it(
         # The list page's own title is shown here and never sent.
         assert _text(panel, "list-title") == "합성 카테고리"
         rows = panel.locator("[data-role='queue-rows'] .queue-row")
-        assert rows.count() == 3
+        assert rows.count() == 4
         panel.locator("#queue-max").fill("2")
         panel.locator("#queue-interval").select_option("10")
         panel.locator("[data-action='queue-start']").dispatch_event("click")
@@ -540,6 +544,37 @@ def test_a_closed_panel_finds_its_open_queue_again_and_cancels_it(
         # The unread product stays unread.
         runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
         assert [run.source_url for run in runs] == [_product("9001")]
+
+
+def test_a_dead_product_is_given_back_at_once_and_the_queue_goes_on(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    # The user's rule (2026-10-03): a product the storefront no longer serves costs no wait. The
+    # browser cannot capture it (not 200), gives the read back, and ICBM issues the next item after
+    # the queue interval — not after the 120 s issue lifetime.
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        _discover(panel, chromium)
+        panel.locator("#queue-max").fill("3")
+        panel.locator("#queue-interval").select_option("10")
+        started = time.monotonic()
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
+        elapsed = time.monotonic() - started
+        assert app.extension_queues.discovery_policy(SUPPLIER).open_queue is None
+        runs = sorted(
+            (run for run in app.collection.recent_runs() if run.provenance is not None),
+            key=lambda run: run.requested_at,
+        )
+        assert [(run.source_url, run.outcome) for run in runs] == [
+            (_product("9001"), CollectionOutcome.RECORDED),
+            (_product("9002"), CollectionOutcome.RECORDED),
+        ]
+        rows = panel.locator("[data-role='queue-rows'] .queue-row")
+        chips = [rows.nth(i).locator(".chip").inner_text() for i in range(rows.count())]
+        assert chips == ["RECORDED", "RECORDED", "만료"]
+        # Three reads at 10 s apart, and no 120 s wait for the dead one.
+        assert elapsed < 75
 
 
 def _requests(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str, int]]:

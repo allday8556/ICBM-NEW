@@ -595,7 +595,10 @@ SELECTION_TABLES = re.compile(
 # rather than becoming a second operator — and the selection models and tables stay forbidden to it
 # like to any other module.
 SELECTION_OPERATORS = {
-    "automation/acceptance/common/operator.py": frozenset({"record_operator_selection"})
+    "automation/acceptance/common/operator.py": frozenset({"record_operator_selection"}),
+    # The operator's own route to the owner's operator entry point (owner decision 2026-10-03):
+    # it hands over an operator's complete decision and never selects on anyone's behalf.
+    "app/interface/api/routes/product_images.py": frozenset({"record_operator_selection"}),
 }
 SOURCE_TRUTH_WRITERS = frozenset({"SourceAssetStore", "SourceAssetRecorder"})
 SOURCE_TRUTH_MODELS = frozenset({"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"})

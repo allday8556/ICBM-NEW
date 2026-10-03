@@ -577,6 +577,40 @@ def test_one_queue_through_the_routes(client: TestClient, caplog: pytest.LogCapt
     assert cancelled["state"] in ("CANCELLED", "FINISHED")
 
 
+def test_a_release_through_the_route_spends_the_read(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = pair(client.app.state.container)  # type: ignore[attr-defined]
+    declared = _send(
+        client,
+        record,
+        "POST",
+        QUEUES,
+        {
+            "supplier_key": SUPPLIER,
+            "links": [_url("9001"), _url("9002")],
+            "max_products": 2,
+            "interval_s": QUEUE_MIN_INTERVAL_S,
+            "skip_collected": False,
+        },
+    )
+    queue_id = declared.json()["queue"]["queue_id"]
+    issued = _send(client, record, "POST", f"{QUEUES}/{queue_id}/next").json()
+    assert issued["kind"] == "ISSUE"
+    with caplog.at_level(logging.INFO):
+        released = _send(
+            client, record, "POST", f"{QUEUES}/{queue_id}/release", {"ticket": issued["ticket"]}
+        )
+    assert released.status_code == 200
+    assert [item["state"] for item in released.json()["items"]] == ["EXPIRED", "WAITING"]
+    assert issued["ticket"] not in "\n".join(
+        json.dumps(vars(r), default=str) for r in caplog.records
+    )
+    # The body is the exact envelope: a wrong shape refuses.
+    bad = _send(client, record, "POST", f"{QUEUES}/{queue_id}/release", {"ticket": "short"})
+    assert bad.status_code == 422
+
+
 def test_a_queue_declaration_is_the_exact_envelope(client: TestClient) -> None:
     record = pair(client.app.state.container)  # type: ignore[attr-defined]
     for payload in (
@@ -611,3 +645,51 @@ def test_the_discovery_policy_names_the_queue_still_open(
     held = container.extension_queues.discovery_policy(SUPPLIER).open_queue
     assert held is not None and held.state is QueueState.OPEN
     assert [item.state for item in held.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]
+
+
+# ---------------------------------------------------------------- the release (instant give-back)
+
+
+def test_a_read_the_extension_gives_back_is_spent_at_once_and_the_queue_goes_on(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    # The user's rule (2026-10-03): a dead product must not cost the issue lifetime. The extension
+    # gives the read back the moment it knows it cannot capture it; the read is spent as an
+    # expired one is, and the next item follows after the queue interval only.
+    queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
+    issued = _issue(container, queue_id)
+    assert issued.ticket is not None
+    view = container.extension_queues.release(queue_id, issued.ticket)
+    assert view.state is QueueState.OPEN
+    assert [item.state for item in view.items] == [QueueItemState.EXPIRED, QueueItemState.WAITING]
+    # Spent: the ticket claims nothing, and the read is never reissued.
+    _refused(lambda: _capture(container, "9001", issued.ticket), "EXTENSION_QUEUE_TICKET_REFUSED")
+    runs_before = _count(config, "collection_runs")
+    assert _count(config, "collection_runs") == runs_before
+    # Only the queue interval is owed now, not the issue lifetime.
+    waiting = container.extension_queues.next(queue_id)
+    assert waiting.kind == "WAIT" and waiting.wait_s is not None
+    assert waiting.wait_s <= QUEUE_MIN_INTERVAL_S
+    clock.advance(QUEUE_MIN_INTERVAL_S)
+    assert _issue(container, queue_id).item.source_url == _url("9002")  # type: ignore[union-attr]
+
+
+def test_a_release_names_its_read_by_the_ticket_alone(
+    container: Container, clock: FakeClock
+) -> None:
+    queue_id = _declare(container, [_url("9001"), _url("9002")]).view.queue_id
+    issued = _issue(container, queue_id)
+    assert issued.ticket is not None
+    # Another queue's id, or a ticket that was never issued, changes nothing.
+    _refused(
+        lambda: container.extension_queues.release(
+            "00000000-0000-4000-8000-000000000000", issued.ticket
+        ),
+        "EXTENSION_QUEUE_UNKNOWN",
+    )
+    same = container.extension_queues.release(queue_id, "A" * 43)
+    assert [item.state for item in same.items] == [QueueItemState.ISSUED, QueueItemState.WAITING]
+    # A read already captured is not given back.
+    _capture(container, "9001", issued.ticket)
+    after = container.extension_queues.release(queue_id, issued.ticket)
+    assert after.items[0].state is QueueItemState.CAPTURED
