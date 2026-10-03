@@ -53,6 +53,7 @@ from app.stages.products.model import (
 )
 from app.stages.products.pricing import PriceBasis, PriceGuard
 from app.stages.register import sanitize
+from app.stages.register.detail import DetailPlan, DetailProfile, PlannedImage
 from app.stages.register.model import ListingShape, canonical_json, valid_listing_identity
 from app.stages.register.policy import (
     SATISFYING,
@@ -149,7 +150,9 @@ PUBLICATION_ASSETS_MISSING: Final = "PUBLICATION_ASSETS_MISSING"
 PUBLICATION_ASSET_COUNT_EXCEEDED: Final = "PUBLICATION_ASSET_COUNT_EXCEEDED"
 PUBLICATION_REPRESENTATIVE_MISSING: Final = "PUBLICATION_REPRESENTATIVE_MISSING"
 # Issue #219: a selected detail-body image has no place in the listing until the detail
-# composition places images; it is never sent as a gallery image instead.
+# composition places images; it is never sent as a gallery image instead. B-DETAIL: it is released
+# only by a valid plan — an owner-held v2 composition placing ``DETAIL_IMAGES`` — and only for this
+# reason; every planned image must still be uploaded before the final preflight is READY.
 PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
@@ -322,6 +325,8 @@ class DetailComposition:
 
     composition_revision: str | None
     body: str
+    # The profile's sections, exactly (B-DETAIL): a composition whose sections are not its owned
+    # profile's is not owner-held.
     sections: tuple[str, ...] = ("BODY",)
 
 
@@ -677,6 +682,9 @@ class ResolvedUnit:
     metadata: CategoryMetadata | None
     # The account's current Settings/platform registration policy (a server-side source).
     target: TargetPolicy
+    # The DETAIL_COMPOSITION profile the target names, as its owner holds it (B-DETAIL), or None
+    # when the target names none or no profile source is wired: then the composition is BODY-only.
+    detail_profile: DetailProfile | None = None
 
 
 # ---------------------------------------------------------------- the result
@@ -1080,11 +1088,61 @@ def _template_reasons(target: TargetPolicy, metadata: CategoryMetadata | None) -
     ]
 
 
-def _detail_reasons(request: PreflightRequest) -> list[Reason]:
+def detail_plan(request: PreflightRequest, unit: ResolvedUnit) -> DetailPlan | None:
+    """The unit's URL-free detail plan (B-DETAIL), or ``None`` when there is none to compose.
+
+    A plan exists only for an owner-held composition under a v2 profile: the composition names
+    exactly the target's profile revision with exactly its sections. Its images are the Items'
+    selected ``DETAIL`` outputs, in Item order then selection position, each asset once — REGISTER
+    never chooses or reorders an image. The body is the operator's plain text as authored; nothing
+    else (no COLLECT description) ever fills it.
+    """
+    profile, detail = unit.detail_profile, request.detail
+    if (
+        profile is None
+        or not profile.renders
+        or detail is None
+        or detail.composition_revision != profile.revision_id
+        or unit.target.detail_composition_revision != profile.revision_id
+        or tuple(detail.sections) != profile.sections
+    ):
+        return None
+    assert profile.body_format is not None and profile.renderer is not None
+    images: list[PlannedImage] = []
+    seen: set[tuple[str, str, str]] = set()
+    if profile.places_images:
+        for item in unit.items:
+            detail_images = [image for image in item.images if image.role is OutputRole.DETAIL]
+            for image in sorted(detail_images, key=lambda i: i.position):
+                if image.key in seen:
+                    continue
+                seen.add(image.key)
+                images.append(
+                    PlannedImage(
+                        item_id=item.item_id,
+                        position=image.position,
+                        asset_kind=image.asset_kind.value,
+                        sha256=image.sha256,
+                        derivation_id=image.derivation_id,
+                    )
+                )
+    return DetailPlan(
+        composition_revision=profile.revision_id,
+        sections=profile.sections,
+        body_format=profile.body_format,
+        renderer=profile.renderer,
+        body=detail.body,
+        images=tuple(images),
+    )
+
+
+def _detail_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
     detail = request.detail
     if detail is None:
         return [Reason(DETAIL_COMPOSITION_MISSING, _R, "detail")]
-    if not detail.body.strip():
+    plan = detail_plan(request, unit)
+    # B-DETAIL D2: the body is optional when the plan places at least one detail image.
+    if not detail.body.strip() and (plan is None or not plan.images):
         return [Reason(DETAIL_BODY_EMPTY, _R, "detail")]
     return []
 
@@ -1099,17 +1157,24 @@ def _authoring_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Re
     was written — is unowned: a client-supplied revision never makes a unit READY. This is neither
     missing category metadata nor a missing policy, and every other rule is still evaluated."""
     target, category, detail = unit.target, request.category, request.detail
+    profile = unit.detail_profile
     owned = (
         target.category_mapping_revision is not None
         and target.detail_composition_revision is not None
         and (category is None or category.mapping_revision == target.category_mapping_revision)
         and (detail is None or detail.composition_revision == target.detail_composition_revision)
+        # B-DETAIL: the sections are the owned profile's, never a client's own.
+        and (detail is None or profile is None or tuple(detail.sections) == profile.sections)
     )
     return [] if owned else [Reason(AUTHORING_REVISIONS_UNOWNED, _R, "authoring")]
 
 
-def _publication_reasons(target: TargetPolicy, unit: ResolvedUnit) -> list[Reason]:
+def _publication_reasons(
+    target: TargetPolicy, unit: ResolvedUnit, plan: DetailPlan | None
+) -> list[Reason]:
     policy = target.asset_policy
+    # B-DETAIL: only a valid plan places the detail images; nothing else releases the reason.
+    placed = plan is not None and plan.places_images
     reasons: list[Reason] = []
     for item in unit.items:
         images = item.images
@@ -1122,7 +1187,7 @@ def _publication_reasons(target: TargetPolicy, unit: ResolvedUnit) -> list[Reaso
             reasons.append(
                 Reason(PUBLICATION_ASSET_COUNT_EXCEEDED, _R, _subject(item.item_id, "images"))
             )
-        if len(gallery) != len(images):
+        if len(gallery) != len(images) and not placed:
             reasons.append(
                 Reason(PUBLICATION_DETAIL_IMAGES_UNPLACED, _B, _subject(item.item_id, "images"))
             )
@@ -1306,6 +1371,7 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
     category = request.category
     evidence = request.duplicate_evidence
     detail = request.detail
+    plan = detail_plan(request, unit)
     return {
         "fingerprint_version": FINGERPRINT_VERSION,
         "rule_version": PREFLIGHT_RULE_VERSION,
@@ -1365,6 +1431,19 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
             "composition_revision": detail.composition_revision,
             "sections": list(detail.sections),
             "body_digest": hashlib.sha256(detail.body.encode("utf-8")).hexdigest(),
+            # B-DETAIL: a plan's renderer, body format and ordered image identities. Named only
+            # when a plan exists, so a BODY-only fingerprint is unchanged.
+            **(
+                {}
+                if plan is None
+                else {
+                    "plan": {
+                        "body_format": plan.body_format,
+                        "renderer": plan.renderer,
+                        "images": [image.canonical() for image in plan.images],
+                    }
+                }
+            ),
         },
         "duplicate": {
             "evidence": None
@@ -1388,6 +1467,7 @@ def evaluate(
     if stage is PreflightStage.CANDIDATE and prepared:
         raise ValueError("a candidate is evaluated without any provider asset identity")
     metadata = unit.metadata
+    plan = detail_plan(request, unit)
     reasons: list[Reason] = [
         *_account_reasons(unit, unit.target),
         *_unit_reasons(request, unit),
@@ -1397,9 +1477,9 @@ def evaluate(
         *_listing_reasons(request, metadata),
         *_option_reasons(request, unit, metadata),
         *_template_reasons(unit.target, metadata),
-        *_detail_reasons(request),
+        *_detail_reasons(request, unit),
         *_authoring_reasons(request, unit),
-        *_publication_reasons(unit.target, unit),
+        *_publication_reasons(unit.target, unit, plan),
         *_conflict_reasons(unit),
         *_duplicate_reasons(request, unit),
         *_sanitation_reasons(request, unit),

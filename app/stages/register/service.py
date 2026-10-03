@@ -517,6 +517,9 @@ class RegisterService:
             taxonomy_revision=target.taxonomy_revision,
             metadata_revision=metadata.metadata_revision,
             detail_composition_revision=target.detail_composition_revision,
+            detail_sections=_profile_sections(
+                preflight.detail_profile(target.detail_composition_revision)
+            ),
             notice_type=None if metadata.notice is None else metadata.notice.notice_type,
             attributes=fields(metadata.attributes),
             notice_fields=fields(() if metadata.notice is None else metadata.notice.fields),
@@ -1385,6 +1388,11 @@ def _field_view(value: Any) -> FieldValueView:
 def _unit_items(snapshot: SnapshotRecord) -> tuple[str, ...]:
     """The Items one provider-listing unit holds: its identity within a Draft (§2, §7)."""
     return tuple(sorted(item.item_id for item in snapshot.items))
+
+
+def _profile_sections(profile: Any) -> tuple[str, ...]:
+    """The sections an authored composition sends back: its profile's, or BODY alone."""
+    return ("BODY",) if profile is None else tuple(profile.sections)
 
 
 def _codes(readiness: Any) -> tuple[str, ...]:

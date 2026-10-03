@@ -9,8 +9,11 @@ server-owned authoring profile revision:
   what ``CategorySelection.mapping_revision`` names, and it replaces neither the taxonomy
   revision, the category nor the reviewed ``CategoryMetadata`` owner.
 - ``DETAIL_COMPOSITION`` — the detail-composition profile of one ``marketplace_key``. Its v1
-  content is **BODY-only** (ADR-0014 §19). It is what ``DetailComposition.composition_revision``
-  names.
+  content is **BODY-only** (ADR-0014 §19). Its v2 content (B-DETAIL, §19 and §27.1 amendment notes)
+  orders ``DETAIL_IMAGES`` → ``BODY`` with a ``PLAIN_TEXT`` body under a pinned renderer version;
+  it still holds no product content — a unit's detail images and body are the product-specific
+  plan (:mod:`app.stages.register.detail`). It is what ``DetailComposition.composition_revision``
+  names, and the server now appends v2.
 
 A revision is a real row, never a label: a server-created identity, a strictly typed canonical
 content document and the SHA-256 fingerprint of it. No client authors one, and none holds Product,
@@ -45,10 +48,18 @@ from app.platform.db.base import Base
 from app.platform.db.database import Database
 from app.platform.db.types import UTCDateTime
 from app.stages.register import sanitize
+from app.stages.register.detail import (
+    BODY_FORMAT_PLAIN_TEXT,
+    DETAIL_RENDERER_VERSION,
+    SECTION_BODY,
+    SECTION_DETAIL_IMAGES,
+    DetailProfile,
+)
 from app.stages.register.model import canonical_json, sanitized_digest
 
 CATEGORY_MAPPING_CONTENT_VERSION: Final = "registration-category-mapping/v1"
-DETAIL_COMPOSITION_CONTENT_VERSION: Final = "registration-detail-composition/v1"
+DETAIL_COMPOSITION_CONTENT_VERSION_V1: Final = "registration-detail-composition/v1"
+DETAIL_COMPOSITION_CONTENT_VERSION: Final = "registration-detail-composition/v2"
 
 # The server is the only author of a revision (resolution 5907626428 D1).
 SERVER_ACTOR: Final = "system:register-authoring"
@@ -89,6 +100,20 @@ class DetailCompositionContentV1(_Content):
     guidance: Literal[False]
 
 
+class DetailCompositionContentV2(_Content):
+    """B-DETAIL (ADR-0014 §19, §27.1 amendment notes): the section vocabulary and order, the body
+    format and the renderer version — never an image, a body or a URL. The reserved sections
+    (guidance, video, option table) stay unrepresentable."""
+
+    content_version: Literal["registration-detail-composition/v2"]
+    kind: Literal["DETAIL_COMPOSITION"]
+    marketplace_key: StrictStr
+    sections: tuple[Literal["DETAIL_IMAGES"], Literal["BODY"]]
+    body_format: Literal["PLAIN_TEXT"]
+    renderer: Literal["detail-renderer/v1"]
+    guidance: Literal[False]
+
+
 def category_mapping_content(marketplace_key: str, taxonomy_revision: str) -> dict[str, Any]:
     """The v1 category-authoring profile of one marketplace taxonomy."""
     return {
@@ -102,20 +127,46 @@ def category_mapping_content(marketplace_key: str, taxonomy_revision: str) -> di
 
 
 def detail_composition_content(marketplace_key: str) -> dict[str, Any]:
-    """The v1 detail-composition profile of one marketplace."""
+    """The current (v2) detail-composition profile of one marketplace (B-DETAIL)."""
     return {
         "content_version": DETAIL_COMPOSITION_CONTENT_VERSION,
         "kind": AuthoringRevisionKind.DETAIL_COMPOSITION.value,
         "marketplace_key": marketplace_key,
-        "sections": ["BODY"],
+        "sections": [SECTION_DETAIL_IMAGES, SECTION_BODY],
+        "body_format": BODY_FORMAT_PLAIN_TEXT,
+        "renderer": DETAIL_RENDERER_VERSION,
         "guidance": False,
     }
 
 
-_MODELS: Final[Mapping[AuthoringRevisionKind, type[_Content]]] = {
-    AuthoringRevisionKind.CATEGORY_MAPPING: CategoryMappingContentV1,
-    AuthoringRevisionKind.DETAIL_COMPOSITION: DetailCompositionContentV1,
+# Every content version a revision of each kind may hold. An earlier version stays readable: a
+# revision is never rewritten.
+_MODELS: Final[Mapping[AuthoringRevisionKind, Mapping[str, type[_Content]]]] = {
+    AuthoringRevisionKind.CATEGORY_MAPPING: {
+        CATEGORY_MAPPING_CONTENT_VERSION: CategoryMappingContentV1,
+    },
+    AuthoringRevisionKind.DETAIL_COMPOSITION: {
+        DETAIL_COMPOSITION_CONTENT_VERSION_V1: DetailCompositionContentV1,
+        DETAIL_COMPOSITION_CONTENT_VERSION: DetailCompositionContentV2,
+    },
 }
+
+
+def detail_profile_of(revision_id: str, content: Mapping[str, Any]) -> DetailProfile:
+    """The profile one stored ``DETAIL_COMPOSITION`` revision holds, read strictly."""
+    document = canonical_content(
+        AuthoringRevisionKind.DETAIL_COMPOSITION,
+        str(content.get("marketplace_key")),
+        None,
+        content,
+    )
+    return DetailProfile(
+        revision_id=revision_id,
+        content_version=document["content_version"],
+        sections=tuple(document["sections"]),
+        body_format=document.get("body_format"),
+        renderer=document.get("renderer"),
+    )
 
 
 class AuthoringRevisionError(ValueError):
@@ -138,8 +189,11 @@ def canonical_content(
     )
     if not all(sanitize.safe_label(label) for label in labels):
         raise AuthoringRevisionError("a scope is named by plain labels")
+    model = _MODELS[kind].get(str(content.get("content_version")))
+    if model is None:
+        raise AuthoringRevisionError(f"not a canonical {kind.value} profile version")
     try:
-        document = _MODELS[kind].model_validate(dict(content)).model_dump(mode="json")
+        document = model.model_validate(dict(content)).model_dump(mode="json")
     except ValueError as refused:
         raise AuthoringRevisionError(f"not a canonical {kind.value} profile") from refused
     if (
@@ -285,6 +339,15 @@ class AuthoringRevisionStore:
         with self._db.read() as session:
             row = _current_row(session, kind, marketplace_key, taxonomy_revision)
             return None if row is None else _record(row)
+
+    def detail_profile(self, revision_id: str) -> DetailProfile | None:
+        """The ``DETAIL_COMPOSITION`` profile a revision identity names, or none when no such
+        revision exists. A stored revision that no longer parses is refused, never guessed."""
+        with self._db.read() as session:
+            row = session.get(RegistrationAuthoringRevision, revision_id)
+            if row is None or row.kind != AuthoringRevisionKind.DETAIL_COMPOSITION.value:
+                return None
+            return detail_profile_of(row.revision_id, json.loads(row.content_json))
 
     def history(
         self,
