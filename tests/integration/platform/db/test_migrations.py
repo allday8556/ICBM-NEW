@@ -139,8 +139,13 @@ CANONICAL_TABLES = (
     "residual_risk_acceptances",
     "registration_deletions",
     "synthetic_test_products",
+    # ADR-0013 owner amendment C1/C2: provider-neutral option authoring revisions.
+    "common_sales_option_revisions",
+    "common_sales_option_axes",
+    "common_sales_option_values",
+    "current_common_sales_option_revision_moves",
 )
-HEAD = "0038_synthetic_test_products"
+HEAD = "0039_common_sales_option_owner"
 
 
 def _url(path: Path) -> str:

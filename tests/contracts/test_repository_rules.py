@@ -3744,6 +3744,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "residual_risk_acceptances",
         "registration_deletions",
         "synthetic_test_products",
+        "common_sales_option_revisions",
+        "common_sales_option_axes",
+        "common_sales_option_values",
+        "current_common_sales_option_revision_moves",
     }
     offenders = [
         path
