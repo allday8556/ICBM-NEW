@@ -438,7 +438,8 @@ Any failing layer refuses the mutation before transmission. No layer re-decides 
 - A production ComplianceGate owner is still required before any regulated-category automation, under
   its own contract and authorization.
 
-> **Amendment note (owner decision 2026-10-03).** ICBM is the seller's own operations tool: whether
+> **Amendment note (owner decision 2026-10-03; recorded in PR #204 comment `5966638763`).** ICBM is
+> the seller's own operations tool: whether
 > a product falls in a regulated category, and the legal risk of selling it (for example a
 > 건강기능식품 sales registration and its labelling review), is the seller's, not ICBM's to judge.
 > Canary eligibility is therefore **no longer a layer of the send-time stack** and blocks no stage;
