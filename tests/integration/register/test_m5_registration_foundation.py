@@ -505,6 +505,10 @@ ADAPTIVE_TABLES = (
     "supplier_common_image_decisions",
     "marketplace_category_catalog_snapshots",
     "marketplace_category_catalog_entries",
+    "common_sales_option_revisions",
+    "common_sales_option_axes",
+    "common_sales_option_values",
+    "current_common_sales_option_revision_moves",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
