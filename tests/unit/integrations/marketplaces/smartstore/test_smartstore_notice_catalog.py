@@ -45,9 +45,13 @@ class Provider:
         return httpx.Response(500, json={"code": "INTERNAL_SERVER_ERROR"})
 
 
+PAUSES: list[float] = []
+
+
 def _catalog(provider: Provider, bearer: object = Bearer()) -> SmartStoreNoticeCatalog:
     caller = SmartStoreEndpointCaller(transport=httpx.MockTransport(provider))
-    return SmartStoreNoticeCatalog(caller, bearer=lambda: bearer)
+    PAUSES.clear()
+    return SmartStoreNoticeCatalog(caller, bearer=lambda: bearer, pause=PAUSES.append)
 
 
 def test_both_reads_are_adopted_as_reads() -> None:
@@ -79,6 +83,9 @@ def test_the_capture_reads_the_list_then_each_type_once_keeping_only_listed_memb
     assert "DIET_FOOD" not in captured["types"]
     assert captured["failures"]["DIET_FOOD"]["http_status"] == 500
     assert captured["mapping_revision"] == "m5-notice-r1"
+    # Each type read is spaced by the policy interval, so a full capture stays under the provider's
+    # request-rate limit; nothing is retried.
+    assert PAUSES == [1.0, 1.0]
 
 
 def test_without_a_session_nothing_is_read() -> None:
