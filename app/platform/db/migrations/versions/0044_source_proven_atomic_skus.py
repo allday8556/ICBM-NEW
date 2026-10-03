@@ -246,6 +246,12 @@ def upgrade() -> None:
         f" JOIN {REVISIONS} sr ON sr.sku_set_revision_id = m.sku_set_revision_id"
         " JOIN common_sales_option_axes a ON a.axis_id = NEW.common_option_axis_id"
         " JOIN common_sales_option_values v ON v.value_id = NEW.common_option_value_id"
+        " JOIN common_option_fact_value_mappings vm"
+        " ON vm.mapping_revision_id = sr.fact_mapping_revision_id"
+        " AND vm.common_option_value_id = NEW.common_option_value_id"
+        " JOIN json_each(m.source_configuration_json, '$.selections') selected"
+        " ON NEW.source_json_path = m.source_configuration_path"
+        " || '.selections[' || selected.key || ']'"
         " JOIN product_facts_fields f ON f.revision_id = m.source_revision_id"
         " AND f.field_key = m.source_field_key"
         " WHERE m.revision_member_id = NEW.revision_member_id"
@@ -260,7 +266,9 @@ def upgrade() -> None:
         " AND NEW.source_field_fingerprint = m.source_field_fingerprint"
         " AND json_type(f.value_json, NEW.source_json_path) = 'text'"
         " AND json_quote(json_extract(f.value_json, NEW.source_json_path))"
-        " = NEW.source_value_json)"
+        " = NEW.source_value_json"
+        " AND json_quote(selected.value) = NEW.source_value_json"
+        " AND vm.source_value_json = NEW.source_value_json)"
         " THEN RAISE(ABORT, 'Atomic SKU selection evidence is not exact') END; END"
     )
     op.execute(

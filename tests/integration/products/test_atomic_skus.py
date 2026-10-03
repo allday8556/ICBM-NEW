@@ -371,6 +371,48 @@ def test_member_allows_missing_supplier_sku_when_source_evidence_has_none(
     assert recorded.atomic_skus[0].supplier_sku_id is None
 
 
+@pytest.mark.parametrize(
+    ("source_json_path", "source_value_json"),
+    [
+        ("$.axes[0].values[0]", '"300mg"'),
+        ("$.configurations[0].selections[1]", '"30정"'),
+    ],
+)
+def test_selection_evidence_is_inside_the_configuration_and_matches_the_reviewed_value(
+    config: AppConfig,
+    container: Container,
+    source_json_path: str,
+    source_value_json: str,
+) -> None:
+    group, revision, common = _foundation(container)
+    recorded = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, revision, 0, ("300mg", "30정")),),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic",
+    )
+    member = recorded.atomic_skus[0]
+
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="selection evidence is not exact"),
+    ):
+        raw.execute(
+            "INSERT INTO atomic_sku_revision_selection_evidence ("
+            "evidence_id, revision_member_id, atomic_sku_selection_id, "
+            "common_option_axis_id, common_option_value_id, source_revision_id, "
+            "source_field_key, source_json_path, source_value_json, source_field_fingerprint) "
+            "SELECT '00000000-0000-0000-0000-000000000002', e.revision_member_id, "
+            "e.atomic_sku_selection_id, e.common_option_axis_id, e.common_option_value_id, "
+            "e.source_revision_id, e.source_field_key, ?, ?, e.source_field_fingerprint "
+            "FROM atomic_sku_revision_selection_evidence e "
+            "JOIN atomic_sku_selections s ON s.selection_id = e.atomic_sku_selection_id "
+            "WHERE e.revision_member_id = ? AND s.semantic_key = 'per_unit_weight'",
+            (source_json_path, source_value_json, member.revision_member_id),
+        )
+
+
 def test_rejects_an_unobserved_cross_combination(container: Container) -> None:
     group, revision, common = _foundation(container)
     fabricated = _configuration(common, revision, 0, ("300mg", "60정"))
