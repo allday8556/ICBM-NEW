@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` + `OFFICIAL_RELEASE_NOTE` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -24,9 +24,14 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/getting-started/coupang-open-api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** product creation requires option information (up to 200 items/options per product, [PRODUCT_CREATE](PRODUCT_CREATE.md#coupang)); `vendorItemId` is the immutable option-level management key.
-- **Missing:** option keys and required rules; option metadata endpoint.
+- **Locators:** category metadata https://developers.coupang.com/en/api/categories/category-metadata-query ; Korean guide https://developers.coupang.com/ko/getting-started/guide-to-creating-product-listings ; CREATE https://developers.coupang.com/en/api/products/product-creation ; current open-option policy https://developers.coupang.com/en/notices/notice-on-changes-to-all-category-purchase-options-sepember-9-2024 — `OFFICIAL_API_DOC` + `OFFICIAL_RELEASE_NOTE`, observed 2026-10-03.
+- **Metadata contract:** `data.attributes[]` exposes `attributeTypeName`, `dataType`, `basicUnit`, `usableUnits`, `required`, `groupNumber` and `exposed`; the official guide examples also show `inputType` and `inputValues`. `exposed=EXPOSED` is a purchase option, while `NONE` is a search attribute. `groupNumber=NONE` is independent; equal non-`NONE` group numbers are alternative attribute types from which one is chosen.
+- **Required rules captured:** `MANDATORY + NONE + EXPOSED` is a required axis. The Korean guide and FAQ state `MANDATORY + group 1 + EXPOSED` is a required choice group. The English guide says `OPTIONAL` for that second case, and group `2` requiredness is not independently documented; those cases stay `AMBIGUOUS` until reviewed evidence resolves them.
+- **CREATE shape:** `items[]` is the vendor-item option list, maximum 200. Each item carries `attributes[]` with `attributeTypeName` (max 25) and `attributeValueName` (max 30, including its unit); at least one value is required and an exposed attribute cannot be added when every item has the same value. `itemName` is unique and max 150. `bundleType=AB` cannot configure options.
+- **Policy overlay:** from 2024-10-10, free/open purchase options are not a fallback; only purchase options present in category metadata may be registered for the target categories. Mandatory-option enforcement was strengthened in 2026; missing/invalid values may fail CREATE or restrict exposure.
+- **Identity:** `vendorItemId` is the immutable lowest option-level key. `externalVendorSku` is seller-controlled per item and returned in orders; its captured length, charset, uniqueness and reuse contract remain missing.
+- **Detailed audit:** [Track C packet](../../reviews/COUPANG-OPTION-SKU-COMMON-CORE-BY-CODEX.md).
+- **Missing:** live all-category metadata, the official-language contradiction, group `2` required semantics, constant-required-value behavior, `externalVendorSku` wire limits and read-after-write timing.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

@@ -9,6 +9,11 @@ It authorizes no schema, migration, runtime code, UI, AI call, supplier request 
 
 Clarified for product-level quantity offers by Issue #80 ruling `5738760913` (PR-Q, kickoff `5738854211`): §2 and §6 only. See "Clarification" below.
 
+Amended by the repository owner's Common Sales Option product decision on 2026-10-03 (PR #208):
+the accepted M4 evidence and implementation boundary remain historical facts, while the canonical
+product contract now fixes the future positive-option owner and cross-market invariant. See
+"Owner product decision amendment — Common Sales Option and Atomic SKU" below.
+
 Decision owner: Architect (ChatGPT). Sources:
 - the Issue #80 body (the M4 umbrella) and the architect kickoff `5726182664`, which authorized PR-A only;
 - the architect's PR #81 review `5245152210`, which ruled the five former choices for review and set two blockers (see "Rulings");
@@ -501,6 +506,90 @@ The architect's product-level quantity-offer ruling, under the quantity-priced r
 - no synthetic "base SKU" is ever fabricated to satisfy a reference.
 
 Ruling C (§7) already covers the minimum sale price. A generic `minimum_sale_price` names no offer. It is never applied to every quantity and never multiplied by one, so a `SOURCE_OFFER` it would affect is `REVIEW_REQUIRED`. Nothing else in this ADR changes.
+
+## Owner product decision amendment — Common Sales Option and Atomic SKU (2026-10-03, PR #208)
+
+**Decision status:** ACCEPTED PRODUCT REQUIREMENT; implementation is `NOT_IMPLEMENTED` and provider
+runtime is `UNVERIFIED`. This amendment authorizes no schema, migration, provider endpoint adoption,
+provider call or marketplace mutation.
+
+This amendment extends the future positive-option product contract without rewriting the accepted
+M3/M4 boundary or its evidence. The existing no-positive-option base path, default composition and
+`BASE_PRODUCT` binding stay exactly as accepted.
+
+### A. One common sales-option authoring truth
+
+`CommonSalesOptionAxis` and `CommonSalesOptionValue` are product-side canonical children of the
+existing `ProductGroup`. They are the customer-facing option structure authored once for a product.
+They are not source facts, marketplace attributes, product-information notices or provider payload
+fields, and they create no second `Product` root.
+
+A versioned Product Fact -> Common Sales Option mapping may promote an existing, evidenced fact to
+a common axis/value only when its semantics and unit correspondence are proven by an accepted rule
+or explicit review. An absent or ambiguous correspondence is `REVIEW_REQUIRED`; it never creates a
+fact, axis or value. Historical `ProductFactsRevision` records are never edited by this mapping.
+
+### B. Coupang required options set a minimum common requirement
+
+Coupang's category-required purchase-option metadata remains official provider evidence owned at
+the marketplace-contract/REGISTER boundary. The repository owner's ICBM policy is separate: when a
+Coupang required purchase option has a proven semantic match in canonical Product Facts, that
+requirement becomes a minimum requirement for the product's Common Sales Option structure.
+
+This does not copy the Coupang API model into Product Core and does not claim that Coupang dictates
+another marketplace's API. It decides that ICBM will author the fact-backed option once and project
+the same structure to NAVER, Coupang and later 11st. Product Fact, Common Sales Option, Atomic SKU,
+Product Information Notice and Marketplace Attribute remain distinct roles even when they refer to
+the same underlying fact.
+
+### C. Atomic SKU is a source-proven common-option configuration
+
+An `AtomicSKU` belongs to one `ProductGroup` and selects one value from each applicable
+Common Sales Option axis. It materializes only from an explicit source SKU/configuration observation
+whose evidence is `CONFIRMED`. Axis/value inventories alone are never configuration evidence and
+never authorize a Cartesian product.
+
+For example, axes containing `300 mg`, `500 mg`, `30 tablets` and `60 tablets`, with source evidence
+only for `300 mg + 30 tablets` and `500 mg + 60 tablets`, create exactly those two Atomic SKUs. The
+other two mathematical combinations are forbidden fabrication.
+
+For a positive-option path, the product-side Item identity becomes the existing group and
+composition identity plus the Atomic SKU identity. The implementation must be additive and
+versioned; it does not reinterpret existing no-option Items or `registration_item_key/v1`.
+
+### D. One canonical structure, many marketplace projections
+
+All selected marketplaces consume one immutable Common Sales Option authoring revision and the same
+Atomic SKU set. An adapter may render provider keys, labels, units and IDs, but it may not author a
+new canonical axis, invent a value/combination or keep a marketplace-specific SKU truth.
+
+If a marketplace cannot represent the common structure because of an axis, value, combination or
+item limit, that marketplace's REGISTER readiness is `REVIEW_REQUIRED`. The adapter must not remove,
+flatten or mutate the canonical structure, and another marketplace's compatible projection remains
+unchanged.
+
+Registration item identity is versioned so a new `registration_item_key/v2` includes the canonical
+Item/Atomic SKU identity while existing v1 snapshots remain immutable. Provider option/SKU IDs are
+typed aliases of the registration correspondence, never canonical product identities.
+
+### E. Order and operation identity
+
+A NAVER order line and a Coupang order line representing the same Common Sales Option selection
+must resolve through their persisted marketplace registration items to the same ICBM Atomic SKU.
+Order management, procurement, inventory, sold-out state, cost, option price, invoice and delivery
+use that resolved identity; marketplace names and labels are diagnostics only.
+
+### F. Implementation gate and ownership boundary
+
+The no-positive-option SmartStore first canary may continue without this implementation. Before
+SmartStore expands to a positive-option product, or before Coupang performs an actual REGISTER,
+the Common Sales Option owner, fact mapping, source-proven Atomic SKU materialization, Item/key v2,
+shared projection compatibility and order-line resolution contracts must be implemented and tested.
+
+PRODUCT DB owns the Common Sales Option and Atomic SKU canonical truth. REGISTER owns marketplace
+requirement revisions, the reviewed requirement-to-common mapping, provider rendering/readiness,
+registration snapshots and provider identities. OPERATE owns immutable marketplace order-line
+resolution back to the registration Item and Atomic SKU. No layer duplicates another's truth.
 
 ## Consequences
 

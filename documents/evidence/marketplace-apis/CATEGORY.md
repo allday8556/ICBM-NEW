@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -25,9 +25,12 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** the Categories family includes a metadata query by `displayCategoryCode` and category recommendation.
-- **Missing:** method/path and request/response of both.
+- **Locators:** full hierarchy https://developers.coupang.com/en/api/categories/how-to-get-category-list ; one-depth query https://developers.coupang.com/en/api/categories/how-to-get-categories ; leaf validity https://developers.coupang.com/en/api/categories/how-to-check-validity-of-a-category ; metadata https://developers.coupang.com/en/api/categories/category-metadata-query — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Hierarchy:** `GET /v2/providers/seller_api/apis/api/v1/marketplace/meta/display-categories` returns the recursive category tree with `displayItemCategoryCode`, `name`, `status` (`ACTIVE | READY | DISABLED`) and `child`. `GET .../display-categories/{displayCategoryCode}` returns one lower depth; code `0` selects depth 1.
+- **Validity:** `GET .../display-categories/{displayCategoryCode}/status` returns a boolean. Only a leaf is valid; a non-leaf error lists leaf descendants. Coupang documents category renewal twice yearly.
+- **Metadata:** `GET .../category-related-metas/display-category-codes/{displayCategoryCode}` returns `isAllowSingleItem`, attributes, notices, required documents, certifications and allowed offer conditions. Attribute details are in [ATTRIBUTE](ATTRIBUTE.md#coupang) and [OPTION](OPTION.md#coupang).
+- **Full-inventory status:** mechanically feasible as one hierarchy read plus one metadata read per ACTIVE valid leaf, but no authenticated provider request was made. Current all-category values are `NOT_CAPTURED`; the read/adoption plan and sample matrix are in the [Track C packet](../../reviews/COUPANG-OPTION-SKU-COMMON-CORE-BY-CODEX.md#b-category-required-optionattribute-matrix).
+- **Missing:** authenticated live inventory, category recommendation contract, response freshness/cache semantics, errors beyond the captured validity errors, and endpoint-specific rate-limit behavior.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -24,9 +24,11 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api/products/product-creation — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** category metadata and product create define category-based attributes and required purchase-option fields.
-- **Missing:** the metadata endpoint contract and attribute keys.
+- **Locators:** https://developers.coupang.com/en/api/categories/category-metadata-query and https://developers.coupang.com/en/api/products/product-creation — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Metadata endpoint:** `GET /v2/providers/seller_api/apis/api/v1/marketplace/meta/category-related-metas/display-category-codes/{displayCategoryCode}`. Attribute rows carry `attributeTypeName`, `dataType` (`STRING | NUMBER | DATE` in the field table), `basicUnit`, `usableUnits`, `required` (`MANDATORY | OPTIONAL`), `groupNumber` (`NONE | 1 | 2`) and `exposed` (`EXPOSED` purchase option, `NONE` search attribute). The official Korean guide examples additionally carry `inputType` (`INPUT | SELECT`) and `inputValues`.
+- **CREATE projection:** `items[].attributes[]` contains `attributeTypeName` (max 25) and `attributeValueName` (max 30, unit included). Values and units must match the exact category metadata; current policy disallows an unknown free purchase-option type.
+- **Lifecycle:** metadata attributes may be added/modified/deleted before sales approval; after approval they may be added but not deleted or modified. Product read-back may include auto-extracted/recommended attributes, including empty recommended values, so raw-array equality is not a safe comparison contract.
+- **Missing:** live all-category rows, response enum completeness, the guide/reference difference for `inputType`/`inputValues`, and the required group-rule contradiction recorded in [OPTION](OPTION.md#coupang).
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

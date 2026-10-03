@@ -22,9 +22,12 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** item price update `PUT .../marketplace/vendor-items/{vendorItemId}/prices/{price}` (path prefix elided in the capture); an original-price endpoint also exists.
-- **Missing:** full path, request/response, errors, idempotency; the original-price endpoint's path.
+- **Locator:** https://developers.coupang.com/en/api/products/changing-price-of-each-item-of-a-product — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Method / path:** `PUT /v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/{vendorItemId}/prices/{price}`. It is usable after approval has issued the item ID.
+- **Input:** `vendorItemId` is the unique option ID. Price is entered in 10-won units. Query parameters include `forceSalePriceUpdate`; auto-pricing parameters `apMinSalePrice` and `apActive` must be supplied together when used.
+- **Response:** `code`, `message`, `data`; the success example has `code=SUCCESS`. Captured `400` cases include ordinary price-change bounds, auto-generated option restrictions, deleted/invalid ID, non-10-won price, and invalid auto-pricing parameters.
+- **CREATE/read:** `items[].salePrice` is item-level; `GET .../vendor-items/{vendorItemId}/inventories` returns the item sale price ([PRODUCT_READ](PRODUCT_READ.md#coupang)).
+- **Missing:** idempotency/replay and ambiguous-outcome semantics, rate limit, complete error classification, and the original-price endpoint contract.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

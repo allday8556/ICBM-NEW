@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -23,8 +23,11 @@
 
 ## Coupang
 
-- **Captured (https://developers.coupang.com/en/api, 2026-09-28):** the Exchanges family exposes request list, receipt confirmation, rejection and waybill upload.
-- **Missing:** method/paths and fields.
+- **Locator:** https://developers.coupang.com/en/api/exchanges/query-a-list-of-exchange-requests — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Method / path:** `GET /v2/providers/openapi/apis/api/v4/vendors/{vendorId}/exchangeRequests`.
+- **Identity:** `exchangeItemDtoV1s[]` identifies the original and target by `orderItemId` and `targetItemId`; it does not directly expose the seller code. Nested delivery-invoice and return-delivery item rows expose `vendorItemId` with quantity/status evidence.
+- **Canonical consequence:** resolve the exchange through the immutable original order line first, then use nested `vendorItemId` as additional/cross-check evidence. Do not map by `orderItemName` or `targetItemName`.
+- **Missing:** complete paging/error contract, exact semantics tying target/original item IDs to nested vendor IDs in every exchange shape, processing mutations, idempotency and rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st
