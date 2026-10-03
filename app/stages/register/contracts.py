@@ -108,6 +108,17 @@ class AssetView(BaseModel):
     provider_asset_prepared: bool = False
 
 
+class ReasonView(BaseModel):
+    """B-UX1: one readiness reason exactly as its owner returned it — code, status and subject —
+    with the areas it belongs to (``app.stages.register.reason_areas``). The status is the owner's
+    own; nothing here re-judges it, and an unclassified reason keeps its real code."""
+
+    code: str
+    status: str
+    subject: str | None = None
+    areas: tuple[str, ...]
+
+
 class ItemView(BaseModel):
     """One Item of the unit: its pinned price, the current M4 price, its M4 readiness and assets.
 
@@ -139,6 +150,9 @@ class ItemView(BaseModel):
     base_reason_codes: tuple[str, ...] = ()
     pricing_status: str | None = None
     pricing_reason_codes: tuple[str, ...] = ()
+    # B-UX1: the same reasons, structured — each with its owner's status and subject.
+    base_reasons: tuple[ReasonView, ...] = ()
+    pricing_reasons: tuple[ReasonView, ...] = ()
 
 
 class SnapshotView(BaseModel):
@@ -300,6 +314,8 @@ class PreflightView(BaseModel):
     stage: str
     source: str
     reason_codes: tuple[str, ...]
+    # B-UX1: every reason the owner returned, structured, in the owner's order.
+    reasons: tuple[ReasonView, ...] = ()
     rule_version: str
     dependency_fingerprint: str
     # Only a final evaluation of a frozen unit can answer this; a candidate leaves it unanswered.
@@ -379,6 +395,43 @@ class UnitView(BaseModel):
     conflicting_intents: tuple[str, ...]
     scope: ScopeBrakeView
     actions: tuple[ActionView, ...]
+
+
+class AreaCountView(BaseModel):
+    """B-UX1: how many units of the population carry at least one reason of this area, and how
+    many reasons that is. Areas overlap, so these never sum to the population."""
+
+    area: str
+    label: str
+    units: int
+    reasons: int
+    # The real codes behind it, sorted; for UNCLASSIFIED this is what the table has not caught up
+    # with.
+    codes: tuple[str, ...]
+
+
+class RegisterReadinessView(BaseModel):
+    """B-UX1: the readiness of the registration population, evaluated now (ADR-0014 §3, §22).
+
+    **Population.** Every pre-send provider-listing unit the registration screen holds: each unit
+    of every Draft — authored, prospective or frozen — that no Intent names yet. A unit an Intent
+    names is counted by the read-state partition instead (§28.5), so the two never overlap.
+
+    **Coverage.** Every unit is evaluated at read time by the preflight owner, so the counts are
+    current when ``evaluated_at`` was stamped; nothing is cached or stored. A unit the owner could
+    not evaluate is ``NOT_EVALUATED`` with the owner's own refusal code — never one of the five
+    readiness statuses — and ``statuses`` always sums to ``population``.
+    """
+
+    summary_version: str
+    area_version: str
+    evaluated_at: datetime
+    population: int
+    # READY, REVIEW_REQUIRED, BLOCKED, DUPLICATE, STALE and NOT_EVALUATED, each always present.
+    statuses: dict[str, int]
+    # The owner's refusal code of each NOT_EVALUATED unit, counted.
+    not_evaluated: dict[str, int]
+    areas: tuple[AreaCountView, ...]
 
 
 class ReadStateCounts(BaseModel):
