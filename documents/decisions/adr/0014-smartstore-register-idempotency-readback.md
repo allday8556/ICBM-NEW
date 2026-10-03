@@ -172,7 +172,11 @@ RegistrationSnapshot               immutable, one per provider-listing unit
   preflight rule version + dependency fingerprint
   category / taxonomy mapping revision
   platform policy and Settings revisions (shipping, returns, templates)
-  detail composition revision (§19)
+  detail composition revision (§19) — until the B-DETAIL implementation slice is accepted and
+                                   landed, exactly as today; from then also the URL-free plan: the
+                                   ordered sections, the ordered detail image asset identities, the
+                                   optional operator BODY text and the renderer version, never a
+                                   provider URL (§19 amendment note)
   sanitizer / safe-query-key profile version (§15)
   payload_hash                     SHA-256 of the sanitized canonical evidence representation (§15), never of wire bytes
   asset hashes                     the exact local artifact SHA-256s
@@ -597,6 +601,19 @@ remains `UNVERIFIED`, the canary remains `BLOCKED` on every other prerequisite, 
 - The first vertical may be body-only. The payload builder never hardwires the body so that later top or bottom guidance requires replacing the registration owner.
 - No Detail Guidance is implemented in PR-A or in M5's core merely to keep the seam open.
 
+> **Amendment note (B-DETAIL; owner decision 2026-10-04).** The detail composition places the
+> selected detail-body images (ADR-0013 §9, Issue #219). Its sections are a closed, versioned
+> vocabulary; profile content v2 orders `DETAIL_IMAGES` → `BODY` (the owner's first image-placing
+> section set), content v1 stays `BODY`-only, and Detail Guidance, video and an option table stay
+> unimplemented. `BODY` is operator plain text — never HTML, a URL or markup — and is optional when
+> detail images exist; COLLECT's truncated `detail_description` never fills it. The composition and
+> the Snapshot hold no provider URL: the **trusted REGISTER renderer** alone produces the provider
+> `detailContent`, deterministically and under a pinned renderer version, from the frozen plan and
+> the already-uploaded provider asset identities of that same Snapshot. This is a typed boundary
+> beside the outbound sanitizer, which is not relaxed: no operator-authored string may carry a URL.
+> No provider limit or HTML rule is assumed without official evidence (G-1 `INSUFFICIENT`), and a
+> provider incompatibility never edits the canonical composition. Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
+
 ### 20. Supplier resale-price advisory is UI only
 
 Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is shown in the registration option-price UI as **`공급처 판매가 정책 참고`**:
@@ -713,6 +730,18 @@ One durable owner holds both authoring revisions, in one append-only table — `
 - **No backfill.** Existing target-policy revisions, preparations and Snapshots keep exactly what they hold, `null` included. A unit becomes owner-held only through a **new** target-policy revision and a preparation revision authored against it.
 - **What it changes, and nothing else.** Under a stamped policy the authoring metadata answers with the two revisions, a preparation must send back exactly those (the `REGISTER_AUTHORING_REVISION_NOT_OWNED` rule is unchanged), and the candidate preflight no longer reports `AUTHORING_REVISIONS_UNOWNED` — by exact equality only. Every other preflight rule is evaluated as before, freezing stays fail-closed on any unequal or null revision, and `registration_snapshots` and its constraints are unchanged.
 - **It authorizes nothing.** No provider call, endpoint adoption, category auto-mapping or AI, Detail Guidance, canary-eligibility owner, published-state proof, committed provider session, ASSET upload, CREATE, LIVE, canary or residual-risk acceptance.
+
+> **Amendment note (B-DETAIL; owner decision 2026-10-04).** `DETAIL_COMPOSITION` gains content v2,
+> still one profile per `marketplace_key` and still holding no product content: the section order
+> `DETAIL_IMAGES` → `BODY`, the `PLAIN_TEXT` body format and the pinned renderer version. A unit's
+> detail images stay the M4 selection's `DETAIL` outputs and its `BODY` stays in the preparation
+> revision; the preparation's sections are derived from the profile, never sent by a client. v2 is
+> appended by `ensure` like v1; preparations authored against v1 are re-authored under the
+> no-backfill rule above. No migration is needed. The two layers are never mixed in one profile
+> row: the marketplace profile holds only the section vocabulary and order, the renderer/template
+> version and the rendering policy; the product-specific immutable plan — the selected `DETAIL` asset
+> identities, the optional `BODY` and the exact authoring/preparation revision inputs — is frozen in
+> the Snapshot (§6). Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
 
 ### 28. Positive-only reconcile, recovered provider identity and the registration read state (architect decision `5845062336`)
 
