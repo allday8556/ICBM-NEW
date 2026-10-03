@@ -142,6 +142,41 @@ def test_an_absent_product_module_yields_no_product_sample() -> None:
     assert plan.selected == (), "a page without product imagery is sampled zero times"
 
 
+# The page the operator's browser shows (ADR-0019): the platform's image-zoom script has written
+# its own asset and a copy of the image into the representative image's container. The structure
+# follows the E3 real run's references (2026-10-02); no captured page content is copied here.
+ZOOMED = (
+    '<html><body><div class="xans-element- xans-product xans-product-image"><div class="keyImg">'
+    f'<a><img class="BigImage" src="//{STORE}/web/product/big/1/key.jpg"></a>'
+    f'<div id="zoom_wrap"><img src="//{ASSETS}/skin/zoom_cursor.png">'
+    f'<div><img src="//{STORE}/web/product/big/1/key.jpg"></div></div>'
+    "</div></div></body></html>"
+)
+
+
+def test_only_the_modules_own_big_image_is_the_representative_image() -> None:
+    found = classify_images(ZOOMED, PRODUCT_URL)
+    assert [(c.role, c.rule) for c in found] == [
+        (ImageRole.PRIMARY, "km.primary.key_image"),
+        (ImageRole.UI_COMMON, "km.ui.key_image_furniture"),
+        (ImageRole.UI_COMMON, "km.ui.key_image_furniture"),
+    ]
+    # The furniture names the host that serves it, and that is not why it is furniture: the copy on
+    # the storefront host is furniture as well.
+    assert {c.host for c in found[1:]} == {ASSETS, STORE}
+    plan = plan_image_sample(found, 6, rules=IMAGE_ROLES.identity)
+    assert [c.role for c in plan.selected] == [ImageRole.PRIMARY]
+    assert plan.selected[0].url == f"https://{STORE}/web/product/big/1/key.jpg"
+
+
+def test_a_representative_container_without_its_big_image_offers_no_representative() -> None:
+    # Fail closed: when the mark is missing, nothing in the container is called the product's image.
+    page = ZOOMED.replace('class="BigImage" ', "")
+    found = classify_images(page, PRODUCT_URL)
+    assert ImageRole.PRIMARY not in {c.role for c in found}
+    assert plan_image_sample(found, 6, rules=IMAGE_ROLES.identity).selected == ()
+
+
 # ---------------------------------------------------------------- the ancestry a role is read from
 # Review 5222192371: a void element has no end tag, and a page's closes are not to be trusted. Both
 # used to shift the stack, leaving the description block standing over the rest of the document so
@@ -187,7 +222,7 @@ def test_a_void_element_is_not_an_ancestor_of_what_follows_it() -> None:
     # stack it would stand over its siblings, and the next reference would inherit its role.
     page = (
         '<html><body><div class="xans-element- xans-product xans-product-image">'
-        f'<img class="keyImg" src="https://{STORE}/web/product/big/1/key.jpg">'
+        f'<img class="keyImg BigImage" src="https://{STORE}/web/product/big/1/key.jpg">'
         f'<img src="https://{ASSETS}/after">'
         "</div></body></html>"
     )
