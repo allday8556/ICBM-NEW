@@ -10,6 +10,10 @@ It advances from ``kmretail-images-1``, which covered image-role classification 
 ``kmretail-2`` (2026-10-03, the user's decision after the E3 real run): only the product module's
 ``BigImage`` inside ``keyImg`` is the representative image, and the rest of that container is
 layout furniture; and the profile's per-image bound is 4 MiB.
+
+``kmretail-3`` (2026-10-03, the user's rule): a minimum-price row that says the price is free
+(``자율``) states that there is no minimum, so the field is ``ABSENT`` like an unstated one; any
+other row without an amount stays ``REVIEW_REQUIRED``.
 """
 
-EXTRACTION_REVISION = "kmretail-2"
+EXTRACTION_REVISION = "kmretail-3"
