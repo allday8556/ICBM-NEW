@@ -1,12 +1,12 @@
 # Product Information Notice
 
-> Evidence catalog; status model and provenance conventions in [README](README.md). Nothing here adopts an endpoint.
+> Evidence catalog; status model and provenance conventions in [README](README.md). The two SmartStore notice reads are adopted, read only, by `ENDPOINT_MATRIX.md` §4.
 
 ## Status matrix
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + provider response | `PARTIAL` | `ADOPTED` (the two notice reads, read only) | `VERIFIED` for the two reads (2026-10-03 capture) |
 | Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -20,9 +20,10 @@
 - **Notice-type lookup:** `GET /v1/products-for-provided-notice` (all notice product groups); `GET /v1/products-for-provided-notice/{productInfoProvidedNoticeType}` (one group); bearer; API group `상품`.
 - **Notice in the product body:** `originProduct.detailAttribute.productInfoProvidedNotice` (required for registration; omissible on update only when a notice is already stored) with the required discriminator `productInfoProvidedNoticeType` and exactly one matching type child. The rules are recorded once in [PRODUCT_CREATE § Request structure](PRODUCT_CREATE.md#request-structure); the type-child fields are a not-captured, fail-closed gap of that record ([Coverage](PRODUCT_CREATE.md#coverage-and-remaining-gaps-exact)).
 - **Error example:** a missing required notice field has produced `BAD_REQUEST` with structured `invalidInputs` (`NAVER-P1-BADREQ-NOTICE-1649`, `OFFICIAL_SUPPORT`).
-- **Missing:** every response field of both lookups (none proven, `SOURCES.md` §5.1); the full list of type values; the field set of each type child; errors; rate limit.
+- **Captured 2026-10-03 (notice coverage S0, owner directive):** the live type list (36 types) and every listed type's content fields (`fieldType`, `fieldName`, `fieldDescription`, `fieldAddDescription`, `fieldMaxLength`; 411 fields), cross-checked against the official OpenAPI `docs/2.0.0-RC.js` (wire type, required, omit semantics, deprecated). The full inventory and every disagreement between the two sources are in [NOTICE_SMARTSTORE_S0](NOTICE_SMARTSTORE_S0.md); the raw retained responses are [smartstore-notice-capture-2026-10-03.json](smartstore-notice-capture-2026-10-03.json). Unspaced reads were answered `429 RATE_LIMITED`; one read a second captured all 36.
+- **Missing:** the current (2.90.0) wire schema of every type child — the cross-check uses the 2022 `2.0.0-RC` specification; `RENTAL_HA`'s child, which that specification does not have; errors of the two reads.
 - **Captured since 2.90.0** (evidence packet `5916962285`, `NAVER-P0-NOTICE-CHILD-290`): the explicit type → member mapping of 36 types, and the member sets of `WEAR`, `SHOES`, `HOME_APPLIANCES`, `KITCHEN_UTENSILS`, `COSMETIC`, `GENERAL_FOOD` and `ETC` ([PRODUCT_CREATE § Coverage](PRODUCT_CREATE.md#coverage-and-remaining-gaps-exact)). The lookups' response fields are still missing.
-- **ICBM:** `SMARTSTORE_NOTICE_TYPES` / `SMARTSTORE_NOTICE_TYPE_READ` are `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4.1) and no discovery call is made; no value of a type-specific child that ICBM does not own may be invented. The CREATE projection selects the child of the reviewed notice type through the pinned table (`ENDPOINT_MATRIX.md` §4.1.1; Issue #89 architect resolution `5915900049` D2.3); an uncaptured type stays a gap. Runtime `UNVERIFIED`.
+- **ICBM:** `SMARTSTORE_NOTICE_TYPES` / `SMARTSTORE_NOTICE_TYPE_READ` are `ADOPTED` read only, to capture the provider notice schema (`ENDPOINT_MATRIX.md` §4; `POST /api/v1/connect/marketplaces/smartstore/notice-catalog/capture`); no value of a type-specific child that ICBM does not own may be invented. The CREATE projection selects the child of the reviewed notice type through the pinned table (`ENDPOINT_MATRIX.md` §4.1.1; Issue #89 architect resolution `5915900049` D2.3); an uncaptured type stays a gap. Runtime `UNVERIFIED`.
 
 ## Coupang
 
