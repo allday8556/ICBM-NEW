@@ -232,6 +232,8 @@ def upgrade() -> None:
         " AND json_type(f.value_json, NEW.source_configuration_path) = 'object'"
         " AND json(json_extract(f.value_json, NEW.source_configuration_path))"
         " = json(NEW.source_configuration_json)"
+        " AND NEW.supplier_sku_id IS json_extract("
+        " NEW.source_configuration_json, '$.supplier_sku_id')"
         " AND gm.product_group_id = sr.product_group_id AND gm.status = 'CONFIRMED'"
         " AND NEW.source_revision_id = (SELECT revision_id FROM current_source_revision_moves"
         " WHERE source_product_uid = sp.source_product_uid ORDER BY sequence DESC LIMIT 1))"

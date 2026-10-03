@@ -57,8 +57,12 @@ def _option_fields(
     return fields
 
 
-def _foundation(container: Container):  # type: ignore[no-untyped-def]
-    revision = container.revisions.append(collected(fields=_option_fields(), images=()))
+def _foundation(
+    container: Container,
+    configurations: tuple[OptionConfiguration, ...] | None = None,
+):  # type: ignore[no-untyped-def]
+    fields = _option_fields() if configurations is None else _option_fields(configurations)
+    revision = container.revisions.append(collected(fields=fields, images=()))
     source = container.product_store.source_product("kmretail", "1234")
     container.product_store.record_move(
         source.source_product_uid,
@@ -306,6 +310,65 @@ def test_materializes_only_observed_configurations_not_the_cartesian_product(
     assert revised.atomic_skus[0].atomic_sku_id == recorded.atomic_skus[0].atomic_sku_id
     assert revised.atomic_skus[0].revision_member_id != recorded.atomic_skus[0].revision_member_id
     assert container.atomic_skus.current(group) == revised
+
+
+@pytest.mark.parametrize("supplier_sku_id", ["forged-sku", "", None])
+def test_member_supplier_sku_id_is_exact_source_evidence(
+    config: AppConfig,
+    container: Container,
+    supplier_sku_id: str | None,
+) -> None:
+    group, revision, common = _foundation(container)
+    recorded = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, revision, 0, ("300mg", "30정")),),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic",
+    )
+    member = recorded.atomic_skus[0]
+
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="source configuration is not exact current evidence",
+        ),
+    ):
+        raw.execute(
+            "INSERT INTO atomic_sku_revision_members ("
+            "revision_member_id, sku_set_revision_id, atomic_sku_id, source_revision_id, "
+            "source_field_key, source_configuration_path, source_configuration_json, "
+            "source_field_fingerprint, supplier_sku_id, ordinal) "
+            "SELECT '00000000-0000-0000-0000-000000000001', sku_set_revision_id, "
+            "atomic_sku_id, source_revision_id, source_field_key, source_configuration_path, "
+            "source_configuration_json, source_field_fingerprint, ?, ordinal + 1 "
+            "FROM atomic_sku_revision_members WHERE revision_member_id = ?",
+            (supplier_sku_id, member.revision_member_id),
+        )
+
+
+def test_member_allows_missing_supplier_sku_when_source_evidence_has_none(
+    container: Container,
+) -> None:
+    group, revision, common = _foundation(
+        container,
+        (
+            OptionConfiguration(
+                selections=("300mg", "30정"),
+                supplier_sku_id=None,
+            ),
+        ),
+    )
+    recorded = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, revision, 0, ("300mg", "30정")),),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic-without-supplier-sku",
+    )
+
+    assert recorded.atomic_skus[0].supplier_sku_id is None
 
 
 def test_rejects_an_unobserved_cross_combination(container: Container) -> None:
