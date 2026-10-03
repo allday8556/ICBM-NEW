@@ -48,6 +48,8 @@ Notice coverage S0 (owner directive 2026-10-03) added
 `integrations/marketplaces/smartstore/notice_catalog.py` and one unit suite.
 Its capture (2026-10-03) added the S0 inventory `NOTICE_SMARTSTORE_S0.md` and the retained
 responses `smartstore-notice-capture-2026-10-03.json` under `documents/evidence/marketplace-apis/`.
+The current 2.90.0 reference's notice children are retained beside them as
+`smartstore-notice-schema-2.90.0-2026-10-03.json`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -65,13 +67,13 @@ responses `smartstore-notice-capture-2026-10-03.json` under `documents/evidence/
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 160 | all canonical and historical documents |
+| `documents/` | 161 | all canonical and historical documents |
 | `documents/acceptance/` | 66 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
 | `documents/decisions/` | 24 | ADRs and architect review records |
-| `documents/evidence/` | 29 | external provider evidence catalog |
+| `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 1 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
