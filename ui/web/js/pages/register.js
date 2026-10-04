@@ -96,6 +96,10 @@ const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
+  // B-PRICE1: the repin command's refusals.
+  REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
+  REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
+  REGISTER_DRAFT_ITEM_NOT_PRICED: 'M4가 일부 품목의 가격을 정하지 못해 아무것도 다시 고정하지 않았습니다.',
   REGISTER_READ_QUEUED: '전송 작업이 대기 중입니다.',
   REGISTER_READ_SENDABLE: '전송할 수 있는 상태입니다.',
   REGISTER_READ_SEND_IN_FLIGHT: '전송이 진행 중입니다.',
@@ -935,6 +939,39 @@ function previewView(view) {
   );
 }
 
+// B-PRICE1: when the server says a pinned price is no longer M4's current one, the operator may
+// ask M4 to price again and re-pin the Draft. The page names no price; the server decides all.
+const REPIN_REASONS = new Set(['PRICING_SNAPSHOT_MISSING', 'PRICING_SNAPSHOT_SUPERSEDED']);
+
+function repinBlock(unit, onDone) {
+  // Offered when the server says the pin is not M4's current price, or M4's own pricing readiness
+  // names a missing or superseded snapshot; the server decides everything else.
+  const moved = unit.items.some(
+    (item) =>
+      item.price_pin_current === false ||
+      (item.pricing_reason_codes ?? []).some((code) => REPIN_REASONS.has(code)),
+  );
+  if (!moved) return null;
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'REPIN_DRAFT' }, '가격 다시 고정');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const moved = await sendJson('POST', `/api/v1/register/drafts/${unit.draft_id}/repin`, {
+        actor: OPERATOR,
+        expected_draft_revision: unit.draft_revision,
+      });
+      const count = moved.items.filter((item) => item.repinned).length;
+      toast(count ? `${count}개 품목의 가격을 다시 고정했습니다.` : 'M4 가격이 그대로라 바뀐 것이 없습니다.');
+      onDone();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      button.disabled = false;
+    }
+  });
+  return h('div', { class: 'register-repin', 'data-repin': unit.draft_id }, button);
+}
+
 function unitPanel(unit, onDone, labels) {
   const intent = unit.intent;
   return h(
@@ -969,6 +1006,7 @@ function unitPanel(unit, onDone, labels) {
     unit.snapshot ? null : authoringForm(unit, onDone),
     unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
     preflightBlock(unit, labels),
+    repinBlock(unit, onDone),
     unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
     table(
       ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],

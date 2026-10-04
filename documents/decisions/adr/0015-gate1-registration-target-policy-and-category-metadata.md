@@ -219,6 +219,20 @@ never in parallel**, each as its own PR with its own exact-head audit:
 - **G1-D adds no second price owner**: it calls the M4 pricing owner and pins what that owner
   recorded, through the existing registration store writers.
 
+> **Amendment note (B-PRICE1; owner directive 2026-10-04).** The Draft command owner also re-pins:
+> `POST /api/v1/register/drafts/{draft_id}/repin` (`DraftCommandService.repin`). The operator names
+> only the Draft revision they saw — never a price or a snapshot. Every open Item is priced by the
+> M4 pricing owner under the account's current policy context, all before any refusal: `RECORDED`
+> and `UNCHANGED` give the snapshot M4 holds current; `NOT_PRICED` on any Item re-pins nothing and
+> returns every Item's M4 reasons; a moved Draft is refused (`REGISTER_DRAFT_REVISION_MOVED`). The
+> re-pin is one registration unit of work, all or nothing, through the existing
+> `change_draft_item_price` (one Draft revision per moved pin, the history keeps every price; an
+> unchanged price moves nothing). It is refused while any Intent of the Draft is `PREPARED`, `SENT`
+> or `UNKNOWN` (`REGISTER_REPIN_INTENT_OPEN`), since such an Intent may still send, or may already
+> have sent, its frozen price. Another Draft pinning a superseded snapshot is not written: M4's
+> pointer move already makes it `DRAFT_PRICE_PIN_SUPERSEDED`. M4's history, its
+> `minimum_sale_price` rule and every price stay M4's; REGISTER writes no price.
+
 ### 6. The Gate 1 acceptance boundary
 
 Gate 1 closes when, **from a fresh session and with zero provider writes**, this operator path

@@ -94,11 +94,11 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 | `integrations/` | 42 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 21 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 268 | tests |
+| `tests/` | 269 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 105 | integration tests by runtime owner |
+| `tests/integration/` | 106 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 97 | unit tests by runtime owner |
 | `ui/` | 55 | operator clients: the served web client and the capture extension |
