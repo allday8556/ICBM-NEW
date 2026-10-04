@@ -472,9 +472,7 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
         # The evidence is the field's own, opened on demand.
         first = revision["fields"][0]
         evidence = facts.locator(f"tr[data-evidence-for='{first['key']}']")
-        toggle = facts.locator(
-            f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']"
-        )
+        toggle = facts.locator(f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']")
         assert evidence.count() == 0
         assert toggle.get_attribute("aria-expanded") == "false"
         toggle.click()
@@ -512,8 +510,7 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             image_rows = image_table.locator("tbody tr")
             assert image_rows.count() == len(revision["images"])
             assert [
-                image_rows.nth(i).get_attribute("data-status")
-                for i in range(image_rows.count())
+                image_rows.nth(i).get_attribute("data-status") for i in range(image_rows.count())
             ] == [image["status"] for image in revision["images"]]
             assert image_toggle.get_attribute("aria-expanded") == "true"
             image_toggle.click()
