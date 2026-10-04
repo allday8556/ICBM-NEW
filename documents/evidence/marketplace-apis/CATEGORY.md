@@ -6,7 +6,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` | `LIST_COMPLETE` | `CATEGORY_LIST_ADOPTED` | `PROVIDER_READ_PENDING` |
 | Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -16,12 +16,13 @@
 
 ## SmartStore
 
-- **Locators:** `전체 카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-list-product ; `카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-product — `OFFICIAL_API_DOC`, NAVER Commerce API 2.89.0 (2026-09-15), `NAVER-P0-PACKET-289` (Issue #89 comment 5746489554).
+- **Locators:** `전체 카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-list-product ; `카테고리 조회` https://apicenter.commerce.naver.com/docs/commerce-api/current/get-category-product — `OFFICIAL_API_DOC`, NAVER Commerce API 2.90.0, re-read 2026-10-04.
 - **Method / path:** `GET /v1/categories` (all categories); `GET /v1/categories/{categoryId}` (one category).
 - **Auth / group:** `Authorization: Bearer {token}`; the AI-use guide groups category reads under API group `상품`.
 - **In the product body:** `originProduct.leafCategoryId` is **required on product registration** (`NAVER-P0-REGISTRATION-CREATE-289`, Issue #89 comment 5862400626; [PRODUCT_CREATE](PRODUCT_CREATE.md#request-structure)).
-- **Missing:** every response field of both reads (none is proven, `SOURCES.md` §5.1), query keys, errors, rate limit; the `leafCategoryId` value format.
-- **ICBM:** `SMARTSTORE_CATEGORY_LIST` / `SMARTSTORE_CATEGORY_READ` are `NOT_ADOPTED` (`ENDPOINT_MATRIX.md` §4, §4.1: with no proven response field a deny-by-default retention profile would keep nothing; the registry records app mode and group as `TBD_AT_ADOPTION`). Runtime `UNVERIFIED`.
+- **Adopted list contract:** optional boolean query `last`; with `last=true`, HTTP 200 returns an array whose required fields are `wholeCategoryName`, `id`, `name`, `last`. Bearer authentication; API group `상품`; retained fields are exactly those four.
+- **Still missing/out:** the richer single-category certification response is not needed by the list snapshot and `SMARTSTORE_CATEGORY_READ` stays `NOT_ADOPTED`; rate-limit behavior remains runtime measurement.
+- **ICBM:** `SMARTSTORE_CATEGORY_LIST` is `ADOPTED` for read-only leaf-catalog synchronization; `SMARTSTORE_CATEGORY_READ` remains `NOT_ADOPTED`. No real provider read has yet been recorded as acceptance evidence.
 
 ## Coupang
 

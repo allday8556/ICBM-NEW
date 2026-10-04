@@ -1,6 +1,6 @@
 // 카테고리 메타데이터 검토 (Gate 1 G1-B; ADR-0015 §3). The operator-reviewed category metadata of one
-// marketplace × taxonomy revision × category, recorded from reviewed evidence. No provider category
-// endpoint is adopted; nothing here calls a marketplace.
+// marketplace × taxonomy revision × category, recorded from reviewed evidence. SmartStore's
+// official leaf catalog is synchronized explicitly and supplies the selectable category identity.
 //
 // The page renders what the server holds and sends what the operator typed. It computes no
 // revision, fingerprint, review time or validity: the server validates the whole revision, creates
@@ -13,6 +13,8 @@ import { h } from '../../core/dom.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/category-metadata';
+const CATALOG = '/api/v1/settings/category-catalog';
+const SMARTSTORE_SYNC = '/api/v1/connect/marketplaces/smartstore/categories/sync';
 const TITLE = '카테고리 메타데이터';
 const ACTOR = 'operator';
 const MISSING = ['REVIEW_REQUIRED', 'BLOCKED'];
@@ -134,13 +136,36 @@ function entryRow(entry, onEdit) {
   );
 }
 
-function editor(marketplaceKey, entry, onSaved) {
+function categorySelect(catalog, value) {
+  sequence += 1;
+  const id = `category-metadata-${sequence}`;
+  const control = h(
+    'select',
+    { id, 'data-meta-field': 'category_id' },
+    catalog.entries.map((item) =>
+      h('option', { value: item.category_id }, `${item.whole_category_name} (${item.category_id})`),
+    ),
+  );
+  if (value) control.value = value;
+  return { control, row: h('div', { class: 'form-row' }, h('label', { for: id }, '리프 카테고리'), control) };
+}
+
+function editor(marketplaceKey, entry, catalog, onSaved) {
   const content = entry?.content;
   const current = entry?.current;
   const fixed = Boolean(entry);
-  const taxonomy = input('카테고리 체계 리비전', 'taxonomy_revision', entry?.taxonomy_revision, { readonly: fixed });
-  const category = input('카테고리 ID', 'category_id', entry?.category_id, { readonly: fixed });
-  const leaf = input('리프 카테고리', 'leaf', content?.leaf, { type: 'checkbox' });
+  const catalogReady = !entry && Boolean(catalog?.taxonomy_revision && catalog.entries?.length);
+  const taxonomy = input(
+    '카테고리 체계 리비전',
+    'taxonomy_revision',
+    entry?.taxonomy_revision ?? catalog?.taxonomy_revision,
+    { readonly: fixed || catalogReady },
+  );
+  const category = catalogReady
+    ? categorySelect(catalog, entry?.category_id)
+    : input('카테고리 ID', 'category_id', entry?.category_id, { readonly: fixed });
+  const leaf = input('리프 카테고리', 'leaf', catalogReady ? true : content?.leaf, { type: 'checkbox' });
+  if (catalogReady) leaf.control.disabled = true;
   const registrable = input('등록 가능 카테고리', 'registrable', content?.registrable, { type: 'checkbox' });
   const nameMax = input('상품명 최대 길이', 'name_max_length', content ? String(content.name_max_length) : '');
   const attributes = area('속성 규칙 (한 줄에: 키 | 필수 y/n | 상세참조 y/n | REVIEW_REQUIRED·BLOCKED | 최대길이 또는 -)', 'attributes', rulesText(content?.attributes));
@@ -221,17 +246,59 @@ export function categoryMetadataPanel(marketplaceKey) {
   const form = h('div', { class: 'truth-host' });
   const host = h('div', { class: 'category-metadata', 'data-marketplace': marketplaceKey }, list, form);
   let load = null;
-  const edit = (entry) => form.replaceChildren(editor(marketplaceKey, entry, load));
+  let catalog = null;
+  const edit = (entry) => form.replaceChildren(editor(marketplaceKey, entry, catalog, load));
   const fresh = h('button', { type: 'button', class: 'btn', 'data-action': 'new-category-metadata' }, '새 카테고리 기록');
   fresh.addEventListener('click', () => edit(null));
+  const catalogQuery = h('input', {
+    type: 'search',
+    autocomplete: 'off',
+    placeholder: '카테고리명·경로·ID 검색',
+    'data-category-catalog-query': 'true',
+  });
+  const search = h('button', { type: 'button', class: 'btn', 'data-action': 'search-category-catalog' }, '카테고리 검색');
+  search.addEventListener('click', async () => {
+    search.disabled = true;
+    try {
+      const query = encodeURIComponent(catalogQuery.value.trim());
+      catalog = await getJson(`${CATALOG}/${marketplaceKey}?query=${query}&limit=500`);
+      edit(null);
+      toast(TITLE, `검색 결과 ${catalog.entries.length}개를 불러왔습니다.`);
+    } catch (error) {
+      toast(TITLE, errorText(error));
+    } finally {
+      search.disabled = false;
+    }
+  });
+  const sync = h('button', { type: 'button', class: 'btn', 'data-action': 'sync-category-catalog' }, '네이버 리프 카테고리 동기화');
+  sync.addEventListener('click', async () => {
+    sync.disabled = true;
+    try {
+      catalog = await sendJson('POST', SMARTSTORE_SYNC);
+      toast(TITLE, `리프 카테고리 ${catalog.total}개를 저장했습니다.`);
+      await load();
+    } catch (error) {
+      toast(TITLE, errorText(error));
+    } finally {
+      sync.disabled = false;
+    }
+  });
   load = async () => {
     try {
-      const view = await getJson(`${BASE}/${marketplaceKey}`);
+      const [view, catalogView] = await Promise.all([
+        getJson(`${BASE}/${marketplaceKey}`),
+        getJson(`${CATALOG}/${marketplaceKey}?limit=500`),
+      ]);
+      catalog = catalogView;
+      const catalogLine = catalog.taxonomy_revision
+        ? `현재 리프 ${catalog.total}개 · ${catalog.taxonomy_revision}`
+        : '저장된 네이버 리프 카테고리가 없습니다';
       list.replaceChildren(
+        h('div', { class: 'note', 'data-category-catalog-state': catalog.taxonomy_revision ? 'ready' : 'missing' }, catalogLine),
         ...(view.entries.length
           ? view.entries.map((entry) => entryRow(entry, edit))
           : [h('div', { class: 'note' }, '기록된 카테고리 메타데이터가 없습니다 · 모든 카테고리의 사전검사는 CATEGORY_METADATA_MISSING입니다')]),
-        h('div', { class: 'api-action-row' }, fresh),
+        h('div', { class: 'api-action-row' }, catalogQuery, search, sync, fresh),
       );
       form.replaceChildren();
     } catch (error) {

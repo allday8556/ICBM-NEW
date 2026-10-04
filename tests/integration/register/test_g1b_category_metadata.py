@@ -455,6 +455,8 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "registration_deletions",
         "synthetic_test_products",
         "supplier_common_image_decisions",
+        "marketplace_category_catalog_snapshots",
+        "marketplace_category_catalog_entries",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

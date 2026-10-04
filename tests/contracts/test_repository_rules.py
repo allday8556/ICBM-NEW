@@ -320,8 +320,9 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     matrix = _section(_read(smartstore / "ENDPOINT_MATRIX.md"), r"^4\. Master registry")
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
     # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
-    # the DELETE slice (ADR-0018 §3.5) and the two notice reads (notice coverage S0)
-    assert len(adopted) == 10, adopted
+    # the DELETE slice (ADR-0018 §3.5), the leaf-category read and the two notice reads
+    # (notice coverage S0)
+    assert len(adopted) == 11, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -3699,6 +3700,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "registration_category_metadata",
         "registration_category_metadata_revisions",
         "registration_category_metadata_current",
+        # The official marketplace leaf-category catalog: immutable provider snapshots and their
+        # leaf entries. Selection validity is derived against the current snapshot.
+        "marketplace_category_catalog_snapshots",
+        "marketplace_category_catalog_entries",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

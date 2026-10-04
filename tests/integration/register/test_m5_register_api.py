@@ -1080,6 +1080,100 @@ def test_first_create_copy_comes_from_the_linked_revision_and_is_reused(
     assert container.jobs.payload(accepted.json()["job_id"]) == before
 
 
+def _authored_intents_for_bulk(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    source_product_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Freeze independent authored units without creating any jobs."""
+    from tests.support.register_support import no_match, prepared
+
+    authoring = container.registration_preparations
+    intent_ids: list[str] = []
+    for source_product_id in source_product_ids:
+        item = ready_item(container, sources, source_product_id)
+        draft_id = draft(container.registrations, account, [item])
+        preparation_id = _author(api, draft_id, [item])
+        candidate = authoring.evaluate(preparation_id)
+        evidence = no_match(candidate)
+        ready = authoring.evaluate(preparation_id, duplicate_evidence=evidence)
+        frozen = authoring.freeze(
+            preparation_id,
+            actor=OPERATOR,
+            duplicate_evidence=evidence,
+            prepared_assets=prepared(ready),
+        )
+        intent_ids.append(frozen.intent.intent_id)
+    return tuple(intent_ids)
+
+
+def test_bulk_create_prevalidates_then_queues_in_order_and_reuses_jobs(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    intent_ids = _authored_intents_for_bulk(
+        api, container, sources, account, ("bulk-1234", "bulk-5678")
+    )
+    lookup = FakeDuplicateLookup()
+    container.registration_preparations._duplicate_lookup = lookup
+    # Keep the jobs QUEUED so the second request exercises active-job reuse instead of a
+    # legitimate retry after the DRY_RUN worker has already dead-lettered them.
+    assert api.portal is not None
+    api.portal.call(container.worker.stop)
+
+    first = api.post(
+        "/api/v1/register/bulk-creates", json={"intent_ids": intent_ids}, headers=CLIENT
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["action"] == "BULK_CREATE_ENQUEUE"
+    assert body["total"] == 2
+    assert [item["intent_id"] for item in body["items"]] == list(intent_ids)
+    job_ids = [item["job_id"] for item in body["items"]]
+    assert len(set(job_ids)) == 2
+    assert container.jobs.count(job_type_prefix="register.create") == 2
+
+    repeated = api.post(
+        "/api/v1/register/bulk-creates", json={"intent_ids": intent_ids}, headers=CLIENT
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert [item["job_id"] for item in repeated.json()["items"]] == job_ids
+    assert container.jobs.count(job_type_prefix="register.create") == 2
+
+
+def test_bulk_create_rejects_the_whole_request_before_queueing_any_member(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    (intent_id,) = _authored_intents_for_bulk(api, container, sources, account, ("bulk-valid",))
+    container.registration_preparations._duplicate_lookup = FakeDuplicateLookup()
+
+    missing = api.post(
+        "/api/v1/register/bulk-creates",
+        json={"intent_ids": [intent_id, "missing-intent"]},
+        headers=CLIENT,
+    )
+    assert missing.status_code >= 400
+    assert container.jobs.count(job_type_prefix="register.create") == 0
+
+    duplicate = api.post(
+        "/api/v1/register/bulk-creates",
+        json={"intent_ids": [intent_id, intent_id]},
+        headers=CLIENT,
+    )
+    assert duplicate.status_code >= 400
+    assert duplicate.json()["error"]["code"] == "REGISTER_BULK_DUPLICATE_INTENT"
+    assert container.jobs.count(job_type_prefix="register.create") == 0
+
+
 @pytest.mark.parametrize(
     ("lookup_kwargs", "reason"),
     (

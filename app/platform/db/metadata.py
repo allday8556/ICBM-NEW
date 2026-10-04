@@ -18,6 +18,7 @@ from app.stages.connect.smartstore import models as _smartstore_models  # noqa: 
 from app.stages.products import image_models as _image_models  # noqa: F401
 from app.stages.products import models as _product_models  # noqa: F401
 from app.stages.register import authoring_revisions as _authoring_revisions  # noqa: F401
+from app.stages.register import category_catalog as _category_catalog_models  # noqa: F401
 from app.stages.register import category_metadata_models as _category_metadata_models  # noqa: F401
 from app.stages.register import models as _register_models  # noqa: F401
 from app.stages.register import target_policy_models as _target_policy_models  # noqa: F401

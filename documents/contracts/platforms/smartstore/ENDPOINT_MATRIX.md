@@ -113,7 +113,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); ASSET sender wired (`SmartStoreAssetSender`) to the CONNECT owner's committed bearer (ROADMAP §14 item 4), so unavailable without a proven current committed session; every upload still refused by the send-time stack under `M0_DRY_RUN_ONLY` |
-| `SMARTSTORE_CATEGORY_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories` | Category discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
+| `SMARTSTORE_CATEGORY_LIST` | `ADOPTED` | Leaf-category catalog (owner decision 2026-10-04) | `GET` | `/v1/categories` with `last=true` | Current registrable leaf-category discovery | `OWN_STORE_SELF` | `상품` | No; read-only, no LIVE authority |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attribute-values` | Attribute-value discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -131,12 +131,15 @@ PR-D adopted the two product read-backs. Issue #89 decisions `5765557497` and `5
 subsequently adopted IMAGE UPLOAD, and the separately authorized CREATE adoption slice
 (ADR-0020 §4 order 1) later adopted `SMARTSTORE_PRODUCT_CREATE_V2`, whose frozen contract is
 §4.1.1, and the SEARCH positive-only reconcile slice (order 2) `SMARTSTORE_PRODUCT_SEARCH`, whose
-frozen contract is §4.1.2. Every other M5 row of §4 stays `NOT_ADOPTED`. Each of those adoptions is a contract and
+frozen contract is §4.1.2. The owner decision of 2026-10-04 subsequently adopted only the
+leaf-category list with `last=true`; category single-read, attributes and options stay
+`NOT_ADOPTED`. Each adoption is a contract and
 never a call: the application remains `DRY_RUN`/provider-zero, `product_registration.write` stays
 `UNVERIFIED`, and no application route invokes the upload caller or the CREATE caller.
 
 | Endpoint | Why it is still `NOT_ADOPTED` |
 | --- | --- |
+| `SMARTSTORE_CATEGORY_READ` | the leaf catalog needs only the adopted complete leaf list; the richer single-category certification response has not been adopted |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` / `_VALUES` / `SMARTSTORE_STANDARD_OPTIONS` | each needs a category query key the packet does not name |
 | `SMARTSTORE_CATEGORY_LIST` / `_READ` | no response field is proven, so a deny-by-default retention profile would keep nothing |
 

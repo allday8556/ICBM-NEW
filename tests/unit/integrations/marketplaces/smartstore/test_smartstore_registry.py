@@ -19,6 +19,7 @@ from integrations.marketplaces.smartstore.registry import (
     RedirectPolicy,
     RegistryMappingRevision,
     account_succeeded,
+    category_list_succeeded,
     image_upload_succeeded,
     mapping_fingerprint,
     product_create_succeeded,
@@ -36,7 +37,6 @@ CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 # the CREATE adoption slice POST /v2/products; everything else the official evidence leaves unproven
 # stays NOT_ADOPTED with a named gap (registry.ADOPTION_GAPS).
 STILL_NOT_ADOPTED = {
-    "SMARTSTORE_CATEGORY_LIST",
     "SMARTSTORE_CATEGORY_READ",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
     "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
@@ -59,6 +59,7 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         EndpointId.SMARTSTORE_PRODUCT_DELETE_V2,
         EndpointId.SMARTSTORE_NOTICE_TYPES,
         EndpointId.SMARTSTORE_NOTICE_TYPE_READ,
+        EndpointId.SMARTSTORE_CATEGORY_LIST,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -197,6 +198,32 @@ def test_the_create_contract_is_exactly_the_captured_official_evidence() -> None
         }
     )
     assert contract.predicate_revision == "m5-create-r1"
+
+
+def test_the_category_list_contract_is_leaf_only_and_deny_by_default() -> None:
+    contract = resolve(EndpointId.SMARTSTORE_CATEGORY_LIST)
+    assert (contract.method, contract.path, contract.content_type) == (
+        Method.GET,
+        "/v1/categories",
+        None,
+    )
+    assert contract.requires_bearer and not contract.mutating
+    assert contract.required_groups == frozenset({"상품"})
+    assert contract.safe_query_keys == frozenset({"last"})
+    assert contract.retained_response_fields == frozenset(
+        {"wholeCategoryName", "id", "name", "last"}
+    )
+    assert contract.predicate_revision == "m5-category-list-r1"
+
+
+def test_the_category_list_predicate_requires_every_documented_field() -> None:
+    valid = [
+        {"wholeCategoryName": "식품>건강식품", "id": "50000001", "name": "건강식품", "last": True}
+    ]
+    assert category_list_succeeded(200, valid)
+    assert not category_list_succeeded(200, [{**valid[0], "id": ""}])
+    assert not category_list_succeeded(200, [{k: v for k, v in valid[0].items() if k != "last"}])
+    assert not category_list_succeeded(201, valid)
 
 
 @pytest.mark.parametrize(
@@ -358,7 +385,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-notice-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m5-category-list-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -370,6 +397,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-published-state-r1",
         "m5-delete-r1",
         "m5-notice-r1",
+        "m5-category-list-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2
@@ -398,7 +426,7 @@ def test_a_permission_relevant_change_changes_the_fingerprint(
 
 def test_adopting_another_endpoint_changes_the_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
     before = mapping_fingerprint()
-    category = EndpointId.SMARTSTORE_CATEGORY_LIST
+    category = EndpointId.SMARTSTORE_CATEGORY_READ
     adopted = dataclasses.replace(ADOPTED[ACCOUNT], endpoint_id=category)
     monkeypatch.setitem(registry.ADOPTED, category, adopted)  # type: ignore[arg-type]
     monkeypatch.setattr(registry, "NOT_ADOPTED", NOT_ADOPTED - {category})

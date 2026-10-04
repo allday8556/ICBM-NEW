@@ -33,6 +33,7 @@ from app.stages.register.contracts import (
     ActionResult,
     AuthoredInputsView,
     AuthoringMetadataView,
+    BulkCreateResult,
     PreparationView,
     RegisterOverview,
     RegisterReadinessView,
@@ -81,6 +82,12 @@ class FreezeRequest(BaseModel):
     """Freeze the unit this preparation authored and open its CREATE Intent, if it is READY."""
 
     actor: str = Field(min_length=2, max_length=64)
+
+
+class BulkCreateRequest(BaseModel):
+    """Queue several already frozen Intents through their existing one-product CREATE paths."""
+
+    intent_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 def _correlation() -> str:
@@ -214,6 +221,12 @@ def freeze_preparation(
 @router.post("/intents/{intent_id}/create")
 def enqueue_create(container: ContainerDep, intent_id: str) -> ActionResult:
     return container.register.enqueue_create(intent_id)
+
+
+@router.post("/bulk-creates")
+def enqueue_bulk_create(container: ContainerDep, request: BulkCreateRequest) -> BulkCreateResult:
+    """Prevalidate all members, then durably queue/reuse one normal CREATE job per Intent."""
+    return container.register.enqueue_bulk_create(request.intent_ids)
 
 
 @router.post("/intents/{intent_id}/reconcile")

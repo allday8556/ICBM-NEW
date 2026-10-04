@@ -81,18 +81,19 @@ M5_ADOPTED = frozenset(
         # Notice coverage S0 (owner directive 2026-10-03): the two official 상품정보제공고시 reads.
         "SMARTSTORE_NOTICE_TYPES",
         "SMARTSTORE_NOTICE_TYPE_READ",
+        # Owner decision 2026-10-04: official leaf-category catalog read.
+        "SMARTSTORE_CATEGORY_LIST",
     }
 )
 M5_UNPROVEN = frozenset(
     {
-        "SMARTSTORE_CATEGORY_LIST",
         "SMARTSTORE_CATEGORY_READ",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST",
         "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES",
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m5-notice-r1"
+M5_MAPPING_REVISION = "m5-category-list-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -142,8 +143,8 @@ def test_the_adopted_reconcile_lookup_without_a_session_proves_nothing() -> None
 
 
 def test_the_adoption_detector_fires() -> None:
-    adopted = [*M2_ENDPOINTS, "SMARTSTORE_CATEGORY_LIST"]
-    assert adoption_problems(adopted) == ["SMARTSTORE_CATEGORY_LIST"]
+    adopted = [*M2_ENDPOINTS, "SMARTSTORE_CATEGORY_READ"]
+    assert adoption_problems(adopted) == ["SMARTSTORE_CATEGORY_READ"]
 
 
 # ---------------------------------------------------------------- schema (ADR-0014 §3, §25)
@@ -215,7 +216,8 @@ COMMON_IMAGES = "0039_supplier_common_images"
 # Issue #219: an image selection may be the auto-selection rule's and may place an additional
 # image. Product image state, never registration state.
 AUTO_SELECTION = "0040_image_auto_selection"
-SCHEMA_HEAD = AUTO_SELECTION
+CATEGORY_CATALOG = "0041_category_catalog"
+SCHEMA_HEAD = CATEGORY_CATALOG
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -237,6 +239,7 @@ AFTER_M5 = (
     SYNTHETIC,
     COMMON_IMAGES,
     AUTO_SELECTION,
+    CATEGORY_CATALOG,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

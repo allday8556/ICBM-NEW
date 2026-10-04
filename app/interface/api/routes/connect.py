@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.capabilities.jobs.records import JobRecord
 from app.interface.api.deps import ContainerDep
+from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.stages.connect.contracts import StoredLoginView, SupplierConnectionSummary
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_contracts import PermissionAttestationView
@@ -239,6 +240,19 @@ def capture_notice_catalog(container: ContainerDep) -> dict[str, Any]:
     and each listed type's content fields, once each, with the committed session. A read only: it
     writes and stores nothing, and returns the retained, allow-listed responses."""
     return container.notice_catalog.capture()
+
+
+@router.post(f"{SMARTSTORE}/categories/sync")
+def sync_smartstore_categories(container: ContainerDep) -> dict[str, Any]:
+    """Read and durably snapshot the current official leaf-category catalog.
+
+    This is a provider read, not a marketplace mutation. It uses only the committed CONNECT
+    session and never renews credentials or opens a LIVE scope.
+    """
+    return container.category_catalog.sync(
+        actor=container.config.operator_actor,
+        correlation_id=get_correlation_id() or new_correlation_id(),
+    ).model_dump(mode="json")
 
 
 @router.post(f"{SMARTSTORE}/bind")

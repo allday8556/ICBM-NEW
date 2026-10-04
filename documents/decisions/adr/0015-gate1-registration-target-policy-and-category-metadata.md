@@ -188,6 +188,12 @@ only in the separately authorized G1-B.
 `SMARTSTORE_STANDARD_OPTIONS`, `SMARTSTORE_NOTICE_TYPES` and `SMARTSTORE_NOTICE_TYPE_READ` stay
 `NOT_ADOPTED`, and Gate 1 makes no provider call to them.
 
+**Later amendment (owner decision 2026-10-04).** Gate 1 remains historical, but
+`SMARTSTORE_CATEGORY_LIST` is now adopted for the official `last=true` leaf set. It feeds an
+immutable local catalog snapshot and validates new revisions in this same metadata owner; it does
+not create a second category truth. The other category/attribute/option endpoints in the paragraph
+above remain `NOT_ADOPTED`.
+
 ### 4. What stays out of Gate 1 (D3–D5)
 
 - **`ReviewItem` (D3).** Its persistence and producers belong to Gate 2. Gate 1 creates **no second

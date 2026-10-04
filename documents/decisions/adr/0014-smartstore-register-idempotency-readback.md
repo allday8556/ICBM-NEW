@@ -35,7 +35,11 @@ Related:
 
 M4 is accepted (`documents/acceptance/milestones/M4.md`): the canonical Product (the v3.1 `ProductGroup`), its Items, current source bindings, context-scoped `PricingSnapshot`s, derived image lineage with operator selection and exact-binary QA, and layered readiness exist and are proven offline. SmartStore CONNECT is accepted (M2). **When this ADR was written** every SmartStore product, image, category, attribute, option and notice endpoint was `NOT_ADOPTED` planning metadata (`ENDPOINT_MATRIX.md` §4), and `product_registration.write` was `UNVERIFIED`.
 
-That starting state has since moved only where an amendment moved it: PR-D adopted the two product read-backs, §17.1 adopted the bounded image upload, and everything else — product CREATE, the duplicate-lookup search, the category, attribute, option and notice reads — remains `NOT_ADOPTED`. `product_registration.write` is still `UNVERIFIED`. The current adoption facts are `ENDPOINT_MATRIX.md` §4 and the adapter registry, never this paragraph.
+That starting state has since moved only where an amendment moved it: the current adopted surface
+includes the product read-backs, bounded image upload, CREATE, positive-only search, DELETE, notice
+reads and (owner decision 2026-10-04) the leaf-category list. Category single-read, attribute and
+option reads remain `NOT_ADOPTED`. `product_registration.write` is still `UNVERIFIED`. The current
+adoption facts are `ENDPOINT_MATRIX.md` §4 and the adapter registry, never this paragraph.
 
 M5 registers one canonical product to SmartStore and proves, by read-back, that the marketplace recorded exactly what ICBM sent. The dangerous failure is not a failed registration but a **second listing**: a replay, a restart, a retry after an ambiguous result, a changed Snapshot or a partial option set can each create one. This ADR freezes, before any schema, the contract that makes those impossible.
 
@@ -904,6 +908,24 @@ The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 co
 - **Not authorized here:** runtime code, schema, migration, endpoint adoption, provider call, LIVE change, area-5 opening or canary. `SMARTSTORE_PRODUCT_CREATE_V2` and `SMARTSTORE_PRODUCT_SEARCH` stay `NOT_ADOPTED` (§17.2). A SEARCH adoption, when separately authorized, is limited to this positive reconcile. *(Amendment note: CREATE was later adopted by its own separately authorized slice under ADR-0020 §4 — see §17.3. This amendment still authorizes nothing by itself, SEARCH was then adopted by its own slice for this positive reconcile only — §17.4 — and every rule of §28 is unchanged.)*
 
 > **Amendment note (ADR-0020 §2, §4).** This amendment still authorizes nothing by itself. The CREATE adoption slice and, after it, the positive-only reconcile SEARCH adoption slice are each authorized by the ROADMAP standing authorization of ADR-0020, as separate PRs, when they meet all of its conditions — provider-zero, adoption in code only, and any schema of §28.4 only where a canonical contract has concretely decided it. No provider call, LIVE change, area-5 opening, canary or residual-risk acceptance (§28.7) is authorized by it.
+
+### 29. Leaf-category catalog and local bulk CREATE orchestration (owner decision 2026-10-04)
+
+- `SMARTSTORE_CATEGORY_LIST` adopts only `GET /v1/categories?last=true`, bearer authentication,
+  the `상품` group and the documented response fields `wholeCategoryName`, `id`, `name`, `last`.
+  It is read-only and grants no mutation authority.
+- A successful complete leaf set becomes one immutable local snapshot. Its canonical content
+  digest determines the server-owned taxonomy revision. An empty, malformed, duplicate or
+  non-leaf response changes nothing. Once a catalog exists, new category-metadata revisions must
+  name its current taxonomy revision and one category ID in that leaf set.
+- `POST /api/v1/register/bulk-creates` is local orchestration, not a provider endpoint. It accepts
+  1–50 unique existing Intent IDs, resolves and validates every frozen send request and scope
+  budget before queueing any member, then queues or reuses the ordinary `register.create` job for
+  each Intent in request order.
+- Every member keeps the single-product safety contract: its own immutable Snapshot and Intent,
+  one live job, exact CREATE grant, brake, bounded LIVE window, Attempt, UNKNOWN handling and
+  read-back. The bulk call issues no grant, opens no LIVE window, and never converts a child
+  outcome into a batch truth.
 
 ## Invariants
 

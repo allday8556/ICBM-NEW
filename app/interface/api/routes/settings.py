@@ -9,10 +9,11 @@ save contract exists for it.
 No route here reaches a provider or a marketplace: both are local, operator-recorded truth.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
+from app.stages.register.category_catalog import CategoryCatalogView
 from app.stages.register.category_metadata import (
     CategoryMetadataListView,
     CategoryMetadataView,
@@ -25,6 +26,17 @@ from app.stages.register.target_policy import (
 )
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
+
+
+@router.get("/category-catalog/{marketplace_key}")
+def category_catalog(
+    container: ContainerDep,
+    marketplace_key: str,
+    query: str = Query(default="", max_length=100),
+    limit: int = Query(default=200, ge=1, le=500),
+) -> CategoryCatalogView:
+    """The latest locally stored provider leaf catalog, optionally filtered for selection."""
+    return container.category_catalog.catalog(marketplace_key, query=query, limit=limit)
 
 
 @router.get("/target-policies/{marketplace_key}")

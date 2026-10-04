@@ -39,6 +39,7 @@ class RegisterAction(StrEnum):
     EVALUATE = "EVALUATE"
     FREEZE = "FREEZE"
     CREATE_ENQUEUE = "CREATE_ENQUEUE"
+    BULK_CREATE_ENQUEUE = "BULK_CREATE_ENQUEUE"
     RECONCILE = "RECONCILE"
     VERIFY = "VERIFY"
     RESUME_SCOPE = "RESUME_SCOPE"
@@ -503,3 +504,15 @@ class ActionResult(BaseModel):
     registration_snapshot_id: str | None = None
     # The owner's own evaluation, when the action was one that asks for it.
     preflight: PreflightView | None = None
+
+
+class BulkCreateResult(BaseModel):
+    """Ordered local orchestration of existing single-Intent CREATE jobs.
+
+    It claims only that jobs were durably queued or reused. Each job still reaches the existing
+    per-Intent send-time gate, grant, brake and UNKNOWN rules independently.
+    """
+
+    action: RegisterAction = RegisterAction.BULK_CREATE_ENQUEUE
+    total: int
+    items: tuple[ActionResult, ...]

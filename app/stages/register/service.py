@@ -27,7 +27,7 @@ from app.capabilities.jobs.models import JobState
 from app.capabilities.jobs.records import JobRecord
 from app.capabilities.jobs.service import JobService
 from app.platform.core.clock import Clock, SystemClock
-from app.platform.core.errors import AppError, NotFoundError
+from app.platform.core.errors import AppError, InputValidationError, NotFoundError
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
 from app.stages.connect.marketplace.capability import (
     AuthStatus,
@@ -58,6 +58,7 @@ from app.stages.register.contracts import (
     AuthoredInputsView,
     AuthoringFieldView,
     AuthoringMetadataView,
+    BulkCreateResult,
     CategoryChoiceView,
     CategoryView,
     FieldStateView,
@@ -87,12 +88,10 @@ from app.stages.register.execution import (
     BudgetState,
     RegistrationExecutionService,
     decode_send_request,
+    encode_send_request,
     frozen_unit_identity,
     queue_send_request,
     target_ref,
-)
-from app.stages.register.execution import (
-    enqueue_create as enqueue_first_create,
 )
 from app.stages.register.model import (
     CREATE_ENDPOINT_GROUP,
@@ -673,6 +672,49 @@ class RegisterService:
         permission of its own.
         """
         store, jobs = self._require_store(), self._require_jobs()
+        intent, payload = self._create_plan(intent_id)
+        job_id = queue_send_request(jobs, store, intent_id=intent_id, payload=payload)
+        return ActionResult(
+            action=RegisterAction.CREATE_ENQUEUE,
+            intent_id=intent_id,
+            job_id=job_id,
+            intent_state=intent.state,
+        )
+
+    def enqueue_bulk_create(self, intent_ids: Sequence[str]) -> BulkCreateResult:
+        """Validate the whole request, then queue each existing single-Intent CREATE in order.
+
+        Naver exposes one-product CREATE, so this is deliberately local orchestration rather than
+        a second wire contract. Input defects are rejected before any job is queued. Concurrent
+        state movement is still handled by the single-Intent queue owner, which is idempotent for
+        an already live job.
+        """
+        ids = tuple(intent_ids)
+        if not 1 <= len(ids) <= 50 or any(not value for value in ids):
+            raise InputValidationError(
+                "REGISTER_BULK_SCOPE_INVALID", "bulk registration accepts 1 to 50 Intent ids"
+            )
+        if len(set(ids)) != len(ids):
+            raise InputValidationError(
+                "REGISTER_BULK_DUPLICATE_INTENT", "an Intent may appear only once in a bulk request"
+            )
+        # Resolve every frozen request and every current scope budget first. A bad member therefore
+        # queues nothing; only a race after this point can produce a partial local enqueue.
+        plans = tuple(self._create_plan(intent_id) for intent_id in ids)
+        store, jobs = self._require_store(), self._require_jobs()
+        items = tuple(
+            ActionResult(
+                action=RegisterAction.CREATE_ENQUEUE,
+                intent_id=intent.intent_id,
+                job_id=queue_send_request(jobs, store, intent_id=intent.intent_id, payload=payload),
+                intent_state=intent.state,
+            )
+            for intent, payload in plans
+        )
+        return BulkCreateResult(total=len(items), items=items)
+
+    def _create_plan(self, intent_id: str) -> tuple[IntentRecord, Mapping[str, Any]]:
+        store = self._require_store()
         intent = self._require_intent(store, intent_id)
         budget = self._budget(intent)
         if not budget.sends_allowed:
@@ -681,24 +723,27 @@ class RegisterService:
                 "this execution scope is stopped",
                 details=budget.canonical(),
             )
-        payload = self._send_request(intent_id)
-        if payload is None:
-            copy = self._require_authoring().execution_copy(intent.registration_snapshot_id)
-            job_id = enqueue_first_create(
-                jobs,
-                store,
-                intent_id=intent_id,
-                request=copy.request,
-                frozen=copy.final,
+        if intent.state not in (IntentState.PREPARED, IntentState.FAILED):
+            raise AppError(
+                NOT_SENDABLE,
+                "only a PREPARED Intent, or one proven not applied, may be queued",
+                details={"intent_id": intent.intent_id, "state": intent.state.value},
             )
-        else:
-            job_id = queue_send_request(jobs, store, intent_id=intent_id, payload=payload)
-        return ActionResult(
-            action=RegisterAction.CREATE_ENQUEUE,
-            intent_id=intent_id,
-            job_id=job_id,
-            intent_state=intent.state,
+        payload = self._send_request(intent_id)
+        if payload is not None:
+            # Validate the durable copy now, before any member of a bulk request is queued.
+            decode_send_request(payload)
+            frozen_unit_identity(payload)
+            return intent, payload
+        copy = self._require_authoring().execution_copy(intent.registration_snapshot_id)
+        payload = encode_send_request(
+            intent_id,
+            copy.request,
+            copy.final.prepared_assets,
+            listing_identity=copy.final.resolved.listing_identity,
+            identity_generation=copy.final.resolved.identity_generation,
         )
+        return intent, payload
 
     def reconcile(self, intent_id: str, *, correlation_id: str) -> ActionResult:
         """Resolve an UNKNOWN with provider evidence only (§10). Never a CREATE."""

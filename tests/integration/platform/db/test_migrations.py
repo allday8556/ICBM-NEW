@@ -141,8 +141,11 @@ CANONICAL_TABLES = (
     "synthetic_test_products",
     # The operator's decisions on supplier common images (Issue #219).
     "supplier_common_image_decisions",
+    # Official marketplace leaf-category catalog snapshots (owner decision 2026-10-04).
+    "marketplace_category_catalog_snapshots",
+    "marketplace_category_catalog_entries",
 )
-HEAD = "0040_image_auto_selection"
+HEAD = "0041_category_catalog"
 
 
 def _url(path: Path) -> str:
