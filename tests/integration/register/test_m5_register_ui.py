@@ -148,6 +148,12 @@ def test_the_screen_renders_server_state_and_the_servers_verdicts(
         assert create.get_attribute("data-satisfied") == "true"
         # The page performed no write at all while rendering.
         assert writes == []
+        # B-PREVIEW: the frozen unit's preview is a read; it shows no provider URL.
+        unit.locator("button[data-action='PREVIEW_SNAPSHOT']").click()
+        shown = unit.locator(".register-preview-view")
+        shown.wait_for(timeout=15_000)
+        assert "://" not in shown.inner_text()
+        assert writes == []
 
 
 def test_an_unknown_outcome_offers_reconcile_only(
