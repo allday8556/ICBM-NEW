@@ -217,7 +217,9 @@ COMMON_IMAGES = "0039_supplier_common_images"
 # image. Product image state, never registration state.
 AUTO_SELECTION = "0040_image_auto_selection"
 CATEGORY_CATALOG = "0041_category_catalog"
-SCHEMA_HEAD = CATEGORY_CATALOG
+# ADR-0013 owner amendment C1/C2: Product Core state, never registration state.
+COMMON_OPTIONS = "0042_common_sales_option_owner"
+SCHEMA_HEAD = COMMON_OPTIONS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -240,6 +242,7 @@ AFTER_M5 = (
     COMMON_IMAGES,
     AUTO_SELECTION,
     CATEGORY_CATALOG,
+    COMMON_OPTIONS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

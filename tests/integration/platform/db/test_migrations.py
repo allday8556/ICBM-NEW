@@ -144,8 +144,13 @@ CANONICAL_TABLES = (
     # Official marketplace leaf-category catalog snapshots (owner decision 2026-10-04).
     "marketplace_category_catalog_snapshots",
     "marketplace_category_catalog_entries",
+    # ADR-0013 owner amendment C1/C2: provider-neutral option authoring revisions.
+    "common_sales_option_revisions",
+    "common_sales_option_axes",
+    "common_sales_option_values",
+    "current_common_sales_option_revision_moves",
 )
-HEAD = "0041_category_catalog"
+HEAD = "0042_common_sales_option_owner"
 
 
 def _url(path: Path) -> str:
