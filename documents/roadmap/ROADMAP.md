@@ -393,6 +393,15 @@ Product Facts, Common Sales Options, Atomic SKUs, Product Information Notices an
 Attributes remain distinct roles. This requirement is accepted but not implemented; it does not
 change the accepted no-positive-option M3/M4 evidence.
 
+### C-P1 Marketplace Option Structure Compatibility
+
+The first shared projection slice is provider-zero and read-only. It renders only the existing
+Common Sales Option axes/values and source-proven AtomicSKUs, with no price and no provider payload.
+It may report `COMPATIBLE` only when adopted and reviewed marketplace metadata proves the existing
+structure fits its documented axis, value and item-count ranges. That state is not readiness,
+sendability or provider verification. Missing metadata and marketplace-local limit conflicts become
+`REVIEW_REQUIRED`; neither condition edits canonical options or invents a Cartesian combination.
+
 ## Phase 3 acceptance
 
 - one collected product has one canonical product ID
