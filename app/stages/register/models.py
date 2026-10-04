@@ -34,7 +34,7 @@ migration 0017 (§26, architect decision `5749504280`):
   changed or deleted. Migration 0031 also adds ``marketplace_channel_product_id`` to the Intent and
   the registration (§B): the provider's channel identity, written only with an applied outcome and
   immutable afterwards.
-- ``registration_bulk_runs`` and ``registration_bulk_items`` (migration 0042, owner decision
+- ``registration_bulk_runs`` and ``registration_bulk_items`` (migration 0043, owner decision
   2026-10-04): durable local orchestration of an uncapped request as ordinary single-product
   CREATE jobs, with exactly one queued member at a time and derived current/total progress.
 

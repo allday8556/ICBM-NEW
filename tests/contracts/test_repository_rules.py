@@ -3768,6 +3768,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "synthetic_test_products",
         # The operator's decisions on supplier common images (Issue #219).
         "supplier_common_image_decisions",
+        "common_sales_option_revisions",
+        "common_sales_option_axes",
+        "common_sales_option_values",
+        "current_common_sales_option_revision_moves",
     }
     offenders = [
         path

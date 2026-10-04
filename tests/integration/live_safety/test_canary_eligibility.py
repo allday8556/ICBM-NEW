@@ -935,6 +935,10 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "supplier_common_image_decisions",
         "marketplace_category_catalog_snapshots",
         "marketplace_category_catalog_entries",
+        "common_sales_option_revisions",
+        "common_sales_option_axes",
+        "common_sales_option_values",
+        "current_common_sales_option_revision_moves",
         "registration_bulk_runs",
         "registration_bulk_items",
     }
