@@ -144,8 +144,11 @@ CANONICAL_TABLES = (
     # Official marketplace leaf-category catalog snapshots (owner decision 2026-10-04).
     "marketplace_category_catalog_snapshots",
     "marketplace_category_catalog_entries",
+    # One-at-a-time bulk CREATE orchestration and its ordered members.
+    "registration_bulk_runs",
+    "registration_bulk_items",
 )
-HEAD = "0041_category_catalog"
+HEAD = "0042_sequential_bulk_registration"
 
 
 def _url(path: Path) -> str:

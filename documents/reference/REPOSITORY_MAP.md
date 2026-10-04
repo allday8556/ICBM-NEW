@@ -66,16 +66,20 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
+Sequential bulk registration now has no application-level total-count ceiling: migration `0042`
+and `app/stages/register/bulk.py` persist the ordered run, queue exactly one ordinary CREATE job at
+a time, expose durable `current/total` progress, and retain a classified reason for each failed
+product while later products continue.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 272 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 274 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 71 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 129 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 72 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 130 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |

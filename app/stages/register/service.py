@@ -42,6 +42,7 @@ from app.stages.register.authoring import (
     preflight_request,
     submitted_view_revisions,
 )
+from app.stages.register.bulk import BulkCreatePlan, BulkRegistrationService
 from app.stages.register.canary import (
     AdoptionFacts,
     CanaryReadinessView,
@@ -200,6 +201,7 @@ class RegisterService:
         authoring: RegistrationPreparationService | None = None,
         accounts: MarketplaceAccountStore | None = None,
         jobs: JobService | None = None,
+        bulk: BulkRegistrationService | None = None,
         capability: CapabilityReader | None = None,
         adoption: AdoptionFacts | None = None,
         stages: StageReadinessFacts | None = None,
@@ -215,6 +217,7 @@ class RegisterService:
         self._authoring = authoring
         self._accounts = accounts
         self._jobs = jobs
+        self._bulk = bulk
         self._capability = capability
         self._adoption_source = adoption
         self._stages = stages
@@ -681,37 +684,38 @@ class RegisterService:
             intent_state=intent.state,
         )
 
-    def enqueue_bulk_create(self, intent_ids: Sequence[str]) -> BulkCreateResult:
-        """Validate the whole request, then queue each existing single-Intent CREATE in order.
+    def enqueue_bulk_create(
+        self, intent_ids: Sequence[str], *, correlation_id: str
+    ) -> BulkCreateResult:
+        """Validate the whole request, then start one durable sequential CREATE chain.
 
-        Naver exposes one-product CREATE, so this is deliberately local orchestration rather than
-        a second wire contract. Input defects are rejected before any job is queued. Concurrent
-        state movement is still handled by the single-Intent queue owner, which is idempotent for
-        an already live job.
+        Naver exposes one-product CREATE. There is no total-count ceiling here: the chain queues
+        only its first item, and a terminal child queues exactly one successor. Input defects are
+        rejected before the run or any child job exists.
         """
         ids = tuple(intent_ids)
-        if not 1 <= len(ids) <= 50 or any(not value for value in ids):
+        if not ids or any(not value for value in ids):
             raise InputValidationError(
-                "REGISTER_BULK_SCOPE_INVALID", "bulk registration accepts 1 to 50 Intent ids"
+                "REGISTER_BULK_SCOPE_INVALID", "bulk registration needs at least one Intent id"
             )
         if len(set(ids)) != len(ids):
             raise InputValidationError(
                 "REGISTER_BULK_DUPLICATE_INTENT", "an Intent may appear only once in a bulk request"
             )
+        bulk = self._require_bulk()
+        active = bulk.active(ids)
+        if active is not None:
+            return active
         # Resolve every frozen request and every current scope budget first. A bad member therefore
-        # queues nothing; only a race after this point can produce a partial local enqueue.
+        # creates neither a run nor a job.
         plans = tuple(self._create_plan(intent_id) for intent_id in ids)
-        store, jobs = self._require_store(), self._require_jobs()
-        items = tuple(
-            ActionResult(
-                action=RegisterAction.CREATE_ENQUEUE,
-                intent_id=intent.intent_id,
-                job_id=queue_send_request(jobs, store, intent_id=intent.intent_id, payload=payload),
-                intent_state=intent.state,
-            )
-            for intent, payload in plans
+        return bulk.start(
+            tuple(BulkCreatePlan(intent.intent_id, payload) for intent, payload in plans),
+            correlation_id=correlation_id,
         )
-        return BulkCreateResult(total=len(items), items=items)
+
+    def bulk_create_status(self, bulk_run_id: str) -> BulkCreateResult:
+        return self._require_bulk().status(bulk_run_id)
 
     def _create_plan(self, intent_id: str) -> tuple[IntentRecord, Mapping[str, Any]]:
         store = self._require_store()
@@ -1453,6 +1457,11 @@ class RegisterService:
         if self._jobs is None:  # pragma: no cover - the container always wires it
             raise NotFoundError("REGISTER_NOT_WIRED", "the job owner is not wired")
         return self._jobs
+
+    def _require_bulk(self) -> BulkRegistrationService:
+        if self._bulk is None:  # pragma: no cover - the container always wires it
+            raise NotFoundError("REGISTER_NOT_WIRED", "the bulk registration owner is not wired")
+        return self._bulk
 
     def _require_intent(self, store: RegistrationStore, intent_id: str) -> IntentRecord:
         intent = store.intent(intent_id)

@@ -506,13 +506,35 @@ class ActionResult(BaseModel):
     preflight: PreflightView | None = None
 
 
-class BulkCreateResult(BaseModel):
-    """Ordered local orchestration of existing single-Intent CREATE jobs.
+class BulkCreateFailure(BaseModel):
+    """One product that failed without stopping the remaining bulk run."""
 
-    It claims only that jobs were durably queued or reused. Each job still reaches the existing
-    per-Intent send-time gate, grant, brake and UNKNOWN rules independently.
+    position: int
+    intent_id: str
+    error_class: ErrorClass | None = None
+    error_code: str
+    message: str
+
+
+class BulkCreateResult(BaseModel):
+    """Durable progress of an ordered, strictly sequential series of CREATE jobs.
+
+    ``position / total`` is the operator-facing progress: while running it names the only item
+    allowed to own a live job. Each item still reaches the existing per-Intent send-time gate,
+    grant, brake and UNKNOWN rules independently.
     """
 
     action: RegisterAction = RegisterAction.BULK_CREATE_ENQUEUE
+    bulk_run_id: str
+    state: str
     total: int
-    items: tuple[ActionResult, ...]
+    processed: int
+    succeeded: int
+    failed: int
+    position: int
+    progress: str
+    current_intent_id: str | None = None
+    current_job_id: str | None = None
+    failed_intent_id: str | None = None
+    error_code: str | None = None
+    failures: tuple[BulkCreateFailure, ...] = ()

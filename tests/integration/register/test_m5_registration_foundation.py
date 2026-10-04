@@ -505,6 +505,8 @@ ADAPTIVE_TABLES = (
     "supplier_common_image_decisions",
     "marketplace_category_catalog_snapshots",
     "marketplace_category_catalog_entries",
+    "registration_bulk_runs",
+    "registration_bulk_items",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

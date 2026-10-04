@@ -218,9 +218,13 @@ platform projection is fabricated.
 Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
 facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
 Bulk AI remains later work. Bulk registration is local orchestration over accepted single-product
-paths: one request may queue several existing Intents, but every child remains its own Snapshot,
-Intent, job, grant, attempt, outcome and read-back. It is not a separate truth system and there is
-no provider bulk-CREATE assumption (owner decision 2026-10-04).
+paths: one request may contain any non-empty number of existing Intents, but the durable run queues
+only one child at a time and advances only after that child reaches a terminal result. A failed
+child records its error class, code and safe message and does not block later children. Progress is
+the current ordinal over the total (`1/100`, `2/100`, ...), with per-item failures retained in the
+final `COMPLETED_WITH_FAILURES` result. Every child remains its own Snapshot, Intent, job, grant,
+attempt, outcome and read-back. It is not a separate marketplace truth system and there is no
+provider bulk-CREATE assumption (owner decisions 2026-10-04).
 
 ### OPERATE
 Owns everything after publication.
