@@ -203,10 +203,10 @@ def test_no_source_sku_exists_to_be_fabricated_and_offers_are_product_level() ->
     # ADR-0013 §2/§6 (ruling B), clarified by ruling 5738760913 for PR-Q: nothing can hold an
     # invented source SKU. The one offer table holds product-level offers, which have no SKU, and
     # a binding references an offer only through its exact quantity_offer_id.
-    assert not [t for t in metadata.tables if "sku" in t]
+    assert "source_skus" not in metadata.tables
     assert [t for t in metadata.tables if "offer" in t] == ["quantity_offers"]
     for table in ("quantity_offers", "source_bindings"):
-        assert not [c.name for c in metadata.tables[table].columns if "sku" in c.name], table
+        assert "source_sku_id" not in {c.name for c in metadata.tables[table].columns}, table
     binding_columns = {c.name for c in metadata.tables["source_bindings"].columns}
     assert [c for c in binding_columns if "offer" in c] == ["quantity_offer_id"]
 

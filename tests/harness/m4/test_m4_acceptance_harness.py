@@ -11,6 +11,7 @@ from pathlib import Path, PurePath
 
 import pytest
 
+from app.platform.db.metadata import metadata
 from app.stages.products.model import (
     READINESS_PRECEDENCE,
     ReadinessStatus,
@@ -21,6 +22,7 @@ from automation.acceptance.common import evidence
 from automation.acceptance.common.guards import FORBIDDEN_MODULES, forbidden
 from automation.acceptance.common.root import names_preserved_campaign
 from automation.acceptance.m3.campaign.prep import HARD_ZERO_MODULES
+from automation.acceptance.m4.harness import _has_source_sku_owner
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS = [
@@ -150,6 +152,29 @@ def test_the_forbidden_imports_cover_the_source_truth_hard_zero() -> None:
         assert forbidden(f"{name}.anything") and forbidden(name)
     assert not forbidden("app.stages.connect.smartstore.models")
     assert not forbidden("app.stages.products.pricing")
+
+
+# ---------------------------------------------------------------- schema guard
+
+
+def test_the_source_sku_guard_accepts_the_current_atomic_sku_schema() -> None:
+    tables = list(metadata.tables)
+    columns = [
+        (table, column.name)
+        for table, definition in metadata.tables.items()
+        for column in definition.columns
+    ]
+    assert "atomic_skus" in tables
+    assert ("atomic_skus", "atomic_sku_id") in columns
+    assert not _has_source_sku_owner(tables, columns)
+
+
+def test_the_source_sku_guard_rejects_the_forbidden_owner_table() -> None:
+    assert _has_source_sku_owner(("product_groups", "source_skus"), ())
+
+
+def test_the_source_sku_guard_rejects_the_forbidden_column_on_any_table() -> None:
+    assert _has_source_sku_owner(("inventories",), (("inventories", "source_sku_id"),))
 
 
 # ---------------------------------------------------------------- roots
