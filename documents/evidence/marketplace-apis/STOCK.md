@@ -22,9 +22,11 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** item quantity update `PUT .../marketplace/vendor-items/{vendorItemId}/quantities/{quantity}` (path prefix elided in the capture).
-- **Missing:** full path, request/response, errors, idempotency.
+- **Locators:** stock update https://developers.coupang.com/en/api/products/changing-quantity-of-each-product-item ; item state https://developers.coupang.com/en/api/products/query-quantitypricestatus-by-product-items ; CREATE https://developers.coupang.com/en/api/products/product-creation — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Update:** `PUT /v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/{vendorItemId}/quantities/{quantity}` after approval has issued the immutable option ID. The success example returns `code=SUCCESS` and a message.
+- **Read:** `GET /v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/{vendorItemId}/inventories` returns `sellerItemId`, `amountInStock`, `salePrice`, and boolean `onSale`. Captured `400` cases include invalid/deleted option ID.
+- **CREATE:** `items[].maximumBuyCount` is available inventory, max 99,999. `items[].unitCount` is strictly for displayed unit-price calculation and is not stock.
+- **Missing:** quantity bounds beyond CREATE's initial bound, idempotency/replay and ambiguous-outcome semantics, complete errors and rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

@@ -70,7 +70,7 @@ A field that is not listed for a platform was not captured. `Not captured` in a 
 
 - SmartStore source IDs (`NAVER-P0-*`, `NAVER-P1-*`) resolve through `documents/contracts/platforms/smartstore/SOURCES.md` §5–§6 to the official NAVER URL, authority class and version.
 - `NAVER-P0-PACKET-289` = Issue #89 comment 5746489554; `NAVER-P0-REVIEW-CREATE-289` = Issue #89 comments 5768199984 and 5768247290; `NAVER-P0-FIELDS-CREATE-289` = Issue #89 comment 5861477977; `NAVER-P0-REQUIRED-CREATE-289` = Issue #89 comment 5861933729; `NAVER-P0-REGISTRATION-CREATE-289` = Issue #89 comment 5862400626, which supersedes 5861933729 for the registration requirement of `leafCategoryId` and top-level `stockQuantity`. All are architect-reviewed extracts of NAVER Commerce API **2.89.0 (2026-09-15)**.
-- Non-SmartStore facts come from Issue #140 research packet 1 (comment 5857814524, 2026-09-28) and the initial catalog pass of the same date (PR #141); each fact carries its official URL.
+- Non-SmartStore facts come from Issue #140 research packet 1 (comment 5857814524, 2026-09-28), the initial catalog pass of the same date (PR #141), and the Track C Coupang Option/SKU research observed 2026-10-03; each fact carries its official URL. The Track C audit identity is `track-c-coupang-option-sku/2026-10-03/v1`, with its cross-capability analysis in `documents/reviews/COUPANG-OPTION-SKU-COMMON-CORE-BY-CODEX.md`.
 - ICBM-side decisions (adoption, outcome rules, projections) are labelled as such and cite the ICBM canonical document or architect ruling; they are never provider facts.
 
 ## Platform roots
@@ -78,7 +78,7 @@ A field that is not listed for a platform was not captured. `Not captured` in a 
 | Platform | Official root | Observed | Note |
 | --- | --- | --- | --- |
 | SmartStore | https://apicenter.commerce.naver.com/docs/commerce-api/current | 2.89.0 (2026-09-15) for M5 rows; 2.88.0 (2026-09-07), retrieved 2026-09-14, for the M2 contract set | the only connected marketplace; strict adoption/audit path |
-| Coupang | https://developers.coupang.com/en/api | 2026-09-28 | RESTful, JSON over HTTPS, HMAC-SHA256 |
+| Coupang | https://developers.coupang.com/en/api | 2026-10-03 | RESTful, JSON over HTTPS, HMAC-SHA256 |
 | 11st | https://openapi.11st.co.kr/ | 2026-09-28 | portal reachable; the public fetch returned no endpoint reference content |
 | Kakao Shopping | https://shopping-developers.kakao.com/hc/ko/categories/4406596840975-API-Docs | 2026-09-28 | API use requires integration review/selection |
 | Gmarket / Auction | https://etapi.gmarket.com/category | 2026-09-28 | one ESM Trading API family for both sites |

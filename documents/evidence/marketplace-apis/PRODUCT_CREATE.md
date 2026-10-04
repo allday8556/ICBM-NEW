@@ -180,13 +180,16 @@ Two further items are recorded, but are not capture gaps in this scope:
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api/products/product-creation — `OFFICIAL_API_DOC`, 2026 developer portal, observed 2026-09-28 (research packet 1).
+- **Locator:** https://developers.coupang.com/en/api/products/product-creation — `OFFICIAL_API_DOC`, 2026 developer portal, observed 2026-10-03 (Track C).
 - **Method / path:** `POST /v2/providers/seller_api/apis/api/v1/marketplace/seller-products`.
 - **Auth:** HMAC-SHA256 signed request ([AUTH](AUTH.md#coupang)).
 - **Content-Type:** the request example is `application/json`.
 - **Prerequisites stated by the page:** shipping/return locations, category, koshi/notices and options are part of the create requirements.
-- **Request content described:** category, seller product name, vendor, delivery/return info, approval flag, up to 200 items/options, price, stock, `unitCount`, `externalVendorSku`, images, notices, attributes. These are captured as descriptions; exact JSON keys and nesting were not captured except where written in code style.
-- **Missing:** exact request keys/nesting and required/conditional rules; success status and response envelope, including the provider product identifier returned; error statuses/body; idempotency/replay; timeout semantics; rate limit.
+- **Item contract:** `items[]` is required and holds at most 200 vendor-item options. Each has unique `itemName` (max 150), item-level `salePrice`, inventory `maximumBuyCount` (max 99,999), unit-price-only `unitCount`, seller code `externalVendorSku`, and category-defined `attributes[]`. `attributes[].attributeTypeName` is max 25 and `attributeValueName` max 30 including unit. `bundleInfo.bundleType=AB` disallows options.
+- **Approval:** `requested=false` saves without approval; `true` saves and requests approval. A saved item can have no `vendorItemId` until approval.
+- **Response:** the application payload's `data` is the registered group-level `sellerProductId`; CREATE returns no item ID. `errorItems[]` identifies `itemIndex`, `itemName` and attribute type/value/message. A `SUCCESS` example can still carry MOTA details/error items, so status alone does not prove normal exposure or read-back equality.
+- **Read-back requirement:** after CREATE, query by `sellerProductId` to obtain `sellerProductItemId`, `vendorItemId` and the returned `externalVendorSku` correspondence ([PRODUCT_READ](PRODUCT_READ.md#coupang)).
+- **Missing:** complete field-by-field request requirements outside Track C's option/SKU scope; `externalVendorSku` limits/uniqueness; idempotency/replay; timeout/ambiguous-outcome semantics; all error classes; endpoint-specific rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st
