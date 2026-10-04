@@ -2248,8 +2248,23 @@ def test_no_reviewed_owner_reads_the_review_owner() -> None:
                 if isinstance(node, ast.ImportFrom)
                 else []
             )
-            offenders += [f"{module}: {n}" for n in names if n.split(".")[:2] == ["app", "review"]]
+            # The review owner is ``app.capabilities.review`` (B-UX2: the prefix this check matched
+            # before named no package, so it could never fail).
+            offenders += [
+                f"{module}: {n}" for n in names if n.split(".")[:3] == REVIEW_OWNER_PACKAGE
+            ]
     assert offenders == []
+
+
+REVIEW_OWNER_PACKAGE = ["app", "capabilities", "review"]
+
+
+def test_the_review_owner_package_is_the_one_the_boundary_checks() -> None:
+    """The G2-02 check names a package that exists, so a reviewed owner importing it is caught."""
+    assert (REPO_ROOT / Path(*REVIEW_OWNER_PACKAGE) / "owner.py").is_file()
+    tree = ast.parse("from app.capabilities.review.model import ReviewItem")
+    (node,) = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+    assert (node.module or "").split(".")[:3] == REVIEW_OWNER_PACKAGE
 
 
 def _production_modules() -> dict[str, ast.Module]:

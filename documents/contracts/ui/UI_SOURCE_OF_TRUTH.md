@@ -163,6 +163,12 @@ authorization.
 > statuses. It is not a review count, a review queue or a ComplianceGate surface, and it adds
 > nothing to the Gate 2 review path.
 
+> **B-UX2 (owner directive 2026-10-04).** The fix-only projection of Registration Management is
+> another such surface under its own contract (ADR-0014 §22 amendment note): it lists only what the
+> operator can fix or re-check now and where, from server-owned actionability, and counts the rest.
+> It is not a review queue: it resolves no item and fixes nothing, and its review rows are only the
+> REGISTER execution producer's open items.
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`
