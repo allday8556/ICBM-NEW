@@ -149,11 +149,16 @@ CANONICAL_TABLES = (
     "common_sales_option_axes",
     "common_sales_option_values",
     "current_common_sales_option_revision_moves",
+    # Reviewed, exact Product Fact correspondence for the provider-neutral option owner.
+    "common_option_fact_mapping_revisions",
+    "common_option_fact_axis_mappings",
+    "common_option_fact_value_mappings",
+    "current_common_option_fact_mapping_moves",
     # One-at-a-time bulk CREATE orchestration and its ordered members.
     "registration_bulk_runs",
     "registration_bulk_items",
 )
-HEAD = "0043_sequential_bulk_registration"
+HEAD = "0044_sequential_bulk_registration"
 
 
 def _url(path: Path) -> str:

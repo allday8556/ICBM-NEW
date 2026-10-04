@@ -701,6 +701,10 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "common_sales_option_axes",
         "common_sales_option_values",
         "current_common_sales_option_revision_moves",
+        "common_option_fact_mapping_revisions",
+        "common_option_fact_axis_mappings",
+        "common_option_fact_value_mappings",
+        "current_common_option_fact_mapping_moves",
         "registration_bulk_runs",
         "registration_bulk_items",
     }
