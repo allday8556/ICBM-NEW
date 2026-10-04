@@ -182,6 +182,11 @@ reproduces that structure in the focused run of 수집관리, where the run's re
   stored evidence on demand (kind, locator, observed, normalized, status, digest), plus the
   extractor revision, the transport and the image count included / total, all as the revision holds
   them;
+- each image reference's recorded disposition reads `포함` / `제외` / `확인 필요`, and its recorded
+  reason is worded beside its codes — the exclusion row (`원천이 http 주소로 적은 이미지`), else the
+  transport's target refusal (`가져오기 전 거절: …`), else the issue (`파일 크기 제한 초과`, …). The
+  words name codes the revision already holds; the screen judges nothing and shows an unknown code
+  as itself (A-NEXT1, 2026-10-04);
 - the prototype's percentage chip (`94%`) is demo content and is **not** reproduced: no confidence
   number is shown, and the screen decides no status and changes no fact;
 - the run's outcome and the revision's facts status stay two labelled axes, and `NO_REVISION` is
