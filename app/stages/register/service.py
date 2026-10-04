@@ -102,6 +102,8 @@ from app.stages.register.model import (
     VerificationState,
 )
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
+from app.stages.register.preview import SnapshotPreviewView, preview
+from app.stages.register.provider import WireProjector
 from app.stages.register.read_state import (
     READ_STATE_LABELS,
     READ_STATE_PARTITION_VERSION,
@@ -206,6 +208,7 @@ class RegisterService:
         execution_mode: str | Callable[[], str] = DRY_RUN,
         clock: Clock | None = None,
         seller_code: Callable[[str], str] | None = None,
+        preview_projection: WireProjector | None = None,
     ) -> None:
         self._registrations = registrations
         self._execution = execution
@@ -225,6 +228,8 @@ class RegisterService:
         # The provider projection of a listing identity (the SmartStore ``sellerManagementCode``),
         # wired by the composition root: REGISTER never imports a marketplace adapter.
         self._seller_code = seller_code
+        # B-PREVIEW: the provider wire projection, injected like the seller code.
+        self._preview_projection = preview_projection
 
     # ------------------------------------------------------------------ counts (screens)
 
@@ -252,6 +257,18 @@ class RegisterService:
         )
 
     # ------------------------------------------------------------------ readiness (B-UX1)
+
+    def snapshot_preview(self, registration_snapshot_id: str) -> SnapshotPreviewView:
+        """B-PREVIEW: what one frozen Snapshot would send, read from its frozen payload and the
+        provider projection of it. Read-only: it decides, sends and stores nothing."""
+        store = self._require_store()
+        snapshot = store.snapshot(registration_snapshot_id)
+        payload = store.snapshot_payload(registration_snapshot_id)
+        if snapshot is None or payload is None:
+            raise NotFoundError("REGISTER_SNAPSHOT_NOT_FOUND", "no such registration snapshot")
+        return preview(
+            registration_snapshot_id, snapshot.payload_hash, payload, self._preview_projection
+        )
 
     def pre_send_units(self) -> tuple[UnitView, ...]:
         """Every provider-listing unit of every Draft that no Intent names, each evaluated now

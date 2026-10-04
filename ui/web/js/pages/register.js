@@ -96,6 +96,10 @@ const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
+  // B-PRICE1: the repin command's refusals.
+  REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
+  REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
+  REGISTER_DRAFT_ITEM_NOT_PRICED: 'M4가 일부 품목의 가격을 정하지 못해 아무것도 다시 고정하지 않았습니다.',
   REGISTER_READ_QUEUED: '전송 작업이 대기 중입니다.',
   REGISTER_READ_SENDABLE: '전송할 수 있는 상태입니다.',
   REGISTER_READ_SEND_IN_FLIGHT: '전송이 진행 중입니다.',
@@ -859,6 +863,115 @@ function actionCell(unit, action, onDone) {
   return h('div', { class: 'register-action' }, button, action.enabled ? null : reason(action.reason_code));
 }
 
+// B-PREVIEW: what this frozen Snapshot would send, as the server projected it. Every value is
+// inserted as text; provider URLs never arrive (the server redacts them) and the detail body is
+// its structure, never HTML.
+function previewBlock(unit) {
+  if (!unit.snapshot) return null;
+  const holder = h('div', { class: 'register-preview', 'data-preview': unit.snapshot.registration_snapshot_id });
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'PREVIEW_SNAPSHOT' }, '스마트스토어 미리보기');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const view = await getJson(
+        `/api/v1/register/snapshots/${encodeURIComponent(unit.snapshot.registration_snapshot_id)}/preview`,
+      );
+      holder.replaceChildren(previewView(view));
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : String(error));
+      button.disabled = false;
+    }
+  });
+  holder.append(button);
+  return holder;
+}
+
+function previewView(view) {
+  const detail = view.detail;
+  return h(
+    'div',
+    { class: 'register-preview-view', 'data-projected': String(view.projected) },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '스마트스토어 미리보기'),
+      view.projected
+        ? chip(view.sendable ? '보낼 수 있음' : '빈 칸 있음', view.sendable ? 'good' : 'warn')
+        : chip('투영 거절', 'bad')),
+    view.refusal_code ? reason(view.refusal_code) : null,
+    kv('상품명', view.name ?? '—'),
+    kv('판매가', view.sale_prices_krw.map((price) => won(price)).join(', ') || '—'),
+    kv('카테고리 ID', view.category_id ?? '—'),
+    ...view.gaps.map((gap) => h('div', { class: 'mini', 'data-gap': 'true' }, gap)),
+    table(
+      ['이미지 역할', '순서', '이미지', '마켓 업로드'],
+      view.images.map((image) =>
+        h('tr', { 'data-preview-image': image.sha256 },
+          h('td', {}, image.role),
+          h('td', {}, image.position === null ? '—' : String(image.position)),
+          h('td', {}, image.sha256.slice(0, 8)),
+          h('td', {}, image.provider_asset_prepared ? '준비됨' : '없음')),
+      ),
+    ),
+    detail
+      ? h('div', { class: 'register-preview-detail', 'data-detail-builder': detail.builder },
+          kv('상세 구획', detail.sections.join(' → ') || '—'),
+          kv('상세 이미지', `${detail.image_slots.length}장`),
+          ...detail.paragraphs.map((paragraph) => h('p', { class: 'mini' }, paragraph)))
+      : null,
+    view.document.length
+      ? table(
+          ['보낼 항목', '값'],
+          view.document.map((field) =>
+            h('tr', { 'data-field': field.path },
+              h('td', {}, field.path),
+              h('td', {}, field.redacted ? '(마켓 참조 · 표시 안 함)' : field.value ?? '—')),
+          ),
+        )
+      : null,
+    view.not_sent.length
+      ? table(
+          ['보내지 않음', '값'],
+          view.not_sent.map((row) =>
+            h('tr', { 'data-not-sent': row.path },
+              h('td', {}, row.path),
+              h('td', {}, row.value === 'DETAIL_PAGE_REFERENCE' ? '상세페이지 참조' : row.value)),
+          ),
+        )
+      : null,
+  );
+}
+
+// B-PRICE1: when the server says a pinned price is no longer M4's current one, the operator may
+// ask M4 to price again and re-pin the Draft. The page names no price; the server decides all.
+const REPIN_REASONS = new Set(['PRICING_SNAPSHOT_MISSING', 'PRICING_SNAPSHOT_SUPERSEDED']);
+
+function repinBlock(unit, onDone) {
+  // Offered when the server says the pin is not M4's current price, or M4's own pricing readiness
+  // names a missing or superseded snapshot; the server decides everything else.
+  const moved = unit.items.some(
+    (item) =>
+      item.price_pin_current === false ||
+      (item.pricing_reason_codes ?? []).some((code) => REPIN_REASONS.has(code)),
+  );
+  if (!moved) return null;
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'REPIN_DRAFT' }, '가격 다시 고정');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const moved = await sendJson('POST', `/api/v1/register/drafts/${unit.draft_id}/repin`, {
+        actor: OPERATOR,
+        expected_draft_revision: unit.draft_revision,
+      });
+      const count = moved.items.filter((item) => item.repinned).length;
+      toast(count ? `${count}개 품목의 가격을 다시 고정했습니다.` : 'M4 가격이 그대로라 바뀐 것이 없습니다.');
+      onDone();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      button.disabled = false;
+    }
+  });
+  return h('div', { class: 'register-repin', 'data-repin': unit.draft_id }, button);
+}
+
 function unitPanel(unit, onDone, labels) {
   const intent = unit.intent;
   return h(
@@ -884,6 +997,7 @@ function unitPanel(unit, onDone, labels) {
     kv('초안 리비전', String(unit.draft_revision)),
     unit.snapshot ? kv('리스팅 식별자', unit.snapshot.listing_identity) : null,
     unit.snapshot ? kv('스냅샷 지문', unit.snapshot.preflight_fingerprint.slice(0, 16)) : null,
+    previewBlock(unit),
     intent ? kv('검증 상태', VERIFICATION_LABEL[intent.verification_state] ?? intent.verification_state) : null,
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
@@ -892,6 +1006,7 @@ function unitPanel(unit, onDone, labels) {
     unit.snapshot ? null : authoringForm(unit, onDone),
     unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
     preflightBlock(unit, labels),
+    repinBlock(unit, onDone),
     unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
     table(
       ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],

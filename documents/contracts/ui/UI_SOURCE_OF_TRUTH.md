@@ -169,6 +169,10 @@ authorization.
 > It is not a review queue: it resolves no item and fixes nothing, and its review rows are only the
 > REGISTER execution producer's open items.
 
+> **B-PREVIEW (owner decisions `5975647306`).** The kept "marketplace preview" is the frozen-Snapshot
+> preview (ADR-0014 §22 amendment note): the prototype's category name path and shipping fee have
+> no Snapshot source and are not shown; provider image URLs are never shown.
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`
@@ -182,7 +186,8 @@ It must never be folded into a generic successful/failed state in the domain mod
 
 v29 shows the source-evidence comparison (`수집 근거 / 정규화 비교`: per field, source → normalized
 → status) inside the product editor modal, and a `수집 미리보기` beside the collection list. The app
-reproduces that structure in the focused run of 수집관리, where the run's revision is read back:
+reproduces that structure in 수집관리, where the focused run and its read-back revision are separate,
+adjacent panels so either block remains readable within the viewport:
 
 - per field: its status (`확정` / `없음` / `확인 필요`), its stored value only when `CONFIRMED`, and its
   stored evidence on demand (kind, locator, observed, normalized, status, digest), plus the
@@ -193,6 +198,9 @@ reproduces that structure in the focused run of 수집관리, where the run's re
   transport's target refusal (`가져오기 전 거절: …`), else the issue (`파일 크기 제한 초과`, …). The
   words name codes the revision already holds; the screen judges nothing and shows an unknown code
   as itself (A-NEXT1, 2026-10-04);
+- a field's value/evidence row and the image-reference table exist in the document only while the
+  operator has expanded them. Collapsing removes that detail instead of leaving hidden server-owned
+  state behind for the visual acceptance surface;
 - the prototype's percentage chip (`94%`) is demo content and is **not** reproduced: no confidence
   number is shown, and the screen decides no status and changes no fact;
 - the run's outcome and the revision's facts status stay two labelled axes, and `NO_REVISION` is

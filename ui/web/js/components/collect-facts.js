@@ -155,26 +155,34 @@ function evidenceTable(evidence) {
   );
 }
 
+// A field's stored value and evidence open on demand. The detail row exists only while it is open:
+// a collapsed row leaves no hidden state in the page (Gate 3 visual contract, ADR-0018 §9).
 function fieldRows(field) {
   const label = FIELD_LABEL[field.key] ?? field.key;
-  const detail = h(
-    'tr',
-    { class: 'evidence-row', 'data-evidence-for': field.key, hidden: true },
-    h(
-      'td',
-      { colspan: '4' },
-      field.status === 'CONFIRMED' && field.value_json !== null ? fullValue(field.value_json) : null,
-      evidenceTable(field.evidence),
-    ),
-  );
   const toggle = h(
     'button',
     { type: 'button', class: 'btn', 'data-action': 'toggle-evidence', 'aria-expanded': 'false' },
     field.status === 'CONFIRMED' ? `값·근거 ${field.evidence.length}` : `근거 ${field.evidence.length}`,
   );
+  let detail = null;
   toggle.addEventListener('click', () => {
-    detail.hidden = !detail.hidden;
-    toggle.setAttribute('aria-expanded', String(!detail.hidden));
+    if (detail) {
+      detail.remove();
+      detail = null;
+    } else {
+      detail = h(
+        'tr',
+        { class: 'evidence-row', 'data-evidence-for': field.key },
+        h(
+          'td',
+          { colspan: '4' },
+          field.status === 'CONFIRMED' && field.value_json !== null ? fullValue(field.value_json) : null,
+          evidenceTable(field.evidence),
+        ),
+      );
+      row.after(detail);
+    }
+    toggle.setAttribute('aria-expanded', String(Boolean(detail)));
   });
   const row = h(
     'tr',
@@ -184,7 +192,7 @@ function fieldRows(field) {
     h('td', { 'data-role': 'field-value' }, field.status === 'CONFIRMED' ? valueText(field.value_json) : '—'),
     h('td', {}, toggle),
   );
-  return [row, detail];
+  return [row];
 }
 
 // The recorded reason, worded, with the codes kept beside it. An excluded reference reads its
@@ -205,8 +213,31 @@ function imageReason(image) {
   );
 }
 
-function imagesTable(images) {
+// The image references open on demand, like a field's evidence, and exist only while open.
+function imagesBlock(images) {
   if (!images.length) return null;
+  const holder = h('div', { 'data-role': 'image-refs-holder' });
+  const toggle = h(
+    'button',
+    { type: 'button', class: 'btn', 'data-action': 'toggle-images', 'aria-expanded': 'false' },
+    `이미지 참조 ${images.length}개`,
+  );
+  let table = null;
+  toggle.addEventListener('click', () => {
+    if (table) {
+      table.remove();
+      table = null;
+    } else {
+      table = imagesTable(images);
+      holder.append(table);
+    }
+    toggle.setAttribute('aria-expanded', String(Boolean(table)));
+  });
+  holder.append(h('div', { class: 'supplier-actions' }, toggle));
+  return holder;
+}
+
+function imagesTable(images) {
   return h(
     'table',
     { class: 'table', 'data-role': 'image-refs' },
@@ -261,7 +292,7 @@ function kv(label, value) {
 // The revision of a RECORDED run, as one block. A failed read shows the server's reason and nothing
 // in its place.
 export async function collectFactsBlock(revisionId, run, errorCopy) {
-  const holder = h('section', { class: 'collect-facts', 'data-role': 'collect-facts', 'data-revision': revisionId });
+  const holder = h('section', { class: 'panel collect-facts', 'data-role': 'collect-facts', 'data-revision': revisionId });
   let revision;
   try {
     revision = await getJson(`${REVISIONS}/${encodeURIComponent(revisionId)}`);
@@ -291,7 +322,7 @@ export async function collectFactsBlock(revisionId, run, errorCopy) {
       h('thead', {}, h('tr', {}, ...['필드', '상태', '값', '근거'].map((label) => h('th', {}, label)))),
       h('tbody', {}, ...revision.fields.flatMap(fieldRows)),
     ),
-    imagesTable(revision.images),
+    imagesBlock(revision.images),
   ));
   return holder;
 }
