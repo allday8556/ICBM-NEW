@@ -74,8 +74,8 @@ class EndpointId(StrEnum):
     SMARTSTORE_ORIGIN_PRODUCT_READ_V2 = "SMARTSTORE_ORIGIN_PRODUCT_READ_V2"
     SMARTSTORE_CHANNEL_PRODUCT_READ_V2 = "SMARTSTORE_CHANNEL_PRODUCT_READ_V2"
     # ADOPTED by the CREATE adoption slice and the SEARCH positive-only reconcile slice. IMAGE
-    # UPLOAD was adopted by the earlier bounded M5 amendment. The metadata reads remain NOT_ADOPTED
-    # (see ADOPTION_GAPS); adoption does not grant LIVE authority to any of them.
+    # UPLOAD was adopted by the earlier bounded M5 amendment. The leaf-category list is adopted by
+    # the 2026-10-04 owner decision; the other metadata reads remain NOT_ADOPTED (ADOPTION_GAPS).
     SMARTSTORE_PRODUCT_CREATE_V2 = "SMARTSTORE_PRODUCT_CREATE_V2"
     SMARTSTORE_PRODUCT_IMAGE_UPLOAD = "SMARTSTORE_PRODUCT_IMAGE_UPLOAD"
     SMARTSTORE_PRODUCT_SEARCH = "SMARTSTORE_PRODUCT_SEARCH"
@@ -181,6 +181,30 @@ def notice_type_succeeded(status: int, body: object) -> bool:
         status == 200
         and isinstance(body, dict)
         and isinstance(body.get("productInfoProvidedNoticeContents"), list)
+    )
+
+
+def category_list_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented full-category array shape.
+
+    The adopted caller always requests ``last=true``.  This predicate validates the provider's
+    documented fields before retention; the category source separately refuses a non-leaf item so
+    a provider regression can never enter the local leaf catalog.
+    """
+    return (
+        status == 200
+        and isinstance(body, list)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("wholeCategoryName"), str)
+            and bool(item["wholeCategoryName"].strip())
+            and isinstance(item.get("id"), str)
+            and bool(item["id"].strip())
+            and isinstance(item.get("name"), str)
+            and bool(item["name"].strip())
+            and isinstance(item.get("last"), bool)
+            for item in body
+        )
     )
 
 
@@ -326,6 +350,7 @@ _NOTICE_FIELDS = frozenset(
         "fieldMaxLength",
     }
 )
+_CATEGORY_FIELDS = frozenset({"wholeCategoryName", "id", "name", "last"})
 
 
 ADOPTED: Mapping[EndpointId, EndpointContract] = {
@@ -356,6 +381,24 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         mutating=False,
         success_predicate=account_succeeded,
         predicate_revision="em7-account-r1",
+    ),
+    # ---- Category catalog (owner decision 2026-10-04): the official leaf-only category list.
+    # This is a read, never mutation authority.  Only the four documented category fields survive.
+    EndpointId.SMARTSTORE_CATEGORY_LIST: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_CATEGORY_LIST,
+        method=Method.GET,
+        path="/v1/categories",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=category_list_succeeded,
+        predicate_revision="m5-category-list-r1",
+        safe_query_keys=frozenset({"last"}),
+        retained_response_fields=_CATEGORY_FIELDS,
     ),
     # ---- M5 PR-D (packet 5746489554). Group 상품; bearer per the current auth page.
     EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2: EndpointContract(
@@ -523,7 +566,6 @@ ADOPTION_GAPS: Mapping[EndpointId, str] = {
     # deny-by-default retention profile would keep nothing and no typed metadata could be derived.
     # Category, attribute, option and notice metadata therefore stay operator-reviewed Settings
     # data (PR-C ``RegistrationMetadataSource``) until a response contract is proven.
-    EndpointId.SMARTSTORE_CATEGORY_LIST: _NO_RESPONSE_CONTRACT,
     EndpointId.SMARTSTORE_CATEGORY_READ: _NO_RESPONSE_CONTRACT,
 }
 
@@ -564,7 +606,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-notice-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-category-list-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -596,6 +638,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # Notice coverage S0 adopts the two official 상품정보제공고시 reads (owner directive
     # 2026-10-03).
     "m5-notice-r1": "e6c90c610dc86026be1acf5cec1bcb297567ade0e2932af3aa3c6799c8da023a",
+    # Filled from ``mapping_fingerprint()`` after adopting the official leaf-category list.
+    "m5-category-list-r1": "684af90adf7ea00913c460bbea2b34034233ea82797aa0d1a0c3f4712af6248c",
 }
 
 

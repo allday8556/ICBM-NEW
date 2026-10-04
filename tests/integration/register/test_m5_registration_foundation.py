@@ -503,6 +503,8 @@ ADAPTIVE_TABLES = (
     "registration_deletions",
     "synthetic_test_products",
     "supplier_common_image_decisions",
+    "marketplace_category_catalog_snapshots",
+    "marketplace_category_catalog_entries",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -17,6 +17,8 @@ from app.stages.connect.marketplace.capability import RemoteOutcome
 from integrations.marketplaces.smartstore.caller import (
     EGRESS_OWNER,
     AccountRequest,
+    CategoryListRequest,
+    CategoryListResponse,
     SellerAccount,
     SmartStoreCallError,
     SmartStoreEndpointCaller,
@@ -39,6 +41,7 @@ ACCOUNT_UID = "uid-fixture-1"
 CREDENTIALS = ApplicationCredentials(CLIENT_ID, SECRET, 3)
 TOKEN_URL = "https://api.commerce.naver.com/external/v1/oauth2/token"
 ACCOUNT_URL = "https://api.commerce.naver.com/external/v1/seller/account"
+CATEGORY_URL = "https://api.commerce.naver.com/external/v1/categories?last=true"
 TOKEN_BODY = {"access_token": BEARER, "expires_in": 10800, "token_type": "Bearer"}
 ACCOUNT_BODY = {"accountUid": ACCOUNT_UID, "accountId": "account-fixture-1"}
 
@@ -134,6 +137,29 @@ def test_em13_5_the_account_read_carries_the_given_bearer_and_no_body() -> None:
     assert request.content == b""
     assert "content-type" not in request.headers
     assert account == SellerAccount(ACCOUNT_UID, "account-fixture-1", 3, 7)
+
+
+def test_the_category_read_sends_only_last_true_and_retains_only_documented_fields() -> None:
+    body = [
+        {
+            "wholeCategoryName": "식품>건강식품",
+            "id": "50000001",
+            "name": "건강식품",
+            "last": True,
+            "providerExtra": "drop-me",
+        }
+    ]
+    provider = Provider(_json(body))
+    result = _caller(provider).call(
+        EndpointId.SMARTSTORE_CATEGORY_LIST, CategoryListRequest(BEARER, 3, 7)
+    )
+    (request,) = provider.requests
+    assert (request.method, str(request.url)) == ("GET", CATEGORY_URL)
+    assert request.headers["authorization"] == f"Bearer {BEARER}"
+    assert result == CategoryListResponse(
+        retained={"items": [{k: v for k, v in body[0].items() if k != "providerExtra"}]},
+        http_status=200,
+    )
 
 
 @pytest.mark.parametrize(

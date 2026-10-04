@@ -559,10 +559,17 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
     assert kept["originProduct"]["images"] == [{"url": REF_MAIN}]
 
 
-def test_no_adopted_endpoint_may_send_a_query_key() -> None:
+def test_only_the_category_list_may_send_its_documented_query_key() -> None:
     for contract in ADOPTED.values():
-        assert contract.safe_query_keys == frozenset()
+        expected = (
+            frozenset({"last"})
+            if contract.endpoint_id is EndpointId.SMARTSTORE_CATEGORY_LIST
+            else frozenset()
+        )
+        assert contract.safe_query_keys == expected
         assert retained_query(contract, {}) == {}
+        if expected:
+            assert retained_query(contract, {"last": "true"}) == {"last": "true"}
         with pytest.raises(ValueError, match="may not send query keys"):
             retained_query(contract, {"page": "1"})
 

@@ -63,16 +63,19 @@ Notice coverage S4 added the contract matrix of every documented SmartStore noti
 wire forms `notice_children.golden.json`, beside them.
 The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집관리 component
 `ui/web/js/components/collect-facts.js`.
+The official SmartStore leaf-category catalog and local bulk-registration orchestration added
+`app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
+one integration plus one unit suite.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 270 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 272 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 70 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 128 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 71 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 129 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -91,16 +94,16 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 42 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 21 |  |
+| `integrations/` | 43 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 22 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 269 | tests |
+| `tests/` | 271 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 106 | integration tests by runtime owner |
+| `tests/integration/` | 107 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 97 | unit tests by runtime owner |
+| `tests/unit/` | 98 | unit tests by runtime owner |
 | `ui/` | 55 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 46 | the served web client |

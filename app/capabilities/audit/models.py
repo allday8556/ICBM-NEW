@@ -85,6 +85,8 @@ class AuditEventType(StrEnum):
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.
     REGISTRATION_CATEGORY_METADATA_RECORDED = "REGISTRATION_CATEGORY_METADATA_RECORDED"
+    # Official marketplace leaf-category catalog snapshot. Identifiers, counts and digests only.
+    MARKETPLACE_CATEGORY_CATALOG_RECORDED = "MARKETPLACE_CATEGORY_CATALOG_RECORDED"
     # ADR-0014 §27.1 (Issue #89 5907626428): a server-owned authoring profile revision — category
     # mapping or detail composition — appended by the server. Kind, scope, identifiers, sequence
     # and the content fingerprint only.

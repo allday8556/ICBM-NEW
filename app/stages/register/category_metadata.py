@@ -1,9 +1,9 @@
 """The durable operator-reviewed category metadata (Gate 1 G1-B; ADR-0015 §3, ADR-0014 §4).
 
-One owner per ``marketplace_key × taxonomy_revision × category_id``. No provider category,
-attribute, option or notice endpoint is adopted, so this is where the metadata the REGISTER
-preflight reads comes from: what an operator recorded from reviewed evidence. This module is its
-only owner:
+One owner per ``marketplace_key × taxonomy_revision × category_id``. The provider leaf-category
+list is now adopted and stored by ``category_catalog``; attribute and option reads remain outside
+this owner. This is where the richer metadata the REGISTER preflight reads comes from: what an
+operator recorded from reviewed evidence. This module is its only owner:
 
 - **Revisions are append-only and server-created.** A save appends one revision: the server
   creates its identity (the ``CategoryMetadata.metadata_revision``), the fingerprint of its
@@ -33,7 +33,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, Protocol
 
 from pydantic import (
     BaseModel,
@@ -718,12 +718,26 @@ class DurableRegistrationMetadata:
 # ------------------------------------------------------------------ the operator application owner
 
 
+class LeafCategoryCatalog(Protocol):
+    def has_current(self, marketplace_key: str) -> bool: ...
+
+    def require_current_leaf(
+        self, marketplace_key: str, taxonomy_revision: str, category_id: str
+    ) -> None: ...
+
+
 class CategoryMetadataService:
     """What the operator reads and records for category metadata, provider-zero."""
 
-    def __init__(self, store: CategoryMetadataStore, marketplaces: frozenset[str]) -> None:
+    def __init__(
+        self,
+        store: CategoryMetadataStore,
+        marketplaces: frozenset[str],
+        category_catalog: LeafCategoryCatalog | None = None,
+    ) -> None:
         self._store = store
         self._marketplaces = marketplaces
+        self._category_catalog = category_catalog
 
     def entries(self, marketplace_key: str) -> CategoryMetadataListView:
         self._require_marketplace(marketplace_key)
@@ -751,6 +765,15 @@ class CategoryMetadataService:
         correlation_id: str,
     ) -> CategoryMetadataView:
         self._require_marketplace(marketplace_key)
+        # Existing installations may hold operator-reviewed metadata from before the provider
+        # catalog owner existed. Once the first catalog is synchronized, every subsequent save is
+        # bound to its current taxonomy and a leaf in it; there is no manual-ID bypass after that.
+        if self._category_catalog is not None and self._category_catalog.has_current(
+            marketplace_key
+        ):
+            self._category_catalog.require_current_leaf(
+                marketplace_key, taxonomy_revision, category_id
+            )
         document = encode_content(marketplace_key, taxonomy_revision, category_id, request)
         # The contract materializes before anything is written: no second category model.
         category_metadata_of("pending", request.reviewed, document)

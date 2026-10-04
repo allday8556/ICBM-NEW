@@ -123,6 +123,7 @@ from app.stages.products.store import ProductFoundationStore
 from app.stages.register.authoring import RegistrationPreparationService
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.builder import RegistrationSnapshotBuilder
+from app.stages.register.category_catalog import CategoryCatalogService, CategoryCatalogStore
 from app.stages.register.category_metadata import (
     CategoryMetadataService,
     CategoryMetadataStore,
@@ -152,6 +153,7 @@ from integrations.marketplaces.smartstore import registry as smartstore_registry
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.category import SmartStoreCategoryCatalogSource
 from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
 from integrations.marketplaces.smartstore.execution import MARKETPLACE_KEY as SMARTSTORE_KEY
 from integrations.marketplaces.smartstore.execution import (
@@ -227,6 +229,7 @@ class Container:
     authoring_revisions: AuthoringRevisionStore
     target_policies: TargetPolicyService
     category_metadata: CategoryMetadataService
+    category_catalog: CategoryCatalogService
     registration_preflight: RegistrationPreflightService
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
@@ -567,6 +570,9 @@ def build_container(
     # ACCOUNT_IDENTITY §2): established only from a committed M2 binding, with no provider call.
     accounts = MarketplaceAccountStore(db, clock, audit)
     registrations = RegistrationStore(db, clock, audit)
+    # The only bearer source for provider metadata reads as well as REGISTER execution. Reading it
+    # never renews or commits a token and authorizes no mutation.
+    committed_bearer = smartstore.committed_bearer
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
     # revision still fails closed with REGISTER_TARGET_POLICY_MISSING.
@@ -575,12 +581,25 @@ def build_container(
     authoring_revisions = AuthoringRevisionStore(db, clock, audit)
     target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
     target_policies = TargetPolicyService(target_policy_store, accounts)
+    # Official SmartStore leaf-category catalog (owner decision 2026-10-04): one read-only provider
+    # capture becomes an immutable local snapshot. Its digest is the taxonomy revision used by the
+    # target policy and category metadata.
+    category_catalog_store = CategoryCatalogStore(db, clock, audit)
+    category_catalog = CategoryCatalogService(
+        category_catalog_store,
+        SmartStoreCategoryCatalogSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        endpoint_mapping_revision=smartstore_registry.SMARTSTORE_ENDPOINT_MAPPING_REVISION,
+    )
     # Gate 1 G1-B (ADR-0015 §3): the durable operator-reviewed category metadata of each
-    # marketplace × taxonomy × category. No provider category endpoint is adopted; a category with
-    # no current revision still fails closed with CATEGORY_METADATA_MISSING.
+    # marketplace × taxonomy × category. New revisions are admitted only for a current provider
+    # leaf category; a category with no current metadata still fails closed.
     category_metadata_store = CategoryMetadataStore(db, clock, audit)
     category_metadata = CategoryMetadataService(
-        category_metadata_store, frozenset(m.key for m in MARKETPLACE_IDENTITIES)
+        category_metadata_store,
+        frozenset(m.key for m in MARKETPLACE_IDENTITIES),
+        category_catalog,
     )
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
     # either; both sources it reads are the durable owners above.
@@ -673,7 +692,6 @@ def build_container(
         store=live_store, registrations=registrations, preparations=registration_preparations
     )
     # ROADMAP §14 item 4: the one canonical bearer source of every SmartStore REGISTER seam.
-    committed_bearer = smartstore.committed_bearer
     registration_execution = RegistrationExecutionService(
         registrations=registrations,
         preflight=registration_preflight,
@@ -889,6 +907,7 @@ def build_container(
         authoring_revisions=authoring_revisions,
         target_policies=target_policies,
         category_metadata=category_metadata,
+        category_catalog=category_catalog,
         registration_preflight=registration_preflight,
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,

@@ -82,7 +82,7 @@ def test_the_capture_reads_the_list_then_each_type_once_keeping_only_listed_memb
     # A failed type is reported with its code, never filled in, and never retried.
     assert "DIET_FOOD" not in captured["types"]
     assert captured["failures"]["DIET_FOOD"]["http_status"] == 500
-    assert captured["mapping_revision"] == "m5-notice-r1"
+    assert captured["mapping_revision"] == "m5-category-list-r1"
     # Each type read is spaced by the policy interval, so a full capture stays under the provider's
     # request-rate limit; nothing is retried.
     assert PAUSES == [1.0, 1.0]

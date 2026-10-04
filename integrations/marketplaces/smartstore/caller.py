@@ -46,7 +46,7 @@ from integrations.marketplaces.smartstore.registry import (
     EndpointNotAdoptedError,
     resolve,
 )
-from integrations.marketplaces.smartstore.retention import retain
+from integrations.marketplaces.smartstore.retention import retain, retained_query
 from integrations.marketplaces.smartstore.search import (
     FIRST_PAGE,
     INT32_MAX,
@@ -87,6 +87,7 @@ _PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
 _PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
 _NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
 _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
+_CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
 # An official 상품정보제공고시 type code: upper-case words joined by underscores.
 _NOTICE_TYPE_CODE = re.compile(r"^[A-Z][A-Z_]{1,39}$")
 # The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
@@ -178,6 +179,16 @@ class NoticeCatalogRequest:
 
 
 @dataclass(frozen=True)
+class CategoryListRequest:
+    """Read the official category catalog, restricted to registrable leaf categories."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    last: bool = True
+
+
+@dataclass(frozen=True)
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
@@ -252,6 +263,14 @@ class NoticeCatalogResponse:
 
     endpoint_id: EndpointId
     notice_type: str | None
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class CategoryListResponse:
+    """The documented category array after deny-by-default field retention."""
+
     retained: Mapping[str, object]
     http_status: int
 
@@ -356,7 +375,8 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ProductReadRequest
         | ProductCreateRequest
         | ProductSearchRequest
-        | ImageUploadRequest,
+        | ImageUploadRequest
+        | CategoryListRequest,
     ):
         return request.credential_generation, request.session_generation
     return None, None
@@ -373,6 +393,7 @@ class _Wire:
     # A pre-encoded body, used by the JSON endpoints: the bytes are produced here, from the typed
     # document, so the media type of the wire is the endpoint contract's and nothing else.
     content: bytes | None = None
+    query: dict[str, str] = field(default_factory=dict)
 
 
 def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
@@ -422,6 +443,17 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
             headers, request.access_token, request.credential_generation, request.session_generation
         )
         return _Wire(contract.path, headers, {})
+    if contract.endpoint_id is _CATEGORY_LIST:
+        if not isinstance(request, CategoryListRequest) or request.last is not True:
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        try:
+            query = retained_query(contract, {"last": "true"})
+        except ValueError as exc:  # pragma: no cover - registry/caller contract drift
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+        return _Wire(contract.path, headers, {}, query=query)
     if contract.endpoint_id in _PRODUCT_READS:
         if not isinstance(request, ProductReadRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -547,6 +579,7 @@ _Result = (
     | ProductCreateResponse
     | ProductDeleteResponse
     | NoticeCatalogResponse
+    | CategoryListResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -561,6 +594,12 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
             endpoint_id=contract.endpoint_id,
             notice_type=request.notice_type,
             retained=retain(contract, wrapped),
+            http_status=status,
+        )
+    if contract.endpoint_id is _CATEGORY_LIST:
+        assert isinstance(request, CategoryListRequest)
+        return CategoryListResponse(
+            retained=retain(contract, {"items": body}),
             http_status=status,
         )
     fields = cast(dict[str, object], body)
@@ -669,6 +708,13 @@ class SmartStoreEndpointCaller:
         ],
         request: NoticeCatalogRequest,
     ) -> NoticeCatalogResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_CATEGORY_LIST],
+        request: CategoryListRequest,
+    ) -> CategoryListResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...
@@ -815,6 +861,7 @@ class SmartStoreEndpointCaller:
                 contract.method.value,
                 BASE_URL + wire.path,
                 headers=wire.headers,
+                params=wire.query or None,
                 content=wire.content,
                 data=wire.form or None,
                 files=wire.files or None,

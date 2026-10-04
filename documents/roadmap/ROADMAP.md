@@ -453,8 +453,11 @@ Before the first vertical closes:
 
 Do **not** implement an interim AI path merely to make those controls active. In particular, do not
 pull forward AI-provider execution, PromptTemplate runtime execution, SearchSignalAdapter, platform
-metadata endpoint adoption solely for AI, Coupang/11st AI authoring, multi-product AI orchestration,
-bulk registration or seasonal-keyword runtime. Those use the post-first-vertical sequence in §12.
+metadata endpoint adoption solely for AI, Coupang/11st AI authoring, multi-product AI orchestration
+or seasonal-keyword runtime. Those use the post-first-vertical sequence in §12. Owner decision
+2026-10-04 is a narrow exception for two non-AI operations needed for the real registration run:
+the official SmartStore leaf-category catalog and local bulk queueing over existing single-Intent
+CREATE paths. Neither creates a second truth system or a provider bulk-CREATE contract.
 
 The individual editor is a workspace over canonical owners, not a second product database. A future
 manual-product entry uses the same editor only after manual provenance and its backend owner are
@@ -857,8 +860,9 @@ After those two, the mandatory pre-canary prerequisites that no slice has closed
 **Registration authoring / AI sequencing note (Issue #127).** The list / quick panel / full individual
 editor product shape may be finalized while the first vertical is in progress, but that is a UX and
 owner-boundary decision only. It does not authorize AI calls, SearchSignalAdapter, new SmartStore
-metadata endpoints, Coupang/11st AI, bulk AI or bulk registration. The runtime implementation order
-is the post-first-vertical dependency chain in §12. Existing research outputs such as tag candidate
+metadata endpoints, Coupang/11st AI or bulk AI. Owner decision 2026-10-04 separately authorizes the
+SmartStore leaf-category catalog and local bulk CREATE orchestration; no other sequencing changes.
+The remaining runtime implementation order is the post-first-vertical dependency chain in §12. Existing research outputs such as tag candidate
 files are fixtures/measurement evidence only until they pass through canonical enrichment, policy
 and final-value owners.
 
@@ -870,7 +874,7 @@ Merged owners are not an operable path. These gaps are recorded facts at the cur
 
 | gap | what exists | what is missing |
 | --- | --- | --- |
-| registration category metadata | **G1-B:** the durable operator-reviewed category-metadata owner (migration 0020), keyed by marketplace × taxonomy revision × category, its Settings review path and the production `RegistrationMetadataSource` over it | nothing for the owner; a category with no current revision still answers `CATEGORY_METADATA_MISSING`, an unreviewed current one `CATEGORY_METADATA_UNREVIEWED`; no provider category endpoint is adopted |
+| registration category metadata | **G1-B:** the durable operator-reviewed category-metadata owner (migration 0020), keyed by marketplace × taxonomy revision × category, its Settings review path and the production `RegistrationMetadataSource` over it; owner decision 2026-10-04 adds the official SmartStore leaf-category catalog snapshot (migration 0041), sync/read paths and current-leaf validation | richer category attribute/option automation remains out; a category with no current metadata revision still answers `CATEGORY_METADATA_MISSING`, an unreviewed current one `CATEGORY_METADATA_UNREVIEWED` |
 | registration target policy | **G1-A:** the durable, append-only target-policy owner (migration 0019), its Settings save path and the production `RegistrationPolicySource` over it | nothing for the owner; an account without a saved policy still blocks with `REGISTER_TARGET_POLICY_MISSING` |
 | Draft creation from the product DB | **G1-D:** `POST /api/v1/register/drafts` and the 통합DB screen's 등록 초안 panel turn a server-revalidated Product selection into one `RegistrationDraft` for a bound canonical account with a current target policy (`GET /api/v1/register/draft-targets` names each account's verdict); a stale selection, an unbound or unknown account, a missing policy or a foreign pricing context creates nothing | nothing for the one-Draft path; the Draft opens in Registration Management, where the existing preparation authoring continues |
 | pricing snapshot creation and pinning | **G1-D:** the same command prices every chosen Item through M4 `ProductPricingService.price` under the policy's pricing context and pins the exact `PricingSnapshot` M4 returned; an Item M4 does not price, or a Product that moves while it is priced, creates no Draft (no partial Draft), and no price is computed outside M4 | nothing for the pin; a frozen Snapshot needs owner-held authoring revisions, which the authoring-revision owner supplies to every newly appended target-policy revision (ADR-0014 §27.1, migration `0032`); a policy revision appended before it keeps `null` and its unit still reports `AUTHORING_REVISIONS_UNOWNED` |

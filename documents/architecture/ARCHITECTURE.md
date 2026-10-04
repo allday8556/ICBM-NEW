@@ -217,8 +217,10 @@ platform projection is fabricated.
 
 Seasonal-keyword expiry is a later tag-enrichment concern. It is modeled separately from ordinary
 facts/prompt/policy `STALE`; a locked final value is never silently deleted because time passed.
-Bulk AI and bulk registration are later orchestration over accepted single-product paths, not a
-separate truth system.
+Bulk AI remains later work. Bulk registration is local orchestration over accepted single-product
+paths: one request may queue several existing Intents, but every child remains its own Snapshot,
+Intent, job, grant, attempt, outcome and read-back. It is not a separate truth system and there is
+no provider bulk-CREATE assumption (owner decision 2026-10-04).
 
 ### OPERATE
 Owns everything after publication.
