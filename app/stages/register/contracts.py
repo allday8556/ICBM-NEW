@@ -8,6 +8,9 @@ refuses (the route re-checks every rule).
 
 Nothing provider-shaped is exposed: a marketplace product identity appears only once the Intent
 proved it (§9), and no payload value, credential, URL or provider response text is carried.
+**One exception (B-PREVIEW, owner decision 5975647306):** the frozen-Snapshot preview
+(``app.stages.register.preview.SnapshotPreviewView``) carries the frozen outbound values a Snapshot
+would send — never a credential, a provider URL or provider response text.
 """
 
 from datetime import datetime

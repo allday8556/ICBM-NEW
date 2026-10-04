@@ -660,6 +660,18 @@ Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is
 > owner; it lists only `FIX_AVAILABLE` and `RECHECK` rows and counts the rest. It fixes nothing:
 > the screen only navigates to the named surface.
 
+> **Amendment note (B-PREVIEW; owner decisions `5975647306`, 2026-10-04).** A frozen Snapshot has a
+> read-only marketplace preview (`GET /api/v1/register/snapshots/{id}/preview`,
+> `app/stages/register/preview.py`, `register-snapshot-preview/v1`): its frozen outbound values —
+> a preview-only exception to "no payload value is carried" — and every field of the document the
+> provider wire projection would send, through the same injected projection the sender uses. No
+> provider URL ever reaches the screen: URL-shaped document values are redacted, images are shown
+> by role, position, local identity and whether a provider asset was prepared, and the detail body
+> is its structure (sections, detail image slots, body paragraphs as plain text), never the
+> rendered HTML. Values frozen but never sent (tags, attributes) are shown marked as not sent. A
+> projection the adapter refuses is shown with its own refusal code. A candidate (unfrozen) preview
+> is not part of it and needs its own contract.
+
 ### 23. The M5 / M6 boundary
 
 - **M5 read-back is registration and reconcile proof.** It covers the CREATE of a provider listing, the reconcile of an ambiguous CREATE, the verification against the Snapshot, and the explicit reconcile of a known registration (§14).

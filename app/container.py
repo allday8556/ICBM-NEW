@@ -820,6 +820,8 @@ def build_container(
         # ADR-0014 §28.5: the status panel shows the ICBM seller code the provider is sent.
         clock=clock,
         seller_code=smartstore_product.seller_management_code,
+        # B-PREVIEW: the frozen-Snapshot preview reads the same wire projection the sender uses.
+        preview_projection=smartstore_product.project,
     )
     screens = ScreenService(
         clock=clock,

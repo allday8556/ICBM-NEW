@@ -859,6 +859,82 @@ function actionCell(unit, action, onDone) {
   return h('div', { class: 'register-action' }, button, action.enabled ? null : reason(action.reason_code));
 }
 
+// B-PREVIEW: what this frozen Snapshot would send, as the server projected it. Every value is
+// inserted as text; provider URLs never arrive (the server redacts them) and the detail body is
+// its structure, never HTML.
+function previewBlock(unit) {
+  if (!unit.snapshot) return null;
+  const holder = h('div', { class: 'register-preview', 'data-preview': unit.snapshot.registration_snapshot_id });
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'PREVIEW_SNAPSHOT' }, '스마트스토어 미리보기');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const view = await getJson(
+        `/api/v1/register/snapshots/${encodeURIComponent(unit.snapshot.registration_snapshot_id)}/preview`,
+      );
+      holder.replaceChildren(previewView(view));
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : String(error));
+      button.disabled = false;
+    }
+  });
+  holder.append(button);
+  return holder;
+}
+
+function previewView(view) {
+  const detail = view.detail;
+  return h(
+    'div',
+    { class: 'register-preview-view', 'data-projected': String(view.projected) },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '스마트스토어 미리보기'),
+      view.projected
+        ? chip(view.sendable ? '보낼 수 있음' : '빈 칸 있음', view.sendable ? 'good' : 'warn')
+        : chip('투영 거절', 'bad')),
+    view.refusal_code ? reason(view.refusal_code) : null,
+    kv('상품명', view.name ?? '—'),
+    kv('판매가', view.sale_prices_krw.map((price) => won(price)).join(', ') || '—'),
+    kv('카테고리 ID', view.category_id ?? '—'),
+    ...view.gaps.map((gap) => h('div', { class: 'mini', 'data-gap': 'true' }, gap)),
+    table(
+      ['이미지 역할', '순서', '이미지', '마켓 업로드'],
+      view.images.map((image) =>
+        h('tr', { 'data-preview-image': image.sha256 },
+          h('td', {}, image.role),
+          h('td', {}, image.position === null ? '—' : String(image.position)),
+          h('td', {}, image.sha256.slice(0, 8)),
+          h('td', {}, image.provider_asset_prepared ? '준비됨' : '없음')),
+      ),
+    ),
+    detail
+      ? h('div', { class: 'register-preview-detail', 'data-detail-builder': detail.builder },
+          kv('상세 구획', detail.sections.join(' → ') || '—'),
+          kv('상세 이미지', `${detail.image_slots.length}장`),
+          ...detail.paragraphs.map((paragraph) => h('p', { class: 'mini' }, paragraph)))
+      : null,
+    view.document.length
+      ? table(
+          ['보낼 항목', '값'],
+          view.document.map((field) =>
+            h('tr', { 'data-field': field.path },
+              h('td', {}, field.path),
+              h('td', {}, field.redacted ? '(마켓 참조 · 표시 안 함)' : field.value ?? '—')),
+          ),
+        )
+      : null,
+    view.not_sent.length
+      ? table(
+          ['보내지 않음', '값'],
+          view.not_sent.map((row) =>
+            h('tr', { 'data-not-sent': row.path },
+              h('td', {}, row.path),
+              h('td', {}, row.value === 'DETAIL_PAGE_REFERENCE' ? '상세페이지 참조' : row.value)),
+          ),
+        )
+      : null,
+  );
+}
+
 function unitPanel(unit, onDone, labels) {
   const intent = unit.intent;
   return h(
@@ -884,6 +960,7 @@ function unitPanel(unit, onDone, labels) {
     kv('초안 리비전', String(unit.draft_revision)),
     unit.snapshot ? kv('리스팅 식별자', unit.snapshot.listing_identity) : null,
     unit.snapshot ? kv('스냅샷 지문', unit.snapshot.preflight_fingerprint.slice(0, 16)) : null,
+    previewBlock(unit),
     intent ? kv('검증 상태', VERIFICATION_LABEL[intent.verification_state] ?? intent.verification_state) : null,
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,

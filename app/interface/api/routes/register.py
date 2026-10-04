@@ -40,6 +40,7 @@ from app.stages.register.contracts import (
     UnitView,
 )
 from app.stages.register.drafting import CreateDraftRequest, DraftCreatedView, DraftTargetsView
+from app.stages.register.preview import SnapshotPreviewView
 
 router = APIRouter(prefix="/api/v1/register", tags=["register"])
 
@@ -119,6 +120,14 @@ def create_draft(container: ContainerDep, request: CreateDraftRequest) -> DraftC
     revalidated, every Item is priced by M4 and pinned, or nothing is created. It creates no
     preparation, Snapshot, Intent or job."""
     return container.drafting.create(request, correlation_id=_correlation())
+
+
+@router.get("/snapshots/{registration_snapshot_id}/preview")
+def snapshot_preview(container: ContainerDep, registration_snapshot_id: str) -> SnapshotPreviewView:
+    """B-PREVIEW: what one frozen Snapshot would send to the marketplace — its frozen outbound
+    values and the provider document fields, with every provider URL redacted and the detail body
+    as structure. Read-only."""
+    return container.register.snapshot_preview(registration_snapshot_id)
 
 
 @router.get("/canary")
