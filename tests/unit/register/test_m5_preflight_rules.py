@@ -23,7 +23,12 @@ from app.stages.products.image_model import ImageAssetKind, OutputRole, QaVerdic
 from app.stages.products.model import ReadinessStatus, Reason
 from app.stages.products.pricing import PriceBasis, PriceGuard, PricingContextInput, Rounding
 from app.stages.register import sanitize
-from app.stages.register.model import ListingShape, registration_item_key, sanitized_digest
+from app.stages.register.model import (
+    ListingShape,
+    registration_item_key,
+    registration_item_key_v2,
+    sanitized_digest,
+)
 from app.stages.register.payload import PAYLOAD_BUILDER_VERSION, PayloadNotReadyError, build_payload
 from app.stages.register.policy import (
     AssetPolicy,
@@ -1136,6 +1141,19 @@ def test_secret_material_and_external_urls_never_reach_the_payload() -> None:
 
 
 # ---------------------------------------------------------------- the payload (§6, §7)
+
+
+def test_atomic_sku_item_key_is_additive_and_does_not_change_v1() -> None:
+    legacy = registration_item_key("icbm-listing-1", "group-1", "a" * 64)
+    first = registration_item_key_v2("icbm-listing-1", "group-1", "a" * 64, "atomic-sku-1")
+    same = registration_item_key_v2("icbm-listing-1", "group-1", "a" * 64, "atomic-sku-1")
+    other = registration_item_key_v2("icbm-listing-1", "group-1", "a" * 64, "atomic-sku-2")
+
+    assert legacy == "rik1-2f1c3330fdf7ad562f1e64a817b9b204"
+    assert first == same
+    assert first == "rik2-50395fa26c97abaab9169169bab07c29"
+    assert first != other
+    assert first != legacy
 
 
 def test_the_payload_is_the_exact_evaluated_preparation() -> None:

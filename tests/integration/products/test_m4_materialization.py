@@ -701,6 +701,20 @@ def test_absent_options_and_tiers_materialize_the_default_item_and_base_product_
         1,
         1,
     )
+    with contextlib.closing(_raw(config)) as raw:
+        atomic_sku_counts = [
+            raw.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in (
+                "atomic_sku_set_revisions",
+                "atomic_skus",
+                "atomic_sku_selections",
+                "atomic_sku_revision_members",
+                "atomic_sku_revision_selection_evidence",
+                "current_atomic_sku_set_moves",
+                "atomic_sku_product_items",
+            )
+        ]
+    assert not any(atomic_sku_counts)
 
 
 AMBIGUOUS = {

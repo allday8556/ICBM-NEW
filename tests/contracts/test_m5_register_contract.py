@@ -219,7 +219,9 @@ AUTO_SELECTION = "0040_image_auto_selection"
 CATEGORY_CATALOG = "0041_category_catalog"
 COMMON_OPTIONS = "0042_common_sales_option_owner"
 COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
-SEQUENTIAL_BULK = "0044_sequential_bulk_registration"
+ATOMIC_SKUS = "0044_source_proven_atomic_skus"
+ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
+SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
 SCHEMA_HEAD = SEQUENTIAL_BULK
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -245,6 +247,8 @@ AFTER_M5 = (
     CATEGORY_CATALOG,
     COMMON_OPTIONS,
     COMMON_OPTION_FACT_MAPPING,
+    ATOMIC_SKUS,
+    ATOMIC_SKU_ITEMS,
     SEQUENTIAL_BULK,
 )
 REGISTRATION_STATE = re.compile(
@@ -401,7 +405,7 @@ REGISTRATION_OWNERS = frozenset(
     {
         "app/stages/register/store.py",
         "app/stages/register/models.py",
-        # Owns only the two sequential bulk orchestration tables authorized in migration 0044.
+        # Owns only the two sequential bulk orchestration tables authorized in migration 0046.
         "app/stages/register/bulk.py",
     }
 )

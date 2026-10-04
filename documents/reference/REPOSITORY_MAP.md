@@ -66,23 +66,27 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
-Sequential bulk registration now has no application-level total-count ceiling: migration `0044`
+Sequential bulk registration now has no application-level total-count ceiling: migration `0046`
 and `app/stages/register/bulk.py` persist the ordered run, queue exactly one ordinary CREATE job at
 a time, expose durable `current/total` progress, and retain a classified reason for each failed
 product while later products continue.
 The Common Sales Option C1/C2 owner added three PRODUCT DB modules, migration `0042` and one
 integration and one unit suite. Its reviewed Product Fact correspondence slice added three more
 PRODUCT DB modules, migration `0043` and one integration and one unit suite.
+The source-proven Atomic SKU slice added three PRODUCT DB modules, migration `0044` and one
+integration and one unit suite.
+The AtomicSKU-qualified Product Item identity slice added two PRODUCT DB modules and migration
+`0045`; it leaves the legacy no-option Item and `registration-item-key/v1` contracts unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 282 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 289 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 74 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 136 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 76 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 141 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -104,13 +108,13 @@ PRODUCT DB modules, migration `0043` and one integration and one unit suite.
 | `integrations/` | 43 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 22 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 275 | tests |
+| `tests/` | 277 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 109 | integration tests by runtime owner |
+| `tests/integration/` | 110 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 100 | unit tests by runtime owner |
+| `tests/unit/` | 101 | unit tests by runtime owner |
 | `ui/` | 55 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 46 | the served web client |

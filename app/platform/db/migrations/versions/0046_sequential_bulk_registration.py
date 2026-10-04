@@ -1,7 +1,7 @@
 """Persist strictly sequential bulk-registration runs.
 
-Revision ID: 0044_sequential_bulk_registration
-Revises: 0043_common_option_fact_mapping
+Revision ID: 0046_sequential_bulk_registration
+Revises: 0045_atomic_sku_product_items
 Create Date: 2026-10-04
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0044_sequential_bulk_registration"
-down_revision: str | None = "0043_common_option_fact_mapping"
+revision: str = "0046_sequential_bulk_registration"
+down_revision: str | None = "0045_atomic_sku_product_items"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

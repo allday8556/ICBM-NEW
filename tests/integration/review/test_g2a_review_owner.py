@@ -705,6 +705,13 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "common_option_fact_axis_mappings",
         "common_option_fact_value_mappings",
         "current_common_option_fact_mapping_moves",
+        "atomic_sku_set_revisions",
+        "atomic_skus",
+        "atomic_sku_selections",
+        "atomic_sku_revision_members",
+        "atomic_sku_revision_selection_evidence",
+        "current_atomic_sku_set_moves",
+        "atomic_sku_product_items",
         "registration_bulk_runs",
         "registration_bulk_items",
     }

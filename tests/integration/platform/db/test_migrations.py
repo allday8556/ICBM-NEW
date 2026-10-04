@@ -154,11 +154,20 @@ CANONICAL_TABLES = (
     "common_option_fact_axis_mappings",
     "common_option_fact_value_mappings",
     "current_common_option_fact_mapping_moves",
+    # Source-proven Atomic SKU set revisions; no inferred option Cartesian products.
+    "atomic_sku_set_revisions",
+    "atomic_skus",
+    "atomic_sku_selections",
+    "atomic_sku_revision_members",
+    "atomic_sku_revision_selection_evidence",
+    "current_atomic_sku_set_moves",
+    # Additive Item identities qualified by stable AtomicSKU identity.
+    "atomic_sku_product_items",
     # One-at-a-time bulk CREATE orchestration and its ordered members.
     "registration_bulk_runs",
     "registration_bulk_items",
 )
-HEAD = "0044_sequential_bulk_registration"
+HEAD = "0046_sequential_bulk_registration"
 
 
 def _url(path: Path) -> str:
