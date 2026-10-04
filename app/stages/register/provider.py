@@ -41,13 +41,7 @@ class DuplicateLookupSource(Protocol):
 
 @runtime_checkable
 class PreparedAssetSource(Protocol):
-    """The provider assets already prepared for one exact authored unit.
-
-    Read from the durable ASSET upload-attempt owner: only ``APPLIED_PROVEN`` uploads of exactly
-    this preparation revision under exactly this candidate fingerprint. Nothing is produced,
-    promoted or looked up here, and an absent asset is simply absent (Issue #89 architect
-    follow-up 5919917893 §3).
-    """
+    """Known provider assets for the selected exact bytes in one canonical account."""
 
     def prepared_assets(
         self,
@@ -56,6 +50,8 @@ class PreparedAssetSource(Protocol):
         marketplace_account_id: str,
         preparation_revision_id: str,
         candidate_fingerprint: str,
+        selected_artifacts: tuple[tuple[str, str, str], ...],
+        asset_profile: str,
     ) -> tuple[PreparedAsset, ...]: ...
 
 

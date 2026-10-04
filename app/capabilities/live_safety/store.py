@@ -259,6 +259,12 @@ class LiveAuthorityStore:
         with self.reading() as unit:
             return unit.applied_uploads(preparation_revision_id, candidate_fingerprint)
 
+    def applied_uploads_for_account(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> tuple[UploadAttemptRecord, ...]:
+        with self.reading() as unit:
+            return unit.applied_uploads_for_account(marketplace_key, marketplace_account_id)
+
 
 class LiveUnit:
     """The pre-LIVE owners' writes and reads over one caller-owned session. It never commits."""
@@ -628,6 +634,22 @@ class LiveUnit:
             .where(
                 AssetUploadAttempt.preparation_revision_id == preparation_revision_id,
                 AssetUploadAttempt.candidate_fingerprint == candidate_fingerprint,
+                AssetUploadAttempt.state == UploadAttemptState.APPLIED_PROVEN.value,
+            )
+            .order_by(AssetUploadAttempt.started_at, AssetUploadAttempt.attempt_id)
+        )
+        return tuple(_attempt_record(row) for row in rows)
+
+    def applied_uploads_for_account(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> tuple[UploadAttemptRecord, ...]:
+        """Known provider identities reusable by exact bytes inside one canonical account."""
+        rows = self.session.scalars(
+            select(AssetUploadAttempt)
+            .where(
+                AssetUploadAttempt.marketplace_key == marketplace_key,
+                AssetUploadAttempt.marketplace_account_id == marketplace_account_id,
+                AssetUploadAttempt.endpoint_group == ASSET_ENDPOINT_GROUP,
                 AssetUploadAttempt.state == UploadAttemptState.APPLIED_PROVEN.value,
             )
             .order_by(AssetUploadAttempt.started_at, AssetUploadAttempt.attempt_id)

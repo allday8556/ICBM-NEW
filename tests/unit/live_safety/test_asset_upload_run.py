@@ -5,8 +5,8 @@ It composes the existing owners and decides nothing itself:
   run before the window, CONNECT or any upload;
 - the bounded LIVE window opens first (only a live grant permits it), CONNECT runs inside it, and
   the window is closed when the run ends, whatever happens;
-- each artifact is uploaded once through the upload owner, with its exact bytes and media type; the
-  run stops at the first upload that is not APPLIED_PROVEN and never retries it;
+- each artifact is uploaded once through the upload owner, with its exact bytes and media type;
+  one terminal failure is logged and the remaining independent artifacts continue;
 - an artifact already APPLIED_PROVEN under the grant's revision and candidate is not uploaded again.
 """
 
@@ -89,6 +89,7 @@ class Attempt:
     asset_kind: ImageAssetKind
     state: UploadAttemptState
     provider_asset_ref: str | None
+    asset_profile: str = "profile-1"
 
 
 @dataclass
@@ -101,6 +102,10 @@ class Store:
 
     def applied_uploads(self, revision: str, candidate: str) -> tuple[Attempt, ...]:
         assert (revision, candidate) == ("prep-rev-1", "f" * 64)
+        return self.applied
+
+    def applied_uploads_for_account(self, marketplace: str, account: str) -> tuple[Attempt, ...]:
+        assert (marketplace, account) == ("smartstore", "mpa-1")
         return self.applied
 
 
@@ -199,14 +204,25 @@ def test_every_artifact_is_uploaded_once_inside_a_closed_window() -> None:
     assert [i.outcome for i in result.items] == ["APPLIED_PROVEN", "APPLIED_PROVEN"]
 
 
-def test_the_run_stops_at_the_first_unproven_upload_and_never_retries() -> None:
+def test_the_run_records_an_unproven_upload_and_continues_without_retrying_it() -> None:
     events: list[tuple[str, Any]] = []
     uploads = Uploads(events, outcomes={SOURCE.sha256: UploadAttemptState.UPLOAD_UNKNOWN})
     result = run_of(Store(grant(SOURCE, DERIVED, THIRD)), uploads, events).run(
         "grant-1", window_s=900, actor="op", correlation_id="cid"
     )
-    assert kinds(events) == ["mode:LIVE", "connect", "upload", "mode:DRY_RUN"]
-    assert [i.outcome for i in result.items] == ["UPLOAD_UNKNOWN"]
+    assert kinds(events) == [
+        "mode:LIVE",
+        "connect",
+        "upload",
+        "upload",
+        "upload",
+        "mode:DRY_RUN",
+    ]
+    assert [i.outcome for i in result.items] == [
+        "UPLOAD_UNKNOWN",
+        "APPLIED_PROVEN",
+        "APPLIED_PROVEN",
+    ]
     assert not result.complete
 
 

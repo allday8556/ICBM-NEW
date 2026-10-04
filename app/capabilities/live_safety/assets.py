@@ -54,6 +54,7 @@ from app.capabilities.live_safety.store import (
 )
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError
+from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.model import DUPLICATE_EVIDENCE_UNAVAILABLE, RegistrationConflictError
 from app.stages.register.preparation import PreparedAsset
@@ -355,12 +356,11 @@ def _prepared(attempt: UploadAttemptRecord) -> PreparedAsset | None:
 
 
 class PreparedUploadAssets:
-    """The provider assets the upload-attempt owner holds for one exact authored unit.
+    """Provider assets proven for selected exact bytes in one canonical account.
 
-    Only ``APPLIED_PROVEN`` attempts of exactly this preparation revision under exactly this
-    candidate fingerprint, of this account, each as the one :class:`PreparedAsset` its attempt
-    yields. Nothing is looked up at a provider or inferred: an artifact without such an attempt
-    has no prepared asset, and the final preflight refuses (Issue #89 5919917893 §3).
+    A known reference may be rebound to another preparation only when the account, upload endpoint,
+    content SHA-256 and asset profile match. No provider call or re-upload occurs; the final
+    preflight binds that known reference to the current candidate and exact selected artifact.
     """
 
     def __init__(self, store: LiveAuthorityStore) -> None:
@@ -373,18 +373,29 @@ class PreparedUploadAssets:
         marketplace_account_id: str,
         preparation_revision_id: str,
         candidate_fingerprint: str,
+        selected_artifacts: tuple[tuple[str, str, str], ...],
+        asset_profile: str,
     ) -> tuple[PreparedAsset, ...]:
-        prepared: list[PreparedAsset] = []
-        for attempt in self._store.applied_uploads(preparation_revision_id, candidate_fingerprint):
-            if (attempt.marketplace_key, attempt.marketplace_account_id) != (
-                marketplace_key,
-                marketplace_account_id,
-            ):
+        del preparation_revision_id
+        selected = set(selected_artifacts)
+        prepared: dict[tuple[str, str, str], PreparedAsset] = {}
+        for attempt in self._store.applied_uploads_for_account(
+            marketplace_key, marketplace_account_id
+        ):
+            if attempt.asset_profile != asset_profile:
                 continue
-            asset = _prepared(attempt)
-            if asset is not None:
-                prepared.append(asset)
-        return tuple(prepared)
+            matching = [key for key in selected if key[1] == attempt.artifact_sha256]
+            for key in matching:
+                assert attempt.provider_asset_ref is not None
+                prepared[key] = PreparedAsset(
+                    asset_kind=ImageAssetKind(key[0]),
+                    sha256=key[1],
+                    derivation_id=key[2] or None,
+                    asset_profile=asset_profile,
+                    candidate_fingerprint=candidate_fingerprint,
+                    provider_asset_ref=attempt.provider_asset_ref,
+                )
+        return tuple(prepared[key] for key in sorted(prepared))
 
 
 class PreparationCandidateGate:
