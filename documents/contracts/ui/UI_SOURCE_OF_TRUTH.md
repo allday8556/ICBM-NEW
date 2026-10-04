@@ -163,6 +163,12 @@ authorization.
 > statuses. It is not a review count, a review queue or a ComplianceGate surface, and it adds
 > nothing to the Gate 2 review path.
 
+> **B-UX2 (owner directive 2026-10-04).** The fix-only projection of Registration Management is
+> another such surface under its own contract (ADR-0014 §22 amendment note): it lists only what the
+> operator can fix or re-check now and where, from server-owned actionability, and counts the rest.
+> It is not a review queue: it resolves no item and fixes nothing, and its review rows are only the
+> REGISTER execution producer's open items.
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`
@@ -189,6 +195,34 @@ reproduces that structure in the focused run of 수집관리, where the run's re
 - the recent-runs list offers `전체 / 원천 확인 필요 / 실패 / 기록할 식별자 없음`. The server applies the
   filter before it orders and bounds the list, reports how many runs the filter selects in all, and
   pages on with `더 보기`; a page is never shown as the whole list.
+
+## Navigation and recovery (A-UX3, owner decision 2026-10-04)
+
+Small additions beside the approved boards, in their existing visual language:
+
+- Extension list mode: a captured row offers `수집관리에서 결과 보기`, which opens that row's own run in
+  Collection Management (`#/collect?view=jobs&run=…`) through the same worker path as the
+  single-capture `수집관리에서 보기`, which stays as it is.
+- Extension list mode: once a queue has ended and ICBM holds no open queue, a note explains recovery —
+  go back to the list page yourself, `목록 찾기` again with `이미 수집한 상품 건너뛰기` on. ICBM skips what
+  it recorded and declares a new queue; the ended queue is never reissued, the bound is typed again
+  (never pre-filled), and the extension never navigates to the list page itself.
+- Collection Management: a `FAILED` run offers `다시 수집`, which puts the run's supplier and URL back
+  into the submit form and sends nothing. Only the operator's own submit makes a new run, through the
+  one submit path and its server rules (the target check and the same-product interval included);
+  the failed run stays as recorded. `NO_REVISION` and `RECORDED` runs offer no such control.
+
+## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
+
+- Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per
+  line, at most 50. Under the box the screen counts `입력 n줄 · 중복 n · 잘못된 URL n · 수집 예정 n` and
+  lists the lines it cannot read as an http(s) URL; those are never sent, and a repeated URL is sent
+  once. Each planned URL is sent on its own through the one submit call, one after another, and its
+  answer — a run or the server's refusal — is shown beside it; refused lines stay in the box. One
+  URL behaves exactly as before and opens its run.
+- The extension's list mode shows a checkbox on each found product, `선택 n` beside the found
+  count, and `전체 선택 / 전체 해제`. Only the chosen links are declared. The queue bound is never
+  filled from the selection (the board's no-pre-filled-bound rule above still holds).
 
 ## Rules
 

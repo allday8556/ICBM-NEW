@@ -1,8 +1,7 @@
-# B-DETAIL — Canonical detail content composition (design draft for review)
+# B-DETAIL — Canonical detail content composition
 
-Status: **design draft, awaiting the GPT/Claude design cross-audit**. Owner decisions of
-2026-10-04 (D1–D4, G-1, invariants) are recorded below. No code changes before a separate approval;
-the implementation is a later HIGH_RISK slice.
+Status: **design accepted** (PR #223, DUAL_PASS, merged `83a3ff3`); the HIGH_RISK implementation
+slice is recorded in §8. Owner decisions of 2026-10-04 (D1–D4, G-1, invariants) are recorded below.
 
 Base: main `ec0d305`. Every current fact below cites the code or document it comes from.
 
@@ -157,7 +156,7 @@ projection refuses it. The PRODUCT_CREATE G-1 row is evidence, not a rule change
 | 14 | No truncation on unknown limits | 50 detail images render 50 images; no code path drops any |
 | 15 | Provider incompatibility never edits the canonical composition | a projection refusal leaves the preparation and Snapshot unchanged |
 
-## 7. Exact implementation scope (later, HIGH_RISK)
+## 7. Exact implementation scope (HIGH_RISK)
 
 - `authoring_revisions.py`: `DetailCompositionContentV2`, `detail_composition_content` → v2, v1
   still parsed.
@@ -170,3 +169,45 @@ projection refuses it. The PRODUCT_CREATE G-1 row is evidence, not a rule change
 - Tests for §6; ADR/ARCHITECTURE/GLOSSARY/M5 amendments take effect.
 - Out of scope: Issue #61 guidance, video, option table, per-product section toggles, read-back
   comparison of `detailContent`, Coupang.
+
+## 8. Implementation (the HIGH_RISK slice)
+
+Base: main `83a3ff3`; the inventory of §4 is unchanged on it (the moves since `ec0d305` touch no
+REGISTER, SmartStore or live-safety code).
+
+- `app/stages/register/detail.py` — the pure plan and the trusted renderer: `DetailProfile`,
+  `PlannedImage`, `DetailPlan` (`plan_of` reads a frozen plan strictly: an unknown member, a URL
+  included, refuses it), `UploadedProviderAsset` (a type of its own, built only from a safe provider
+  reference) and `render` (`detail-renderer/v1`).
+- `authoring_revisions.py` — content v2 beside v1 (both readable); `ensure`/`stamp` now append v2;
+  `AuthoringRevisionStore.detail_profile` reads one revision's profile.
+- `preflight.py` — the service resolves the target's profile through `DetailProfileSource` into
+  `ResolvedUnit.detail_profile` (the container wires the authoring-revision store).
+- `preparation.py` — `detail_plan` (a plan exists only for an owner-held composition under a v2
+  profile: exactly the target's revision and exactly its sections); `DETAIL_BODY_EMPTY` only without
+  planned images; `PUBLICATION_DETAIL_IMAGES_UNPLACED` released only by a plan that places images;
+  `AUTHORING_REVISIONS_UNOWNED` also when the sections are not the profile's; the plan's renderer,
+  body format and ordered image identities join the candidate fingerprint, named only when a plan
+  exists.
+- `authoring.py` — the stored sections are the owned profile's; a client section the profile does
+  not hold is refused (`REGISTER_DETAIL_SECTIONS_NOT_PROFILE`). A client still sending `["BODY"]`
+  is not refused: `BODY` is in the profile, and the profile's own sections are what is stored.
+- `payload.py` — `registration-payload/v2` freezes the plan as `payload.detail`; a BODY-only
+  composition keeps the v1 document exactly.
+- `product.py` — `smartstore-register-wire/v6`: a plan Snapshot's `detailContent` is rendered from
+  the plan and the Snapshot's own `DETAIL` publication assets (their set must equal the plan's,
+  `WIRE_DETAIL_PLAN_MISMATCH`); its detail images are never gallery images. A BODY-only Snapshot
+  projects its frozen body exactly as before, and a detail image without a plan is still
+  `WIRE_DETAIL_IMAGE_NOT_PLACEABLE`.
+- `register.js` — the body label says it follows the detail images and is optional with them; the
+  form sends the server's sections back and an empty body under an image-placing profile.
+
+Recorded choices within the design:
+
+- A frozen v1 (BODY-only) Snapshot keeps its v1 projection: rendering it under a renderer it never
+  pinned would change what was frozen. New compositions are v2 as soon as a target-policy save
+  stamps the v2 profile (the existing no-backfill rule).
+- An asset two Items of one listing share is placed once, at its first Item and position.
+- Tests: `tests/unit/register/test_b_detail_composition.py` (the owner's 20 required cases, the
+  profile owner, no truncation of 50 images), provider-zero (every socket refused).
+

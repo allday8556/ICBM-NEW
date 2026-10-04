@@ -28,6 +28,9 @@ const LIVE = '/api/v1/register/live';
 // B-UX1: the readiness of every pre-send unit, evaluated by the server now.
 const READINESS = '/api/v1/register/readiness';
 const READINESS_STATUSES = ['READY', 'REVIEW_REQUIRED', 'BLOCKED', 'DUPLICATE', 'STALE', 'NOT_EVALUATED'];
+// B-UX2: what the operator can fix or re-check now, and where (server-owned).
+const FIXES = '/api/v1/screens/register/fixes';
+const FIX_ACTIONABILITY = ['FIX_AVAILABLE', 'RECHECK', 'WAITING', 'NO_OPERATOR_ACTION', 'NOT_IMPLEMENTED'];
 const TITLE = '등록관리';
 const HELP =
   '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
@@ -229,6 +232,56 @@ function reasonGroups(reasons, labels) {
       { class: 'register-reason-area', 'data-area': area },
       h('span', { class: 'mini' }, labels?.[area] ?? area),
       ...members.map((reason) => reasonNode('div', reason)),
+    ),
+  );
+}
+
+// B-UX2: the fix-only projection. A row only says where to act; the move is to that surface, and
+// nothing is fixed from here. Rows without an action are counted, never offered.
+function fixesPanel(found, ctx) {
+  if (!found) return null;
+  if (found.unavailable) {
+    return h('div', { class: 'register-fixes', 'data-fixes': 'UNAVAILABLE' }, reason(found.unavailable));
+  }
+  const go = (row) => {
+    if (row.surface?.startsWith('SETTINGS_')) {
+      ctx.navigate('settings');
+      return;
+    }
+    const target = row.draft_id
+      ? document.querySelector(`.register-unit[data-draft='${CSS.escape(row.draft_id)}']`)
+      : null;
+    target?.scrollIntoView({ block: 'start' });
+  };
+  return h(
+    'div',
+    { class: 'register-fixes', 'data-fixes': found.projection_version },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '고칠 것'), chip(`${found.fixes.length}`)),
+    h(
+      'div',
+      { class: 'supplier-head-row' },
+      ...FIX_ACTIONABILITY.map((key) =>
+        h('span', { class: 'mini', 'data-actionability-count': key }, `${key} ${found.counts?.[key] ?? 0}`),
+      ),
+    ),
+    ...found.fixes.map((row) =>
+      h(
+        'div',
+        {
+          class: 'register-fix',
+          'data-fix': row.code,
+          'data-actionability': row.actionability,
+          'data-surface': row.surface,
+          'data-source': row.source,
+        },
+        chip(row.actionability_label, row.actionability === 'FIX_AVAILABLE' ? 'warn' : ''),
+        h('span', { class: 'mini', 'data-reason': row.code, title: row.subject ?? '' }, row.code),
+        h(
+          'button',
+          { type: 'button', class: 'btn', 'data-action': 'GO_TO_FIX', onclick: () => go(row) },
+          row.surface_label,
+        ),
+      ),
     ),
   );
 }
@@ -510,7 +563,14 @@ function authoringForm(unit, onDone) {
     field('상품명', 'name', inputs.name?.value),
     dynamicFields,
     optionFields,
-    field('상세 본문', 'detail_body', inputs.detail_body, 'textarea'),
+    // B-DETAIL: the selected detail images come first; the text after them is optional when the
+    // unit has detail images (the server decides, never this page).
+    field(
+      '상세 본문 (상세 이미지 뒤, 상세 이미지가 있으면 선택)',
+      'detail_body',
+      inputs.detail_body,
+      'textarea',
+    ),
     h(
       'button',
       {
@@ -589,8 +649,11 @@ function authoringForm(unit, onDone) {
           notices,
           options,
           detail_composition_revision: approved?.detail_composition_revision ?? null,
-          detail_body: values.detail_body || null,
-          detail_sections: inputs.detail_sections ?? ['BODY'],
+          // Under a profile that places detail images an empty body is still a composition.
+          detail_body: (approved?.detail_sections ?? []).includes('DETAIL_IMAGES')
+            ? (values.detail_body ?? '')
+            : (values.detail_body || null),
+          detail_sections: approved?.detail_sections ?? inputs.detail_sections ?? ['BODY'],
         },
       };
       if (authored) {
@@ -1004,8 +1067,9 @@ export default {
     let canary;
     let live;
     let readiness;
+    let fixes;
     try {
-      [screen, overview, canary, live, readiness] = await Promise.all([
+      [screen, overview, canary, live, readiness, fixes] = await Promise.all([
         getJson(SCREEN),
         getJson(OVERVIEW),
         getJson(CANARY),
@@ -1013,6 +1077,9 @@ export default {
         // The summary is its own read: when it is refused the page still shows every unit, and
         // says the summary is unavailable with the server's code.
         getJson(READINESS).catch((error) => ({
+          unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
+        })),
+        getJson(FIXES).catch((error) => ({
           unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
         })),
       ]);
@@ -1071,6 +1138,7 @@ export default {
         kv('중단된 범위', String(overview.paused_scopes.length)),
       ),
       readinessBlock,
+      fixesPanel(fixes, ctx),
       statusPanel,
       canaryPanel(canary),
       livePanel(live),

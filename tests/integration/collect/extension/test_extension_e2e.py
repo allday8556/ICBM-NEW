@@ -584,3 +584,116 @@ def _requests(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str, int]]:
             values: dict[str, Any] = vars(record)
             found.append((values["method"], values["path"], values["status"]))
     return found
+
+
+# ---------------------------------------------------------------- A-UX3: navigation and recovery
+
+
+def test_each_captured_row_opens_its_own_run_in_collection_management(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        _discover(panel, chromium)
+        # Before a queue is declared, no row names a run.
+        assert panel.locator("[data-action='open-run']").count() == 0
+        panel.locator("#queue-max").fill("2")
+        panel.locator("#queue-interval").select_option("10")
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-count"))).to_have_text("2 / 2", timeout=60_000)
+        runs = sorted(
+            (run for run in app.collection.recent_runs() if run.provenance is not None),
+            key=lambda run: run.requested_at,
+        )
+        links = panel.locator("[data-action='open-run']")
+        assert [links.nth(i).get_attribute("data-run") for i in range(links.count())] == [
+            run.collection_run_id for run in runs
+        ]
+        with chromium.expect_page() as opened:
+            links.nth(1).click()
+        page = opened.value
+        page.wait_for_load_state("domcontentloaded")
+        assert page.url == f"{origin}/#/collect?view=jobs&run={runs[1].collection_run_id}"
+        page.close()
+
+
+def test_recovery_rediscovers_the_list_and_icbm_skips_what_it_recorded(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        listing = _discover(panel, chromium)
+        recovery = panel.locator(_role("queue-recovery"))
+        assert recovery.is_hidden()
+        panel.locator("#queue-max").fill("3")
+        panel.locator("#queue-interval").select_option("10")
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
+        first = app.extension_queues.discovery_policy(SUPPLIER)
+        assert first.open_queue is None
+        expect(recovery).to_be_visible(timeout=TIMEOUT_MS)
+        # The operator goes back to the list page (the extension never navigates there itself);
+        # the panel leaves the ended list, and the operator finds the page's products again.
+        listing.goto(LIST_URL)
+        listing.wait_for_load_state("load")
+        listing.bring_to_front()
+        expect(panel.locator("[data-action='discover']")).to_be_enabled(timeout=TIMEOUT_MS)
+        panel.locator("[data-action='discover']").dispatch_event("click")
+        expect(panel.locator(_role("list-found"))).to_have_text("4", timeout=TIMEOUT_MS)
+        assert panel.locator("#queue-skip").is_checked()
+        # The bound is the operator's own again: nothing carried over, nothing filled in.
+        assert panel.locator("#queue-max").input_value() == ""
+        panel.locator("#queue-max").fill("3")
+        panel.locator("#queue-interval").select_option("10")
+        panel.locator("[data-action='queue-start']").dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
+        rows = panel.locator("[data-role='queue-rows'] .queue-row")
+        chips = [rows.nth(i).locator(".chip").inner_text() for i in range(rows.count())]
+        # ICBM skipped the two it recorded (a skipped product takes no read slot): the product it
+        # could not read was tried again, and the list's next product was read for the first time.
+        assert chips == ["건너뜀", "건너뜀", "만료", "RECORDED"]
+        runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
+        assert sorted(run.source_url for run in runs) == [
+            _product("9001"),
+            _product("9002"),
+            _product("9003"),
+        ]
+        assert table_counts(config)["extension_queues"] == 2
+
+
+# ---------------------------------------------------------------- A-UX2: choosing found products
+
+
+def test_only_the_chosen_products_are_queued_and_the_bound_stays_the_operators(
+    chromium: BrowserContext, config: AppConfig
+) -> None:
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        _discover(panel, chromium)
+        chosen = panel.locator(_role("list-selected"))
+        expect(chosen).to_have_text("4")
+        start = panel.locator("[data-action='queue-start']")
+        panel.locator("[data-action='select-none']").dispatch_event("click")
+        expect(chosen).to_have_text("0")
+        assert start.is_disabled()
+        panel.locator("[data-action='select-all']").dispatch_event("click")
+        expect(chosen).to_have_text("4")
+        for number in ("9001", "9015"):
+            panel.locator(f"[data-select='{_product(number)}']").uncheck()
+        expect(chosen).to_have_text("2")
+        # A choice is not the bound: the bound is the operator's own and still empty.
+        assert panel.locator("#queue-max").input_value() == ""
+        panel.locator("#queue-max").fill("2")
+        panel.locator("#queue-interval").select_option("10")
+        start.dispatch_event("click")
+        expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
+        rows = panel.locator("[data-role='queue-rows'] .queue-row")
+        assert rows.count() == 2
+        runs = sorted(
+            (run for run in app.collection.recent_runs() if run.provenance is not None),
+            key=lambda run: run.requested_at,
+        )
+        assert [(run.source_url, run.outcome) for run in runs] == [
+            (_product("9002"), CollectionOutcome.RECORDED),
+            (_product("9003"), CollectionOutcome.RECORDED),
+        ]

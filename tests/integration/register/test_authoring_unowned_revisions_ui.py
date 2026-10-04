@@ -156,6 +156,14 @@ def test_the_screen_authors_with_null_revisions_and_leaves_freeze_disabled(
         for status, count in served["statuses"].items():
             shown = summary.locator(f"[data-status-count='{status}']").inner_text()
             assert shown == f"{status} {count}"
+        # B-UX2: the fix-only panel says where to act on the server's reason, and only that.
+        fix = page.locator(f".register-fixes [data-fix='{AUTHORING_REVISIONS_UNOWNED}']")
+        assert fix.count() == 1
+        assert fix.get_attribute("data-actionability") == "FIX_AVAILABLE"
+        assert fix.get_attribute("data-surface") == "SETTINGS_TARGET_POLICY"
+        listed = page.locator(".register-fixes [data-fix]").count()
+        offered = api.get("/api/v1/screens/register/fixes", headers={"X-ICBM-Client": "pytest"})
+        assert listed == len(offered.json()["fixes"])
     assert not any(path.endswith("/freeze") for _, path, _ in calls)
     assert not any(status >= 500 for _, _, status in calls)
     assert counts(config) == dict.fromkeys(FROZEN_ROWS, 0)

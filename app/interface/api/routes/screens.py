@@ -14,6 +14,7 @@ from app.interface.screens.contracts import (
     ShellView,
     SoldoutView,
 )
+from app.interface.screens.register_fixes import RegisterFixesView
 
 router = APIRouter(tags=["screens"])
 
@@ -71,3 +72,9 @@ def analytics(container: ContainerDep) -> AnalyticsView:
 @router.get("/api/v1/screens/settings")
 def settings(container: ContainerDep) -> SettingsView:
     return container.screens.settings()
+
+
+@router.get("/api/v1/screens/register/fixes")
+def register_fixes(container: ContainerDep) -> RegisterFixesView:
+    """B-UX2: what the operator can fix or re-check now, and where; everything else counted."""
+    return container.register_fixes.fixes()

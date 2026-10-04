@@ -11,7 +11,11 @@ evaluated:
 - ``registration_item_key`` derives from the unit's listing identity and the Item key only;
 - publication assets are exact local artifact identities, with the provider reference PR-D
   prepared under the candidate fingerprint; never a supplier URL;
-- no credential, session or tokenized material can be in it (``app.stages.register.sanitize``).
+- no credential, session or tokenized material can be in it (``app.stages.register.sanitize``);
+- B-DETAIL: under a v2 detail composition the detail is the URL-free plan
+  (``registration-payload/v2``): the composition revision, sections, body format, pinned renderer,
+  the operator's plain body and the ordered detail image asset identities. A BODY-only composition
+  keeps the v1 document exactly.
 
 The SmartStore wire representation is PR-D's: this is the business representation it encodes.
 """
@@ -22,9 +26,11 @@ from typing import Any, Final
 from app.stages.products.model import ReadinessStatus
 from app.stages.register import sanitize
 from app.stages.register.model import registration_item_key, sanitized_digest
-from app.stages.register.preparation import PreflightResult, PreflightStage
+from app.stages.register.preparation import PreflightResult, PreflightStage, detail_plan
 
 PAYLOAD_BUILDER_VERSION: Final = "registration-payload/v1"
+# B-DETAIL: the detail is a URL-free plan the trusted REGISTER renderer renders.
+PAYLOAD_BUILDER_VERSION_V2: Final = "registration-payload/v2"
 
 
 class PayloadNotReadyError(ValueError):
@@ -63,6 +69,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
     assert category is not None and detail is not None and metadata is not None
     assert listing.name is not None
     profile = target.asset_policy.profile
+    plan = detail_plan(request, unit)
     prepared = {asset.key: asset for asset in result.prepared_assets}
     items: list[OutboundItem] = []
     payload_items: list[dict[str, Any]] = []
@@ -126,7 +133,9 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
             "composition_revision": detail.composition_revision,
             "sections": list(detail.sections),
             "body": detail.body,
-        },
+        }
+        if plan is None
+        else plan.canonical(),
         "options": {i.item_id: i.outbound_values["options"] for i in items},
         "templates": dict(sorted(target.templates.items())),
     }
@@ -139,7 +148,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
                 ((sanitize.SECRET_MATERIAL, "publication_assets.provider_asset_ref"),)
             )
     payload = {
-        "builder_version": PAYLOAD_BUILDER_VERSION,
+        "builder_version": PAYLOAD_BUILDER_VERSION if plan is None else PAYLOAD_BUILDER_VERSION_V2,
         "marketplace_key": unit.marketplace_key,
         "marketplace_account_id": unit.marketplace_account_id,
         "listing_shape": unit.listing_shape.value,

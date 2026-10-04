@@ -20,7 +20,7 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -82,6 +82,8 @@ AUTHORING_REVISION_NOT_OWNED = "REGISTER_AUTHORING_REVISION_NOT_OWNED"
 PREPARED_ASSETS_UNAVAILABLE = "REGISTER_PREPARED_ASSETS_UNAVAILABLE"
 MAPPING_REVISION = "mapping_revision"
 COMPOSITION_REVISION = "detail_composition_revision"
+# B-DETAIL: a composition names a section its owned profile does not hold.
+DETAIL_SECTIONS_NOT_PROFILE = "REGISTER_DETAIL_SECTIONS_NOT_PROFILE"
 
 
 @dataclass(frozen=True)
@@ -285,7 +287,7 @@ class RegistrationPreparationService:
         draft = self._registrations.draft(draft_id)
         if draft is None:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
-        self._require_owned_revisions(
+        inputs = self._require_owned_revisions(
             draft.marketplace_key, draft.marketplace_account_id, inputs, revisions
         )
         chosen, problems = resolve_unit(
@@ -327,7 +329,7 @@ class RegistrationPreparationService:
     ) -> PreparationRecord:
         """Append the next revision. An earlier one, and any Snapshot it froze, stay as they are."""
         current = self.preparation(preparation_id)
-        self._require_owned_revisions(
+        inputs = self._require_owned_revisions(
             current.marketplace_key, current.marketplace_account_id, inputs, revisions
         )
         encoded = encode_inputs(inputs)
@@ -572,13 +574,17 @@ class RegistrationPreparationService:
         marketplace_account_id: str,
         inputs: AuthoredInputs,
         submitted: Mapping[str, str | None] | None,
-    ) -> None:
+    ) -> AuthoredInputs:
         """The authoring revisions are server-owned (decision 5801915996): each one a client
         submits, and each one these inputs would store, must be **exactly** the account's current
         target-policy value — ``None`` included under a policy revision appended before the
         authoring-revision owner existed (ADR-0014 §27.1). Anything else is refused
         before anything is written, so no sentinel, default or stale revision ever becomes an
-        authored input."""
+        authored input.
+
+        B-DETAIL: the composition's sections are server-derived. A composition is stored with
+        exactly its owned profile's sections, never a client's own; a client section the profile
+        does not hold is refused. Without a profile the sections stay as authored (BODY-only)."""
         target = self._preflight.target_policy(marketplace_key, marketplace_account_id)
         owned: dict[str, str | None] = {
             MAPPING_REVISION: None if target is None else target.category_mapping_revision,
@@ -592,6 +598,19 @@ class RegistrationPreparationService:
                 "authoring revisions are server-owned: send back exactly the server's values",
                 details={"fields": mismatched},
             )
+        detail = inputs.detail
+        profile = (
+            None if target is None else self._preflight.detail_profile(owned[COMPOSITION_REVISION])
+        )
+        if detail is None or profile is None:
+            return inputs
+        if not set(detail.sections) <= set(profile.sections):
+            raise InputValidationError(
+                DETAIL_SECTIONS_NOT_PROFILE,
+                "the detail sections are the composition profile's own",
+                details={"sections": sorted(set(detail.sections) - set(profile.sections))},
+            )
+        return replace(inputs, detail=replace(detail, sections=profile.sections))
 
     def _draft_revision(self, draft_id: str) -> int:
         draft = self._registrations.draft(draft_id)

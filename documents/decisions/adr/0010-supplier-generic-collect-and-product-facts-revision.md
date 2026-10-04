@@ -40,6 +40,15 @@ M4 = canonical Product identity + current accepted revision link + enrichment/pr
 
 ### 2. Scope of M3
 
+> **Amendment note (DIRECT_URL multi-input; owner decision 2026-10-04, A-UX2 D1).** The canonical
+> DIRECT_URL collection unit is still one URL. The COLLECT screen may take up to 50 URLs at once,
+> one per line, but each URL is its own ordinary single-URL request and its own run, through
+> `POST /api/v1/collect/collections` and every rule below (the target check, the same-product
+> interval, the supplier pacing and the bounded budgets) exactly as one URL alone. The 50 is the
+> operator's input bound, not a batch, a queue or a cap of any run; there is no bulk collection
+> truth, no separate DIRECT_URL collector, and this neither replaces nor redefines E3 discovery or
+> its bounded queue (ADR-0019 §8.1).
+
 - **One operator-supplied KM통상 product URL at a time.**
 - No category crawl, pagination crawl, bulk discovery or related-product traversal.
 - Pipeline:
@@ -127,7 +136,8 @@ ProductFactsRevision persistence                       app/stages/collect/
 >   it happens. The extension's own clock never decides.
 > - A missing cap still refuses fail-closed before any read.
 
-- **Operator-supplied one-product scope only** (§2).
+- **Operator-supplied one-product scope only** (§2). Under §2's amendment note a screen input of up
+  to 50 URLs is that many one-product requests, each paced and budgeted on its own.
 - **Pacing:** the supplier `RequestPolicy` applies unchanged. For KM통상 that is one request at a time, at least 2.0 s between request starts, and a 20 s timeout.
 - **Same-product interval: at least 60 s between real reads of the same product** (ruling on Q2). This is on top of the supplier spacing.
   - Until a stable `source_product_id` is known, the interval is keyed by the normalized in-scope product URL.
