@@ -32,6 +32,7 @@ from app.capabilities.live_safety.retention import RetentionProofService
 from app.capabilities.live_safety.stack import SafetyStack
 from app.capabilities.live_safety.status import LiveStatusService
 from app.capabilities.live_safety.store import LiveAuthorityStore
+from app.capabilities.live_safety.upload_run import AssetUploadRun
 from app.capabilities.live_safety.visual import VisualAcceptanceService
 from app.capabilities.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
 from app.capabilities.review.counts import ReviewCounts
@@ -232,6 +233,8 @@ class Container:
     residual_risk: ResidualRiskAcceptanceService
     safety_stack: SafetyStack
     asset_uploads: AssetUploadService
+    # The operator's upload run (`icbm live upload-assets`, owner decision 5975217061).
+    asset_upload_run: AssetUploadRun
     registration_deletions: RegistrationDeletionService
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
@@ -714,6 +717,17 @@ def build_container(
         candidates=PreparationCandidateGate(registration_preparations, registrations),
         clock=clock,
     )
+    # The only production entry point of the upload owner: an `icbm live upload-assets` run in the
+    # process that owns the data directory. It composes the grant, CONNECT, the execution-mode
+    # window and the M4 lineage stores, and decides nothing itself.
+    asset_upload_run = AssetUploadRun(
+        store=live_store,
+        uploads=asset_uploads,
+        mode=execution_mode,
+        connect=smartstore.connect,
+        sources=source_assets,
+        derived=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+    )
     # ADR-0018 §3.5: the deletion of one ICBM-confirmed registration, through the same send-time
     # stack and the same canonical bearer source. Its exact DELETE grant is the only authority for
     # it, an unknown deletion is never resent, and only a read-back confirms or resolves one.
@@ -878,6 +892,7 @@ def build_container(
         residual_risk=residual_risk,
         safety_stack=safety_stack,
         asset_uploads=asset_uploads,
+        asset_upload_run=asset_upload_run,
         registration_deletions=registration_deletions,
         notice_catalog=notice_catalog,
         restore_drills=restore_drills,
