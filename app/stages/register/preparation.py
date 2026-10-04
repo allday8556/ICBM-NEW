@@ -1275,6 +1275,22 @@ def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[R
         "notices": {k: v.value for k, v in listing.notices.items()},
         "options": {k: dict(v) for k, v in listing.options.items()},
         "templates": dict(unit.target.templates),
+        "delivery_policy": None
+        if unit.target.delivery_policy is None
+        else {
+            "delivery_type": unit.target.delivery_policy.delivery_type,
+            "delivery_attribute_type": unit.target.delivery_policy.delivery_attribute_type,
+            "delivery_fee_type": unit.target.delivery_policy.delivery_fee_type,
+            "base_fee_krw": unit.target.delivery_policy.base_fee_krw,
+            "delivery_fee_pay_type": unit.target.delivery_policy.delivery_fee_pay_type,
+            "return_delivery_company_priority_type": (
+                unit.target.delivery_policy.return_delivery_company_priority_type
+            ),
+            "return_delivery_fee_krw": unit.target.delivery_policy.return_delivery_fee_krw,
+            "exchange_delivery_fee_krw": unit.target.delivery_policy.exchange_delivery_fee_krw,
+            "shipping_address_id": unit.target.delivery_policy.shipping_address_id,
+            "return_address_id": unit.target.delivery_policy.return_address_id,
+        },
         "category": None
         if category is None
         else [category.category_id, category.mapping_revision, category.taxonomy_revision],
@@ -1384,6 +1400,22 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
             "pricing_context_fingerprint": target.pricing_context.fingerprint,
             "sanitizer_profile_version": target.sanitizer_profile_version,
             "templates": dict(target.templates),
+            "delivery_policy": None
+            if target.delivery_policy is None
+            else {
+                "delivery_type": target.delivery_policy.delivery_type,
+                "delivery_attribute_type": target.delivery_policy.delivery_attribute_type,
+                "delivery_fee_type": target.delivery_policy.delivery_fee_type,
+                "base_fee_krw": target.delivery_policy.base_fee_krw,
+                "delivery_fee_pay_type": target.delivery_policy.delivery_fee_pay_type,
+                "return_delivery_company_priority_type": (
+                    target.delivery_policy.return_delivery_company_priority_type
+                ),
+                "return_delivery_fee_krw": target.delivery_policy.return_delivery_fee_krw,
+                "exchange_delivery_fee_krw": target.delivery_policy.exchange_delivery_fee_krw,
+                "shipping_address_id": target.delivery_policy.shipping_address_id,
+                "return_address_id": target.delivery_policy.return_address_id,
+            },
             "duplicate_proof_required": target.duplicate_proof_required,
             "duplicate_lookup_keys": sorted(k.value for k in target.duplicate_lookup_keys),
             "asset_policy": {

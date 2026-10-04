@@ -120,6 +120,7 @@ def inputs(**overrides: Any) -> dict[str, Any]:
             "requires_representative": True,
             "provider_asset_identity_required": True,
         },
+        "delivery_policy": None,
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],
@@ -148,6 +149,21 @@ def save(
         },
         headers=CLIENT,
     )
+
+
+def delivery_policy() -> dict[str, Any]:
+    return {
+        "delivery_type": "DELIVERY",
+        "delivery_attribute_type": "NORMAL",
+        "delivery_fee_type": "PAID",
+        "base_fee_krw": 3000,
+        "delivery_fee_pay_type": "PREPAID",
+        "return_delivery_company_priority_type": "PRIMARY",
+        "return_delivery_fee_krw": 3000,
+        "exchange_delivery_fee_krw": 6000,
+        "shipping_address_id": 200441202,
+        "return_address_id": 200401837,
+    }
 
 
 def counts(config: AppConfig) -> dict[str, int]:
@@ -196,6 +212,23 @@ def test_a_first_save_creates_the_policy_its_revision_and_its_current_pointer(
     }
     # The audit record carries identifiers only, never a policy value.
     assert "shipping-template-test" not in str(events[0].model_dump())
+
+
+def test_delivery_policy_is_revisioned_and_materialized_exactly(
+    api: TestClient, container: Container, account: str
+) -> None:
+    values = inputs(delivery_policy=delivery_policy())
+    saved = save(api, account, values)
+    assert saved.status_code == 200, saved.text
+    assert authored(saved.json()["inputs"]) == values
+
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.delivery_policy is not None
+    assert target.delivery_policy.base_fee_krw == 3000
+    assert target.delivery_policy.return_delivery_fee_krw == 3000
+    assert target.delivery_policy.exchange_delivery_fee_krw == 6000
+    assert target.delivery_policy.shipping_address_id == 200441202
+    assert target.delivery_policy.return_address_id == 200401837
 
 
 def test_a_save_appends_a_revision_and_never_rewrites_the_one_before(

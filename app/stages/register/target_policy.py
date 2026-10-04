@@ -55,7 +55,7 @@ from app.stages.products.pricing import PricingContextInput, PricingError, Round
 from app.stages.register import sanitize
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.model import RegistrationConflictError, canonical_json, sanitized_digest
-from app.stages.register.policy import AssetPolicy, DuplicateKeyKind, TargetPolicy
+from app.stages.register.policy import AssetPolicy, DeliveryPolicy, DuplicateKeyKind, TargetPolicy
 from app.stages.register.target_policy_models import (
     RegistrationTargetPolicy,
     RegistrationTargetPolicyCurrent,
@@ -124,6 +124,26 @@ class AssetPolicyView(_Strict):
     provider_asset_identity_required: StrictBool
 
 
+class DeliveryPolicyView(_Strict):
+    """One explicit physical-delivery profile for SmartStore CREATE.
+
+    The first adopted shape is deliberately narrow: ordinary parcel delivery, a paid fixed fee,
+    prepaid by the buyer and the account's primary return carrier.  Supporting another provider
+    shape requires another reviewed contract rather than silently accepting an arbitrary enum.
+    """
+
+    delivery_type: StrictStr
+    delivery_attribute_type: StrictStr
+    delivery_fee_type: StrictStr
+    base_fee_krw: StrictInt
+    delivery_fee_pay_type: StrictStr
+    return_delivery_company_priority_type: StrictStr
+    return_delivery_fee_krw: StrictInt
+    exchange_delivery_fee_krw: StrictInt
+    shipping_address_id: StrictInt
+    return_address_id: StrictInt
+
+
 class TargetPolicyInputsView(_Strict):
     """The supported target-policy surface (ADR-0015 §2).
 
@@ -136,6 +156,9 @@ class TargetPolicyInputsView(_Strict):
     pricing_context: PricingContextInputView
     sanitizer_profile_version: StrictStr
     asset_policy: AssetPolicyView
+    # Older revisions omitted delivery and keep their original no-delivery meaning.  A physical
+    # product canary supplies the whole object; no member is defaulted.
+    delivery_policy: DeliveryPolicyView | None = None
     templates: dict[StrictStr, StrictStr]
     duplicate_proof_required: StrictBool
     duplicate_lookup_keys: list[DuplicateKeyKind]
@@ -229,6 +252,42 @@ def encode_content(
         _label(kind, "templates"): _label(identity, f"templates.{kind}")
         for kind, identity in inputs.templates.items()
     }
+    delivery = inputs.delivery_policy
+    if delivery is not None:
+        expected = {
+            "delivery_type": "DELIVERY",
+            "delivery_attribute_type": "NORMAL",
+            "delivery_fee_type": "PAID",
+            "delivery_fee_pay_type": "PREPAID",
+            "return_delivery_company_priority_type": "PRIMARY",
+        }
+        for name, value in expected.items():
+            if getattr(delivery, name) != value:
+                raise _invalid(
+                    TARGET_POLICY_INVALID,
+                    f"the adopted SmartStore delivery profile requires {value}",
+                    f"delivery_policy.{name}",
+                )
+        for name, maximum in (
+            ("base_fee_krw", 200_000),
+            ("return_delivery_fee_krw", 1_000_000),
+            ("exchange_delivery_fee_krw", 1_000_000),
+        ):
+            value = getattr(delivery, name)
+            if value < 0 or value > maximum:
+                raise _invalid(
+                    TARGET_POLICY_INVALID,
+                    f"the fee must be between 0 and {maximum}",
+                    f"delivery_policy.{name}",
+                )
+        for name in ("shipping_address_id", "return_address_id"):
+            value = getattr(delivery, name)
+            if value <= 0:
+                raise _invalid(
+                    TARGET_POLICY_INVALID,
+                    "a positive provider address-book id is required",
+                    f"delivery_policy.{name}",
+                )
     keys = [key.value for key in inputs.duplicate_lookup_keys]
     if len(set(keys)) != len(keys):
         raise _invalid(
@@ -258,6 +317,7 @@ def encode_content(
             "requires_representative": asset.requires_representative,
             "provider_asset_identity_required": asset.provider_asset_identity_required,
         },
+        "delivery_policy": None if delivery is None else delivery.model_dump(mode="json"),
         "templates": dict(sorted(templates.items())),
         "duplicate_proof_required": inputs.duplicate_proof_required,
         "duplicate_lookup_keys": sorted(keys),
@@ -280,11 +340,12 @@ def inputs_of(content: Mapping[str, Any]) -> TargetPolicyInputsView:
     """The authored inputs a stored revision holds."""
     return TargetPolicyInputsView.model_validate(
         {
-            key: content[key]
+            key: content.get(key)
             for key in TargetPolicyInputsView.model_fields
-            if key != "duplicate_lookup_keys"
+            if key not in {"duplicate_lookup_keys", "delivery_policy"}
         }
         | {"duplicate_lookup_keys": [DuplicateKeyKind(k) for k in content["duplicate_lookup_keys"]]}
+        | {"delivery_policy": content.get("delivery_policy")}
         | {
             "pricing_context": {
                 **content["pricing_context"],
@@ -300,6 +361,7 @@ def target_policy_of(policy_revision: str, content: Mapping[str, Any]) -> Target
     inputs = inputs_of(content)
     pricing = inputs.pricing_context
     asset = inputs.asset_policy
+    delivery = inputs.delivery_policy
     return TargetPolicy(
         marketplace_key=str(content["marketplace_key"]),
         marketplace_account_id=str(content["marketplace_account_id"]),
@@ -314,6 +376,7 @@ def target_policy_of(policy_revision: str, content: Mapping[str, Any]) -> Target
             requires_representative=asset.requires_representative,
             provider_asset_identity_required=asset.provider_asset_identity_required,
         ),
+        delivery_policy=None if delivery is None else DeliveryPolicy(**delivery.model_dump()),
         category_mapping_revision=inputs.category_mapping_revision,
         detail_composition_revision=inputs.detail_composition_revision,
         templates=dict(inputs.templates),

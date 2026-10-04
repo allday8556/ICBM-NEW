@@ -53,6 +53,11 @@ VALUES = {
     "asset_profile": "asset-profile-ui-1",
     "min_images": "1",
     "max_images": "10",
+    "base_fee_krw": "3000",
+    "return_delivery_fee_krw": "3000",
+    "exchange_delivery_fee_krw": "6000",
+    "shipping_address_id": "200441202",
+    "return_address_id": "200401837",
 }
 
 
@@ -122,7 +127,12 @@ def _fill(page: Page, account: str, values: dict[str, str]) -> None:
     editor.locator("[data-policy-field='templates']").fill(
         "shipping=shipping-template-ui\nreturns=returns-template-ui"
     )
-    for name in ("requires_representative", "duplicate_proof_required", "lookup_SELLER_CODE"):
+    for name in (
+        "requires_representative",
+        "physical_delivery",
+        "duplicate_proof_required",
+        "lookup_SELLER_CODE",
+    ):
         editor.locator(f"[data-policy-field='{name}']").check()
 
 
@@ -188,6 +198,10 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         target = restarted.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.policy_revision == current.policy_revision
         assert target.pricing_context.fee_rate == "0.055"
+        assert target.delivery_policy is not None
+        assert target.delivery_policy.shipping_address_id == 200441202
+        assert target.delivery_policy.return_address_id == 200401837
+        assert target.delivery_policy.exchange_delivery_fee_krw == 6000
     assert _counts(config) == dict.fromkeys(TABLES, 1)
 
 
