@@ -219,7 +219,8 @@ AUTO_SELECTION = "0040_image_auto_selection"
 CATEGORY_CATALOG = "0041_category_catalog"
 # ADR-0013 owner amendment C1/C2: Product Core state, never registration state.
 COMMON_OPTIONS = "0042_common_sales_option_owner"
-SCHEMA_HEAD = COMMON_OPTIONS
+COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
+SCHEMA_HEAD = COMMON_OPTION_FACT_MAPPING
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -243,6 +244,7 @@ AFTER_M5 = (
     AUTO_SELECTION,
     CATEGORY_CATALOG,
     COMMON_OPTIONS,
+    COMMON_OPTION_FACT_MAPPING,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

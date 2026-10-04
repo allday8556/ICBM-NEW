@@ -66,16 +66,19 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
+The Common Sales Option C1/C2 owner added three PRODUCT DB modules, migration `0042` and one
+integration and one unit suite. Its reviewed Product Fact correspondence slice added three more
+PRODUCT DB modules, migration `0043` and one integration and one unit suite.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 276 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 280 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 72 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 132 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 73 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 135 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -97,13 +100,13 @@ one integration plus one unit suite.
 | `integrations/` | 43 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 22 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 273 | tests |
+| `tests/` | 275 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 108 | integration tests by runtime owner |
+| `tests/integration/` | 109 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 99 | unit tests by runtime owner |
+| `tests/unit/` | 100 | unit tests by runtime owner |
 | `ui/` | 55 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 46 | the served web client |

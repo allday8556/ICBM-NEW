@@ -3770,6 +3770,10 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "common_sales_option_axes",
         "common_sales_option_values",
         "current_common_sales_option_revision_moves",
+        "common_option_fact_mapping_revisions",
+        "common_option_fact_axis_mappings",
+        "common_option_fact_value_mappings",
+        "current_common_option_fact_mapping_moves",
     }
     offenders = [
         path
