@@ -71,16 +71,18 @@ integration and one unit suite. Its reviewed Product Fact correspondence slice a
 PRODUCT DB modules, migration `0043` and one integration and one unit suite.
 The source-proven Atomic SKU slice added three PRODUCT DB modules, migration `0044` and one
 integration and one unit suite.
+The AtomicSKU-qualified Product Item identity slice added two PRODUCT DB modules and migration
+`0045`; it leaves the legacy no-option Item and `registration-item-key/v1` contracts unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 284 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 287 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 74 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 138 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 75 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 140 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |

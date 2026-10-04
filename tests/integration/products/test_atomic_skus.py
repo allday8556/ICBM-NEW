@@ -2,8 +2,10 @@
 
 import contextlib
 import sqlite3
+import uuid
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.config import AppConfig, database_path
 from app.container import Container
@@ -25,7 +27,8 @@ from app.stages.products.common_options import (
     CommonSalesOptionAxisSpec,
     CommonSalesOptionValueSpec,
 )
-from app.stages.products.model import MoveReason
+from app.stages.products.model import CompositionSpec, MoveReason
+from app.stages.register.model import registration_item_key_v2
 from tests.support.collect_support import base_fields, collected, confirmed
 
 pytestmark = pytest.mark.integration
@@ -35,6 +38,28 @@ def _raw(config: AppConfig) -> sqlite3.Connection:
     raw = sqlite3.connect(database_path(config.data_dir))
     raw.execute("PRAGMA foreign_keys=ON")
     return raw
+
+
+def _raw_atomic_item_insert(
+    raw: sqlite3.Connection,
+    group: str,
+    composition_id: str,
+    composition_signature: str,
+    atomic_sku_id: str,
+    selection_signature: str,
+) -> None:
+    raw.execute(
+        "INSERT INTO atomic_sku_product_items VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            str(uuid.uuid4()),
+            group,
+            composition_id,
+            composition_signature,
+            atomic_sku_id,
+            selection_signature,
+            "2026-10-04 00:00:00",
+        ),
+    )
 
 
 def _option_fields(
@@ -560,6 +585,7 @@ def test_atomic_sku_identity_changes_with_canonical_value_or_unit(
 
 
 def test_current_for_use_fails_closed_on_source_revision_and_recovers_same_identity(
+    config: AppConfig,
     container: Container,
 ) -> None:
     group, revision_id, common = _foundation(container)
@@ -569,6 +595,16 @@ def test_current_for_use_fails_closed_on_source_revision_and_recovers_same_ident
         reason="initial",
         decided_by="owner",
         correlation_id="atomic-initial",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    initial_item = container.atomic_sku_items.item(
+        group, composition.composition_id, initial.atomic_skus[0].atomic_sku_id
+    )
+    initial_rik2 = registration_item_key_v2(
+        "icbm-listing-1",
+        group,
+        composition.composition_signature,
+        initial.atomic_skus[0].atomic_sku_id,
     )
     source = container.product_store.source_product("kmretail", "1234")
     replacement = container.revisions.append(collected(fields=_option_fields(), images=()))
@@ -582,6 +618,22 @@ def test_current_for_use_fails_closed_on_source_revision_and_recovers_same_ident
 
     assert container.atomic_skus.current(group) == initial
     assert container.atomic_skus.current_for_use(group) is None
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, initial.atomic_skus[0].atomic_sku_id
+        )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            initial.atomic_skus[0].atomic_sku_id,
+            initial.atomic_skus[0].selection_signature,
+        )
 
     _record_mapping_for_common(container, group, common, replacement.revision_id)
     recovered = container.atomic_skus.record_source_proven_set(
@@ -594,9 +646,23 @@ def test_current_for_use_fails_closed_on_source_revision_and_recovers_same_ident
 
     assert recovered.atomic_skus[0].atomic_sku_id == initial.atomic_skus[0].atomic_sku_id
     assert container.atomic_skus.current_for_use(group) == recovered
+    recovered_item = container.atomic_sku_items.item(
+        group, composition.composition_id, recovered.atomic_skus[0].atomic_sku_id
+    )
+    assert recovered_item.atomic_sku_item_id == initial_item.atomic_sku_item_id
+    assert (
+        registration_item_key_v2(
+            "icbm-listing-1",
+            group,
+            composition.composition_signature,
+            recovered.atomic_skus[0].atomic_sku_id,
+        )
+        == initial_rik2
+    )
 
 
 def test_current_for_use_fails_closed_when_common_options_advance(
+    config: AppConfig,
     container: Container,
 ) -> None:
     group, revision_id, common = _foundation(container)
@@ -634,9 +700,27 @@ def test_current_for_use_fails_closed_when_common_options_advance(
 
     assert container.atomic_skus.current(group) == historical
     assert container.atomic_skus.current_for_use(group) is None
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, historical.atomic_skus[0].atomic_sku_id
+        )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            historical.atomic_skus[0].atomic_sku_id,
+            historical.atomic_skus[0].selection_signature,
+        )
 
 
 def test_current_for_use_fails_closed_when_mapping_evidence_source_advances(
+    config: AppConfig,
     container: Container,
 ) -> None:
     group, configuration_revision_id, common = _foundation(container)
@@ -693,9 +777,27 @@ def test_current_for_use_fails_closed_when_mapping_evidence_source_advances(
 
     assert container.atomic_skus.current(group) == historical
     assert container.atomic_skus.current_for_use(group) is None
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, historical.atomic_skus[0].atomic_sku_id
+        )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            historical.atomic_skus[0].atomic_sku_id,
+            historical.atomic_skus[0].selection_signature,
+        )
 
 
 def test_current_for_use_fails_closed_when_mapping_advances(
+    config: AppConfig,
     container: Container,
 ) -> None:
     group, revision_id, common = _foundation(container)
@@ -734,3 +836,220 @@ def test_current_for_use_fails_closed_when_mapping_advances(
 
     assert container.atomic_skus.current(group) == historical
     assert container.atomic_skus.current_for_use(group) is None
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, historical.atomic_skus[0].atomic_sku_id
+        )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            historical.atomic_skus[0].atomic_sku_id,
+            historical.atomic_skus[0].selection_signature,
+        )
+
+
+def test_one_stale_source_dependency_invalidates_the_entire_multi_source_set(
+    config: AppConfig, container: Container
+) -> None:
+    group, first_revision, common = _foundation(container)
+    second_revision = container.revisions.append(
+        collected(
+            fields=_option_fields(),
+            images=(),
+            supplier_key="other",
+            source_product_id="5678",
+            source_url="https://other.example/products/5678",
+        )
+    )
+    second_source = container.product_store.source_product("other", "5678")
+    container.product_store.record_move(
+        second_source.source_product_uid,
+        second_revision.revision_id,
+        reason=MoveReason.INITIAL,
+        decided_by="owner",
+        correlation_id="second-source",
+    )
+    container.product_store.confirm_new_member(
+        group,
+        second_source.source_product_uid,
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="second-member",
+    )
+    atomic_set = container.atomic_skus.record_source_proven_set(
+        group,
+        (
+            _configuration(common, first_revision, 0, ("300mg", "30정")),
+            _configuration(common, second_revision.revision_id, 1, ("500mg", "60정")),
+        ),
+        reason="multi-source proof",
+        decided_by="owner",
+        correlation_id="multi-source",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    first_item = container.atomic_sku_items.item(
+        group, composition.composition_id, atomic_set.atomic_skus[0].atomic_sku_id
+    )
+    replacement = container.revisions.append(
+        collected(
+            fields=_option_fields(),
+            images=(),
+            supplier_key="other",
+            source_product_id="5678",
+            source_url="https://other.example/products/5678",
+        )
+    )
+    container.product_store.record_move(
+        second_source.source_product_uid,
+        replacement.revision_id,
+        reason=MoveReason.NEWER_REVISION,
+        decided_by="owner",
+        correlation_id="second-source-advanced",
+    )
+
+    assert container.atomic_skus.current_for_use(group) is None
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, atomic_set.atomic_skus[0].atomic_sku_id
+        )
+    assert (
+        container.atomic_sku_items.find(
+            group, composition.composition_signature, atomic_set.atomic_skus[0].atomic_sku_id
+        )
+        == first_item
+    )
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="not current for use"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            atomic_set.atomic_skus[0].atomic_sku_id,
+            atomic_set.atomic_skus[0].selection_signature,
+        )
+
+
+def test_atomic_sku_items_extend_legacy_items_without_reinterpreting_them(
+    config: AppConfig, container: Container
+) -> None:
+    group, revision, common = _foundation(container)
+    atomic_set = container.atomic_skus.record_source_proven_set(
+        group,
+        (
+            _configuration(common, revision, 0, ("300mg", "30정")),
+            _configuration(common, revision, 1, ("500mg", "60정")),
+        ),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    legacy = container.product_store.item(group, composition.composition_id)
+
+    first = container.atomic_sku_items.item(
+        group, composition.composition_id, atomic_set.atomic_skus[0].atomic_sku_id
+    )
+    same = container.atomic_sku_items.item(
+        group, composition.composition_id, atomic_set.atomic_skus[0].atomic_sku_id
+    )
+    second = container.atomic_sku_items.item(
+        group, composition.composition_id, atomic_set.atomic_skus[1].atomic_sku_id
+    )
+
+    assert same == first
+    assert first.atomic_sku_item_id != second.atomic_sku_item_id
+    assert first.atomic_sku_id != second.atomic_sku_id
+    assert first.composition_signature == legacy.composition_signature
+    assert first.atomic_sku_item_id != legacy.item_id
+    assert container.product_store.item(group, composition.composition_id) == legacy
+    assert (
+        container.atomic_sku_items.find(
+            group, composition.composition_signature, first.atomic_sku_id
+        )
+        == first
+    )
+
+    with contextlib.closing(_raw(config)) as raw:
+        for statement in (
+            "UPDATE atomic_sku_product_items SET composition_signature = '" + "0" * 64 + "'",
+            "DELETE FROM atomic_sku_product_items",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+                raw.execute(statement)
+
+
+def test_atomic_sku_item_requires_an_active_product_group(
+    config: AppConfig, container: Container
+) -> None:
+    group, revision, common = _foundation(container)
+    atomic_set = container.atomic_skus.record_source_proven_set(
+        group,
+        (_configuration(common, revision, 0, ("300mg", "30정")),),
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+    atomic_sku = atomic_set.atomic_skus[0]
+
+    with contextlib.closing(_raw(config)) as raw:
+        raw.execute(
+            "UPDATE product_groups SET status = 'RETIRED',"
+            " retired_at = '2026-10-04 00:00:00' WHERE product_group_id = ?",
+            (group,),
+        )
+        raw.commit()
+
+    with pytest.raises(IntegrityError, match="ACTIVE group"):
+        container.atomic_sku_items.item(group, composition.composition_id, atomic_sku.atomic_sku_id)
+
+    with (
+        contextlib.closing(_raw(config)) as raw,
+        pytest.raises(sqlite3.IntegrityError, match="ACTIVE group"),
+    ):
+        _raw_atomic_item_insert(
+            raw,
+            group,
+            composition.composition_id,
+            composition.composition_signature,
+            atomic_sku.atomic_sku_id,
+            atomic_sku.selection_signature,
+        )
+
+
+def test_atomic_sku_item_requires_current_membership(container: Container) -> None:
+    group, revision, common = _foundation(container)
+    specs = (
+        _configuration(common, revision, 0, ("300mg", "30정")),
+        _configuration(common, revision, 1, ("500mg", "60정")),
+    )
+    first_set = container.atomic_skus.record_source_proven_set(
+        group,
+        specs,
+        reason="reviewed",
+        decided_by="owner",
+        correlation_id="atomic-1",
+    )
+    container.atomic_skus.record_source_proven_set(
+        group,
+        specs[:1],
+        reason="reviewed removal",
+        decided_by="owner",
+        correlation_id="atomic-2",
+    )
+    composition = container.product_store.composition(CompositionSpec.default_single_unit())
+
+    with pytest.raises(InputValidationError, match="not current"):
+        container.atomic_sku_items.item(
+            group, composition.composition_id, first_set.atomic_skus[1].atomic_sku_id
+        )

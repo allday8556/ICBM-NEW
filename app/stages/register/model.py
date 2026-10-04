@@ -266,6 +266,8 @@ def summarize(states: Iterable[IntentState]) -> BatchSummary:
 LISTING_IDENTITY: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
 ITEM_KEY_VERSION: Final = "registration-item-key/v1"
 ITEM_KEY_PREFIX: Final = "rik1-"
+ITEM_KEY_V2_VERSION: Final = "registration-item-key/v2"
+ITEM_KEY_V2_PREFIX: Final = "rik2-"
 IDEMPOTENCY_VERSION: Final = "registration-idempotency/v1"
 
 
@@ -311,6 +313,29 @@ def registration_item_key(
         }
     )
     return ITEM_KEY_PREFIX + hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
+def registration_item_key_v2(
+    listing_identity: str,
+    product_group_id: str,
+    composition_signature: str,
+    atomic_sku_id: str,
+) -> str:
+    """The additive Item key for a listing unit whose Item is one explicit AtomicSKU.
+
+    The v1 function stays the no-option compatibility contract. No label, option display value,
+    price, or order position participates in either identity.
+    """
+    text = canonical_json(
+        {
+            "version": ITEM_KEY_V2_VERSION,
+            "listing_identity": listing_identity,
+            "product_group_id": product_group_id,
+            "composition_signature": composition_signature,
+            "atomic_sku_id": atomic_sku_id,
+        }
+    )
+    return ITEM_KEY_V2_PREFIX + hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
 def idempotency_key(
