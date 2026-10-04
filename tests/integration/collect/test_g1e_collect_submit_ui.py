@@ -493,6 +493,9 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
                 assert json.loads(shown) == json.loads(field["value_json"]), field["key"]
                 row.locator("[data-action='toggle-evidence']").click()
                 assert facts.locator(f"tr[data-evidence-for='{field['key']}']").count() == 0
+        # Inspecting other confirmed fields must not collapse or replace the first field's detail.
+        assert toggle.get_attribute("aria-expanded") == "true"
+        assert evidence.count() == 1
         entries = evidence.locator("[data-role='evidence'] tbody tr")
         assert [
             entries.nth(i).get_attribute("data-evidence-kind") for i in range(entries.count())
