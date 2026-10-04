@@ -70,6 +70,8 @@ This ADR is a contract. It names entities, owners, states and invariants. It doe
 - The listing shape is one of `SINGLE_LISTING_WITH_OPTIONS | SEPARATE_LISTINGS | SELECTED_OFFERS`.
 - For `SINGLE_LISTING_WITH_OPTIONS`, every Item resolves to one SmartStore category, and the SmartStore adapter provides a **deterministic compatibility check**. AI never decides whether Items can be combined into one option listing.
 - Price stays Item-owned: each Item carries its exact M4 `PricingSnapshot` for the target context. There is no listing-level price flattening.
+  A Draft is re-pinned to the price M4 holds current only by the Draft command owner's re-pin
+  (B-PRICE1, ADR-0015 §5 amendment note), never by an operator-supplied price.
 
 **The provider-listing unit (ruling R3).** A Draft may hold many Items, but CREATE idempotency belongs to the **provider listing**: one listing SmartStore creates.
 - **Before any execution, the Draft is resolved into provider-listing units. Each unit has exactly one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`.**
@@ -659,6 +661,18 @@ Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is
 > pre-send population and the open execution-producer items, so REGISTER never reads the review
 > owner; it lists only `FIX_AVAILABLE` and `RECHECK` rows and counts the rest. It fixes nothing:
 > the screen only navigates to the named surface.
+
+> **Amendment note (B-PREVIEW; owner decisions `5975647306`, 2026-10-04).** A frozen Snapshot has a
+> read-only marketplace preview (`GET /api/v1/register/snapshots/{id}/preview`,
+> `app/stages/register/preview.py`, `register-snapshot-preview/v1`): its frozen outbound values —
+> a preview-only exception to "no payload value is carried" — and every field of the document the
+> provider wire projection would send, through the same injected projection the sender uses. No
+> provider URL ever reaches the screen: URL-shaped document values are redacted, images are shown
+> by role, position, local identity and whether a provider asset was prepared, and the detail body
+> is its structure (sections, detail image slots, body paragraphs as plain text), never the
+> rendered HTML. Values frozen but never sent (tags, attributes) are shown marked as not sent. A
+> projection the adapter refuses is shown with its own refusal code. A candidate (unfrozen) preview
+> is not part of it and needs its own contract.
 
 ### 23. The M5 / M6 boundary
 

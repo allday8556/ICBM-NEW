@@ -169,6 +169,10 @@ authorization.
 > It is not a review queue: it resolves no item and fixes nothing, and its review rows are only the
 > REGISTER execution producer's open items.
 
+> **B-PREVIEW (owner decisions `5975647306`).** The kept "marketplace preview" is the frozen-Snapshot
+> preview (ADR-0014 §22 amendment note): the prototype's category name path and shipping fee have
+> no Snapshot source and are not shown; provider image URLs are never shown.
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`
