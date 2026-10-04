@@ -44,6 +44,7 @@ from app.capabilities.review.reconciler import ReviewReconciler
 from app.capabilities.review.register_producer import RegisterReviewProducer
 from app.capabilities.review.service import ReviewService
 from app.config import AppConfig
+from app.interface.screens.register_fixes import RegisterFixService
 from app.interface.screens.service import ScreenService
 from app.platform.core.clock import Clock, SystemClock
 from app.platform.core.code_identity import running_checkout_sha, running_code_digest
@@ -201,6 +202,8 @@ class Container:
     diagnostics: DiagnosticsService
     readiness: ReadinessService
     screens: ScreenService
+    # B-UX2: the fix-only projection of Registration Management (screens layer).
+    register_fixes: RegisterFixService
     connect: ConnectService
     source_assets: SourceAssetStore
     source_asset_recorder: SourceAssetRecorder
@@ -783,7 +786,7 @@ def build_container(
         producers=[
             CollectReviewProducer(revisions),
             ProductsReviewProducer(product_readiness),
-            RegisterReviewProducer(registrations),
+            RegisterReviewProducer(registrations, clock),
             PreflightReviewProducer(
                 registrations=registrations,
                 preparations=registration_preparations,
@@ -862,6 +865,7 @@ def build_container(
         diagnostics=diagnostics,
         readiness=readiness,
         screens=screens,
+        register_fixes=RegisterFixService(register_service, review_items, clock),
         connect=connect,
         source_assets=source_assets,
         source_asset_recorder=source_asset_recorder,
