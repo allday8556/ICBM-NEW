@@ -63,8 +63,13 @@ def test_only_an_action_names_a_surface(entry: tuple[Actionability, FixSurface |
         ("PAYLOAD_EXTERNAL_URL", (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_PREPARATION)),
         # B-DETAIL's reason is consumed as it is: no screen places a detail image.
         ("PUBLICATION_DETAIL_IMAGES_UNPLACED", (Actionability.NOT_IMPLEMENTED, None)),
-        # A price pin is re-pinned only by the pricing owner (B-PRICE1 has no command yet).
-        ("DRAFT_PRICE_PIN_SUPERSEDED", (Actionability.NOT_IMPLEMENTED, None)),
+        # B-PRICE1: a moved price is re-pinned by the unit's re-pin action.
+        ("DRAFT_PRICE_PIN_SUPERSEDED", (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_ACTION)),
+        (
+            "M4_PRICING.PRICING_SNAPSHOT_SUPERSEDED",
+            (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_ACTION),
+        ),
+        ("DRAFT_PRICE_PIN_MISSING", (Actionability.NOT_IMPLEMENTED, None)),
     ],
 )
 def test_preflight_actions(code: str, expected: tuple[Actionability, FixSurface | None]) -> None:

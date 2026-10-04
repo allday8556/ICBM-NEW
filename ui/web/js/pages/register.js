@@ -865,8 +865,17 @@ function actionCell(unit, action, onDone) {
 
 // B-PRICE1: when the server says a pinned price is no longer M4's current one, the operator may
 // ask M4 to price again and re-pin the Draft. The page names no price; the server decides all.
+const REPIN_REASONS = new Set(['PRICING_SNAPSHOT_MISSING', 'PRICING_SNAPSHOT_SUPERSEDED']);
+
 function repinBlock(unit, onDone) {
-  if (!unit.items.some((item) => item.price_pin_current === false)) return null;
+  // Offered when the server says the pin is not M4's current price, or M4's own pricing readiness
+  // names a missing or superseded snapshot; the server decides everything else.
+  const moved = unit.items.some(
+    (item) =>
+      item.price_pin_current === false ||
+      (item.pricing_reason_codes ?? []).some((code) => REPIN_REASONS.has(code)),
+  );
+  if (!moved) return null;
   const button = h('button', { type: 'button', class: 'btn', 'data-action': 'REPIN_DRAFT' }, '가격 다시 고정');
   button.addEventListener('click', async () => {
     button.disabled = true;
