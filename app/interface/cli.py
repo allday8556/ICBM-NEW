@@ -93,6 +93,7 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "restore-drill-create",
     "prove-retention",
     "record-residual-risk-acceptance",
+    "upload-assets",
 )
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
@@ -243,6 +244,21 @@ def _add_operator_commands(live_commands: Any) -> None:
         "prove-retention", help="record the evidence-retention proof as it is now (ADR-0018 §8)"
     )
     retention.add_argument("--actor", required=True)
+    upload = live_commands.add_parser(
+        "upload-assets",
+        help=(
+            "upload one ASSET grant's artifacts in a bounded LIVE window of this process"
+            " (ADR-0018 §4.1 amendment note)"
+        ),
+    )
+    upload.add_argument("--grant-id", required=True)
+    upload.add_argument(
+        "--window-s",
+        required=True,
+        type=int,
+        help="the LIVE window of this run in seconds, at most 14400; it closes when the run ends",
+    )
+    upload.add_argument("--actor", required=True)
 
 
 def _add_window(command: argparse.ArgumentParser) -> None:
@@ -563,6 +579,15 @@ def _restore_drill_create(container: Any, args: argparse.Namespace, correlation_
     )
 
 
+def _upload_assets(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    """The one production upload entry point (owner decision 5975217061): the run composes the
+    grant, CONNECT, this process's bounded LIVE window and the M4 lineage stores; every layer of
+    the send-time stack still decides each upload."""
+    return container.asset_upload_run.run(
+        args.grant_id, window_s=args.window_s, actor=args.actor, correlation_id=correlation_id
+    )
+
+
 def _prove_retention(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
     proof_id, verdict = container.retention.prove(actor=args.actor, correlation_id=correlation_id)
     return {"proof_id": proof_id, "verdict": verdict}
@@ -581,6 +606,7 @@ _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "restore-drill-create": _restore_drill_create,
     "prove-retention": _prove_retention,
     "record-residual-risk-acceptance": _record_residual_risk_acceptance,
+    "upload-assets": _upload_assets,
 }
 
 

@@ -106,6 +106,9 @@ def test_every_operator_command_is_an_owning_live_command() -> None:
         ("live", "restore-drill-create"),
         ("live", "prove-retention"),
         ("live", "record-residual-risk-acceptance"),
+        # The one command that reaches a provider: a bounded upload run (owner decision
+        # 5975217061), still decided upload by upload by the send-time stack.
+        ("live", "upload-assets"),
     }
     # They hold the data directory like every other writer; none is classified read-only.
     assert commands <= set(cli.OWNING_COMMANDS)
@@ -259,6 +262,21 @@ def test_an_owner_refusal_is_printed_with_its_own_code_and_writes_nothing(
     )
     assert code == 1 and "LIVE_GRANT_PREPARATION_NOT_FOUND" in capsys.readouterr().err
     assert _rows(fresh, "live_grants") == 0
+    # The upload run: an unknown grant opens no window, reaches no provider and records nothing.
+    code = cli.main(
+        [
+            "live",
+            "upload-assets",
+            "--grant-id",
+            "no-such-grant",
+            "--window-s",
+            "900",
+            "--actor",
+            "op",
+        ]
+    )
+    assert code == 1 and "LIVE_UPLOAD_GRANT_NOT_FOUND" in capsys.readouterr().err
+    assert _rows(fresh, "asset_upload_attempts") == 0
 
 
 # ---------------------------------------------------------------- through the owners of a real unit
