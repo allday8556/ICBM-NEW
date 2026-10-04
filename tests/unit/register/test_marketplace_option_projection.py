@@ -19,6 +19,7 @@ from app.stages.register.marketplace_option_projection import (
     ATOMIC_SKU_LIMIT_EXCEEDED,
     AXIS_LIMIT_EXCEEDED,
     METADATA_MISSING,
+    METADATA_UNADOPTED,
     METADATA_UNREVIEWED,
     OPTIONS_UNSUPPORTED,
     VALUE_LIMIT_EXCEEDED,
@@ -124,6 +125,7 @@ def metadata(**changes: object) -> ReviewedOptionStructureMetadata:
         marketplace_key="coupang",
         category_id="health",
         metadata_revision_id="metadata-1",
+        adopted=True,
         reviewed=True,
         options_supported=True,
         max_axes=2,
@@ -170,7 +172,7 @@ def test_preview_renders_only_the_two_source_proven_sparse_atomic_skus() -> None
     assert common_options().axes[0].semantic_key == "individual_weight"
 
 
-def test_absent_or_unreviewed_metadata_never_infers_compatibility() -> None:
+def test_absent_unadopted_or_unreviewed_metadata_never_infers_compatibility() -> None:
     absent = preview_marketplace_option_structure(
         common_options(),
         atomic_skus(),
@@ -178,13 +180,16 @@ def test_absent_or_unreviewed_metadata_never_infers_compatibility() -> None:
         marketplace_key="coupang",
         category_id="health",
     )
+    unadopted = preview(metadata(adopted=False))
     unreviewed = preview(metadata(reviewed=False))
 
     assert absent.compatibility is OptionStructureCompatibility.REVIEW_REQUIRED
     assert absent.reasons[0].code == METADATA_MISSING
+    assert unadopted.compatibility is OptionStructureCompatibility.REVIEW_REQUIRED
+    assert unadopted.reasons[0].code == METADATA_UNADOPTED
     assert unreviewed.compatibility is OptionStructureCompatibility.REVIEW_REQUIRED
     assert unreviewed.reasons[0].code == METADATA_UNREVIEWED
-    assert len(absent.atomic_skus) == len(unreviewed.atomic_skus) == 2
+    assert len(absent.atomic_skus) == len(unadopted.atomic_skus) == len(unreviewed.atomic_skus) == 2
 
 
 def test_metadata_from_another_marketplace_or_category_is_not_reused() -> None:

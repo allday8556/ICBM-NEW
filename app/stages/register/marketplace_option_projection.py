@@ -19,6 +19,7 @@ NOT_EVALUATED: Final = "NOT_EVALUATED"
 NOT_VERIFIED: Final = "NOT_VERIFIED"
 
 METADATA_MISSING: Final = "OPTION_STRUCTURE_METADATA_MISSING"
+METADATA_UNADOPTED: Final = "OPTION_STRUCTURE_METADATA_UNADOPTED"
 METADATA_UNREVIEWED: Final = "OPTION_STRUCTURE_METADATA_UNREVIEWED"
 OPTIONS_UNSUPPORTED: Final = "OPTION_STRUCTURE_OPTIONS_UNSUPPORTED"
 AXIS_LIMIT_EXCEEDED: Final = "OPTION_STRUCTURE_AXIS_LIMIT_EXCEEDED"
@@ -47,6 +48,7 @@ class ReviewedOptionStructureMetadata:
     marketplace_key: str
     category_id: str
     metadata_revision_id: str
+    adopted: bool
     reviewed: bool
     options_supported: bool
     max_axes: int
@@ -221,6 +223,8 @@ def preview_marketplace_option_structure(
             or metadata.category_id != requested_category
         ):
             reasons.append(OptionCompatibilityReason(METADATA_MISSING, "metadata_scope"))
+        elif not metadata.adopted:
+            reasons.append(OptionCompatibilityReason(METADATA_UNADOPTED, "metadata"))
         elif not metadata.reviewed:
             reasons.append(OptionCompatibilityReason(METADATA_UNREVIEWED, "metadata"))
         else:
@@ -264,6 +268,7 @@ __all__ = [
     "ATOMIC_SKU_LIMIT_EXCEEDED",
     "AXIS_LIMIT_EXCEEDED",
     "METADATA_MISSING",
+    "METADATA_UNADOPTED",
     "METADATA_UNREVIEWED",
     "OPTIONS_UNSUPPORTED",
     "OPTION_STRUCTURE_PREVIEW_VERSION",
