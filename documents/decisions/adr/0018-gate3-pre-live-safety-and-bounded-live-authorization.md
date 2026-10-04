@@ -390,6 +390,23 @@ independently of any UI state and of any grant.
 > into a fresh restore root the operator names, and `prove-retention` calls
 > `RetentionProofService.prove` (§8). Each owner computes its own target and records its own
 > PASSED or FAILED proof; the command decides nothing, and a proof proves only its own layer.
+>
+> **Amendment note (the ASSET upload run; owner decision `5975217061`, 2026-10-04).** The upload
+> owner (§3.4, `AssetUploadService`) had no production entry point. The owner chose one more
+> command of this family, never a screen or route: `icbm live upload-assets --grant-id
+> --window-s --actor` (`app/capabilities/live_safety/upload_run.py`). It is the one command of the
+> family that reaches a provider and changes the execution mode, and only like this, in its own
+> process (the server is stopped; it holds the data directory): every artifact's exact local bytes
+> are read from the M4 lineage store first; then it opens a bounded `LIVE` window of its own process
+> through the execution-mode owner under every rule of the §2 amendment note (a live grant must
+> exist, at most four hours); only then one CONNECT pass of the marketplace owner commits a session
+> so the canonical bearer source answers in that process; each pending artifact is uploaded once
+> through `AssetUploadService.upload`, where every layer of the send-time stack (§4.3), the grant
+> and its budget still decide; the run stops at the first upload that is not `APPLIED_PROVEN` and
+> never retries it; and the window is closed when the run ends, whatever happens, as it is when
+> the process exits. An artifact already `APPLIED_PROVEN` under the grant's exact preparation
+> revision and candidate is not uploaded again. The command owns no truth and widens no rule:
+> issuing the grant remains the protected action that carries the user's approval (§2 note).
 
 #### 4.2 What the brake never does
 
