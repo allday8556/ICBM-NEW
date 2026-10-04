@@ -87,6 +87,8 @@ from app.stages.register.models import (
     MarketplaceRegistrationItem,
     RegistrationAttempt,
     RegistrationBatch,
+    RegistrationBulkItem,
+    RegistrationBulkRun,
     RegistrationDeletion,
     RegistrationDraft,
     RegistrationDraftItem,
@@ -2334,6 +2336,22 @@ class RegistrationUnit:
                 RegistrationReconcileCheck.finished_at.is_(None),
             )
         )
+
+    def active_bulk_reservation(self, intent_id: str) -> tuple[str, str] | None:
+        """The running sequential bulk run that reserves this Intent, and its item state."""
+        row = self.session.execute(
+            select(RegistrationBulkItem.bulk_run_id, RegistrationBulkItem.state)
+            .join(
+                RegistrationBulkRun,
+                RegistrationBulkRun.bulk_run_id == RegistrationBulkItem.bulk_run_id,
+            )
+            .where(
+                RegistrationBulkRun.state == "RUNNING",
+                RegistrationBulkItem.intent_id == intent_id,
+            )
+            .limit(1)
+        ).first()
+        return None if row is None else (str(row[0]), str(row[1]))
 
     def attempts(self, intent_id: str) -> tuple[AttemptRecord, ...]:
         rows = self.session.scalars(

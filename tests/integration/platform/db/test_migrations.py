@@ -163,8 +163,11 @@ CANONICAL_TABLES = (
     "current_atomic_sku_set_moves",
     # Additive Item identities qualified by stable AtomicSKU identity.
     "atomic_sku_product_items",
+    # One-at-a-time bulk CREATE orchestration and its ordered members.
+    "registration_bulk_runs",
+    "registration_bulk_items",
 )
-HEAD = "0045_atomic_sku_product_items"
+HEAD = "0046_sequential_bulk_registration"
 
 
 def _url(path: Path) -> str:

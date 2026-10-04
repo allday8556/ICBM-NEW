@@ -66,6 +66,10 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
+Sequential bulk registration now has no application-level total-count ceiling: migration `0046`
+and `app/stages/register/bulk.py` persist the ordered run, queue exactly one ordinary CREATE job at
+a time, expose durable `current/total` progress, and retain a classified reason for each failed
+product while later products continue.
 The Common Sales Option C1/C2 owner added three PRODUCT DB modules, migration `0042` and one
 integration and one unit suite. Its reviewed Product Fact correspondence slice added three more
 PRODUCT DB modules, migration `0043` and one integration and one unit suite.
@@ -78,11 +82,11 @@ The AtomicSKU-qualified Product Item identity slice added two PRODUCT DB modules
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 287 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 289 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 75 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 140 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 76 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 141 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |

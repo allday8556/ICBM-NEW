@@ -456,8 +456,10 @@ pull forward AI-provider execution, PromptTemplate runtime execution, SearchSign
 metadata endpoint adoption solely for AI, Coupang/11st AI authoring, multi-product AI orchestration
 or seasonal-keyword runtime. Those use the post-first-vertical sequence in §12. Owner decision
 2026-10-04 is a narrow exception for two non-AI operations needed for the real registration run:
-the official SmartStore leaf-category catalog and local bulk queueing over existing single-Intent
-CREATE paths. Neither creates a second truth system or a provider bulk-CREATE contract.
+the official SmartStore leaf-category catalog and durable, uncapped sequential orchestration over
+existing single-Intent CREATE paths. Only one child is queued at a time; a failed child keeps its
+classified reason and later children continue. Neither operation creates a second truth system or
+a provider bulk-CREATE contract.
 
 The individual editor is a workspace over canonical owners, not a second product database. A future
 manual-product entry uses the same editor only after manual provenance and its backend owner are

@@ -85,9 +85,9 @@ class FreezeRequest(BaseModel):
 
 
 class BulkCreateRequest(BaseModel):
-    """Queue several already frozen Intents through their existing one-product CREATE paths."""
+    """Run already frozen Intents one at a time through the one-product CREATE path."""
 
-    intent_ids: list[str] = Field(min_length=1, max_length=50)
+    intent_ids: list[str] = Field(min_length=1)
 
 
 def _correlation() -> str:
@@ -225,8 +225,14 @@ def enqueue_create(container: ContainerDep, intent_id: str) -> ActionResult:
 
 @router.post("/bulk-creates")
 def enqueue_bulk_create(container: ContainerDep, request: BulkCreateRequest) -> BulkCreateResult:
-    """Prevalidate all members, then durably queue/reuse one normal CREATE job per Intent."""
-    return container.register.enqueue_bulk_create(request.intent_ids)
+    """Prevalidate all members, then queue only the first normal CREATE job."""
+    return container.register.enqueue_bulk_create(request.intent_ids, correlation_id=_correlation())
+
+
+@router.get("/bulk-creates/{bulk_run_id}")
+def bulk_create_status(container: ContainerDep, bulk_run_id: str) -> BulkCreateResult:
+    """Read durable ``current/total`` progress for a sequential bulk registration."""
+    return container.register.bulk_create_status(bulk_run_id)
 
 
 @router.post("/intents/{intent_id}/reconcile")

@@ -217,12 +217,12 @@ COMMON_IMAGES = "0039_supplier_common_images"
 # image. Product image state, never registration state.
 AUTO_SELECTION = "0040_image_auto_selection"
 CATEGORY_CATALOG = "0041_category_catalog"
-# ADR-0013 owner amendment C1/C2: Product Core state, never registration state.
 COMMON_OPTIONS = "0042_common_sales_option_owner"
 COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
 ATOMIC_SKUS = "0044_source_proven_atomic_skus"
 ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
-SCHEMA_HEAD = ATOMIC_SKU_ITEMS
+SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
+SCHEMA_HEAD = SEQUENTIAL_BULK
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -249,6 +249,7 @@ AFTER_M5 = (
     COMMON_OPTION_FACT_MAPPING,
     ATOMIC_SKUS,
     ATOMIC_SKU_ITEMS,
+    SEQUENTIAL_BULK,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
@@ -289,6 +290,9 @@ REGISTRATION_TABLES = frozenset(
         "registration_reconcile_checks",
         # ADR-0014 §27.1 (Issue #89 5907626428): the authoring-revision owner.
         "registration_authoring_revisions",
+        # Owner decision 2026-10-04: durable one-at-a-time bulk CREATE orchestration.
+        "registration_bulk_runs",
+        "registration_bulk_items",
     }
 )
 # ADR-0014 §3 and §12: preflight is derived and a batch or Draft summary is derived, so no column
@@ -302,7 +306,7 @@ def migration_problems(names: Iterable[str]) -> list[str]:
     """A migration after the M5 head, or a registration-named one that is not an authorized M5
     migration: the PR-B foundation, or the PR-E execution-scope owner (§25, §26)."""
     head = int(M5_HEAD.split("_", 1)[0])
-    authorized = {f"{name}.py" for name in M5_MIGRATIONS}
+    authorized = {f"{name}.py" for name in (*M5_MIGRATIONS, SEQUENTIAL_BULK)}
     after = {f"{name}.py" for name in AFTER_M5}
     return [
         name
@@ -397,7 +401,14 @@ def test_the_registration_schema_detector_fires() -> None:
 
 # PR-B: the registration store is the only production writer of the registration tables, so the
 # conflict scope, the idempotency identity and the sanitized digests cannot be bypassed.
-REGISTRATION_OWNERS = frozenset({"app/stages/register/store.py", "app/stages/register/models.py"})
+REGISTRATION_OWNERS = frozenset(
+    {
+        "app/stages/register/store.py",
+        "app/stages/register/models.py",
+        # Owns only the two sequential bulk orchestration tables authorized in migration 0046.
+        "app/stages/register/bulk.py",
+    }
+)
 REGISTRATION_CLASSES = frozenset(
     {
         "RegistrationDraft",
@@ -410,10 +421,13 @@ REGISTRATION_CLASSES = frozenset(
         "MarketplaceRegistration",
         "MarketplaceRegistrationItem",
         "DuplicateOverride",
+        "RegistrationBulkRun",
+        "RegistrationBulkItem",
     }
 )
 REGISTRATION_TABLE_NAMES = re.compile(
-    r"\b(registration_(drafts|draft_items|snapshots|item_snapshots|batches|intents|attempts)"
+    r"\b(registration_(drafts|draft_items|snapshots|item_snapshots|batches|intents|attempts"
+    r"|bulk_runs|bulk_items)"
     r"|marketplace_registrations|marketplace_registration_items|duplicate_overrides)\b"
 )
 

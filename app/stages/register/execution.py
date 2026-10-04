@@ -50,7 +50,13 @@ from sqlalchemy.orm import Session
 
 from app.capabilities.jobs.models import JobState
 from app.capabilities.jobs.policy import RetryPolicy
-from app.capabilities.jobs.registry import JobContext, JobDefinition, TerminalJob
+from app.capabilities.jobs.registry import (
+    JobContext,
+    JobDefinition,
+    TerminalHook,
+    TerminalJob,
+    UnsettledOwnedJobs,
+)
 from app.capabilities.jobs.service import JobService
 from app.capabilities.live_safety.model import MutationRefused, MutationStage
 from app.platform.core.clock import Clock
@@ -1505,9 +1511,26 @@ def target_ref(intent_id: str) -> str:
 
 
 def create_job_definition(
-    service: RegistrationExecutionService, *, retry_policy: RetryPolicy | None = None
+    service: RegistrationExecutionService,
+    *,
+    retry_policy: RetryPolicy | None = None,
+    after_terminal: TerminalHook | None = None,
+    additional_unsettled: UnsettledOwnedJobs | None = None,
 ) -> JobDefinition:
     """The CREATE job type: **non-idempotent**, with its terminal owner settlement (§6)."""
+    if (after_terminal is None) != (additional_unsettled is None):
+        raise ValueError("an additional CREATE terminal owner and its recovery read are paired")
+
+    def settle(terminal: TerminalJob) -> None:
+        service.settle_terminal(terminal)
+        if after_terminal is not None:
+            after_terminal(terminal)
+
+    def unsettled(terminal_states: Sequence[str]) -> Sequence[str]:
+        ordinary = service.unsettled_jobs(terminal_states)
+        extra = () if additional_unsettled is None else additional_unsettled(terminal_states)
+        return tuple(dict.fromkeys((*ordinary, *extra)))
+
     return JobDefinition(
         job_type=CREATE_JOB_TYPE,
         handler=lambda context: _run(service, context),
@@ -1515,8 +1538,8 @@ def create_job_definition(
         # A process that stops after a possible handoff may have created a listing.
         idempotent=False,
         retry_policy=retry_policy,
-        on_terminal=service.settle_terminal,
-        unsettled_owned_jobs=service.unsettled_jobs,
+        on_terminal=settle,
+        unsettled_owned_jobs=unsettled,
     )
 
 
@@ -1597,6 +1620,14 @@ def queue_send_request(
                 "REGISTER_INTENT_UNKNOWN",
                 f"no Intent {intent_id!r}",
                 error_class=ErrorClass.NOT_FOUND,
+            )
+        reservation = unit.active_bulk_reservation(intent_id)
+        if reservation is not None and reservation[1] == "WAITING":
+            raise ExecutionRefused(
+                "REGISTER_INTENT_RESERVED_BY_BULK",
+                "this Intent is waiting for its turn in a sequential bulk registration",
+                error_class=ErrorClass.CONFLICT,
+                details={"bulk_run_id": reservation[0], "intent_id": intent_id},
             )
         if intent.state not in SENDABLE_STATES:
             raise ExecutionRefused(

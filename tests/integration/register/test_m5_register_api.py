@@ -17,6 +17,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.capabilities.jobs.models import Job, JobState
+from app.capabilities.jobs.registry import TerminalJob
 from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
@@ -1109,7 +1111,41 @@ def _authored_intents_for_bulk(
     return tuple(intent_ids)
 
 
-def test_bulk_create_prevalidates_then_queues_in_order_and_reuses_jobs(
+def _settle_create_job(
+    container: Container,
+    job_id: str,
+    *,
+    state: JobState = JobState.SUCCEEDED,
+    error_class: str | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    with container.db.write() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.state = state
+        job.last_error_class = error_class
+        job.last_error_code = error_code
+        job.last_error_message = error_message
+        job.finished_at = container.clock.now()
+        job.updated_at = container.clock.now()
+    definition = container.job_registry.get("register.create")
+    assert definition.on_terminal is not None
+    definition.on_terminal(
+        TerminalJob(
+            job_id=job_id,
+            job_type="register.create",
+            state=state.value,
+            attempt_no=1,
+            correlation_id="cid-bulk-terminal",
+            target_ref=job.target_ref,
+            error_class=error_class,
+            error_code=error_code,
+        )
+    )
+
+
+def test_bulk_create_queues_exactly_one_at_a_time_and_reports_progress(
     api: TestClient,
     container: Container,
     sources: Collections,
@@ -1121,8 +1157,7 @@ def test_bulk_create_prevalidates_then_queues_in_order_and_reuses_jobs(
     )
     lookup = FakeDuplicateLookup()
     container.registration_preparations._duplicate_lookup = lookup
-    # Keep the jobs QUEUED so the second request exercises active-job reuse instead of a
-    # legitimate retry after the DRY_RUN worker has already dead-lettered them.
+    # Keep the jobs QUEUED so the test can observe and settle each link of the chain itself.
     assert api.portal is not None
     api.portal.call(container.worker.stop)
 
@@ -1132,18 +1167,144 @@ def test_bulk_create_prevalidates_then_queues_in_order_and_reuses_jobs(
     assert first.status_code == 200, first.text
     body = first.json()
     assert body["action"] == "BULK_CREATE_ENQUEUE"
-    assert body["total"] == 2
-    assert [item["intent_id"] for item in body["items"]] == list(intent_ids)
-    job_ids = [item["job_id"] for item in body["items"]]
-    assert len(set(job_ids)) == 2
-    assert container.jobs.count(job_type_prefix="register.create") == 2
+    assert (body["state"], body["total"], body["processed"]) == ("RUNNING", 2, 0)
+    assert (body["position"], body["progress"]) == (1, "1/2")
+    assert body["current_intent_id"] == intent_ids[0]
+    first_job = body["current_job_id"]
+    assert first_job
+    assert container.jobs.count(job_type_prefix="register.create") == 1
+
+    # A future member is reserved by the chain and cannot be queued around its predecessor.
+    bypass = api.post(f"/api/v1/register/intents/{intent_ids[1]}/create", headers=CLIENT)
+    assert bypass.status_code == 409
+    assert bypass.json()["error"]["code"] == "REGISTER_INTENT_RESERVED_BY_BULK"
 
     repeated = api.post(
         "/api/v1/register/bulk-creates", json={"intent_ids": intent_ids}, headers=CLIENT
     )
     assert repeated.status_code == 200, repeated.text
-    assert [item["job_id"] for item in repeated.json()["items"]] == job_ids
+    assert repeated.json()["bulk_run_id"] == body["bulk_run_id"]
+    assert repeated.json()["current_job_id"] == first_job
+    assert container.jobs.count(job_type_prefix="register.create") == 1
+
+    _settle_create_job(container, first_job)
+    second = api.get(f"/api/v1/register/bulk-creates/{body['bulk_run_id']}", headers=CLIENT)
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert (second_body["processed"], second_body["progress"]) == (1, "2/2")
+    assert second_body["current_intent_id"] == intent_ids[1]
+    second_job = second_body["current_job_id"]
+    assert second_job and second_job != first_job
     assert container.jobs.count(job_type_prefix="register.create") == 2
+
+    _settle_create_job(container, second_job)
+    done = api.get(f"/api/v1/register/bulk-creates/{body['bulk_run_id']}", headers=CLIENT)
+    assert done.status_code == 200, done.text
+    assert done.json()["state"] == "COMPLETED"
+    assert (done.json()["processed"], done.json()["progress"]) == (2, "2/2")
+    assert (done.json()["succeeded"], done.json()["failed"], done.json()["failures"]) == (
+        2,
+        0,
+        [],
+    )
+
+
+def test_bulk_create_records_a_product_failure_and_continues_with_the_rest(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    intent_ids = _authored_intents_for_bulk(
+        api, container, sources, account, ("bulk-fails-image", "bulk-after-failure")
+    )
+    container.registration_preparations._duplicate_lookup = FakeDuplicateLookup()
+    assert api.portal is not None
+    api.portal.call(container.worker.stop)
+
+    started = api.post(
+        "/api/v1/register/bulk-creates", json={"intent_ids": intent_ids}, headers=CLIENT
+    )
+    assert started.status_code == 200, started.text
+    first_job = started.json()["current_job_id"]
+    caplog.set_level("WARNING", logger="icbm.register.bulk")
+    _settle_create_job(
+        container,
+        first_job,
+        state=JobState.DEAD,
+        error_class="VALIDATION",
+        error_code="NAVER_IMAGE_TOO_LARGE",
+        error_message="representative image exceeds the provider size limit",
+    )
+
+    continued = api.get(
+        f"/api/v1/register/bulk-creates/{started.json()['bulk_run_id']}", headers=CLIENT
+    )
+    assert continued.status_code == 200, continued.text
+    body = continued.json()
+    assert (body["state"], body["processed"], body["succeeded"], body["failed"]) == (
+        "RUNNING",
+        1,
+        0,
+        1,
+    )
+    assert (body["position"], body["progress"], body["current_intent_id"]) == (
+        2,
+        "2/2",
+        intent_ids[1],
+    )
+    assert body["current_job_id"] != first_job
+    assert body["failures"] == [
+        {
+            "position": 1,
+            "intent_id": intent_ids[0],
+            "error_class": "VALIDATION",
+            "error_code": "NAVER_IMAGE_TOO_LARGE",
+            "message": "representative image exceeds the provider size limit",
+        }
+    ]
+    failure_log = next(
+        record for record in caplog.records if record.msg == "register.bulk_item_failed"
+    )
+    assert (
+        failure_log.intent_id,
+        failure_log.error_class,
+        failure_log.error_code,
+        failure_log.error_message,
+    ) == (
+        intent_ids[0],
+        "VALIDATION",
+        "NAVER_IMAGE_TOO_LARGE",
+        "representative image exceeds the provider size limit",
+    )
+    assert container.jobs.count(job_type_prefix="register.create") == 2
+
+    _settle_create_job(container, body["current_job_id"])
+    finished = api.get(
+        f"/api/v1/register/bulk-creates/{started.json()['bulk_run_id']}", headers=CLIENT
+    )
+    assert finished.status_code == 200, finished.text
+    assert (
+        finished.json()["state"],
+        finished.json()["processed"],
+        finished.json()["succeeded"],
+        finished.json()["failed"],
+        finished.json()["progress"],
+    ) == ("COMPLETED_WITH_FAILURES", 2, 1, 1, "2/2")
+
+
+def test_bulk_create_request_has_no_total_count_ceiling(api: TestClient) -> None:
+    response = api.post(
+        "/api/v1/register/bulk-creates",
+        json={"intent_ids": [f"missing-{index}" for index in range(100)]},
+        headers=CLIENT,
+    )
+    # The first missing Intent is a domain refusal, proving the 100-member request passed schema
+    # validation instead of being rejected by an arbitrary bulk-size ceiling.
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "REGISTER_INTENT_NOT_FOUND"
 
 
 def test_bulk_create_rejects_the_whole_request_before_queueing_any_member(

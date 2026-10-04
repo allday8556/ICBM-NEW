@@ -919,13 +919,19 @@ The existing ADR-0016 `REGISTRATION_ERROR` kind carries every 재확인필요 co
   non-leaf response changes nothing. Once a catalog exists, new category-metadata revisions must
   name its current taxonomy revision and one category ID in that leaf set.
 - `POST /api/v1/register/bulk-creates` is local orchestration, not a provider endpoint. It accepts
-  1–50 unique existing Intent IDs, resolves and validates every frozen send request and scope
-  budget before queueing any member, then queues or reuses the ordinary `register.create` job for
-  each Intent in request order.
+  any non-empty number of unique existing Intent IDs and resolves and validates every frozen send
+  request and scope budget before creating the run. It queues only the first ordinary
+  `register.create` job. Every terminal child durably advances the run and queues exactly one
+  successor. A dead child fails only that item: its error class, code and safe message are kept in
+  the bulk item and emitted as a structured log, while later items continue. A run that reaches
+  the end with any such item is `COMPLETED_WITH_FAILURES`. `GET
+  /api/v1/register/bulk-creates/{bulk_run_id}` reports the durable current/total position (for
+  example `2/100`) and every recorded item failure.
 - Every member keeps the single-product safety contract: its own immutable Snapshot and Intent,
   one live job, exact CREATE grant, brake, bounded LIVE window, Attempt, UNKNOWN handling and
   read-back. The bulk call issues no grant, opens no LIVE window, and never converts a child
-  outcome into a batch truth.
+  outcome into marketplace truth. A waiting member is reserved so another caller cannot bypass
+  the sequence by queueing it directly.
 
 ## Invariants
 

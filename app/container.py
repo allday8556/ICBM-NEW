@@ -127,6 +127,7 @@ from app.stages.products.store import ProductFoundationStore
 from app.stages.register.authoring import RegistrationPreparationService
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.builder import RegistrationSnapshotBuilder
+from app.stages.register.bulk import BulkRegistrationService
 from app.stages.register.category_catalog import CategoryCatalogService, CategoryCatalogStore
 from app.stages.register.category_metadata import (
     CategoryMetadataService,
@@ -242,6 +243,7 @@ class Container:
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
     registration_execution: RegistrationExecutionService
+    bulk_registration: BulkRegistrationService
     live_authority: LiveAuthorityService
     canary_eligibility: CanaryEligibilityService
     residual_risk: ResidualRiskAcceptanceService
@@ -732,7 +734,15 @@ def build_container(
         clock=clock,
         authority=safety_stack,
     )
-    registry.register(create_job_definition(registration_execution, retry_policy=CREATE_POLICY))
+    bulk_registration = BulkRegistrationService(db, jobs, clock)
+    registry.register(
+        create_job_definition(
+            registration_execution,
+            retry_policy=CREATE_POLICY,
+            after_terminal=bulk_registration.settle_terminal,
+            additional_unsettled=bulk_registration.unsettled_jobs,
+        )
+    )
     # The ASSET upload path (§3.4) with its durable attempt owner. The sender is the adopted
     # SmartStore image upload with the same canonical bearer source as the CREATE seams; the
     # send-time stack still refuses every upload under M0_DRY_RUN_ONLY.
@@ -856,6 +866,7 @@ def build_container(
         authoring=registration_preparations,
         accounts=accounts,
         jobs=jobs,
+        bulk=bulk_registration,
         capability=marketplace_capability,
         adoption=SmartStoreAdoption(),
         stages=canary_stages,
@@ -928,6 +939,7 @@ def build_container(
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,
         registration_execution=registration_execution,
+        bulk_registration=bulk_registration,
         live_authority=live_authority,
         canary_eligibility=canary_eligibility,
         residual_risk=residual_risk,

@@ -34,6 +34,9 @@ migration 0017 (§26, architect decision `5749504280`):
   changed or deleted. Migration 0031 also adds ``marketplace_channel_product_id`` to the Intent and
   the registration (§B): the provider's channel identity, written only with an applied outcome and
   immutable afterwards.
+- ``registration_bulk_runs`` and ``registration_bulk_items`` (migration 0046, owner decision
+  2026-10-04): durable local orchestration of an uncapped request as ordinary single-product
+  CREATE jobs, with exactly one queued member at a time and derived current/total progress.
 
 **Account scope.** Every "account" here is the canonical ``marketplace_account_id`` of
 ``app.stages.connect.account_models`` (``ACCOUNT_IDENTITY.md`` §2), never a free string and never
@@ -979,4 +982,83 @@ class RegistrationDeletion(Base):
     actor: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class RegistrationBulkRun(Base):
+    """One operator-requested, strictly sequential series of CREATE Intents.
+
+    The run is orchestration state, not marketplace truth.  Only its current item may own a live
+    ``register.create`` job; the terminal hook advances the chain after that job has finished.
+    """
+
+    __tablename__ = "registration_bulk_runs"
+    __table_args__ = (
+        Index("ix_registration_bulk_runs_fingerprint_state", "request_fingerprint", "state"),
+        CheckConstraint(_hex64("request_fingerprint"), name="request_fingerprint_hex"),
+        CheckConstraint("total > 0", name="total_positive"),
+        CheckConstraint(
+            "state IN ('RUNNING', 'COMPLETED', 'COMPLETED_WITH_FAILURES')",
+            name="state_valid",
+        ),
+        CheckConstraint("error_code IS NULL OR error_code <> ''", name="error_code_present"),
+        CheckConstraint(_present("correlation_id"), name="correlation_present"),
+        CheckConstraint("updated_at >= created_at", name="updated_after_created"),
+    )
+
+    bulk_run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    total: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class RegistrationBulkItem(Base):
+    """One frozen single-product request in a sequential bulk run."""
+
+    __tablename__ = "registration_bulk_items"
+    __table_args__ = (
+        UniqueConstraint("bulk_run_id", "ordinal"),
+        UniqueConstraint("bulk_run_id", "intent_id"),
+        UniqueConstraint("job_id"),
+        Index("ix_registration_bulk_items_intent_state", "intent_id", "state"),
+        CheckConstraint("ordinal >= 1", name="ordinal_positive"),
+        CheckConstraint(
+            "state IN ('WAITING', 'QUEUED', 'SUCCEEDED', 'FAILED')", name="state_valid"
+        ),
+        CheckConstraint(_json_object("send_request_json"), name="send_request_is_object"),
+        CheckConstraint(
+            f"error_class IS NULL OR {_in('error_class', ErrorClass)}",
+            name="error_class_valid",
+        ),
+        CheckConstraint("error_code IS NULL OR error_code <> ''", name="error_code_present"),
+        CheckConstraint("(state = 'FAILED') = (error_code IS NOT NULL)", name="failure_has_error"),
+        CheckConstraint(
+            "(error_class IS NULL) = (error_code IS NULL)", name="error_class_with_code"
+        ),
+        CheckConstraint(
+            "(error_message IS NULL) = (error_code IS NULL)", name="error_message_with_code"
+        ),
+        CheckConstraint("finished_at IS NULL OR queued_at IS NOT NULL", name="finish_after_queue"),
+        CheckConstraint(
+            "finished_at IS NULL OR finished_at >= queued_at", name="finished_after_queue"
+        ),
+    )
+
+    bulk_item_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bulk_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("registration_bulk_runs.bulk_run_id")
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    intent_id: Mapped[str] = mapped_column(String(36), ForeignKey("registration_intents.intent_id"))
+    send_request_json: Mapped[str] = mapped_column(Text)
+    job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("jobs.job_id"))
+    state: Mapped[str] = mapped_column(String(20))
+    error_class: Mapped[str | None] = mapped_column(String(20))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    queued_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
