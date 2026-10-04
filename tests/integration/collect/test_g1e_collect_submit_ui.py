@@ -23,6 +23,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import pytest
@@ -710,3 +711,93 @@ def test_a_refused_url_keeps_its_line_and_the_others_go_on(
             product_url("71")
         ]
     assert len(wire.posts()) == 2
+
+
+# ----------------------------------------- A-NEXT1: the recorded image reasons, worded
+
+
+def _ref(ordinal: int, **recorded: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "role": "DETAIL",
+        "ordinal": ordinal,
+        "host": "img.collect.invalid",
+        "provenance": "fake.detail",
+        "locator": None,
+        "status": "REVIEW_REQUIRED",
+        "issue": None,
+        "http_etag": None,
+        "http_last_modified": None,
+        "asset": None,
+        "source_form": "ABSOLUTE",
+        "source_trimmed": False,
+        "target_refusal": None,
+        "certainty": "INDETERMINATE",
+        "disposition": "UNRESOLVED",
+        "exclusion": None,
+    }
+    base.update(recorded)
+    return base
+
+
+def test_each_image_reason_is_the_recorded_code_worded_and_nothing_more(
+    browser: Browser, config: AppConfig
+) -> None:
+    # The page words the codes a revision holds; it never decides one. The references below are
+    # put into the revision read as the server would record them, to show every kind of reason.
+    crafted = [
+        _ref(
+            8,
+            issue="FETCH_FAILED",
+            target_refusal="NON_HTTPS",
+            exclusion="SOURCE_AUTHORED_NON_HTTPS",
+            certainty="DETERMINATE",
+            disposition="EXCLUDED",
+        ),
+        _ref(9, issue="OVERSIZE"),
+        _ref(10, issue="FETCH_FAILED", target_refusal="HOST_NOT_ALLOWLISTED"),
+        _ref(11, issue="SOMETHING_NEW"),
+    ]
+    wire = Wire()
+    with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
+
+        def revision(route: Route) -> None:
+            parts = urlsplit(route.request.url)
+            answer = client.get(parts.path, headers={"X-ICBM-Client": "pytest"})
+            body = answer.json()
+            body["images"] = [*body["images"], *crafted]
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+        page.route("**/api/v1/collect/revisions/**", revision)
+        _submit(page, "4242")
+        _outcome(page, "RECORDED")
+        facts = page.locator(f"{FACTS}[data-state='ready']")
+        facts.wait_for()
+        image_table = facts.locator("[data-role='image-refs']")
+        image_toggle = facts.locator("[data-action='toggle-images']")
+        assert image_table.count() == 0
+        assert image_toggle.get_attribute("aria-expanded") == "false"
+        image_toggle.click()
+        assert image_toggle.get_attribute("aria-expanded") == "true"
+        rows = facts.locator("[data-role='image-refs'] tbody tr")
+        shown = {
+            rows.nth(i).locator("td").nth(1).inner_text(): (
+                rows.nth(i).locator("td").nth(4).inner_text(),
+                rows.nth(i).locator("[data-role='image-reason']").inner_text()
+                if rows.nth(i).locator("[data-role='image-reason']").count()
+                else "—",
+            )
+            for i in range(rows.count())
+        }
+        assert shown["8"] == ("제외", "원천이 http 주소로 적은 이미지 (보안 연결 아님)")
+        assert shown["9"] == ("확인 필요", "파일 크기 제한 초과")
+        assert shown["10"] == ("확인 필요", "가져오기 전 거절: 허용되지 않은 이미지 호스트")
+        assert shown["11"] == ("확인 필요", "SOMETHING_NEW")
+        # The codes stay beside the words, exactly as recorded.
+        codes = facts.locator(
+            "[data-role='image-refs'] tr:has-text('원천이 http') [data-role='image-reason-codes']"
+        )
+        assert codes.inner_text() == "SOURCE_AUTHORED_NON_HTTPS · NON_HTTPS · FETCH_FAILED"
+        image_toggle.click()
+        assert image_table.count() == 0
+        assert image_toggle.get_attribute("aria-expanded") == "false"
+    assert len(wire.posts()) == 1

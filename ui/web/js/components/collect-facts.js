@@ -33,7 +33,35 @@ const STATUS = {
 };
 const STATUS_ORDER = ['CONFIRMED', 'ABSENT', 'REVIEW_REQUIRED'];
 const ROLE_LABEL = { REPRESENTATIVE: '대표', DETAIL: '상세' };
-const DISPOSITION_LABEL = { INCLUDED: '포함', EXCLUDED: '제외', UNRESOLVED: '미해결' };
+// The image acceptance vocabulary the server records for each reference (ADR-0010 §9; Issue #52
+// ruling 5723016554), worded. Each word names a code the revision already holds; the page judges
+// nothing, and a code it has no word for is shown as the code itself.
+const DISPOSITION_LABEL = { INCLUDED: '포함', EXCLUDED: '제외', UNRESOLVED: '확인 필요' };
+const EXCLUSION_COPY = {
+  SOURCE_AUTHORED_NON_HTTPS: '원천이 http 주소로 적은 이미지 (보안 연결 아님)',
+};
+const ISSUE_COPY = {
+  BAD_HOST: '허용되지 않은 호스트',
+  BAD_CONTENT_TYPE: '이미지가 아닌 응답',
+  OVERSIZE: '파일 크기 제한 초과',
+  BUDGET_EXHAUSTED: '이번 수집의 요청·용량 한도를 다 써서 가져오지 않음',
+  UNSUPPORTED_FORMAT: '지원하지 않는 이미지 형식',
+  FETCH_FAILED: '가져오기 실패',
+};
+// Why the transport's own target check refused the reference before anything was sent.
+const REFUSAL_COPY = {
+  UNPARSEABLE: '주소를 읽을 수 없음',
+  WHITESPACE: '주소에 공백이 있음',
+  FRAGMENT: '주소에 # 조각이 있음',
+  NOT_ABSOLUTE: '완전한 주소가 아님',
+  NON_HTTPS: 'http 주소 (보안 연결 아님)',
+  UNSUPPORTED_SCHEME: '지원하지 않는 주소 형식',
+  CREDENTIALS_PRESENT: '주소에 계정 정보가 있음',
+  NON_STANDARD_PORT: '표준이 아닌 포트',
+  HOST_NOT_ALLOWLISTED: '허용되지 않은 이미지 호스트',
+  PATH_NOT_ALLOWED: '허용되지 않은 경로',
+  QUERY_NOT_ALLOWED: '허용되지 않은 주소 매개변수(?)',
+};
 const AVAILABILITY_LABEL = { ON_SALE: '판매 중', SOLD_OUT: '품절' };
 const TRANSPORT_LABEL = { DIRECT_URL: '직접 URL', EXTENSION: '확장 수집' };
 const VALUE_LIMIT = 160;
@@ -167,8 +195,22 @@ function fieldRows(field) {
   return [row];
 }
 
+// The recorded reason, worded, with the codes kept beside it. An excluded reference reads its
+// closed exclusion row; otherwise the target refusal, which is more exact than FETCH_FAILED, and
+// then the issue. Nothing is inferred from the URL.
 function imageReason(image) {
-  return [image.issue, image.target_refusal, image.exclusion].filter(Boolean).join(' · ') || '—';
+  const codes = [image.exclusion, image.target_refusal, image.issue].filter(Boolean);
+  if (!codes.length) return '—';
+  const words = image.exclusion
+    ? EXCLUSION_COPY[image.exclusion] ?? image.exclusion
+    : image.target_refusal
+      ? `가져오기 전 거절: ${REFUSAL_COPY[image.target_refusal] ?? image.target_refusal}`
+      : ISSUE_COPY[image.issue] ?? image.issue;
+  return fragment(
+    h('span', { 'data-role': 'image-reason' }, words),
+    ' ',
+    h('span', { class: 'mini mono', 'data-role': 'image-reason-codes' }, codes.join(' · ')),
+  );
 }
 
 // The image references open on demand, like a field's evidence, and exist only while open.
@@ -212,7 +254,15 @@ function imagesTable(images) {
           h('td', { class: 'mono', title: image.locator ?? '' }, image.host),
           h('td', {}, statusChip(image.status)),
           h('td', {}, image.disposition ? DISPOSITION_LABEL[image.disposition] ?? image.disposition : '—'),
-          h('td', { class: 'mono' }, imageReason(image)),
+          h(
+            'td',
+            {
+              'data-exclusion': image.exclusion ?? '',
+              'data-refusal': image.target_refusal ?? '',
+              'data-issue': image.issue ?? '',
+            },
+            imageReason(image),
+          ),
           h('td', {}, image.asset ? `${image.asset.width}×${image.asset.height} · ${bytes(image.asset.byte_size)}` : '—'),
         ),
       ),

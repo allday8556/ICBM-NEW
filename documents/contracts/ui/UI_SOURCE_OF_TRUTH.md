@@ -193,6 +193,11 @@ adjacent panels so either block remains readable within the viewport:
   stored evidence on demand (kind, locator, observed, normalized, status, digest), plus the
   extractor revision, the transport and the image count included / total, all as the revision holds
   them;
+- each image reference's recorded disposition reads `포함` / `제외` / `확인 필요`, and its recorded
+  reason is worded beside its codes — the exclusion row (`원천이 http 주소로 적은 이미지`), else the
+  transport's target refusal (`가져오기 전 거절: …`), else the issue (`파일 크기 제한 초과`, …). The
+  words name codes the revision already holds; the screen judges nothing and shows an unknown code
+  as itself (A-NEXT1, 2026-10-04);
 - a field's value/evidence row and the image-reference table exist in the document only while the
   operator has expanded them. Collapsing removes that detail instead of leaving hidden server-owned
   state behind for the visual acceptance surface;
