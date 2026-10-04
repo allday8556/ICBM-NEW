@@ -17,6 +17,11 @@ const ACTOR = 'operator';
 // The vocabulary the contract declares, shown as choices. Choosing one decides nothing.
 const ROUNDING = ['CEIL_KRW_1'];
 const LOOKUP_KEYS = ['SELLER_CODE', 'GTIN', 'OFFICIAL_KEY', 'NORMALIZED_NAME'];
+const DELIVERY_TYPES = ['DELIVERY'];
+const DELIVERY_ATTRIBUTES = ['NORMAL'];
+const DELIVERY_FEE_TYPES = ['PAID'];
+const DELIVERY_PAY_TYPES = ['PREPAID'];
+const RETURN_CARRIER_PRIORITIES = ['PRIMARY'];
 
 let sequence = 0;
 
@@ -106,6 +111,7 @@ function editor(view, onSaved) {
   const inputs = view.inputs;
   const pricing = inputs?.pricing_context;
   const asset = inputs?.asset_policy;
+  const delivery = inputs?.delivery_policy;
   const on = { editable };
 
   const taxonomy = field('카테고리 체계 리비전', inputs?.taxonomy_revision, { ...on, name: 'taxonomy_revision' });
@@ -132,6 +138,49 @@ function editor(view, onSaved) {
   const providerIdentity = check('마켓 이미지 식별자 필요', asset?.provider_asset_identity_required, {
     ...on,
     name: 'provider_asset_identity_required',
+  });
+  const physicalDelivery = check('실물 배송 정보 전송', Boolean(delivery), {
+    ...on,
+    name: 'physical_delivery',
+  });
+  const deliveryType = choice('배송 방법', DELIVERY_TYPES, delivery?.delivery_type, { ...on, name: 'delivery_type' });
+  const deliveryAttribute = choice('배송 속성', DELIVERY_ATTRIBUTES, delivery?.delivery_attribute_type, {
+    ...on,
+    name: 'delivery_attribute_type',
+  });
+  const deliveryFeeType = choice('배송비 유형', DELIVERY_FEE_TYPES, delivery?.delivery_fee_type, {
+    ...on,
+    name: 'delivery_fee_type',
+  });
+  const baseFee = field('기본 배송비 (원)', delivery ? String(delivery.base_fee_krw) : '', {
+    ...on,
+    name: 'base_fee_krw',
+  });
+  const deliveryPayType = choice('배송비 결제', DELIVERY_PAY_TYPES, delivery?.delivery_fee_pay_type, {
+    ...on,
+    name: 'delivery_fee_pay_type',
+  });
+  const returnPriority = choice(
+    '반품 택배사 우선순위',
+    RETURN_CARRIER_PRIORITIES,
+    delivery?.return_delivery_company_priority_type,
+    { ...on, name: 'return_delivery_company_priority_type' },
+  );
+  const returnFee = field('반품 배송비 (원)', delivery ? String(delivery.return_delivery_fee_krw) : '', {
+    ...on,
+    name: 'return_delivery_fee_krw',
+  });
+  const exchangeFee = field('교환 배송비 (원)', delivery ? String(delivery.exchange_delivery_fee_krw) : '', {
+    ...on,
+    name: 'exchange_delivery_fee_krw',
+  });
+  const shippingAddress = field('출고지 주소록 번호', delivery ? String(delivery.shipping_address_id) : '', {
+    ...on,
+    name: 'shipping_address_id',
+  });
+  const returnAddress = field('반품·교환지 주소록 번호', delivery ? String(delivery.return_address_id) : '', {
+    ...on,
+    name: 'return_address_id',
   });
   sequence += 1;
   const templatesId = `target-policy-${sequence}`;
@@ -177,6 +226,20 @@ function editor(view, onSaved) {
             requires_representative: representative.box.checked,
             provider_asset_identity_required: providerIdentity.box.checked,
           },
+          delivery_policy: physicalDelivery.box.checked
+            ? {
+                delivery_type: deliveryType.select.value,
+                delivery_attribute_type: deliveryAttribute.select.value,
+                delivery_fee_type: deliveryFeeType.select.value,
+                base_fee_krw: whole(baseFee.input.value),
+                delivery_fee_pay_type: deliveryPayType.select.value,
+                return_delivery_company_priority_type: returnPriority.select.value,
+                return_delivery_fee_krw: whole(returnFee.input.value),
+                exchange_delivery_fee_krw: whole(exchangeFee.input.value),
+                shipping_address_id: whole(shippingAddress.input.value),
+                return_address_id: whole(returnAddress.input.value),
+              }
+            : null,
           templates: templatesOf(templates.value),
           duplicate_proof_required: proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
@@ -223,6 +286,17 @@ function editor(view, onSaved) {
     maxImages.row,
     representative.row,
     providerIdentity.row,
+    physicalDelivery.row,
+    deliveryType.row,
+    deliveryAttribute.row,
+    deliveryFeeType.row,
+    baseFee.row,
+    deliveryPayType.row,
+    returnPriority.row,
+    returnFee.row,
+    exchangeFee.row,
+    shippingAddress.row,
+    returnAddress.row,
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
     proofRequired.row,
     ...keys.map((key) => key.row),

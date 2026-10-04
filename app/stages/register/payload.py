@@ -71,6 +71,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
     profile = target.asset_policy.profile
     plan = detail_plan(request, unit)
     prepared = {asset.key: asset for asset in result.prepared_assets}
+    delivery = target.delivery_policy
     items: list[OutboundItem] = []
     payload_items: list[dict[str, Any]] = []
     for item in unit.items:
@@ -138,6 +139,22 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         else plan.canonical(),
         "options": {i.item_id: i.outbound_values["options"] for i in items},
         "templates": dict(sorted(target.templates.items())),
+        "delivery_policy": None
+        if delivery is None
+        else {
+            "delivery_type": delivery.delivery_type,
+            "delivery_attribute_type": delivery.delivery_attribute_type,
+            "delivery_fee_type": delivery.delivery_fee_type,
+            "base_fee_krw": delivery.base_fee_krw,
+            "delivery_fee_pay_type": delivery.delivery_fee_pay_type,
+            "return_delivery_company_priority_type": (
+                delivery.return_delivery_company_priority_type
+            ),
+            "return_delivery_fee_krw": delivery.return_delivery_fee_krw,
+            "exchange_delivery_fee_krw": delivery.exchange_delivery_fee_krw,
+            "shipping_address_id": delivery.shipping_address_id,
+            "return_address_id": delivery.return_address_id,
+        },
     }
     # Fail closed even if a caller bypassed the preflight's own sanitation reasons.
     sanitize.require_clean(business)
@@ -161,6 +178,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         "policy": {
             "policy_revision": target.policy_revision,
             "templates": business["templates"],
+            "delivery_policy": business["delivery_policy"],
         },
         "detail": business["detail"],
         "items": payload_items,

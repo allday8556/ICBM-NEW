@@ -153,6 +153,27 @@ class AssetPolicy:
 
 
 @dataclass(frozen=True)
+class DeliveryPolicy:
+    """The account-owned SmartStore delivery values frozen with a registration Snapshot.
+
+    These values are operator-confirmed account configuration, not supplier facts.  Keeping them
+    on the target policy makes the address-book identities and every fee revisioned, audited and
+    stale-checkable like the other outbound account policy.
+    """
+
+    delivery_type: str
+    delivery_attribute_type: str
+    delivery_fee_type: str
+    base_fee_krw: int
+    delivery_fee_pay_type: str
+    return_delivery_company_priority_type: str
+    return_delivery_fee_krw: int
+    exchange_delivery_fee_krw: int
+    shipping_address_id: int
+    return_address_id: int
+
+
+@dataclass(frozen=True)
 class CategoryMetadata:
     """Reviewed metadata of one category under one taxonomy revision."""
 
@@ -185,6 +206,7 @@ class TargetPolicy:
     pricing_context: PricingContextInput
     sanitizer_profile_version: str
     asset_policy: AssetPolicy
+    delivery_policy: DeliveryPolicy | None = None
     # Server-owned authoring revisions exposed to the operator form. A deployment without them
     # cannot author a category or detail by inventing a client-side revision label.
     category_mapping_revision: str | None = None

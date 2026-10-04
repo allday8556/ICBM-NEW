@@ -140,7 +140,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v6"
+    assert projected.encoding_version == "smartstore-register-wire/v7"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -241,6 +241,80 @@ def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> Non
         "storeKeepExclusiveProduct",
     ):
         assert never not in text
+
+
+def test_operator_confirmed_delivery_policy_is_projected_exactly() -> None:
+    delivery = {
+        "delivery_type": "DELIVERY",
+        "delivery_attribute_type": "NORMAL",
+        "delivery_fee_type": "PAID",
+        "base_fee_krw": 3000,
+        "delivery_fee_pay_type": "PREPAID",
+        "return_delivery_company_priority_type": "PRIMARY",
+        "return_delivery_fee_krw": 3000,
+        "exchange_delivery_fee_krw": 6000,
+        "shipping_address_id": 200441202,
+        "return_address_id": 200401837,
+    }
+    base = payload(notice=_etc_notice())
+    projected = product.project(
+        payload(
+            notice=_etc_notice(),
+            policy={**base["policy"], "delivery_policy": delivery},
+        )
+    )
+    assert projected.document.mapping()["originProduct"]["deliveryInfo"] == {
+        "deliveryType": "DELIVERY",
+        "deliveryAttributeType": "NORMAL",
+        "deliveryFee": {
+            "deliveryFeeType": "PAID",
+            "baseFee": 3000,
+            "deliveryFeePayType": "PREPAID",
+        },
+        "claimDeliveryInfo": {
+            "returnDeliveryCompanyPriorityType": "PRIMARY",
+            "returnDeliveryFee": 3000,
+            "exchangeDeliveryFee": 6000,
+            "shippingAddressId": 200441202,
+            "returnAddressId": 200401837,
+        },
+    }
+    assert projected.gaps == ()
+    assert projected.sendable is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("base_fee_krw", -1),
+        ("return_delivery_fee_krw", 1_000_001),
+        ("shipping_address_id", 0),
+        ("delivery_fee_type", "FREE"),
+    ],
+)
+def test_delivery_policy_outside_the_adopted_shape_is_refused(field: str, value: Any) -> None:
+    delivery = {
+        "delivery_type": "DELIVERY",
+        "delivery_attribute_type": "NORMAL",
+        "delivery_fee_type": "PAID",
+        "base_fee_krw": 3000,
+        "delivery_fee_pay_type": "PREPAID",
+        "return_delivery_company_priority_type": "PRIMARY",
+        "return_delivery_fee_krw": 3000,
+        "exchange_delivery_fee_krw": 6000,
+        "shipping_address_id": 200441202,
+        "return_address_id": 200401837,
+    }
+    delivery[field] = value
+    base = payload(notice=_etc_notice())
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(
+            payload(
+                notice=_etc_notice(),
+                policy={**base["policy"], "delivery_policy": delivery},
+            )
+        )
+    assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID"
 
 
 # ---------------------------------------------------------------- the notice child (D2.3)

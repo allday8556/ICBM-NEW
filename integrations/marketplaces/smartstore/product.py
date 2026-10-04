@@ -115,7 +115,9 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # v6: B-DETAIL — a plan Snapshot's detailContent is rendered by the trusted REGISTER renderer from
 # the frozen plan and the Snapshot's uploaded provider asset identities; its detail images are
 # placed there and never in the gallery. A BODY-only Snapshot projects exactly as under v5.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v6"
+# v7: an operator-confirmed account delivery policy is projected as deliveryInfo.  Revisions
+# without one retain the provider's documented no-delivery omission.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v7"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -131,6 +133,9 @@ MAX_OPTION_DIMENSIONS: Final = 3
 # One representative image plus at most nine optional images.
 MAX_OPTIONAL_IMAGES: Final = 9
 MAX_IMAGES: Final = MAX_OPTIONAL_IMAGES + 1
+MAX_DELIVERY_BASE_FEE: Final = 200_000
+MAX_CLAIM_DELIVERY_FEE: Final = 1_000_000
+MAX_PROVIDER_ADDRESS_ID: Final = 2**63 - 1
 
 # Provider field names the captured evidence proves, and the only ones this module may spell.
 FIELD_ORIGIN_PRODUCT: Final = "originProduct"
@@ -145,6 +150,19 @@ FIELD_SALE_PRICE: Final = "salePrice"
 FIELD_STOCK_QUANTITY: Final = "stockQuantity"
 FIELD_LEAF_CATEGORY_ID: Final = "leafCategoryId"
 FIELD_DETAIL_ATTRIBUTE: Final = "detailAttribute"
+FIELD_DELIVERY_INFO: Final = "deliveryInfo"
+FIELD_DELIVERY_TYPE: Final = "deliveryType"
+FIELD_DELIVERY_ATTRIBUTE_TYPE: Final = "deliveryAttributeType"
+FIELD_DELIVERY_FEE: Final = "deliveryFee"
+FIELD_DELIVERY_FEE_TYPE: Final = "deliveryFeeType"
+FIELD_BASE_FEE: Final = "baseFee"
+FIELD_DELIVERY_FEE_PAY_TYPE: Final = "deliveryFeePayType"
+FIELD_CLAIM_DELIVERY_INFO: Final = "claimDeliveryInfo"
+FIELD_RETURN_DELIVERY_COMPANY_PRIORITY_TYPE: Final = "returnDeliveryCompanyPriorityType"
+FIELD_RETURN_DELIVERY_FEE: Final = "returnDeliveryFee"
+FIELD_EXCHANGE_DELIVERY_FEE: Final = "exchangeDeliveryFee"
+FIELD_SHIPPING_ADDRESS_ID: Final = "shippingAddressId"
+FIELD_RETURN_ADDRESS_ID: Final = "returnAddressId"
 FIELD_SELLER_CODE_INFO: Final = "sellerCodeInfo"
 FIELD_SELLER_MANAGEMENT_CODE: Final = "sellerManagementCode"
 FIELD_OPTION_INFO: Final = "optionInfo"
@@ -290,13 +308,35 @@ _ORIGIN_KEYS: Final = frozenset(
         FIELD_STOCK_QUANTITY,
         FIELD_LEAF_CATEGORY_ID,
         FIELD_DETAIL_ATTRIBUTE,
+        FIELD_DELIVERY_INFO,
     }
 )
+_ORIGIN_REQUIRED_KEYS: Final = _ORIGIN_KEYS - {FIELD_DELIVERY_INFO}
 _IMAGES_KEYS: Final = frozenset({FIELD_REPRESENTATIVE_IMAGE, FIELD_OPTIONAL_IMAGES})
 _IMAGE_KEYS: Final = frozenset({FIELD_URL})
 _DETAIL_ATTRIBUTE_KEYS: Final = frozenset({FIELD_SELLER_CODE_INFO, FIELD_OPTION_INFO, FIELD_NOTICE})
 _SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
 _OPTION_INFO_KEYS: Final = frozenset({FIELD_OPTION_GROUP_NAMES, FIELD_OPTION_COMBINATIONS})
+_DELIVERY_INFO_KEYS: Final = frozenset(
+    {
+        FIELD_DELIVERY_TYPE,
+        FIELD_DELIVERY_ATTRIBUTE_TYPE,
+        FIELD_DELIVERY_FEE,
+        FIELD_CLAIM_DELIVERY_INFO,
+    }
+)
+_DELIVERY_FEE_KEYS: Final = frozenset(
+    {FIELD_DELIVERY_FEE_TYPE, FIELD_BASE_FEE, FIELD_DELIVERY_FEE_PAY_TYPE}
+)
+_CLAIM_DELIVERY_KEYS: Final = frozenset(
+    {
+        FIELD_RETURN_DELIVERY_COMPANY_PRIORITY_TYPE,
+        FIELD_RETURN_DELIVERY_FEE,
+        FIELD_EXCHANGE_DELIVERY_FEE,
+        FIELD_SHIPPING_ADDRESS_ID,
+        FIELD_RETURN_ADDRESS_ID,
+    }
+)
 
 
 def _object(value: Any, path: str, allowed: frozenset[str]) -> Mapping[str, Any]:
@@ -356,6 +396,59 @@ def _validate_images(value: Any, path: str) -> None:
         entries = _array(images[FIELD_OPTIONAL_IMAGES], optional_path, maximum=MAX_OPTIONAL_IMAGES)
         for index, entry in enumerate(entries):
             _validate_image(entry, f"{optional_path}[{index}]")
+
+
+def _validate_delivery_info(value: Any, path: str) -> None:
+    delivery = _object(value, path, _DELIVERY_INFO_KEYS)
+    _required(delivery, path, sorted(_DELIVERY_INFO_KEYS))
+    expected = {
+        FIELD_DELIVERY_TYPE: "DELIVERY",
+        FIELD_DELIVERY_ATTRIBUTE_TYPE: "NORMAL",
+    }
+    for name, accepted in expected.items():
+        if delivery[name] != accepted:
+            raise WireContractError(
+                "WIRE_DOCUMENT_VALUE_INVALID", f"{path}.{name} is not {accepted}"
+            )
+    fee_path = f"{path}.{FIELD_DELIVERY_FEE}"
+    fee = _object(delivery[FIELD_DELIVERY_FEE], fee_path, _DELIVERY_FEE_KEYS)
+    _required(fee, fee_path, sorted(_DELIVERY_FEE_KEYS))
+    if fee[FIELD_DELIVERY_FEE_TYPE] != "PAID":
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{fee_path}.{FIELD_DELIVERY_FEE_TYPE} is not PAID",
+        )
+    if fee[FIELD_DELIVERY_FEE_PAY_TYPE] != "PREPAID":
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{fee_path}.{FIELD_DELIVERY_FEE_PAY_TYPE} is not PREPAID",
+        )
+    _bounded_int(fee[FIELD_BASE_FEE], f"{fee_path}.{FIELD_BASE_FEE}", MAX_DELIVERY_BASE_FEE)
+
+    claim_path = f"{path}.{FIELD_CLAIM_DELIVERY_INFO}"
+    claim = _object(delivery[FIELD_CLAIM_DELIVERY_INFO], claim_path, _CLAIM_DELIVERY_KEYS)
+    _required(claim, claim_path, sorted(_CLAIM_DELIVERY_KEYS))
+    if claim[FIELD_RETURN_DELIVERY_COMPANY_PRIORITY_TYPE] != "PRIMARY":
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{claim_path}.{FIELD_RETURN_DELIVERY_COMPANY_PRIORITY_TYPE} is not PRIMARY",
+        )
+    _bounded_int(
+        claim[FIELD_RETURN_DELIVERY_FEE],
+        f"{claim_path}.{FIELD_RETURN_DELIVERY_FEE}",
+        MAX_CLAIM_DELIVERY_FEE,
+    )
+    _bounded_int(
+        claim[FIELD_EXCHANGE_DELIVERY_FEE],
+        f"{claim_path}.{FIELD_EXCHANGE_DELIVERY_FEE}",
+        MAX_CLAIM_DELIVERY_FEE,
+    )
+    for name in (FIELD_SHIPPING_ADDRESS_ID, FIELD_RETURN_ADDRESS_ID):
+        address = _bounded_int(claim[name], f"{claim_path}.{name}", MAX_PROVIDER_ADDRESS_ID)
+        if address == 0:
+            raise WireContractError(
+                "WIRE_DOCUMENT_VALUE_INVALID", f"{claim_path}.{name} is not positive"
+            )
 
 
 def _validate_option_info(value: Any, path: str) -> None:
@@ -480,7 +573,7 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
             f" {REGISTRATION_DISPLAY_STATUS}",
         )
     origin = _object(document[FIELD_ORIGIN_PRODUCT], FIELD_ORIGIN_PRODUCT, _ORIGIN_KEYS)
-    _required(origin, FIELD_ORIGIN_PRODUCT, sorted(_ORIGIN_KEYS))
+    _required(origin, FIELD_ORIGIN_PRODUCT, sorted(_ORIGIN_REQUIRED_KEYS))
     if origin[FIELD_STATUS_TYPE] != CREATE_STATUS_TYPE:
         # E2: on registration only SALE may be entered; any other value is not a CREATE input.
         raise WireContractError(
@@ -502,6 +595,10 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
             "WIRE_DOCUMENT_VALUE_INVALID", f"{stock_path} is not {REGISTRATION_STOCK_QUANTITY}"
         )
     _validate_images(origin[FIELD_IMAGES], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_IMAGES}")
+    if FIELD_DELIVERY_INFO in origin:
+        _validate_delivery_info(
+            origin[FIELD_DELIVERY_INFO], f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DELIVERY_INFO}"
+        )
     attribute_path = f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}"
     attribute = _object(origin[FIELD_DETAIL_ATTRIBUTE], attribute_path, _DETAIL_ATTRIBUTE_KEYS)
     _required(attribute, attribute_path, (FIELD_SELLER_CODE_INFO,))
@@ -968,6 +1065,51 @@ def _option_info(
     return {FIELD_OPTION_GROUP_NAMES: group_names, FIELD_OPTION_COMBINATIONS: combinations}
 
 
+def _delivery_info(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    policy = payload.get("policy")
+    if not isinstance(policy, Mapping):
+        return None
+    delivery = policy.get("delivery_policy")
+    if delivery is None:
+        return None
+    if not isinstance(delivery, Mapping):
+        raise WireContractError("WIRE_PAYLOAD_MALFORMED", "policy.delivery_policy is not an object")
+    required = {
+        "delivery_type",
+        "delivery_attribute_type",
+        "delivery_fee_type",
+        "base_fee_krw",
+        "delivery_fee_pay_type",
+        "return_delivery_company_priority_type",
+        "return_delivery_fee_krw",
+        "exchange_delivery_fee_krw",
+        "shipping_address_id",
+        "return_address_id",
+    }
+    if set(delivery) != required:
+        raise WireContractError(
+            "WIRE_PAYLOAD_MALFORMED", "policy.delivery_policy is incomplete or has unknown fields"
+        )
+    return {
+        FIELD_DELIVERY_TYPE: delivery["delivery_type"],
+        FIELD_DELIVERY_ATTRIBUTE_TYPE: delivery["delivery_attribute_type"],
+        FIELD_DELIVERY_FEE: {
+            FIELD_DELIVERY_FEE_TYPE: delivery["delivery_fee_type"],
+            FIELD_BASE_FEE: delivery["base_fee_krw"],
+            FIELD_DELIVERY_FEE_PAY_TYPE: delivery["delivery_fee_pay_type"],
+        },
+        FIELD_CLAIM_DELIVERY_INFO: {
+            FIELD_RETURN_DELIVERY_COMPANY_PRIORITY_TYPE: delivery[
+                "return_delivery_company_priority_type"
+            ],
+            FIELD_RETURN_DELIVERY_FEE: delivery["return_delivery_fee_krw"],
+            FIELD_EXCHANGE_DELIVERY_FEE: delivery["exchange_delivery_fee_krw"],
+            FIELD_SHIPPING_ADDRESS_ID: delivery["shipping_address_id"],
+            FIELD_RETURN_ADDRESS_ID: delivery["return_address_id"],
+        },
+    }
+
+
 def project(payload: Mapping[str, Any]) -> WireProjection:
     """Project one frozen Snapshot payload onto the adopted SmartStore CREATE request.
 
@@ -1013,6 +1155,9 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_LEAF_CATEGORY_ID: _leaf_category_id(payload),
         FIELD_DETAIL_ATTRIBUTE: detail_attribute,
     }
+    delivery_info = _delivery_info(payload)
+    if delivery_info is not None:
+        origin_product[FIELD_DELIVERY_INFO] = delivery_info
     # smartstoreChannelProduct: both required members carry the value ICBM owns (5915900049 D1,
     # D2.1); every optional member (channelProductName, bbsSeq, storeKeepExclusiveProduct) is
     # unowned and never emitted. windowChannelProduct is out of scope and is never emitted.
