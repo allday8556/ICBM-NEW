@@ -70,6 +70,8 @@ This ADR is a contract. It names entities, owners, states and invariants. It doe
 - The listing shape is one of `SINGLE_LISTING_WITH_OPTIONS | SEPARATE_LISTINGS | SELECTED_OFFERS`.
 - For `SINGLE_LISTING_WITH_OPTIONS`, every Item resolves to one SmartStore category, and the SmartStore adapter provides a **deterministic compatibility check**. AI never decides whether Items can be combined into one option listing.
 - Price stays Item-owned: each Item carries its exact M4 `PricingSnapshot` for the target context. There is no listing-level price flattening.
+  A Draft is re-pinned to the price M4 holds current only by the Draft command owner's re-pin
+  (B-PRICE1, ADR-0015 §5 amendment note), never by an operator-supplied price.
 
 **The provider-listing unit (ruling R3).** A Draft may hold many Items, but CREATE idempotency belongs to the **provider listing**: one listing SmartStore creates.
 - **Before any execution, the Draft is resolved into provider-listing units. Each unit has exactly one immutable `RegistrationSnapshot` and one CREATE `RegistrationIntent`.**

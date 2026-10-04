@@ -38,7 +38,7 @@ from app.stages.products.pricing import PriceBasis, PriceGuard
 from app.stages.products.pricing_service import PricingOutcome, ProductPricingService
 from app.stages.products.pricing_store import PricingSnapshotRecord
 from app.stages.products.service import ProductsService
-from app.stages.register.model import ListingShape, RegistrationConflictError
+from app.stages.register.model import IntentState, ListingShape, RegistrationConflictError
 from app.stages.register.policy import RegistrationPolicySource, TargetPolicy
 from app.stages.register.store import RegistrationStore
 
@@ -48,6 +48,14 @@ TARGET_POLICY_MISSING = "REGISTER_TARGET_POLICY_MISSING"
 PRICING_CONTEXT_MISMATCH = "REGISTER_PRICING_CONTEXT_MISMATCH"
 ITEM_NOT_PRICED = "REGISTER_DRAFT_ITEM_NOT_PRICED"
 SELECTION_MOVED = "REGISTER_DRAFT_SELECTION_MOVED"
+# B-PRICE1: the repin command's own refusals.
+DRAFT_NOT_FOUND = "REGISTER_DRAFT_NOT_FOUND"
+DRAFT_REVISION_MOVED = "REGISTER_DRAFT_REVISION_MOVED"
+REPIN_INTENT_OPEN = "REGISTER_REPIN_INTENT_OPEN"
+REPIN_PRICE_IDENTITY = "REGISTER_REPIN_PRICE_IDENTITY"
+# An Intent in one of these states may still send, or may already have sent, the frozen price: a
+# repin then waits until it settles (fail closed). CONFIRMED and FAILED are settled.
+REPIN_BLOCKING_INTENTS = frozenset({IntentState.PREPARED, IntentState.SENT, IntentState.UNKNOWN})
 
 Identifier = Annotated[StrictStr, Field(min_length=1, max_length=36)]
 
@@ -107,6 +115,37 @@ class DraftCreatedView(BaseModel):
     membership_revision_id: str
     policy_revision: str
     items: list[DraftItemPinView]
+
+
+class RepinDraftRequest(BaseModel):
+    """B-PRICE1: re-pin a Draft's Items to the price M4 holds current now. The operator names the
+    Draft revision they saw and nothing else — never a price or a snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor: Annotated[StrictStr, Field(min_length=2, max_length=64)]
+    expected_draft_revision: int = Field(ge=1)
+
+
+class DraftRepinItemView(BaseModel):
+    item_id: str
+    previous_pricing_snapshot_id: str
+    pricing_snapshot_id: str
+    pricing_outcome: PricingOutcome
+    # Whether the pin moved: an UNCHANGED price, or a RECORDED one equal to the pin, moves nothing.
+    repinned: bool
+    final_sale_price_krw: int
+    price_basis: PriceBasis
+    price_guard: PriceGuard
+
+
+class DraftRepinnedView(BaseModel):
+    draft_id: str
+    previous_draft_revision: int
+    # One revision per Item whose pin moved (``change_draft_item_price``); none when nothing moved.
+    draft_revision: int
+    policy_revision: str
+    items: list[DraftRepinItemView]
 
 
 class DraftCommandService:
@@ -208,6 +247,119 @@ class DraftCommandService:
                     price_guard=snapshot.price_guard,
                 )
                 for item in selection.items
+                for outcome, snapshot in (priced[item.item_id],)
+            ],
+        )
+
+    def repin(
+        self, draft_id: str, request: RepinDraftRequest, *, correlation_id: str
+    ) -> DraftRepinnedView:
+        """B-PRICE1: re-price every open Item through M4 and re-pin the Draft to it.
+
+        1. The Draft and the revision the operator saw; a moved Draft is refused.
+        2. Every open Item priced by the M4 owner under the account's current policy context, all
+           before any refusal: ``RECORDED`` and ``UNCHANGED`` give the snapshot M4 holds current;
+           ``NOT_PRICED`` on any Item re-pins nothing and returns every Item's M4 reasons. M4's own
+           history is M4's: a snapshot it recorded stays recorded either way.
+        3. Each snapshot must price exactly this Item under exactly the policy's context.
+        4. One registration unit of work, all-or-nothing: refused while any Intent of the Draft may
+           still send its frozen price (``PREPARED``, ``SENT``, ``UNKNOWN``); otherwise each Item
+           whose pin differs is re-pinned (``change_draft_item_price``: one revision each, the
+           Draft history keeps every price). A Snapshot of an earlier revision is stale by the
+           existing rules, and nothing about the price is ever written by REGISTER.
+
+        Another Draft that pins a superseded snapshot is not touched: M4's pointer move already
+        makes it ``DRAFT_PRICE_PIN_SUPERSEDED`` (STALE) through its own preflight.
+        """
+        draft = self._registrations.draft(draft_id)
+        if draft is None:
+            raise NotFoundError(DRAFT_NOT_FOUND, "the draft does not exist")
+        if draft.draft_revision != request.expected_draft_revision:
+            raise RegistrationConflictError(
+                DRAFT_REVISION_MOVED,
+                "the Draft moved since it was read; read it again",
+                details={"draft_revision": draft.draft_revision},
+            )
+        policy = self._target(draft.marketplace_key, draft.marketplace_account_id)
+        priced: dict[str, tuple[PricingOutcome, PricingSnapshotRecord]] = {}
+        refused: dict[str, list[dict[str, str | None]]] = {}
+        for item in draft.items:
+            result = self._pricing.price(
+                item.item_id, policy.pricing_context, correlation_id=correlation_id
+            )
+            if result.outcome is PricingOutcome.NOT_PRICED or result.snapshot is None:
+                refused[item.item_id] = [
+                    {"code": reason.code, "subject": reason.subject} for reason in result.reasons
+                ]
+            else:
+                priced[item.item_id] = (result.outcome, result.snapshot)
+        if refused:
+            raise RegistrationConflictError(
+                ITEM_NOT_PRICED,
+                "M4 did not price every Item of the Draft; nothing was re-pinned",
+                details={"items": refused, "policy_revision": policy.policy_revision},
+            )
+        foreign = sorted(
+            item.item_id
+            for item in draft.items
+            if priced[item.item_id][1].item_id != item.item_id
+            or priced[item.item_id][1].pricing_context_fingerprint
+            != policy.pricing_context.fingerprint
+        )
+        if foreign:  # pragma: no cover - M4 prices exactly the Item and context it is asked
+            raise RegistrationConflictError(
+                REPIN_PRICE_IDENTITY,
+                "a price is not this Item's under the policy's context; nothing was re-pinned",
+                details={"item_ids": foreign},
+            )
+        previous = {item.item_id: item.pricing_snapshot_id for item in draft.items}
+        with self._registrations.transaction() as unit:
+            current = unit.draft(draft_id)
+            if current is None or current.draft_revision != request.expected_draft_revision:
+                raise RegistrationConflictError(
+                    DRAFT_REVISION_MOVED,
+                    "the Draft moved while it was priced; nothing was re-pinned",
+                )
+            blocking = sorted(
+                intent.intent_id
+                for snapshot in unit.snapshots_of_draft(draft_id, limit=10_000)
+                for intent in (unit.intent_of_snapshot(snapshot.registration_snapshot_id),)
+                if intent is not None and intent.state in REPIN_BLOCKING_INTENTS
+            )
+            if blocking:
+                raise RegistrationConflictError(
+                    REPIN_INTENT_OPEN,
+                    "an Intent of this Draft may still send its price; nothing was re-pinned",
+                    details={"intent_ids": blocking},
+                )
+            updated = current
+            for item in current.items:
+                snapshot = priced[item.item_id][1]
+                if snapshot.pricing_snapshot_id != item.pricing_snapshot_id:
+                    updated = unit.change_draft_item_price(
+                        draft_id,
+                        item.item_id,
+                        snapshot.pricing_snapshot_id,
+                        changed_by=request.actor,
+                        correlation_id=correlation_id,
+                    )
+        return DraftRepinnedView(
+            draft_id=draft_id,
+            previous_draft_revision=request.expected_draft_revision,
+            draft_revision=updated.draft_revision,
+            policy_revision=policy.policy_revision,
+            items=[
+                DraftRepinItemView(
+                    item_id=item.item_id,
+                    previous_pricing_snapshot_id=previous[item.item_id],
+                    pricing_snapshot_id=snapshot.pricing_snapshot_id,
+                    pricing_outcome=outcome,
+                    repinned=snapshot.pricing_snapshot_id != previous[item.item_id],
+                    final_sale_price_krw=snapshot.final_sale_price_krw,
+                    price_basis=snapshot.price_basis,
+                    price_guard=snapshot.price_guard,
+                )
+                for item in draft.items
                 for outcome, snapshot in (priced[item.item_id],)
             ],
         )

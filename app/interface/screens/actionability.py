@@ -100,13 +100,14 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "UNIT_SINGLE_NOT_COVERING": (_X, None),
     "UNIT_SEPARATE_NOT_ONE_ITEM": (_X, None),
     "LISTING_IDENTITY_INVALID": (_X, None),
-    # Price: the pricing context is the target policy's; a pin is re-pinned only by the pricing
-    # owner, which has no operator command yet (B-PRICE1).
+    # Price: the pricing context is the target policy's; a pin is moved only by the Draft command
+    # owner's re-pin (B-PRICE1), which has M4 price again — the unit's "가격 다시 고정" action.
+    # An open Item always holds a pin, so a missing one has no operator fix.
     "TARGET_PRICING_CONTEXT_INVALID": (_F, _POLICY),
     "DRAFT_PRICE_PIN_MISSING": (_X, None),
-    "DRAFT_PRICE_PIN_CONTEXT_INVALID": (_X, None),
-    "DRAFT_PRICE_PIN_CONTEXT_STALE": (_X, None),
-    "DRAFT_PRICE_PIN_SUPERSEDED": (_X, None),
+    "DRAFT_PRICE_PIN_CONTEXT_INVALID": (_F, _ACT),
+    "DRAFT_PRICE_PIN_CONTEXT_STALE": (_F, _ACT),
+    "DRAFT_PRICE_PIN_SUPERSEDED": (_F, _ACT),
     # Category: chosen in the preparation form; its reviewed metadata lives in Settings.
     "CATEGORY_NOT_SELECTED": (_F, _PREP),
     "CATEGORY_NOT_CONFIRMED": (_F, _PREP),
@@ -171,12 +172,13 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "PAYLOAD_EXTERNAL_URL": (_F, _PREP),
 }
 
-# The M4 owners' reasons (unprefixed). None has an operator screen in REGISTER; a sold-out source
-# is a supplier fact.
+# The M4 owners' reasons (unprefixed). Only the pricing snapshot is moved from REGISTER, through the
+# re-pin; a sold-out source is a supplier fact; the rest have no operator screen.
 M4_ACTIONS: Final[Mapping[str, Entry]] = {
     "SOURCE_STOCK_SOLD_OUT": (_N, None),
-    "PRICING_SNAPSHOT_MISSING": (_X, None),
-    "PRICING_SNAPSHOT_SUPERSEDED": (_X, None),
+    # The re-pin has M4 price the Item under the policy's context (B-PRICE1).
+    "PRICING_SNAPSHOT_MISSING": (_F, _ACT),
+    "PRICING_SNAPSHOT_SUPERSEDED": (_F, _ACT),
 }
 
 # REGISTRATION_ERROR review conditions of the REGISTER execution producer.
