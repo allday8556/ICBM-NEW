@@ -53,6 +53,7 @@ RUNS = "/api/v1/collect/collections"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 FORM = "[data-role='collect-submit']"
 FOCUS = "[data-role='run-focus']"
+FACTS = "[data-role='facts-slot'] > [data-role='collect-facts']"
 SESSION = "fake-session-payload"
 NEVER_CREATED = (
     "pricing_snapshots",
@@ -438,8 +439,9 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
     with served(config, ScriptedShop()) as client, _page(browser, client, wire) as page:
         _submit(page, "4242")
         run_id = _outcome(page, "RECORDED")
-        facts = page.locator(f"{FOCUS} [data-role='collect-facts'][data-state='ready']")
+        facts = page.locator(f"{FACTS}[data-state='ready']")
         facts.wait_for()
+        assert page.locator(f"{FOCUS} [data-role='collect-facts']").count() == 0
         served_container: Container = client.app.state.container  # type: ignore[attr-defined]
         run = served_container.collection.run(run_id)
         assert run.revision_id is not None
@@ -470,9 +472,15 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
         # The evidence is the field's own, opened on demand.
         first = revision["fields"][0]
         evidence = facts.locator(f"tr[data-evidence-for='{first['key']}']")
-        assert evidence.is_hidden()
-        facts.locator(f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']").click()
+        toggle = facts.locator(
+            f"tr[data-field='{first['key']}'] [data-action='toggle-evidence']"
+        )
+        assert evidence.count() == 0
+        assert toggle.get_attribute("aria-expanded") == "false"
+        toggle.click()
+        assert evidence.count() == 1
         assert evidence.is_visible()
+        assert toggle.get_attribute("aria-expanded") == "true"
         # A CONFIRMED field's whole stored value is there too, never shortened.
         if first["status"] == "CONFIRMED":
             full = evidence.locator("[data-role='field-value-full']").inner_text()
@@ -485,10 +493,34 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
                     f"tr[data-evidence-for='{field['key']}'] [data-role='field-value-full']"
                 ).inner_text()
                 assert json.loads(shown) == json.loads(field["value_json"]), field["key"]
+                row.locator("[data-action='toggle-evidence']").click()
+                assert facts.locator(f"tr[data-evidence-for='{field['key']}']").count() == 0
         entries = evidence.locator("[data-role='evidence'] tbody tr")
         assert [
             entries.nth(i).get_attribute("data-evidence-kind") for i in range(entries.count())
         ] == [e["kind"] for e in first["evidence"]]
+        toggle.click()
+        assert evidence.count() == 0
+        assert toggle.get_attribute("aria-expanded") == "false"
+        # Image state follows the same contract: its table is built only while expanded.
+        image_table = facts.locator("[data-role='image-refs']")
+        image_toggle = facts.locator("[data-action='toggle-images']")
+        assert image_table.count() == 0
+        if revision["images"]:
+            assert image_toggle.get_attribute("aria-expanded") == "false"
+            image_toggle.click()
+            image_rows = image_table.locator("tbody tr")
+            assert image_rows.count() == len(revision["images"])
+            assert [
+                image_rows.nth(i).get_attribute("data-status")
+                for i in range(image_rows.count())
+            ] == [image["status"] for image in revision["images"]]
+            assert image_toggle.get_attribute("aria-expanded") == "true"
+            image_toggle.click()
+            assert image_table.count() == 0
+            assert image_toggle.get_attribute("aria-expanded") == "false"
+        else:
+            assert image_toggle.count() == 0
         # Two axes, never merged: the run's outcome and the revision's facts status.
         assert (
             page.locator(f"{FOCUS} [data-role='run-outcome'] [data-outcome='RECORDED']").count()
@@ -541,7 +573,7 @@ def test_the_run_list_is_filtered_on_the_server_and_counts_what_it_selected(
             page.locator("[data-action='open-run']").click()
             _outcome(page, "NO_REVISION")
             assert page.locator(f"{FOCUS} [data-reason='NO_REVISION']").count() == 1
-            assert page.locator(f"{FOCUS} [data-role='collect-facts']").count() == 0
+            assert page.locator(FACTS).count() == 0
             assert page.locator(f"{FOCUS} [data-facts-status]").count() == 0
             # 전체 lists every run the server holds.
             page.locator("[data-filter='all']").click()
