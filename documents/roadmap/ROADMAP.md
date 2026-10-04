@@ -376,6 +376,23 @@ Quantity tiers remain original `(quantity, total price)` facts. Do not infer per
 
 Atomic supplier SKU identity is preserved. Same weight does not allow flattening when count/grade differs.
 
+The accepted owner decision in ADR-0013's 2026-10-03 amendment adds the positive-option canonical
+contract:
+
+- a fact-backed Coupang category-required purchase option is a minimum requirement for one
+  product-level Common Sales Option authoring decision;
+- `CommonSalesOptionAxis`/`CommonSalesOptionValue` are authored once under the existing canonical
+  ProductGroup, never separately by NAVER, Coupang or 11st;
+- an Atomic SKU is created only for a source-proven option configuration, never from an inferred
+  Cartesian product;
+- every marketplace adapter consumes the same Common Sales Option revision and Atomic SKU set;
+- an incompatible marketplace becomes `REVIEW_REQUIRED` without changing the canonical structure;
+- marketplace order lines for the same selection resolve to the same ICBM Atomic SKU.
+
+Product Facts, Common Sales Options, Atomic SKUs, Product Information Notices and Marketplace
+Attributes remain distinct roles. This requirement is accepted but not implemented; it does not
+change the accepted no-positive-option M3/M4 evidence.
+
 ## Phase 3 acceptance
 
 - one collected product has one canonical product ID
@@ -716,6 +733,22 @@ AI authoring foundation
 
 This is a dependency order for the registration/AI lane, not permission to start any of those
 slices before the first vertical is accepted.
+
+For the positive-option/cross-market lane, after the current no-positive-option first vertical:
+
+```text
+CommonSalesOptionAxis / CommonSalesOptionValue canonical owner
+  -> Product Fact -> Common Sales Option reviewed mapping
+  -> source-proven AtomicSKU materialization (no inferred Cartesian combinations)
+  -> ProductItem identity + registration_item_key/v2 coexistence
+  -> shared marketplace projection compatibility/preflight
+  -> typed provider option/SKU identity aliases
+  -> marketplace order-line -> AtomicSKU resolution
+  -> SmartStore positive-option expansion and/or actual Coupang REGISTER
+```
+
+Research, official-evidence capture and provider-zero dry-run design may precede that implementation.
+An actual Coupang REGISTER and a SmartStore positive-option claim may not.
 
 **AI_INITIAL timing clarification is intentionally deferred.** Canonical v3.1 §7.6 says both that
 platform name/tag projections are created only for the `RegistrationTargetSet` and that the first

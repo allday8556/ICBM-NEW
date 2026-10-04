@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_APPLICABLE` (owned by `ERRORS.md` §16) | `UNVERIFIED` |
-| Coupang | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_RELEASE_NOTE` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -24,7 +24,10 @@
 
 ## Coupang
 
-- **Missing:** no global requests-per-second/day limit captured from the official index (2026-09-28).
+- **Locator:** https://developers.coupang.com/en/notices/optimization-and-adjustment-of-open-api-rate-limiteffective-march-17th2026 — `OFFICIAL_RELEASE_NOTE`, effective and observed 2026-03-17 / 2026-10-03.
+- **Captured:** Coupang reduced the published baseline frequency from 10 to 5 requests per second for all affected Open APIs.
+- **Inventory plan:** Track C proposes sequential 1–2 rps with jitter and checkpoints for future category inventory, below the baseline. That is an ICBM safety decision, not a provider guarantee.
+- **Missing:** endpoint/account-specific buckets, burst rules, headers, `429` body/`Retry-After` contract, daily limits and whether any family has a lower ceiling. The 5 rps baseline is never generalized upward over a stricter endpoint rule.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

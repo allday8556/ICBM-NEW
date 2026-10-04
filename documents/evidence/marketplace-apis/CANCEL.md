@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -23,8 +23,11 @@
 
 ## Coupang
 
-- **Captured (https://developers.coupang.com/en/api, 2026-09-28):** the official order and return families expose order cancellation and return/cancel request lists.
-- **Missing:** method/path and fields.
+- **Locators:** seller cancellation https://developers.coupang.com/en/api/shipments/cancel-an-order ; return/cancellation read https://developers.coupang.com/en/api/returns/return-cancellation-request-list-query — `OFFICIAL_API_DOC`, observed 2026-10-03.
+- **Mutation method / path:** `POST /v2/providers/openapi/apis/api/v5/vendors/{vendorId}/orders/{orderId}/cancel`; the request identifies option units with `vendorItemIds[]` and receipt counts. This is identity evidence only and is not adopted for mutation.
+- **Read identity:** the v6 return/cancellation list returns `returnItems[].vendorItemId`, cancellation quantity and `sellerProductId` ([RETURN](RETURN.md#coupang)).
+- **Canonical consequence:** a future cancellation may be issued only from an already resolved immutable order line; a name or seller product group ID is not sufficient.
+- **Missing:** complete cancellation request/response/error, outcome/replay/idempotency and rate limit.
 - **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
 
 ## 11st

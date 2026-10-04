@@ -269,6 +269,28 @@ The M4 product contract is `documents/decisions/adr/0013-m4-canonical-product-co
 - A `PricingSnapshot` is per Item **and** per explicit pricing context (marketplace, account where it matters, fee and policy versions). Readiness is layered: base readiness, per-context pricing readiness, then M5 registration preflight.
 - Sellable Items are `group identifier + composition_signature`.
 
+#### Common Sales Option and Atomic SKU
+
+ADR-0013's 2026-10-03 owner amendment is the canonical positive-option contract. A
+`CommonSalesOptionAxis`/`CommonSalesOptionValue` is authored once under the existing ProductGroup
+from semantically matched, evidenced Product Facts. A fact, a Common Sales Option, an Atomic SKU, a
+Product Information Notice and a Marketplace Attribute remain separate roles; sharing evidence does
+not merge their owners.
+
+A fact-backed Coupang category-required purchase option sets a minimum Common Sales Option
+requirement under ICBM product policy. Coupang metadata remains provider evidence, not the Product
+Core schema. An `AtomicSKU` is one source-proven common-option configuration; axis/value lists never
+authorize fabrication of missing Cartesian combinations.
+
+NAVER, Coupang and later 11st project the same Common Sales Option revision and Atomic SKU set. A
+marketplace incompatibility makes only that marketplace's REGISTER readiness `REVIEW_REQUIRED`; it
+does not silently change the canonical structure. Persisted marketplace item identities resolve
+orders back to the same Item/Atomic SKU across marketplaces.
+
+This requirement is accepted but not implemented. The existing bounded no-positive-option Item
+path remains valid and unchanged; positive-option SmartStore expansion and actual Coupang REGISTER
+are gated on the additive common-option/Atomic-SKU implementation.
+
 ### MarketplaceRegistration
 Always includes:
 
