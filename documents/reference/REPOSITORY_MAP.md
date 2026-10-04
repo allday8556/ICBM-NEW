@@ -68,9 +68,9 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 266 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 268 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 42 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 22 | operator surfaces: HTTP api, screens, cli |
+| `app/interface/` | 24 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 70 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 127 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
@@ -94,13 +94,13 @@ The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집�
 | `integrations/` | 42 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 21 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 261 | tests |
+| `tests/` | 265 | tests |
 | `tests/contracts/` | 9 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 102 | integration tests by runtime owner |
+| `tests/integration/` | 104 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 93 | unit tests by runtime owner |
+| `tests/unit/` | 95 | unit tests by runtime owner |
 | `ui/` | 55 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 46 | the served web client |

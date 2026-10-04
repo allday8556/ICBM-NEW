@@ -21,7 +21,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import Final, Protocol
 
 from app.platform.core.errors import AppError
 from app.stages.connect.marketplace.capability import RemoteOutcome
@@ -66,6 +66,44 @@ REASON_READBACK_MISMATCH: Final = "REGISTER_READ_READBACK_MISMATCH"
 REASON_VERIFICATION_OVERDUE: Final = "REGISTER_READ_VERIFICATION_OVERDUE"
 REASON_NOT_APPLIED: Final = "REGISTER_READ_NOT_APPLIED"
 REASON_PRE_SEND_FAILED: Final = "REGISTER_READ_PRE_SEND_FAILED"
+
+
+class AppliedAttempt(Protocol):
+    """What the verification deadline reads of one Attempt (the store's ``AttemptRecord``)."""
+
+    @property
+    def attempt_id(self) -> str: ...
+
+    @property
+    def outcome(self) -> RemoteOutcome | None: ...
+
+    @property
+    def resolved_outcome(self) -> RemoteOutcome | None: ...
+
+    @property
+    def resolved_at(self) -> datetime | None: ...
+
+    @property
+    def finished_at(self) -> datetime | None: ...
+
+
+def applied_attempt(attempts: Iterable[AppliedAttempt]) -> tuple[str, datetime] | None:
+    """The Attempt whose applied outcome was established latest, and when: its evidence-backed
+    resolution, else its finish. The verification deadline runs from it."""
+    found: tuple[str, datetime] | None = None
+    for attempt in attempts:
+        if attempt.outcome is not RemoteOutcome.APPLIED_PROVEN:
+            continue
+        at = attempt.resolved_at if attempt.resolved_outcome is not None else attempt.finished_at
+        if at is not None and (found is None or at > found[1]):
+            found = (attempt.attempt_id, at)
+    return found
+
+
+def verification_overdue(applied_at: datetime, *, now: datetime) -> bool:
+    """The one deadline rule (§28.5): an applied, unverified CREATE is overdue strictly after
+    ``VERIFICATION_DEADLINE``. The read state and the review producer both read it."""
+    return now - applied_at > VERIFICATION_DEADLINE
 
 
 @dataclass(frozen=True)
@@ -145,7 +183,7 @@ def classify(facts: IntentReadFacts, *, now: datetime) -> ReadVerdict:
                 return ReadVerdict(ReadState.RECHECK_REQUIRED, REASON_READBACK_MISMATCH)
             if facts.applied_at is None:
                 raise _unclassified(facts)
-            if now - facts.applied_at <= VERIFICATION_DEADLINE:
+            if not verification_overdue(facts.applied_at, now=now):
                 return ReadVerdict(ReadState.REGISTERING, REASON_AWAITING_VERIFICATION)
             return ReadVerdict(ReadState.RECHECK_REQUIRED, REASON_VERIFICATION_OVERDUE)
         if (

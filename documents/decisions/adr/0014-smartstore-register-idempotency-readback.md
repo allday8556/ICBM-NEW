@@ -649,6 +649,17 @@ Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is
 > the owner's real refusal code and is never one of the five; the six counts always sum to the
 > population. Nothing is stored or cached, and the screen never recomputes a status.
 
+> **Amendment note (B-UX2; owner directive 2026-10-04).** Every reason and every REGISTRATION_ERROR
+> condition of the REGISTER execution producer has one server-owned **actionability**
+> (`app/interface/screens/actionability.py`, `register-actionability/v1`): `FIX_AVAILABLE` with the
+> existing screen where the operator acts, `RECHECK` (a read-only re-check the server offers),
+> `WAITING`, `NO_OPERATOR_ACTION`, or `NOT_IMPLEMENTED` — a code without a surface is never given a
+> fix. The **fix-only projection** (`GET /api/v1/screens/register/fixes`,
+> `register-fix-projection/v1`) is a composite read model in the screens layer over the B-UX1
+> pre-send population and the open execution-producer items, so REGISTER never reads the review
+> owner; it lists only `FIX_AVAILABLE` and `RECHECK` rows and counts the rest. It fixes nothing:
+> the screen only navigates to the named surface.
+
 ### 23. The M5 / M6 boundary
 
 - **M5 read-back is registration and reconcile proof.** It covers the CREATE of a provider listing, the reconcile of an ambiguous CREATE, the verification against the Snapshot, and the explicit reconcile of a known registration (§14).

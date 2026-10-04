@@ -12,7 +12,10 @@ are unchanged, and a resolution of one of these items changes no REGISTER fact (
 - an Intent whose read-back comparison is a ``MISMATCH`` (§11) → ``readback``,
   ``REGISTER_READBACK_MISMATCH``; source identity: the sanitized comparison evidence digest;
 - a PAUSED execution scope (§26) → ``scope:<endpoint_group>``,
-  ``REGISTER_SCOPE_PAUSED_<AUTH|POLICY|FAILURE_BUDGET>``; source identity: its resume generation.
+  ``REGISTER_SCOPE_PAUSED_<AUTH|POLICY|FAILURE_BUDGET>``; source identity: its resume generation;
+- B-UX2 (ADR-0016 §1, ADR-0014 §28.6): an applied, unverified Intent past the verification
+  deadline (``read_state.verification_overdue``, the same rule as its 재확인필요 read state) →
+  ``verification``, ``REGISTER_READ_VERIFICATION_OVERDUE``; source identity: the applied Attempt.
 
 An Intent's scope is ``marketplace_key``, ``marketplace_account_id``, the ``draft_id`` its
 Snapshot froze, and ``intent_id``; an execution scope's is its account (§8).
@@ -20,8 +23,13 @@ Snapshot froze, and ``intent_id``; an execution scope's is its account (§8).
 Preflight and preparation reasons are the REGISTER preparation producer's
 (``app.capabilities.review.preflight_producer``), anchored on the durable preparation revision; this
 producer
-reads execution state only. An ``APPLIED_PROVEN`` Intent awaiting its read-back is pending work,
-not a recorded failure.
+reads execution state only. An ``APPLIED_PROVEN`` Intent awaiting its read-back within the deadline
+is pending work, not a recorded failure; past it, it is the overdue condition above.
+
+**Time-driven coverage.** The overdue condition becomes true with the clock alone, so the truth
+token names the set of Intents overdue now: crossing the deadline moves the token, the count stops
+being ``CURRENT`` and a pass is requested — an overdue Intent is never hidden behind a current
+count.
 """
 
 import hashlib
@@ -30,21 +38,31 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from app.capabilities.review.model import ReviewCondition, ReviewKind
+from app.platform.core.clock import Clock, SystemClock
 from app.stages.register.model import IntentState, VerificationState
-from app.stages.register.store import IntentReviewRecord, RegistrationStore, ScopeRecord
+from app.stages.register.read_state import REASON_VERIFICATION_OVERDUE, verification_overdue
+from app.stages.register.store import (
+    IntentReviewRecord,
+    RegistrationStore,
+    ScopeRecord,
+    VerificationReviewRecord,
+)
 
 REGISTER_PRODUCER: Final = "register.execution"
 
 REGISTER_INTENT_UNKNOWN: Final = "REGISTER_INTENT_UNKNOWN"
 REGISTER_READBACK_MISMATCH: Final = "REGISTER_READBACK_MISMATCH"
 REGISTER_SCOPE_PAUSED_PREFIX: Final = "REGISTER_SCOPE_PAUSED_"
+# The read state's own reason code, so the review item and the 재확인필요 row name one condition.
+REGISTER_VERIFICATION_OVERDUE: Final = REASON_VERIFICATION_OVERDUE
 
 
 class RegisterReviewProducer:
     """Reads REGISTER's durable intents and execution scopes; writes nothing."""
 
-    def __init__(self, registrations: RegistrationStore) -> None:
+    def __init__(self, registrations: RegistrationStore, clock: Clock | None = None) -> None:
         self._registrations = registrations
+        self._clock = clock or SystemClock()
 
     @property
     def name(self) -> str:
@@ -58,13 +76,22 @@ class RegisterReviewProducer:
         )
 
     def truth_token(self) -> str:
-        return hashlib.sha256(
-            json.dumps(self._registrations.review_truth(), sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        now = self._clock.now()
+        truth = {
+            **self._registrations.review_truth(),
+            # Clock-derived: which applied, unverified Intents are past the deadline now.
+            "verification_overdue": sorted(
+                record.intent_id
+                for record in self._registrations.review_awaiting_verification()
+                if verification_overdue(record.applied_at, now=now)
+            ),
+        }
+        return hashlib.sha256(json.dumps(truth, sort_keys=True).encode("utf-8")).hexdigest()
 
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         key, account = scope.get("marketplace_key"), scope.get("marketplace_account_id")
         narrowed = None if key is None or account is None else (key, account)
+        now = self._clock.now()
         conditions = [
             *(
                 c
@@ -72,6 +99,11 @@ class RegisterReviewProducer:
                 for c in _intent(intent)
             ),
             *(_paused(paused) for paused in self._registrations.review_paused_scopes(narrowed)),
+            *(
+                _overdue(record)
+                for record in self._registrations.review_awaiting_verification(narrowed)
+                if verification_overdue(record.applied_at, now=now)
+            ),
         ]
         return tuple(c for c in conditions if _within(c.scope, scope))
 
@@ -107,6 +139,22 @@ def _intent(intent: IntentReviewRecord) -> list[ReviewCondition]:
             )
         )
     return found
+
+
+def _overdue(record: VerificationReviewRecord) -> ReviewCondition:
+    return ReviewCondition(
+        kind=ReviewKind.REGISTRATION_ERROR,
+        producer=REGISTER_PRODUCER,
+        scope={
+            "marketplace_key": record.marketplace_key,
+            "marketplace_account_id": record.marketplace_account_id,
+            "draft_id": record.draft_id,
+            "intent_id": record.intent_id,
+        },
+        subject="verification",
+        reason_code=REGISTER_VERIFICATION_OVERDUE,
+        source_identity=record.applied_attempt_id,
+    )
 
 
 def _paused(paused: ScopeRecord) -> ReviewCondition:

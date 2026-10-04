@@ -109,6 +109,7 @@ from app.stages.register.read_state import (
     VERIFICATION_DEADLINE,
     IntentReadFacts,
     ReadState,
+    applied_attempt,
     classify,
     counts,
 )
@@ -252,21 +253,26 @@ class RegisterService:
 
     # ------------------------------------------------------------------ readiness (B-UX1)
 
+    def pre_send_units(self) -> tuple[UnitView, ...]:
+        """Every provider-listing unit of every Draft that no Intent names, each evaluated now
+        exactly as the screen evaluates it (the B-UX1 population)."""
+        store = self._require_store()
+        drafts = store.drafts(limit=None)
+        intents = {i.registration_snapshot_id: i for i in store.intents(limit=None)}
+        return tuple(
+            unit
+            for draft in drafts
+            for unit in self._units_of(draft, intents)
+            if unit.intent is None
+        )
+
     def readiness_summary(self) -> RegisterReadinessView:
         """The readiness of every pre-send provider-listing unit, evaluated now (B-UX1).
 
         The population is every unit of every Draft that no Intent names (see
         :class:`RegisterReadinessView`); each is evaluated by the preflight owner exactly as the
         screen evaluates it, so a count can never disagree with a unit's own panel."""
-        store = self._require_store()
-        drafts = store.drafts(limit=None)
-        intents = {i.registration_snapshot_id: i for i in store.intents(limit=None)}
-        population = [
-            unit
-            for draft in drafts
-            for unit in self._units_of(draft, intents)
-            if unit.intent is None
-        ]
+        population = self.pre_send_units()
         statuses = dict.fromkeys(READINESS_SUMMARY_STATUSES, 0)
         not_evaluated: dict[str, int] = {}
         units_by_area: dict[str, set[str]] = {}
@@ -1607,16 +1613,9 @@ _ = ScopePauseReason  # the vocabulary this surface renders, re-exported by the 
 
 
 def _applied_at(attempts: Sequence[AttemptRecord]) -> datetime | None:
-    """When the latest applied outcome was established: its evidence-backed resolution, else the
-    applied Attempt's finish. The verification deadline runs from it."""
-    found: datetime | None = None
-    for attempt in attempts:
-        if attempt.outcome is not RemoteOutcome.APPLIED_PROVEN:
-            continue
-        at = attempt.resolved_at if attempt.resolved_outcome is not None else attempt.finished_at
-        if at is not None and (found is None or at > found):
-            found = at
-    return found
+    """When the latest applied outcome was established (``read_state.applied_attempt``)."""
+    found = applied_attempt(attempts)
+    return None if found is None else found[1]
 
 
 def _requested_at(attempts: Sequence[AttemptRecord], job: JobRecord | None) -> datetime | None:
