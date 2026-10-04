@@ -934,11 +934,15 @@ body.has-registration-status .content {
   margin-top: var(--space-4);
 }
 
-/* 수집 사실 (A-UX1): the revision's own fields and evidence, read back as stored. */
+/* 수집 사실 (A-UX1): the revision's own fields and evidence, read back as stored, in its own
+   panel beside the focused run. */
 .collect-facts {
-  margin-top: var(--space-4);
   display: grid;
   gap: var(--space-3);
+}
+
+.collect-facts-slot:empty {
+  display: none;
 }
 
 .collect-facts .table {

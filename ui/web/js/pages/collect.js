@@ -590,6 +590,8 @@ function jobsView(view, ctx) {
   const filterQuery = RUN_FILTERS.find(([key]) => key === filterKey)[2];
   const root = h('div', { class: 'collect-jobs', 'data-role': 'collect-jobs' });
   const focus = h('section', { class: 'panel collect-run', 'data-role': 'run-focus', hidden: !focusId });
+  // The focused run's 수집 사실 is its own panel beside the run, so neither outgrows the screen.
+  const factsSlot = h('div', { class: 'collect-facts-slot', 'data-role': 'facts-slot' });
   const listBody = h('tbody', {});
   const recheck = h('button', { type: 'button', class: 'btn', 'data-action': 'recheck-runs', hidden: true }, '상태 다시 확인');
   const listCount = h('div', { class: 'mini', 'data-role': 'runs-count' });
@@ -763,9 +765,9 @@ function jobsView(view, ctx) {
         ? h('div', { class: 'note', 'data-reason': 'NO_REVISION' }, '수집은 끝났지만 원천이 상품 식별자를 밝히지 않아 기록할 리비전이 없습니다. 실패가 아니며, 사실 상태도 없습니다.')
         : null,
       handoff,
-      facts,
       review,
     ));
+    factsSlot.replaceChildren(...(facts ? [facts] : []));
     return run.outcome === 'PENDING';
   }
 
@@ -840,7 +842,7 @@ function jobsView(view, ctx) {
     refresh();
   });
 
-  root.append(submitCard(view, ctx, () => refresh()), focus, runsPanel);
+  root.append(submitCard(view, ctx, () => refresh()), focus, factsSlot, runsPanel);
   refresh();
   return root;
 }
