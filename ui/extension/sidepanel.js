@@ -376,6 +376,9 @@ const QUEUE_LABELS = {
 let mode = "product";
 // The products found on the operator's loaded list page, or null. Product URLs only.
 let discovery = null;
+// Which of them the operator chose to queue (A-UX2 F-9). A choice narrows the list ICBM is asked
+// to queue; it is no authorization and never the queue's bound, which the operator types.
+let selected = new Set();
 // The worker port of the list mode, open while it is shown.
 let queuePort = null;
 // The queue as ICBM last returned it, or null before one is declared.
@@ -403,10 +406,38 @@ function queueRow(item) {
   );
   chip.dataset.state = item.state === "CAPTURED" ? (settled ? "SETTLED" : "PROCESSING") : item.state;
   if (settled) chip.dataset.outcome = item.run_outcome;
-  line.append(name, chip);
+  if (item.state === "DISCOVERED") {
+    const box = element("input");
+    box.type = "checkbox";
+    box.dataset.select = item.source_url;
+    box.checked = selected.has(item.source_url);
+    box.setAttribute("aria-label", `${readable(item.source_url)} 선택`);
+    box.addEventListener("change", () => {
+      if (box.checked) selected.add(item.source_url);
+      else selected.delete(item.source_url);
+      render();
+    });
+    const pick = element("label", "row-select");
+    pick.append(box, name);
+    line.append(pick, chip);
+  } else {
+    line.append(name, chip);
+  }
   const note = element("div", "queue-note");
   note.append(element("span", "mono", item.product_key || "—"), ` · ${itemNote(item)}`);
   row.append(line, note);
+  // A captured item names its run: open that run in ICBM Collection Management, which owns runs
+  // and their history (ADR-0019 §12.2). Nothing is sent to the supplier and nothing is read again.
+  if (item.collection_run_id) {
+    const open = element("button", "row-open", "수집관리에서 결과 보기");
+    open.type = "button";
+    open.dataset.action = "open-run";
+    open.dataset.run = item.collection_run_id;
+    open.addEventListener("click", () =>
+      chrome.runtime.sendMessage({ type: "open-icbm", collection_run_id: item.collection_run_id }),
+    );
+    row.append(open);
+  }
   return row;
 }
 
@@ -448,6 +479,8 @@ function renderList() {
   role("list-supplier-key").textContent = discovery ? discovery.supplier_key : "—";
   role("list-title").textContent = (discovery && discovery.title) || "—";
   role("list-found").textContent = String(discovery ? discovery.found : 0);
+  role("list-selected").textContent = String(discovery && !queue ? chosenLinks().length : 0);
+  show("selection-actions", Boolean(discovery) && !queue && discovery.links.length > 0);
   show("queue-bounds", Boolean(discovery) && !queue);
   show("queue-section", items.length > 0 || Boolean(queueLine));
   role("queue-rows").replaceChildren(...items.map(queueRow));
@@ -464,12 +497,21 @@ function renderList() {
   const status = [queueLine, queueCode ? `코드 ${queueCode}` : null].filter(Boolean).join(" · ");
   role("queue-status").textContent = status;
   show("queue-status", Boolean(status));
-  action("queue-start").disabled = control !== "IDLE" || !discovery || discovery.links.length === 0;
+  action("queue-start").disabled = control !== "IDLE" || !discovery || chosenLinks().length === 0;
   action("queue-start").hidden = control === "PAUSED";
   action("queue-pause").disabled = control !== "RUNNING" && control !== "PAUSED";
   action("queue-pause").textContent = control === "PAUSED" ? "재개" : "일시정지";
   action("queue-cancel").hidden = !queue || queue.state !== "OPEN" || control === "RUNNING";
   action("product-mode").disabled = control === "RUNNING" || control === "PAUSED";
+  // Recovery (A-UX3 F-10) is explained once this queue has ended and ICBM holds no open one: the
+  // operator goes back to the list page and finds it again, and ICBM skips what it recorded. The
+  // ended queue is never reissued, and nothing here navigates the supplier's pages.
+  show("queue-recovery", control === "ENDED" && Boolean(queue) && queue.state !== "OPEN");
+}
+
+// The chosen links in the page's own order.
+function chosenLinks() {
+  return discovery ? discovery.links.filter((link) => selected.has(link)) : [];
 }
 
 function listMessage(message) {
@@ -481,6 +523,8 @@ function listMessage(message) {
       queueCode = found ? found.code : "DISCOVERY_UNAVAILABLE";
     } else {
       discovery = found;
+      // Every found product starts chosen; the operator removes what should not be read.
+      selected = new Set(found.links);
       queueLine = null;
       queueCode = null;
       const max = document.getElementById("queue-max");
@@ -569,6 +613,16 @@ function leaveList() {
 
 action("discover").addEventListener("click", enterList);
 action("product-mode").addEventListener("click", leaveList);
+action("select-all").addEventListener("click", () => {
+  if (!discovery || queue) return;
+  selected = new Set(discovery.links);
+  render();
+});
+action("select-none").addEventListener("click", () => {
+  if (!discovery || queue) return;
+  selected = new Set();
+  render();
+});
 
 // The operator's own bounds go to ICBM as they were entered: an empty one is sent as missing, and
 // ICBM refuses it. Nothing here fills one in.
@@ -584,7 +638,8 @@ action("queue-start").addEventListener("click", () => {
     tab_id: discovery.tab_id,
     declaration: {
       supplier_key: discovery.supplier_key,
-      links: discovery.links,
+      // Only the chosen links. ICBM checks each one again and applies its own bounds.
+      links: chosenLinks(),
       max_products: max === "" ? null : Number(max),
       interval_s: interval === "" ? null : Number(interval),
       skip_collected: document.getElementById("queue-skip").checked,
