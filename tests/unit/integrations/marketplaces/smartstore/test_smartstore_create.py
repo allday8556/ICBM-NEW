@@ -79,7 +79,15 @@ ORIGIN: dict[str, Any] = {
     # The registration seed (architect resolution 5915900049 D2.2).
     "stockQuantity": 1,
     "leafCategoryId": "cat-1",
-    "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
+    "detailAttribute": {
+        "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE},
+        "afterServiceInfo": {
+            "afterServiceTelephoneNumber": "02-000-0000",
+            "afterServiceGuideContent": "상품 문의 및 A/S는 고객센터로 연락해 주세요.",
+        },
+        "originAreaInfo": {"originAreaCode": "03"},
+        "minorPurchasable": True,
+    },
 }
 # The channel members ICBM owns (architect resolution 5915900049 D1, D2.1).
 CHANNEL: dict[str, Any] = {
@@ -94,6 +102,11 @@ FROZEN = product.create_document(IDENTITY, DOCUMENT)
 
 def _origin(**changes: Any) -> dict[str, Any]:
     """One request body with the named origin-product fields replaced or removed."""
+    if isinstance(changes.get("detailAttribute"), dict):
+        changes["detailAttribute"] = {
+            **deepcopy(ORIGIN["detailAttribute"]),
+            **changes["detailAttribute"],
+        }
     origin = {**deepcopy(ORIGIN), **changes}
     return {
         "originProduct": {key: value for key, value in origin.items() if value is not None},

@@ -117,7 +117,10 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # placed there and never in the gallery. A BODY-only Snapshot projects exactly as under v5.
 # v7: an operator-confirmed account delivery policy is projected as deliveryInfo.  Revisions
 # without one retain the provider's documented no-delivery omission.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v7"
+# v8: the CREATE endpoint's required detail attributes are projected: A/S uses the frozen,
+# operator-confirmed customer-service phone; origin is explicitly displayed in the frozen detail
+# notice; and the first vertical permits minor purchases for this non-adult category.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v8"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -166,6 +169,12 @@ FIELD_SHIPPING_ADDRESS_ID: Final = "shippingAddressId"
 FIELD_RETURN_ADDRESS_ID: Final = "returnAddressId"
 FIELD_SELLER_CODE_INFO: Final = "sellerCodeInfo"
 FIELD_SELLER_MANAGEMENT_CODE: Final = "sellerManagementCode"
+FIELD_AFTER_SERVICE_INFO: Final = "afterServiceInfo"
+FIELD_AFTER_SERVICE_TELEPHONE_NUMBER: Final = "afterServiceTelephoneNumber"
+FIELD_AFTER_SERVICE_GUIDE_CONTENT: Final = "afterServiceGuideContent"
+FIELD_ORIGIN_AREA_INFO: Final = "originAreaInfo"
+FIELD_ORIGIN_AREA_CODE: Final = "originAreaCode"
+FIELD_MINOR_PURCHASABLE: Final = "minorPurchasable"
 FIELD_OPTION_INFO: Final = "optionInfo"
 FIELD_OPTION_GROUP_NAMES: Final = "optionCombinationGroupNames"
 FIELD_OPTION_COMBINATIONS: Final = "optionCombinations"
@@ -192,6 +201,12 @@ CREATE_STATUS_TYPE: Final = "SALE"
 # D2.2: the registration seed, required on registration (at least 1, packet 5862400626). It is not
 # a supplier quantity, and it is compared exactly on read-back.
 REGISTRATION_STOCK_QUANTITY: Final = 1
+# The first vertical is a non-adult health-food category.  The origin's reviewed location and
+# producer are already frozen into detailContent through the DIET_FOOD notice, so code 03 tells
+# SmartStore to display that exact detail rather than guessing a country code.
+REGISTRATION_MINOR_PURCHASABLE: Final = True
+ORIGIN_AREA_DETAIL_CODE: Final = "03"
+AFTER_SERVICE_GUIDE_CONTENT: Final = "상품 문의 및 A/S는 고객센터로 연락해 주세요."
 
 # The numbered option-name keys of the combination form.
 _GROUP_NAME_KEYS: Final = ("optionGroupName1", "optionGroupName2", "optionGroupName3")
@@ -315,8 +330,21 @@ _ORIGIN_KEYS: Final = frozenset(
 _ORIGIN_REQUIRED_KEYS: Final = _ORIGIN_KEYS - {FIELD_DELIVERY_INFO}
 _IMAGES_KEYS: Final = frozenset({FIELD_REPRESENTATIVE_IMAGE, FIELD_OPTIONAL_IMAGES})
 _IMAGE_KEYS: Final = frozenset({FIELD_URL})
-_DETAIL_ATTRIBUTE_KEYS: Final = frozenset({FIELD_SELLER_CODE_INFO, FIELD_OPTION_INFO, FIELD_NOTICE})
+_DETAIL_ATTRIBUTE_KEYS: Final = frozenset(
+    {
+        FIELD_SELLER_CODE_INFO,
+        FIELD_OPTION_INFO,
+        FIELD_NOTICE,
+        FIELD_AFTER_SERVICE_INFO,
+        FIELD_ORIGIN_AREA_INFO,
+        FIELD_MINOR_PURCHASABLE,
+    }
+)
 _SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
+_AFTER_SERVICE_KEYS: Final = frozenset(
+    {FIELD_AFTER_SERVICE_TELEPHONE_NUMBER, FIELD_AFTER_SERVICE_GUIDE_CONTENT}
+)
+_ORIGIN_AREA_KEYS: Final = frozenset({FIELD_ORIGIN_AREA_CODE})
 _OPTION_INFO_KEYS: Final = frozenset({FIELD_OPTION_GROUP_NAMES, FIELD_OPTION_COMBINATIONS})
 _DELIVERY_INFO_KEYS: Final = frozenset(
     {
@@ -604,7 +632,16 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
         )
     attribute_path = f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}"
     attribute = _object(origin[FIELD_DETAIL_ATTRIBUTE], attribute_path, _DETAIL_ATTRIBUTE_KEYS)
-    _required(attribute, attribute_path, (FIELD_SELLER_CODE_INFO,))
+    _required(
+        attribute,
+        attribute_path,
+        (
+            FIELD_SELLER_CODE_INFO,
+            FIELD_AFTER_SERVICE_INFO,
+            FIELD_ORIGIN_AREA_INFO,
+            FIELD_MINOR_PURCHASABLE,
+        ),
+    )
     seller_path = f"{attribute_path}.{FIELD_SELLER_CODE_INFO}"
     seller = _object(attribute[FIELD_SELLER_CODE_INFO], seller_path, _SELLER_CODE_KEYS)
     _required(seller, seller_path, (FIELD_SELLER_MANAGEMENT_CODE,))
@@ -617,6 +654,34 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
         raise WireContractError(
             "WIRE_DOCUMENT_NOT_THIS_SNAPSHOT",
             "the request does not carry this listing identity's management code",
+        )
+    after_service_path = f"{attribute_path}.{FIELD_AFTER_SERVICE_INFO}"
+    after_service = _object(
+        attribute[FIELD_AFTER_SERVICE_INFO], after_service_path, _AFTER_SERVICE_KEYS
+    )
+    _required(after_service, after_service_path, sorted(_AFTER_SERVICE_KEYS))
+    _string(
+        after_service[FIELD_AFTER_SERVICE_TELEPHONE_NUMBER],
+        f"{after_service_path}.{FIELD_AFTER_SERVICE_TELEPHONE_NUMBER}",
+        limit=100,
+    )
+    _string(
+        after_service[FIELD_AFTER_SERVICE_GUIDE_CONTENT],
+        f"{after_service_path}.{FIELD_AFTER_SERVICE_GUIDE_CONTENT}",
+        limit=1_000,
+    )
+    origin_area_path = f"{attribute_path}.{FIELD_ORIGIN_AREA_INFO}"
+    origin_area = _object(attribute[FIELD_ORIGIN_AREA_INFO], origin_area_path, _ORIGIN_AREA_KEYS)
+    _required(origin_area, origin_area_path, (FIELD_ORIGIN_AREA_CODE,))
+    if origin_area[FIELD_ORIGIN_AREA_CODE] != ORIGIN_AREA_DETAIL_CODE:
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{origin_area_path}.{FIELD_ORIGIN_AREA_CODE} is not {ORIGIN_AREA_DETAIL_CODE}",
+        )
+    if attribute[FIELD_MINOR_PURCHASABLE] is not REGISTRATION_MINOR_PURCHASABLE:
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{attribute_path}.{FIELD_MINOR_PURCHASABLE} is not true",
         )
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
@@ -998,6 +1063,36 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     return notice_type, reviewed
 
 
+def _after_service_info(fields: Mapping[str, Any]) -> dict[str, str]:
+    """Project the provider-required A/S object from the frozen reviewed notice.
+
+    The phone is never taken from runtime account state: it is the operator-confirmed
+    ``customerServicePhoneNumber`` already frozen in this Snapshot.  The guide is the first
+    vertical's stable publication wording and contains no mutable contact value of its own.
+    """
+    phone = fields.get("customerServicePhoneNumber")
+    if not isinstance(phone, str) or not phone.strip():
+        # Several notice types carry the same operator-confirmed contact in
+        # ``afterServiceDirector`` rather than ``customerServicePhoneNumber``.  Extract only the
+        # telephone token; the surrounding person/company text is not sent as a phone number.
+        director = fields.get("afterServiceDirector")
+        match = (
+            re.search(r"(?<![0-9])0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}(?![0-9])", director)
+            if isinstance(director, str)
+            else None
+        )
+        phone = None if match is None else match.group(0)
+    if not isinstance(phone, str) or not phone.strip():
+        raise WireContractError(
+            "WIRE_AFTER_SERVICE_PHONE_MISSING",
+            "the frozen notice has no operator-confirmed customer-service phone",
+        )
+    return {
+        FIELD_AFTER_SERVICE_TELEPHONE_NUMBER: phone,
+        FIELD_AFTER_SERVICE_GUIDE_CONTENT: AFTER_SERVICE_GUIDE_CONTENT,
+    }
+
+
 def _notice_document(notice_type: str, fields: Mapping[str, Any]) -> dict[str, Any] | None:
     """The notice child of the reviewed type, or ``None`` when the type has no documented child.
 
@@ -1137,6 +1232,9 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
 
     detail_attribute: dict[str, Any] = {
         FIELD_SELLER_CODE_INFO: {FIELD_SELLER_MANAGEMENT_CODE: codes.seller_management_code},
+        FIELD_AFTER_SERVICE_INFO: _after_service_info(notice_fields),
+        FIELD_ORIGIN_AREA_INFO: {FIELD_ORIGIN_AREA_CODE: ORIGIN_AREA_DETAIL_CODE},
+        FIELD_MINOR_PURCHASABLE: REGISTRATION_MINOR_PURCHASABLE,
     }
     # D2.3: the child of the reviewed notice type, or a named gap — never another type's child.
     notice = _notice_document(notice_type, notice_fields)

@@ -88,6 +88,10 @@ def payload(**overrides: Any) -> dict[str, Any]:
             "fields": {
                 "material": {"value": "면 100%", "provenance": "SOURCE_FACT"},
                 "manufacturer": {"detail_page_reference": True, "provenance": "SOURCE_FACT"},
+                "customerServicePhoneNumber": {
+                    "value": "02-000-0000",
+                    "provenance": "OPERATOR_CONFIRMED",
+                },
             },
         },
         "policy": {"policy_revision": "policy-1", "templates": {}},
@@ -140,7 +144,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v7"
+    assert projected.encoding_version == "smartstore-register-wire/v8"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -162,14 +166,25 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
             # Required on registration (packet 5862400626); the value is the operator-reviewed
             # category id the Snapshot froze, emitted verbatim.
             "leafCategoryId": "cat-1",
-            "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
+            "detailAttribute": {
+                "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE},
+                "afterServiceInfo": {
+                    "afterServiceTelephoneNumber": "02-000-0000",
+                    "afterServiceGuideContent": "상품 문의 및 A/S는 고객센터로 연락해 주세요.",
+                },
+                "originAreaInfo": {"originAreaCode": "03"},
+                "minorPurchasable": True,
+            },
         },
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
     # The reviewed notice the Snapshot owns is kept as evidence. Its type has no captured child
     # in the pinned table, so nothing of it is placed on the wire.
     assert projected.notice_type == "Wear2023"
-    assert projected.notice_fields == {"material": "면 100%"}
+    assert projected.notice_fields == {
+        "customerServicePhoneNumber": "02-000-0000",
+        "material": "면 100%",
+    }
     assert not projected.sendable
     assert projected.gaps == (product.GAP_NOTICE_TYPE_CHILD,)
 
@@ -231,10 +246,9 @@ def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> Non
         "windowChannelProduct",
         # The reviewed type of this Snapshot has no captured child: no notice at all.
         "productInfoProvidedNotice",
-        # Unowned optional structures are omitted rather than defaulted (delivery, A/S, origin).
+        # An account delivery policy remains optional; the provider-required A/S and origin
+        # attributes are now owned by the frozen first-vertical projection.
         "deliveryInfo",
-        "afterServiceInfo",
-        "originAreaInfo",
         # Unowned optional channel members.
         "channelProductName",
         "bbsSeq",
@@ -416,7 +430,7 @@ def test_an_uncaptured_notice_type_stays_a_gap_and_never_falls_back(notice_type:
             "WIRE_DOCUMENT_FIELD_MISSING",
         ),
         # customerServicePhoneNumber is required without afterServiceDirector.
-        ({"customerServicePhoneNumber": None}, "WIRE_DOCUMENT_FIELD_MISSING"),
+        ({"customerServicePhoneNumber": None}, "WIRE_AFTER_SERVICE_PHONE_MISSING"),
         # A value past its documented bound.
         ({"itemName": _value("x" * 51)}, "WIRE_DOCUMENT_VALUE_INVALID"),
     ],

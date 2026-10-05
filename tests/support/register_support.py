@@ -192,6 +192,7 @@ def metadata(**overrides: Any) -> CategoryMetadata:
             (
                 FieldRule("manufacturer", required=True),
                 FieldRule("origin", required=True, detail_page_reference_allowed=True),
+                FieldRule("customerServicePhoneNumber", required=False),
             ),
         ),
         "options": OptionPolicy(options_supported=True, max_options=5),
@@ -365,6 +366,7 @@ def listing(items: list[ReadyItem], **overrides: Any) -> ListingValues:
         "notices": {
             "manufacturer": FieldValue("invented maker", Provenance.SOURCE_FACT),
             "origin": FieldValue(detail_page_reference=True),
+            "customerServicePhoneNumber": FieldValue("02-000-0000"),
         },
         "options": {}
         if len(items) <= 1
