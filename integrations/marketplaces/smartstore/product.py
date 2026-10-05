@@ -153,6 +153,7 @@ FIELD_DETAIL_ATTRIBUTE: Final = "detailAttribute"
 FIELD_DELIVERY_INFO: Final = "deliveryInfo"
 FIELD_DELIVERY_TYPE: Final = "deliveryType"
 FIELD_DELIVERY_ATTRIBUTE_TYPE: Final = "deliveryAttributeType"
+FIELD_DELIVERY_COMPANY: Final = "deliveryCompany"
 FIELD_DELIVERY_FEE: Final = "deliveryFee"
 FIELD_DELIVERY_FEE_TYPE: Final = "deliveryFeeType"
 FIELD_BASE_FEE: Final = "baseFee"
@@ -321,6 +322,7 @@ _DELIVERY_INFO_KEYS: Final = frozenset(
     {
         FIELD_DELIVERY_TYPE,
         FIELD_DELIVERY_ATTRIBUTE_TYPE,
+        FIELD_DELIVERY_COMPANY,
         FIELD_DELIVERY_FEE,
         FIELD_CLAIM_DELIVERY_INFO,
     }
@@ -410,6 +412,7 @@ def _validate_delivery_info(value: Any, path: str) -> None:
             raise WireContractError(
                 "WIRE_DOCUMENT_VALUE_INVALID", f"{path}.{name} is not {accepted}"
             )
+    _string(delivery[FIELD_DELIVERY_COMPANY], f"{path}.{FIELD_DELIVERY_COMPANY}", limit=64)
     fee_path = f"{path}.{FIELD_DELIVERY_FEE}"
     fee = _object(delivery[FIELD_DELIVERY_FEE], fee_path, _DELIVERY_FEE_KEYS)
     _required(fee, fee_path, sorted(_DELIVERY_FEE_KEYS))
@@ -1077,6 +1080,7 @@ def _delivery_info(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     required = {
         "delivery_type",
         "delivery_attribute_type",
+        "delivery_company",
         "delivery_fee_type",
         "base_fee_krw",
         "delivery_fee_pay_type",
@@ -1093,6 +1097,7 @@ def _delivery_info(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     return {
         FIELD_DELIVERY_TYPE: delivery["delivery_type"],
         FIELD_DELIVERY_ATTRIBUTE_TYPE: delivery["delivery_attribute_type"],
+        FIELD_DELIVERY_COMPANY: delivery["delivery_company"],
         FIELD_DELIVERY_FEE: {
             FIELD_DELIVERY_FEE_TYPE: delivery["delivery_fee_type"],
             FIELD_BASE_FEE: delivery["base_fee_krw"],

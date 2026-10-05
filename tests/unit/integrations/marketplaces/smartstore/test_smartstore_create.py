@@ -696,6 +696,35 @@ def test_every_response_after_handoff_is_unknown_never_proven_not_applied(status
     assert handoff.details["transmission_phase"] == "RESPONSE_RECEIVED"
 
 
+def test_create_failure_keeps_only_bounded_provider_diagnostics() -> None:
+    body = {
+        "code": "BAD_REQUEST",
+        "message": "배송 택배사 코드는 필수입니다.",
+        "invalidInputs": [
+            {
+                "name": "originProduct.deliveryInfo.deliveryCompany",
+                "type": "NotBlank",
+                "message": "must not be blank",
+                "rejectedValue": "never retained",
+            }
+        ],
+    }
+    handoff = _send(Provider(httpx.Response(400, json=body)))
+    assert handoff.details["provider_message"] == "배송 택배사 코드는 필수입니다."
+    assert handoff.details["provider_invalid_input"] == (
+        "originProduct.deliveryInfo.deliveryCompany: NotBlank: must not be blank"
+    )
+    assert "never retained" not in str(handoff.details)
+
+
+def test_create_failure_drops_a_provider_message_that_echoes_the_bearer() -> None:
+    handoff = _send(
+        Provider(httpx.Response(400, json={"code": "BAD_REQUEST", "message": BEARER}))
+    )
+    assert handoff.details["provider_message"] is None
+    assert BEARER not in str(handoff.details)
+
+
 @pytest.mark.parametrize("status", [301, 302, 307, 308])
 def test_a_redirect_is_never_followed_and_never_proves_anything(status: int) -> None:
     # ERRORS.md §10.6, §17: a 308 is never followed for a mutation, and the response is evidence.

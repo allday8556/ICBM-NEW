@@ -163,6 +163,7 @@ class DeliveryPolicy:
 
     delivery_type: str
     delivery_attribute_type: str
+    delivery_company: str | None
     delivery_fee_type: str
     base_fee_krw: int
     delivery_fee_pay_type: str

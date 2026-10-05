@@ -134,6 +134,9 @@ class DeliveryPolicyView(_Strict):
 
     delivery_type: StrictStr
     delivery_attribute_type: StrictStr
+    # Revisions written before the provider-required courier was adopted decode as ``None`` and
+    # remain readable, but a new revision with physical delivery must name the real code.
+    delivery_company: StrictStr | None = None
     delivery_fee_type: StrictStr
     base_fee_krw: StrictInt
     delivery_fee_pay_type: StrictStr
@@ -268,6 +271,13 @@ def encode_content(
                     f"the adopted SmartStore delivery profile requires {value}",
                     f"delivery_policy.{name}",
                 )
+        if delivery.delivery_company is None:
+            raise _invalid(
+                TARGET_POLICY_INVALID,
+                "SmartStore DELIVERY requires the outbound courier code",
+                "delivery_policy.delivery_company",
+            )
+        _label(delivery.delivery_company, "delivery_policy.delivery_company")
         for name, maximum in (
             ("base_fee_krw", 200_000),
             ("return_delivery_fee_krw", 1_000_000),

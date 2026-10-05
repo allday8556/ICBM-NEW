@@ -144,6 +144,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         else {
             "delivery_type": delivery.delivery_type,
             "delivery_attribute_type": delivery.delivery_attribute_type,
+            "delivery_company": delivery.delivery_company,
             "delivery_fee_type": delivery.delivery_fee_type,
             "base_fee_krw": delivery.base_fee_krw,
             "delivery_fee_pay_type": delivery.delivery_fee_pay_type,

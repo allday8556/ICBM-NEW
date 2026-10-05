@@ -247,6 +247,7 @@ def test_operator_confirmed_delivery_policy_is_projected_exactly() -> None:
     delivery = {
         "delivery_type": "DELIVERY",
         "delivery_attribute_type": "NORMAL",
+        "delivery_company": "CJGLS",
         "delivery_fee_type": "PAID",
         "base_fee_krw": 3000,
         "delivery_fee_pay_type": "PREPAID",
@@ -266,6 +267,7 @@ def test_operator_confirmed_delivery_policy_is_projected_exactly() -> None:
     assert projected.document.mapping()["originProduct"]["deliveryInfo"] == {
         "deliveryType": "DELIVERY",
         "deliveryAttributeType": "NORMAL",
+        "deliveryCompany": "CJGLS",
         "deliveryFee": {
             "deliveryFeeType": "PAID",
             "baseFee": 3000,
@@ -296,6 +298,7 @@ def test_delivery_policy_outside_the_adopted_shape_is_refused(field: str, value:
     delivery = {
         "delivery_type": "DELIVERY",
         "delivery_attribute_type": "NORMAL",
+        "delivery_company": "CJGLS",
         "delivery_fee_type": "PAID",
         "base_fee_krw": 3000,
         "delivery_fee_pay_type": "PREPAID",

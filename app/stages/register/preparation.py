@@ -1280,6 +1280,7 @@ def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[R
         else {
             "delivery_type": unit.target.delivery_policy.delivery_type,
             "delivery_attribute_type": unit.target.delivery_policy.delivery_attribute_type,
+            "delivery_company": unit.target.delivery_policy.delivery_company,
             "delivery_fee_type": unit.target.delivery_policy.delivery_fee_type,
             "base_fee_krw": unit.target.delivery_policy.base_fee_krw,
             "delivery_fee_pay_type": unit.target.delivery_policy.delivery_fee_pay_type,
@@ -1405,6 +1406,7 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
             else {
                 "delivery_type": target.delivery_policy.delivery_type,
                 "delivery_attribute_type": target.delivery_policy.delivery_attribute_type,
+                "delivery_company": target.delivery_policy.delivery_company,
                 "delivery_fee_type": target.delivery_policy.delivery_fee_type,
                 "base_fee_krw": target.delivery_policy.base_fee_krw,
                 "delivery_fee_pay_type": target.delivery_policy.delivery_fee_pay_type,

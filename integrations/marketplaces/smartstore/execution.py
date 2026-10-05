@@ -126,6 +126,8 @@ class SmartStoreCreateSender:
                     "transmission_phase": failure.phase.value,
                     "failure_layer": failure.classification.layer.value,
                     "provider_code": failure.classification.provider_code,
+                    "provider_message": failure.provider_message,
+                    "provider_invalid_input": failure.provider_invalid_input,
                 },
             )
         reading = create.read(response.retained)

@@ -155,6 +155,7 @@ def delivery_policy() -> dict[str, Any]:
     return {
         "delivery_type": "DELIVERY",
         "delivery_attribute_type": "NORMAL",
+        "delivery_company": "CJGLS",
         "delivery_fee_type": "PAID",
         "base_fee_krw": 3000,
         "delivery_fee_pay_type": "PREPAID",
@@ -224,6 +225,7 @@ def test_delivery_policy_is_revisioned_and_materialized_exactly(
 
     target = container.registration_preflight.target_policy(MARKET, account)
     assert target is not None and target.delivery_policy is not None
+    assert target.delivery_policy.delivery_company == "CJGLS"
     assert target.delivery_policy.base_fee_krw == 3000
     assert target.delivery_policy.return_delivery_fee_krw == 3000
     assert target.delivery_policy.exchange_delivery_fee_krw == 6000
