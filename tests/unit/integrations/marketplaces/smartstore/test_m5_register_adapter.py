@@ -144,7 +144,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v8"
+    assert projected.encoding_version == "smartstore-register-wire/v9"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -174,6 +174,7 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
                 },
                 "originAreaInfo": {"originAreaCode": "03"},
                 "minorPurchasable": True,
+                "customsTaxType": "NOT_APPLICABLE",
             },
         },
     }
@@ -236,6 +237,26 @@ def test_the_channel_members_carry_the_owned_values_only() -> None:
     options = product.project(payload(items=items, notice=_etc_notice()))
     assert options.gaps == (product.GAP_OPTION_PRICE_SEMANTICS,)
     assert options.sendable is False
+
+
+def test_the_customs_tax_type_is_required_and_fixed_to_the_canary_terms() -> None:
+    projected = product.project(payload())
+    detail = projected.document.mapping()["originProduct"]["detailAttribute"]
+    assert detail["customsTaxType"] == "NOT_APPLICABLE"
+    assert product.REGISTRATION_CUSTOMS_TAX_TYPE == "NOT_APPLICABLE"
+
+    for other in (None, "INCLUDED", "EXCLUDED", ""):
+        body = projected.document.mapping()
+        body["originProduct"]["detailAttribute"]["customsTaxType"] = other
+        with pytest.raises(product.WireContractError) as refused:
+            product.create_document(IDENTITY, body)
+        assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID", other
+
+    body = projected.document.mapping()
+    del body["originProduct"]["detailAttribute"]["customsTaxType"]
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == "WIRE_DOCUMENT_FIELD_MISSING"
 
 
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:

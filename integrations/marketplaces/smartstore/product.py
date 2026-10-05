@@ -120,7 +120,9 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # v8: the CREATE endpoint's required detail attributes are projected: A/S uses the frozen,
 # operator-confirmed customer-service phone; origin is explicitly displayed in the frozen detail
 # notice; and the first vertical permits minor purchases for this non-adult category.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v8"
+# v9: the canary account's shipping address is overseas, so the provider requires customsTaxType.
+# This listing does not charge customs tax to the buyer; domestic shipping addresses ignore it.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v9"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -175,6 +177,7 @@ FIELD_AFTER_SERVICE_GUIDE_CONTENT: Final = "afterServiceGuideContent"
 FIELD_ORIGIN_AREA_INFO: Final = "originAreaInfo"
 FIELD_ORIGIN_AREA_CODE: Final = "originAreaCode"
 FIELD_MINOR_PURCHASABLE: Final = "minorPurchasable"
+FIELD_CUSTOMS_TAX_TYPE: Final = "customsTaxType"
 FIELD_OPTION_INFO: Final = "optionInfo"
 FIELD_OPTION_GROUP_NAMES: Final = "optionCombinationGroupNames"
 FIELD_OPTION_COMBINATIONS: Final = "optionCombinations"
@@ -206,6 +209,7 @@ REGISTRATION_STOCK_QUANTITY: Final = 1
 # SmartStore to display that exact detail rather than guessing a country code.
 REGISTRATION_MINOR_PURCHASABLE: Final = True
 ORIGIN_AREA_DETAIL_CODE: Final = "03"
+REGISTRATION_CUSTOMS_TAX_TYPE: Final = "NOT_APPLICABLE"
 AFTER_SERVICE_GUIDE_CONTENT: Final = "상품 문의 및 A/S는 고객센터로 연락해 주세요."
 
 # The numbered option-name keys of the combination form.
@@ -338,6 +342,7 @@ _DETAIL_ATTRIBUTE_KEYS: Final = frozenset(
         FIELD_AFTER_SERVICE_INFO,
         FIELD_ORIGIN_AREA_INFO,
         FIELD_MINOR_PURCHASABLE,
+        FIELD_CUSTOMS_TAX_TYPE,
     }
 )
 _SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
@@ -640,6 +645,7 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
             FIELD_AFTER_SERVICE_INFO,
             FIELD_ORIGIN_AREA_INFO,
             FIELD_MINOR_PURCHASABLE,
+            FIELD_CUSTOMS_TAX_TYPE,
         ),
     )
     seller_path = f"{attribute_path}.{FIELD_SELLER_CODE_INFO}"
@@ -682,6 +688,12 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
         raise WireContractError(
             "WIRE_DOCUMENT_VALUE_INVALID",
             f"{attribute_path}.{FIELD_MINOR_PURCHASABLE} is not true",
+        )
+    if attribute[FIELD_CUSTOMS_TAX_TYPE] != REGISTRATION_CUSTOMS_TAX_TYPE:
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not"
+            f" {REGISTRATION_CUSTOMS_TAX_TYPE}",
         )
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
@@ -1235,6 +1247,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_AFTER_SERVICE_INFO: _after_service_info(notice_fields),
         FIELD_ORIGIN_AREA_INFO: {FIELD_ORIGIN_AREA_CODE: ORIGIN_AREA_DETAIL_CODE},
         FIELD_MINOR_PURCHASABLE: REGISTRATION_MINOR_PURCHASABLE,
+        FIELD_CUSTOMS_TAX_TYPE: REGISTRATION_CUSTOMS_TAX_TYPE,
     }
     # D2.3: the child of the reviewed notice type, or a named gap — never another type's child.
     notice = _notice_document(notice_type, notice_fields)

@@ -87,6 +87,7 @@ ORIGIN: dict[str, Any] = {
         },
         "originAreaInfo": {"originAreaCode": "03"},
         "minorPurchasable": True,
+        "customsTaxType": "NOT_APPLICABLE",
     },
 }
 # The channel members ICBM owns (architect resolution 5915900049 D1, D2.1).
