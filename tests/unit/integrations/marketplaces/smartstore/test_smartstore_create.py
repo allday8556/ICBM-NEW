@@ -732,9 +732,7 @@ def test_create_failure_keeps_only_bounded_provider_diagnostics() -> None:
 
 
 def test_create_failure_drops_a_provider_message_that_echoes_the_bearer() -> None:
-    handoff = _send(
-        Provider(httpx.Response(400, json={"code": "BAD_REQUEST", "message": BEARER}))
-    )
+    handoff = _send(Provider(httpx.Response(400, json={"code": "BAD_REQUEST", "message": BEARER})))
     assert handoff.details["provider_message"] is None
     assert BEARER not in str(handoff.details)
 

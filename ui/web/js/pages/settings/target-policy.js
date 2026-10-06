@@ -22,6 +22,9 @@ const DELIVERY_ATTRIBUTES = ['NORMAL'];
 const DELIVERY_FEE_TYPES = ['PAID'];
 const DELIVERY_PAY_TYPES = ['PREPAID'];
 const RETURN_CARRIER_PRIORITIES = ['PRIMARY'];
+// The outbound courier codes a real SmartStore CREATE has accepted (CJGLS = CJ대한통운, canary
+// 2026-10-05). Another code is added only once it is proven the same way.
+const DELIVERY_COMPANIES = ['CJGLS'];
 
 let sequence = 0;
 
@@ -160,6 +163,10 @@ function editor(view, onSaved) {
     ...on,
     name: 'delivery_fee_pay_type',
   });
+  const deliveryCompany = choice('택배사 (CJGLS = CJ대한통운)', DELIVERY_COMPANIES, delivery?.delivery_company ?? 'CJGLS', {
+    ...on,
+    name: 'delivery_company',
+  });
   const returnPriority = choice(
     '반품 택배사 우선순위',
     RETURN_CARRIER_PRIORITIES,
@@ -230,6 +237,7 @@ function editor(view, onSaved) {
             ? {
                 delivery_type: deliveryType.select.value,
                 delivery_attribute_type: deliveryAttribute.select.value,
+                delivery_company: deliveryCompany.select.value,
                 delivery_fee_type: deliveryFeeType.select.value,
                 base_fee_krw: whole(baseFee.input.value),
                 delivery_fee_pay_type: deliveryPayType.select.value,
@@ -295,6 +303,7 @@ function editor(view, onSaved) {
     returnPriority.row,
     returnFee.row,
     exchangeFee.row,
+    deliveryCompany.row,
     shippingAddress.row,
     returnAddress.row,
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),

@@ -105,6 +105,8 @@ def content(**overrides: Any) -> dict[str, Any]:
             "fields": [
                 _rule("manufacturer", required=True),
                 _rule("origin", required=True, detail_page_reference_allowed=True),
+                # The operator-confirmed contact the CREATE projection sends as A/S (wire v8).
+                _rule("customerServicePhoneNumber", required=False),
             ],
         },
         "options": {"options_supported": True, "max_options": 5, "max_dimensions": 1},
@@ -693,7 +695,11 @@ def test_a_frozen_unit_renders_the_exact_revision_it_froze_while_the_preflight_r
             ("brand", True),
             ("color", False),
         ]
-        assert [f["key"] for f in view["notice_fields"]] == ["manufacturer", "origin"]
+        assert [f["key"] for f in view["notice_fields"]] == [
+            "manufacturer",
+            "origin",
+            "customerServicePhoneNumber",
+        ]
         assert (view["options_supported"], view["max_options"]) == (True, 5)
 
     # A fresh evaluation reads the current revision, and the frozen candidate is stale under it.

@@ -98,6 +98,8 @@ from app.stages.register.store import IntentRecord, RegistrationRecord, ScopeRec
 REPLAY_DUPLICATE_IN_UNIT = "LIVE_ASSET_REPLAY_DUPLICATE_IN_UNIT_REUSE_NOT_ADOPTED"
 # The upload's provenance is not the unit its grant names (profile, artifact, revision, candidate).
 PROVENANCE_NOT_GRANTED = "LIVE_ASSET_PROVENANCE_NOT_GRANTED"
+
+
 class Verdict(StrEnum):
     READY = "READY"
     BLOCKED = "BLOCKED"

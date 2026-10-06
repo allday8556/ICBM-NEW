@@ -692,8 +692,7 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     if attribute[FIELD_CUSTOMS_TAX_TYPE] != REGISTRATION_CUSTOMS_TAX_TYPE:
         raise WireContractError(
             "WIRE_DOCUMENT_VALUE_INVALID",
-            f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not"
-            f" {REGISTRATION_CUSTOMS_TAX_TYPE}",
+            f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not {REGISTRATION_CUSTOMS_TAX_TYPE}",
         )
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
