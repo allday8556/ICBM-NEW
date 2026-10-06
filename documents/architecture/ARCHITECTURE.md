@@ -295,6 +295,14 @@ This requirement is accepted but not implemented. The existing bounded no-positi
 path remains valid and unchanged; positive-option SmartStore expansion and actual Coupang REGISTER
 are gated on the additive common-option/Atomic-SKU implementation.
 
+The first provider-zero projection slice, C-P1, is deliberately structural and read-only. It
+compares the current Common Sales Option revision and the exact source-proven AtomicSKU set only
+against adopted, reviewed metadata's documented structure ranges. `COMPATIBLE` therefore does not
+mean registration-ready, sendable or provider-verified. Missing or unreviewed metadata yields
+`REVIEW_REQUIRED`; the preview preserves canonical authored order, contains no price or provider
+payload, never creates a Cartesian combination and never changes the canonical option/SKU owners.
+Requirement semantics, provider wire rendering and provider identity remain later REGISTER slices.
+
 ### MarketplaceRegistration
 Always includes:
 
