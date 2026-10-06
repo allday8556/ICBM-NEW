@@ -672,18 +672,20 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
 
 
 def test_only_the_category_list_may_send_its_documented_query_key() -> None:
+    # The category list sends ``last``; the address-book read pages with ``page``; nothing else
+    # sends a query key.
+    documented = {
+        EndpointId.SMARTSTORE_CATEGORY_LIST: frozenset({"last"}),
+        EndpointId.SMARTSTORE_ADDRESSBOOK_LIST: frozenset({"page"}),
+    }
     for contract in ADOPTED.values():
-        expected = (
-            frozenset({"last"})
-            if contract.endpoint_id is EndpointId.SMARTSTORE_CATEGORY_LIST
-            else frozenset()
-        )
+        expected = documented.get(contract.endpoint_id, frozenset())
         assert contract.safe_query_keys == expected
         assert retained_query(contract, {}) == {}
-        if expected:
-            assert retained_query(contract, {"last": "true"}) == {"last": "true"}
+        for key in expected:
+            assert retained_query(contract, {key: "1"}) == {key: "1"}
         with pytest.raises(ValueError, match="may not send query keys"):
-            retained_query(contract, {"page": "1"})
+            retained_query(contract, {"unknown": "1"})
 
 
 # ---------------------------------------------------------------- read-back and comparison

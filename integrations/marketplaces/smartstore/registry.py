@@ -82,6 +82,8 @@ class EndpointId(StrEnum):
     # ADOPTED by the DELETE slice (ADR-0018 §3.5): the removal of one ICBM-confirmed listing.
     SMARTSTORE_PRODUCT_DELETE_V2 = "SMARTSTORE_PRODUCT_DELETE_V2"
     SMARTSTORE_CATEGORY_LIST = "SMARTSTORE_CATEGORY_LIST"
+    # The seller's address book (출고지 / 반품·교환지), read for the Settings delivery policy.
+    SMARTSTORE_ADDRESSBOOK_LIST = "SMARTSTORE_ADDRESSBOOK_LIST"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
     SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES = "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES"
@@ -181,6 +183,20 @@ def notice_type_succeeded(status: int, body: object) -> bool:
         status == 200
         and isinstance(body, dict)
         and isinstance(body.get("productInfoProvidedNoticeContents"), list)
+    )
+
+
+def addressbook_list_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented ``addressBooks`` array, each entry naming its number and type."""
+    if status != 200 or not isinstance(body, dict):
+        return False
+    books = body.get("addressBooks")
+    return isinstance(books, list) and all(
+        isinstance(item, dict)
+        and isinstance(item.get("addressBookNo"), int)
+        and not isinstance(item.get("addressBookNo"), bool)
+        and isinstance(item.get("addressType"), str)
+        for item in books
     )
 
 
@@ -351,6 +367,9 @@ _NOTICE_FIELDS = frozenset(
     }
 )
 _CATEGORY_FIELDS = frozenset({"wholeCategoryName", "id", "name", "last"})
+# Only the address book's identity, its operator label and its type survive: never the address,
+# the phone or any other personal or contact field of the entry.
+_ADDRESSBOOK_FIELDS = frozenset({"addressBooks", "addressBookNo", "name", "addressType"})
 
 
 ADOPTED: Mapping[EndpointId, EndpointContract] = {
@@ -399,6 +418,25 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="m5-category-list-r1",
         safe_query_keys=frozenset({"last"}),
         retained_response_fields=_CATEGORY_FIELDS,
+    ),
+    # ---- Settings delivery policy (owner directive 2026-10-07): the seller's address book, read
+    # so 출고지 and 반품·교환지 are chosen from the account instead of typed. A read, never mutation
+    # authority; only the number, label and type survive.
+    EndpointId.SMARTSTORE_ADDRESSBOOK_LIST: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
+        method=Method.GET,
+        path="/v1/seller/addressbooks-for-page",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({"판매자정보"}),
+        mutating=False,
+        success_predicate=addressbook_list_succeeded,
+        predicate_revision="settings-addressbook-list-r1",
+        safe_query_keys=frozenset({"page"}),
+        retained_response_fields=_ADDRESSBOOK_FIELDS,
     ),
     # ---- M5 PR-D (packet 5746489554). Group 상품; bearer per the current auth page.
     EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2: EndpointContract(
@@ -606,7 +644,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m5-category-list-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "settings-addressbook-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -640,6 +678,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m5-notice-r1": "e6c90c610dc86026be1acf5cec1bcb297567ade0e2932af3aa3c6799c8da023a",
     # Filled from ``mapping_fingerprint()`` after adopting the official leaf-category list.
     "m5-category-list-r1": "684af90adf7ea00913c460bbea2b34034233ea82797aa0d1a0c3f4712af6248c",
+    # The Settings delivery policy adopts the seller address-book read (owner directive
+    # 2026-10-07): GET /v1/seller/addressbooks-for-page, retaining number, label and type only.
+    "settings-addressbook-r1": "e3fc720afa9b1693defd29ba16574a96d6c0671b3962c75f2df6c66c36e6a8d4",
 }
 
 

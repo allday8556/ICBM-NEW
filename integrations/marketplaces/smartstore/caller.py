@@ -88,6 +88,7 @@ _PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
 _NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
 _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
 _CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
+_ADDRESSBOOK_LIST = EndpointId.SMARTSTORE_ADDRESSBOOK_LIST
 # An official 상품정보제공고시 type code: upper-case words joined by underscores.
 _NOTICE_TYPE_CODE = re.compile(r"^[A-Z][A-Z_]{1,39}$")
 # The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
@@ -189,6 +190,16 @@ class CategoryListRequest:
 
 
 @dataclass(frozen=True)
+class AddressBookListRequest:
+    """Read one page of the seller's address book (출고지 / 반품·교환지)."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    page: int = 1
+
+
+@dataclass(frozen=True)
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
@@ -270,6 +281,14 @@ class NoticeCatalogResponse:
 @dataclass(frozen=True)
 class CategoryListResponse:
     """The documented category array after deny-by-default field retention."""
+
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class AddressBookListResponse:
+    """One page of the address book after deny-by-default field retention."""
 
     retained: Mapping[str, object]
     http_status: int
@@ -382,7 +401,8 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ProductCreateRequest
         | ProductSearchRequest
         | ImageUploadRequest
-        | CategoryListRequest,
+        | CategoryListRequest
+        | AddressBookListRequest,
     ):
         return request.credential_generation, request.session_generation
     return None, None
@@ -457,6 +477,21 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         try:
             query = retained_query(contract, {"last": "true"})
+        except ValueError as exc:  # pragma: no cover - registry/caller contract drift
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+        return _Wire(contract.path, headers, {}, query=query)
+    if contract.endpoint_id is _ADDRESSBOOK_LIST:
+        if (
+            not isinstance(request, AddressBookListRequest)
+            or isinstance(request.page, bool)
+            or not 1 <= request.page <= 100
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        try:
+            query = retained_query(contract, {"page": str(request.page)})
         except ValueError as exc:  # pragma: no cover - registry/caller contract drift
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
         return _Wire(contract.path, headers, {}, query=query)
@@ -619,6 +654,7 @@ _Result = (
     | ProductDeleteResponse
     | NoticeCatalogResponse
     | CategoryListResponse
+    | AddressBookListResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -635,6 +671,9 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
             retained=retain(contract, wrapped),
             http_status=status,
         )
+    if contract.endpoint_id is _ADDRESSBOOK_LIST:
+        assert isinstance(request, AddressBookListRequest)
+        return AddressBookListResponse(retained=retain(contract, body), http_status=status)
     if contract.endpoint_id is _CATEGORY_LIST:
         assert isinstance(request, CategoryListRequest)
         return CategoryListResponse(
@@ -754,6 +793,13 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_CATEGORY_LIST],
         request: CategoryListRequest,
     ) -> CategoryListResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_ADDRESSBOOK_LIST],
+        request: AddressBookListRequest,
+    ) -> AddressBookListResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...

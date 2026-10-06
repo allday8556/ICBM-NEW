@@ -11,6 +11,9 @@ import { h } from '../../core/dom.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/target-policies';
+// The seller's SmartStore address book, read from the connected account (never stored).
+const ADDRESS_BOOKS = '/api/v1/connect/marketplaces/smartstore/addressbooks';
+const ADDRESS_TYPE_LABEL = { RELEASE: '출고지', REFUND_OR_EXCHANGE: '반품·교환지', GENERAL: '일반' };
 const TITLE = '등록 대상 정책';
 const ACTOR = 'operator';
 
@@ -189,6 +192,54 @@ function editor(view, onSaved) {
     ...on,
     name: 'return_address_id',
   });
+  // 네이버 주소록 불러오기: the connected account's address book becomes the choices of the two
+  // number fields. A field already holding a number keeps it; an empty one takes the first entry
+  // of its type. The server still validates whatever is saved.
+  const addressList = h('div', { class: 'mini', 'data-address-books': 'NOT_LOADED' });
+  const loadAddresses = h(
+    'button',
+    { type: 'button', class: 'btn', 'data-action': 'load-address-books' },
+    '네이버 주소록 불러오기',
+  );
+  loadAddresses.disabled = !editable;
+  loadAddresses.addEventListener('click', async () => {
+    loadAddresses.disabled = true;
+    try {
+      const found = await getJson(ADDRESS_BOOKS);
+      const books = found.address_books ?? [];
+      const label = (book) =>
+        `${book.address_book_no} · ${book.name || '(이름 없음)'} · ${ADDRESS_TYPE_LABEL[book.address_type] ?? book.address_type}`;
+      for (const [input, type] of [
+        [shippingAddress.input, 'RELEASE'],
+        [returnAddress.input, 'REFUND_OR_EXCHANGE'],
+      ]) {
+        sequence += 1;
+        const listId = `target-policy-${sequence}`;
+        input.setAttribute('list', listId);
+        input.after(
+          h(
+            'datalist',
+            { id: listId },
+            books.map((book) => h('option', { value: String(book.address_book_no) }, label(book))),
+          ),
+        );
+        if (!input.value.trim()) {
+          const first = books.find((book) => book.address_type === type);
+          if (first) input.value = String(first.address_book_no);
+        }
+      }
+      addressList.setAttribute('data-address-books', String(books.length));
+      addressList.replaceChildren(
+        ...(books.length
+          ? books.map((book) => h('div', { 'data-address-book': String(book.address_book_no) }, label(book)))
+          : [h('div', {}, '네이버 주소록에 등록된 주소가 없습니다.')]),
+      );
+    } catch (error) {
+      toast(`주소록을 불러오지 못했습니다: ${errorText(error)}`);
+    } finally {
+      loadAddresses.disabled = !editable;
+    }
+  });
   sequence += 1;
   const templatesId = `target-policy-${sequence}`;
   const templates = h('textarea', { id: templatesId, rows: '3', spellcheck: 'false', 'data-policy-field': 'templates' });
@@ -304,6 +355,7 @@ function editor(view, onSaved) {
     returnFee.row,
     exchangeFee.row,
     deliveryCompany.row,
+    h('div', { class: 'form-row' }, loadAddresses, addressList),
     shippingAddress.row,
     returnAddress.row,
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
