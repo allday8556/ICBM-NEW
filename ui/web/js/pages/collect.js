@@ -683,6 +683,7 @@ function jobsView(view, ctx) {
       h('div', { class: 'supplier-actions' }, open, again),
     ));
     holder.source = { supplier_key: handoff.supplier_key, source_product_id: handoff.source_product_id };
+    holder.product = { state: handoff.state, productGroupId: handoff.product_group_id ?? null };
     return holder;
   }
 
@@ -723,7 +724,7 @@ function jobsView(view, ctx) {
       }
     }
     const handoff = run.outcome === 'RECORDED' ? await handoffBlock(run) : null;
-    const facts = run.outcome === 'RECORDED' && run.revision_id ? await collectFactsBlock(run.revision_id, run, codeCopy) : null;
+    const facts = run.outcome === 'RECORDED' && run.revision_id ? await collectFactsBlock(run.revision_id, run, codeCopy, handoff?.product ?? null) : null;
     const review = handoff?.source ? await reviewBlock(handoff.source) : null;
     if (!root.isConnected && polls > 0) return false; // the operator left; nothing to render into
     focus.dataset.run = run.collection_run_id;
