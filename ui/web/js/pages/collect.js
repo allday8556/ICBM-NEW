@@ -12,6 +12,7 @@ import { markInert } from '../core/inert.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
 import { collectFactsBlock, collectPreviewBlock, readRevisionFacts } from '../components/collect-facts.js';
+import { commonImagesSummary, openCommonImages } from '../components/common-images.js';
 import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 
@@ -239,6 +240,14 @@ function supplierCard(supplier, ctx) {
           { type: 'button', class: 'btn', disabled: !supplier.credentials_stored, onclick: () => runConnectionTest(supplier, ctx) },
           '연결 테스트',
         );
+  // A-NEXT2a: the supplier's common images (Issue #219's owner), counted by the owner and decided
+  // in their own modal. The card line is read again after a decision.
+  let commonLine = commonImagesSummary(supplier);
+  const refreshCommon = () => {
+    const next = commonImagesSummary(supplier);
+    commonLine.replaceWith(next);
+    commonLine = next;
+  };
   return h(
     'div',
     { class: 'supplier-card', 'data-supplier': supplier.supplier_key },
@@ -256,12 +265,14 @@ function supplierCard(supplier, ctx) {
       kv('마지막 확인', supplier.last_verified_at ? dotDateTime(supplier.last_verified_at) : '-'),
       kv('마지막 수집', '-'),
     ),
+    commonLine,
     failing ? h('div', { class: 'note' }, ERROR_COPY[supplier.last_error_code] ?? supplier.last_error_code) : null,
     h(
       'div',
       { class: 'supplier-actions' },
       h('button', { type: 'button', class: 'btn', onclick: () => openCredentialModal(supplier, ctx) }, '로그인 정보'),
       primary,
+      h('button', { type: 'button', class: 'btn', 'data-action': 'open-common-images', onclick: () => openCommonImages(supplier, refreshCommon) }, '공통 이미지'),
       markInert(h('button', { type: 'button', class: 'btn' }, '사이트 분석')),
       markInert(h('button', { type: 'button', class: 'btn' }, '수집 규칙')),
     ),
