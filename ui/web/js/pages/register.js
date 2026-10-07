@@ -1405,6 +1405,11 @@ function settingsPanel() {
   );
 }
 
+// A bare block placed as its own card in a section; the block itself is unchanged.
+function panelOf(block) {
+  return block ? h('section', { class: 'panel register-fixes-panel' }, block) : null;
+}
+
 function sectionWrap(section, title, ...children) {
   const shown = children.filter(Boolean);
   if (!shown.length) return null;
@@ -1507,7 +1512,7 @@ export default {
       utilityRow(overview),
       h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessBlock, null), settingsPanel()),
       sectionWrap('products', '등록상품 관리', listingSyncPanel()),
-      sectionWrap('failed', '실패 / 재시도', fixesPanel(fixes, ctx), statusPanel),
+      sectionWrap('failed', '실패 / 재시도', panelOf(fixesPanel(fixes, ctx)), statusPanel),
       sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
       sectionWrap('reviews', '검토 항목', ...reviews),
       sectionWrap('units', '등록 단위 작업 공간', ...panels),
