@@ -138,6 +138,16 @@ def test_ui_is_served_with_a_restrictive_csp(client: TestClient) -> None:
     assert response.headers["x-frame-options"] == "DENY"
 
 
+def test_ui_files_are_revalidated_so_an_update_is_never_stale(client: TestClient) -> None:
+    module = client.get("/js/pages/settings.js")
+    assert module.status_code == 200
+    assert module.headers["cache-control"] == "no-cache"
+    # Revalidation stays cheap: an unchanged file answers 304 through its ETag.
+    again = client.get("/js/pages/settings.js", headers={"If-None-Match": module.headers["etag"]})
+    assert again.status_code == 304
+    assert again.headers["cache-control"] == "no-cache"
+
+
 def test_correlation_id_is_echoed_or_issued(client: TestClient) -> None:
     echoed = client.get("/api/health", headers={"X-Correlation-ID": "trace-api-000001"})
     assert echoed.headers["x-correlation-id"] == "trace-api-000001"
