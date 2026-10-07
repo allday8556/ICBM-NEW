@@ -63,6 +63,8 @@ Notice coverage S4 added the contract matrix of every documented SmartStore noti
 wire forms `notice_children.golden.json`, beside them.
 The Collect Truth Inspector (A-UX1, owner decision 2026-10-04) added the 수집관리 component
 `ui/web/js/components/collect-facts.js`.
+The supplier common-image screen (A-NEXT2a, Issue #231) added the 수집관리 component
+`ui/web/js/components/common-images.js`.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -123,6 +125,6 @@ payload or external call and leaves legacy Item economics unchanged.
 | `tests/integration/` | 115 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 104 | unit tests by runtime owner |
-| `ui/` | 59 | operator clients: the served web client and the capture extension |
+| `ui/` | 60 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 50 | the served web client |
+| `ui/web/` | 51 | the served web client |

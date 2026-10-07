@@ -269,6 +269,29 @@ Small additions beside the approved boards, in their existing visual language:
   one submit path and its server rules (the target check and the same-product interval included);
   the failed run stays as recorded. `NO_REVISION` and `RECORDED` runs offer no such control.
 
+## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
+
+v29 has no board for Issue #219's supplier common images; they live with the supplier they belong
+to, in v29's existing language: the 공급처 관리 supplier card and a modal like its credential surface.
+
+- The supplier card shows `공통 이미지` with the owner's counts `확인 필요 / 차단 / 유지`, read from
+  `GET /api/v1/products/supplier-common-images/{supplier}`, and a `공통 이미지` button.
+- The modal lists every file the owner lists, in its order, each as a tile:
+  - the preview, through the owner's read-only bytes route
+    (`GET …/supplier-common-images/{supplier}/{sha256}/image`). A file no product shows yet is not
+    asked for and reads `미리보기 데이터 없음`;
+  - the verdict chip, the products it was found in, and the current decision as recorded: the
+    owner's seed (revision 0) reads `초기 지정`, a later decision names its number and who made it,
+    and the earlier decisions no read returns read `이전 결정 기록 데이터 없음`. An undecided
+    candidate reads `확인 필요` and that the owner treats it as blocked until decided;
+  - `차단` and `유지`, each the owner's own decide command
+    (`POST …/supplier-common-images/{supplier}/{sha256}` with `{verdict, actor: "operator"}`). The
+    list is read again after every answer, so a tile always shows what the owner now holds;
+    pressing the verdict a file already has sends nothing.
+- The screen detects nothing, counts nothing and decides no verdict. Only these three owner routes
+  are used. This is the one write the 수집관리 screen adds besides the collection submit, and it is
+  the Product DB owner's write, not COLLECT's.
+
 ## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
 
 - Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per

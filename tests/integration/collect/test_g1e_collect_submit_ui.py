@@ -19,7 +19,9 @@ No supplier, marketplace or AI provider is reached.
 
 import contextlib
 import json
+import struct
 import threading
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -58,6 +60,8 @@ RUNS = "/api/v1/collect/collections"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 FORM = "[data-role='collect-submit']"
 FOCUS = "[data-role='run-focus']"
+# The supplier Collections records products for, and whose common images the owner keeps.
+COMMON_SUPPLIER = "kmretail"
 FACTS = "[data-role='facts-slot'] > [data-role='collect-facts']"
 SESSION = "fake-session-payload"
 NEVER_CREATED = (
@@ -942,3 +946,140 @@ def test_the_run_shows_the_bound_items_common_image_notes_and_nothing_before_it(
             assert first.inner_text() == "대표 이미지"
             _no_browser_truth(page)
     assert wire.posts() == []
+
+
+# ------------------------------------- A-NEXT2a: the supplier's common images, decided by the owner
+
+
+def _one_pixel_png(marker: bytes) -> bytes:
+    """A real 1×1 PNG a browser can draw; the marker after IEND makes each file distinct."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    pixels = zlib.compress(b"\x00\xd0\xd8\xe0")
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels)
+    return png + chunk(b"IEND", b"") + marker
+
+
+def test_the_suppliers_common_images_preview_and_each_decision_is_the_owners(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client:
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        assets = SourceAssetStore(
+            config.source_assets_dir, served_container.db, FakeDecoder(), FakeClock()
+        )
+        drawable = _one_pixel_png(b"a-next2a-shipping-notice")
+        repeated = assets.put(drawable).sha256
+        detail = ImageReference(
+            role=ImageRole.DETAIL,
+            ordinal=1,
+            host="img.shop.example",
+            provenance=".detail img:nth-of-type(1)",
+            status=FieldStatus.CONFIRMED,
+            sha256=repeated,
+        )
+        # The same detail file in three different products: the owner's REVIEW candidate.
+        for source_id in ("6161", "6262", "6363"):
+            Collections.of(served_container, config).collect(
+                source_product_id=source_id, extra_images=(detail,)
+            )
+        listed = client.get(
+            f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}",
+            headers={"X-ICBM-Client": "pytest"},
+        ).json()
+        assert {i["sha256"]: i["verdict"] for i in listed["images"]}[repeated] == "REVIEW"
+        shown = client.get(
+            f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}/{repeated}/image",
+            headers={"X-ICBM-Client": "pytest"},
+        )
+        assert shown.status_code == 200, shown.text
+        assert shown.content == drawable
+        with _page(browser, client, wire) as page:
+            page.get_by_role("tab", name="공급처 관리").click()
+            card = page.locator(
+                f"[data-role='common-image-summary'][data-supplier='{COMMON_SUPPLIER}']"
+                "[data-state='ready']"
+            )
+            card.wait_for()
+            reviews = sum(i["verdict"] == "REVIEW" for i in listed["images"])
+            assert card.locator("[data-count-verdict='REVIEW']").get_attribute("data-count") == str(
+                reviews
+            )
+            page.locator("[data-action='open-common-images']").first.click()
+            tile = page.locator(f".common-image-tile[data-sha='{repeated}']")
+            tile.wait_for()
+            assert tile.get_attribute("data-verdict") == "REVIEW"
+            assert tile.get_attribute("data-decided") == "false"
+            assert tile.locator("[data-role='product-count']").inner_text() == "3개"
+            # The preview is the owner's own bytes route for this supplier and file.
+            image = tile.locator("[data-role='common-image-preview'] img")
+            assert image.get_attribute("src") == (
+                f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}/{repeated}/image"
+            )
+            page.wait_for_function(
+                "(img) => img.complete && img.naturalWidth > 0", arg=image.element_handle()
+            )
+            # The owner's own seed (revision 0) reads as such, and a file no product shows yet is
+            # never asked for: only the shown file's bytes are requested.
+            seeded = [i for i in listed["images"] if (i["decision"] or {}).get("revision_no") == 0]
+            if seeded:
+                first = page.locator(f".common-image-tile[data-sha='{seeded[0]['sha256']}']")
+                assert (
+                    "초기 지정" in first.locator("[data-role='common-image-decision']").inner_text()
+                )
+            unseen = [i["sha256"] for i in listed["images"] if i["product_count"] == 0]
+            for sha in unseen:
+                frame = page.locator(
+                    f".common-image-tile[data-sha='{sha}'] [data-role='common-image-preview']"
+                )
+                assert frame.get_attribute("data-state") == "unseen"
+            asked = {
+                urlsplit(u).path for m, u, _ in wire.requests if urlsplit(u).path.endswith("/image")
+            }
+            assert asked == {
+                f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}/{repeated}/image"
+            }
+            # 차단, then 유지: each is the owner's POST, and the tile is what the owner now holds.
+            tile.locator("[data-action='decide-block']").click()
+            page.wait_for_selector(
+                f".common-image-tile[data-sha='{repeated}'][data-verdict='BLOCK']"
+            )
+            assert (
+                tile.locator("[data-role='common-image-decision']").get_attribute("data-revision")
+                == "1"
+            )
+            tile.locator("[data-action='decide-keep']").click()
+            page.wait_for_selector(
+                f".common-image-tile[data-sha='{repeated}'][data-verdict='KEEP']"
+            )
+            decision = tile.locator("[data-role='common-image-decision']")
+            assert decision.get_attribute("data-revision") == "2"
+            assert "이전 결정 기록 데이터 없음" in decision.inner_text()
+            # Pressing the verdict it already has sends nothing.
+            tile.locator("[data-action='decide-keep']").click()
+            page.wait_for_selector(
+                f"[data-role='common-image-summary'][data-supplier='{COMMON_SUPPLIER}']"
+                "[data-state='ready'] [data-count-verdict='KEEP']"
+            )
+            _no_browser_truth(page)
+        now = client.get(
+            f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}",
+            headers={"X-ICBM-Client": "pytest"},
+        ).json()
+        assert {i["sha256"]: i["verdict"] for i in now["images"]}[repeated] == "KEEP"
+    posts = wire.posts()
+    assert [(urlsplit(u).path, json.loads(body or b"{}")) for _, u, body in posts] == [
+        (
+            f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}/{repeated}",
+            {"verdict": "BLOCK", "actor": "operator"},
+        ),
+        (
+            f"/api/v1/products/supplier-common-images/{COMMON_SUPPLIER}/{repeated}",
+            {"verdict": "KEEP", "actor": "operator"},
+        ),
+    ]
