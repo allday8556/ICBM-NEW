@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 
 from app.capabilities.review.stock_producer import LISTED_SOURCE_SOLD_OUT, StockReviewProducer
 from app.config import AppConfig
@@ -28,6 +29,7 @@ from app.stages.operate.stock import (
     REFUSED,
     StockRecheckService,
 )
+from app.stages.operate.stock_models import StockRecheck
 from app.stages.register.store import RegistrationStore
 from tests.integration.register.test_m5_registration_foundation import (  # noqa: F401 - fixtures
     MARKET,
@@ -186,3 +188,73 @@ def test_nothing_is_listed_without_an_active_registration(container: Container) 
     service = _service(container, FakeCollector(), FakeRevisions())
     assert service.listed_sources() == ()
     assert service.request_round(trigger=OPERATOR) == ()
+
+
+def test_the_pending_slot_is_reserved_before_collect_is_asked(
+    container: Container, registration: str
+) -> None:
+    """GPT audit (PR #248): a request that does not hold the source's one pending slot never asks
+    COLLECT, so two requests can never launch two re-collections of one source."""
+    revisions = FakeRevisions(
+        current=_revision("rev-1", Availability.ON_SALE, FieldStatus.CONFIRMED)
+    )
+    collector = FakeCollector()
+    service = _service(container, collector, revisions)
+    (listed,) = service.listed_sources()
+    seen: list[str] = []
+
+    def submit(supplier_key: str, product_url: str) -> Any:
+        # While COLLECT is being asked, the slot is already held: a second request sends nothing.
+        with container.db.read() as session:
+            seen.extend(
+                session.scalars(select(StockRecheck.state).where(StockRecheck.state != "FINISHED"))
+            )
+        assert service._request(listed, OPERATOR) is None
+        return FakeCollector.submit(collector, supplier_key, product_url)
+
+    collector.submit = submit  # type: ignore[method-assign]
+    opened = service.request_round(trigger=OPERATOR)
+    assert len(opened) == 1 and len(collector.submitted) == 1
+    assert seen == ["SUBMITTING"]
+    (state,) = service.overview().sources
+    assert state.pending is True
+
+
+def test_a_reservation_left_by_a_dead_process_is_released_at_startup(
+    container: Container, registration: str
+) -> None:
+    revisions = FakeRevisions(
+        current=_revision("rev-1", Availability.ON_SALE, FieldStatus.CONFIRMED)
+    )
+    collector = FakeCollector()
+    service = _service(container, collector, revisions)
+    (listed,) = service.listed_sources()
+
+    def crash(supplier_key: str, product_url: str) -> Any:
+        raise KeyboardInterrupt
+
+    collector.submit = crash  # type: ignore[method-assign]
+    with pytest.raises(KeyboardInterrupt):
+        service.request_round(trigger=OPERATOR)
+    # The interrupted request finished its own reservation; a reservation a killed process left
+    # behind is released at the next start.
+    with container.db.write() as session:
+        session.add(
+            StockRecheck(
+                recheck_id="left-behind",
+                supplier_key=listed.supplier_key,
+                source_product_id=listed.source_product_id,
+                trigger=OPERATOR,
+                state="SUBMITTING",
+                outcome=None,
+                collection_run_id=None,
+                revision_id=None,
+                availability=None,
+                error_code=None,
+                requested_at=container.clock.now(),
+                finished_at=None,
+            )
+        )
+    assert service.settle_interrupted() == 1
+    (state,) = service.overview().sources
+    assert state.pending is False

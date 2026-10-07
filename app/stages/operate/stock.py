@@ -41,7 +41,13 @@ logger = logging.getLogger("icbm.operate.stock")
 
 AUTO: Final = "AUTO"
 OPERATOR: Final = "OPERATOR"
+# The one-pending slot is reserved before COLLECT is asked, so a second request — another
+# operator click, the schedule, another worker — never submits a second re-collection.
+SUBMITTING: Final = "SUBMITTING"
 REQUESTED: Final = "REQUESTED"
+# A reservation an earlier process left before COLLECT answered: whether a run was opened is not
+# known here, and any run it opened is an ordinary collection that settles on its own.
+SUBMIT_INTERRUPTED: Final = "OPERATE_STOCK_SUBMIT_INTERRUPTED"
 FINISHED: Final = "FINISHED"
 RECORDED: Final = "RECORDED"
 NO_REVISION: Final = "NO_REVISION"
@@ -277,14 +283,11 @@ class StockRecheckService:
     def _request(self, source: ListedSource, trigger: str) -> str | None:
         current = self._revisions.current_recorded(source.supplier_key, source.source_product_id)
         recheck_id = str(uuid.uuid4())
-        now = self._clock.now()
         url = getattr(current, "source_url", None)
         if not url:
             return self._refusal(recheck_id, source, trigger, NO_SOURCE_URL)
-        try:
-            submitted = self._collector.submit(source.supplier_key, url)
-        except AppError as exc:
-            return self._refusal(recheck_id, source, trigger, exc.code)
+        # Reserve the source's one pending slot first: only the request that holds it asks COLLECT
+        # (GPT audit, PR #248). A slot already held means a recheck is pending; nothing is sent.
         try:
             with self._db.write() as session:
                 session.add(
@@ -293,21 +296,43 @@ class StockRecheckService:
                         supplier_key=source.supplier_key,
                         source_product_id=source.source_product_id,
                         trigger=trigger,
-                        state=REQUESTED,
+                        state=SUBMITTING,
                         outcome=None,
-                        collection_run_id=submitted.collection_run_id,
+                        collection_run_id=None,
                         revision_id=None,
                         availability=None,
                         error_code=None,
-                        requested_at=now,
+                        requested_at=self._clock.now(),
                         finished_at=None,
                     )
                 )
         except IntegrityError:
-            # A recheck of this source product is already pending; the run COLLECT opened is an
-            # ordinary collection and settles on its own.
             return None
+        try:
+            submitted = self._collector.submit(source.supplier_key, url)
+        except AppError as exc:
+            self._finish(recheck_id, REFUSED, error_code=exc.code)
+            return recheck_id
+        except BaseException:
+            self._finish(recheck_id, FAILED, error_code=SUBMIT_INTERRUPTED)
+            raise
+        with self._db.write() as session:
+            row = session.get(StockRecheck, recheck_id)
+            assert row is not None
+            row.state, row.collection_run_id = REQUESTED, submitted.collection_run_id
         return recheck_id
+
+    def settle_interrupted(self) -> int:
+        """A reservation an earlier process left before COLLECT answered is finished as FAILED
+        (startup): the slot is released, and nothing is concluded about the source."""
+        with self._db.write() as session:
+            rows = session.scalars(
+                select(StockRecheck).where(StockRecheck.state == SUBMITTING)
+            ).all()
+            for row in rows:
+                row.state, row.outcome, row.finished_at = FINISHED, FAILED, self._clock.now()
+                row.error_code = SUBMIT_INTERRUPTED
+            return len(rows)
 
     def _refusal(self, recheck_id: str, source: ListedSource, trigger: str, code: str) -> str:
         now = self._clock.now()
@@ -373,7 +398,7 @@ class StockRecheckService:
             last_recheck_error=None if last is None else last.error_code,
             last_requested_at=rows[0].requested_at if rows else None,
             last_finished_at=None if last is None else last.finished_at,
-            pending=any(r.state == REQUESTED for r in rows),
+            pending=any(r.state in (SUBMITTING, REQUESTED) for r in rows),
             needs_decision=availability == Availability.SOLD_OUT.value,
         )
 
@@ -388,6 +413,7 @@ class StockRecheckScheduler:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        self._service.settle_interrupted()
         if self._service.interval_s <= 0:
             return
         self._halt.clear()

@@ -24,10 +24,10 @@ class StockRecheck(Base):
             "supplier_key",
             "source_product_id",
             unique=True,
-            sqlite_where=sql("state = 'REQUESTED'"),
+            sqlite_where=sql("state IN ('SUBMITTING', 'REQUESTED')"),
         ),
         CheckConstraint("trigger IN ('AUTO', 'OPERATOR')", name="trigger_valid"),
-        CheckConstraint("state IN ('REQUESTED', 'FINISHED')", name="state_valid"),
+        CheckConstraint("state IN ('SUBMITTING', 'REQUESTED', 'FINISHED')", name="state_valid"),
         CheckConstraint(
             "outcome IS NULL OR outcome IN ('RECORDED', 'NO_REVISION', 'FAILED', 'REFUSED')",
             name="outcome_valid",
@@ -37,7 +37,7 @@ class StockRecheck(Base):
             name="finished_has_outcome",
         ),
         CheckConstraint(
-            "state = 'FINISHED' OR collection_run_id IS NOT NULL", name="requested_has_run"
+            "state <> 'REQUESTED' OR collection_run_id IS NOT NULL", name="requested_has_run"
         ),
         CheckConstraint(
             "availability IS NULL OR availability IN ('ON_SALE', 'SOLD_OUT', 'REVIEW_REQUIRED')",
