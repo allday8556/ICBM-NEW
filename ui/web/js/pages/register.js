@@ -90,6 +90,7 @@ const ACTION_LABEL = {
   RECONCILE: '등록확인 재시도',
   VERIFY: '읽기 확인',
   RESUME_SCOPE: '전송 재개',
+  SETTLE_REJECTION: '거절 확인 · 미등록 처리',
 };
 
 const OPERATOR = 'operator';
@@ -112,6 +113,15 @@ const REASON_COPY = {
   REGISTER_READ_NOT_APPLIED: '마켓에 반영되지 않은 것이 확인되었습니다.',
   REGISTER_READ_PRE_SEND_FAILED: '전송 전에 거부되어 아무 것도 보내지 않았습니다.',
   REGISTER_READ_STATE_UNCLASSIFIED: '서버가 이 등록 상태를 분류하지 못했습니다. 결함으로 기록되었습니다.',
+  // B-STATUS: the latest Attempt's cause and the reconcile result, shown apart.
+  SMARTSTORE_HTTP_400: '네이버가 400으로 거절했습니다.',
+  SMARTSTORE_CREATE_REJECTED: '네이버가 등록 요청을 거절했습니다 (등록되지 않음).',
+  ZERO: '등록 확인: 네이버에서 찾지 못함',
+  MULTIPLE: '등록 확인: 후보가 여러 개',
+  LOOKUP_UNAVAILABLE: '등록 확인: 조회 불가',
+  ERROR: '등록 확인: 조회 오류',
+  REGISTER_REJECTION_NOT_PROVEN: '마지막 시도가 네이버의 400 거절이 아니라 미등록으로 처리할 수 없습니다.',
+  REGISTER_REJECTION_LOOKUP_MISSING: '거절 뒤 등록확인 재시도에서 "찾지 못함"이 한 번 있어야 미등록으로 처리할 수 있습니다.',
   REGISTER_INTENT_ABSENT: '아직 등록 요청이 만들어지지 않았습니다.',
   REGISTER_INTENT_NOT_SENDABLE: '지금 상태에서는 서버가 전송을 허용하지 않습니다.',
   REGISTER_JOB_ALREADY_QUEUED: '이미 대기 중인 전송 작업이 있습니다.',
@@ -755,7 +765,12 @@ function call(unit, action, intentId) {
       actor: OPERATOR,
     });
   }
-  const path = { CREATE_ENQUEUE: 'create', RECONCILE: 'reconcile', VERIFY: 'verify' }[action];
+  const path = {
+    CREATE_ENQUEUE: 'create',
+    RECONCILE: 'reconcile',
+    VERIFY: 'verify',
+    SETTLE_REJECTION: 'settle-rejection',
+  }[action];
   return sendJson('POST', `/api/v1/register/intents/${intentId}/${path}`, {});
 }
 
@@ -797,6 +812,23 @@ function statusRow(entry, onDone) {
         ACTION_LABEL[action] ?? action,
       )
     : null;
+  // B-STATUS: only when the server says the UNKNOWN is a provider 400 rejection it can settle.
+  const settle = read?.rejection_settleable
+    ? h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn',
+          'data-action': 'SETTLE_REJECTION',
+          'data-intent': entry.intent_id,
+          onclick: () => runStatus(entry, 'SETTLE_REJECTION', settle, onDone),
+        },
+        ACTION_LABEL.SETTLE_REJECTION,
+      )
+    : null;
+  const causes = [read?.attempt_cause_code, read?.cause_code]
+    .filter((code, index, all) => code && all.indexOf(code) === index)
+    .map((code) => h('span', { class: 'mini', 'data-cause': code }, REASON_COPY[code] ?? code));
   return h(
     'tr',
     { 'data-intent': entry.intent_id, 'data-read-row': read?.state ?? 'UNCLASSIFIED' },
@@ -809,12 +841,18 @@ function statusRow(entry, onDone) {
       read
         ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? read.reason_code)
         : reason(entry.read_state_problem),
-      read?.cause_code ? h('span', { class: 'mini' }, read.cause_code) : null,
+      ...causes,
     ),
     h('td', {}, read?.requested_at ? dotDateTime(read.requested_at) : '—'),
     h('td', {}, read?.last_confirmed_at ? dotDateTime(read.last_confirmed_at) : '—'),
     h('td', {}, String(read?.confirmation_attempts ?? 0)),
-    h('td', {}, button ?? '—', button && !read.action_enabled ? reason(read.action_reason_code) : null),
+    h(
+      'td',
+      {},
+      button ?? (settle ? null : '—'),
+      button && !read.action_enabled ? reason(read.action_reason_code) : null,
+      settle,
+    ),
   );
 }
 

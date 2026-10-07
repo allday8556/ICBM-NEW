@@ -663,6 +663,10 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.intents(limit=limit)
 
+    def open_intents(self) -> tuple[IntentRecord, ...]:
+        with self.reading() as unit:
+            return unit.open_intents()
+
     def registrations(self, *, limit: int = 200) -> tuple[RegistrationRecord, ...]:
         with self.reading() as unit:
             return unit.registrations(limit=limit)
@@ -899,6 +903,22 @@ class RegistrationUnit:
             )
             or 0
         )
+
+    def open_intents(self) -> tuple[IntentRecord, ...]:
+        """Every Intent not yet terminal — PREPARED, SENT or UNKNOWN — whatever its age (B-STATUS).
+
+        They are few by construction: an open Intent blocks its conflict scope (ADR-0014 §7).
+        """
+        rows = self.session.scalars(
+            select(RegistrationIntent)
+            .where(
+                RegistrationIntent.state.in_(
+                    (IntentState.PREPARED.value, IntentState.SENT.value, IntentState.UNKNOWN.value)
+                )
+            )
+            .order_by(RegistrationIntent.created_at.desc(), RegistrationIntent.intent_id)
+        ).all()
+        return tuple(_intent_record(row) for row in rows)
 
     def intents(self, *, limit: int | None = 200) -> tuple[IntentRecord, ...]:
         rows = self.session.scalars(

@@ -111,6 +111,7 @@ from app.stages.register.sanitize import (
 from app.stages.register.store import (
     AttemptRecord,
     IntentRecord,
+    ReconcileCheckRecord,
     RegistrationStore,
     RegistrationUnit,
     ScopeRecord,
@@ -201,6 +202,40 @@ class ExecutionRefused(AppError):
 REJECTED_CREATE_CODE: Final = "SMARTSTORE_HTTP_400"
 REJECTION_SETTLEMENT_RULE: Final = "create-http-400-rejection/v1"
 REJECTION_SETTLEMENT_DECISION: Final = "6031580064"
+
+
+def rejected_attempt(attempts: Sequence[AttemptRecord]) -> AttemptRecord | None:
+    """The latest Attempt when it is an unresolved provider 400 rejection, else ``None``."""
+    attempt = attempts[-1] if attempts else None
+    if (
+        attempt is None
+        or not attempt.finished
+        or attempt.remote_outcome is not RemoteOutcome.UNKNOWN
+        or attempt.resolved_outcome is not None
+        or attempt.error_code != REJECTED_CREATE_CODE
+        or attempt.finished_at is None
+    ):
+        return None
+    return attempt
+
+
+def settleable_rejection(
+    attempts: Sequence[AttemptRecord], checks: Sequence[ReconcileCheckRecord]
+) -> tuple[AttemptRecord, ReconcileCheckRecord] | None:
+    """The unresolved 400 rejection and the zero-candidate check after it that settle an UNKNOWN
+    (owner decision ``6031580064``), or ``None`` when the facts do not prove it."""
+    attempt = rejected_attempt(attempts)
+    if attempt is None or attempt.finished_at is None:
+        return None
+    finished_at = attempt.finished_at
+    zero = [
+        check
+        for check in checks
+        if check.result is ReconcileResult.ZERO
+        and check.finished_at is not None
+        and check.started_at >= finished_at
+    ]
+    return (attempt, zero[-1]) if zero else None
 
 
 class AttemptFailed(AppError):
@@ -1112,42 +1147,28 @@ class RegistrationExecutionService:
                 error_class=ErrorClass.VALIDATION,
             )
         attempts = self._registrations.attempts(intent_id)
-        attempt = attempts[-1] if attempts else None
-        if (
-            attempt is None
-            or not attempt.finished
-            or attempt.remote_outcome is not RemoteOutcome.UNKNOWN
-            or attempt.resolved_outcome is not None
-            or attempt.error_code != REJECTED_CREATE_CODE
-            or attempt.finished_at is None
-        ):
+        if rejected_attempt(attempts) is None:
             raise ExecutionRefused(
                 "REGISTER_REJECTION_NOT_PROVEN",
                 "the latest attempt is not an unresolved provider 400 rejection",
                 error_class=ErrorClass.VALIDATION,
             )
-        finished_at = attempt.finished_at
-        zero = [
-            check
-            for check in self._registrations.reconcile_checks(intent_id)
-            if check.result is ReconcileResult.ZERO
-            and check.finished_at is not None
-            and check.started_at >= finished_at
-        ]
-        if not zero:
+        proven = settleable_rejection(attempts, self._registrations.reconcile_checks(intent_id))
+        if proven is None:
             raise ExecutionRefused(
                 "REGISTER_REJECTION_LOOKUP_MISSING",
                 "a finished reconcile check after the rejection must have found zero candidates",
                 error_class=ErrorClass.VALIDATION,
             )
+        attempt, check = proven
         evidence = {
             "rule": REJECTION_SETTLEMENT_RULE,
             "owner_decision": REJECTION_SETTLEMENT_DECISION,
             "attempt_id": attempt.attempt_id,
             "attempt_no": attempt.attempt_no,
             "error_code": attempt.error_code,
-            "reconcile_seq": zero[-1].seq,
-            "reconcile_evidence_digest": zero[-1].evidence_digest,
+            "reconcile_seq": check.seq,
+            "reconcile_evidence_digest": check.evidence_digest,
         }
         with self._registrations.transaction() as unit:
             settled = unit.resolve_unknown(
@@ -1164,7 +1185,7 @@ class RegistrationExecutionService:
             "REJECTION_SETTLED_NOT_APPLIED",
             settled.state,
             remote_outcome=RemoteOutcome.NOT_APPLIED_PROVEN,
-            details={"attempt_id": attempt.attempt_id, "reconcile_seq": zero[-1].seq},
+            details={"attempt_id": attempt.attempt_id, "reconcile_seq": check.seq},
         )
 
     def reconcile_due(self, *, correlation_id: str) -> tuple[ExecutionResult | str, ...]:
