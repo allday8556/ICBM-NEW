@@ -43,6 +43,8 @@ class FixSurface(StrEnum):
     SETTINGS_TARGET_POLICY = "SETTINGS_TARGET_POLICY"
     SETTINGS_CATEGORY_METADATA = "SETTINGS_CATEGORY_METADATA"
     SETTINGS_CONNECT = "SETTINGS_CONNECT"
+    # B-EDITOR: the unit workspace's image section (the image owner's selection routes).
+    REGISTER_IMAGES = "REGISTER_IMAGES"
 
 
 ACTIONABILITY_LABELS: Final[Mapping[Actionability, str]] = {
@@ -59,6 +61,7 @@ SURFACE_LABELS: Final[Mapping[FixSurface, str]] = {
     FixSurface.SETTINGS_TARGET_POLICY: "설정 › 등록 정책",
     FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 카테고리 메타데이터",
     FixSurface.SETTINGS_CONNECT: "설정 › 마켓 연결",
+    FixSurface.REGISTER_IMAGES: "등록관리 › 이미지",
 }
 
 _F, _R, _W, _N, _X = (
@@ -75,6 +78,7 @@ _PREP, _ACT, _POLICY, _META, _CONNECT = (
     FixSurface.SETTINGS_CATEGORY_METADATA,
     FixSurface.SETTINGS_CONNECT,
 )
+_IMAGES = FixSurface.REGISTER_IMAGES
 
 Entry = tuple[Actionability, FixSurface | None]
 
@@ -143,10 +147,11 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "DETAIL_BODY_EMPTY": (_F, _PREP),
     # The authoring revisions are stamped by a target-policy save, then authored again.
     "AUTHORING_REVISIONS_UNOWNED": (_F, _POLICY),
-    # Images: selection and QA have no operator screen yet; uploads happen on the LIVE path.
-    "PUBLICATION_ASSETS_MISSING": (_X, None),
-    "PUBLICATION_ASSET_COUNT_EXCEEDED": (_X, None),
-    "PUBLICATION_REPRESENTATIVE_MISSING": (_X, None),
+    # Images: the selection is made in the unit workspace's image section (B-EDITOR). QA is the
+    # automatic rule's, and uploads happen on the LIVE path.
+    "PUBLICATION_ASSETS_MISSING": (_F, _IMAGES),
+    "PUBLICATION_ASSET_COUNT_EXCEEDED": (_F, _IMAGES),
+    "PUBLICATION_REPRESENTATIVE_MISSING": (_F, _IMAGES),
     # B-DETAIL's reason, consumed as it is: no screen places a detail image here.
     "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_X, None),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
@@ -180,6 +185,11 @@ M4_ACTIONS: Final[Mapping[str, Entry]] = {
     # The re-pin has M4 price the Item under the policy's context (B-PRICE1).
     "PRICING_SNAPSHOT_MISSING": (_F, _ACT),
     "PRICING_SNAPSHOT_SUPERSEDED": (_F, _ACT),
+    # The image owner's selection reasons: chosen in the workspace's image section (B-EDITOR).
+    "IMAGE_SELECTION_MISSING": (_F, _IMAGES),
+    "IMAGE_SELECTION_STALE": (_F, _IMAGES),
+    "IMAGE_SELECTION_EMPTY": (_F, _IMAGES),
+    "IMAGE_SELECTION_RECHECK_REQUIRED": (_F, _IMAGES),
 }
 
 # REGISTRATION_ERROR review conditions of the REGISTER execution producer.

@@ -58,7 +58,15 @@ def test_only_an_action_names_a_surface(entry: tuple[Actionability, FixSurface |
     [
         ("A_REASON_NOBODY_MAPPED", (Actionability.NOT_IMPLEMENTED, None)),
         ("M4_BASE.SOURCE_STOCK_SOLD_OUT", (Actionability.NO_OPERATOR_ACTION, None)),
-        ("M4_BASE.IMAGE_SELECTION_MISSING", (Actionability.NOT_IMPLEMENTED, None)),
+        # B-EDITOR: an image selection is made in the unit workspace's image section.
+        (
+            "M4_BASE.IMAGE_SELECTION_MISSING",
+            (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_IMAGES),
+        ),
+        (
+            "PUBLICATION_REPRESENTATIVE_MISSING",
+            (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_IMAGES),
+        ),
         ("CATEGORY_NOT_SELECTED", (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_PREPARATION)),
         ("PAYLOAD_EXTERNAL_URL", (Actionability.FIX_AVAILABLE, FixSurface.REGISTER_PREPARATION)),
         # B-DETAIL's reason is consumed as it is: no screen places a detail image.
