@@ -522,6 +522,8 @@ ADAPTIVE_TABLES = (
     "atomic_sku_product_items",
     "registration_bulk_runs",
     "registration_bulk_items",
+    "operate_listing_sync_runs",
+    "operate_listing_observations",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
