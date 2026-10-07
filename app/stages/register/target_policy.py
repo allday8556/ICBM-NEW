@@ -33,6 +33,7 @@ changes the next evaluation's dependency fingerprint and never an earlier Snapsh
 """
 
 import json
+import re
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -64,6 +65,8 @@ from app.stages.register.target_policy_models import (
 
 CONTENT_VERSION: Final = "registration-target-policy/v1"
 MAX_TEMPLATES: Final = 32
+# A Korean landline, mobile or representative number, hyphenated (02-000-0000, 1588-0000).
+AFTER_SERVICE_TELEPHONE: Final = re.compile(r"0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}|1[0-9]{3}-[0-9]{4}")
 
 TARGET_POLICY_INVALID: Final = "TARGET_POLICY_INVALID"
 TARGET_POLICY_PRICING_CONTEXT_INVALID: Final = "TARGET_POLICY_PRICING_CONTEXT_INVALID"
@@ -162,6 +165,9 @@ class TargetPolicyInputsView(_Strict):
     # Older revisions omitted delivery and keep their original no-delivery meaning.  A physical
     # product canary supplies the whole object; no member is defaulted.
     delivery_policy: DeliveryPolicyView | None = None
+    # The seller's A/S contact the CREATE endpoint requires (afterServiceInfo), confirmed by the
+    # operator once per account. Older revisions omit it; the wire then reads the notice's.
+    after_service_telephone: StrictStr | None = None
     templates: dict[StrictStr, StrictStr]
     duplicate_proof_required: StrictBool
     duplicate_lookup_keys: list[DuplicateKeyKind]
@@ -311,6 +317,13 @@ def encode_content(
                 " null is accepted and the server stamps the owner's current revision",
                 name,
             )
+    phone = inputs.after_service_telephone
+    if phone is not None and not AFTER_SERVICE_TELEPHONE.fullmatch(phone):
+        raise _invalid(
+            TARGET_POLICY_INVALID,
+            "the A/S phone is a Korean phone number like 02-000-0000 or 1588-0000",
+            "after_service_telephone",
+        )
     content: dict[str, Any] = {
         "content_version": CONTENT_VERSION,
         "marketplace_key": marketplace_key,
@@ -328,6 +341,8 @@ def encode_content(
             "provider_asset_identity_required": asset.provider_asset_identity_required,
         },
         "delivery_policy": None if delivery is None else delivery.model_dump(mode="json"),
+        # Named only when set, so a revision without it keeps its exact earlier content.
+        **({} if phone is None else {"after_service_telephone": phone}),
         "templates": dict(sorted(templates.items())),
         "duplicate_proof_required": inputs.duplicate_proof_required,
         "duplicate_lookup_keys": sorted(keys),
@@ -387,6 +402,7 @@ def target_policy_of(policy_revision: str, content: Mapping[str, Any]) -> Target
             provider_asset_identity_required=asset.provider_asset_identity_required,
         ),
         delivery_policy=None if delivery is None else DeliveryPolicy(**delivery.model_dump()),
+        after_service_telephone=inputs.after_service_telephone,
         category_mapping_revision=inputs.category_mapping_revision,
         detail_composition_revision=inputs.detail_composition_revision,
         templates=dict(inputs.templates),

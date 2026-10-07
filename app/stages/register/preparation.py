@@ -1418,6 +1418,12 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
                 "shipping_address_id": target.delivery_policy.shipping_address_id,
                 "return_address_id": target.delivery_policy.return_address_id,
             },
+            # Named only when set, so an earlier fingerprint is unchanged.
+            **(
+                {}
+                if target.after_service_telephone is None
+                else {"after_service_telephone": target.after_service_telephone}
+            ),
             "duplicate_proof_required": target.duplicate_proof_required,
             "duplicate_lookup_keys": sorted(k.value for k in target.duplicate_lookup_keys),
             "asset_policy": {

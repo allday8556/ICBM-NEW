@@ -53,6 +53,8 @@ def policy_inputs(account: str, *, account_scoped: bool = False) -> dict[str, An
             "requires_representative": True,
             "provider_asset_identity_required": True,
         },
+        # The seller's A/S contact the CREATE projection sends (wire v8).
+        "after_service_telephone": "02-000-0000",
         "templates": {"shipping": "shipping-template-g1", "returns": "returns-template-g1"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],

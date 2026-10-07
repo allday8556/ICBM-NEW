@@ -163,6 +163,10 @@ function editor(view, onSaved) {
     ...on,
     name: 'delivery_fee_pay_type',
   });
+  const afterServicePhone = field('A/S 전화번호 (예: 02-000-0000)', inputs?.after_service_telephone ?? '', {
+    ...on,
+    name: 'after_service_telephone',
+  });
   const deliveryCompany = choice('택배사 (CJGLS = CJ대한통운)', DELIVERY_COMPANIES, delivery?.delivery_company ?? 'CJGLS', {
     ...on,
     name: 'delivery_company',
@@ -248,6 +252,8 @@ function editor(view, onSaved) {
                 return_address_id: whole(returnAddress.input.value),
               }
             : null,
+          // The seller's A/S contact the marketplace requires on every listing (null when empty).
+          after_service_telephone: afterServicePhone.input.value.trim() || null,
           templates: templatesOf(templates.value),
           duplicate_proof_required: proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
@@ -303,6 +309,7 @@ function editor(view, onSaved) {
     returnPriority.row,
     returnFee.row,
     exchangeFee.row,
+    afterServicePhone.row,
     deliveryCompany.row,
     shippingAddress.row,
     returnAddress.row,

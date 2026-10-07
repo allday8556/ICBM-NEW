@@ -180,6 +180,12 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
             "policy_revision": target.policy_revision,
             "templates": business["templates"],
             "delivery_policy": business["delivery_policy"],
+            # Named only when the policy holds one, so an earlier payload shape is unchanged.
+            **(
+                {}
+                if target.after_service_telephone is None
+                else {"after_service_telephone": target.after_service_telephone}
+            ),
         },
         "detail": business["detail"],
         "items": payload_items,

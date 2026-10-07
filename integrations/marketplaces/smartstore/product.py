@@ -1074,14 +1074,22 @@ def _notice(payload: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     return notice_type, reviewed
 
 
-def _after_service_info(fields: Mapping[str, Any]) -> dict[str, str]:
+def _policy_phone(payload: Mapping[str, Any]) -> object:
+    policy = payload.get("policy")
+    return policy.get("after_service_telephone") if isinstance(policy, Mapping) else None
+
+
+def _after_service_info(fields: Mapping[str, Any], policy_phone: object) -> dict[str, str]:
     """Project the provider-required A/S object from the frozen reviewed notice.
 
     The phone is never taken from runtime account state: it is the operator-confirmed
     ``customerServicePhoneNumber`` already frozen in this Snapshot.  The guide is the first
     vertical's stable publication wording and contains no mutable contact value of its own.
     """
-    phone = fields.get("customerServicePhoneNumber")
+    # The account's operator-confirmed A/S phone, frozen with the Snapshot's policy, first.
+    phone = policy_phone if isinstance(policy_phone, str) and policy_phone.strip() else None
+    if phone is None:
+        phone = fields.get("customerServicePhoneNumber")
     if not isinstance(phone, str) or not phone.strip():
         # Several notice types carry the same operator-confirmed contact in
         # ``afterServiceDirector`` rather than ``customerServicePhoneNumber``.  Extract only the
@@ -1243,7 +1251,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
 
     detail_attribute: dict[str, Any] = {
         FIELD_SELLER_CODE_INFO: {FIELD_SELLER_MANAGEMENT_CODE: codes.seller_management_code},
-        FIELD_AFTER_SERVICE_INFO: _after_service_info(notice_fields),
+        FIELD_AFTER_SERVICE_INFO: _after_service_info(notice_fields, _policy_phone(payload)),
         FIELD_ORIGIN_AREA_INFO: {FIELD_ORIGIN_AREA_CODE: ORIGIN_AREA_DETAIL_CODE},
         FIELD_MINOR_PURCHASABLE: REGISTRATION_MINOR_PURCHASABLE,
         FIELD_CUSTOMS_TAX_TYPE: REGISTRATION_CUSTOMS_TAX_TYPE,

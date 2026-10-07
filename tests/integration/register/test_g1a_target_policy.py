@@ -121,6 +121,7 @@ def inputs(**overrides: Any) -> dict[str, Any]:
             "provider_asset_identity_required": True,
         },
         "delivery_policy": None,
+        "after_service_telephone": "02-000-0000",
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],
