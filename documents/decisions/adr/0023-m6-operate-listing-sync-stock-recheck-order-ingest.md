@@ -114,7 +114,14 @@ There is no second token owner. Configuration: `ICBM_SMARTSTORE_AUTO_RENEW` (def
   - The judged state of each registered source product is shown on 품절, with its last recheck.
   - A STOCK `ReviewItem` producer (`operate.stock`) is wired, so the kind leaves `NOT_WIRED` only after its first full reconciliation (ADR-0016 §7).
   - **The operator decides.** M6 never changes the marketplace listing (owner decision).
-- **Track A boundary:** the collection code is Track A's. If the COLLECT owner has no public "re-collect this source identity" command, Track A adds it, and Track B only calls it.
+- **Track A boundary:** the collection code is Track A's. M6-B calls only COLLECT's public command, `ProductCollectionService.submit(supplier_key, product_url)`, and its `run` read.
+  - The URL is the `source_url` that the source product's current ProductFactsRevision recorded, so no new COLLECT command and no Track A edit is needed.
+  - A re-collection is an ordinary run: COLLECT's target check, its same-product interval and its supplier pacing apply unchanged, and a refusal is recorded as `REFUSED`.
+- **Implementation (M6-B):**
+  - **Storage:** migration `0049` (`operate_stock_rechecks`, at most one pending per source). The pending slot is reserved (`SUBMITTING`) before COLLECT is asked, so a second request never launches a second re-collection. A reservation a killed process left is released as `FAILED` at the next start.
+  - **Owner:** `StockRecheckService` (`app/stages/operate/stock.py`), with a periodic round of default 6 hours, at most 20 sources per round, and a stop after 3 refusals in a row.
+  - **Review work:** the `operate.stock` producer emits STOCK `LISTED_SOURCE_SOLD_OUT` on the source-identity scope, which is COLLECT's shape. A stock field under review stays COLLECT's own condition. With both STOCK producers current, STOCK is an authoritative count (ADR-0016 §7).
+  - **Interface:** `GET /api/v1/operate/stock`, `POST /api/v1/operate/stock/recheck`, and the 품절확인 panel.
 
 ## 5. Order ingest
 
