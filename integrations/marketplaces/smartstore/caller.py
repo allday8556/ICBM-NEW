@@ -44,6 +44,7 @@ from integrations.marketplaces.smartstore.registry import (
     EndpointContract,
     EndpointId,
     EndpointNotAdoptedError,
+    empty_window_answer,
     resolve,
 )
 from integrations.marketplaces.smartstore.retention import retain, retained_query
@@ -332,10 +333,12 @@ class AddressBookListResponse:
 
 @dataclass(frozen=True)
 class OrderChangesResponse:
-    """One change page after deny-by-default retention (ADR-0023 §7)."""
+    """One change page after deny-by-default retention (ADR-0023 §7). ``empty_window`` is True
+    only for the proven no-change answer (``empty_window_answer`` on the raw body)."""
 
     retained: Mapping[str, object]
     http_status: int
+    empty_window: bool = False
 
 
 @dataclass(frozen=True)
@@ -822,7 +825,11 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
         return AddressBookListResponse(retained=retain(contract, body), http_status=status)
     if contract.endpoint_id is _ORDER_CHANGES:
         assert isinstance(request, OrderChangesRequest)
-        return OrderChangesResponse(retained=retain(contract, body), http_status=status)
+        return OrderChangesResponse(
+            retained=retain(contract, body),
+            http_status=status,
+            empty_window=empty_window_answer(body),
+        )
     if contract.endpoint_id is _ORDER_DETAILS:
         assert isinstance(request, OrderDetailsRequest)
         return OrderDetailsResponse(

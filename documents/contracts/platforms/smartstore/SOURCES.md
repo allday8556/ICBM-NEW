@@ -406,6 +406,12 @@ such a member and never sends the string.
 | --- | --- | --- | --- | --- |
 | `NAVER-P0-ORDER-READ-2901` | Issue #219 comment 6035983005 (research packet of the 2.90.1 `변경 상품 주문 내역 조회` — https://apicenter.commerce.naver.com/docs/commerce-api/current/seller-get-last-changed-status-pay-order-seller — and `상품 주문 상세 내역 조회` — https://apicenter.commerce.naver.com/docs/commerce-api/current/seller-get-product-orders-pay-order-seller — with their schemas, the RESTful API and 제약 사항 pages, read 2026-10-07) | the two methods and paths; the change query parameters, the 300 limit and the default 24-hour span; the `more`/`moreFrom`/`moreSequence` continuation; the change, order, product-order, shipping-address and delivery members and their types; the status, change, claim and place-order enumerations; KST ISO 8601 date-times; `429` `GW.RATE_LIMIT`/`GW.QUOTA_LIMIT`. NOT STATED: the API group, a maximum window, a fixed call rate | `ENDPOINT_MATRIX.md` §4, §4.1.4; `documents/evidence/marketplace-apis/ORDER_READ.md` § SmartStore; `integrations/marketplaces/smartstore/{registry,caller,orders}.py` (`m6-orders-r1`); ADR-0023 §5–§7 | Commerce API version or any order-read request/response schema change |
 
+### 5.7 M6-C order-read runtime evidence (`R0`, 2026-10-08)
+
+| Source ID | Locator | Claims supported | Used by | Re-review trigger |
+| --- | --- | --- | --- | --- |
+| `SMARTSTORE-R0-ORDER-EMPTY-WINDOW` | Issue #219 comment 6048219909 (30 change windows read through ICBM's own caller on the operating data, structure only, no value recorded) | a window with no change answers HTTP 200 with exactly `timestamp` and `traceId`; unpaced consecutive calls meet `429` with `code`/`message`; the 주문 판매자 group is granted to the application | `integrations/marketplaces/smartstore/registry.py` (`empty_window_answer`, `m6-order-changes-r2`); `app/stages/operate/orders.py` (`PROVIDER_PAUSE_S`); `ENDPOINT_MATRIX.md` §4.1.4 | a change of the empty answer, or a documented rate limit |
+
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.
