@@ -421,7 +421,13 @@ class OrderSyncService:
     # ------------------------------------------------------------------ lifecycle
 
     def settle_interrupted(self) -> int:
-        """A pass an earlier process left RUNNING is finished as INTERRUPTED (startup)."""
+        """A pass an earlier process left RUNNING is finished as INTERRUPTED (startup).
+
+        Only the process that owns the data directory runs this, before its scheduler starts:
+        one process owns a data directory (ADR-0006, ``owner.lock`` taken before the container
+        is built, never shared and never taken over), so no RUNNING row can belong to a live
+        pass of another process when it runs (GPT audit, PR #250). Within the owner, the lock
+        and the unique RUNNING index refuse a second pass as busy."""
         with self._db.write() as session:
             rows = session.scalars(select(OrderSyncRun).where(OrderSyncRun.state == RUNNING)).all()
             for row in rows:

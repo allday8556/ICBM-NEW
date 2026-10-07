@@ -23,6 +23,7 @@ from app.capabilities.audit.models import AuditEventType
 from app.config import AppConfig
 from app.container import Container
 from app.platform.core.errors import AppError, ErrorClass, RateLimitedError
+from app.platform.core.ownership import DataDirInUseError, acquire_data_dir
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from app.stages.operate.order_facts import (
     ChangePage,
@@ -465,3 +466,21 @@ def test_the_orders_screen_counts_only_once_an_order_read_succeeded(
     after = container.screens.orders()
     assert (after.orders_total, after.order_read) == (1, CONNECTED)
     assert after.meta.empty_reason is None
+
+
+def test_startup_settles_only_what_no_live_process_can_hold(
+    container: Container, registration: str
+) -> None:
+    """GPT audit (PR #250): startup finishes RUNNING passes as INTERRUPTED, which is safe only
+    because no second process can own this data directory while this one runs (ADR-0006)."""
+    with pytest.raises(DataDirInUseError):
+        acquire_data_dir(container.config.data_dir, app_version="second-process")
+    with sqlite3.connect(container.config.database_path) as raw:
+        raw.execute(
+            "INSERT INTO operate_order_sync_runs (run_id, trigger, state, window_from, changes,"
+            " orders_read, correlation_id, started_at) VALUES ('dead', 'AUTO', 'RUNNING',"
+            " '2026-09-12 00:00:00', 0, 0, 'cid-dead', '2026-09-12 00:00:00')"
+        )
+    service = _service(container, FakeSource())
+    assert service.settle_interrupted() == 1
+    assert service.overview().last_run.outcome == "INTERRUPTED"  # type: ignore[union-attr]
