@@ -93,14 +93,14 @@ def upgrade() -> None:
         sa.Column("unit_price", sa.Integer(), nullable=True),
         sa.Column("total_payment_amount", sa.Integer(), nullable=True),
         sa.Column("delivery_method", sa.String(length=40), nullable=True),
-        sa.Column("resolution", sa.String(length=20), nullable=False),
+        sa.Column("resolution", sa.String(length=20), nullable=True),
         sa.Column("registration_id", sa.String(length=36), nullable=True),
         sa.Column("registration_item_key", sa.String(length=200), nullable=True),
         sa.Column("item_id", sa.String(length=36), nullable=True),
         sa.Column("source_binding_id", sa.String(length=36), nullable=True),
         sa.Column("supplier_key", sa.String(length=40), nullable=True),
         sa.Column("source_product_id", sa.String(length=200), nullable=True),
-        sa.Column("resolved_at", sa.DateTime(), nullable=False),
+        sa.Column("resolved_at", sa.DateTime(), nullable=True),
         sa.Column("shipping_state", sa.String(length=20), nullable=False),
         sa.Column("shipping_ciphertext", sa.LargeBinary(), nullable=True),
         sa.Column("recipient_masked", sa.String(length=40), nullable=True),
@@ -111,8 +111,18 @@ def upgrade() -> None:
         sa.Column("last_changed_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.CheckConstraint(
-            "resolution IN ('MATCHED', 'UNMATCHED', 'ITEM_UNMATCHED', 'CONFLICT')",
+            "resolution IS NULL"
+            " OR resolution IN ('MATCHED', 'UNMATCHED', 'ITEM_UNMATCHED', 'CONFLICT')",
             name="resolution_valid",
+        ),
+        sa.CheckConstraint(
+            "(resolution IS NULL) = (resolved_at IS NULL)", name="resolved_has_time"
+        ),
+        sa.CheckConstraint(
+            "resolution IS NOT NULL OR (registration_id IS NULL AND registration_item_key IS NULL"
+            " AND item_id IS NULL AND source_binding_id IS NULL AND supplier_key IS NULL"
+            " AND source_product_id IS NULL)",
+            name="pending_names_nothing",
         ),
         sa.CheckConstraint(
             "(resolution = 'MATCHED') = (registration_item_key IS NOT NULL AND item_id IS NOT NULL)",
@@ -144,7 +154,7 @@ def upgrade() -> None:
         f"""
         CREATE TRIGGER {ORDERS}_resolution_immutable
         BEFORE UPDATE ON {ORDERS}
-        WHEN {changed}
+        WHEN OLD.resolution IS NOT NULL AND ({changed})
         BEGIN SELECT RAISE(ABORT, 'an order resolution is immutable once recorded'); END;
         """
     )

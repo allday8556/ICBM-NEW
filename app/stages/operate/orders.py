@@ -99,7 +99,6 @@ DETAIL_BATCH: Final = 300
 UNREADABLE: Final = "OPERATE_ORDER_UNREADABLE"
 PAGES_EXCEEDED: Final = "OPERATE_ORDER_PAGES_EXCEEDED"
 DETAIL_MISSING: Final = "OPERATE_ORDER_DETAIL_MISSING"
-REGISTRATION_PENDING: Final = "OPERATE_ORDER_REGISTRATION_PENDING"
 ACTOR: Final = "operate.orders"
 LIST_LIMIT: Final = 200
 
@@ -227,7 +226,8 @@ class OrderView:
     quantity: int | None
     total_payment_amount: int | None
     delivery_method: str | None
-    resolution: str
+    # None while the order's product is one ICBM created and has not confirmed yet.
+    resolution: str | None
     registration_id: str | None
     registration_item_key: str | None
     item_id: str | None
@@ -520,6 +520,9 @@ class OrderSyncService:
                     # Every window overlaps the last one, inside a pass as across passes, so a
                     # change reported late is never missed (ADR-0023 §5; GPT audit, PR #250).
                     window_from = window_to - OVERLAP
+                # Orders kept without a resolution are settled against the registrations
+                # as they are now, whether or not they changed again.
+                self.settle_pending()
             except _Stop as stop:
                 return self._finish(run_id, stop.outcome, synced, totals, stop.error_code)
             except BaseException:
@@ -562,12 +565,6 @@ class OrderSyncService:
         by_order: dict[str, list[OrderChange]] = {}
         for change in changes:
             by_order.setdefault(change.product_order_id, []).append(change)
-        # A resolution is immutable once recorded, so an order of a product ICBM itself created
-        # but has not confirmed yet (an Intent that names the provider product, with no
-        # registration) is never recorded as UNMATCHED: the window is not complete, the cursor
-        # stays, and a later pass resolves it once the registration exists (GPT audit, PR #250).
-        if self._awaiting_registration(facts, registrations):
-            raise _Stop(FAILED, REGISTRATION_PENDING)
         try:
             with self._db.write() as session:
                 for fact in facts:
@@ -616,23 +613,18 @@ class OrderSyncService:
         now = self._clock.now()
         row = session.get(ProductOrder, fact.product_order_id)
         if row is None:
-            resolved = self._resolve(fact, registrations)
             row = ProductOrder(
                 product_order_id=fact.product_order_id,
                 marketplace_key=self._marketplace_key,
-                resolution=resolved.resolution,
-                registration_id=resolved.registration_id,
-                registration_item_key=resolved.registration_item_key,
-                item_id=resolved.item_id,
-                source_binding_id=resolved.source_binding_id,
-                supplier_key=resolved.supplier_key,
-                source_product_id=resolved.source_product_id,
-                resolved_at=now,
+                resolution=None,
+                resolved_at=None,
                 shipping_state=NONE,
                 first_seen_at=now,
                 updated_at=now,
             )
             session.add(row)
+        if row.resolution is None:
+            self._settle_resolution(row, fact, registrations, now)
         latest = max((change.changed_at for change in changes), default=None)
         row.order_id = fact.order_id
         row.status = fact.status
@@ -712,21 +704,64 @@ class OrderSyncService:
                 session.flush()
 
     def _awaiting_registration(
-        self, facts: Sequence[ProductOrderFacts], registrations: Sequence[RegistrationRecord]
+        self, fact: ProductOrderFacts, registrations: Sequence[RegistrationRecord]
     ) -> bool:
-        registered = {record.marketplace_product_id for record in registrations}
-        unknown = {
-            fact.original_product_id
-            for fact in facts
-            if fact.original_product_id and fact.original_product_id not in registered
-        }
-        if not unknown:
+        """Whether the order's product is one ICBM created and has not yet confirmed: an
+        Intent names the provider product and no registration does."""
+        product = fact.original_product_id
+        if not product or any(r.marketplace_product_id == product for r in registrations):
             return False
         return any(
             intent.marketplace_key == self._marketplace_key
-            and intent.marketplace_product_id in unknown
+            and intent.marketplace_product_id == product
             for intent in self._registrations.intents(limit=None)
         )
+
+    def _settle_resolution(
+        self,
+        row: ProductOrder,
+        fact: ProductOrderFacts,
+        registrations: Sequence[RegistrationRecord],
+        now: datetime,
+    ) -> None:
+        """Record the order's resolution once (GPT audit, PR #250).
+
+        A resolution is immutable once recorded (trigger), so an order of a product ICBM created
+        but has not confirmed yet is kept with no resolution rather than recorded UNMATCHED. The
+        window still completes and nothing waits on it; a later read, or the end of any pass,
+        records it once the registration exists or no Intent awaits one any more."""
+        if self._awaiting_registration(fact, registrations):
+            return
+        resolved = self._resolve(fact, registrations)
+        row.resolution = resolved.resolution
+        row.registration_id = resolved.registration_id
+        row.registration_item_key = resolved.registration_item_key
+        row.item_id = resolved.item_id
+        row.source_binding_id = resolved.source_binding_id
+        row.supplier_key = resolved.supplier_key
+        row.source_product_id = resolved.source_product_id
+        row.resolved_at = now
+
+    def settle_pending(self) -> int:
+        """Record the resolution of every order still without one, against the registrations
+        as they are now. Returns how many were recorded."""
+        registrations = self._registrations.marketplace_registrations(self._marketplace_key)
+        now = self._clock.now()
+        settled = 0
+        with self._db.write() as session:
+            for row in session.scalars(
+                select(ProductOrder).where(ProductOrder.resolution.is_(None))
+            ).all():
+                identity = ProductOrderFacts(
+                    product_order_id=row.product_order_id,
+                    original_product_id=row.original_product_id,
+                    channel_product_id=row.channel_product_id,
+                    option_manage_code=row.option_manage_code,
+                    seller_product_code=row.seller_product_code,
+                )
+                self._settle_resolution(row, identity, registrations, now)
+                settled += row.resolution is not None
+        return settled
 
     def _resolve(
         self, fact: ProductOrderFacts, registrations: Sequence[RegistrationRecord]

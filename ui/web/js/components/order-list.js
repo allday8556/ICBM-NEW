@@ -71,7 +71,8 @@ function shippingButton(order) {
 }
 
 function row(order) {
-  const [label, tone] = RESOLUTION[order.resolution] ?? [order.resolution, ''];
+  // No resolution yet: the product is one ICBM created and has not confirmed.
+  const [label, tone] = order.resolution == null ? ['등록 확정 대기', 'warn'] : RESOLUTION[order.resolution] ?? [order.resolution, ''];
   return h(
     'tr',
     { 'data-order': order.product_order_id },
@@ -81,7 +82,7 @@ function row(order) {
     h(
       'td',
       {},
-      h('span', { class: `chip ${tone}`.trim(), 'data-resolution': order.resolution }, label),
+      h('span', { class: `chip ${tone}`.trim(), 'data-resolution': order.resolution ?? 'PENDING' }, label),
       order.supplier_key ? h('span', { class: 'mini' }, `${order.supplier_key} · ${order.source_product_id}`) : null,
     ),
     h('td', {}, order.quantity ?? '—'),

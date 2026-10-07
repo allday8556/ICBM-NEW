@@ -69,8 +69,16 @@ class ProductOrder(Base):
         Index("ix_operate_orders_changed", "last_changed_at"),
         Index("ix_operate_orders_registration", "registration_id"),
         CheckConstraint(
-            "resolution IN ('MATCHED', 'UNMATCHED', 'ITEM_UNMATCHED', 'CONFLICT')",
+            "resolution IS NULL"
+            " OR resolution IN ('MATCHED', 'UNMATCHED', 'ITEM_UNMATCHED', 'CONFLICT')",
             name="resolution_valid",
+        ),
+        CheckConstraint("(resolution IS NULL) = (resolved_at IS NULL)", name="resolved_has_time"),
+        CheckConstraint(
+            "resolution IS NOT NULL OR (registration_id IS NULL AND registration_item_key IS NULL"
+            " AND item_id IS NULL AND source_binding_id IS NULL AND supplier_key IS NULL"
+            " AND source_product_id IS NULL)",
+            name="pending_names_nothing",
         ),
         CheckConstraint(
             "(resolution = 'MATCHED')"
@@ -113,8 +121,10 @@ class ProductOrder(Base):
     unit_price: Mapped[int | None] = mapped_column(Integer)
     total_payment_amount: Mapped[int | None] = mapped_column(Integer)
     delivery_method: Mapped[str | None] = mapped_column(String(40))
-    # The resolution (ADR-0013 order-line resolution), immutable once recorded.
-    resolution: Mapped[str] = mapped_column(String(20))
+    # The resolution (ADR-0013 order-line resolution), recorded once and then immutable. It is
+    # NULL — not recorded — only while the order's product is one ICBM created and has not yet
+    # confirmed; it is recorded as soon as that settles (GPT audit, PR #250).
+    resolution: Mapped[str | None] = mapped_column(String(20))
     registration_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("marketplace_registrations.registration_id")
     )
@@ -123,7 +133,7 @@ class ProductOrder(Base):
     source_binding_id: Mapped[str | None] = mapped_column(String(36))
     supplier_key: Mapped[str | None] = mapped_column(String(40))
     source_product_id: Mapped[str | None] = mapped_column(String(200))
-    resolved_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # The shipping record (ADR-0023 §7): AES-256-GCM ciphertext only; the masks are for lists.
     shipping_state: Mapped[str] = mapped_column(String(20))
     shipping_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)

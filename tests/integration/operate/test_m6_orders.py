@@ -503,14 +503,14 @@ def test_startup_settles_only_what_no_live_process_can_hold(
     assert service.overview().last_run.outcome == "INTERRUPTED"  # type: ignore[union-attr]
 
 
-def test_an_order_of_a_product_icbm_has_not_confirmed_yet_is_not_recorded(
+def test_an_order_of_a_product_icbm_has_not_confirmed_is_resolved_once_it_is(
     container: Container,
     config: AppConfig,
     sources: Collections,  # noqa: F811
     store: RegistrationStore,  # noqa: F811
 ) -> None:
-    """GPT audit (PR #250): a resolution is immutable, so an order of a product ICBM created
-    but has not confirmed is never recorded as UNMATCHED; it waits for the registration."""
+    """GPT audit (PR #250): such an order is kept without a resolution — never recorded as
+    UNMATCHED and never holding the cursor — and its resolution is recorded once, later."""
     item = _priced(container, config, sources)
     intent = _intent(store, _freeze(store, [item]).registration_snapshot_id)
     _finish(store, intent, RemoteOutcome.APPLIED_PROVEN, "mp-orders-late")
@@ -518,19 +518,26 @@ def test_an_order_of_a_product_icbm_has_not_confirmed_yet_is_not_recorded(
     source = FakeSource(pages=[ChangePage((_change(container),))], facts={"po-1": early})
     service = _service(container, source)
     run = _sync(service)
-    assert (run.outcome, run.error_code, run.synced_until) == (  # type: ignore[attr-defined]
-        FAILED,
-        "OPERATE_ORDER_REGISTRATION_PENDING",
-        None,
-    )
-    assert service.order_count() == 0
-    # Once the registration is confirmed, the next pass reads the window again and resolves it.
+    assert run.outcome == COMPLETED and run.synced_until is not None  # type: ignore[attr-defined]
+    (order,) = service.overview().orders
+    assert (order.resolution, order.registration_id) == (None, None)
+    assert order.shipping_state == STORED
+    # The registration is confirmed; the end of the next pass records the resolution, even
+    # though the order did not change again.
     registration_id = _confirm(store, intent)
-    source.pages = [ChangePage((_change(container),))]
-    run = _sync(service)
-    assert run.outcome == COMPLETED  # type: ignore[attr-defined]
+    _sync(service)
     (order,) = service.overview().orders
     assert (order.resolution, order.registration_id) == (MATCHED, registration_id)
+    # Recorded once, it never changes.
+    with (
+        sqlite3.connect(container.config.database_path) as raw,
+        pytest.raises(sqlite3.IntegrityError),
+    ):
+        raw.execute(
+            "UPDATE operate_orders SET resolution = 'UNMATCHED', registration_id = NULL,"
+            " registration_item_key = NULL, item_id = NULL, source_binding_id = NULL,"
+            " supplier_key = NULL, source_product_id = NULL"
+        )
 
 
 def test_retention_starts_only_at_a_change_that_reported_the_terminal_status(
