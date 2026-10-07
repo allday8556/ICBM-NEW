@@ -94,7 +94,12 @@ def payload(**overrides: Any) -> dict[str, Any]:
                 },
             },
         },
-        "policy": {"policy_revision": "policy-1", "templates": {}},
+        # The account's operator-confirmed A/S phone (CREATE afterServiceInfo, wire v8).
+        "policy": {
+            "policy_revision": "policy-1",
+            "templates": {},
+            "after_service_telephone": "02-000-0000",
+        },
         "detail": {"composition_revision": "detail-1", "sections": ["BODY"], "body": "본문"},
         "items": [_item(KEY_A, 19900)],
     }
@@ -451,7 +456,7 @@ def test_an_uncaptured_notice_type_stays_a_gap_and_never_falls_back(notice_type:
             "WIRE_DOCUMENT_FIELD_MISSING",
         ),
         # customerServicePhoneNumber is required without afterServiceDirector.
-        ({"customerServicePhoneNumber": None}, "WIRE_AFTER_SERVICE_PHONE_MISSING"),
+        ({"customerServicePhoneNumber": None}, "WIRE_DOCUMENT_FIELD_MISSING"),
         # A value past its documented bound.
         ({"itemName": _value("x" * 51)}, "WIRE_DOCUMENT_VALUE_INVALID"),
     ],
@@ -1131,3 +1136,19 @@ def test_a_detail_body_image_is_never_sent_as_a_gallery_image() -> None:
     with pytest.raises(product.WireContractError) as refused:
         product.project(payload(items=[item]))
     assert refused.value.code == "WIRE_DETAIL_IMAGE_NOT_PLACEABLE"
+
+
+def test_the_after_service_phone_is_the_accounts_and_never_guessed() -> None:
+    # The account's operator-confirmed A/S phone, frozen with the policy, is what is sent.
+    projected = product.project(payload())
+    after_service = projected.document.mapping()["originProduct"]["detailAttribute"][
+        "afterServiceInfo"
+    ]
+    assert after_service["afterServiceTelephoneNumber"] == "02-000-0000"
+    # Without it, and without one in the notice, the projection is refused — never guessed.
+    bare = payload(policy={"policy_revision": "policy-1", "templates": {}})
+    bare["notice"]["fields"].pop("customerServicePhoneNumber", None)
+    bare["notice"]["fields"].pop("afterServiceDirector", None)
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(bare)
+    assert refused.value.code == "WIRE_AFTER_SERVICE_PHONE_MISSING"

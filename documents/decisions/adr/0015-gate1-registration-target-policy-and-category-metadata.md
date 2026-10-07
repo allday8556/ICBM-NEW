@@ -130,6 +130,16 @@ owner prices under this context, and only its `PricingSnapshot` identities are p
 - The write path is an application contract into this owner; the UI computes no revision, no
   fingerprint and no validity.
 
+> **Amendment note (SmartStore required details; owner decisions `6026680898`, 2026-10-07).** The
+> target policy may hold `after_service_telephone`: the seller's A/S contact, confirmed by the
+> operator once per account, which the SmartStore CREATE projection sends as `afterServiceInfo`
+> (required on every listing). It is a hyphenated Korean number and is named in the content only
+> when set, so an earlier revision keeps its exact content and fingerprint. The projection uses
+> it first and only otherwise reads an operator-confirmed contact from the frozen notice; with
+> neither, the projection is refused (`WIRE_AFTER_SERVICE_PHONE_MISSING`) — never guessed. The
+> delivery policy's `delivery_company` (the outbound courier code) is required whenever physical
+> delivery is configured.
+
 ### 3. The operator-reviewed category metadata (D2)
 
 **Scope.** One metadata owner keyed by **`marketplace_key × taxonomy_revision × category_id`**,

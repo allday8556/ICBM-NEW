@@ -208,6 +208,8 @@ class TargetPolicy:
     sanitizer_profile_version: str
     asset_policy: AssetPolicy
     delivery_policy: DeliveryPolicy | None = None
+    # The operator-confirmed seller A/S phone (CREATE afterServiceInfo), or None.
+    after_service_telephone: str | None = None
     # Server-owned authoring revisions exposed to the operator form. A deployment without them
     # cannot author a category or detail by inventing a client-side revision label.
     category_mapping_revision: str | None = None

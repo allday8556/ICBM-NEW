@@ -116,6 +116,8 @@ def target(**overrides: Any) -> TargetPolicy:
         "category_mapping_revision": "mapping-1",
         "detail_composition_revision": "detail-1",
         "templates": {"shipping": "ship-1", "returns": "ret-1"},
+        # The account's A/S phone the CREATE projection requires (wire v8).
+        "after_service_telephone": "02-000-0000",
     }
     values.update(overrides)
     return TargetPolicy(**values)
