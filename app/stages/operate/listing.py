@@ -49,6 +49,8 @@ INTERRUPTED: Final = "INTERRUPTED"
 OBSERVED: Final = "OBSERVED"
 NOT_FOUND: Final = "NOT_FOUND"
 READ_FAILED: Final = "READ_FAILED"
+# A provider answer the normalizer could not read, or a local failure while recording it.
+UNREADABLE: Final = "OPERATE_LISTING_UNREADABLE"
 DELETED_SALE_STATUS: Final = "DELETE"
 NOT_FOUND_STATUS: Final = 404
 ACTOR: Final = "operate.listing_sync"
@@ -245,7 +247,13 @@ class ListingSyncService:
             return len(rows)
 
     def sync(self, *, trigger: str, correlation_id: str) -> SyncRunView:
-        """One pass over every ACTIVE registration ICBM has not deleted. One at a time."""
+        """One pass over every ACTIVE registration ICBM has not deleted. One at a time.
+
+        A run always ends: an unexpected failure of one registration is that registration's
+        ``READ_FAILED`` and the pass goes on, and anything that escapes the pass still finishes
+        the run as ``INTERRUPTED`` before it is raised, so the one-running slot is never left
+        held (a held slot would stop every later sync until a restart).
+        """
         if not self._lock.acquire(blocking=False):
             raise ListingSyncBusy(
                 "OPERATE_LISTING_SYNC_RUNNING", "a listing sync is already running"
@@ -253,43 +261,64 @@ class ListingSyncService:
         try:
             targets = self._targets(include_inactive=False)
             run_id = self._start(trigger, len(targets), correlation_id)
-            if not self._reader.available():
-                return self._finish(run_id, SESSION_UNAVAILABLE, 0, 0)
             observed = failed = 0
-            for record in targets:
-                try:
-                    retained = self._reader.read(
-                        marketplace_product_id=record.marketplace_product_id
-                    )
-                except AppError as exc:
-                    if exc.error_class is ErrorClass.RATE_LIMITED:
+            try:
+                if not self._reader.available():
+                    return self._finish(run_id, SESSION_UNAVAILABLE, 0, 0)
+                for record in targets:
+                    result = self._visit(run_id, record, correlation_id)
+                    if result == RATE_LIMITED:
                         return self._finish(run_id, RATE_LIMITED, observed, failed)
-                    if exc.details.get("http_status") == NOT_FOUND_STATUS:
-                        self._absent(
-                            run_id, record, correlation_id, {"http_status": NOT_FOUND_STATUS}
-                        )
-                        observed += 1
-                    else:
-                        self._observe(run_id, record, READ_FAILED, error_code=exc.code)
+                    if result == READ_FAILED:
                         failed += 1
-                    continue
-                fields = self._normalize(retained)
-                if fields.sale_status == DELETED_SALE_STATUS:
-                    self._absent(
-                        run_id, record, correlation_id, {"statusType": DELETED_SALE_STATUS}
-                    )
-                    observed += 1
-                    continue
-                self._observe(run_id, record, OBSERVED, fields=fields)
-                with self._registrations.transaction() as unit:
-                    unit.record_readback(
-                        record.registration_id, actor=ACTOR, correlation_id=correlation_id
-                    )
-                observed += 1
+                    else:
+                        observed += 1
+            except BaseException:
+                self._finish(run_id, INTERRUPTED, observed, failed)
+                raise
             outcome = COMPLETED_WITH_FAILURES if failed else COMPLETED
             return self._finish(run_id, outcome, observed, failed)
         finally:
             self._lock.release()
+
+    def _visit(self, run_id: str, record: RegistrationRecord, correlation_id: str) -> str:
+        """Read one registration back and record what it showed: OBSERVED, NOT_FOUND,
+        READ_FAILED, or RATE_LIMITED (nothing recorded; the run ends)."""
+        written = False
+        try:
+            try:
+                retained = self._reader.read(marketplace_product_id=record.marketplace_product_id)
+            except AppError as exc:
+                if exc.error_class is ErrorClass.RATE_LIMITED:
+                    return RATE_LIMITED
+                if exc.details.get("http_status") != NOT_FOUND_STATUS:
+                    self._observe(run_id, record, READ_FAILED, error_code=exc.code)
+                    return READ_FAILED
+                written = True
+                self._absent(run_id, record, correlation_id, {"http_status": NOT_FOUND_STATUS})
+                return NOT_FOUND
+            fields = self._normalize(retained)
+            if fields.sale_status == DELETED_SALE_STATUS:
+                written = True
+                self._absent(run_id, record, correlation_id, {"statusType": DELETED_SALE_STATUS})
+                return NOT_FOUND
+            written = True
+            self._observe(run_id, record, OBSERVED, fields=fields)
+            with self._registrations.transaction() as unit:
+                unit.record_readback(
+                    record.registration_id, actor=ACTOR, correlation_id=correlation_id
+                )
+            return OBSERVED
+        except Exception:
+            # An unreadable answer or a failed local write proves nothing about the listing.
+            logger.warning(
+                "operate.listing_visit_failed",
+                extra={"registration_id": record.registration_id},
+                exc_info=True,
+            )
+            if not written:
+                self._observe(run_id, record, READ_FAILED, error_code=UNREADABLE)
+            return READ_FAILED
 
     # ------------------------------------------------------------------ internals
 

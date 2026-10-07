@@ -212,3 +212,52 @@ def test_observations_are_append_only(container: Container, registration: str) -
             raw.execute("UPDATE operate_listing_observations SET sale_price = 1")
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             raw.execute("DELETE FROM operate_listing_observations")
+
+
+def test_an_unreadable_answer_fails_only_that_registration_and_never_holds_the_run(
+    container: Container, registration: str
+) -> None:
+    # GPT audit (PR #247): a normalizer failure after a successful read must not leave the run
+    # RUNNING, or the one-running slot would stop every later sync until a restart.
+    reader = FakeReader()
+    reader.answer = _listing()
+
+    def broken(_: Mapping[str, Any]) -> Any:
+        raise ValueError("unreadable answer")
+
+    service = ListingSyncService(
+        db=container.db,
+        clock=container.clock,
+        registrations=container.registrations,
+        reader=reader,
+        normalize=broken,
+        interval_s=1800,
+        marketplace_key=MARKET,
+    )
+    run = _sync(service)
+    assert (run.state, run.outcome, run.failed) == ("FINISHED", COMPLETED_WITH_FAILURES, 1)
+    (state,) = service.overview().listings
+    assert state.last_result == "READ_FAILED" and state.error_code == "OPERATE_LISTING_UNREADABLE"
+    # The slot is free: the next pass runs.
+    assert _sync(_service(container, reader)).outcome == COMPLETED
+
+
+def test_an_escaping_failure_still_finishes_the_run(
+    container: Container, registration: str
+) -> None:
+    reader = FakeReader()
+    reader.answer = _listing()
+    service = _service(container, reader)
+
+    class Boom(BaseException):
+        pass
+
+    def explode(run_id: str, record: Any, correlation_id: str) -> str:
+        raise Boom()
+
+    service._visit = explode  # type: ignore[method-assign]
+    with pytest.raises(Boom):
+        _sync(service)
+    last = service.overview().last_run
+    assert last is not None and last.outcome == "INTERRUPTED"
+    assert _sync(_service(container, reader)).outcome == COMPLETED
