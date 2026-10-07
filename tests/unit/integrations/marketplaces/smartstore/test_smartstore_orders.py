@@ -306,3 +306,22 @@ def test_a_window_is_sent_in_kst() -> None:
     assert kst(datetime(2026, 10, 7, 0, 0, tzinfo=UTC)) == "2026-10-07T09:00:00.000+09:00"
     with pytest.raises(ValueError):
         kst(datetime(2026, 10, 7))
+
+
+@pytest.mark.parametrize(
+    "retained",
+    ({}, {"data": {}}, {"data": {"count": "0"}}, {"data": {"count": True}}, {"data": []}),
+)
+def test_the_reader_itself_refuses_an_answer_that_names_no_window(retained: object) -> None:
+    """GPT audit (PR #250): even past the caller, no answer without ``data.count`` is a page."""
+
+    class Answer:
+        def call(self, endpoint_id: object, request: object) -> Any:
+            return SimpleNamespace(retained=retained, http_status=200)
+
+    source = SmartStoreOrderSource(Answer(), _bearer)  # type: ignore[arg-type]
+    with pytest.raises(PolicyBlockedError) as refused:
+        source.changes(
+            since=datetime(2026, 10, 7, tzinfo=UTC), until=datetime(2026, 10, 8, tzinfo=UTC)
+        )
+    assert refused.value.code == "SMARTSTORE_ORDER_RESPONSE_INVALID"

@@ -112,7 +112,13 @@ class SmartStoreOrderSource:
                 ORDER_PAGE_MAX,
             ),
         )
-        data = _object(response.retained.get("data"), "data")
+        # The caller's predicate already required a ``data`` object with an integer ``count``;
+        # it is checked again here, so this reader never turns an answer that names no window
+        # into an empty one (GPT audit, PR #250). Retention drops an empty array, so an absent
+        # ``lastChangeStatuses`` beside a proven ``count`` is an empty page.
+        data = response.retained.get("data")
+        if not isinstance(data, Mapping) or _int(data.get("count"), "count") is None:
+            raise _invalid("data")
         entries = data.get("lastChangeStatuses", [])
         if not isinstance(entries, list):
             raise _invalid("lastChangeStatuses")
