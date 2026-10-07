@@ -293,14 +293,18 @@ function detailName(detail) {
   return fact?.status === 'CONFIRMED' ? fact.value : null;
 }
 
-// v29's detail groups. Only what a member's source states is shown; the rest keeps its place.
+// v29's detail groups, as their own card under the detail. Only what a member's source states is
+// shown; the rest keeps its place.
 function v29Groups(detail) {
-  const brand = detail.member_sources.flatMap((source) => source.facts).find((fact) => fact.key === 'brand');
+  const brand = detail ? detail.member_sources.flatMap((source) => source.facts).find((fact) => fact.key === 'brand') : null;
   return [
+    h('h3', {}, '가격 · 채널 · 태그'),
     h(
       'div',
       { class: 'detail-group', 'data-role': 'detail-basics' },
-      h('div', { class: 'kv', 'data-fact': 'brand-summary' }, h('span', {}, '브랜드'), h('b', {}, factValue(brand))),
+      detail
+        ? h('div', { class: 'kv', 'data-fact': 'brand-summary' }, h('span', {}, '브랜드'), h('b', {}, factValue(brand)))
+        : noDataKv('브랜드'),
       noDataKv('카테고리'),
       noDataKv('카테고리 추천 신뢰도'),
     ),
@@ -401,9 +405,11 @@ function workspace(initialProduct, navigateTo) {
     h('div', { class: 'db-pager' }, pageLabel, first, previous, next),
   );
   const detailPanel = h('aside', { class: 'panel db-detail', 'data-role': 'product-detail' });
+  const v29Panel = h('section', { class: 'panel db-detail db-v29-groups', 'data-role': 'product-v29-groups' });
   let lastPage = null;
 
   function renderIdleDetail() {
+    v29Panel.replaceChildren(...v29Groups(null));
     detailPanel.removeAttribute('data-product');
     detailPanel.dataset.state = 'idle';
     detailPanel.replaceChildren(
@@ -464,6 +470,8 @@ function workspace(initialProduct, navigateTo) {
     state.draftSeq += 1; // a Draft command still in flight answers for the previous Product only
     const seq = ++state.detailSeq;
     markSelectedRow();
+    // Product context isolation: nothing of the previous Product stays in the v29 card either.
+    v29Panel.replaceChildren(...v29Groups(null));
     detailPanel.dataset.product = id;
     detailPanel.dataset.state = 'loading';
     detailPanel.replaceChildren(
@@ -758,7 +766,7 @@ function workspace(initialProduct, navigateTo) {
         ),
         chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn'),
       ),
-      ...v29Groups(detail),
+
       h(
         'div',
         { class: 'detail-group' },
@@ -787,6 +795,7 @@ function workspace(initialProduct, navigateTo) {
       targetResult,
       draftPanel,
     );
+    v29Panel.replaceChildren(...v29Groups(detail));
     renderSelection();
     loadProductReview(product.product_group_id, reviewSlot);
   }
@@ -865,5 +874,5 @@ function workspace(initialProduct, navigateTo) {
     renderDraftButton();
   });
   if (initialProduct) selectProduct(initialProduct);
-  return h('div', { class: 'db-workspace' }, toolbar, h('div', { class: 'db-layout' }, listPanel, detailPanel));
+  return h('div', { class: 'db-workspace' }, toolbar, h('div', { class: 'db-layout' }, listPanel, h('div', { class: 'db-side' }, detailPanel, v29Panel)));
 }

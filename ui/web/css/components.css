@@ -1359,11 +1359,13 @@ td.no-data {
   margin-top: 2px;
 }
 
-/* The v29 detail is taller than one screen: it scrolls inside itself, so its top always stays
-   clear of the sticky topbar wherever it is brought into view. */
-.db-detail {
-  max-height: calc(100vh - 2 * var(--topbar-height) - var(--space-4));
-  overscroll-behavior: contain;
+/* The detail stays within one screen (its state is judged scrolled into view below the sticky
+   topbar); v29's price, channel and tag groups are their own card under it. */
+.db-side {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
 }
 
 /* Room below the workspace for the fixed registration status card (ADR-0014 §28.5): the detail's
