@@ -8,8 +8,11 @@ M1 — KM통상 CONNECT only                   ACCEPTED 2026-09-13 (Issue #7, PR
 M2 — SmartStore CONNECT                    ACCEPTED 2026-09-15 (Issue #46, PR #51, documents/acceptance/milestones/M2.md)
 M3 — KM통상 one-product COLLECT             ACCEPTED 2026-09-18 (Issue #52, ADR-0010, documents/acceptance/milestones/M3.md; bounded by its §2)
 M4 — canonical Product DB                  ACCEPTED 2026-09-19 (Issue #80, ADR-0013, PR #81–#87, documents/acceptance/milestones/M4.md; bounded by its §2)
-M5 — SmartStore REGISTER                   CURRENT (Issue #89; PR-A contract ADR-0014 → PR-B → PR-C → PR-D → PR-E → PR-F all merged, plus the #96 IMAGE UPLOAD amendment; each PR was separately authorized)
+M5 — SmartStore REGISTER                   ACCEPTED 2026-10-07 (Issue #89; ADR-0014; exact-main record documents/acceptance/milestones/M5.md §10 on 0a91156; owner acceptance Issue #219 6033126992)
+M6 — OPERATE read-back + stock + orders     CURRENT (not started; needs its own kickoff and authorization, ROADMAP §12)
 ```
+
+> **Amendment note (2026-10-07).** M5 is **ACCEPTED**. The exact-main record of `documents/acceptance/milestones/M5.md` §10 (main `0a91156`) shows the offline harness at 65 / 65 and one bounded live canary: one CREATE, read-back PASS, a stable read-back after a restart, and the replay refused. The owner accepted it in the architect role (Issue #219 `6033126992`). The paragraph below is the pre-acceptance state, kept as history. M6 is now the CURRENT milestone in ROADMAP order. It is not started, and it starts only under its own kickoff and authorization.
 
 Every M5 implementation PR is merged (#90–#96) and main is green. **That is not acceptance.** `documents/acceptance/milestones/M5.md` stays `PENDING` and records no acceptance run; product CREATE and the positive-only reconcile search are adopted as contracts by their own later slices — `ENDPOINT_MATRIX.md` §4.1.1 and §4.1.2, ADR-0014 §17.3 and §17.4 — which are never calls and never permission, and the provider-evidence review's `INSUFFICIENT` verdict stands unchanged (Issue #89 `5768312853`, `5768347233`); `product_registration.write` stays `UNVERIFIED`; execution stays `DRY_RUN`; a real canary is `BLOCKED`. The owner and application-path gaps that still separate this from a runnable vertical are listed in `documents/roadmap/ROADMAP.md` §14 and `documents/acceptance/milestones/M5.md` §9; none of them may be closed without its own authorization, which the two paragraphs below define.
 

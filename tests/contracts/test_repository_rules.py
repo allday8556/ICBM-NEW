@@ -1477,10 +1477,11 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "**The ASSET stage has no §26\n   scope owner" in safety
     assert "`ASSET_MUTATION_READY` before an upload" in safety
     assert "`CREATE_MUTATION_READY` before a CREATE" in safety
-    # G3-0 changes no runtime: the M0 policy still refuses LIVE, and M5 is still PENDING.
+    # G3-0 changes no runtime: the M0 policy still refuses LIVE outside a bounded window. M5 was
+    # accepted later, only on its exact-main record (2026-10-07, Issue #219 6033126992).
     assert M0_POLICY == "M0_DRY_RUN_ONLY"
     assert "live_writes_permitted=False" in inspect.getsource(ExecutionModeService.state)
-    assert "Status: **PENDING**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
+    assert "Status: **ACCEPTED**" in _read(M5_ACCEPTANCE).split("\n---", 1)[0]
     assert "authorizes nothing to run" in adr.split("\n---", 1)[0]
 
 

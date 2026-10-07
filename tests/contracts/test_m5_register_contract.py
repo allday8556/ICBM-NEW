@@ -1715,11 +1715,15 @@ M5_PLAN = (
 )
 
 
-def test_the_m5_acceptance_plan_is_pending_and_bounded() -> None:
+def test_the_m5_acceptance_plan_is_accepted_on_its_exact_main_record_and_bounded() -> None:
+    # 2026-10-07: accepted only on the exact-main record of §10, by the owner in the architect role.
     text = M5_MD.read_text("utf-8")
     header = text.split("\n## ", 1)[0]
-    assert "Status: **PENDING**" in header
-    assert "Status: **ACCEPTED**" not in header
+    assert "Status: **ACCEPTED**" in header and "6033126992" in header
+    assert "Status: **PENDING**" not in header
+    record = text.split("\n## 10. Exact-main acceptance record", 1)[1]
+    assert "0a91156b12fff783130814ddf98941c5ae467bf4" in record and "65 / 65" in record
+    assert "REGISTER_INTENT_NOT_SENDABLE" in record
     assert ADR_PATH in header
     normalized = _normalized(text)
     for phrase in M5_PLAN:
