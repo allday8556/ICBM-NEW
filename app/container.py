@@ -95,6 +95,7 @@ from app.stages.collect.sourceassets import SourceAssetRecorder
 from app.stages.collect.synthetic import SyntheticTestProductService
 from app.stages.connect.accounts import MarketplaceAccountStore
 from app.stages.connect.credentials import SupplierCredentialStore
+from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.service import MarketplaceCapabilityService
@@ -108,6 +109,7 @@ from app.stages.connect.sessions import (
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
+from app.stages.operate.orders import OrderSyncScheduler, OrderSyncService, ShippingCipher
 from app.stages.operate.service import OperateService
 from app.stages.operate.stock import StockRecheckScheduler, StockRecheckService
 from app.stages.products.atomic_sku_economics_store import AtomicSKUEconomicsStore
@@ -175,6 +177,7 @@ from integrations.marketplaces.smartstore.execution import (
 from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
 from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
+from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
@@ -267,6 +270,9 @@ class Container:
     # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
     stock_recheck: StockRecheckService
     stock_recheck_scheduler: StockRecheckScheduler
+    # M6-C/D (ADR-0023 §5-§7): the read-only order ingest and its periodic pass.
+    order_sync: OrderSyncService
+    order_sync_scheduler: OrderSyncScheduler
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
@@ -929,6 +935,24 @@ def build_container(
         normalize=smartstore_readback.normalize,
         interval_s=config.operate_listing_sync_interval_s,
     )
+    order_sync = OrderSyncService(
+        db=db,
+        clock=clock,
+        registrations=registrations,
+        source_identity=_source_identity,
+        source=SmartStoreOrderSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        cipher=ShippingCipher(secrets),
+        audit=audit,
+        interval_s=config.operate_order_sync_interval_s,
+        initial_lookback_s=config.operate_order_initial_lookback_s,
+        retention_days=config.operate_order_shipping_retention_days,
+        # ADR-0023 §5: the operator-attested 주문 판매자 group gates order ingest.
+        order_read_attested=lambda: (
+            ApiGroup.ORDER_SELLER in permission_attestation.attested_groups("smartstore")
+        ),
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -937,7 +961,9 @@ def build_container(
         collect=CollectService(jobs),
         products=products,
         register=register_service,
-        operate=OperateService(),
+        operate=OperateService(
+            order_count=order_sync.order_count, order_capability=order_sync.capability
+        ),
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
@@ -947,6 +973,8 @@ def build_container(
         listing_sync=listing_sync,
         stock_recheck=stock_recheck,
         stock_recheck_scheduler=StockRecheckScheduler(stock_recheck),
+        order_sync=order_sync,
+        order_sync_scheduler=OrderSyncScheduler(order_sync),
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,
         common_images=common_images,

@@ -677,11 +677,15 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
 
 
 def test_only_the_category_list_may_send_its_documented_query_key() -> None:
-    # The category list sends ``last``; the address-book read pages with ``page``; nothing else
-    # sends a query key.
+    # The category list sends ``last``; the address-book read pages with ``page``; the M6-C
+    # change listing sends its documented window, limit and continuation; nothing else sends a
+    # query key.
     documented = {
         EndpointId.SMARTSTORE_CATEGORY_LIST: frozenset({"last"}),
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST: frozenset({"page"}),
+        EndpointId.SMARTSTORE_ORDER_CHANGES: frozenset(
+            {"lastChangedFrom", "lastChangedTo", "moreSequence", "limitCount"}
+        ),
     }
     for contract in ADOPTED.values():
         expected = documented.get(contract.endpoint_id, frozenset())

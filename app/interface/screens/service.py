@@ -177,9 +177,15 @@ class ScreenService:
 
     def orders(self) -> OrdersView:
         orders = self._operate.order_count()
+        order_read = self._operate.order_capability()
+        if order_read != "CONNECTED":
+            empty: EmptyReason | None = EmptyReason.NO_CONNECTIONS if orders == 0 else None
+        else:
+            empty = EmptyReason.NO_ORDERS if orders == 0 else None
         return OrdersView(
-            meta=self._meta(ScreenKey.ORDERS, EmptyReason.NO_ORDERS if orders == 0 else None),
-            orders_total=orders,
+            meta=self._meta(ScreenKey.ORDERS, empty),
+            orders_total=orders if order_read == "CONNECTED" else None,
+            order_read=order_read,
             marketplaces_connected=self._connect.connected_marketplace_count(),
         )
 

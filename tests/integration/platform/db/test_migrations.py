@@ -173,8 +173,11 @@ CANONICAL_TABLES = (
     "operate_listing_sync_runs",
     "operate_listing_observations",
     "operate_stock_rechecks",
+    "operate_order_sync_runs",
+    "operate_orders",
+    "operate_order_status_history",
 )
-HEAD = "0049_m6_stock_recheck"
+HEAD = "0050_m6_orders"
 
 
 def _url(path: Path) -> str:

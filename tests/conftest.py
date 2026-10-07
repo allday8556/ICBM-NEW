@@ -73,6 +73,7 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
         "smartstore_auto_renew": False,
         "operate_listing_sync_interval_s": 0.0,
         "operate_stock_recheck_interval_s": 0.0,
+        "operate_order_sync_interval_s": 0.0,
     }
     values.update(overrides)
     return AppConfig(**values)  # type: ignore[arg-type]

@@ -6,7 +6,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (M6-C, read-only) | `UNVERIFIED` |
 | Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -21,6 +21,7 @@
 - **Group:** order-seller APIs require API group `주문 판매자` (`NAVER-P1-ORDERSELLER-GROUP-1093`, `OFFICIAL_SUPPORT`); the group of this specific endpoint is not separately captured.
 - **Missing:** query parameters and their limits, response envelope and order/product-order identifiers, paging, errors, rate limit, freshness semantics.
 - **ICBM:** not registered in `ENDPOINT_MATRIX.md` §4 → `NOT_ADOPTED`; runtime `UNVERIFIED`.
+- **Amendment (M6-C, 2026-10-07):** the change listing `GET /v1/pay-order/seller/product-orders/last-changed-statuses` and the product-order query `POST /v1/pay-order/seller/product-orders/query` are captured at `2.90.1` (`SOURCES.md` §5.6, `NAVER-P0-ORDER-READ-2901`): parameters, the 300 limit, the `more` continuation, the change, product-order, shipping-address and delivery members, the enumerations and KST date-times. Both are `ADOPTED` read-only in `ENDPOINT_MATRIX.md` §4.1.4. Still not stated: the group on the page, a maximum window, a fixed call rate. The conditional read above stays `NOT_ADOPTED`; runtime stays `UNVERIFIED` until a real read.
 
 ## Coupang
 

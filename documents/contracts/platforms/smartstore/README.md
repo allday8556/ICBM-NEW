@@ -54,7 +54,9 @@ read only, for durable category selection), and the two official 상품정보제
 `SMARTSTORE_NOTICE_TYPE_READ` (notice coverage S0; read only to capture the provider notice
 schema), and the seller address-book read `SMARTSTORE_ADDRESSBOOK_LIST` (read only, for the
 Settings delivery policy's 출고지 / 반품·교환지 choice; only each entry's number, label and type
-are kept). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
+are kept), and the two M6-C order reads `SMARTSTORE_ORDER_CHANGES` and
+`SMARTSTORE_ORDER_DETAILS` (read only, `ENDPOINT_MATRIX.md` §4.1.4; inside the ADR-0023 §7
+order allow-list). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
 remains:
 
 `NOT_ADOPTED`

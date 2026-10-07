@@ -1,4 +1,5 @@
 import { contractPage } from './contract-page.js';
+import { orderListPanel } from '../components/order-list.js';
 
 export default contractPage({
   key: 'orders',
@@ -12,4 +13,6 @@ export default contractPage({
     actionLabel: '스마트스토어 연결하기',
     to: { page: 'settings', params: { tab: 'smartstore' } },
   },
+  // M6-D: the ingested orders, their resolution and 지금 동기화.
+  extra: () => orderListPanel(),
 });

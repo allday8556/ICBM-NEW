@@ -528,6 +528,9 @@ ADAPTIVE_TABLES = (
     "operate_listing_sync_runs",
     "operate_listing_observations",
     "operate_stock_rechecks",
+    "operate_order_sync_runs",
+    "operate_orders",
+    "operate_order_status_history",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -566,6 +566,9 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "operate_listing_sync_runs",
         "operate_listing_observations",
         "operate_stock_rechecks",
+        "operate_order_sync_runs",
+        "operate_orders",
+        "operate_order_status_history",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

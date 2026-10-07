@@ -61,6 +61,8 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         EndpointId.SMARTSTORE_NOTICE_TYPE_READ,
         EndpointId.SMARTSTORE_CATEGORY_LIST,
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
+        EndpointId.SMARTSTORE_ORDER_CHANGES,
+        EndpointId.SMARTSTORE_ORDER_DETAILS,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -128,8 +130,12 @@ def test_em13_7_every_adopted_endpoint_is_no_follow() -> None:
 def test_em5_the_adopted_group_union_and_the_only_adopted_mutation() -> None:
     union = set().union(*(c.required_groups for c in ADOPTED.values()))
     # The packet's AI-use guide gives the API group 상품 for the product reads; no narrower
-    # permission name is invented from it.
-    assert union == {"판매자정보", "상품"}
+    # permission name is invented from it. The M6-C order reads name the 주문 판매자 group of
+    # ``ORDER_READ.md`` (OFFICIAL_SUPPORT).
+    assert union == {"판매자정보", "상품", "주문 판매자"}
+    assert resolve(EndpointId.SMARTSTORE_ORDER_CHANGES).required_groups == frozenset(
+        {"주문 판매자"}
+    )
     assert resolve(TOKEN).required_groups == frozenset()
     assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
     # The three adopted mutations — the image upload, CREATE and the DELETE of one confirmed
@@ -386,7 +392,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "settings-addressbook-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m6-orders-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -400,6 +406,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m5-notice-r1",
         "m5-category-list-r1",
         "settings-addressbook-r1",
+        "m6-orders-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

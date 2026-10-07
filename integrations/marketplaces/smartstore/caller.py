@@ -22,7 +22,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal, cast, overload
+from typing import Final, Literal, cast, overload
 
 import httpx
 
@@ -89,6 +89,16 @@ _NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
 _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
 _CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
 _ADDRESSBOOK_LIST = EndpointId.SMARTSTORE_ADDRESSBOOK_LIST
+_ORDER_CHANGES = EndpointId.SMARTSTORE_ORDER_CHANGES
+_ORDER_DETAILS = EndpointId.SMARTSTORE_ORDER_DETAILS
+# The documented request date-time (yyyy-MM-dd'T'HH:mm:ss.SSSXXX); ICBM always sends KST.
+_ORDER_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$")
+# ``moreSequence`` is only ever echoed from the provider's own ``more``; printable, no space.
+_ORDER_SEQUENCE = re.compile(r"^[\x21-\x7e]{1,64}$")
+# A provider product-order id as the change listing named it.
+_ORDER_ID = re.compile(r"^[0-9A-Za-z_-]{1,40}$")
+# The documented maximum of both reads: 300 changes per page, 300 product orders per query.
+ORDER_PAGE_MAX: Final = 300
 # An official 상품정보제공고시 type code: upper-case words joined by underscores.
 _NOTICE_TYPE_CODE = re.compile(r"^[A-Z][A-Z_]{1,39}$")
 # The only seller code a search may carry: the ``smartstore-seller-management-code/v1`` projection
@@ -200,6 +210,32 @@ class AddressBookListRequest:
 
 
 @dataclass(frozen=True)
+class OrderChangesRequest:
+    """One page of the product orders changed in ``[last_changed_from, last_changed_to]`` (M6-C).
+
+    Both ends are sent as KST date-times. ``more_sequence`` is the provider's own continuation,
+    sent only with the ``moreFrom`` it came with as ``last_changed_from``."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    last_changed_from: str
+    last_changed_to: str
+    more_sequence: str | None = None
+    limit_count: int = 300
+
+
+@dataclass(frozen=True)
+class OrderDetailsRequest:
+    """The product orders named by ``product_order_ids`` (at most 300, distinct; M6-C)."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    product_order_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
@@ -291,6 +327,23 @@ class AddressBookListResponse:
     """One page of the address book after deny-by-default field retention."""
 
     retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class OrderChangesResponse:
+    """One change page after deny-by-default retention (ADR-0023 §7)."""
+
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class OrderDetailsResponse:
+    """The product orders after the order allow-list (ADR-0023 §7). It still carries the shipping
+    record in clear: OPERATE encrypts it before anything is stored, and nothing logs it."""
+
+    retained: Mapping[str, object] = field(repr=False)
     http_status: int
 
 
@@ -402,7 +455,9 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ProductSearchRequest
         | ImageUploadRequest
         | CategoryListRequest
-        | AddressBookListRequest,
+        | AddressBookListRequest
+        | OrderChangesRequest
+        | OrderDetailsRequest,
     ):
         return request.credential_generation, request.session_generation
     return None, None
@@ -495,6 +550,55 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         except ValueError as exc:  # pragma: no cover - registry/caller contract drift
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
         return _Wire(contract.path, headers, {}, query=query)
+    if contract.endpoint_id is _ORDER_CHANGES:
+        if (
+            not isinstance(request, OrderChangesRequest)
+            or not _matches(_ORDER_TIME, request.last_changed_from)
+            or not _matches(_ORDER_TIME, request.last_changed_to)
+            or request.last_changed_to < request.last_changed_from
+            or (
+                request.more_sequence is not None
+                and not _matches(_ORDER_SEQUENCE, request.more_sequence)
+            )
+            or isinstance(request.limit_count, bool)
+            or not isinstance(request.limit_count, int)
+            or not 1 <= request.limit_count <= ORDER_PAGE_MAX
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        wanted = {
+            "lastChangedFrom": request.last_changed_from,
+            "lastChangedTo": request.last_changed_to,
+            "limitCount": str(request.limit_count),
+        }
+        if request.more_sequence is not None:
+            wanted["moreSequence"] = request.more_sequence
+        try:
+            query = retained_query(contract, wanted)
+        except ValueError as exc:  # pragma: no cover - registry/caller contract drift
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+        return _Wire(contract.path, headers, {}, query=query)
+    if contract.endpoint_id is _ORDER_DETAILS:
+        ids = request.product_order_ids if isinstance(request, OrderDetailsRequest) else None
+        if (
+            not isinstance(ids, tuple)
+            or not 1 <= len(ids) <= ORDER_PAGE_MAX
+            or not all(_matches(_ORDER_ID, value) for value in ids)
+            or len(set(ids)) != len(ids)
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        assert isinstance(request, OrderDetailsRequest)
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        content = json.dumps(
+            {"productOrderIds": list(ids)}, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return _Wire(contract.path, headers, {}, content=content)
     if contract.endpoint_id in _PRODUCT_READS:
         if not isinstance(request, ProductReadRequest):
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
@@ -602,6 +706,46 @@ def _json_body(document: CreateDocument) -> bytes:
     return body
 
 
+def _matches(pattern: re.Pattern[str], value: object) -> bool:
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
+
+
+def _scalars(value: object) -> dict[str, object]:
+    """The scalar members of an object; every nested object and array is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: member for key, member in value.items() if not isinstance(member, dict | list)}
+
+
+def _order_scope(body: object) -> dict[str, object]:
+    """The part of an order-detail answer the allow-list is applied to (ADR-0023 §7).
+
+    Each entry keeps only the scalar members of ``order``, ``productOrder`` and ``delivery``, and
+    of ``productOrder`` also its ``shippingAddress``. A claim, its addresses, the seller's
+    ``takingAddress``, coupons, promotions and every other nested member are dropped before the
+    allow-list ever sees them, so a shared leaf name (``name``, ``tel1``) can only be the
+    recipient's.
+    """
+    entries = body.get("data") if isinstance(body, dict) else None
+    scoped: list[dict[str, object]] = []
+    for entry in entries if isinstance(entries, list) else ():
+        if not isinstance(entry, dict):
+            continue
+        product_order = entry.get("productOrder")
+        narrowed = _scalars(product_order)
+        address = product_order.get("shippingAddress") if isinstance(product_order, dict) else None
+        if isinstance(address, dict):
+            narrowed["shippingAddress"] = _scalars(address)
+        scoped.append(
+            {
+                "order": _scalars(entry.get("order")),
+                "productOrder": narrowed,
+                "delivery": _scalars(entry.get("delivery")),
+            }
+        )
+    return {"data": scoped}
+
+
 def _json(content: bytes) -> object:
     try:
         return json.loads(content)
@@ -655,6 +799,8 @@ _Result = (
     | NoticeCatalogResponse
     | CategoryListResponse
     | AddressBookListResponse
+    | OrderChangesResponse
+    | OrderDetailsResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -674,6 +820,14 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
     if contract.endpoint_id is _ADDRESSBOOK_LIST:
         assert isinstance(request, AddressBookListRequest)
         return AddressBookListResponse(retained=retain(contract, body), http_status=status)
+    if contract.endpoint_id is _ORDER_CHANGES:
+        assert isinstance(request, OrderChangesRequest)
+        return OrderChangesResponse(retained=retain(contract, body), http_status=status)
+    if contract.endpoint_id is _ORDER_DETAILS:
+        assert isinstance(request, OrderDetailsRequest)
+        return OrderDetailsResponse(
+            retained=retain(contract, _order_scope(body)), http_status=status
+        )
     if contract.endpoint_id is _CATEGORY_LIST:
         assert isinstance(request, CategoryListRequest)
         return CategoryListResponse(
@@ -800,6 +954,20 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_ADDRESSBOOK_LIST],
         request: AddressBookListRequest,
     ) -> AddressBookListResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_ORDER_CHANGES],
+        request: OrderChangesRequest,
+    ) -> OrderChangesResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_ORDER_DETAILS],
+        request: OrderDetailsRequest,
+    ) -> OrderDetailsResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...
