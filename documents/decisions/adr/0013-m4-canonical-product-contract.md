@@ -641,6 +641,32 @@ requirement revisions, the reviewed requirement-to-common mapping, provider rend
 registration snapshots and provider identities. OPERATE owns immutable marketplace order-line
 resolution back to the registration Item and Atomic SKU. No layer duplicates another's truth.
 
+### G. C-P2 implementation amendment — exact AtomicSKU economics (2026-10-05)
+
+C-P2 implements the PRODUCT-side economics prerequisite without changing the legacy no-option
+path. The additive identity is `ProductGroup + ListingComposition + AtomicSKU`. Its exact source
+binding names the current source-proven configuration, confirmed member and Product Facts revision,
+and records this acquisition basis:
+
+```text
+purchase_cost_krw = base_purchase_cost_krw + option_additional_price_krw
+```
+
+Both terms must be explicit current source evidence. A missing option delta is not interpreted as
+zero, and one configuration's economics are never multiplied into a composed fulfillment.
+
+`ProductPricingService` remains the sole pricing calculator and applies the unchanged canonical
+rule under an explicit pricing context. The AtomicSKU economics repository stores only the exact
+binding, immutable calculation snapshot and append-only current-pointer moves. Its dependency
+fingerprint includes the AtomicSKU-qualified Item, current group membership, current AtomicSKU set,
+binding/source proof and pricing context. When any proof moves, derived pricing readiness becomes
+stale while the historical snapshot remains addressable.
+
+Base readiness and pricing readiness are distinct. Until image selection itself has an
+AtomicSKU-qualified owner, v2 base readiness reports that gap as `REVIEW_REQUIRED` instead of
+silently projecting a legacy Item image selection. This amendment adopts no provider requirement,
+creates no provider payload, performs no marketplace call and does not make an Item sendable.
+
 ## Consequences
 
 - **PR-B to PR-F build on this contract** (Issue #80 §12): models and migrations, materialization and read-back, pricing and readiness, derived image lineage, then the M4 acceptance harness on a fresh dedicated data root. No preserved M3 campaign, and not the `m3-accept-04` runtime, is used as a migration shortcut.

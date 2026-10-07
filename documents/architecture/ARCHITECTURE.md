@@ -291,9 +291,11 @@ marketplace incompatibility makes only that marketplace's REGISTER readiness `RE
 does not silently change the canonical structure. Persisted marketplace item identities resolve
 orders back to the same Item/Atomic SKU across marketplaces.
 
-This requirement is accepted but not implemented. The existing bounded no-positive-option Item
-path remains valid and unchanged; positive-option SmartStore expansion and actual Coupang REGISTER
-are gated on the additive common-option/Atomic-SKU implementation.
+The product-side contract is implemented additively through C-P2: reviewed Common Sales Options,
+fact mapping, source-proven AtomicSKUs, AtomicSKU-qualified Item identity, and exact source binding
+plus pricing snapshots/readiness. The existing bounded no-positive-option Item path remains valid
+and unchanged. Positive-option provider rendering, SmartStore expansion and actual Coupang
+REGISTER remain later gated work.
 
 The first provider-zero projection slice, C-P1, is deliberately structural and read-only. It
 compares the current Common Sales Option revision and the exact source-proven AtomicSKU set only
@@ -302,6 +304,16 @@ mean registration-ready, sendable or provider-verified. Missing or unreviewed me
 `REVIEW_REQUIRED`; the preview preserves canonical authored order, contains no price or provider
 payload, never creates a Cartesian combination and never changes the canonical option/SKU owners.
 Requirement semantics, provider wire rendering and provider identity remain later REGISTER slices.
+
+C-P2 keeps one pricing owner. `ProductPricingService` calculates both legacy and AtomicSKU paths;
+the additive AtomicSKU economics store only retains the exact source binding and immutable result.
+Its acquisition basis is the source's one confirmed base purchase price plus the selected source
+configuration's explicit option delta. No missing delta becomes zero, and no composed quantity is
+multiplied from a single-unit configuration. The v2 pricing dependency fingerprint includes the
+AtomicSKU Item, current membership and AtomicSKU-set revisions, exact binding/source revision and
+explicit pricing context. A moved source or option proof therefore makes readiness stale while
+the old snapshot stays pinned as history. AtomicSKU base readiness does not silently reuse the
+legacy Item image owner; that missing identity-qualified image contract remains review-required.
 
 ### MarketplaceRegistration
 Always includes:

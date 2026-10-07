@@ -169,6 +169,9 @@ M4_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "BINDING_OFFER_INVALID": (_A.SOURCE,),
     "BINDING_MEMBER_NOT_CONFIRMED": (_A.SOURCE,),
     "BINDING_PROVENANCE_STALE": (_A.SOURCE,),
+    "ATOMIC_SKU_SET_STALE": (_A.SOURCE,),
+    "ATOMIC_SKU_BINDING_MISSING": (_A.SOURCE,),
+    "ATOMIC_SKU_BINDING_STALE": (_A.SOURCE,),
     # pricing
     "PRICING_PURCHASE_PRICE_UNRESOLVED": (_A.PRICE,),
     "PRICING_PURCHASE_PRICE_AMBIGUOUS": (_A.PRICE,),
@@ -190,6 +193,7 @@ M4_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "IMAGE_DERIVATION_STALE": (_A.IMAGES,),
     "IMAGE_QA_STALE": (_A.IMAGES,),
     "IMAGE_QA_FAILED": (_A.IMAGES,),
+    "ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE": (_A.IMAGES,),
 }
 
 # A layer that is not READY but returned no reason propagates as ``M4_<LAYER>.<STATUS>``.

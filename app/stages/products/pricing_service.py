@@ -25,12 +25,25 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from sqlalchemy import select
+
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import NotFoundError
 from app.stages.collect.revisions import ProductFactsRevisionStore
+from app.stages.products.atomic_sku_economics_store import (
+    AtomicPricingDependencies,
+    AtomicPricingMove,
+    AtomicPricingSnapshotRecord,
+    AtomicSKUEconomicsStore,
+    AtomicSKUEconomicsUnit,
+    AtomicSourceBindingRecord,
+)
+from app.stages.products.atomic_sku_item_store import AtomicSKUItemRecord
+from app.stages.products.atomic_sku_models import AtomicSKURevisionMember
+from app.stages.products.atomic_sku_store import AtomicSKUStore
 from app.stages.products.model import (
     DEFAULT_SINGLE_UNIT_SIGNATURE,
     BindingKind,
@@ -75,6 +88,9 @@ BINDING_COMPOSITION_INVALID = "BINDING_COMPOSITION_INVALID"
 BINDING_OFFER_INVALID = "BINDING_OFFER_INVALID"
 BINDING_MEMBER_NOT_CONFIRMED = "BINDING_MEMBER_NOT_CONFIRMED"
 BINDING_PROVENANCE_STALE = "BINDING_PROVENANCE_STALE"
+ATOMIC_SKU_SET_STALE = "ATOMIC_SKU_SET_STALE"
+ATOMIC_SKU_BINDING_MISSING = "ATOMIC_SKU_BINDING_MISSING"
+ATOMIC_SKU_BINDING_STALE = "ATOMIC_SKU_BINDING_STALE"
 
 
 @dataclass(frozen=True)
@@ -221,16 +237,70 @@ class PricingResult:
     reasons: tuple[Reason, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True)
+class AtomicProcurement:
+    """The exact, source-proven acquisition of one AtomicSKU-qualified Item."""
+
+    item: AtomicSKUItemRecord
+    group_status: GroupStatus | None
+    membership_revision_id: str | None
+    binding: AtomicSourceBindingRecord | None
+    atomic_sku_set_revision_id: str | None
+    reasons: tuple[Reason, ...]
+
+    @property
+    def dependencies(self) -> AtomicPricingDependencies | None:
+        if (
+            self.reasons
+            or self.binding is None
+            or self.membership_revision_id is None
+            or self.atomic_sku_set_revision_id is None
+        ):
+            return None
+        return AtomicPricingDependencies(
+            item=self.item,
+            membership_revision_id=self.membership_revision_id,
+            binding=self.binding,
+            source_revision_id=self.binding.provenance_revision_id,
+            atomic_sku_set_revision_id=self.atomic_sku_set_revision_id,
+        )
+
+
+@dataclass(frozen=True)
+class AtomicPricingEvaluation:
+    item_id: str
+    context_fingerprint: str
+    procurement: AtomicProcurement
+    reasons: tuple[Reason, ...]
+    dependencies: AtomicPricingDependencies | None = None
+    dependency_fingerprint: str | None = None
+    inputs: SourceInputs | None = None
+    calculation: Calculation | None = None
+    current_snapshot: AtomicPricingSnapshotRecord | None = None
+
+
+@dataclass(frozen=True)
+class AtomicPricingResult:
+    outcome: PricingOutcome
+    item_id: str
+    context_fingerprint: str
+    snapshot: AtomicPricingSnapshotRecord | None = None
+    move: AtomicPricingMove | None = None
+    reasons: tuple[Reason, ...] = field(default_factory=tuple)
+
+
 class ProductPricingService:
     def __init__(
         self,
         *,
         store: ProductFoundationStore,
+        atomic_economics: AtomicSKUEconomicsStore | None = None,
         revisions: ProductFactsRevisionStore,
         audit: AuditLog,
         clock: Clock,
     ) -> None:
         self._store = store
+        self._atomic_economics = atomic_economics
         self._revisions = revisions
         self._audit = audit
         self._clock = clock
@@ -298,7 +368,84 @@ class ProductPricingService:
         )
         return PricingResult(PricingOutcome.RECORDED, item_id, fingerprint, snapshot, move)
 
+    def evaluate_atomic_sku(
+        self, atomic_sku_item_id: str, context: PricingContextInput
+    ) -> AtomicPricingEvaluation:
+        """Evaluate the v2 identity without changing legacy Item pricing."""
+        atomic_economics = self._require_atomic_economics()
+        with atomic_economics.reading() as unit:
+            return self._evaluate_atomic(unit, atomic_sku_item_id, context)
+
+    def atomic_procurement(self, atomic_sku_item_id: str) -> AtomicProcurement:
+        """Read the context-free v2 acquisition state used by base readiness."""
+        atomic_economics = self._require_atomic_economics()
+        with atomic_economics.reading() as unit:
+            return self._atomic_procurement(unit, atomic_sku_item_id)
+
+    def current_atomic_pricing_snapshot(
+        self, atomic_sku_item_id: str, context: PricingContextInput
+    ) -> AtomicPricingSnapshotRecord | None:
+        atomic_economics = self._require_atomic_economics()
+        with atomic_economics.reading() as unit:
+            return self._current_atomic_snapshot(unit, atomic_sku_item_id, context)
+
+    def price_atomic_sku(
+        self,
+        atomic_sku_item_id: str,
+        context: PricingContextInput,
+        *,
+        correlation_id: str | None = None,
+    ) -> AtomicPricingResult:
+        """Price one exact v2 Item with the same sole calculator as the legacy path."""
+        correlation = correlation_id or get_correlation_id() or new_correlation_id()
+        fingerprint = context.fingerprint
+        atomic_economics = self._require_atomic_economics()
+        with atomic_economics.transaction() as unit:
+            evaluation = self._evaluate_atomic(unit, atomic_sku_item_id, context)
+            if (
+                evaluation.reasons
+                or evaluation.dependencies is None
+                or evaluation.inputs is None
+                or evaluation.calculation is None
+            ):
+                return AtomicPricingResult(
+                    PricingOutcome.NOT_PRICED,
+                    atomic_sku_item_id,
+                    fingerprint,
+                    reasons=evaluation.reasons,
+                )
+            current = evaluation.current_snapshot
+            if (
+                current is not None
+                and current.dependency_fingerprint == evaluation.dependency_fingerprint
+            ):
+                return AtomicPricingResult(
+                    PricingOutcome.UNCHANGED, atomic_sku_item_id, fingerprint, current
+                )
+            snapshot = unit.record_snapshot(
+                dependencies=evaluation.dependencies,
+                context=context,
+                inputs=evaluation.inputs,
+                calculation=evaluation.calculation,
+            )
+            self._audit.append(_atomic_recorded_entry(snapshot, correlation), session=unit.session)
+            move = unit.record_move(
+                snapshot,
+                decided_by=DECIDED_BY,
+                correlation_id=correlation,
+                rule_version=CURRENT_PRICING_RULE_VERSION,
+            )
+            self._audit.append(_atomic_moved_entry(move, correlation), session=unit.session)
+        return AtomicPricingResult(
+            PricingOutcome.RECORDED, atomic_sku_item_id, fingerprint, snapshot, move
+        )
+
     # ------------------------------------------------------------------ internals
+
+    def _require_atomic_economics(self) -> AtomicSKUEconomicsStore:
+        if self._atomic_economics is None:
+            raise RuntimeError("AtomicSKU economics store is not configured")
+        return self._atomic_economics
 
     def _current_snapshot(
         self, pricing: PricingUnit, item_id: str, context: PricingContextInput
@@ -347,9 +494,129 @@ class ProductPricingService:
             current_snapshot=current,
         )
 
+    def _current_atomic_snapshot(
+        self,
+        unit: AtomicSKUEconomicsUnit,
+        atomic_sku_item_id: str,
+        context: PricingContextInput,
+    ) -> AtomicPricingSnapshotRecord | None:
+        move = unit.current_move(atomic_sku_item_id, context.fingerprint)
+        return None if move is None else unit.snapshot(move.pricing_snapshot_id)
+
+    def _atomic_procurement(
+        self, unit: AtomicSKUEconomicsUnit, atomic_sku_item_id: str
+    ) -> AtomicProcurement:
+        item = unit.item(atomic_sku_item_id)
+        if item is None:
+            raise NotFoundError("PRODUCTS_ATOMIC_SKU_ITEM_UNKNOWN", "no AtomicSKU Item has that id")
+        foundation = ProductFoundationUnit(unit.session, self._clock)
+        reasons: list[Reason] = []
+        group_status = foundation.group_status(item.product_group_id)
+        if group_status is not GroupStatus.ACTIVE:
+            reasons.append(Reason(GROUP_RETIRED, ReadinessStatus.BLOCKED))
+        membership = foundation.current_membership_revision(item.product_group_id)
+        if membership is None:
+            reasons.append(Reason(MEMBERSHIP_REVISION_MISSING, ReadinessStatus.REVIEW_REQUIRED))
+        elif not foundation.membership_is_current(item.product_group_id):
+            reasons.append(Reason(MEMBERSHIP_REVISION_NOT_CURRENT, ReadinessStatus.REVIEW_REQUIRED))
+        current_set = AtomicSKUStore.current_for_use_row(unit.session, item.product_group_id)
+        if current_set is None:
+            reasons.append(Reason(ATOMIC_SKU_SET_STALE, ReadinessStatus.STALE))
+        binding = unit.current_binding(atomic_sku_item_id)
+        if binding is None:
+            reasons.append(Reason(ATOMIC_SKU_BINDING_MISSING, ReadinessStatus.REVIEW_REQUIRED))
+        elif current_set is not None:
+            revision_member = unit.session.scalar(
+                select(AtomicSKURevisionMember).where(
+                    AtomicSKURevisionMember.sku_set_revision_id == current_set.sku_set_revision_id,
+                    AtomicSKURevisionMember.atomic_sku_id == item.atomic_sku_id,
+                )
+            )
+            member = foundation.member_detail(binding.group_member_id)
+            move = None if member is None else foundation.current_move(member.source_product_uid)
+            if (
+                revision_member is None
+                or revision_member.revision_member_id != binding.atomic_sku_revision_member_id
+                or revision_member.source_revision_id != binding.provenance_revision_id
+                or member is None
+                or member.status is not MemberStatus.CONFIRMED
+                or member.product_group_id != item.product_group_id
+                or move is None
+                or move.revision_id != binding.provenance_revision_id
+            ):
+                reasons.append(Reason(ATOMIC_SKU_BINDING_STALE, ReadinessStatus.STALE))
+        return AtomicProcurement(
+            item=item,
+            group_status=group_status,
+            membership_revision_id=None
+            if membership is None
+            else membership.membership_revision_id,
+            binding=binding,
+            atomic_sku_set_revision_id=(
+                None if current_set is None else current_set.sku_set_revision_id
+            ),
+            reasons=tuple(reasons),
+        )
+
+    def _evaluate_atomic(
+        self,
+        unit: AtomicSKUEconomicsUnit,
+        atomic_sku_item_id: str,
+        context: PricingContextInput,
+    ) -> AtomicPricingEvaluation:
+        procurement = self._atomic_procurement(unit, atomic_sku_item_id)
+        current = self._current_atomic_snapshot(unit, atomic_sku_item_id, context)
+        base = AtomicPricingEvaluation(
+            atomic_sku_item_id,
+            context.fingerprint,
+            procurement,
+            procurement.reasons,
+            current_snapshot=current,
+        )
+        dependencies = procurement.dependencies
+        if dependencies is None:
+            return base
+        stored = self._revisions.get(dependencies.source_revision_id)
+        if stored is None:  # pragma: no cover - foreign keys guarantee the revision
+            raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
+        source = source_inputs(stored.fields)
+        if isinstance(source, tuple):
+            return _with_atomic(base, reasons=source)
+        inputs = SourceInputs(
+            purchase_cost_krw=dependencies.binding.purchase_cost_krw,
+            supplier_shipping_krw=source.supplier_shipping_krw,
+            minimum_sale_price_krw=source.minimum_sale_price_krw,
+        )
+        calculation = calculate(inputs, context)
+        if isinstance(calculation, Reason):
+            return _with_atomic(base, reasons=(calculation,))
+        return AtomicPricingEvaluation(
+            atomic_sku_item_id,
+            context.fingerprint,
+            procurement,
+            (),
+            dependencies,
+            dependencies.fingerprint(context),
+            inputs,
+            calculation,
+            current,
+        )
+
 
 def _with(evaluation: PricingEvaluation, *, reasons: Sequence[Reason]) -> PricingEvaluation:
     return PricingEvaluation(
+        item_id=evaluation.item_id,
+        context_fingerprint=evaluation.context_fingerprint,
+        procurement=evaluation.procurement,
+        reasons=tuple(reasons),
+        current_snapshot=evaluation.current_snapshot,
+    )
+
+
+def _with_atomic(
+    evaluation: AtomicPricingEvaluation, *, reasons: Sequence[Reason]
+) -> AtomicPricingEvaluation:
+    return AtomicPricingEvaluation(
         item_id=evaluation.item_id,
         context_fingerprint=evaluation.context_fingerprint,
         procurement=evaluation.procurement,
@@ -414,6 +681,58 @@ def _moved_entry(move: PricingMove, correlation: str) -> AuditEntry:
         else {"pricing_snapshot_id": move.previous_pricing_snapshot_id},
         after={"pricing_snapshot_id": move.pricing_snapshot_id, "sequence": move.sequence},
         details={
+            "move_id": move.move_id,
+            "pricing_context_fingerprint": move.pricing_context_fingerprint,
+            "rule_version": CURRENT_PRICING_RULE_VERSION,
+        },
+        correlation_id=correlation,
+    )
+
+
+def _atomic_recorded_entry(snapshot: AtomicPricingSnapshotRecord, correlation: str) -> AuditEntry:
+    return AuditEntry(
+        event_type=AuditEventType.PRODUCT_PRICING_SNAPSHOT_RECORDED,
+        action="atomic_sku_pricing_snapshot.record",
+        actor=DECIDED_BY,
+        outcome=AuditOutcome.RECORDED,
+        target_ref=snapshot.pricing_snapshot_id,
+        reason_code=snapshot.price_guard.value,
+        details={
+            "identity_version": "ATOMIC_SKU_ITEM_V2",
+            "atomic_sku_item_id": snapshot.atomic_sku_item_id,
+            "product_group_id": snapshot.product_group_id,
+            "composition_signature": snapshot.composition_signature,
+            "atomic_sku_id": snapshot.atomic_sku_id,
+            "atomic_sku_selection_signature": snapshot.atomic_sku_selection_signature,
+            "marketplace_key": snapshot.marketplace_key,
+            "account_id": snapshot.account_id,
+            "pricing_context_fingerprint": snapshot.pricing_context_fingerprint,
+            "dependency_fingerprint": snapshot.dependency_fingerprint,
+            "source_binding_id": snapshot.source_binding_id,
+            "source_product_facts_revision_id": snapshot.source_product_facts_revision_id,
+            "purchase_cost_krw": snapshot.purchase_cost_krw,
+            "final_sale_price_krw": snapshot.final_sale_price_krw,
+            "price_basis": snapshot.price_basis.value,
+            "guard_reasons": [reason.value for reason in snapshot.guard_reasons],
+        },
+        correlation_id=correlation,
+    )
+
+
+def _atomic_moved_entry(move: AtomicPricingMove, correlation: str) -> AuditEntry:
+    return AuditEntry(
+        event_type=AuditEventType.PRODUCT_CURRENT_PRICING_SNAPSHOT_MOVED,
+        action="current_atomic_sku_pricing_snapshot.move",
+        actor=DECIDED_BY,
+        outcome=AuditOutcome.RECORDED,
+        target_ref=move.atomic_sku_item_id,
+        reason_code=move.reason.value,
+        before=None
+        if move.previous_pricing_snapshot_id is None
+        else {"pricing_snapshot_id": move.previous_pricing_snapshot_id},
+        after={"pricing_snapshot_id": move.pricing_snapshot_id, "sequence": move.sequence},
+        details={
+            "identity_version": "ATOMIC_SKU_ITEM_V2",
             "move_id": move.move_id,
             "pricing_context_fingerprint": move.pricing_context_fingerprint,
             "rule_version": CURRENT_PRICING_RULE_VERSION,

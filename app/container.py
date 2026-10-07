@@ -106,6 +106,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.service import OperateService
+from app.stages.products.atomic_sku_economics_store import AtomicSKUEconomicsStore
 from app.stages.products.atomic_sku_item_store import AtomicSKUItemStore
 from app.stages.products.atomic_sku_store import AtomicSKUStore
 from app.stages.products.auto_images import (
@@ -227,6 +228,7 @@ class Container:
     common_option_fact_mappings: CommonOptionFactMappingStore
     atomic_skus: AtomicSKUStore
     atomic_sku_items: AtomicSKUItemStore
+    atomic_sku_economics: AtomicSKUEconomicsStore
     products: ProductsService
     materializer: ProductMaterializer
     pricing: ProductPricingService
@@ -429,6 +431,7 @@ def build_container(
     common_option_fact_mappings = CommonOptionFactMappingStore(db, clock)
     atomic_skus = AtomicSKUStore(db, clock)
     atomic_sku_items = AtomicSKUItemStore(db, clock)
+    atomic_sku_economics = AtomicSKUEconomicsStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
     registered_collections = (
         tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
@@ -556,7 +559,11 @@ def build_container(
     # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
     # makes a registration candidate: that is M5's preflight.
     pricing = ProductPricingService(
-        store=product_store, revisions=revisions, audit=audit, clock=clock
+        store=product_store,
+        atomic_economics=atomic_sku_economics,
+        revisions=revisions,
+        audit=audit,
+        clock=clock,
     )
     # M4 PR-E: derived image lineage, operator image selection and exact-binary QA. Derived
     # bytes live in their own namespace, never among the source assets.
@@ -927,6 +934,7 @@ def build_container(
         common_option_fact_mappings=common_option_fact_mappings,
         atomic_skus=atomic_skus,
         atomic_sku_items=atomic_sku_items,
+        atomic_sku_economics=atomic_sku_economics,
         products=products,
         materializer=materializer,
         pricing=pricing,

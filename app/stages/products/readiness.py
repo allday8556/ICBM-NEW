@@ -45,6 +45,7 @@ from app.stages.products.model import (
 )
 from app.stages.products.pricing import PriceGuard, PricingContextInput, digest
 from app.stages.products.pricing_service import (
+    AtomicProcurement,
     Procurement,
     ProductPricingService,
     current_procurement,
@@ -53,6 +54,8 @@ from app.stages.products.store import ProductFoundationStore
 
 BASE_READINESS_RULE_VERSION = "base-readiness/v3"
 PRICING_READINESS_RULE_VERSION = "pricing-readiness/v2"
+ATOMIC_BASE_READINESS_RULE_VERSION = "atomic-sku-base-readiness/v1"
+ATOMIC_PRICING_READINESS_RULE_VERSION = "atomic-sku-pricing-readiness/v1"
 
 # Reason codes: our own, never page content.
 GROUP_CANDIDATE_PENDING = "GROUP_MEMBER_CANDIDATE_PENDING"
@@ -61,6 +64,7 @@ SOURCE_CORE_FIELD_ABSENT = "SOURCE_CORE_FIELD_ABSENT"
 SOURCE_STOCK_SOLD_OUT = "SOURCE_STOCK_SOLD_OUT"
 PRICING_SNAPSHOT_MISSING = "PRICING_SNAPSHOT_MISSING"
 PRICING_SNAPSHOT_SUPERSEDED = "PRICING_SNAPSHOT_SUPERSEDED"
+ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE = "ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE"
 # ABSENT is a legitimate reading of these (M3 capability boundary): never a failure by itself.
 _ABSENCE_ALLOWED = frozenset({"options", "quantity_tiers"})
 
@@ -113,6 +117,29 @@ def _procurement_state(procurement: Procurement) -> dict[str, object]:
         if procurement.binding is None
         else procurement.binding.provenance_revision_id,
         "current_source_revision_id": procurement.current_revision_id,
+    }
+
+
+def _atomic_procurement_state(procurement: AtomicProcurement) -> dict[str, object]:
+    return {
+        "identity_version": "ATOMIC_SKU_ITEM_V2",
+        "atomic_sku_item_id": procurement.item.atomic_sku_item_id,
+        "product_group_id": procurement.item.product_group_id,
+        "composition_signature": procurement.item.composition_signature,
+        "atomic_sku_id": procurement.item.atomic_sku_id,
+        "atomic_sku_selection_signature": procurement.item.atomic_sku_selection_signature,
+        "group_status": None
+        if procurement.group_status is None
+        else procurement.group_status.value,
+        "membership_revision_id": procurement.membership_revision_id,
+        "atomic_sku_set_revision_id": procurement.atomic_sku_set_revision_id,
+        "binding_id": None if procurement.binding is None else procurement.binding.binding_id,
+        "binding_provenance_revision_id": None
+        if procurement.binding is None
+        else procurement.binding.provenance_revision_id,
+        "purchase_cost_krw": None
+        if procurement.binding is None
+        else procurement.binding.purchase_cost_krw,
     }
 
 
@@ -211,6 +238,78 @@ class ProductReadinessService:
                     "layer": ReadinessLayer.PRICING.value,
                     "rule_version": PRICING_READINESS_RULE_VERSION,
                     **_procurement_state(evaluation.procurement),
+                    "pricing_context_fingerprint": context.fingerprint,
+                    "pricing_dependency_fingerprint": evaluation.dependency_fingerprint,
+                    "current_pricing_snapshot_id": None
+                    if current is None
+                    else current.pricing_snapshot_id,
+                }
+            ),
+        )
+
+    def atomic_base_readiness(self, atomic_sku_item_id: str) -> Readiness:
+        """Base readiness for the v2 identity; legacy image ownership is never silently reused."""
+        procurement = self._pricing.atomic_procurement(atomic_sku_item_id)
+        with self._store.reading() as unit:
+            candidates = unit.pending_candidates(procurement.item.product_group_id)
+            membership_current = unit.membership_is_current(procurement.item.product_group_id)
+        reasons = list(procurement.reasons)
+        if candidates:
+            reasons.append(Reason(GROUP_CANDIDATE_PENDING, ReadinessStatus.REVIEW_REQUIRED))
+        if procurement.binding is not None:
+            reasons.extend(self._source_fact_reasons(procurement.binding.provenance_revision_id))
+        # Image selection currently belongs to legacy Item identity. Reusing it would be an
+        # unapproved identity projection, so the new base layer remains explicitly review-bound.
+        reasons.append(
+            Reason(ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE, ReadinessStatus.REVIEW_REQUIRED)
+        )
+        ordered = _ordered(reasons)
+        return Readiness(
+            layer=ReadinessLayer.BASE,
+            item_id=atomic_sku_item_id,
+            status=precedence_status(ordered),
+            reasons=ordered,
+            rule_version=ATOMIC_BASE_READINESS_RULE_VERSION,
+            dependency_fingerprint=digest(
+                {
+                    "layer": ReadinessLayer.BASE.value,
+                    "rule_version": ATOMIC_BASE_READINESS_RULE_VERSION,
+                    **_atomic_procurement_state(procurement),
+                    "membership_current": membership_current,
+                    "pending_candidates": candidates,
+                    "image_owner": "UNAVAILABLE_FOR_ATOMIC_SKU_ITEM_V2",
+                }
+            ),
+        )
+
+    def atomic_pricing_readiness(
+        self, atomic_sku_item_id: str, context: PricingContextInput
+    ) -> Readiness:
+        evaluation = self._pricing.evaluate_atomic_sku(atomic_sku_item_id, context)
+        reasons = list(evaluation.reasons)
+        current = evaluation.current_snapshot
+        if not reasons:
+            if current is None:
+                reasons.append(Reason(PRICING_SNAPSHOT_MISSING, ReadinessStatus.STALE))
+            elif current.dependency_fingerprint != evaluation.dependency_fingerprint:
+                reasons.append(Reason(PRICING_SNAPSHOT_SUPERSEDED, ReadinessStatus.STALE))
+            elif current.price_guard is not PriceGuard.OK:
+                reasons.extend(
+                    Reason(guard.value, ReadinessStatus.BLOCKED) for guard in current.guard_reasons
+                )
+        ordered = _ordered(reasons)
+        return Readiness(
+            layer=ReadinessLayer.PRICING,
+            item_id=atomic_sku_item_id,
+            status=precedence_status(ordered),
+            reasons=ordered,
+            rule_version=ATOMIC_PRICING_READINESS_RULE_VERSION,
+            pricing_context_fingerprint=context.fingerprint,
+            dependency_fingerprint=digest(
+                {
+                    "layer": ReadinessLayer.PRICING.value,
+                    "rule_version": ATOMIC_PRICING_READINESS_RULE_VERSION,
+                    **_atomic_procurement_state(evaluation.procurement),
                     "pricing_context_fingerprint": context.fingerprint,
                     "pricing_dependency_fingerprint": evaluation.dependency_fingerprint,
                     "current_pricing_snapshot_id": None

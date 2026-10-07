@@ -402,6 +402,20 @@ structure fits its documented axis, value and item-count ranges. That state is n
 sendability or provider verification. Missing metadata and marketplace-local limit conflicts become
 `REVIEW_REQUIRED`; neither condition edits canonical options or invents a Cartesian combination.
 
+### C-P2 AtomicSKU-qualified Source Binding and Pricing Readiness
+
+The positive-option Product path adds an exact source binding and immutable pricing history for
+`ProductGroup + ListingComposition + AtomicSKU`. Each binding names the current source-proven
+configuration and records the explicit acquisition equation `base purchase price + source option
+delta`; a missing delta is `REVIEW_REQUIRED`, never zero by assumption. Composed fulfillment is not
+derived by multiplying that equation.
+
+The existing `ProductPricingService` remains the only calculator. It applies the same canonical
+pricing rule under one explicit marketplace/account context and writes a versioned AtomicSKU Item
+snapshot plus append-only current-pointer history. Base and pricing readiness are derived
+separately. Legacy no-option Items, bindings, snapshots and `registration_item_key/v1` are
+unchanged. This slice is provider-zero: it adopts no marketplace requirement and sends no payload.
+
 ## Phase 3 acceptance
 
 - one collected product has one canonical product ID
