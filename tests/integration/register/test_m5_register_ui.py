@@ -428,3 +428,50 @@ def test_the_status_card_and_panel_show_the_servers_read_state_only(
         page.wait_for_function("location.hash.includes('status=open')")
         page.wait_for_selector("[data-role='register-status']", timeout=10_000)
         assert writes == []
+
+
+def test_the_unit_workspace_edits_images_through_the_image_owner(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # B-EDITOR (Issue #127): one unit is a workspace of four sections that all stay rendered. The
+    # image section shows the Item's CONFIRMED source images with the current selection and saves
+    # the operator's complete decision through the image owner's own route — nothing else.
+    from tests.support.register_support import draft, ready_item
+
+    item = ready_item(container, sources, "1234")
+    draft(container.registrations, account, [item])
+    before = container.images.current_selection(item.item_id)
+    assert before is not None
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        unit = page.locator(".register-unit[data-preparation='DRAFTED']")
+        sections = unit.locator("[data-editor-section]")
+        assert [sections.nth(i).get_attribute("data-editor-section") for i in range(4)] == [
+            "info",
+            "images",
+            "price",
+            "ready",
+        ]
+        # Every section is rendered: the Gate-3 preflight block is never hidden by the bar.
+        assert unit.locator(".register-preflight").count() >= 1
+        images = unit.locator(f"[data-item-images='{item.item_id}'][data-images-state='READY']")
+        images.wait_for(timeout=15_000)
+        chosen = images.locator("select[data-image-role]")
+        assert chosen.count() == len(item.revision.images)
+        assert chosen.first.input_value() == "REPRESENTATIVE"
+        assert writes == []
+        chosen.first.select_option("EXCLUDE")
+        images.locator("button[data-action='save-image-selection']").click()
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('[data-selection-by]')]"
+            ".some((n) => n.textContent.includes('#2'))"
+        )
+        assert writes == [("POST", f"/api/v1/products/items/{item.item_id}/image-selection")]
+    after = container.images.current_selection(item.item_id)
+    assert after is not None and after.revision_no == before.revision_no + 1
+    assert after.outputs == ()

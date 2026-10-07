@@ -41,6 +41,8 @@ class RegisterAction(StrEnum):
     CREATE_ENQUEUE = "CREATE_ENQUEUE"
     BULK_CREATE_ENQUEUE = "BULK_CREATE_ENQUEUE"
     RECONCILE = "RECONCILE"
+    # An UNKNOWN the provider rejected with HTTP 400, settled on machine evidence (2026-10-07).
+    SETTLE_REJECTION = "SETTLE_REJECTION"
     VERIFY = "VERIFY"
     RESUME_SCOPE = "RESUME_SCOPE"
 
@@ -338,6 +340,10 @@ class ReadStateView(BaseModel):
     # The latest cause an owner recorded — the Attempt's or the CREATE job's error code, or the
     # latest reconcile check's result — when one exists.
     cause_code: str | None
+    # B-STATUS: the latest Attempt's own cause, kept apart from the reconcile result above, and
+    # whether its UNKNOWN is a provider 400 rejection the operator may settle as not applied.
+    attempt_cause_code: str | None = None
+    rejection_settleable: bool = False
     # The one action this state offers, and whether the server accepts it now.
     action: RegisterAction | None
     action_enabled: bool

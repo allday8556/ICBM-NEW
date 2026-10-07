@@ -33,6 +33,8 @@ pytestmark = pytest.mark.integration
 
 MARKETPLACE = "smartstore"
 POLICY_TAB = f"{LOCAL}/#/settings?tab=smartstore&sub=policy"
+# The delivery half of the same policy revision lives in 배송 관리.
+SHIPPING_TAB = f"{LOCAL}/#/settings?tab=smartstore&sub=shipping"
 COMMON_TAB = f"{LOCAL}/#/settings?tab=common"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 TABLES = (
@@ -53,6 +55,8 @@ VALUES = {
     "asset_profile": "asset-profile-ui-1",
     "min_images": "1",
     "max_images": "10",
+}
+DELIVERY = {
     "base_fee_krw": "3000",
     "return_delivery_fee_krw": "3000",
     "exchange_delivery_fee_krw": "6000",
@@ -120,6 +124,18 @@ def _editor(account: str) -> str:
     return f".target-policy[data-account='{account}']"
 
 
+def _save(page: Page, account: str, revision: int) -> None:
+    page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
+    page.wait_for_selector(f"{_editor(account)} [data-policy-history='{revision}']", timeout=10_000)
+
+
+def _fill_delivery(page: Page, account: str, values: dict[str, str]) -> None:
+    editor = page.locator(_editor(account))
+    for name, value in values.items():
+        editor.locator(f"[data-policy-field='{name}']").fill(value)
+    editor.locator("[data-policy-field='physical_delivery']").check()
+
+
 def _fill(page: Page, account: str, values: dict[str, str]) -> None:
     editor = page.locator(_editor(account))
     for name, value in values.items():
@@ -129,7 +145,6 @@ def _fill(page: Page, account: str, values: dict[str, str]) -> None:
     )
     for name in (
         "requires_representative",
-        "physical_delivery",
         "duplicate_proof_required",
         "lookup_SELLER_CODE",
     ):
@@ -164,23 +179,28 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
                 shown = editor.locator(f"[data-policy-reference='{reference}']")
                 assert shown.locator("input, textarea, select").count() == 0
                 assert "서버 소유 리비전" in shown.inner_text()
+            # The delivery fields are not on this tab: they live in 배송 관리.
+            assert editor.locator("[data-policy-field='base_fee_krw']").count() == 0
             _fill(page, account, VALUES)
-            page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
-            page.wait_for_selector(
-                f"{_editor(account)} [data-policy-state='saved']", timeout=10_000
-            )
+            _save(page, account, 1)
+            assert "현재 리비전 #1" in _state(page, account)[2]
+        with _page(browser, client, SHIPPING_TAB, _editor(account), writes) as page:
+            editor = page.locator(_editor(account))
+            assert editor.get_attribute("data-policy-section") == "delivery"
+            assert editor.locator("[data-policy-field='fee_rate']").count() == 0
+            _fill_delivery(page, account, DELIVERY)
+            _save(page, account, 2)
             saved = _state(page, account)
-            assert saved[:2] == ("saved", "1")
-            assert "현재 리비전 #1" in saved[2]
-            assert writes == [
-                ("POST", f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions")
-            ]
+            assert saved[:2] == ("saved", "2")
+            assert "현재 리비전 #2" in saved[2]
+            revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
+            assert writes == [("POST", revisions), ("POST", revisions)]
             # A reload rebuilds the same state from the server, nothing kept in the page.
             page.reload()
             page.wait_for_selector(f"{_editor(account)} [data-policy-state='saved']")
             assert _state(page, account) == saved
-            field = page.locator(f"{_editor(account)} [data-policy-field='fee_rate']")
-            assert field.input_value() == "0.055"
+            field = page.locator(f"{_editor(account)} [data-policy-field='base_fee_krw']")
+            assert field.input_value() == "3000"
         stored = served.target_policies.policy(MARKETPLACE, account)
         current = stored.current
         assert current is not None and stored.inputs is not None
@@ -190,19 +210,24 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
     # A restart: a new process owns the same data directory and serves the same durable policy.
     with (
         _served(config) as client,
-        _page(browser, client, POLICY_TAB, _editor(account), []) as page,
+        _page(browser, client, SHIPPING_TAB, _editor(account), []) as page,
     ):
         page.wait_for_selector(f"{_editor(account)} [data-policy-state='saved']")
         assert _state(page, account) == saved
         restarted: Container = client.app.state.container  # type: ignore[attr-defined]
         target = restarted.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.policy_revision == current.policy_revision
+        # The delivery save kept the policy tab's values whole.
         assert target.pricing_context.fee_rate == "0.055"
         assert target.delivery_policy is not None
         assert target.delivery_policy.shipping_address_id == 200441202
         assert target.delivery_policy.return_address_id == 200401837
         assert target.delivery_policy.exchange_delivery_fee_krw == 6000
-    assert _counts(config) == dict.fromkeys(TABLES, 1)
+    assert _counts(config) == {
+        "registration_target_policies": 1,
+        "registration_target_policy_revisions": 2,
+        "registration_target_policy_current": 1,
+    }
 
 
 def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
@@ -273,13 +298,18 @@ def test_the_naver_address_book_becomes_named_dropdowns_and_the_choice_is_saved(
         served: Container = client.app.state.container  # type: ignore[attr-defined]
         account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
         with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            _fill(page, account, VALUES)
+            _save(page, account, 1)
+        with _page(browser, client, SHIPPING_TAB, _editor(account), writes) as page:
             editor = page.locator(_editor(account))
             # Without a CONNECT session the editor's own load is refused quietly: the number
             # fields stay, with a hint instead of an error.
             hint = editor.locator("[data-address-books='NOT_LOADED']")
             hint.filter(has_text="스마트스토어 연결 후").wait_for(timeout=10_000)
             assert editor.locator("select[data-address-select]").count() == 0
-            _fill(page, account, {**VALUES, "shipping_address_id": "", "return_address_id": "123"})
+            _fill_delivery(
+                page, account, {**DELIVERY, "shipping_address_id": "", "return_address_id": "123"}
+            )
             page.route(f"**{ADDRESS_BOOKS}", lambda route: route.fulfill(status=200, json=books))
             button = editor.locator("button[data-action='load-address-books']")
             for _ in range(2):  # a second load replaces the dropdowns, it never stacks them
@@ -301,14 +331,10 @@ def test_the_naver_address_book_becomes_named_dropdowns_and_the_choice_is_saved(
             ]
             assert editor.locator("[data-policy-field='return_address_id']").is_hidden()
             returns.select_option("200583581")
-            page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
-            page.wait_for_selector(
-                f"{_editor(account)} [data-policy-state='saved']", timeout=10_000
-            )
+            _save(page, account, 2)
         target = served.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.delivery_policy is not None
         assert target.delivery_policy.shipping_address_id == 200441202
         assert target.delivery_policy.return_address_id == 200583581
-    assert writes == [
-        ("POST", f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions")
-    ]
+    revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
+    assert writes == [("POST", revisions), ("POST", revisions)]

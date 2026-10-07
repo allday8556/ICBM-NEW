@@ -345,7 +345,18 @@ export const SUBTABS = {
     {
       key: 'shipping',
       label: '배송 관리',
-      blocks: [{ cards: [shippingOverrideCard('smartstore'), appliedValuesCard(['기본 배송비', '기본 출고일', '출고지'])] }],
+      // The delivery half of the same registration target policy (one revision, two tabs).
+      blocks: [
+        {
+          card: {
+            title: '배송 정책',
+            full: true,
+            help:
+              '등록할 때 스마트스토어에 보내는 배송·반품·교환 정보입니다. · 등록 정책과 같은 정책 리비전으로 저장되며, 저장하면 새 리비전이 만들어집니다. · 출고지와 반품·교환지는 연결된 계정의 네이버 주소록에서 고릅니다.',
+            items: [{ targetPolicy: 'smartstore', section: 'delivery' }],
+          },
+        },
+      ],
     },
     {
       key: 'product',

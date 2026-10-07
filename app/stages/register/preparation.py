@@ -138,6 +138,10 @@ OPTION_DIMENSIONS_INCONSISTENT: Final = "OPTION_DIMENSIONS_INCONSISTENT"
 OPTION_DIMENSIONS_EXCEEDED: Final = "OPTION_DIMENSIONS_EXCEEDED"
 OPTION_VALUES_NOT_DISTINCT: Final = "OPTION_VALUES_NOT_DISTINCT"
 POLICY_TEMPLATE_MISSING: Final = "POLICY_TEMPLATE_MISSING"
+# SmartStore CREATE requires the seller's A/S phone (afterServiceInfo). The account's
+# policy holds it; an earlier policy without it may still rely on the reviewed notice's
+# phone. With neither, the wire refuses the send, so the unit is never READY (2026-10-07).
+POLICY_AFTER_SERVICE_PHONE_MISSING: Final = "POLICY_AFTER_SERVICE_PHONE_MISSING"
 DETAIL_COMPOSITION_MISSING: Final = "DETAIL_COMPOSITION_MISSING"
 DETAIL_BODY_EMPTY: Final = "DETAIL_BODY_EMPTY"
 # The category-mapping and detail-composition authoring revisions are owner-held only when the
@@ -227,6 +231,7 @@ REASON_CODES: Final = frozenset(
         OPTION_DIMENSIONS_EXCEEDED,
         OPTION_VALUES_NOT_DISTINCT,
         POLICY_TEMPLATE_MISSING,
+        POLICY_AFTER_SERVICE_PHONE_MISSING,
         DETAIL_COMPOSITION_MISSING,
         DETAIL_BODY_EMPTY,
         AUTHORING_REVISIONS_UNOWNED,
@@ -1088,6 +1093,35 @@ def _template_reasons(target: TargetPolicy, metadata: CategoryMetadata | None) -
     ]
 
 
+# The marketplaces whose CREATE requires a seller A/S phone.
+AFTER_SERVICE_PHONE_MARKETPLACES: Final = frozenset({"smartstore"})
+# The phone token the SmartStore wire takes from a reviewed ``afterServiceDirector`` text; kept
+# identical to the adapter's (a contract test holds the two in agreement).
+AFTER_SERVICE_DIRECTOR_PHONE: Final = re.compile(
+    r"(?<![0-9])0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}(?![0-9])"
+)
+
+
+def _after_service_reasons(request: PreflightRequest, target: TargetPolicy) -> list[Reason]:
+    """The A/S phone the wire will send: the policy's first, else the reviewed notice's."""
+    if target.marketplace_key not in AFTER_SERVICE_PHONE_MARKETPLACES:
+        return []
+    if target.after_service_telephone and target.after_service_telephone.strip():
+        return []
+    notices = request.listing.notices
+    phone = notices.get("customerServicePhoneNumber")
+    if phone is not None and isinstance(phone.value, str) and phone.value.strip():
+        return []
+    director = notices.get("afterServiceDirector")
+    if (
+        director is not None
+        and isinstance(director.value, str)
+        and AFTER_SERVICE_DIRECTOR_PHONE.search(director.value)
+    ):
+        return []
+    return [Reason(POLICY_AFTER_SERVICE_PHONE_MISSING, _R, "policy:after_service_telephone")]
+
+
 def detail_plan(request: PreflightRequest, unit: ResolvedUnit) -> DetailPlan | None:
     """The unit's URL-free detail plan (B-DETAIL), or ``None`` when there is none to compose.
 
@@ -1517,6 +1551,7 @@ def evaluate(
         *_listing_reasons(request, metadata),
         *_option_reasons(request, unit, metadata),
         *_template_reasons(unit.target, metadata),
+        *_after_service_reasons(request, unit.target),
         *_detail_reasons(request, unit),
         *_authoring_reasons(request, unit),
         *_publication_reasons(unit.target, unit, plan),

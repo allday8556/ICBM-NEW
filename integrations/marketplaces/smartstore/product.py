@@ -1079,6 +1079,11 @@ def _policy_phone(payload: Mapping[str, Any]) -> object:
     return policy.get("after_service_telephone") if isinstance(policy, Mapping) else None
 
 
+# The phone token taken from a reviewed ``afterServiceDirector`` text. REGISTER's preflight holds
+# the same pattern (``AFTER_SERVICE_DIRECTOR_PHONE``) so READY never disagrees with this wire.
+DIRECTOR_PHONE: Final = re.compile(r"(?<![0-9])0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}(?![0-9])")
+
+
 def _after_service_info(fields: Mapping[str, Any], policy_phone: object) -> dict[str, str]:
     """Project the provider-required A/S object from the frozen reviewed notice.
 
@@ -1095,11 +1100,7 @@ def _after_service_info(fields: Mapping[str, Any], policy_phone: object) -> dict
         # ``afterServiceDirector`` rather than ``customerServicePhoneNumber``.  Extract only the
         # telephone token; the surrounding person/company text is not sent as a phone number.
         director = fields.get("afterServiceDirector")
-        match = (
-            re.search(r"(?<![0-9])0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}(?![0-9])", director)
-            if isinstance(director, str)
-            else None
-        )
+        match = DIRECTOR_PHONE.search(director) if isinstance(director, str) else None
         phone = None if match is None else match.group(0)
     if not isinstance(phone, str) or not phone.strip():
         raise WireContractError(

@@ -240,6 +240,12 @@ def reconcile(container: ContainerDep, intent_id: str) -> ActionResult:
     return container.register.reconcile(intent_id, correlation_id=_correlation())
 
 
+@router.post("/intents/{intent_id}/settle-rejection")
+def settle_rejection(container: ContainerDep, intent_id: str) -> ActionResult:
+    """An UNKNOWN the provider rejected with HTTP 400 becomes FAILED, on machine evidence only."""
+    return container.register.settle_rejection(intent_id, correlation_id=_correlation())
+
+
 @router.post("/intents/{intent_id}/verify")
 def verify(container: ContainerDep, intent_id: str) -> ActionResult:
     return container.register.verify(intent_id, correlation_id=_correlation())

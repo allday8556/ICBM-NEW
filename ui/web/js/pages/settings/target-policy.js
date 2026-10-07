@@ -112,7 +112,10 @@ function revisionLine(current) {
   return `현재 리비전 #${current.revision_no} · 지문 ${current.content_fingerprint.slice(0, 12)} · ${current.authored_by} · ${at}`;
 }
 
-function editor(view, onSaved) {
+// One policy revision, shown in two tabs: 'policy' (등록 정책) and 'delivery' (배송 관리). Every
+// field is built from the server's current inputs; a tab shows only its own rows, and a save
+// sends the other tab's fields unchanged, so the revision is always whole.
+function editor(view, onSaved, section) {
   const editable = view.editable === true;
   const inputs = view.inputs;
   const pricing = inputs?.pricing_context;
@@ -267,7 +270,7 @@ function editor(view, onSaved) {
     }
   };
   loadAddresses.addEventListener('click', () => fetchAddressBooks({ quiet: false }));
-  if (editable) fetchAddressBooks({ quiet: true });
+  if (editable && section === 'delivery') fetchAddressBooks({ quiet: true });
   sequence += 1;
   const templatesId = `target-policy-${sequence}`;
   const templates = h('textarea', { id: templatesId, rows: '3', spellcheck: 'false', 'data-policy-field': 'templates' });
@@ -282,7 +285,11 @@ function editor(view, onSaved) {
     ...check(`조회 키 ${key}`, (inputs?.duplicate_lookup_keys ?? []).includes(key), { ...on, name: `lookup_${key}` }),
   }));
 
-  const save = h('button', { type: 'button', class: 'btn blue', 'data-action': 'save-target-policy' }, '등록 정책 저장');
+  const save = h(
+    'button',
+    { type: 'button', class: 'btn blue', 'data-action': 'save-target-policy' },
+    section === 'delivery' ? '배송 정책 저장' : '등록 정책 저장',
+  );
   save.disabled = !editable;
   save.addEventListener('click', async () => {
     save.disabled = true;
@@ -346,17 +353,7 @@ function editor(view, onSaved) {
     }
   });
 
-  return h(
-    'div',
-    { class: 'target-policy', 'data-account': view.marketplace_account_id },
-    h('div', { class: 'kv' }, h('span', {}, '계정'), h('b', {}, view.marketplace_account_id)),
-    h(
-      'div',
-      { class: 'kv' },
-      h('span', {}, '저장 상태'),
-      h('span', { class: view.current ? 'chip good' : 'chip', 'data-policy-state': view.current ? 'saved' : 'none' }, revisionLine(view.current)),
-    ),
-    h('div', { class: 'kv' }, h('span', {}, '리비전 이력'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}개`)),
+  const policyRows = [
     taxonomy.row,
     serverOwned('카테고리 매핑 리비전', inputs?.category_mapping_revision, 'category_mapping_revision'),
     serverOwned('상세 구성 리비전', inputs?.detail_composition_revision, 'detail_composition_revision'),
@@ -375,35 +372,51 @@ function editor(view, onSaved) {
     maxImages.row,
     representative.row,
     providerIdentity.row,
+    afterServicePhone.row,
+    h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
+    proofRequired.row,
+    ...keys.map((key) => key.row),
+  ];
+  const deliveryRows = [
     physicalDelivery.row,
     deliveryType.row,
     deliveryAttribute.row,
+    deliveryCompany.row,
     deliveryFeeType.row,
     baseFee.row,
     deliveryPayType.row,
     returnPriority.row,
     returnFee.row,
     exchangeFee.row,
-    afterServicePhone.row,
-    deliveryCompany.row,
     h('div', { class: 'form-row' }, loadAddresses, addressList),
     shippingAddress.row,
     returnAddress.row,
-    h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
-    proofRequired.row,
-    ...keys.map((key) => key.row),
+  ];
+
+  return h(
+    'div',
+    { class: 'target-policy', 'data-account': view.marketplace_account_id, 'data-policy-section': section },
+    h('div', { class: 'kv' }, h('span', {}, '계정'), h('b', {}, view.marketplace_account_id)),
+    h(
+      'div',
+      { class: 'kv' },
+      h('span', {}, '저장 상태'),
+      h('span', { class: view.current ? 'chip good' : 'chip', 'data-policy-state': view.current ? 'saved' : 'none' }, revisionLine(view.current)),
+    ),
+    h('div', { class: 'kv' }, h('span', {}, '리비전 이력'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}개`)),
+    ...(section === 'delivery' ? deliveryRows : policyRows),
     h('div', { class: 'api-action-row' }, save),
   );
 }
 
-export function targetPolicyPanel(marketplaceKey) {
+export function targetPolicyPanel(marketplaceKey, section = 'policy') {
   const host = h('div', { class: 'truth-host', 'data-target-policy': marketplaceKey });
   const load = async () => {
     try {
       const view = await getJson(`${BASE}/${marketplaceKey}`);
       host.replaceChildren(
         ...(view.accounts.length
-          ? view.accounts.map((account) => editor(account, load))
+          ? view.accounts.map((account) => editor(account, load, section))
           : [h('div', { class: 'note' }, '연결 대상으로 확정된 계정이 없습니다 · 계정을 확정한 뒤 정책을 저장할 수 있습니다')]),
       );
     } catch (error) {

@@ -31,6 +31,8 @@ from app.stages.register.execution import CREATE_ENDPOINT_GROUP, decode_send_req
 from app.stages.register.model import (
     IntentState,
     ListingShape,
+    ReconcileResult,
+    ReconcileTrigger,
     RegistrationConflictError,
     ScopePauseReason,
 )
@@ -1663,3 +1665,59 @@ def test_an_applied_create_awaits_verification_until_the_server_deadline(
     assert overdue.read_state.reason_code == "REGISTER_READ_VERIFICATION_OVERDUE"
     # An applied listing is re-checked by its read-back, never registered again.
     assert overdue.read_state.action is RegisterAction.VERIFY
+
+
+def test_an_earlier_400_unknown_is_shown_apart_and_settled_through_the_api(
+    api: TestClient,
+    container: Container,
+    sources: Collections,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # B-STATUS: the Attempt's own cause stays visible beside the reconcile result, the server says
+    # when the 400 settlement is available (owner decision 6031580064), and an open Intent is
+    # never pushed out of the status window.
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(
+        container,
+        prep,
+        sender=FakeSender(
+            outcome=RemoteOutcome.UNKNOWN,
+            product_id=None,
+            error_class=ErrorClass.UNKNOWN,
+            error_code="SMARTSTORE_HTTP_400",
+        ),
+    )
+    with pytest.raises(AppError):
+        run.service.run(context(ready))
+    (entry,) = _status(api)["entries"]
+    assert entry["read_state"]["attempt_cause_code"] == "SMARTSTORE_HTTP_400"
+    assert entry["read_state"]["rejection_settleable"] is False
+    with container.registrations.transaction() as unit:
+        check = unit.start_reconcile_check(ready.intent_id, trigger=ReconcileTrigger.OPERATOR)
+        unit.finish_reconcile_check(
+            ready.intent_id,
+            check.seq,
+            result=ReconcileResult.ZERO,
+            candidate_count=0,
+            sanitized_evidence={"fixture": "zero"},
+            next_due_at=None,
+        )
+    windowless = container.register.registration_status(limit=0)
+    assert [e.intent_id for e in windowless.entries] == [ready.intent_id]
+    assert windowless.counts.recheck_required == 1
+    (entry,) = _status(api)["entries"]
+    read = entry["read_state"]
+    assert read["state"] == "RECHECK_REQUIRED"
+    assert (read["cause_code"], read["attempt_cause_code"]) == ("ZERO", "SMARTSTORE_HTTP_400")
+    assert read["rejection_settleable"] is True
+    settled = api.post(
+        f"/api/v1/register/intents/{ready.intent_id}/settle-rejection",
+        headers={"X-ICBM-Client": "pytest"},
+    )
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["intent_state"] == "FAILED"
+    (entry,) = _status(api)["entries"]
+    assert entry["read_state"]["state"] == "FAILED"
+    assert entry["read_state"]["rejection_settleable"] is False
+    assert container.register.registration_status(limit=0).entries == ()
