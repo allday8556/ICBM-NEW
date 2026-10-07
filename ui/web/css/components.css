@@ -840,6 +840,67 @@ body.has-registration-status .content {
   display: block;
 }
 
+/* B-EDITOR: the unit workspace — a jump bar over sections that all stay rendered. */
+.register-editor-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding: var(--space-2) 0;
+  background: var(--color-panel);
+}
+
+.register-editor-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+  scroll-margin-top: 48px;
+}
+
+.register-editor-section > h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  color: var(--color-text-strong);
+}
+
+.register-item-images {
+  margin-top: var(--space-3);
+}
+
+.item-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.item-image {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.item-image img {
+  width: 100%;
+  height: 112px;
+  object-fit: contain;
+  background: var(--color-input);
+  border-radius: var(--radius-md);
+}
+
+.item-image select {
+  width: 100%;
+  min-width: 0;
+}
+
 .register-status {
   margin-bottom: var(--space-5);
 }

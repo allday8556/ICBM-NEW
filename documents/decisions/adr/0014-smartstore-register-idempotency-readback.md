@@ -822,6 +822,25 @@ lookup unavailable, error or quota refusal         nothing is proven; the Intent
 
 - **`UNKNOWN → SENT`** (towards `CONFIRMED` or a read-back mismatch) happens only through the positive reconcile of §28.2, or through a read-back by an already known provider identity.
 - **`UNKNOWN → FAILED` after transmission** requires later machine proof of non-application: transmission-precluded evidence, or another explicitly reviewed machine proof (§10's table). A definitive provider rejection is recorded as `NOT_APPLIED_PROVEN` on its own Attempt directly; it never passes through `UNKNOWN`. Definitive means an endpoint-specific rejection whose reviewed official or measured contract explicitly proves non-application (architect ruling R2, Issue #89 `5861607665`); a status or provider error code alone never is. At the current SmartStore CREATE evidence no received response qualifies: an ordinary `4xx` after transport handoff keeps `remote_outcome` `UNKNOWN`, and `NOT_APPLIED_PROVEN` stays the whitelist of `ERRORS.md` §15.
+
+> **Amendment note (owner decision 2026-10-07, Issue #219 `6031580064`).** Two narrow changes to the
+> rule above, both SmartStore CREATE only:
+> - **A definitive rejection now exists.** An HTTP 400 that carries the API server's own error body
+>   — a non-gateway provider `code` — is a definitive rejection. The Attempt is recorded
+>   `NOT_APPLIED_PROVEN` with cause `FATAL` and code `SMARTSTORE_CREATE_REJECTED`, and it never
+>   passes through `UNKNOWN` (`classify.create_rejection`). Every other received response stays
+>   `UNKNOWN` as before: any other status, a gateway (`GW.*`) code, and a 400 without a provider
+>   code.
+> - **Earlier 400 `UNKNOWN`s may be settled.** An `UNKNOWN` whose latest Attempt finished with
+>   `SMARTSTORE_HTTP_400` — the classification before this decision — may be settled
+>   `NOT_APPLIED_PROVEN` by `POST /api/v1/register/intents/{id}/settle-rejection`, which needs two
+>   things:
+>   - a finished reconcile check after that Attempt that found zero candidates;
+>   - evidence kind `REVIEWED_MACHINE_PROOF`, whose rule is `create-http-400-rejection/v1`.
+>
+>   The facts are the Attempt's and the check's own rows, never an operator's word. A zero lookup
+>   alone still proves nothing (§17.2). Here it is only a precondition beside the provider's own
+>   rejection.
 - **No CREATE follows an unresolved `UNKNOWN`:**
   - `UNKNOWN` cannot open a CREATE Attempt; a CREATE requested for it is refused, for example as `REGISTER_UNKNOWN_REQUIRES_RECONCILE`;
   - the reconcile path cannot import or call the CREATE sender;

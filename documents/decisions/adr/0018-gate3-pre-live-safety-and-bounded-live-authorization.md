@@ -350,6 +350,10 @@ that slice's:
   documented sale status `DELETE` confirms the deletion; any other documented sale status shows
   the listing still there; a failed or unreadable read-back records nothing. Only a read-back that
   shows the listing still there resolves an `UNKNOWN` attempt and opens the way to a new grant.
+  *(Amendment note — owner decision 2026-10-07, Issue #219 `6031580064`: once the provider has
+  removed the product, its origin-product read answers HTTP 404 instead of a `DELETE` sale status.
+  After an `APPLIED_PROVEN` attempt that 404 confirms the deletion. After an `UNKNOWN` attempt it
+  still proves nothing, and every other failed read still records nothing.)*
 - **What it never does.** It never changes a registration's lifecycle, an Intent, an attempt, a
   read-back or any other evidence; it never deletes local data; and the mode, the grant and the
   brake each stay one layer — none of them authorizes a deletion by itself.

@@ -92,6 +92,7 @@ from app.stages.register.execution import (
     encode_send_request,
     frozen_unit_identity,
     queue_send_request,
+    settleable_rejection,
     target_ref,
 )
 from app.stages.register.model import (
@@ -336,10 +337,17 @@ class RegisterService:
 
         The batches holding the ``limit`` most recent Intents, each counted in full: a batch's four
         counts are its Intents, every one classified by the one partition. Nothing is stored.
+
+        B-STATUS: every batch that still holds an open Intent (``PREPARED``, ``SENT`` or
+        ``UNKNOWN``) is included whatever its age, so 등록중 and 재확인필요 are authoritative —
+        never pushed out of the window. Only 등록성공 and 등록실패 are windowed.
         """
         store = self._require_store()
         recent = store.intents(limit=limit)
-        batch_ids = list(dict.fromkeys(intent.registration_batch_id for intent in recent))
+        open_intents = store.open_intents()
+        batch_ids = list(
+            dict.fromkeys(intent.registration_batch_id for intent in (*recent, *open_intents))
+        )
         batches: list[RegistrationBatchStatus] = []
         entries: list[RegistrationStatusEntry] = []
         for batch_id in batch_ids:
@@ -430,6 +438,11 @@ class RegisterService:
                 label=verdict.label,
                 reason_code=verdict.reason_code,
                 cause_code=_cause(intent, attempts, checks, job),
+                attempt_cause_code=attempts[-1].error_code if attempts else None,
+                rejection_settleable=(
+                    intent.state is IntentState.UNKNOWN
+                    and settleable_rejection(attempts, checks) is not None
+                ),
                 action=action,
                 action_enabled=offered is not None and offered.enabled,
                 action_reason_code=None if offered is None else offered.reason_code,
@@ -755,6 +768,17 @@ class RegisterService:
         result = execution.reconcile(intent_id, correlation_id=correlation_id)
         return ActionResult(
             action=RegisterAction.RECONCILE,
+            intent_id=intent_id,
+            intent_state=result.intent_state,
+            verification_state=result.verification,
+        )
+
+    def settle_rejection(self, intent_id: str, *, correlation_id: str) -> ActionResult:
+        """Settle an UNKNOWN the provider rejected with HTTP 400 as not applied (machine proof)."""
+        execution = self._require_execution()
+        result = execution.settle_rejection(intent_id, correlation_id=correlation_id)
+        return ActionResult(
+            action=RegisterAction.SETTLE_REJECTION,
             intent_id=intent_id,
             intent_state=result.intent_state,
             verification_state=result.verification,

@@ -1,13 +1,17 @@
 """FastAPI application factory."""
 
 import logging
+import os
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from os import PathLike
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app import MILESTONE, __version__
 from app.capabilities.jobs.registry import JobDefinition
@@ -177,5 +181,25 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
 
     if config.ui_dir.is_dir():
-        app.mount("/", StaticFiles(directory=config.ui_dir, html=True), name="ui")
+        app.mount("/", RevalidatedStaticFiles(directory=config.ui_dir, html=True), name="ui")
     return app
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """The UI files, revalidated on every load.
+
+    Without a Cache-Control header a browser keeps an ES module by heuristic freshness, so an
+    updated screen kept running the old code until a forced reload. ``no-cache`` still answers
+    an unchanged file with 304 through its ETag.
+    """
+
+    def file_response(
+        self,
+        full_path: PathLike[str] | str,
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-cache"
+        return response

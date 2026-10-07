@@ -698,16 +698,42 @@ def test_the_retained_fields_are_exactly_the_endpoint_profile() -> None:
 # ---------------------------------------------------------------- outcome classification
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422, 429, 500, 502, 503])
+@pytest.mark.parametrize("status", [401, 403, 404, 409, 422, 429, 500, 502, 503])
 def test_every_response_after_handoff_is_unknown_never_proven_not_applied(status: int) -> None:
     # Architect ruling R2 (Issue #89 `5861607665`): an ordinary provider 4xx received after
     # transport handoff is not proof of non-application, and neither is a 5xx (ADR-0014 §17.2).
+    # The one exception is the provider's own 400 validation rejection (owner decision
+    # `6031580064`), pinned by the next test.
     provider = Provider(httpx.Response(status, json={"code": "BAD_REQUEST", "message": "no"}))
     handoff = _send(provider)
     assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
     assert handoff.marketplace_product_id is None
     assert handoff.response_status == status
     assert handoff.details["transmission_phase"] == "RESPONSE_RECEIVED"
+
+
+def test_a_provider_400_rejection_proves_the_create_was_not_applied() -> None:
+    # Owner decision 2026-10-07 (Issue #219 `6031580064`, ADR-0014 §28.3 amendment): the API
+    # server's own 400 error body is a definitive rejection, recorded on its own Attempt.
+    body = {"code": "BAD_REQUEST", "message": "no", "invalidInputs": []}
+    handoff = _send(Provider(httpx.Response(400, json=body)))
+    assert handoff.remote_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert handoff.error_class is ErrorClass.FATAL
+    assert handoff.error_code == "SMARTSTORE_CREATE_REJECTED"
+    assert handoff.response_status == 400
+    assert handoff.details["transmission_phase"] == "RESPONSE_RECEIVED"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"code": "GW.AUTHN", "message": "gateway"}, {"message": "no code"}, None],
+    ids=["gateway-code", "no-provider-code", "no-json-body"],
+)
+def test_a_400_without_the_providers_own_error_code_stays_unknown(body: object) -> None:
+    answer = httpx.Response(400, json=body) if body is not None else httpx.Response(400)
+    handoff = _send(Provider(answer))
+    assert handoff.remote_outcome is RemoteOutcome.UNKNOWN
+    assert handoff.error_code != "SMARTSTORE_CREATE_REJECTED"
 
 
 def test_create_failure_keeps_only_bounded_provider_diagnostics() -> None:

@@ -20,6 +20,7 @@ import { emptyState, errorState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 import { KIND_LABEL } from '../components/review-counts.js';
 import { READ_STATE_TONE } from '../components/registration-status.js';
+import { itemImagesEditor } from '../components/item-images.js';
 
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
@@ -90,6 +91,7 @@ const ACTION_LABEL = {
   RECONCILE: '등록확인 재시도',
   VERIFY: '읽기 확인',
   RESUME_SCOPE: '전송 재개',
+  SETTLE_REJECTION: '거절 확인 · 미등록 처리',
 };
 
 const OPERATOR = 'operator';
@@ -112,6 +114,15 @@ const REASON_COPY = {
   REGISTER_READ_NOT_APPLIED: '마켓에 반영되지 않은 것이 확인되었습니다.',
   REGISTER_READ_PRE_SEND_FAILED: '전송 전에 거부되어 아무 것도 보내지 않았습니다.',
   REGISTER_READ_STATE_UNCLASSIFIED: '서버가 이 등록 상태를 분류하지 못했습니다. 결함으로 기록되었습니다.',
+  // B-STATUS: the latest Attempt's cause and the reconcile result, shown apart.
+  SMARTSTORE_HTTP_400: '네이버가 400으로 거절했습니다.',
+  SMARTSTORE_CREATE_REJECTED: '네이버가 등록 요청을 거절했습니다 (등록되지 않음).',
+  ZERO: '등록 확인: 네이버에서 찾지 못함',
+  MULTIPLE: '등록 확인: 후보가 여러 개',
+  LOOKUP_UNAVAILABLE: '등록 확인: 조회 불가',
+  ERROR: '등록 확인: 조회 오류',
+  REGISTER_REJECTION_NOT_PROVEN: '마지막 시도가 네이버의 400 거절이 아니라 미등록으로 처리할 수 없습니다.',
+  REGISTER_REJECTION_LOOKUP_MISSING: '거절 뒤 등록확인 재시도에서 "찾지 못함"이 한 번 있어야 미등록으로 처리할 수 있습니다.',
   REGISTER_INTENT_ABSENT: '아직 등록 요청이 만들어지지 않았습니다.',
   REGISTER_INTENT_NOT_SENDABLE: '지금 상태에서는 서버가 전송을 허용하지 않습니다.',
   REGISTER_JOB_ALREADY_QUEUED: '이미 대기 중인 전송 작업이 있습니다.',
@@ -248,10 +259,11 @@ function fixesPanel(found, ctx) {
       ctx.navigate('settings');
       return;
     }
-    const target = row.draft_id
+    const unit = row.draft_id
       ? document.querySelector(`.register-unit[data-draft='${CSS.escape(row.draft_id)}']`)
       : null;
-    target?.scrollIntoView({ block: 'start' });
+    const section = row.surface === 'REGISTER_IMAGES' ? unit?.querySelector("[data-editor-section='images']") : null;
+    (section ?? unit)?.scrollIntoView({ block: 'start' });
   };
   return h(
     'div',
@@ -755,7 +767,12 @@ function call(unit, action, intentId) {
       actor: OPERATOR,
     });
   }
-  const path = { CREATE_ENQUEUE: 'create', RECONCILE: 'reconcile', VERIFY: 'verify' }[action];
+  const path = {
+    CREATE_ENQUEUE: 'create',
+    RECONCILE: 'reconcile',
+    VERIFY: 'verify',
+    SETTLE_REJECTION: 'settle-rejection',
+  }[action];
   return sendJson('POST', `/api/v1/register/intents/${intentId}/${path}`, {});
 }
 
@@ -797,6 +814,23 @@ function statusRow(entry, onDone) {
         ACTION_LABEL[action] ?? action,
       )
     : null;
+  // B-STATUS: only when the server says the UNKNOWN is a provider 400 rejection it can settle.
+  const settle = read?.rejection_settleable
+    ? h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn',
+          'data-action': 'SETTLE_REJECTION',
+          'data-intent': entry.intent_id,
+          onclick: () => runStatus(entry, 'SETTLE_REJECTION', settle, onDone),
+        },
+        ACTION_LABEL.SETTLE_REJECTION,
+      )
+    : null;
+  const causes = [read?.attempt_cause_code, read?.cause_code]
+    .filter((code, index, all) => code && all.indexOf(code) === index)
+    .map((code) => h('span', { class: 'mini', 'data-cause': code }, REASON_COPY[code] ?? code));
   return h(
     'tr',
     { 'data-intent': entry.intent_id, 'data-read-row': read?.state ?? 'UNCLASSIFIED' },
@@ -809,12 +843,18 @@ function statusRow(entry, onDone) {
       read
         ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? read.reason_code)
         : reason(entry.read_state_problem),
-      read?.cause_code ? h('span', { class: 'mini' }, read.cause_code) : null,
+      ...causes,
     ),
     h('td', {}, read?.requested_at ? dotDateTime(read.requested_at) : '—'),
     h('td', {}, read?.last_confirmed_at ? dotDateTime(read.last_confirmed_at) : '—'),
     h('td', {}, String(read?.confirmation_attempts ?? 0)),
-    h('td', {}, button ?? '—', button && !read.action_enabled ? reason(read.action_reason_code) : null),
+    h(
+      'td',
+      {},
+      button ?? (settle ? null : '—'),
+      button && !read.action_enabled ? reason(read.action_reason_code) : null,
+      settle,
+    ),
   );
 }
 
@@ -972,9 +1012,66 @@ function repinBlock(unit, onDone) {
   return h('div', { class: 'register-repin', 'data-repin': unit.draft_id }, button);
 }
 
+// B-EDITOR (Issue #127): one unit is a workspace over its owners, never a second product record.
+// Four sections — 상품 정보, 이미지, 가격, 등록 준비 — each act through their own owner's command, and
+// every section stays rendered: the bar only moves to one, it hides nothing (Gate-3 selectors).
+const EDITOR_SECTIONS = [
+  ['info', '상품 정보'],
+  ['images', '이미지'],
+  ['price', '가격'],
+  ['ready', '등록 준비'],
+];
+
+function editorSection(unit, key, label, ...children) {
+  return h(
+    'div',
+    { class: 'register-editor-section', 'data-editor-section': key, 'data-draft': unit.draft_id },
+    h('h3', { class: 'panel-subtitle' }, label),
+    ...children,
+  );
+}
+
+function editorNav(panel) {
+  return h(
+    'div',
+    { class: 'register-editor-nav', role: 'navigation', 'aria-label': '편집 구역' },
+    ...EDITOR_SECTIONS.map(([key, label]) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn',
+          'data-editor-go': key,
+          onclick: () => panel.querySelector(`[data-editor-section='${key}']`)?.scrollIntoView({ block: 'start' }),
+        },
+        label,
+      ),
+    ),
+  );
+}
+
+function imagesSection(unit, onDone) {
+  // Images are chosen before a Snapshot freezes them; afterwards they are only shown.
+  const editable = !unit.snapshot && !unit.intent;
+  return editorSection(
+    unit,
+    'images',
+    '이미지',
+    editable ? null : h('span', { class: 'mini' }, '스냅샷이 고정되어 이미지는 보기만 합니다.'),
+    ...unit.items.map((item) =>
+      h(
+        'div',
+        { class: 'register-item-images', 'data-item': item.item_id },
+        h('b', {}, `품목 ${item.ordinal} · ${item.item_id}`),
+        itemImagesEditor(item.item_id, { editable, onChanged: onDone }),
+      ),
+    ),
+  );
+}
+
 function unitPanel(unit, onDone, labels) {
   const intent = unit.intent;
-  return h(
+  const panel = h(
     'section',
     {
       class: 'panel register-unit',
@@ -997,27 +1094,47 @@ function unitPanel(unit, onDone, labels) {
     kv('초안 리비전', String(unit.draft_revision)),
     unit.snapshot ? kv('리스팅 식별자', unit.snapshot.listing_identity) : null,
     unit.snapshot ? kv('스냅샷 지문', unit.snapshot.preflight_fingerprint.slice(0, 16)) : null,
-    previewBlock(unit),
     intent ? kv('검증 상태', VERIFICATION_LABEL[intent.verification_state] ?? intent.verification_state) : null,
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
     unit.conflicting_intents.length ? kv('충돌 중인 요청', String(unit.conflicting_intents.length)) : null,
-    unit.category ? categoryBlock(unit.category) : null,
-    unit.snapshot ? null : authoringForm(unit, onDone),
-    unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
-    preflightBlock(unit, labels),
-    repinBlock(unit, onDone),
-    unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
-    table(
-      ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],
-      unit.items.map(itemRow),
-    ),
-    intent && intent.attempts.length
-      ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], intent.attempts.map(attemptRow))
-      : null,
-    scopeBlock(unit.scope),
-    h('div', { class: 'supplier-actions' }, ...unit.actions.map((action) => actionCell(unit, action, onDone))),
   );
+  panel.append(
+    editorNav(panel),
+    editorSection(
+      unit,
+      'info',
+      '상품 정보',
+      unit.category ? categoryBlock(unit.category) : null,
+      unit.snapshot ? null : authoringForm(unit, onDone),
+      unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
+    ),
+    imagesSection(unit, onDone),
+    editorSection(
+      unit,
+      'price',
+      '가격',
+      repinBlock(unit, onDone),
+      unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
+      table(
+        ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],
+        unit.items.map(itemRow),
+      ),
+    ),
+    editorSection(
+      unit,
+      'ready',
+      '등록 준비',
+      preflightBlock(unit, labels),
+      previewBlock(unit),
+      intent && intent.attempts.length
+        ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], intent.attempts.map(attemptRow))
+        : null,
+      scopeBlock(unit.scope),
+      h('div', { class: 'supplier-actions' }, ...unit.actions.map((action) => actionCell(unit, action, onDone))),
+    ),
+  );
+  return panel;
 }
 
 // Gate 2 G2-C (ADR-0016 §7): one account's REGISTER ReviewItems — execution states and each

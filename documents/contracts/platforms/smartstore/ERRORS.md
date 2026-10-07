@@ -957,6 +957,12 @@ The following may support `NOT_APPLIED_PROVEN` when the stated boundary is posit
 
 A proxy/tunnel topology requires equivalent evidence about the provider-bound application request, not merely a generic client exception name.
 
+> **Amendment note (owner decision 2026-10-07, Issue #219 `6031580064`; ADR-0014 §28.3).** One
+> received response now proves non-application: a `SMARTSTORE_PRODUCT_CREATE_V2` HTTP 400 that
+> carries the API server's own non-gateway error `code`. The CREATE was validated and refused, so
+> it is `NOT_APPLIED_PROVEN` (`SMARTSTORE_CREATE_REJECTED`, `FATAL`). It applies to no other
+> endpoint, status or gateway code.
+
 ### 15.2 Explicit non-whitelist / UNKNOWN cases
 
 The following default to:

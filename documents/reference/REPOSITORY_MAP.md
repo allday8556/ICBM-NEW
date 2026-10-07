@@ -118,6 +118,6 @@ payload or external call.
 | `tests/integration/` | 110 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 103 | unit tests by runtime owner |
-| `ui/` | 55 | operator clients: the served web client and the capture extension |
+| `ui/` | 56 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 46 | the served web client |
+| `ui/web/` | 47 | the served web client |

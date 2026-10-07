@@ -211,7 +211,7 @@ function renderItem(item, state) {
   if (item.contractReview) {
     return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
   }
-  if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy);
+  if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);

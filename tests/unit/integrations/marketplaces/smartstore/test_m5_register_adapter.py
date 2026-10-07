@@ -1152,3 +1152,10 @@ def test_the_after_service_phone_is_the_accounts_and_never_guessed() -> None:
     with pytest.raises(product.WireContractError) as refused:
         product.project(bare)
     assert refused.value.code == "WIRE_AFTER_SERVICE_PHONE_MISSING"
+
+
+def test_preflight_and_the_wire_take_the_same_after_service_phone_token() -> None:
+    """READY never disagrees with the wire: preflight's A/S phone pattern is the wire's own."""
+    from app.stages.register.preparation import AFTER_SERVICE_DIRECTOR_PHONE
+
+    assert AFTER_SERVICE_DIRECTOR_PHONE.pattern == product.DIRECTOR_PHONE.pattern

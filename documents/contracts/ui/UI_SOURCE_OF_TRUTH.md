@@ -173,6 +173,23 @@ authorization.
 > preview (ADR-0014 §22 amendment note): the prototype's category name path and shipping fee have
 > no Snapshot source and are not shown; provider image URLs are never shown.
 
+> **B-EDITOR (Issue #127 direction; 2026-10-07).** The kept "product detail editor" is the
+> registration unit's workspace in Registration Management. It has four sections — 상품 정보, 이미지,
+> 가격, 등록 준비 — and a jump bar.
+> - Every section stays rendered; the bar hides nothing, so the Gate-3 selectors stay visible.
+> - Each section acts only through its own owner: the preparation routes, the image owner's
+>   selection and auto-selection routes, and the B-PRICE1 re-pin.
+> - It is not a second product record. An image section shows only the Item's CONFIRMED source
+>   images of its bound revision, and every image is decided explicitly.
+
+> **B-STATUS (2026-10-07).** The registration status card and panel stay the ADR-0014 §28.5
+> partition.
+> - Every batch that still holds an open Intent is included whatever its age, so 등록중 and
+>   재확인필요 are never pushed out of the window. Only 등록성공 and 등록실패 are windowed.
+> - A row shows the latest Attempt's own cause apart from the reconcile result.
+> - A row offers "거절 확인 · 미등록 처리" only when the server says the UNKNOWN is a settleable
+>   provider 400 rejection (Issue #219 `6031580064`).
+
 M5 does **not** require a production ComplianceGate owner, a `COMPLIANCE` `ReviewItem` producer or a
 `COMPLIANCE` dashboard count. `COMPLIANCE` stays `NOT_WIRED` — never an authoritative zero — until a
 separately authorized ComplianceGate owner is implemented and accepted (ADR-0018 §5, `documents/roadmap/ROADMAP.md`

@@ -118,6 +118,7 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "OPTION_DIMENSIONS_EXCEEDED": (_A.OPTIONS,),
     "OPTION_VALUES_NOT_DISTINCT": (_A.OPTIONS,),
     "POLICY_TEMPLATE_MISSING": (_A.POLICY,),
+    "POLICY_AFTER_SERVICE_PHONE_MISSING": (_A.POLICY,),
     "DETAIL_COMPOSITION_MISSING": (_A.DETAIL,),
     "DETAIL_BODY_EMPTY": (_A.DETAIL,),
     # The category-mapping and detail-composition authoring revisions, together (§27.1).

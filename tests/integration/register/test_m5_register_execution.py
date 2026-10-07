@@ -929,7 +929,7 @@ def test_the_adopted_create_seam_never_confirms_from_a_response_body(
     "answer",
     [
         httpx.Response(500, json={"code": "INTERNAL_SERVER_ERROR"}),
-        httpx.Response(400, json={"code": "BAD_REQUEST", "message": "no"}),
+        httpx.Response(409, json={"code": "CONFLICT", "message": "no"}),
         httpx.Response(308, headers={"location": "https://elsewhere.invalid"}),
         httpx.Response(200, json={}),
         httpx.Response(200, json={"originProductNo": 9900112233}),
@@ -977,6 +977,91 @@ def test_the_adopted_create_seam_never_resends_an_unknown(
         run.service.run(context(ready, attempt_no=2))
     assert refused.value.code == "REGISTER_UNKNOWN_REQUIRES_RECONCILE"
     assert len(seen) == 1
+
+
+def test_a_provider_400_rejection_fails_the_intent_without_any_resend(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Owner decision `6031580064` (ADR-0014 §28.3 amendment): the provider's own 400 validation
+    # rejection is NOT_APPLIED_PROVEN on its own Attempt — the Intent is FAILED, never UNKNOWN,
+    # and the FATAL cause is never retried automatically.
+    ready = prepare(container, sources, store, account, prep)
+    body = {"code": "BAD_REQUEST", "message": "배송 택배사 코드는 필수입니다.", "invalidInputs": []}
+    sender, seen = _adopted_sender(httpx.Response(400, json=body))
+    run = execution(container, prep, sender=sender)
+    with pytest.raises(AttemptFailed) as failed:
+        run.service.run(context(ready))
+    assert failed.value.code == "SMARTSTORE_CREATE_REJECTED"
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.FAILED
+    assert intent.marketplace_product_id is None
+    assert len(seen) == 1
+
+
+def test_an_earlier_400_unknown_is_settled_only_with_a_zero_lookup_after_it(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    # Owner decision `6031580064`: an UNKNOWN that ended with the provider's HTTP 400 (the
+    # pre-decision classification) is settled NOT_APPLIED_PROVEN on machine evidence only — the
+    # Attempt's own 400 and a zero-candidate reconcile check after it. Never on a word alone.
+    ready = prepare(container, sources, store, account, prep)
+    sender, seen = _adopted_sender(httpx.Response(400, json={"message": "no provider code"}))
+    lookup = FakeLookup()
+    run = execution(container, prep, sender=sender, lookup=lookup)
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
+    # Without a zero lookup after the rejection, nothing settles.
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.settle_rejection(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_REJECTION_LOOKUP_MISSING"
+    lookup.is_available = True
+    lookup.found = complete()
+    with pytest.raises(ExecutionRefused):
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    settled = run.service.settle_rejection(ready.intent_id, correlation_id=CID)
+    assert settled.action == "REJECTION_SETTLED_NOT_APPLIED"
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.FAILED
+    (attempt,) = store.attempts(ready.intent_id)
+    assert attempt.resolved_outcome is RemoteOutcome.NOT_APPLIED_PROVEN
+    assert attempt.resolution_evidence_kind is ResolutionEvidence.REVIEWED_MACHINE_PROOF
+    # Settled once; a second settlement is refused, and nothing was ever resent.
+    with pytest.raises(ExecutionRefused) as again:
+        run.service.settle_rejection(ready.intent_id, correlation_id=CID)
+    assert again.value.code == "REGISTER_NOT_UNKNOWN"
+    assert len(seen) == 1
+
+
+def test_an_unknown_that_was_not_a_400_rejection_is_never_settled_as_one(
+    container: Container,
+    sources: Collections,
+    store: RegistrationStore,
+    account: str,
+    prep: Preparation,
+) -> None:
+    ready = prepare(container, sources, store, account, prep)
+    sender, _seen = _adopted_sender(httpx.ReadTimeout("no response"))
+    lookup = FakeLookup(is_available=True, found=complete())
+    run = execution(container, prep, sender=sender, lookup=lookup)
+    with pytest.raises(AttemptFailed):
+        run.service.run(context(ready))
+    with pytest.raises(ExecutionRefused):
+        run.service.reconcile(ready.intent_id, correlation_id=CID)
+    with pytest.raises(ExecutionRefused) as refused:
+        run.service.settle_rejection(ready.intent_id, correlation_id=CID)
+    assert refused.value.code == "REGISTER_REJECTION_NOT_PROVEN"
+    intent = store.intent(ready.intent_id)
+    assert intent is not None and intent.state is IntentState.UNKNOWN
 
 
 def test_the_adopted_create_seam_keeps_its_evidence_sanitized(
