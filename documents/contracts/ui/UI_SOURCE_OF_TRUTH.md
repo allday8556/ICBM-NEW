@@ -227,9 +227,31 @@ adjacent panels so either block remains readable within the viewport:
   number is shown, and the screen decides no status and changes no fact;
 - the run's outcome and the revision's facts status stay two labelled axes, and `NO_REVISION` is
   shown as its own answer with no facts status;
-- the recent-runs list offers `전체 / 원천 확인 필요 / 실패 / 기록할 식별자 없음`. The server applies the
-  filter before it orders and bounds the list, reports how many runs the filter selects in all, and
-  pages on with `더 보기`; a page is never shown as the whole list.
+- the recent-runs list is filtered by v29's five state cards — `전체 수집 / 진행 중 / 기록됨 / 실패 /
+  원천 확인 필요` — and by `기록할 식별자 없음`, which has no v29 card and sits beside the list's count.
+  Each card shows the server's own total for its filter. The server applies the filter before it
+  orders and bounds the list, reports how many runs the filter selects in all, and pages on with
+  `더 보기`; a page is never shown as the whole list.
+
+## Collection Management — the v29 수집 layout (owner decision 2026-10-07)
+
+The 수집 view reproduces v29's composition (ADR-0003, "major layout composition and density"): the
+one-row toolbar, the five state cards, the `수집 작업 목록` beside `수집 미리보기`, then the focused
+run and its 수집 사실 as panels below.
+
+- **A v29 slot the system has no source for keeps its place and reads `데이터 없음`** (owner decision
+  2026-10-07, option 가): the cards' `전일 대비`, the list's `후보수 / 저장수 / 가격확인`, the preview's
+  `AI 학습 노트`, and the preview's representative image until the Product DB holds an Item bound to
+  the run's revision. Nothing is estimated, counted in the page or filled from demo content.
+- v29 controls with no contract yet keep their place and only explain themselves when pressed
+  (`markInert`), sending nothing: the collection-option chips (`상세페이지 수집 / 옵션/색상 수집 /
+  이미지 다운로드`), `↻ 재검증` and `✨ AI 추출 보정`.
+- `수집 미리보기` shows the focused run's revision as stored: the name, the supplier, `도매가 / 배송비 /
+  최저판매가 / 옵션 수` from their fields (a field's recorded status when it has no confirmed value),
+  the included detail images, the run's outcome and facts status, and the price/option/image field
+  statuses. Its image is the bound Item's own image read
+  (`GET /api/v1/products/items/{item_id}/images/{sha256}`).
+- The toolbar's chip is CONNECT's own verdict for the chosen supplier, as before.
 
 ## Navigation and recovery (A-UX3, owner decision 2026-10-04)
 
@@ -250,7 +272,8 @@ Small additions beside the approved boards, in their existing visual language:
 ## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
 
 - Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per
-  line, at most 50. Under the box the screen counts `입력 n줄 · 중복 n · 잘못된 URL n · 수집 예정 n` and
+  line, at most 50; the box is v29's one-line field and grows with the lines pasted into it. Under
+  the box the screen counts `입력 n줄 · 중복 n · 잘못된 URL n · 수집 예정 n` and
   lists the lines it cannot read as an http(s) URL; those are never sent, and a repeated URL is sent
   once. Each planned URL is sent on its own through the one submit call, one after another, and its
   answer — a run or the server's refusal — is shown beside it; refused lines stay in the box. One
