@@ -53,8 +53,12 @@ SCREENS = [
     "analytics",
     "settings",
 ]
-# The screens whose empty verdict rests on review counts (ADR-0016 §7, Gate 2 G2-C).
-REVIEW_COUNTED = frozenset({"dashboard", "soldout"})
+# The screens whose empty verdict rests on review counts (ADR-0016 §7, Gate 2 G2-C). The dashboard
+# counts kinds whose producer does not exist yet, so on a fresh database it is READY. 품절 counts
+# STOCK only, whose two producers are wired since M6-B (ADR-0023 §4): it is EMPTY exactly when that
+# count is an authoritative zero, and READY while it is not yet a count.
+REVIEW_COUNTED = frozenset({"dashboard"})
+STOCK_SCREEN = "soldout"
 CLIENT = {"X-ICBM-Client": "m0-acceptance"}
 MAX_ATTEMPTS = 4
 EXPECTED_DELAYS_S = [1.0, 2.0, 4.0]
@@ -311,21 +315,35 @@ def step_contracts(ev: Evidence, server: Server, label: str) -> None:
         meta = server.http.get(f"/api/v1/screens/{screen}").json()["meta"]
         screens[screen] = {"state": meta["state"], "empty_reason": meta["empty_reason"]}
     # Gate 2 G2-C (ADR-0016 §7): the dashboard and 품절 may be EMPTY only on authoritative review
-    # zeros. Kinds whose producer does not exist yet are NOT_WIRED, so on a fresh database both
-    # are READY, and none of those kinds carries a count: never a fake 0.
+    # zeros. Kinds whose producer does not exist yet are NOT_WIRED, so on a fresh database the
+    # dashboard is READY, and none of those kinds carries a count: never a fake 0. STOCK is wired
+    # (M6-B): 품절 is EMPTY on its authoritative zero, or READY with no count before its
+    # producers' first full pass.
     counted = server.http.get("/api/v1/screens/dashboard").json()["review_counts"]
     stock = server.http.get("/api/v1/screens/soldout").json()["stock_review"]
+    stock_expected = "EMPTY" if stock["state"] == "CURRENT" else "READY"
     honest = all(
         view["open"] is None for view in counted.values() if view["state"] != "CURRENT"
-    ) and (stock["state"], stock["open"]) == ("NOT_WIRED", None)
+    ) and (
+        (stock["state"], stock["open"]) == ("CURRENT", 0)
+        or (stock["state"] != "CURRENT" and stock["open"] is None)
+    )
     index = server.http.get("/")
     csp = index.headers.get("content-security-policy", "")
     ev.check(
-        f"{label}: every screen contract at its zero-data verdict (eight EMPTY; dashboard and"
-        " 품절 READY on non-authoritative review counts); UI shell served with self-only CSP",
+        f"{label}: every screen contract at its zero-data verdict (eight EMPTY; dashboard READY"
+        " on non-authoritative review counts; 품절 EMPTY only on an authoritative STOCK zero);"
+        " UI shell served with self-only CSP",
         len(screens) == 10
         and all(
-            s["state"] == ("READY" if name in REVIEW_COUNTED else "EMPTY")
+            s["state"]
+            == (
+                "READY"
+                if name in REVIEW_COUNTED
+                else stock_expected
+                if name == STOCK_SCREEN
+                else "EMPTY"
+            )
             for name, s in screens.items()
         )
         and honest
@@ -333,6 +351,7 @@ def step_contracts(ev: Evidence, server: Server, label: str) -> None:
         and "default-src 'self'" in csp,
         screens=screens,
         review_counts={kind: [view["state"], view["open"]] for kind, view in counted.items()},
+        stock_review=[stock["state"], stock["open"]],
         marketplace_identities=[m["key"] for m in shell["marketplaces"]],
         execution_mode=shell["execution_mode"],
     )
