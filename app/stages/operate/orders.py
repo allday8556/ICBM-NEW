@@ -96,6 +96,7 @@ MAX_PAGES: Final = 50
 DETAIL_BATCH: Final = 300
 UNREADABLE: Final = "OPERATE_ORDER_UNREADABLE"
 PAGES_EXCEEDED: Final = "OPERATE_ORDER_PAGES_EXCEEDED"
+DETAIL_MISSING: Final = "OPERATE_ORDER_DETAIL_MISSING"
 ACTOR: Final = "operate.orders"
 LIST_LIMIT: Final = 200
 
@@ -543,11 +544,15 @@ class OrderSyncService:
             # A failed local write records nothing of the window: the cursor does not move.
             logger.warning("operate.order_ingest_failed", exc_info=True)
             raise _Stop(FAILED, exc.code if isinstance(exc, AppError) else UNREADABLE) from exc
+        totals[0] += len(changes)
+        totals[1] += len(facts)
+        # A listed change whose product order the detail read did not return was not recorded,
+        # so the window was not read completely: the pass ends and the cursor stays (GPT audit,
+        # PR #250). What was read is kept; the next pass reads the window again.
         missing = set(ids) - {fact.product_order_id for fact in facts}
         if missing:
             logger.warning("operate.order_details_missing", extra={"count": len(missing)})
-        totals[0] += len(changes)
-        totals[1] += len(facts)
+            raise _Stop(FAILED, DETAIL_MISSING)
 
     def _read(self, call: Callable[[], _T]) -> _T:
         try:

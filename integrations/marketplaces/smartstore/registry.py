@@ -220,16 +220,16 @@ def _text_member(value: object, key: str, *, required: bool) -> bool:
 def order_changes_succeeded(status: int, body: object) -> bool:
     """HTTP 200 and the documented 변경 상품 주문 내역 (Commerce API 2.90.1).
 
-    ``data`` is not marked required, so an answer without it is an empty window. When present it
-    carries the required integer ``count`` and the required ``lastChangeStatuses`` array, each
-    entry naming its product order and its change; a ``more`` continuation, when present, names
-    both ``moreFrom`` and ``moreSequence``.
+    ``data`` must carry the required integer ``count`` and the required ``lastChangeStatuses``
+    array, each entry naming its product order and its change; a ``more`` continuation, when
+    present, names both ``moreFrom`` and ``moreSequence``. ``data`` is not badged required on the
+    envelope, but an answer without it proves no window was read, so it is never taken as an
+    empty one (GPT audit, PR #250): only a documented page moves the cursor. If the provider is
+    later proven to omit ``data`` for an empty window, that evidence changes this predicate.
     """
     if status != 200 or not isinstance(body, dict):
         return False
     data = body.get("data")
-    if data is None:
-        return True
     if not isinstance(data, dict):
         return False
     count = data.get("count")

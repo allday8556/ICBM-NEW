@@ -254,11 +254,18 @@ def test_the_adapter_reads_what_survived_into_typed_values() -> None:
     assert page.more_sequence == "0001" and page.more_from is not None
 
 
-def test_an_empty_window_answers_without_data() -> None:
-    page = SmartStoreOrderSource(_caller({"traceId": "x"}), _bearer).changes(  # type: ignore[arg-type]
+def test_an_empty_window_is_a_documented_page_and_an_answer_without_data_is_refused() -> None:
+    empty = {"traceId": "x", "data": {"count": 0, "lastChangeStatuses": []}}
+    page = SmartStoreOrderSource(_caller(empty), _bearer).changes(  # type: ignore[arg-type]
         since=datetime(2026, 10, 7, tzinfo=UTC), until=datetime(2026, 10, 8, tzinfo=UTC)
     )
     assert page.changes == () and page.more_from is None
+    # GPT audit (PR #250): an answer that names no window proves nothing was read.
+    with pytest.raises(SmartStoreCallError) as refused:
+        SmartStoreOrderSource(_caller({"traceId": "x"}), _bearer).changes(  # type: ignore[arg-type]
+            since=datetime(2026, 10, 7, tzinfo=UTC), until=datetime(2026, 10, 8, tzinfo=UTC)
+        )
+    assert refused.value.code == "SMARTSTORE_SUCCESS_PREDICATE_FAILED"
 
 
 def test_no_committed_session_calls_nothing() -> None:
@@ -292,7 +299,7 @@ def test_an_undocumented_change_answer_fails_its_predicate(body: object) -> None
 def test_an_undocumented_detail_answer_fails_its_predicate(body: object) -> None:
     assert order_details_succeeded(200, body) is False
     assert order_details_succeeded(200, {"data": []}) is True
-    assert order_changes_succeeded(200, {"traceId": "x"}) is True
+    assert order_changes_succeeded(200, {"traceId": "x"}) is False
 
 
 def test_a_window_is_sent_in_kst() -> None:

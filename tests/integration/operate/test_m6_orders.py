@@ -334,6 +334,30 @@ def test_a_failed_read_proves_nothing_and_moves_no_cursor(
         assert len(source.windows) == 1
 
 
+def test_a_listed_order_the_detail_read_omits_keeps_the_cursor(
+    container: Container, registration: str
+) -> None:
+    """GPT audit (PR #250): only a window read and recorded completely moves the cursor."""
+    source = FakeSource(
+        pages=[ChangePage((_change(container), _change(container, "po-ghost", minutes=4)))],
+        facts={"po-1": _facts()},
+    )
+    service = _service(container, source)
+    run = _sync(service)
+    assert (run.outcome, run.error_code, run.synced_until) == (  # type: ignore[attr-defined]
+        FAILED,
+        "OPERATE_ORDER_DETAIL_MISSING",
+        None,
+    )
+    # What was read is kept; nothing counts as connected until a window is complete.
+    assert service.order_count() == 1
+    assert service.capability() == NOT_CONNECTED
+
+
+def test_the_first_pass_looks_back_the_configured_seven_days(config: AppConfig) -> None:
+    assert config.operate_order_initial_lookback_s == 7 * 86400
+
+
 def test_without_a_session_nothing_is_read(container: Container, registration: str) -> None:
     source = FakeSource(is_available=False)
     run = _sync(_service(container, source))
