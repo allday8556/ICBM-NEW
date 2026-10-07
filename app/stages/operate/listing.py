@@ -324,9 +324,9 @@ class ListingSyncService:
 
     def _targets(self, *, include_inactive: bool) -> list[RegistrationRecord]:
         found: list[RegistrationRecord] = []
-        for record in self._registrations.registrations(limit=1000):
-            if record.marketplace_key != self._marketplace_key:
-                continue
+        # Every registration of the marketplace, never a capped window: a pass that skipped one
+        # would still report completion (GPT audit, PR #247).
+        for record in self._registrations.marketplace_registrations(self._marketplace_key):
             active = record.lifecycle_state is RegistrationLifecycle.ACTIVE
             deleted = any(d.deleted for d in self._registrations.deletions(record.registration_id))
             if include_inactive or (active and not deleted):

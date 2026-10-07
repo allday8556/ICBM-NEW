@@ -9,6 +9,8 @@ registration ICBM itself deleted is never a target; and one run at a time.
 
 import sqlite3
 from collections.abc import Mapping
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -192,15 +194,40 @@ def test_a_rate_limit_ends_the_run_and_no_session_reads_nothing(
 
 
 def test_a_registration_icbm_deleted_is_never_a_target(
-    container: Container, registration: str
+    container: Container, registration: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with sqlite3.connect(container.config.database_path) as raw:
-        assert raw.execute("SELECT count(*) FROM registration_deletions").fetchone() == (0,)
     reader = FakeReader()
     reader.answer = _listing()
     service = _service(container, reader)
     # Without a deletion it is a target.
     assert _sync(service).targets == 1
+    # Once ICBM's own deletion is proven (ADR-0018 §3.5), it is not: its absence is ICBM's act.
+    deleted = SimpleNamespace(deleted=True, open=True)
+    monkeypatch.setattr(
+        container.registrations,
+        "deletions",
+        lambda registration_id: (deleted,) if registration_id == registration else (),
+    )
+    reader.reads.clear()
+    run = _sync(service)
+    assert (run.targets, reader.reads) == (0, [])
+    (state,) = service.overview().listings
+    assert state.deleted_by_icbm is True
+    record = container.registrations.registration(registration)
+    assert record is not None and record.lifecycle_state is RegistrationLifecycle.ACTIVE
+
+
+def test_every_registration_is_a_target_whatever_the_count(
+    container: Container, registration: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # GPT audit (PR #247): no capped window; the enumeration is the store's uncapped read.
+    original = container.registrations.marketplace_registrations
+    (record,) = original(MARKET)
+    many = tuple(replace(record, registration_id=f"r-{n}") for n in range(1200))
+    monkeypatch.setattr(container.registrations, "marketplace_registrations", lambda key: many)
+    monkeypatch.setattr(container.registrations, "deletions", lambda registration_id: ())
+    service = _service(container, FakeReader())
+    assert len(service._targets(include_inactive=False)) == 1200
 
 
 def test_observations_are_append_only(container: Container, registration: str) -> None:
