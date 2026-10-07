@@ -1366,6 +1366,18 @@ td.no-data {
   overscroll-behavior: contain;
 }
 
+/* Room below the workspace for the fixed registration status card (ADR-0014 §28.5): the detail's
+   last rows can always be scrolled above it, so the card covers nothing. */
+.db-workspace {
+  padding-bottom: 140px;
+}
+
+.kpi strong.no-data {
+  color: var(--color-text-faint);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-regular);
+}
+
 .db-detail-title {
   justify-content: flex-start;
   align-items: center;
