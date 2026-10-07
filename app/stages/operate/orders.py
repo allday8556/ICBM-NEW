@@ -485,10 +485,14 @@ class OrderSyncService:
             try:
                 if not self._source.available():
                     return self._finish(run_id, SESSION_UNAVAILABLE, None, totals)
-                registrations = self._registrations.marketplace_registrations(self._marketplace_key)
                 window_from = start
                 for _ in range(MAX_WINDOWS):
                     window_to = min(window_from + WINDOW, now)
+                    # Read fresh for every window: a registration confirmed while the pass runs
+                    # resolves the orders of the windows after it (GPT audit, PR #250).
+                    registrations = self._registrations.marketplace_registrations(
+                        self._marketplace_key
+                    )
                     self._window(
                         run_id, window_from, window_to, registrations, totals, correlation_id
                     )
@@ -605,6 +609,8 @@ class OrderSyncService:
                 updated_at=now,
             )
             session.add(row)
+        elif row.resolution == UNMATCHED:
+            self._settle_unmatched(row, fact, registrations, now)
         latest = max((change.changed_at for change in changes), default=None)
         row.order_id = fact.order_id
         row.status = fact.status
@@ -676,6 +682,29 @@ class OrderSyncService:
                     )
                 )
                 session.flush()
+
+    def _settle_unmatched(
+        self,
+        row: ProductOrder,
+        fact: ProductOrderFacts,
+        registrations: Sequence[RegistrationRecord],
+        now: datetime,
+    ) -> None:
+        """``UNMATCHED`` records only that no registration was found yet: an order can be read
+        before ICBM confirms the registration it belongs to. A later read that finds it by the
+        same provider identities records the resolution once; every other resolution is
+        immutable (trigger)."""
+        resolved = self._resolve(fact, registrations)
+        if resolved.resolution == UNMATCHED:
+            return
+        row.resolution = resolved.resolution
+        row.registration_id = resolved.registration_id
+        row.registration_item_key = resolved.registration_item_key
+        row.item_id = resolved.item_id
+        row.source_binding_id = resolved.source_binding_id
+        row.supplier_key = resolved.supplier_key
+        row.source_product_id = resolved.source_product_id
+        row.resolved_at = now
 
     def _resolve(
         self, fact: ProductOrderFacts, registrations: Sequence[RegistrationRecord]

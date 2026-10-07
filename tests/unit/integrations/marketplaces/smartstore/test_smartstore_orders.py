@@ -289,6 +289,16 @@ def test_no_committed_session_calls_nothing() -> None:
         {"data": {"count": 1, "lastChangeStatuses": [{"productOrderId": "po-1"}]}},
         {"data": {"count": 0, "lastChangeStatuses": [], "more": {"moreFrom": "x"}}},
         {"data": []},
+        # A count that contradicts the page (GPT audit, PR #250).
+        {"data": {"count": 3, "lastChangeStatuses": []}},
+        {
+            "data": {
+                "count": 0,
+                "lastChangeStatuses": [
+                    {"productOrderId": "po-1", "lastChangedDate": "2026-10-07T09:31:00.000+09:00"}
+                ],
+            }
+        },
     ),
 )
 def test_an_undocumented_change_answer_fails_its_predicate(body: object) -> None:

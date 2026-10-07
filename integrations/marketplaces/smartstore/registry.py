@@ -239,6 +239,9 @@ def order_changes_succeeded(status: int, body: object) -> bool:
         isinstance(count, int)
         and not isinstance(count, bool)
         and isinstance(statuses, list)
+        # The count never contradicts the page (GPT audit, PR #250): a last page lists exactly
+        # ``count`` changes, and a page that continues lists no more than ``count``.
+        and (count == len(statuses) if more is None else count >= len(statuses))
         and all(
             _text_member(entry, "productOrderId", required=True)
             and _text_member(entry, "lastChangedDate", required=True)
