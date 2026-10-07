@@ -74,23 +74,14 @@ class ProductOrderFacts:
     ordered_at: datetime | None = None
     paid_at: datetime | None = None
     decided_at: datetime | None = None
-    shipping_due_at: datetime | None = None
     channel_product_id: str | None = None
     original_product_id: str | None = None
     option_manage_code: str | None = None
     seller_product_code: str | None = None
-    product_name: str | None = None
-    product_option: str | None = None
     quantity: int | None = None
     unit_price: int | None = None
     total_payment_amount: int | None = None
     delivery_method: str | None = None
-    delivery_attribute_type: str | None = None
-    delivery_status: str | None = None
-    delivery_company: str | None = None
-    tracking_number: str | None = None
-    sent_at: datetime | None = None
-    delivered_at: datetime | None = None
     shipping: ShippingRecord = field(default_factory=ShippingRecord, repr=False)
 
 

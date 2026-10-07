@@ -75,7 +75,8 @@ function row(order) {
     'tr',
     { 'data-order': order.product_order_id },
     h('td', {}, order.paid_at ? dotDateTime(order.paid_at) : order.ordered_at ? dotDateTime(order.ordered_at) : '—', h('span', { class: 'mini' }, order.product_order_id)),
-    h('td', {}, order.product_name ?? '—', order.product_option ? h('span', { class: 'mini' }, order.product_option) : null),
+    // The name is ICBM's own registration's; the provider's product name is not kept (ADR-0023 §7).
+    h('td', {}, order.product_label ?? `원상품 ${order.original_product_id ?? '—'}`, order.option_manage_code ? h('span', { class: 'mini' }, `옵션 ${order.option_manage_code}`) : null),
     h(
       'td',
       {},

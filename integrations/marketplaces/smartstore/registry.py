@@ -460,9 +460,11 @@ _ORDER_CHANGE_FIELDS = frozenset(
 # ADR-0023 §7, the order allow-list. The caller first narrows each entry to its ``order``,
 # ``productOrder`` (without ``takingAddress``) and ``delivery`` objects, so a claim's addresses
 # and every other member never reach retention. Of what remains, only these leaves survive:
-# the identities, status codes, timestamps, product and option identities, quantity and amounts,
-# and the shipping record (recipient name, phones, address, memo) that OPERATE keeps encrypted.
-# Never the orderer's id, name or phone, a payment means, a coupon or a commission.
+# the order and product-order ids, the status codes and their timestamps, the product and option
+# identities, quantity and amounts, the delivery method, and the shipping record (recipient
+# name, phones, address, memo) that OPERATE keeps encrypted. Never the orderer's id, name or
+# phone, a payment means, a coupon, a commission, a product name or option text, or a carrier,
+# tracking number or delivery state (fulfillment is M6.5; GPT audit, PR #250).
 _ORDER_DETAIL_FIELDS = frozenset(
     {
         # order
@@ -475,20 +477,15 @@ _ORDER_DETAIL_FIELDS = frozenset(
         "claimType",
         "claimStatus",
         "placeOrderStatus",
-        "placeOrderDate",
         "decisionDate",
-        "shippingDueDate",
         "productId",
         "originalProductId",
         "optionManageCode",
         "sellerProductCode",
-        "productName",
-        "productOption",
         "quantity",
         "unitPrice",
         "totalPaymentAmount",
         "expectedDeliveryMethod",
-        "deliveryAttributeType",
         "shippingMemo",
         # productOrder.shippingAddress (kept encrypted by OPERATE)
         "name",
@@ -499,11 +496,6 @@ _ORDER_DETAIL_FIELDS = frozenset(
         "zipCode",
         # delivery
         "deliveryMethod",
-        "deliveryStatus",
-        "deliveryCompany",
-        "trackingNumber",
-        "sendDate",
-        "deliveredDate",
     }
 )
 
@@ -855,7 +847,7 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # 2026-10-07): GET /v1/seller/addressbooks-for-page, retaining number, label and type only.
     "settings-addressbook-r1": "e3fc720afa9b1693defd29ba16574a96d6c0671b3962c75f2df6c66c36e6a8d4",
     # M6-C adopts the two read-only order reads and the ADR-0023 §7 order allow-list.
-    "m6-orders-r1": "f76d1f41b594d1b6d23a298cf8fcafbc75aae843b7dad64a3e19aaf831296955",
+    "m6-orders-r1": "9663d82d248cd480bb8113f7cd935d8cf91edeb9e44df0392a470fc2d383d058",
 }
 
 

@@ -181,26 +181,15 @@ class SmartStoreOrderSource:
             ordered_at=_time(order.get("orderDate"), "orderDate"),
             paid_at=_time(order.get("paymentDate"), "paymentDate"),
             decided_at=_time(product.get("decisionDate"), "decisionDate"),
-            shipping_due_at=_time(product.get("shippingDueDate"), "shippingDueDate"),
             channel_product_id=_text(product.get("productId"), "productId"),
             original_product_id=_text(product.get("originalProductId"), "originalProductId"),
             option_manage_code=_text(product.get("optionManageCode"), "optionManageCode"),
             seller_product_code=_text(product.get("sellerProductCode"), "sellerProductCode"),
-            product_name=_text(product.get("productName"), "productName"),
-            product_option=_text(product.get("productOption"), "productOption"),
             quantity=_int(product.get("quantity"), "quantity"),
             unit_price=_int(product.get("unitPrice"), "unitPrice"),
             total_payment_amount=_int(product.get("totalPaymentAmount"), "totalPaymentAmount"),
             delivery_method=_text(delivery.get("deliveryMethod"), "deliveryMethod")
             or _text(product.get("expectedDeliveryMethod"), "expectedDeliveryMethod"),
-            delivery_attribute_type=_text(
-                product.get("deliveryAttributeType"), "deliveryAttributeType"
-            ),
-            delivery_status=_text(delivery.get("deliveryStatus"), "deliveryStatus"),
-            delivery_company=_text(delivery.get("deliveryCompany"), "deliveryCompany"),
-            tracking_number=_text(delivery.get("trackingNumber"), "trackingNumber"),
-            sent_at=_time(delivery.get("sendDate"), "sendDate"),
-            delivered_at=_time(delivery.get("deliveredDate"), "deliveredDate"),
             shipping=ShippingRecord(
                 recipient_name=_text(address.get("name"), "name"),
                 phone1=_text(address.get("tel1"), "tel1"),

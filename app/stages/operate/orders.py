@@ -29,7 +29,7 @@ import os
 import re
 import threading
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -216,12 +216,14 @@ class OrderView:
     place_order_status: str | None
     ordered_at: datetime | None
     paid_at: datetime | None
-    product_name: str | None
-    product_option: str | None
+    # The name of the registration the order resolved to (ICBM's frozen Snapshot), never the
+    # provider's product name, which is not retained (ADR-0023 §7).
+    product_label: str | None
+    original_product_id: str | None
+    option_manage_code: str | None
     quantity: int | None
     total_payment_amount: int | None
     delivery_method: str | None
-    delivery_status: str | None
     resolution: str
     registration_id: str | None
     registration_item_key: str | None
@@ -261,7 +263,7 @@ def _run_view(row: OrderSyncRun) -> OrderRunView:
     )
 
 
-def _order_view(row: ProductOrder) -> OrderView:
+def _order_view(row: ProductOrder, product_label: str | None) -> OrderView:
     return OrderView(
         product_order_id=row.product_order_id,
         order_id=row.order_id,
@@ -271,12 +273,12 @@ def _order_view(row: ProductOrder) -> OrderView:
         place_order_status=row.place_order_status,
         ordered_at=row.ordered_at,
         paid_at=row.paid_at,
-        product_name=row.product_name,
-        product_option=row.product_option,
+        product_label=product_label,
+        original_product_id=row.original_product_id,
+        option_manage_code=row.option_manage_code,
         quantity=row.quantity,
         total_payment_amount=row.total_payment_amount,
         delivery_method=row.delivery_method,
-        delivery_status=row.delivery_status,
         resolution=row.resolution,
         registration_id=row.registration_id,
         registration_item_key=row.registration_item_key,
@@ -380,7 +382,7 @@ class OrderSyncService:
                 last_run=None if last is None else _run_view(last),
                 synced_until=self._cursor(session),
                 total=total if capability == CONNECTED else None,
-                orders=tuple(_order_view(row) for row in rows),
+                orders=tuple(_order_view(row, self._label(row.registration_id)) for row in rows),
             )
 
     def shipping(self, product_order_id: str, *, actor: str, correlation_id: str) -> ShippingRecord:
@@ -609,23 +611,14 @@ class OrderSyncService:
         row.ordered_at = fact.ordered_at
         row.paid_at = fact.paid_at
         row.decided_at = fact.decided_at
-        row.shipping_due_at = fact.shipping_due_at
         row.channel_product_id = fact.channel_product_id
         row.original_product_id = fact.original_product_id
         row.option_manage_code = fact.option_manage_code
         row.seller_product_code = fact.seller_product_code
-        row.product_name = fact.product_name
-        row.product_option = fact.product_option
         row.quantity = fact.quantity
         row.unit_price = fact.unit_price
         row.total_payment_amount = fact.total_payment_amount
         row.delivery_method = fact.delivery_method
-        row.delivery_attribute_type = fact.delivery_attribute_type
-        row.delivery_status = fact.delivery_status
-        row.delivery_company = fact.delivery_company
-        row.tracking_number = fact.tracking_number
-        row.sent_at = fact.sent_at
-        row.delivered_at = fact.delivered_at
         if latest is not None and (row.last_changed_at is None or latest > row.last_changed_at):
             row.last_changed_at = latest
         if fact.status in TERMINAL_STATUSES and row.terminal_at is None:
@@ -732,6 +725,18 @@ class OrderSyncService:
         )
 
     # ------------------------------------------------------------------ internals
+
+    def _label(self, registration_id: str | None) -> str | None:
+        if registration_id is None:
+            return None
+        record = self._registrations.registration(registration_id)
+        payload = (
+            None
+            if record is None
+            else self._registrations.snapshot_payload(record.registration_snapshot_id)
+        )
+        name = payload.get("name") if isinstance(payload, Mapping) else None
+        return str(name["value"]) if isinstance(name, Mapping) and name.get("value") else None
 
     @staticmethod
     def _cursor(session: Session) -> datetime | None:

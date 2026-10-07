@@ -211,6 +211,13 @@ def test_the_detail_read_keeps_only_the_order_allow_list() -> None:
         "37.0",
         "saleCommission",
         "generalPaymentAmount",
+        # Not in ADR-0023 §7: names, carrier, tracking and delivery state (GPT audit, PR #250).
+        "테스트 상품",
+        "색상: 빨강",
+        "CJGLS",
+        "trackingNumber",
+        "DELIVERING",
+        "sendDate",
     ):
         assert never not in kept, never
     (entry,) = response.retained["data"]
@@ -234,11 +241,7 @@ def test_the_adapter_reads_what_survived_into_typed_values() -> None:
     assert (facts.original_product_id, facts.channel_product_id) == ("22222", "11111")
     assert (facts.option_manage_code, facts.seller_product_code) == ("opt-1", "code-1")
     assert (facts.quantity, facts.unit_price, facts.total_payment_amount) == (2, 12500, 25000)
-    assert (facts.delivery_method, facts.delivery_status, facts.tracking_number) == (
-        "DELIVERY",
-        "DELIVERING",
-        "123",
-    )
+    assert facts.delivery_method == "DELIVERY"
     assert facts.paid_at == datetime(2026, 10, 7, 0, 30, tzinfo=UTC)
     assert (facts.shipping.recipient_name, facts.shipping.memo) == ("가나다", "문 앞")
     assert "가나다" not in repr(facts)
