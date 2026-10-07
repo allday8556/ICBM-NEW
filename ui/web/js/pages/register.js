@@ -1289,8 +1289,9 @@ function registerCards(screen, status, readiness) {
   const cards = [
     ['waiting', '◷', '등록 대기', screen.registration_candidates_total, 'pending'],
     ['registered', '✓', '등록 완료', screen.registrations_total, 'products'],
-    ['failed', '×', status?.labels?.FAILED ?? '등록실패', status?.counts?.failed, 'failed'],
-    ['recheck', '↻', status?.labels?.RECHECK_REQUIRED ?? '재확인필요', status?.counts?.recheck_required, 'failed'],
+    // The status's own labels; without a status read the cards keep v29's titles.
+    ['failed', '×', status?.labels?.FAILED ?? '실패', status?.counts?.failed, 'failed'],
+    ['recheck', '↻', status?.labels?.RECHECK_REQUIRED ?? '재시도 필요', status?.counts?.recheck_required, 'failed'],
     ['category', '◇', '카테고리 확인', category?.units, 'pending'],
   ];
   return h(

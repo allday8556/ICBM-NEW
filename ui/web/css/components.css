@@ -1195,13 +1195,15 @@ td.no-data {
 
 /* v29's own bands: a landscape screen narrower than 1280px stacks the list and its side panel;
    a portrait screen wider than 900px keeps them side by side. */
-@media (max-width: 1280px) and (orientation: landscape), (max-width: 900px) {
+@media (max-width: 1280px) and (orientation: landscape), (max-width: 1199px) {
   .section-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (orientation: portrait) and (min-width: 901px) {
+/* v29 keeps the list and its side panel together from 901px in portrait; the work list here has
+   more columns than v29's, so it does so from 1200px, where the list still fits its half. */
+@media (orientation: portrait) and (min-width: 1200px) {
   .section-grid {
     grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.75fr);
     gap: var(--space-3);
