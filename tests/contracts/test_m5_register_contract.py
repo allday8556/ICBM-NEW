@@ -83,6 +83,8 @@ M5_ADOPTED = frozenset(
         "SMARTSTORE_NOTICE_TYPE_READ",
         # Owner decision 2026-10-04: official leaf-category catalog read.
         "SMARTSTORE_CATEGORY_LIST",
+        # Owner directive 2026-10-07: the seller address-book read for the Settings delivery policy.
+        "SMARTSTORE_ADDRESSBOOK_LIST",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -93,7 +95,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m5-category-list-r1"
+M5_MAPPING_REVISION = "settings-addressbook-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:

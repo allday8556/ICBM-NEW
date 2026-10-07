@@ -54,6 +54,11 @@ ACTOR = "operator:test"
 MARGIN_S = 600
 TOKEN_PATH = "/external/v1/oauth2/token"
 ACCOUNT_PATH = "/external/v1/seller/account"
+ADDRESSBOOK_PATH = "/external/v1/seller/addressbooks-for-page"
+ADDRESS_BOOKS = [
+    {"addressBookNo": 7, "name": "출고지", "addressType": "RELEASE", "baseAddress": "street 1"},
+    {"addressBookNo": 3, "name": "반품지", "addressType": "REFUND_OR_EXCHANGE"},
+]
 CONNECTION = (
     "SELECT credential_generation_hwm, session_generation_hwm, provider_account_uid,"
     " provider_account_id, bound_credential_generation, bound_session_generation, bound_by"
@@ -86,6 +91,11 @@ class Provider:
             self.issued.append(token)
             body = {"access_token": token, "expires_in": 10800, "token_type": "Bearer"}
             return httpx.Response(200, json=body)
+        if request.url.path == ADDRESSBOOK_PATH:
+            self.calls.append(f"ADDRESSBOOK:{request.url.params['page']}")
+            self.reads.append((request.headers["authorization"], None))
+            books = ADDRESS_BOOKS if request.url.params["page"] == "1" else []
+            return httpx.Response(200, json={"addressBooks": books})
         assert request.url.path == ACCOUNT_PATH
         self.calls.append("ACCOUNT")
         payload = self._sessions.load(KEY)
@@ -556,7 +566,33 @@ def test_the_production_wiring_supplies_the_identity_and_the_revision(p: Contain
     # value-level packet, the SEARCH slice when it adopted POST /v1/products/search, and the
     # DELETE slice (ADR-0018 §3.5) when it adopted the origin-product delete, and notice coverage
     # S0 when it adopted the two official 상품정보제공고시 reads.
-    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m5-category-list-r1"
+    assert (
+        p.permission_attestation.context(KEY).endpoint_mapping_revision == "settings-addressbook-r1"
+    )
+
+
+def test_the_address_book_is_read_with_the_committed_bearer_and_keeps_no_address(
+    p: Container, provider: Provider
+) -> None:
+    with pytest.raises(PolicyBlockedError) as refused:
+        p.smartstore_addressbook.address_books()
+    assert refused.value.code == "SMARTSTORE_SESSION_UNAVAILABLE"
+    assert provider.calls == []
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+    p.smartstore.connect()
+    p.smartstore.bind_account(UID_A, actor=ACTOR)
+    reads = len(provider.reads)
+    entries = p.smartstore_addressbook.address_books()
+    assert [(e.address_book_no, e.name, e.address_type) for e in entries] == [
+        (3, "반품지", "REFUND_OR_EXCHANGE"),
+        (7, "출고지", "RELEASE"),
+    ]
+    # A read under the committed session: no token is issued for it.
+    assert provider.calls.count("TOKEN") == 1
+    assert provider.calls[-2:] == ["ADDRESSBOOK:1", "ADDRESSBOOK:2"]
+    assert [header for header, _ in provider.reads[reads:]] == ["Bearer fixture-token-1"] * 2
+    assert "street" not in repr(entries)
 
 
 @pytest.mark.parametrize(

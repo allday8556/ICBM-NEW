@@ -255,6 +255,25 @@ def sync_smartstore_categories(container: ContainerDep) -> dict[str, Any]:
     ).model_dump(mode="json")
 
 
+@router.get(f"{SMARTSTORE}/addressbooks")
+def smartstore_address_books(container: ContainerDep) -> dict[str, Any]:
+    """The seller's SmartStore address book (출고지 / 반품·교환지) for the Settings delivery policy.
+
+    A provider read with the committed CONNECT session, never a mutation: only each entry's
+    number, label and type are returned, and nothing is stored.
+    """
+    return {
+        "address_books": [
+            {
+                "address_book_no": entry.address_book_no,
+                "name": entry.name,
+                "address_type": entry.address_type,
+            }
+            for entry in container.smartstore_addressbook.address_books()
+        ]
+    }
+
+
 @router.post(f"{SMARTSTORE}/bind")
 def bind_smartstore_account(
     body: SmartStoreBindRequest, container: ContainerDep

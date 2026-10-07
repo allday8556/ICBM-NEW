@@ -155,6 +155,7 @@ from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore import registry as smartstore_registry
+from integrations.marketplaces.smartstore.addressbook import SmartStoreAddressBookSource
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
@@ -239,6 +240,8 @@ class Container:
     target_policies: TargetPolicyService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
+    # Settings delivery policy: the seller's address book, read on request and never stored.
+    smartstore_addressbook: SmartStoreAddressBookSource
     registration_preflight: RegistrationPreflightService
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
@@ -935,6 +938,9 @@ def build_container(
         target_policies=target_policies,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
+        smartstore_addressbook=SmartStoreAddressBookSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
         registration_preflight=registration_preflight,
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,

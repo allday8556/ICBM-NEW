@@ -321,8 +321,8 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
     # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
     # the DELETE slice (ADR-0018 §3.5), the leaf-category read and the two notice reads
-    # (notice coverage S0)
-    assert len(adopted) == 11, adopted
+    # (notice coverage S0), and the address-book read (Settings delivery policy)
+    assert len(adopted) == 12, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
