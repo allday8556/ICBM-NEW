@@ -267,6 +267,7 @@
 
 .common-image-body {
   display: grid;
+  min-width: 0;
   gap: var(--space-3);
   padding: var(--space-4);
 }
@@ -289,6 +290,9 @@
 
 .common-image-sha {
   display: block;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-all;
   overflow-wrap: anywhere;
   color: var(--color-text-sub);
   font-size: var(--fs-2xs);

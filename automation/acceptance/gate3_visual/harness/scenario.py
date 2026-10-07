@@ -127,10 +127,11 @@ def _record(
     *,
     sequence: int,
     shipping_needs_review: bool,
+    stock_needs_review: bool = False,
     common_sha: str | None = None,
 ) -> Any:
-    """Append one durably RECORDED revision through COLLECT's own stores (as the M5 helper does),
-    optionally with its shipping fact REVIEW_REQUIRED."""
+    """Append one durable revision through COLLECT's stores, optionally with shipping or stock
+    facts at REVIEW_REQUIRED."""
     found = fields(synthetic.BASE_FACTS)
     if shipping_needs_review:
         evidence = (
@@ -141,6 +142,15 @@ def _record(
             ),
         )
         found["shipping"] = FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+    if stock_needs_review:
+        evidence = (
+            Evidence(
+                kind=EvidenceKind.DOM_TEXT,
+                locator=".m4-stock",
+                status=FieldStatus.REVIEW_REQUIRED,
+            ),
+        )
+        found["stock"] = FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
     stored = owners.source_assets.put(png(f"{product}-{sequence}"))
     source_url = synthetic.SOURCE_URL.format(product=product)
     correlation = f"{CID}-{product}"
@@ -415,6 +425,7 @@ def populate(container: Container, api: TestClient) -> Populated:
         "g3-visual-product-2",
         sequence=1,
         shipping_needs_review=True,
+        stock_needs_review=True,
         common_sha=common_sha,
     )
     container.materializer.materialize_run(review_run)
