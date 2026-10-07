@@ -224,7 +224,8 @@ COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
 ATOMIC_SKUS = "0044_source_proven_atomic_skus"
 ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
 SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
-SCHEMA_HEAD = SEQUENTIAL_BULK
+ATOMIC_SKU_ECONOMICS = "0047_atomic_sku_economics"
+SCHEMA_HEAD = ATOMIC_SKU_ECONOMICS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -252,6 +253,7 @@ AFTER_M5 = (
     ATOMIC_SKUS,
     ATOMIC_SKU_ITEMS,
     SEQUENTIAL_BULK,
+    ATOMIC_SKU_ECONOMICS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

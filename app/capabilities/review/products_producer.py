@@ -52,6 +52,7 @@ from app.stages.products.images import (
 )
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing_service import (
+    ATOMIC_SKU_BINDING_MISSING,
     BINDING_COMPOSITION_INVALID,
     BINDING_MEMBER_NOT_CONFIRMED,
     BINDING_MISSING,
@@ -60,6 +61,7 @@ from app.stages.products.pricing_service import (
     MEMBERSHIP_REVISION_NOT_CURRENT,
 )
 from app.stages.products.readiness import (
+    ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE,
     GROUP_CANDIDATE_PENDING,
     SOURCE_CORE_FIELD_ABSENT,
     SOURCE_CORE_FIELD_REVIEW_REQUIRED,
@@ -90,12 +92,20 @@ MAPPING: Final[Mapping[str, tuple[ReviewKind, str]]] = {
     MEMBERSHIP_REVISION_NOT_CURRENT: (ReviewKind.SOURCE_CHANGE, _MEMBERSHIP),
     GROUP_CANDIDATE_PENDING: (ReviewKind.SOURCE_CHANGE, _CANDIDATES),
     BINDING_MISSING: (ReviewKind.SOURCE_CHANGE, _BINDING),
+    ATOMIC_SKU_BINDING_MISSING: (ReviewKind.SOURCE_CHANGE, _BINDING),
     BINDING_COMPOSITION_INVALID: (ReviewKind.SOURCE_CHANGE, _BINDING),
     BINDING_OFFER_INVALID: (ReviewKind.SOURCE_CHANGE, _BINDING),
     BINDING_MEMBER_NOT_CONFIRMED: (ReviewKind.SOURCE_CHANGE, _BINDING),
 }
 # Excluded on purpose: a projection of COLLECT's own condition (§6).
-EXCLUDED: Final = frozenset({SOURCE_CORE_FIELD_REVIEW_REQUIRED})
+EXCLUDED: Final = frozenset(
+    {
+        SOURCE_CORE_FIELD_REVIEW_REQUIRED,
+        # The v2 base layer refuses to reuse legacy image selection. Until an AtomicSKU-qualified
+        # image owner exists, this is an explicit architecture gap rather than resolvable work.
+        ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE,
+    }
+)
 
 
 class ReviewConditionUnmappedError(AppError):
