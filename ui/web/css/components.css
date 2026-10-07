@@ -966,20 +966,61 @@ body.has-registration-status .content {
   background: var(--color-info-bg);
 }
 
-/* A-UX2: the URL box takes one URL per line; each line is its own request and run. */
-.collect-submit textarea {
-  min-width: 0;
-  width: 100%;
+/* v29 수집 (owner decision 2026-10-07): the one-row toolbar, the five state cards, and the work
+   list beside 수집 미리보기. A slot with no source keeps its place and reads 데이터 없음. */
+.collect-submit {
+  padding: var(--space-6) var(--space-7);
+}
+
+.collect-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.collect-toolbar .field {
+  min-width: 160px;
+  height: 38px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  padding: 8px;
+  border-radius: var(--radius-md);
+  padding: 0 12px;
   background: var(--color-input);
+  color: var(--color-text-body);
   font: inherit;
+  font-size: var(--fs-lg);
+}
+
+/* A-UX2: the URL box takes one URL per line and grows with the lines pasted into it. */
+.collect-toolbar textarea.field {
+  flex: 1 1 240px;
+  height: auto;
+  min-height: 38px;
+  padding: 9px 12px;
+  line-height: 1.4;
   resize: vertical;
 }
 
-.collect-submit [data-role='intake-summary'],
-.collect-submit .intake-results {
+.collect-toolbar .btn {
+  white-space: nowrap;
+}
+
+.collect-toolbar .chip[data-inert] {
+  cursor: pointer;
+}
+
+.ai-btn {
+  background: var(--color-info-bg);
+  border-color: #d8e6ff;
+  color: var(--color-info);
+  font-weight: var(--fw-bold);
+}
+
+.intake-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
   margin-top: var(--space-3);
 }
 
@@ -990,9 +1031,198 @@ body.has-registration-status .content {
   overflow-wrap: anywhere;
 }
 
-.collect-runs .inner-tabs,
-.collect-runs [data-role='runs-count'] {
+.grid5 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.kpi {
+  display: block;
+  min-width: 0;
+  min-height: 86px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-text-body);
+  font: inherit;
+  text-align: left;
+}
+
+.kpi-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: #34404c;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+}
+
+.kicon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: var(--color-neutral-bg);
+  font-size: 13px;
+}
+
+.kpi strong {
+  display: block;
+  margin: 5px 0 3px;
+  color: var(--color-text-strong);
+  font-size: 18px;
+  line-height: 1.08;
+}
+
+.trend {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state-card {
+  cursor: pointer;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+
+.state-card:hover {
+  border-color: #c9d5df;
+}
+
+.state-card.active {
+  border-color: #aebfce;
+  background: #fbfdff;
+  box-shadow: inset 0 0 0 1px rgba(93, 121, 145, 0.08);
+}
+
+.section-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.side-detail {
+  min-width: 0;
+  padding: var(--space-7);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.side-detail h3 {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-strong);
+  font-size: var(--fs-heading);
+}
+
+.collect-preview .detail-title {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.collect-preview .preview-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.collect-preview .preview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.collect-preview .note {
   margin-top: var(--space-4);
+}
+
+.hero-thumb {
+  display: grid;
+  flex: 0 0 72px;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f2f4f6, #d4dbe1);
+  font-size: 28px;
+}
+
+.hero-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.no-data {
+  color: var(--color-text-faint);
+  font-weight: var(--fw-regular);
+}
+
+td.no-data {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.collect-runs .run-url {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.filter-chip {
+  gap: var(--space-1);
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+@media (max-width: 1280px), (orientation: portrait) {
+  .section-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 929px) {
+  .grid5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .grid5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .collect-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .collect-toolbar .field {
+    width: 100%;
+    min-width: 0;
+  }
+  .collect-runs {
+    overflow-x: auto;
+  }
+  .collect-runs .table {
+    min-width: 760px;
+  }
 }
 
 /* 수집 사실 (A-UX1): the revision's own fields and evidence, read back as stored, in its own

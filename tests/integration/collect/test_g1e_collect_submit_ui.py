@@ -536,6 +536,33 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             == revision["facts_status"]
         )
         assert "%" not in facts.inner_text(), "no confidence number is shown"
+        # v29's 수집 미리보기 beside the list holds the revision's own values; a slot the system
+        # has no source for keeps its place and reads 데이터 없음 (owner decision 2026-10-07, 가).
+        preview = page.locator(
+            f"[data-role='run-preview'] [data-role='preview-body'][data-run='{run_id}']"
+        )
+        preview.wait_for()
+        fields = {f["key"]: f for f in revision["fields"]}
+        for label, key in {
+            "도매가": "prices",
+            "배송비": "shipping",
+            "최저판매가": "minimum_sale_price",
+            "옵션 수": "options",
+        }.items():
+            expected = fields[key]["status"] if key in fields else "NO_DATA"
+            assert (
+                preview.locator(f"[data-preview='{label}']").get_attribute("data-status")
+                == expected
+            )
+        assert "데이터 없음" in preview.locator("[data-role='ai-note']").inner_text()
+        row = page.locator(f"[data-role='recent-runs'] tr[data-run='{run_id}']")
+        assert row.locator("[data-no-data]").count() == 3
+        assert "%" not in preview.inner_text(), "no confidence number is shown"
+        # The v29 controls with no contract yet only explain themselves: they send nothing.
+        for role in ("revalidate", "ai-correct", "collect-option"):
+            control = page.locator(f"[data-role='{role}']").first
+            assert control.get_attribute("aria-disabled") == "true"
+            control.click(force=True)
         _no_browser_truth(page)
     # Reading the revision sent nothing: the one POST is the operator's submit.
     assert len(wire.posts()) == 1
@@ -569,8 +596,21 @@ def test_the_run_list_is_filtered_on_the_server_and_counts_what_it_selected(
                 "FAILED"
             ]
             # The server applied the filter: the page asked for it, and never for a bare page.
-            listed = [u for m, u, _ in wire.requests if m == "GET" and urlsplit(u).path == RUNS]
+            reads = [u for m, u, _ in wire.requests if m == "GET" and urlsplit(u).path == RUNS]
+            listed = [u for u in reads if "limit=20" in u]
             assert listed and all("outcome=FAILED" in u for u in listed)
+            # Each v29 state card shows the server's own total for its filter, read as one run;
+            # the page counts nothing itself.
+            assert all("limit=1" in urlsplit(u).query.split("&") for u in reads if u not in listed)
+            for key, total in {"all": "4", "recorded": "2", "failed": "1", "pending": "0"}.items():
+                page.wait_for_selector(
+                    f"[data-filter='{key}'] [data-role='filter-count'][data-total='{total}']"
+                )
+            card = page.locator("[data-role='run-filters'] [data-filter='failed']")
+            assert card.get_attribute("aria-selected") == "true"
+            page.wait_for_selector(
+                "[data-filter='no_revision'] [data-role='filter-count'][data-total='1']"
+            )
             # A NO_REVISION run is its own answer: no facts status, no facts block.
             page.locator("[data-filter='no_revision']").click()
             page.wait_for_selector("[data-role='recent-runs'][data-filter='no_revision']")
