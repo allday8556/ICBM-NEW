@@ -53,6 +53,19 @@ const DETAIL_HELP =
 const TARGET_HELP =
   '선택한 상품의 품목만 등록 대상으로 고를 수 있습니다. 확인은 서버가 현재 상품 구성으로 다시 검증할 뿐, 등록 초안이나 가격은 아직 만들지 않습니다.';
 const PAGE_SIZE = 20;
+// v29 (owner decision 2026-10-07, option 가): a v29 slot the system has no source for keeps its
+// place and reads 데이터 없음. Nothing is estimated and nothing comes from demo content.
+const NO_DATA = '데이터 없음';
+const LIST_COLUMNS = ['상품명', '공급처', '원가', '배송비', '최저판매가', '가격기준', '네이버', '쿠팡', '11번가', '상태', '등록유형'];
+// The list columns with no source on a Product row.
+const NO_DATA_COLUMNS = ['원가', '배송비', '최저판매가', '가격기준', '네이버', '쿠팡', '11번가'];
+const KPI_CARDS = [
+  ['all', '▤', '전체상품'],
+  ['registrable', '🛒', '등록가능'],
+  ['review', '!', '확인필요'],
+  ['soldout', '◫', '품절'],
+  ['prohibited', '⊘', '금지상품'],
+];
 
 const GROUP_STATUS = { ACTIVE: '운영', RETIRED: '보관됨' };
 const FACT_LABEL = {
@@ -130,6 +143,34 @@ function composition(item) {
   return parts.join(' · ');
 }
 
+function noData(label) {
+  return h('td', { class: 'no-data', 'data-no-data': label }, NO_DATA);
+}
+
+function noDataKv(label) {
+  return h('div', { class: 'kv', 'data-no-data': label }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
+}
+
+// v29's five cards. 전체상품 is the server's own total; the other four have no owner yet.
+function kpiCards(total) {
+  return h(
+    'div',
+    { class: 'grid5 page-kpis', 'data-role': 'db-cards' },
+    ...KPI_CARDS.map(([key, icon, label]) => {
+      const known = key === 'all';
+      const card = h(
+        'button',
+        { type: 'button', class: known ? 'kpi state-card active' : 'kpi state-card', 'data-card': key },
+        h('span', { class: 'kpi-top' }, h('span', { class: 'kicon', 'aria-hidden': 'true' }, icon), label),
+        known
+          ? h('strong', { 'data-total': String(total) }, total.toLocaleString('ko-KR'))
+          : h('strong', { class: 'no-data', 'data-no-data': label }, NO_DATA),
+      );
+      return known ? card : markInert(card, label);
+    }),
+  );
+}
+
 function nameLines(row) {
   if (!row.member_names.length) return h('div', { class: 'mini' }, '확정 구성원 없음');
   return row.member_names.map((member) =>
@@ -159,12 +200,23 @@ function listRow(row, state, onSelect) {
         }
       },
     },
-    h('td', {}, nameLines(row)),
-    h('td', {}, h('span', { class: 'mono' }, short(id))),
-    h('td', {}, String(product.members.length)),
-    h('td', {}, String(product.items.length)),
-    h('td', {}, product.membership_revision_no === null ? '—' : `r${product.membership_revision_no}`),
-    h('td', {}, dotDateTime(product.created_at)),
+    h(
+      'td',
+      {},
+      nameLines(row),
+      h(
+        'div',
+        { class: 'mini db-row-meta' },
+        h('span', { class: 'mono' }, short(id)),
+        ` · 구성원 ${product.members.length} · 품목 ${product.items.length} · `,
+        product.membership_revision_no === null ? '멤버십 없음' : `r${product.membership_revision_no}`,
+        ` · ${dotDateTime(product.created_at)}`,
+      ),
+    ),
+    h('td', {}, [...new Set(row.member_names.map((member) => member.supplier_key))].join(', ') || '—'),
+    ...NO_DATA_COLUMNS.map(noData),
+    h('td', {}, chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn')),
+    noData('등록유형'),
   );
   return tr;
 }
@@ -218,6 +270,52 @@ function imagesValue(images) {
   return shown;
 }
 
+// The representative image, through the bound Item's own image read (the image owner's route);
+// without one the slot keeps its place empty.
+function detailThumb(detail) {
+  const empty = () => h('div', { class: 'hero-thumb', 'data-role': 'detail-thumb', 'data-thumb': 'none', title: '대표 이미지 데이터 없음' }, h('span', { 'aria-hidden': 'true' }, '🖼'));
+  for (const source of detail.member_sources) {
+    const sha = source.images?.representative_sha256;
+    const item = detail.product.items.find((candidate) => candidate.current_binding?.group_member_id === source.member_id);
+    if (!sha || !item) continue;
+    const holder = h('div', { class: 'hero-thumb', 'data-role': 'detail-thumb', 'data-thumb': 'item-image' });
+    const image = h('img', { alt: '대표 이미지', src: `${PRODUCTS}/items/${encodeURIComponent(item.item_id)}/images/${encodeURIComponent(sha)}` });
+    image.addEventListener('error', () => holder.replaceWith(empty()));
+    holder.append(image);
+    return holder;
+  }
+  return empty();
+}
+
+// The first member's confirmed name, or the Product's own id when no member states one.
+function detailName(detail) {
+  const fact = detail.member_sources.flatMap((source) => source.facts).find((candidate) => candidate.key === 'original_name');
+  return fact?.status === 'CONFIRMED' ? fact.value : null;
+}
+
+// v29's detail groups. Only what a member's source states is shown; the rest keeps its place.
+function v29Groups(detail) {
+  const brand = detail.member_sources.flatMap((source) => source.facts).find((fact) => fact.key === 'brand');
+  return [
+    h(
+      'div',
+      { class: 'detail-group', 'data-role': 'detail-basics' },
+      h('div', { class: 'kv', 'data-fact': 'brand-summary' }, h('span', {}, '브랜드'), h('b', {}, factValue(brand))),
+      noDataKv('카테고리'),
+      noDataKv('카테고리 추천 신뢰도'),
+    ),
+    h('div', { class: 'detail-group', 'data-role': 'detail-prices' }, h('h4', {}, '가격 정보'), ...['도매가', '배송비', '원가', '가격기준'].map(noDataKv)),
+    h('div', { class: 'detail-group', 'data-role': 'detail-channels' }, h('h4', {}, '채널별 판매가 / 마진율'), ...['네이버', '쿠팡', '11번가'].map(noDataKv)),
+    h('div', { class: 'detail-group', 'data-role': 'detail-tags' }, h('h4', {}, '태그 / AI 상태'), h('div', { class: 'mini no-data' }, NO_DATA)),
+    h(
+      'div',
+      { class: 'detail-actions', 'data-role': 'detail-v29-actions' },
+      markInert(h('button', { type: 'button', class: 'btn ai-btn' }, '✨ AI 추천'), 'AI 추천'),
+      markInert(h('button', { type: 'button', class: 'btn' }, '상세 편집'), '상세 편집'),
+    ),
+  ];
+}
+
 export default {
   key: 'db',
   title: TITLE,
@@ -230,6 +328,7 @@ export default {
       actions: [markInert(h('button', { type: 'button', class: 'btn' }, '⇩ 엑셀 다운로드'))],
     });
     const screen = await getJson(SCREEN);
+    const cards = kpiCards(screen.products_total ?? 0);
     if (screen.meta.state === 'EMPTY') {
       return fragment(
         head,
@@ -241,7 +340,7 @@ export default {
       );
     }
     if (screen.meta.state !== 'READY') return fragment(head, unsupportedState(screen.meta));
-    return fragment(head, workspace(ctx.params.get('product'), ctx.navigate));
+    return fragment(head, cards, workspace(ctx.params.get('product'), ctx.navigate));
   },
 };
 
@@ -261,6 +360,7 @@ function workspace(initialProduct, navigateTo) {
 
   const search = h('input', {
     type: 'search',
+    class: 'field search',
     name: 'q',
     maxlength: '100',
     placeholder: '상품명, 상품 ID, 공급처 상품번호로 검색하세요...',
@@ -271,7 +371,12 @@ function workspace(initialProduct, navigateTo) {
     'form',
     { class: 'db-toolbar panel', role: 'search', 'data-role': 'db-search' },
     search,
+    // v29's filters and AI 추천 have no contract yet: they keep their place and send nothing.
+    ...['카테고리 전체', '플랫폼 전체', '공급처 전체', '가격기준 전체'].map((label) =>
+      markInert(h('select', { class: 'field', 'aria-label': label, 'data-role': 'db-filter' }, h('option', {}, label)), label),
+    ),
     h('button', { type: 'submit', class: 'btn blue' }, '검색'),
+    markInert(h('button', { type: 'button', class: 'btn ai-btn', 'data-role': 'db-ai' }, '✨ AI 추천'), 'AI 추천'),
   );
   const listBody = h('tbody', {});
   const total = h('span', { class: 'mini', 'data-role': 'matching-total' });
@@ -289,7 +394,7 @@ function workspace(initialProduct, navigateTo) {
       h(
         'thead',
         {},
-        h('tr', {}, ...['상품명 · 원천', '상품 ID', '구성원', '품목', '멤버십', '생성'].map((label) => h('th', {}, label))),
+        h('tr', {}, ...LIST_COLUMNS.map((label) => h('th', {}, label))),
       ),
       listBody,
     ),
@@ -323,7 +428,7 @@ function workspace(initialProduct, navigateTo) {
     listBody.replaceChildren(
       ...(page.products.length
         ? page.products.map((row) => listRow(row, state, selectProduct))
-        : [h('tr', {}, h('td', { class: 'table-empty', colspan: '6' }, state.query ? '검색 결과가 없습니다.' : '운영 중인 상품이 없습니다.'))]),
+        : [h('tr', {}, h('td', { class: 'table-empty', colspan: '11' }, state.query ? '검색 결과가 없습니다.' : '운영 중인 상품이 없습니다.'))]),
     );
   }
 
@@ -341,7 +446,7 @@ function workspace(initialProduct, navigateTo) {
     } catch (error) {
       if (seq !== state.listSeq) return;
       listBody.replaceChildren(
-        h('tr', {}, h('td', { class: 'table-empty', colspan: '6', 'data-reason': errorCode(error) ?? '' }, copy(errorCode(error) ?? String(error.message ?? error)))),
+        h('tr', {}, h('td', { class: 'table-empty', colspan: '11', 'data-reason': errorCode(error) ?? '' }, copy(errorCode(error) ?? String(error.message ?? error)))),
       );
     } finally {
       if (seq === state.listSeq) listPanel.removeAttribute('aria-busy');
@@ -642,10 +747,18 @@ function workspace(initialProduct, navigateTo) {
       withHelp(h('h3', {}, '상품 상세 정보'), DETAIL_HELP),
       h(
         'div',
-        { class: 'detail-title' },
-        h('div', {}, h('b', { class: 'mono' }, product.product_group_id), h('div', { class: 'mini' }, `생성 ${dotDateTime(product.created_at)}`)),
+        { class: 'detail-title db-detail-title' },
+        detailThumb(detail),
+        h(
+          'div',
+          { class: 'db-detail-name' },
+          h('b', { 'data-role': 'detail-name' }, detailName(detail) ?? short(product.product_group_id)),
+          h('div', { class: 'mini' }, '상품 ID · ', h('span', { class: 'mono' }, product.product_group_id)),
+          h('div', { class: 'mini' }, `생성 ${dotDateTime(product.created_at)}`),
+        ),
         chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn'),
       ),
+      ...v29Groups(detail),
       h(
         'div',
         { class: 'detail-group' },

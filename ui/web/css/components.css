@@ -1333,6 +1333,43 @@ td.no-data {
   padding: var(--space-4);
 }
 
+/* v29 통합DB (owner decision 2026-10-07): the five cards, the filter row and the detail's
+   thumbnail title. Slots with no source read 데이터 없음. */
+.page-kpis {
+  margin-bottom: var(--space-4);
+}
+
+.db-toolbar .field {
+  min-width: 140px;
+  height: 36px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  background: var(--color-input);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: var(--fs-lg);
+}
+
+.db-toolbar select[data-inert] {
+  cursor: pointer;
+}
+
+.db-list .db-row-meta {
+  margin-top: 2px;
+}
+
+.db-detail-title {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.db-detail-title .db-detail-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .db-toolbar input[type='search'] {
   flex: 1 1 240px;
   min-width: 0;
@@ -1481,4 +1518,49 @@ td.no-data {
   .db-pager {
     padding: var(--space-4);
   }
+}
+
+/* v29 등록관리 (owner decision 2026-10-07): the cards, the 등록 이력 row, the 등록 대기 목록 beside
+   플랫폼별 등록 설정, then each section on screen in v29's order. */
+.register-utility-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.register-layout {
+  margin-bottom: var(--space-4);
+}
+
+.register-queue .register-queue-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.register-queue .register-readiness {
+  margin-top: var(--space-5);
+}
+
+.register-settings .register-platform-tabs {
+  margin-bottom: var(--space-3);
+}
+
+.register-settings .toggle[data-inert] {
+  cursor: pointer;
+}
+
+.register-section {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.register-section-title {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-title);
 }
