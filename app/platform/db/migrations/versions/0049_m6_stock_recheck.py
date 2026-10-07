@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("requested_at", sa.DateTime(), nullable=False),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
         sa.CheckConstraint("trigger IN ('AUTO', 'OPERATOR')", name="trigger_valid"),
-        sa.CheckConstraint("state IN ('REQUESTED', 'FINISHED')", name="state_valid"),
+        sa.CheckConstraint("state IN ('SUBMITTING', 'REQUESTED', 'FINISHED')", name="state_valid"),
         sa.CheckConstraint(
             "outcome IS NULL OR outcome IN ('RECORDED', 'NO_REVISION', 'FAILED', 'REFUSED')",
             name="outcome_valid",
@@ -44,7 +44,7 @@ def upgrade() -> None:
             name="finished_has_outcome",
         ),
         sa.CheckConstraint(
-            "state = 'FINISHED' OR collection_run_id IS NOT NULL",
+            "state <> 'REQUESTED' OR collection_run_id IS NOT NULL",
             name="requested_has_run",
         ),
         sa.CheckConstraint(
@@ -68,7 +68,7 @@ def upgrade() -> None:
         RECHECKS,
         ["supplier_key", "source_product_id"],
         unique=True,
-        sqlite_where=sa.text("state = 'REQUESTED'"),
+        sqlite_where=sa.text("state IN ('SUBMITTING', 'REQUESTED')"),
     )
 
 
