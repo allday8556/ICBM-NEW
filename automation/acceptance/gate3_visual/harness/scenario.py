@@ -3,9 +3,9 @@
 Everything here is invented and provider-zero. The state is written through the application's own
 owners and routes, exactly as production does, over a dedicated root the run owns:
 
-- **수집관리**: three durably RECORDED collection runs — one whose facts are CONFIRMED, one whose
-  shipping fact is REVIEW_REQUIRED, so a COLLECT review item exists, and all three carrying the
-  same detail image so its supplier-owned REVIEW verdict is detected;
+- **수집관리**: four durably RECORDED collection runs — one whose facts are CONFIRMED, one whose
+  shipping fact is REVIEW_REQUIRED, so a COLLECT review item exists, and three separate products
+  carrying the same detail image so its supplier-owned REVIEW verdict is detected;
 - **통합DB**: their Products and Items, the first with its image selection, a QA PASS and a price;
 - **Settings**: the account's durable target policy (G1-A), one reviewed category's metadata
   (G1-B), and the supplier common-image REVIEW candidate (A-NEXT2a);
@@ -405,7 +405,6 @@ def populate(container: Container, api: TestClient) -> Populated:
         "g3-visual-product-1",
         sequence=0,
         shipping_needs_review=False,
-        common_sha=common_sha,
     )
     materialized = container.materializer.materialize_run(confirmed_run)
     if materialized.item_id is None or materialized.product_group_id is None:
@@ -423,6 +422,13 @@ def populate(container: Container, api: TestClient) -> Populated:
         owners,
         "g3-visual-product-3",
         sequence=2,
+        shipping_needs_review=False,
+        common_sha=common_sha,
+    )
+    _record(
+        owners,
+        "g3-visual-product-4",
+        sequence=3,
         shipping_needs_review=False,
         common_sha=common_sha,
     )
