@@ -16,7 +16,7 @@ import { dotDateTime } from '../core/format.js';
 import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
 import { markInert } from '../core/inert.js';
-import { marketplaceLabel } from '../core/platform.js';
+import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
@@ -1330,7 +1330,7 @@ function queueRow(unit) {
     'tr',
     { 'data-queue-unit': unit.unit_ref },
     h('td', {}, h('b', {}, unit.unit_ref), h('div', { class: 'mini mono' }, `초안 ${unit.draft_id.slice(0, 8)}`)),
-    h('td', {}, chip(marketplaceLabel(unit.marketplace_key))),
+    h('td', {}, platformTag(unit.marketplace_key)),
     unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
     noDataCell('옵션 상태'),
     noDataCell('이미지 상태'),
@@ -1384,9 +1384,9 @@ function settingsPanel() {
     h(
       'div',
       { class: 'inner-tabs register-platform-tabs' },
-      h('button', { type: 'button', 'aria-selected': 'true' }, '스마트스토어'),
-      markInert(h('button', { type: 'button', 'aria-selected': 'false' }, '쿠팡'), '쿠팡'),
-      markInert(h('button', { type: 'button', 'aria-selected': 'false' }, '11번가'), '11번가'),
+      h('button', { type: 'button', 'aria-selected': 'true', 'aria-label': '스마트스토어' }, platformTag('smartstore')),
+      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '쿠팡' }, platformTag('coupang')), '쿠팡'),
+      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '11번가' }, platformTag('st11')), '11번가'),
     ),
     h('div', { class: 'detail-group' }, noDataKv('기본 배송비'), noDataKv('기본 출고일'), noDataKv('상품 상태')),
     h(

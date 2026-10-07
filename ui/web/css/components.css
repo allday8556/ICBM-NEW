@@ -1193,9 +1193,18 @@ td.no-data {
   font-family: inherit;
 }
 
-@media (max-width: 1280px), (orientation: portrait) {
+/* v29's own bands: a landscape screen narrower than 1280px stacks the list and its side panel;
+   a portrait screen wider than 900px keeps them side by side. */
+@media (max-width: 1280px) and (orientation: landscape), (max-width: 900px) {
   .section-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .section-grid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.75fr);
+    gap: var(--space-3);
   }
 }
 
@@ -1584,4 +1593,115 @@ td.no-data {
   margin: var(--space-3) 0 0;
   color: var(--color-text-strong);
   font-size: var(--fs-title);
+}
+
+/* v29 portrait (its own rules for 통합DB and 등록관리): the list takes the full width and the
+   detail or settings move under it as one wide card of columns. */
+@media (orientation: portrait) {
+  .register-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .db-detail[data-state='ready'] {
+    display: grid;
+    grid-template-columns: minmax(250px, 1.1fr) repeat(3, minmax(180px, 1fr));
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .db-detail[data-state='ready'] > h3,
+  .db-detail[data-state='ready'] > .db-items,
+  .db-detail[data-state='ready'] > [data-role='product-review'],
+  .db-detail[data-state='ready'] > .db-selection,
+  .db-detail[data-state='ready'] > .detail-actions,
+  .db-detail[data-state='ready'] > .db-target,
+  .db-detail[data-state='ready'] > .db-draft-form {
+    grid-column: 1 / -1;
+  }
+
+  .db-detail[data-state='ready'] > .detail-title {
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    border-bottom: 0;
+  }
+
+  .db-detail[data-state='ready'] > .detail-group:not(.db-items):not(.db-draft-form):not([data-role='product-review']) {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .db-v29-groups {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .db-v29-groups > h3,
+  .db-v29-groups > .detail-actions {
+    grid-column: 1 / -1;
+  }
+
+  .db-v29-groups > .detail-group {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .db-v29-groups > .detail-group:first-of-type {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .db-v29-groups > .detail-actions {
+    justify-content: flex-end;
+    border-top: 1px solid var(--color-line-soft);
+    padding-top: var(--space-5);
+  }
+
+  .register-settings {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.75fr) minmax(220px, 1fr) minmax(220px, 1fr);
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .register-settings > h3 {
+    grid-column: 1 / -1;
+  }
+
+  .register-settings > .register-platform-tabs {
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    flex-direction: column;
+    align-items: stretch;
+    margin: 0;
+    border: 0;
+    border-right: 1px solid var(--color-line-soft);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .register-settings > .detail-group {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .register-settings > .note {
+    grid-column: 2 / -1;
+    margin-top: var(--space-3);
+  }
+}
+
+.register-platform-tabs button {
+  text-align: left;
+}
+
+.register-platform-tabs button[aria-selected='true'] {
+  border-left: 2px solid var(--color-info);
+  background: var(--color-info-bg);
 }
