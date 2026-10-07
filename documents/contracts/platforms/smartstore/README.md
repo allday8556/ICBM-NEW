@@ -52,7 +52,9 @@ exact DELETE grant), the official leaf-category read `SMARTSTORE_CATEGORY_LIST` 
 read only, for durable category selection), and the two official 상품정보제공고시 reads
 `SMARTSTORE_NOTICE_TYPES` and
 `SMARTSTORE_NOTICE_TYPE_READ` (notice coverage S0; read only to capture the provider notice
-schema). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
+schema), and the seller address-book read `SMARTSTORE_ADDRESSBOOK_LIST` (read only, for the
+Settings delivery policy's 출고지 / 반품·교환지 choice; only each entry's number, label and type
+are kept). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
 remains:
 
 `NOT_ADOPTED`
