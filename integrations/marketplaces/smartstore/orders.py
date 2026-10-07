@@ -112,7 +112,11 @@ class SmartStoreOrderSource:
                 ORDER_PAGE_MAX,
             ),
         )
-        # The caller's predicate already required a ``data`` object with an integer ``count``;
+        # The proven no-change answer (``timestamp`` and ``traceId`` only, runtime evidence
+        # 2026-10-08) is an empty window; the caller states it from the raw body.
+        if response.empty_window:
+            return ChangePage(())
+        # Otherwise the caller's predicate required a ``data`` object with an integer ``count``;
         # it is checked again here, so this reader never turns an answer that names no window
         # into an empty one (GPT audit, PR #250). Retention drops an empty array, so an absent
         # ``lastChangeStatuses`` beside a proven ``count`` is an empty page.
