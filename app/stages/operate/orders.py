@@ -636,7 +636,13 @@ class OrderSyncService:
         if latest is not None and (row.last_changed_at is None or latest > row.last_changed_at):
             row.last_changed_at = latest
         if fact.status in TERMINAL_STATUSES and row.terminal_at is None:
-            row.terminal_at = latest or now
+            # The retention starts at a change that reported the terminal status, never at an
+            # earlier change of the same window; without one, at when ICBM saw it terminal —
+            # never before the order became terminal (GPT audit, PR #250).
+            reported = [
+                change.changed_at for change in changes if change.status in TERMINAL_STATUSES
+            ]
+            row.terminal_at = max(reported) if reported else now
         row.updated_at = now
         address_changed = any(change.change_type == ADDRESS_CHANGED for change in changes)
         # A deleted record is never kept again; a stored one is resealed only when its address

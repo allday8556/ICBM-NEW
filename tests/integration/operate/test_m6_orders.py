@@ -522,3 +522,23 @@ def test_an_order_of_a_product_icbm_has_not_confirmed_yet_is_not_recorded(
     assert run.outcome == COMPLETED  # type: ignore[attr-defined]
     (order,) = service.overview().orders
     assert (order.resolution, order.registration_id) == (MATCHED, registration_id)
+
+
+def test_retention_starts_only_at_a_change_that_reported_the_terminal_status(
+    container: Container, registration: str
+) -> None:
+    """GPT audit (PR #250): an earlier, non-terminal change never starts the 90 days."""
+    dispatched = replace(
+        _change(container, kind="DISPATCHED"),
+        changed_at=container.clock.now() - timedelta(days=100),
+    )
+    source = FakeSource(
+        pages=[ChangePage((dispatched,))], facts={"po-1": _facts(status="PURCHASE_DECIDED")}
+    )
+    service = _service(container, source, retention_days=90)
+    _sync(service)
+    # The detail read shows it terminal, but no listed change reported that: the 90 days start
+    # now, so nothing is deleted although the listed change is 100 days old.
+    assert service.purge_shipping(correlation_id=CID) == 0
+    (order,) = service.overview().orders
+    assert order.shipping_state == STORED
