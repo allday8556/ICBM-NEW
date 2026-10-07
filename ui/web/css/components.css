@@ -1359,6 +1359,13 @@ td.no-data {
   margin-top: 2px;
 }
 
+/* The v29 detail is taller than one screen: it scrolls inside itself, so its top always stays
+   clear of the sticky topbar wherever it is brought into view. */
+.db-detail {
+  max-height: calc(100vh - 2 * var(--topbar-height) - var(--space-4));
+  overscroll-behavior: contain;
+}
+
 .db-detail-title {
   justify-content: flex-start;
   align-items: center;
