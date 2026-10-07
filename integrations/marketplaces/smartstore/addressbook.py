@@ -52,7 +52,10 @@ class SmartStoreAddressBookSource:
                     page,
                 ),
             )
-            books = response.retained.get("addressBooks")
+            # The caller answers only a body its contract predicate accepted (a documented
+            # ``addressBooks`` array); retention drops an empty array, so an absent key is an
+            # empty page.
+            books = response.retained.get("addressBooks", [])
             if not isinstance(books, list):
                 raise PolicyBlockedError(
                     "SMARTSTORE_ADDRESSBOOK_RESPONSE_INVALID",

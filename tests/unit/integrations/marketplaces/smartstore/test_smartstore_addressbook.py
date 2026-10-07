@@ -111,3 +111,17 @@ def test_the_endpoint_is_a_read_that_retains_no_address_or_contact() -> None:
             {"addressBookNo": 200401837, "name": "반품교환지", "addressType": "REFUND_OR_EXCHANGE"},
         ]
     }
+
+
+def test_the_empty_last_page_the_retention_drops_ends_the_listing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        books = BOOKS if request.url.params["page"] == "1" else []
+        return httpx.Response(200, json={"addressBooks": books})
+
+    caller = SmartStoreEndpointCaller(transport=httpx.MockTransport(handler))
+    empty = caller.call(
+        EndpointId.SMARTSTORE_ADDRESSBOOK_LIST, AddressBookListRequest("token", 3, 5, 2)
+    )
+    assert empty.retained == {}
+    entries = SmartStoreAddressBookSource(caller, _bearer).address_books()
+    assert [e.address_book_no for e in entries] == [200401837, 200441202]
