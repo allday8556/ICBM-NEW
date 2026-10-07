@@ -201,6 +201,11 @@ adjacent panels so either block remains readable within the viewport:
 - a field's value/evidence row and the image-reference table exist in the document only while the
   operator has expanded them. Collapsing removes that detail instead of leaving hidden server-owned
   state behind for the visual acceptance surface;
+- when the run's revision is the current bound revision of a Product DB Item, `공통 이미지 제외` counts
+  that Item's auto-selection notes (`COMMON_IMAGE_BLOCKED`, `COMMON_IMAGE_UNDECIDED`) and the image
+  table adds `자동 선택`, read from the Item's own `image-candidates` preview (Issue #219's owner).
+  Without such an Item it says so and shows nothing in its place: a supplier's common-image list is
+  never shown as this product's exclusions (A-NEXT2b, 2026-10-07);
 - the prototype's percentage chip (`94%`) is demo content and is **not** reproduced: no confidence
   number is shown, and the screen decides no status and changes no fact;
 - the run's outcome and the revision's facts status stay two labelled axes, and `NO_REVISION` is

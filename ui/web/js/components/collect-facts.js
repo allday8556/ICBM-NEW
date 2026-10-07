@@ -9,6 +9,21 @@ import { fragment, h } from '../core/dom.js';
 import { withHelp } from '../core/help.js';
 
 const REVISIONS = '/api/v1/collect/revisions';
+const PRODUCTS = '/api/v1/products';
+// What the image auto-selection rule (the Product DB's owner, Issue #219) says about each source
+// image of an Item bound to this very revision, worded. Read from the Item's own image-candidates
+// preview; the page decides nothing and shows an unknown note as itself.
+const NOTE_COPY = {
+  REPRESENTATIVE: '대표 이미지',
+  ADDITIONAL: '추가 이미지',
+  DETAIL: '상세 본문',
+  DUPLICATE_BYTES: '중복 파일이라 제외',
+  COMMON_IMAGE_BLOCKED: '공통 이미지(차단)라 제외',
+  COMMON_IMAGE_UNDECIDED: '공통 이미지(확인 필요)라 제외',
+  OVER_LIMIT: '마켓 장수 한도를 넘어 제외',
+  OTHER_SLOT: '다른 칸',
+};
+const COMMON_NOTES = ['COMMON_IMAGE_BLOCKED', 'COMMON_IMAGE_UNDECIDED'];
 
 const FIELD_LABEL = {
   original_name: '상품명',
@@ -213,8 +228,58 @@ function imageReason(image) {
   );
 }
 
+// The auto-selection notes of the Product DB Item bound to exactly this revision, through the
+// owner's own reads: the run's product → its Items → the first Item whose current binding is this
+// revision → that Item's image-candidates preview. No Item bound to this revision means nothing is
+// shown: the supplier's common-image list is never shown as this product's exclusions.
+async function selectionNotes(revisionId, product) {
+  if (!product || product.state !== 'MATERIALIZED' || !product.productGroupId) return { state: 'NOT_MATERIALIZED' };
+  try {
+    const group = await getJson(`${PRODUCTS}/${encodeURIComponent(product.productGroupId)}`);
+    const item = (group.items ?? []).find((candidate) => candidate.current_binding?.provenance_revision_id === revisionId);
+    if (!item) return { state: 'NOT_BOUND' };
+    const found = await getJson(`${PRODUCTS}/items/${encodeURIComponent(item.item_id)}/image-candidates`);
+    if (found.source_revision_id !== revisionId) return { state: 'NOT_BOUND' };
+    const notes = new Map((found.auto_selection?.notes ?? []).map((n) => [`${n.source_role}:${n.source_ordinal}`, n.note]));
+    return { state: 'READY', itemId: item.item_id, notes, blocked: found.auto_selection?.blocked ?? null };
+  } catch (error) {
+    return { state: 'ERROR', code: error?.error?.code ?? null, message: error?.error?.message ?? null };
+  }
+}
+
+function selectionSummary(selection, errorCopy) {
+  const holder = h('div', { class: 'kv', 'data-role': 'common-image-summary', 'data-selection': selection.state });
+  if (selection.state === 'READY') {
+    const values = [...selection.notes.values()];
+    const blocked = values.filter((note) => note === 'COMMON_IMAGE_BLOCKED').length;
+    const undecided = values.filter((note) => note === 'COMMON_IMAGE_UNDECIDED').length;
+    holder.dataset.blocked = String(blocked);
+    holder.dataset.undecided = String(undecided);
+    holder.append(
+      h('span', {}, '공통 이미지 제외'),
+      h(
+        'b',
+        {},
+        selection.blocked
+          ? `자동 선택 안 함 · ${selection.blocked}`
+          : `${blocked + undecided}개 (차단 ${blocked} · 확인 필요 ${undecided}) · 통합DB 품목 ${selection.itemId.slice(0, 8)} 기준`,
+      ),
+    );
+    return holder;
+  }
+  const words = {
+    NOT_MATERIALIZED: '통합DB 상품에 반영된 뒤 표시됩니다',
+    NOT_BOUND: '이 리비전에 묶인 통합DB 품목이 없어 표시하지 않습니다',
+  };
+  holder.append(
+    h('span', {}, '공통 이미지 제외'),
+    h('b', {}, selection.state === 'ERROR' ? errorCopy(selection.code, selection.message) : words[selection.state]),
+  );
+  return holder;
+}
+
 // The image references open on demand, like a field's evidence, and exist only while open.
-function imagesBlock(images) {
+function imagesBlock(images, selection) {
   if (!images.length) return null;
   const holder = h('div', { 'data-role': 'image-refs-holder' });
   const toggle = h(
@@ -228,7 +293,7 @@ function imagesBlock(images) {
       table.remove();
       table = null;
     } else {
-      table = imagesTable(images);
+      table = imagesTable(images, selection);
       holder.append(table);
     }
     toggle.setAttribute('aria-expanded', String(Boolean(table)));
@@ -237,11 +302,13 @@ function imagesBlock(images) {
   return holder;
 }
 
-function imagesTable(images) {
+function imagesTable(images, selection) {
+  const ready = selection?.state === 'READY';
+  const headers = ['역할', '순서', '호스트', '상태', '판정', '사유', '크기', ...(ready ? ['자동 선택'] : [])];
   return h(
     'table',
     { class: 'table', 'data-role': 'image-refs' },
-    h('thead', {}, h('tr', {}, ...['역할', '순서', '호스트', '상태', '판정', '사유', '크기'].map((label) => h('th', {}, label)))),
+    h('thead', {}, h('tr', {}, ...headers.map((label) => h('th', {}, label)))),
     h(
       'tbody',
       {},
@@ -264,9 +331,18 @@ function imagesTable(images) {
             imageReason(image),
           ),
           h('td', {}, image.asset ? `${image.asset.width}×${image.asset.height} · ${bytes(image.asset.byte_size)}` : '—'),
+          ready ? noteCell(selection.notes.get(`${image.role}:${image.ordinal}`)) : null,
         ),
       ),
     ),
+  );
+}
+
+function noteCell(note) {
+  return h(
+    'td',
+    { 'data-note': note ?? '', 'data-common': String(COMMON_NOTES.includes(note)) },
+    note ? NOTE_COPY[note] ?? note : '—',
   );
 }
 
@@ -291,7 +367,7 @@ function kv(label, value) {
 
 // The revision of a RECORDED run, as one block. A failed read shows the server's reason and nothing
 // in its place.
-export async function collectFactsBlock(revisionId, run, errorCopy) {
+export async function collectFactsBlock(revisionId, run, errorCopy, product = null) {
   const holder = h('section', { class: 'panel collect-facts', 'data-role': 'collect-facts', 'data-revision': revisionId });
   let revision;
   try {
@@ -303,6 +379,7 @@ export async function collectFactsBlock(revisionId, run, errorCopy) {
     return holder;
   }
   holder.dataset.state = 'ready';
+  const selection = await selectionNotes(revisionId, product);
   const included = revision.images.filter((image) => image.disposition === 'INCLUDED').length;
   holder.append(fragment(
     h('div', { class: 'supplier-head-row' }, withHelp(h('h4', { class: 'panel-title' }, '수집 사실'), HELP)),
@@ -315,6 +392,7 @@ export async function collectFactsBlock(revisionId, run, errorCopy) {
       h('span', {}, '이미지'),
       h('b', {}, `포함 ${included} / 전체 ${revision.images.length}`),
     ),
+    selectionSummary(selection, errorCopy),
     revision.fingerprints_intact ? null : h('div', { class: 'note', 'data-reason': 'FINGERPRINTS_NOT_INTACT' }, '저장된 지문이 다시 계산한 값과 다릅니다.'),
     h(
       'table',
@@ -322,7 +400,7 @@ export async function collectFactsBlock(revisionId, run, errorCopy) {
       h('thead', {}, h('tr', {}, ...['필드', '상태', '값', '근거'].map((label) => h('th', {}, label)))),
       h('tbody', {}, ...revision.fields.flatMap(fieldRows)),
     ),
-    imagesBlock(revision.images),
+    imagesBlock(revision.images, selection),
   ));
   return holder;
 }
