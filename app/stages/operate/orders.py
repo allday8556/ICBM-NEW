@@ -97,6 +97,7 @@ DETAIL_BATCH: Final = 300
 UNREADABLE: Final = "OPERATE_ORDER_UNREADABLE"
 PAGES_EXCEEDED: Final = "OPERATE_ORDER_PAGES_EXCEEDED"
 DETAIL_MISSING: Final = "OPERATE_ORDER_DETAIL_MISSING"
+REGISTRATION_PENDING: Final = "OPERATE_ORDER_REGISTRATION_PENDING"
 ACTOR: Final = "operate.orders"
 LIST_LIMIT: Final = 200
 
@@ -544,6 +545,12 @@ class OrderSyncService:
         by_order: dict[str, list[OrderChange]] = {}
         for change in changes:
             by_order.setdefault(change.product_order_id, []).append(change)
+        # A resolution is immutable once recorded, so an order of a product ICBM itself created
+        # but has not confirmed yet (an Intent that names the provider product, with no
+        # registration) is never recorded as UNMATCHED: the window is not complete, the cursor
+        # stays, and a later pass resolves it once the registration exists (GPT audit, PR #250).
+        if self._awaiting_registration(facts, registrations):
+            raise _Stop(FAILED, REGISTRATION_PENDING)
         try:
             with self._db.write() as session:
                 for fact in facts:
@@ -609,8 +616,6 @@ class OrderSyncService:
                 updated_at=now,
             )
             session.add(row)
-        elif row.resolution == UNMATCHED:
-            self._settle_unmatched(row, fact, registrations, now)
         latest = max((change.changed_at for change in changes), default=None)
         row.order_id = fact.order_id
         row.status = fact.status
@@ -683,28 +688,22 @@ class OrderSyncService:
                 )
                 session.flush()
 
-    def _settle_unmatched(
-        self,
-        row: ProductOrder,
-        fact: ProductOrderFacts,
-        registrations: Sequence[RegistrationRecord],
-        now: datetime,
-    ) -> None:
-        """``UNMATCHED`` records only that no registration was found yet: an order can be read
-        before ICBM confirms the registration it belongs to. A later read that finds it by the
-        same provider identities records the resolution once; every other resolution is
-        immutable (trigger)."""
-        resolved = self._resolve(fact, registrations)
-        if resolved.resolution == UNMATCHED:
-            return
-        row.resolution = resolved.resolution
-        row.registration_id = resolved.registration_id
-        row.registration_item_key = resolved.registration_item_key
-        row.item_id = resolved.item_id
-        row.source_binding_id = resolved.source_binding_id
-        row.supplier_key = resolved.supplier_key
-        row.source_product_id = resolved.source_product_id
-        row.resolved_at = now
+    def _awaiting_registration(
+        self, facts: Sequence[ProductOrderFacts], registrations: Sequence[RegistrationRecord]
+    ) -> bool:
+        registered = {record.marketplace_product_id for record in registrations}
+        unknown = {
+            fact.original_product_id
+            for fact in facts
+            if fact.original_product_id and fact.original_product_id not in registered
+        }
+        if not unknown:
+            return False
+        return any(
+            intent.marketplace_key == self._marketplace_key
+            and intent.marketplace_product_id in unknown
+            for intent in self._registrations.intents(limit=None)
+        )
 
     def _resolve(
         self, fact: ProductOrderFacts, registrations: Sequence[RegistrationRecord]

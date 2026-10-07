@@ -494,34 +494,31 @@ def test_startup_settles_only_what_no_live_process_can_hold(
     assert service.overview().last_run.outcome == "INTERRUPTED"  # type: ignore[union-attr]
 
 
-def test_an_order_read_before_its_registration_resolves_once_it_is_found(
+def test_an_order_of_a_product_icbm_has_not_confirmed_yet_is_not_recorded(
     container: Container,
     config: AppConfig,
     sources: Collections,  # noqa: F811
     store: RegistrationStore,  # noqa: F811
 ) -> None:
-    """GPT audit (PR #250): UNMATCHED records only that no registration was found yet."""
-    early = _facts(original_product_id="mp-orders-late")
-    source = FakeSource(pages=[ChangePage((_change(container),))], facts={"po-1": early})
-    service = _service(container, source)
-    _sync(service)
-    (order,) = service.overview().orders
-    assert order.resolution == UNMATCHED
-    # The registration is confirmed afterwards; the next read of the order resolves it once.
+    """GPT audit (PR #250): a resolution is immutable, so an order of a product ICBM created
+    but has not confirmed is never recorded as UNMATCHED; it waits for the registration."""
     item = _priced(container, config, sources)
     intent = _intent(store, _freeze(store, [item]).registration_snapshot_id)
     _finish(store, intent, RemoteOutcome.APPLIED_PROVEN, "mp-orders-late")
+    early = _facts(original_product_id="mp-orders-late")
+    source = FakeSource(pages=[ChangePage((_change(container),))], facts={"po-1": early})
+    service = _service(container, source)
+    run = _sync(service)
+    assert (run.outcome, run.error_code, run.synced_until) == (  # type: ignore[attr-defined]
+        FAILED,
+        "OPERATE_ORDER_REGISTRATION_PENDING",
+        None,
+    )
+    assert service.order_count() == 0
+    # Once the registration is confirmed, the next pass reads the window again and resolves it.
     registration_id = _confirm(store, intent)
-    source.pages = [ChangePage((_change(container, kind="DISPATCHED", minutes=1),))]
-    _sync(service)
+    source.pages = [ChangePage((_change(container),))]
+    run = _sync(service)
+    assert run.outcome == COMPLETED  # type: ignore[attr-defined]
     (order,) = service.overview().orders
     assert (order.resolution, order.registration_id) == (MATCHED, registration_id)
-    # Once recorded, it never changes again.
-    with (
-        sqlite3.connect(container.config.database_path) as raw,
-        pytest.raises(sqlite3.IntegrityError),
-    ):
-        raw.execute(
-            "UPDATE operate_orders SET resolution = 'UNMATCHED', registration_id = NULL,"
-            " registration_item_key = NULL, item_id = NULL"
-        )

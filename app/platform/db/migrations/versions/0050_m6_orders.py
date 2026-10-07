@@ -144,7 +144,7 @@ def upgrade() -> None:
         f"""
         CREATE TRIGGER {ORDERS}_resolution_immutable
         BEFORE UPDATE ON {ORDERS}
-        WHEN OLD.resolution <> 'UNMATCHED' AND ({changed})
+        WHEN {changed}
         BEGIN SELECT RAISE(ABORT, 'an order resolution is immutable once recorded'); END;
         """
     )
