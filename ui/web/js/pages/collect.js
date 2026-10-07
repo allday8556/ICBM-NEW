@@ -11,7 +11,7 @@ import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
-import { collectFactsBlock } from '../components/collect-facts.js';
+import { collectFactsBlock, collectPreviewBlock, readRevisionFacts } from '../components/collect-facts.js';
 import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 
@@ -314,12 +314,17 @@ const COLLECT_COPY = {
 };
 // The list filters the server applies before it orders and bounds the runs (A-UX1 D3). A run's
 // outcome and its facts status stay two axes: 확인 필요 selects by facts status, the others by outcome.
+// The first five are v29's state cards (each counts what the server reports for its filter);
+// 기록할 식별자 없음 has no v29 card and sits beside the list's count.
 const RUN_FILTERS = [
-  ['all', '전체', {}],
-  ['review', '원천 확인 필요', { facts_status: 'REVIEW_REQUIRED' }],
-  ['failed', '실패', { outcome: 'FAILED' }],
-  ['no_revision', '기록할 식별자 없음', { outcome: 'NO_REVISION' }],
+  ['all', '전체 수집', { icon: '▤' }, {}],
+  ['pending', '진행 중', { icon: '◌' }, { outcome: 'PENDING' }],
+  ['recorded', '기록됨', { icon: '✓' }, { outcome: 'RECORDED' }],
+  ['failed', '실패', { icon: '×' }, { outcome: 'FAILED' }],
+  ['review', '원천 확인 필요', { icon: '◇' }, { facts_status: 'REVIEW_REQUIRED' }],
+  ['no_revision', '기록할 식별자 없음', {}, { outcome: 'NO_REVISION' }],
 ];
+const CARD_FILTERS = RUN_FILTERS.slice(0, 5);
 const RUN_PAGE = 20;
 const TRANSPORT_LABEL = { DIRECT_URL: '직접 URL', EXTENSION: '확장 수집' };
 const HANDOFF_COPY = {
@@ -379,6 +384,17 @@ function runResult(run) {
   return '—';
 }
 
+// The URL as the run recorded it, shortened to host and path for the list; the full URL is its title.
+function shortUrl(sourceUrl) {
+  try {
+    const parsed = new URL(sourceUrl);
+    const text = `${parsed.host}${parsed.pathname}${parsed.search}`;
+    return text.length > 36 ? `${text.slice(0, 36)}…` : text;
+  } catch {
+    return sourceUrl ?? '—';
+  }
+}
+
 function supplierLabel(key, suppliers) {
   return suppliers.find((s) => s.supplier_key === key)?.display_name ?? key;
 }
@@ -413,19 +429,23 @@ function submitCard(view, ctx, onSubmitted = () => {}) {
   const keys = view.collection_supplier_keys;
   const select = h(
     'select',
-    { id: 'collect-supplier', name: 'supplier_key', disabled: !keys.length },
+    { id: 'collect-supplier', class: 'field', name: 'supplier_key', 'aria-label': '공급처', disabled: !keys.length },
     ...keys.map((key) => h('option', { value: key }, supplierLabel(key, view.suppliers))),
   );
+  // v29's one-line URL field: it grows with the lines pasted into it (A-UX2: one URL per line).
   const url = h('textarea', {
     id: 'collect-url',
+    class: 'field search',
     name: 'product_url',
-    rows: '3',
+    rows: '1',
     autocomplete: 'off',
     spellcheck: 'false',
-    placeholder: '상품 URL을 입력하세요. 여러 개는 줄바꿈 (최대 50개)',
+    'aria-label': '상품 URL',
+    placeholder: 'https:// 도매몰 상품 URL을 입력하세요. 여러 개는 줄바꿈 (최대 50개)',
   });
-  const button = h('button', { type: 'submit', class: 'btn blue', 'data-action': 'submit-collection', disabled: !keys.length }, '수집 요청');
-  const connection = h('div', { 'data-role': 'supplier-connection' });
+  const button = h('button', { type: 'submit', class: 'btn dark', 'data-action': 'submit-collection', disabled: !keys.length }, '▶ 수집 시작');
+  const connection = h('span', { class: 'collect-connection', 'data-role': 'supplier-connection' });
+  const credentials = h('div', { 'data-role': 'credentials-slot' });
   const refusal = h('div', { 'data-role': 'submit-refusal' });
   const summary = h('div', { class: 'mini', 'data-role': 'intake-summary' });
   const results = h('div', { 'data-role': 'intake-results' });
@@ -437,6 +457,7 @@ function submitCard(view, ctx, onSubmitted = () => {}) {
     summary.dataset.duplicates = String(intake.duplicates);
     summary.dataset.invalid = String(intake.invalid.length);
     summary.dataset.planned = String(intake.planned.length);
+    url.rows = String(Math.min(Math.max(intake.lines.length, 1), 6));
     summary.replaceChildren(
       intake.lines.length
         ? `입력 ${intake.lines.length}줄 · 중복 ${intake.duplicates} · 잘못된 URL ${intake.invalid.length} · 수집 예정 ${intake.planned.length}`
@@ -455,12 +476,15 @@ function submitCard(view, ctx, onSubmitted = () => {}) {
     const summary = view.suppliers.find((s) => s.supplier_key === select.value);
     if (!summary) {
       connection.replaceChildren();
+      credentials.replaceChildren();
       return;
     }
     const [label, tone] = CAPABILITY_CHIP[summary.capability_status] ?? [summary.capability_status, null];
+    connection.replaceChildren(
+      h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-capability': summary.capability_status, title: '공급처 연결' }, `● ${label}`),
+    );
     // fragment() skips an absent part; the DOM's own replaceChildren would print "null".
-    connection.replaceChildren(fragment(
-      h('div', { class: 'kv' }, h('span', {}, '공급처 연결'), h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-capability': summary.capability_status }, label)),
+    credentials.replaceChildren(fragment(
       summary.credentials_stored
         ? null
         : h(
@@ -475,17 +499,26 @@ function submitCard(view, ctx, onSubmitted = () => {}) {
   showConnection();
 
   let inFlight = false;
+  // v29's toolbar row. The collection-option chips, 재검증 and AI 추출 보정 have no contract yet: they
+  // keep their v29 place and only say so when pressed (markInert), sending nothing.
   const form = h(
     'form',
     { class: 'panel collect-submit', 'data-role': 'collect-submit', novalidate: true },
-    h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '상품 수집'), SUBMIT_HELP)),
+    h(
+      'div',
+      { class: 'toolbar collect-toolbar' },
+      url,
+      select,
+      connection,
+      ...['상세페이지 수집', '옵션/색상 수집', '이미지 다운로드'].map((label) => markInert(h('span', { class: 'chip info', 'data-role': 'collect-option' }, label))),
+      button,
+      markInert(h('button', { type: 'button', class: 'btn', 'data-role': 'revalidate' }, '↻ 재검증'), '재검증'),
+      markInert(h('button', { type: 'button', class: 'btn ai-btn', 'data-role': 'ai-correct' }, '✨ AI 추출 보정'), 'AI 추출 보정'),
+    ),
     keys.length ? null : h('div', { class: 'note', 'data-role': 'no-collection-supplier' }, '수집 정의가 있는 공급처가 없습니다.'),
-    h('div', { class: 'form-row' }, h('label', { for: 'collect-supplier' }, '공급처'), select),
-    connection,
-    h('div', { class: 'form-row' }, h('label', { for: 'collect-url' }, '상품 URL'), url),
-    summary,
+    h('div', { class: 'intake-line' }, withHelp(h('span', { class: 'mini' }, '한 줄에 URL 하나 · 최대 50개'), SUBMIT_HELP), summary),
+    credentials,
     refusal,
-    h('div', { class: 'supplier-actions' }, button),
     results,
   );
 
@@ -587,43 +620,71 @@ function submitCard(view, ctx, onSubmitted = () => {}) {
 function jobsView(view, ctx) {
   const focusId = ctx.params.get('run');
   const filterKey = RUN_FILTERS.some(([key]) => key === ctx.params.get('filter')) ? ctx.params.get('filter') : 'all';
-  const filterQuery = RUN_FILTERS.find(([key]) => key === filterKey)[2];
+  const filterQuery = RUN_FILTERS.find(([key]) => key === filterKey)[3];
   const root = h('div', { class: 'collect-jobs', 'data-role': 'collect-jobs' });
   const focus = h('section', { class: 'panel collect-run', 'data-role': 'run-focus', hidden: !focusId });
-  // The focused run's 수집 사실 is its own panel beside the run, so neither outgrows the screen.
+  // The focused run's 수집 사실 is its own panel below the run, so neither outgrows the screen.
   const factsSlot = h('div', { class: 'collect-facts-slot', 'data-role': 'facts-slot' });
+  // v29's 수집 미리보기 beside the work list: the focused run, read back as recorded.
+  let previewBody = h('div', { 'data-role': 'preview-body' }, h('div', { class: 'mini' }, '목록에서 수집을 고르면 미리보기가 표시됩니다.'));
+  const preview = h('aside', { class: 'side-detail collect-preview', 'data-role': 'run-preview' }, h('h3', {}, '수집 미리보기'), previewBody);
   const listBody = h('tbody', {});
   const recheck = h('button', { type: 'button', class: 'btn', 'data-action': 'recheck-runs', hidden: true }, '상태 다시 확인');
-  const listCount = h('div', { class: 'mini', 'data-role': 'runs-count' });
+  const listCount = h('span', { class: 'mini', 'data-role': 'runs-count' });
   const more = h('button', { type: 'button', class: 'btn', 'data-action': 'more-runs', hidden: true }, '더 보기');
   // The filter lives in the route, never in browser storage; changing it keeps the focused run.
-  const filters = h(
+  const goFilter = (key) => ctx.navigate('collect', { view: 'jobs', ...(focusId ? { run: focusId } : {}), ...(key === 'all' ? {} : { filter: key }) });
+  const counts = new Map();
+  const cards = h(
     'div',
-    { class: 'inner-tabs', role: 'tablist', 'aria-label': '최근 수집 필터', 'data-role': 'run-filters' },
-    RUN_FILTERS.map(([key, label]) =>
-      h(
+    { class: 'grid5 page-kpis', role: 'tablist', 'aria-label': '수집 상태', 'data-role': 'run-filters' },
+    CARD_FILTERS.map(([key, label, { icon }]) => {
+      const count = h('strong', { 'data-role': 'filter-count' }, '—');
+      counts.set(key, count);
+      return h(
         'button',
         {
           type: 'button',
           role: 'tab',
+          class: key === filterKey ? 'kpi state-card active' : 'kpi state-card',
           'data-filter': key,
           'aria-selected': String(key === filterKey),
-          onclick: () => ctx.navigate('collect', { view: 'jobs', ...(focusId ? { run: focusId } : {}), ...(key === 'all' ? {} : { filter: key }) }),
+          onclick: () => goFilter(key),
         },
-        label,
-      ),
-    ),
+        h('span', { class: 'kpi-top' }, h('span', { class: 'kicon', 'aria-hidden': 'true' }, icon), label),
+        count,
+        h('span', { class: 'trend no-data' }, '전일 대비 데이터 없음'),
+      );
+    }),
+  );
+  const [noRevisionKey, noRevisionLabel] = RUN_FILTERS[5];
+  const noRevisionCount = h('span', { 'data-role': 'filter-count' }, '');
+  counts.set(noRevisionKey, noRevisionCount);
+  const noRevision = h(
+    'button',
+    {
+      type: 'button',
+      class: noRevisionKey === filterKey ? 'chip warn filter-chip' : 'chip filter-chip',
+      'data-filter': noRevisionKey,
+      'aria-pressed': String(noRevisionKey === filterKey),
+      onclick: () => goFilter(noRevisionKey),
+    },
+    noRevisionLabel,
+    ' ',
+    noRevisionCount,
   );
   const runsPanel = h(
     'section',
     { class: 'panel collect-runs', 'data-role': 'recent-runs', 'data-filter': filterKey },
-    h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '최근 수집'), RUNS_HELP), recheck),
-    filters,
-    listCount,
+    h('div', { class: 'supplier-head-row' }, withHelp(h('h3', { class: 'panel-title' }, '수집 작업 목록'), RUNS_HELP), h('div', { class: 'list-head-meta' }, noRevision, listCount, recheck)),
     h(
       'table',
       { class: 'table' },
-      h('thead', {}, h('tr', {}, ...['요청 시각', '공급처', '수집 결과', '원천 리비전 · 사실 상태', ''].map((label) => h('th', {}, label)))),
+      h(
+        'thead',
+        {},
+        h('tr', {}, ...['요청시간', '공급처', 'URL', '상태', '리비전 · 사실', '후보수', '저장수', '가격확인', ''].map((label) => h('th', {}, label))),
+      ),
       listBody,
     ),
     h('div', { class: 'supplier-actions' }, more),
@@ -644,8 +705,11 @@ function jobsView(view, ctx) {
       { 'data-run': run.collection_run_id, 'data-outcome': run.outcome, 'aria-current': run.collection_run_id === focusId ? 'true' : null },
       h('td', {}, dotDateTime(run.requested_at)),
       h('td', {}, supplierLabel(run.supplier_key, view.suppliers)),
+      h('td', { class: 'run-url', title: run.source_url }, shortUrl(run.source_url)),
       h('td', {}, outcomeChip(run.outcome)),
       h('td', {}, runResult(run)),
+      // v29's 후보수 · 저장수 · 가격확인 have no source on a run: their place stays, without data.
+      ...['후보수', '저장수', '가격확인'].map((label) => h('td', { class: 'no-data', 'data-no-data': label }, '데이터 없음')),
       h(
         'td',
         {},
@@ -724,9 +788,17 @@ function jobsView(view, ctx) {
       }
     }
     const handoff = run.outcome === 'RECORDED' ? await handoffBlock(run) : null;
-    const facts = run.outcome === 'RECORDED' && run.revision_id ? await collectFactsBlock(run.revision_id, run, codeCopy, handoff?.product ?? null) : null;
+    const read = run.outcome === 'RECORDED' && run.revision_id ? await readRevisionFacts(run.revision_id, handoff?.product ?? null) : null;
+    const facts = read ? collectFactsBlock(read, run, codeCopy) : null;
     const review = handoff?.source ? await reviewBlock(handoff.source) : null;
     if (!root.isConnected && polls > 0) return false; // the operator left; nothing to render into
+    previewBody.replaceWith(
+      (previewBody = collectPreviewBlock(run, read, {
+        supplier: supplierLabel(run.supplier_key, view.suppliers),
+        chips: [outcomeChip(run.outcome), factsChip(run.facts_status)].filter(Boolean),
+        errorCopy: codeCopy,
+      })),
+    );
     focus.dataset.run = run.collection_run_id;
     focus.dataset.outcome = run.outcome;
     focus.dataset.state = 'ready';
@@ -772,6 +844,24 @@ function jobsView(view, ctx) {
     return run.outcome === 'PENDING';
   }
 
+  // Each state card's count is the server's own total for that filter (a one-run read). It is
+  // never counted in the page.
+  async function renderCounts() {
+    await Promise.all(
+      RUN_FILTERS.map(async ([key, , , query]) => {
+        const slot = counts.get(key);
+        try {
+          const listed = await getJson(`${RUNS}?${new URLSearchParams({ limit: '1', ...query })}`);
+          slot.dataset.total = String(listed.total);
+          slot.textContent = Number(listed.total).toLocaleString('ko-KR');
+        } catch {
+          slot.dataset.total = '';
+          slot.textContent = '—';
+        }
+      }),
+    );
+  }
+
   function listUrl(before) {
     const query = new URLSearchParams({ limit: String(RUN_PAGE), ...filterQuery });
     if (before) query.set('before', before);
@@ -796,12 +886,12 @@ function jobsView(view, ctx) {
       listBody.replaceChildren(
         ...(listed.runs.length
           ? listed.runs.map(runRow)
-          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, filterKey === 'all' ? '아직 수집 기록이 없습니다.' : '이 조건에 맞는 수집 기록이 없습니다.'))]),
+          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, filterKey === 'all' ? '아직 수집 기록이 없습니다.' : '이 조건에 맞는 수집 기록이 없습니다.'))]),
       );
       showPage(listed, listed.runs.length);
       return listed.runs.some((run) => run.outcome === 'PENDING');
     } catch (error) {
-      listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
+      listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
       more.hidden = true;
       return false;
     }
@@ -815,7 +905,7 @@ function jobsView(view, ctx) {
       listBody.append(...listed.runs.map(runRow));
       showPage(listed, listBody.querySelectorAll('tr[data-run]').length);
     } catch (error) {
-      listBody.append(h('tr', {}, h('td', { class: 'table-empty', colspan: '5' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
+      listBody.append(h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, codeCopy(error?.error?.code ?? null, error?.error?.message))));
       more.hidden = true;
     }
     more.disabled = false;
@@ -825,7 +915,7 @@ function jobsView(view, ctx) {
   // only while this view is on screen; nothing here ever sends a collection.
   async function refresh() {
     window.clearTimeout(timer);
-    const [focusPending, listPending] = await Promise.all([renderFocus(), renderList()]);
+    const [focusPending, listPending] = await Promise.all([renderFocus(), renderList(), renderCounts()]);
     const pending = focusPending || listPending;
     if (!root.isConnected && polls > 0) return;
     if (pending && polls < RUN_POLL_LIMIT) {
@@ -843,7 +933,7 @@ function jobsView(view, ctx) {
     refresh();
   });
 
-  root.append(submitCard(view, ctx, () => refresh()), focus, factsSlot, runsPanel);
+  root.append(submitCard(view, ctx, () => refresh()), cards, h('div', { class: 'section-grid' }, runsPanel, preview), focus, factsSlot);
   refresh();
   return root;
 }

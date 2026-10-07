@@ -365,21 +365,29 @@ function kv(label, value) {
   return h('div', { class: 'kv' }, h('span', {}, label), h('b', {}, value));
 }
 
-// The revision of a RECORDED run, as one block. A failed read shows the server's reason and nothing
-// in its place.
-export async function collectFactsBlock(revisionId, run, errorCopy, product = null) {
-  const holder = h('section', { class: 'panel collect-facts', 'data-role': 'collect-facts', 'data-revision': revisionId });
+// One read of a RECORDED run's revision and of its bound Item's auto-selection notes, shared by the
+// 수집 미리보기 and the 수집 사실 blocks. A failed read keeps the server's reason.
+export async function readRevisionFacts(revisionId, product = null) {
   let revision;
   try {
     revision = await getJson(`${REVISIONS}/${encodeURIComponent(revisionId)}`);
   } catch (error) {
-    const code = error?.error?.code ?? null;
+    return { revisionId, error: { code: error?.error?.code ?? null, message: error?.error?.message ?? null } };
+  }
+  return { revisionId, revision, selection: await selectionNotes(revisionId, product) };
+}
+
+// The revision of a RECORDED run, as one block. A failed read shows the server's reason and nothing
+// in its place.
+export function collectFactsBlock(read, run, errorCopy) {
+  const holder = h('section', { class: 'panel collect-facts', 'data-role': 'collect-facts', 'data-revision': read.revisionId });
+  if (read.error) {
     holder.dataset.state = 'error';
-    holder.append(h('div', { class: 'note', 'data-reason': code ?? '' }, errorCopy(code, error?.error?.message)));
+    holder.append(h('div', { class: 'note', 'data-reason': read.error.code ?? '' }, errorCopy(read.error.code, read.error.message)));
     return holder;
   }
+  const { revision, selection } = read;
   holder.dataset.state = 'ready';
-  const selection = await selectionNotes(revisionId, product);
   const included = revision.images.filter((image) => image.disposition === 'INCLUDED').length;
   holder.append(fragment(
     h('div', { class: 'supplier-head-row' }, withHelp(h('h4', { class: 'panel-title' }, '수집 사실'), HELP)),
@@ -401,6 +409,103 @@ export async function collectFactsBlock(revisionId, run, errorCopy, product = nu
       h('tbody', {}, ...revision.fields.flatMap(fieldRows)),
     ),
     imagesBlock(revision.images, selection),
+  ));
+  return holder;
+}
+
+// ---------------------------------------------------------------- 수집 미리보기 (v29 side-detail)
+//
+// v29's 수집 미리보기 beside the work list, filled only from what the run and its revision hold. A
+// slot the system has no source for keeps its v29 place and reads 데이터 없음 (owner decision
+// 2026-10-07, option 가); nothing is estimated or filled from demo content.
+const NO_DATA = '데이터 없음';
+
+function previewField(read, key) {
+  return read?.revision?.fields.find((field) => field.key === key) ?? null;
+}
+
+function optionWords(valueJson) {
+  let value;
+  try {
+    value = JSON.parse(valueJson);
+  } catch {
+    return valueText(valueJson);
+  }
+  if (Array.isArray(value?.configurations) && value.configurations.length) return `${value.configurations.length}개`;
+  if (Array.isArray(value?.axes) && !value.axes.length) return '옵션 없음';
+  return valueText(valueJson);
+}
+
+// A field's stored value, its recorded status when it has none, or 데이터 없음 when the revision
+// holds no such field (or there is no revision yet).
+function previewRow(label, field, words = valueText) {
+  const text = !field ? NO_DATA : field.status === 'CONFIRMED' ? words(field.value_json) : STATUS[field.status]?.[0] ?? field.status;
+  return h(
+    'div',
+    { class: 'kv', 'data-preview': label, 'data-status': field?.status ?? 'NO_DATA' },
+    h('span', {}, label),
+    h('b', { class: field ? null : 'no-data' }, text),
+  );
+}
+
+function noDataRow(label) {
+  return h('div', { class: 'kv', 'data-preview': label, 'data-status': 'NO_DATA' }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
+}
+
+// The representative image is shown through the bound Item's own image read once the Product DB
+// holds it; before that the slot keeps its place empty.
+function previewThumb(read) {
+  const empty = () => h('div', { class: 'hero-thumb', 'data-role': 'preview-thumb', 'data-thumb': 'none', title: '대표 이미지 데이터 없음' }, h('span', { 'aria-hidden': 'true' }, '🖼'));
+  const representative = read?.revision?.images.find((image) => image.role === 'REPRESENTATIVE' && image.disposition === 'INCLUDED' && image.asset);
+  if (!representative || read.selection?.state !== 'READY') return empty();
+  const holder = h('div', { class: 'hero-thumb', 'data-role': 'preview-thumb', 'data-thumb': 'item-image' });
+  const image = h('img', {
+    alt: '대표 이미지',
+    src: `${PRODUCTS}/items/${encodeURIComponent(read.selection.itemId)}/images/${encodeURIComponent(representative.asset.sha256)}`,
+  });
+  image.addEventListener('error', () => holder.replaceWith(empty()));
+  holder.append(image);
+  return holder;
+}
+
+export function collectPreviewBlock(run, read, { supplier, chips = [], errorCopy }) {
+  const holder = h('div', { 'data-role': 'preview-body', 'data-run': run.collection_run_id, 'data-outcome': run.outcome });
+  const name = previewField(read, 'original_name');
+  const images = read?.revision?.images ?? null;
+  const detailImages = images ? images.filter((image) => image.role === 'DETAIL' && image.disposition === 'INCLUDED').length : null;
+  const statusChips = read?.revision
+    ? ['prices', 'options', 'images'].map((key) => {
+        const field = previewField(read, key);
+        if (!field) return null;
+        const [label, tone] = STATUS[field.status] ?? [field.status, null];
+        return h('span', { class: tone ? `chip ${tone}` : 'chip', 'data-preview-status': key }, `${FIELD_LABEL[key]} ${label}`);
+      })
+    : [];
+  holder.append(fragment(
+    h(
+      'div',
+      { class: 'detail-title' },
+      previewThumb(read),
+      h(
+        'div',
+        { class: 'preview-name' },
+        h('b', { 'data-role': 'preview-name', class: name?.status === 'CONFIRMED' ? null : 'no-data' }, name?.status === 'CONFIRMED' ? valueText(name.value_json) : name ? STATUS[name.status]?.[0] ?? name.status : NO_DATA),
+        h('div', { class: 'mini' }, read?.revision ? `${read.revision.supplier_key} · ${read.revision.source_product_id}` : run.source_url),
+      ),
+    ),
+    read?.error ? h('div', { class: 'note', 'data-reason': read.error.code ?? '' }, errorCopy(read.error.code, read.error.message)) : null,
+    h(
+      'div',
+      { class: 'detail-group' },
+      h('div', { class: 'kv', 'data-preview': '공급처' }, h('span', {}, '공급처'), h('b', {}, supplier)),
+      previewRow('도매가', previewField(read, 'prices')),
+      previewRow('배송비', previewField(read, 'shipping')),
+      previewRow('최저판매가', previewField(read, 'minimum_sale_price')),
+      previewRow('옵션 수', previewField(read, 'options'), optionWords),
+      detailImages === null ? noDataRow('상세이미지') : h('div', { class: 'kv', 'data-preview': '상세이미지' }, h('span', {}, '상세이미지'), h('b', {}, `${detailImages}장`)),
+    ),
+    h('div', { class: 'detail-group preview-chips' }, ...chips, ...statusChips),
+    h('div', { class: 'note', 'data-role': 'ai-note' }, h('b', {}, 'AI 학습 노트'), h('br', {}), NO_DATA),
   ));
   return holder;
 }
