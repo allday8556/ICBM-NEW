@@ -60,6 +60,8 @@ PROVIDER = "SMARTSTORE"
 # The provider API group the packet's AI-use guide gives for product registration, lookup and the
 # category/attribute reads. No narrower permission name is invented from it (kickoff note).
 PRODUCT_GROUP = "상품"
+# The order-seller group (``ORDER_READ.md``, ``OFFICIAL_SUPPORT``): the order reads need it.
+ORDER_GROUP = "주문 판매자"
 # AUTH.md §2.1: M2 uses the SELF token type only. Switching to SELLER needs its own ADR (§2.2).
 AUTH_MODE = "SELF"
 PROVIDER_HOST = "api.commerce.naver.com"
@@ -84,6 +86,10 @@ class EndpointId(StrEnum):
     SMARTSTORE_CATEGORY_LIST = "SMARTSTORE_CATEGORY_LIST"
     # The seller's address book (출고지 / 반품·교환지), read for the Settings delivery policy.
     SMARTSTORE_ADDRESSBOOK_LIST = "SMARTSTORE_ADDRESSBOOK_LIST"
+    # M6-C (ADR-0023 §5, §6): the two read-only order reads. What changed by time window, then
+    # the product orders themselves by id. Neither is a write; both are read by OPERATE only.
+    SMARTSTORE_ORDER_CHANGES = "SMARTSTORE_ORDER_CHANGES"
+    SMARTSTORE_ORDER_DETAILS = "SMARTSTORE_ORDER_DETAILS"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
     SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES = "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES"
@@ -197,6 +203,71 @@ def addressbook_list_succeeded(status: int, body: object) -> bool:
         and not isinstance(item.get("addressBookNo"), bool)
         and isinstance(item.get("addressType"), str)
         for item in books
+    )
+
+
+def _text_member(value: object, key: str, *, required: bool) -> bool:
+    """``value`` is an object whose ``key`` is a non-empty string, or, when not required, absent
+    or a string."""
+    if not isinstance(value, dict):
+        return False
+    member = value.get(key)
+    if required:
+        return isinstance(member, str) and bool(member)
+    return member is None or isinstance(member, str)
+
+
+def order_changes_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented 변경 상품 주문 내역 (Commerce API 2.90.1).
+
+    ``data`` is not marked required, so an answer without it is an empty window. When present it
+    carries the required integer ``count`` and the required ``lastChangeStatuses`` array, each
+    entry naming its product order and its change; a ``more`` continuation, when present, names
+    both ``moreFrom`` and ``moreSequence``.
+    """
+    if status != 200 or not isinstance(body, dict):
+        return False
+    data = body.get("data")
+    if data is None:
+        return True
+    if not isinstance(data, dict):
+        return False
+    count = data.get("count")
+    statuses = data.get("lastChangeStatuses")
+    more = data.get("more")
+    return (
+        isinstance(count, int)
+        and not isinstance(count, bool)
+        and isinstance(statuses, list)
+        and all(
+            _text_member(entry, "productOrderId", required=True)
+            and _text_member(entry, "lastChangedDate", required=True)
+            and _text_member(entry, "lastChangedType", required=False)
+            for entry in statuses
+        )
+        and (
+            more is None
+            or (
+                _text_member(more, "moreFrom", required=True)
+                and _text_member(more, "moreSequence", required=True)
+            )
+        )
+    )
+
+
+def order_details_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented 상품 주문 상세 내역: a ``data`` array whose every entry has a
+    ``productOrder`` object naming its ``productOrderId`` (Commerce API 2.90.1)."""
+    if status != 200 or not isinstance(body, dict):
+        return False
+    data = body.get("data")
+    return isinstance(data, list) and all(
+        isinstance(entry, dict)
+        and isinstance(entry.get("productOrder"), dict)
+        and _text_member(entry["productOrder"], "productOrderId", required=True)
+        and (entry.get("order") is None or isinstance(entry.get("order"), dict))
+        and (entry.get("delivery") is None or isinstance(entry.get("delivery"), dict))
+        for entry in data
     )
 
 
@@ -370,6 +441,71 @@ _CATEGORY_FIELDS = frozenset({"wholeCategoryName", "id", "name", "last"})
 # Only the address book's identity, its operator label and its type survive: never the address,
 # the phone or any other personal or contact field of the entry.
 _ADDRESSBOOK_FIELDS = frozenset({"addressBooks", "addressBookNo", "name", "addressType"})
+# ADR-0023 §7: only what identifies a change survives a change listing — never an amount, a
+# buyer field or an address flag beyond the change itself.
+_ORDER_CHANGE_FIELDS = frozenset(
+    {
+        "count",
+        "productOrderId",
+        "orderId",
+        "lastChangedType",
+        "lastChangedDate",
+        "productOrderStatus",
+        "claimType",
+        "claimStatus",
+        "moreFrom",
+        "moreSequence",
+    }
+)
+# ADR-0023 §7, the order allow-list. The caller first narrows each entry to its ``order``,
+# ``productOrder`` (without ``takingAddress``) and ``delivery`` objects, so a claim's addresses
+# and every other member never reach retention. Of what remains, only these leaves survive:
+# the identities, status codes, timestamps, product and option identities, quantity and amounts,
+# and the shipping record (recipient name, phones, address, memo) that OPERATE keeps encrypted.
+# Never the orderer's id, name or phone, a payment means, a coupon or a commission.
+_ORDER_DETAIL_FIELDS = frozenset(
+    {
+        # order
+        "orderId",
+        "orderDate",
+        "paymentDate",
+        # productOrder
+        "productOrderId",
+        "productOrderStatus",
+        "claimType",
+        "claimStatus",
+        "placeOrderStatus",
+        "placeOrderDate",
+        "decisionDate",
+        "shippingDueDate",
+        "productId",
+        "originalProductId",
+        "optionManageCode",
+        "sellerProductCode",
+        "productName",
+        "productOption",
+        "quantity",
+        "unitPrice",
+        "totalPaymentAmount",
+        "expectedDeliveryMethod",
+        "deliveryAttributeType",
+        "shippingMemo",
+        # productOrder.shippingAddress (kept encrypted by OPERATE)
+        "name",
+        "tel1",
+        "tel2",
+        "baseAddress",
+        "detailedAddress",
+        "zipCode",
+        # delivery
+        "deliveryMethod",
+        "deliveryStatus",
+        "deliveryCompany",
+        "trackingNumber",
+        "sendDate",
+        "deliveredDate",
+    }
+)
 
 
 ADOPTED: Mapping[EndpointId, EndpointContract] = {
@@ -437,6 +573,43 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         predicate_revision="settings-addressbook-list-r1",
         safe_query_keys=frozenset({"page"}),
         retained_response_fields=_ADDRESSBOOK_FIELDS,
+    ),
+    # ---- M6-C (ADR-0023 §5, §6; Commerce API 2.90.1 read 2026-10-07). The two order reads,
+    # read-only. The page names no API group; the operator-attested 주문 판매자 group of
+    # ``ORDER_READ.md`` is recorded, and only a successful read proves the capability.
+    EndpointId.SMARTSTORE_ORDER_CHANGES: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_ORDER_CHANGES,
+        method=Method.GET,
+        path="/v1/pay-order/seller/product-orders/last-changed-statuses",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({ORDER_GROUP}),
+        mutating=False,
+        success_predicate=order_changes_succeeded,
+        predicate_revision="m6-order-changes-r1",
+        safe_query_keys=frozenset(
+            {"lastChangedFrom", "lastChangedTo", "moreSequence", "limitCount"}
+        ),
+        retained_response_fields=_ORDER_CHANGE_FIELDS,
+    ),
+    EndpointId.SMARTSTORE_ORDER_DETAILS: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_ORDER_DETAILS,
+        method=Method.POST,
+        path="/v1/pay-order/seller/product-orders/query",
+        content_type="application/json",
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({ORDER_GROUP}),
+        # A query by ids: POST carries the id list, nothing is changed.
+        mutating=False,
+        success_predicate=order_details_succeeded,
+        predicate_revision="m6-order-details-r1",
+        retained_response_fields=_ORDER_DETAIL_FIELDS,
     ),
     # ---- M5 PR-D (packet 5746489554). Group 상품; bearer per the current auth page.
     EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2: EndpointContract(
@@ -644,7 +817,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "settings-addressbook-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m6-orders-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -681,6 +854,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     # The Settings delivery policy adopts the seller address-book read (owner directive
     # 2026-10-07): GET /v1/seller/addressbooks-for-page, retaining number, label and type only.
     "settings-addressbook-r1": "e3fc720afa9b1693defd29ba16574a96d6c0671b3962c75f2df6c66c36e6a8d4",
+    # M6-C adopts the two read-only order reads and the ADR-0023 §7 order allow-list.
+    "m6-orders-r1": "f76d1f41b594d1b6d23a298cf8fcafbc75aae843b7dad64a3e19aaf831296955",
 }
 
 

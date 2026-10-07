@@ -135,6 +135,13 @@ There is no second token owner. Configuration: `ICBM_SMARTSTORE_AUTO_RENEW` (def
   - Resolution is immutable once recorded. A later binding change never rewrites it.
 - **Idempotency:** the provider's product-order id is the key. A re-read appends a status history entry and never creates a second order.
 - **Cadence:** a server policy value (default 10 minutes), plus "지금 동기화". The time-window cursor is durable, and every window overlaps the last one so a late change is never missed.
+- **Implementation (M6-C/M6-D):**
+  - **Reads:** `SMARTSTORE_ORDER_CHANGES` and `SMARTSTORE_ORDER_DETAILS`, adopted read-only (`ENDPOINT_MATRIX.md` §4.1.4, Commerce API 2.90.1, packet Issue #219 `6035983005`), through `SmartStoreOrderSource` with the CONNECT owner's committed bearer.
+  - **Capability, as amended here:** the 2.90.1 page names no API group, so `ORDER_READ` is proven by a read, never declared. It is `NOT_CONNECTED` until one change window has been read completely, then `CONNECTED`. Until then, 주문관리 is empty for `NO_CONNECTIONS` and the API's order `total` is `null`, never a zero.
+  - **Windows:** at most 24 hours each, the documented default span. The first pass looks back a policy span (default 7 days, at most 30). Each later pass starts 10 minutes before the latest point a pass read completely. A window moves the cursor only when it was read and recorded completely. A rate limit, a missing session or a failure ends the pass without moving it.
+  - **Storage:** migration `0050` holds three tables: `operate_order_sync_runs` (one running), `operate_orders` (keyed by the provider product-order id, never deleted, resolution columns immutable by trigger) and `operate_order_status_history` (append-only, unique by order, change time and change type). A change listed without a type is recorded as ICBM's own `UNSPECIFIED`.
+  - **Resolution:** the origin product id, else the channel product id, finds the registration. A `sellerProductCode` that differs from the registration's is `CONFLICT`. The option code, or the only Item of a single-Item listing, finds the frozen Item. The Snapshot gives the canonical Item, and the products owner gives its source.
+  - **Interface:** `GET /api/v1/operate/orders`, `POST /api/v1/operate/orders/sync`, `GET /api/v1/operate/orders/{id}/shipping` (never cached), and the 주문관리 panel.
 
 ## 6. Endpoint adoption
 
@@ -167,6 +174,13 @@ The owner decided to store what shipping needs. This is the lifecycle contract A
   - The 90 days is a policy value the owner may change.
 - **Evidence:** what is stored, decrypted and deleted is audited by id, never by content.
 - **Fixtures:** tests never use real order data (rule 07 §7.3).
+- **Implementation (M6-D):**
+  - **Encryption:** the shipping record is AES-256-GCM sealed under `operate:orders:shipping_key`, held by the OS secret store. The product-order id is bound into the authenticated data.
+  - **Masks:** stored in clear beside the ciphertext so lists never decrypt: the name keeps its first and last letters, and a phone keeps its first group and last four digits.
+  - **Resealing:** a record is sealed when first seen, and resealed only on a `DELIVERY_ADDRESS_CHANGED`. A deleted record is never kept again.
+  - **Terminal statuses:** `PURCHASE_DECIDED`, `CANCELED`, `CANCELED_BY_NOPAYMENT` and `RETURNED`, timed from the change that reported them.
+  - **Audit:** storing, opening and deleting a record are audited by id as `ORDER_SHIPPING_STORED`, `ORDER_SHIPPING_OPENED` and `ORDER_SHIPPING_DELETED`.
+  - **Policy values:** `ICBM_OPERATE_ORDER_SYNC_INTERVAL_S`, `ICBM_OPERATE_ORDER_INITIAL_LOOKBACK_S` and `ICBM_OPERATE_ORDER_SHIPPING_RETENTION_DAYS`.
 
 ## 8. Screens
 

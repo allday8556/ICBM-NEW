@@ -124,6 +124,12 @@ class AuditEventType(StrEnum):
     # ADR-0018 §6.1, G3-30: one durable proof of the user and architect residual-risk acceptance
     # recorded for one account and one risk contract. Identifiers and digests only.
     RESIDUAL_RISK_ACCEPTANCE_RECORDED = "RESIDUAL_RISK_ACCEPTANCE_RECORDED"
+    # M6-D (ADR-0023 §7): one order's encrypted shipping record was stored, opened for the
+    # detail view, or deleted at the end of its retention. The product-order id only, never
+    # a recipient, phone or address.
+    ORDER_SHIPPING_STORED = "ORDER_SHIPPING_STORED"
+    ORDER_SHIPPING_OPENED = "ORDER_SHIPPING_OPENED"
+    ORDER_SHIPPING_DELETED = "ORDER_SHIPPING_DELETED"
 
 
 class AuditOutcome(StrEnum):

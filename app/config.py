@@ -108,6 +108,9 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "smartstore_auto_renew": ("ICBM_SMARTSTORE_AUTO_RENEW", _parse_bool),
     "operate_stock_recheck_interval_s": ("ICBM_OPERATE_STOCK_RECHECK_INTERVAL_S", float),
     "operate_stock_recheck_cap": ("ICBM_OPERATE_STOCK_RECHECK_CAP", int),
+    "operate_order_sync_interval_s": ("ICBM_OPERATE_ORDER_SYNC_INTERVAL_S", float),
+    "operate_order_initial_lookback_s": ("ICBM_OPERATE_ORDER_INITIAL_LOOKBACK_S", float),
+    "operate_order_shipping_retention_days": ("ICBM_OPERATE_ORDER_SHIPPING_RETENTION_DAYS", int),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
 }
 
@@ -153,6 +156,11 @@ class AppConfig:
     # M6-B (ADR-0023 §4): the supplier stock recheck cadence (0 disables it) and per-round cap.
     operate_stock_recheck_interval_s: float = 21600.0
     operate_stock_recheck_cap: int = 20
+    # M6-D (ADR-0023 §5, §7): the order ingest cadence (0 disables it), how far the first pass
+    # looks back, and how long a terminal order keeps its encrypted shipping record.
+    operate_order_sync_interval_s: float = 600.0
+    operate_order_initial_lookback_s: float = 7 * 86400.0
+    operate_order_shipping_retention_days: int = 90
     review_coverage_max_age_s: float = 900.0
 
     def __post_init__(self) -> None:
@@ -188,6 +196,10 @@ class AppConfig:
                 f"smartstore_a0_max_age_days must be 1..{A0_MAX_AGE_DAYS}: an override may only "
                 "tighten the canonical maximum (PERMISSIONS_SCOPES §8.1)"
             )
+        if not 0 < self.operate_order_initial_lookback_s <= 30 * 86400:
+            raise ConfigError("operate_order_initial_lookback_s must be within 30 days")
+        if self.operate_order_shipping_retention_days < 1:
+            raise ConfigError("operate_order_shipping_retention_days must be >= 1")
         margin = self.smartstore_renewal_margin_s
         if margin is not None and not (
             isinstance(margin, int)

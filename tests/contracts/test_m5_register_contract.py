@@ -52,6 +52,8 @@ EVIDENCE_READERS = frozenset(
         # M6-A: a listing observation names its registration by foreign key only; every
         # registration write still goes through the registration store.
         "app/stages/operate/listing_models.py",
+        # M6-D: an order names the registration it resolved to by foreign key only.
+        "app/stages/operate/order_models.py",
     }
 )
 
@@ -91,6 +93,9 @@ M5_ADOPTED = frozenset(
         "SMARTSTORE_CATEGORY_LIST",
         # Owner directive 2026-10-07: the seller address-book read for the Settings delivery policy.
         "SMARTSTORE_ADDRESSBOOK_LIST",
+        # M6-C (ADR-0023 §5, §6): the two read-only order reads.
+        "SMARTSTORE_ORDER_CHANGES",
+        "SMARTSTORE_ORDER_DETAILS",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -101,7 +106,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "settings-addressbook-r1"
+M5_MAPPING_REVISION = "m6-orders-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -235,7 +240,9 @@ ATOMIC_SKU_ECONOMICS = "0047_atomic_sku_economics"
 M6_LISTING_SYNC = "0048_m6_listing_sync"
 # M6-B (ADR-0023 §4): the supplier stock rechecks.
 M6_STOCK_RECHECK = "0049_m6_stock_recheck"
-SCHEMA_HEAD = M6_STOCK_RECHECK
+# M6-D (ADR-0023 §5, §7): the order ingest runs, product orders and their status history.
+M6_ORDERS = "0050_m6_orders"
+SCHEMA_HEAD = M6_ORDERS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -266,6 +273,7 @@ AFTER_M5 = (
     ATOMIC_SKU_ECONOMICS,
     M6_LISTING_SYNC,
     M6_STOCK_RECHECK,
+    M6_ORDERS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

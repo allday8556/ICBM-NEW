@@ -19,7 +19,9 @@ SCREENS = {
     "collect": "NO_COLLECTION_JOBS",
     "db": "NO_PRODUCTS",
     "register": "NO_REGISTRATION_CANDIDATES",
-    "orders": "NO_ORDERS",
+    # ADR-0023 §5: before any order read has succeeded, 주문관리 is not connected — never a
+    # zero of orders.
+    "orders": "NO_CONNECTIONS",
     "inquiry": "NO_INQUIRIES",
     "ai-insight": "NO_INTERNAL_HISTORY",
     "analytics": "NO_OPERATING_DATA",

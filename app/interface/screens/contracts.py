@@ -122,8 +122,12 @@ class RegisterView(BaseModel):
 
 
 class OrdersView(BaseModel):
+    """``NO_ORDERS`` only once an order read has succeeded (``order_read`` CONNECTED); before that
+    the screen says the channel is not connected, never that there are no orders (ADR-0023 §5)."""
+
     meta: ScreenMeta
     orders_total: int
+    order_read: str
     marketplaces_connected: int
 
 

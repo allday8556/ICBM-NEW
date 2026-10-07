@@ -115,6 +115,8 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); ASSET sender wired (`SmartStoreAssetSender`) to the CONNECT owner's committed bearer (ROADMAP §14 item 4), so unavailable without a proven current committed session; every upload still refused by the send-time stack under `M0_DRY_RUN_ONLY` |
 | `SMARTSTORE_CATEGORY_LIST` | `ADOPTED` | Leaf-category catalog (owner decision 2026-10-04) | `GET` | `/v1/categories` with `last=true` | Current registrable leaf-category discovery | `OWN_STORE_SELF` | `상품` | No; read-only, no LIVE authority |
 | `SMARTSTORE_ADDRESSBOOK_LIST` | `ADOPTED` | Settings delivery policy (owner directive 2026-10-07) | `GET` | `/v1/seller/addressbooks-for-page` with `page` | The seller's 출고지 / 반품·교환지 numbers for the target policy; only `addressBookNo`, `name`, `addressType` are retained, never an address or contact | `OWN_STORE_SELF` | `판매자정보` | No; read-only, never stored, no LIVE authority |
+| `SMARTSTORE_ORDER_CHANGES` | `ADOPTED` | M6-C order reads (ADR-0023 §5, §6) | `GET` | `/v1/pay-order/seller/product-orders/last-changed-statuses` | Which product orders changed in a time window (§4.1.4) | `OWN_STORE_SELF` | `주문 판매자` | No; read-only |
+| `SMARTSTORE_ORDER_DETAILS` | `ADOPTED` | M6-C order reads (ADR-0023 §5, §6) | `POST` | `/v1/pay-order/seller/product-orders/query` | The product orders by id, inside the ADR-0023 §7 allow-list (§4.1.4) | `OWN_STORE_SELF` | `주문 판매자` | No; a query by ids, read-only |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attribute-values` | Attribute-value discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -417,6 +419,29 @@ same change. The slice touched **its own endpoint only**: every other row of §4
 Adoption is never authority: a deletion runs only through `RegistrationDeletionService` and the
 send-time stack (ADR-0018 §3.5), for one `ACTIVE` ICBM-confirmed registration, under its exact
 DELETE grant, inside a bounded LIVE window with the brake released.
+
+### 4.1.4 Order read adoption (M6-C; ADR-0023 §5–§7)
+
+**Amendment note, not a rewrite.** The `SMARTSTORE_ORDER_CHANGES` and `SMARTSTORE_ORDER_DETAILS`
+rows are added to §4 as `ADOPTED`, and the mapping revision is bumped to `m6-orders-r1` with its own
+fingerprint in the same change. The slice touched **its own endpoints only**: every other row of §4
+is unchanged. Evidence: `SOURCES.md` §5.6 (`NAVER-P0-ORDER-READ-2901`, Commerce API `2.90.1`).
+
+| Field | `SMARTSTORE_ORDER_CHANGES` | `SMARTSTORE_ORDER_DETAILS` |
+| --- | --- | --- |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, group `주문 판매자` (`ORDER_READ.md`; the reference page names none) | same |
+| Method / path | `GET /v1/pay-order/seller/product-orders/last-changed-statuses` | `POST /v1/pay-order/seller/product-orders/query` |
+| Request | query `lastChangedFrom` and `lastChangedTo` (both sent, KST `yyyy-MM-dd'T'HH:mm:ss.SSS+09:00`, from ≤ to), `limitCount` 1..300, and `moreSequence` only as the provider's own continuation with its `moreFrom` | `application/json` body `{"productOrderIds": [...]}`, 1..300 distinct ids; `quantityClaimCompatibility` is not sent |
+| Timeouts / redirect | connect `5s`, read `30s`; `NO_FOLLOW` | same |
+| Success predicate | HTTP 200 and a JSON object; `data` is not marked required, so its absence is an empty window; when present, an integer `count`, a `lastChangeStatuses` array whose entries carry string `productOrderId` and `lastChangedDate`, and a `more` naming both `moreFrom` and `moreSequence` when present (`m6-order-changes-r1`) | HTTP 200 and a `data` array whose every entry has a `productOrder` object with a string `productOrderId` (`m6-order-details-r1`) |
+| Paging | ascending by change time; a `more` continues with `moreFrom` as the next `lastChangedFrom` and its `moreSequence`; ICBM reads at most 50 pages per window and never goes back in time | none; at most 300 ids per query |
+| Retained fields | `count`, `productOrderId`, `orderId`, `lastChangedType`, `lastChangedDate`, `productOrderStatus`, `claimType`, `claimStatus`, `moreFrom`, `moreSequence` | the ADR-0023 §7 allow-list, applied after the caller narrows each entry to the scalar members of `order`, `productOrder` (and its `shippingAddress`) and `delivery` — every claim, its addresses, the seller's `takingAddress`, coupons and promotions are dropped first, and never the orderer's id, name or phone, a payment means or a commission |
+| Errors | `ERRORS.md` §8 unchanged: a `429`/`GW.RATE_LIMIT`/`GW.QUOTA_LIMIT` is `RATE_LIMITED`; every other failure is classified and proves nothing | same |
+
+**Adoption is not ingest authority.** The reads are wired only to the OPERATE order owner
+(`app/stages/operate/orders.py`) through `SmartStoreOrderSource`, with the CONNECT owner's committed
+bearer; without a proven current committed session nothing is read. Neither read writes the
+marketplace (M6-01), and no order data leaves the local data root (M6-11).
 
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 
