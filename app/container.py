@@ -104,6 +104,7 @@ from app.stages.connect.sessions import (
     SESSIONS_DIR_NAME,
     SupplierSessionStore,
 )
+from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.service import OperateService
@@ -269,6 +270,8 @@ class Container:
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
+    # Owner decision 2026-10-07: automatic token renewal through CONNECT's own pass.
+    smartstore_keeper: SmartStoreSessionKeeper
     review_items: ReviewItemStore
     review_reconciler: ReviewReconciler
     adaptive_profiles: AdaptiveProfileStore
@@ -980,6 +983,7 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
+        smartstore_keeper=SmartStoreSessionKeeper(smartstore, enabled=config.smartstore_auto_renew),
         review_items=review_items,
         review_reconciler=review_reconciler,
         adaptive_profiles=adaptive_profiles,

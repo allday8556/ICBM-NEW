@@ -83,6 +83,20 @@ REGISTER keeps the registration and its lifecycle. M6 calls `record_readback` an
   - One job runs at a time.
   - Reads are bounded per run, and a provider rate limit pauses the run without failing registrations.
 
+### 3.1 Automatic token renewal (owner decision `6034380699`)
+
+The SmartStore token lives about three hours, and renewal used to be the operator's "계정 확인". The owner decided on automatic renewal ("토큰 자동 갱신이지").
+
+A CONNECT session keeper (`app/stages/connect/smartstore/keeper.py`) runs CONNECT's own pass (`connect()`) under these conditions:
+- **When:** soon after startup, then every minute, whenever `auto_renewal_due()` holds. That means a configured renewal margin, committed credentials, a bound account, no open AUTHENTICATION review, and no current committed bearer.
+- **What it does:** it issues the token inside the provider window, commits the new session, re-proves the identity, serializes the pass, and retires the old session only after the new one is durable. This is exactly AUTH.md §15 and §17 Case B, which needs no user approval.
+
+Failure handling:
+- A failed or unproven pass backs off (5 to 30 minutes).
+- A mismatch or a refused credential opens the existing AUTHENTICATION review, and the keeper waits for the operator.
+
+There is no second token owner. Configuration: `ICBM_SMARTSTORE_AUTO_RENEW` (default on), with no effect without `ICBM_SMARTSTORE_RENEWAL_MARGIN_S`.
+
 ## 4. Supplier stock recheck
 
 - **Targets:** only source products bound to an `ACTIVE` registration (owner decision). A product with no active registration is never rechecked by M6.
@@ -187,4 +201,5 @@ M6-09  the provider product-order id is the idempotency key; a re-read never cre
 M6-10  shipping data is stored encrypted, decrypted only for its two uses, masked everywhere else and deleted on its retention
 M6-11  no order data leaves the local data root; fixtures never carry real order data
 M6-12  a count is shown only when its owner is connected and current; there is no hard-coded zero
+M6-13  token renewal is CONNECT's own pass only, for a bound account with a configured margin; an AUTHENTICATION review stops it
 ```

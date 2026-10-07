@@ -503,8 +503,9 @@ class SmartStoreConnectService:
         read-back, SEARCH and ASSET; ROADMAP §14 item 4), or None.
 
         **Read-only.** It never issues, renews or commits a token, takes no single-flight lock and
-        never clears or rewrites a session, so a readiness render can ask it freely. Renewal stays
-        CONNECT's own operator action (AUTH §15). There is no second token owner and no second
+        never clears or rewrites a session, so a readiness render can ask it freely. Renewal is
+        CONNECT's own pass (:meth:`connect`), run by the operator or by the session keeper (owner
+        decision 2026-10-07, AUTH §15, §17 Case B). There is no second token owner and no second
         store: it reads this owner's committed bundle and its connection row.
 
         It answers only when every condition holds, and None otherwise — including when any of it
@@ -554,6 +555,27 @@ class SmartStoreConnectService:
         ):
             return None
         return committed
+
+    def auto_renewal_due(self) -> bool:
+        """Whether the session keeper should run a CONNECT pass now (owner decision 2026-10-07).
+
+        Only for a configured, bound account with a renewal margin (AUTH §15): credentials are
+        committed, the connection is bound, no AUTHENTICATION review is open — a mismatch or a
+        refused credential waits for the operator — and no current committed bearer answers, so
+        the session is missing, about to expire or not yet proven in this process (AUTH §17).
+        Read-only.
+        """
+        if self._renewal_margin is None:
+            return False
+        try:
+            if self._credentials.load(KEY) is None or not self._binding():
+                return False
+            view = self._capability.capability(KEY)
+        except Exception:
+            return False
+        if any(overlay.workflow_scope is WorkflowScope.AUTHENTICATION for overlay in view.workflow):
+            return False
+        return self.committed_bearer() is None
 
     def _binding(self) -> str | None:
         with self._db.read() as session:

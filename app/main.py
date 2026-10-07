@@ -143,11 +143,14 @@ def create_app(
             await services.review_reconciler.start()
             # M6-A (ADR-0023 §3): the periodic read-only listing-state sync.
             services.listing_sync_scheduler.start()
+            # Owner decision 2026-10-07: renew the SmartStore session automatically.
+            services.smartstore_keeper.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})
         try:
             yield
         finally:
+            await asyncio.to_thread(services.smartstore_keeper.stop)
             await asyncio.to_thread(services.listing_sync_scheduler.stop)
             await services.review_reconciler.stop()
             await services.worker.stop()

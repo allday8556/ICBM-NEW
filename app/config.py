@@ -105,6 +105,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "smartstore_renewal_margin_s": ("ICBM_SMARTSTORE_RENEWAL_MARGIN_S", int),
     "review_reconcile_interval_s": ("ICBM_REVIEW_RECONCILE_INTERVAL_S", float),
     "operate_listing_sync_interval_s": ("ICBM_OPERATE_LISTING_SYNC_INTERVAL_S", float),
+    "smartstore_auto_renew": ("ICBM_SMARTSTORE_AUTO_RENEW", _parse_bool),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
 }
 
@@ -144,6 +145,9 @@ class AppConfig:
     review_reconcile_interval_s: float = 300.0
     # M6-A (ADR-0023 §3): the listing-state sync cadence; 0 disables the periodic pass.
     operate_listing_sync_interval_s: float = 1800.0
+    # Owner decision 2026-10-07: the session keeper renews the SmartStore token automatically
+    # (AUTH §15, §17 Case B). It acts only with a configured renewal margin and a bound account.
+    smartstore_auto_renew: bool = True
     review_coverage_max_age_s: float = 900.0
 
     def __post_init__(self) -> None:
