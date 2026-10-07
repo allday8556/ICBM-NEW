@@ -47,6 +47,7 @@ from app.stages.operate.orders import (
     STORED,
     UNMATCHED,
     OrderSyncBusy,
+    OrderSyncScheduler,
     OrderSyncService,
     ShippingCipher,
     ShippingRecordUnavailable,
@@ -579,3 +580,41 @@ def test_the_order_group_is_attested_only_by_a_current_valid_attestation(
     """The gate reads the M2 attestation owner: no attestation attests no group."""
     assert container.permission_attestation.attested_groups("smartstore") == frozenset()
     assert container.order_sync.attested() is False
+
+
+def test_retention_runs_even_when_the_ingest_is_disabled(
+    container: Container, registration: str
+) -> None:
+    """GPT audit (PR #250): an interval of 0 disables the ingest, never the retention."""
+    decided = _change(container, kind="PURCHASE_DECIDED")
+    source = FakeSource(
+        pages=[ChangePage((decided,))], facts={"po-1": _facts(status="PURCHASE_DECIDED")}
+    )
+    service = _service(container, source, retention_days=1)
+    _sync(service)
+    container.clock.advance(2 * 86400)  # type: ignore[attr-defined]
+    disabled = OrderSyncService(
+        db=container.db,
+        clock=container.clock,
+        registrations=container.registrations,
+        source_identity=lambda item_id: None,
+        source=source,
+        cipher=ShippingCipher(container.secrets),
+        audit=container.audit,
+        interval_s=0,
+        initial_lookback_s=86400,
+        retention_days=1,
+        order_read_attested=lambda: True,
+        marketplace_key=MARKET,
+    )
+    scheduler = OrderSyncScheduler(disabled, tick_s=3600)
+    scheduler.start()
+    try:
+        (order,) = disabled.overview().orders
+        assert order.shipping_state == DELETED
+        # No ingest ran: only the one pass above read the source.
+        assert len([w for w in source.windows if w[2] is None]) >= 1
+        runs = disabled.overview().last_run
+        assert runs is not None and runs.trigger == OPERATOR
+    finally:
+        scheduler.stop()

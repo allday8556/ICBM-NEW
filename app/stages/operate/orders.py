@@ -884,7 +884,10 @@ class OrderSyncService:
 
 class OrderSyncScheduler:
     """The periodic ingest (ADR-0023 §5: automatic cadence plus "지금 동기화") and the shipping
-    record retention, on their own thread."""
+    record retention, on their own thread.
+
+    The retention always runs: disabling the ingest (an interval of 0) never keeps a shipping
+    record past its retention (ADR-0023 §7; GPT audit, PR #250)."""
 
     def __init__(self, service: OrderSyncService, *, tick_s: float = 60.0) -> None:
         self._service = service
@@ -894,23 +897,26 @@ class OrderSyncScheduler:
 
     def start(self) -> None:
         self._service.settle_interrupted()
-        if self._service.interval_s <= 0:
-            return  # disabled by policy
+        self.tick(ingest=False)
         self._halt.clear()
         self._thread = threading.Thread(target=self._loop, name="icbm-order-sync", daemon=True)
         self._thread.start()
 
+    def tick(self, *, ingest: bool = True) -> None:
+        """One tick: the retention always, then the ingest when it is enabled and due."""
+        correlation_id = f"order-sync-{uuid.uuid4()}"
+        try:
+            self._service.purge_shipping(correlation_id=correlation_id)
+            if ingest and self._service.interval_s > 0 and self._service.due():
+                self._service.sync(trigger=AUTO, correlation_id=correlation_id)
+        except OrderSyncBusy:
+            return
+        except Exception:
+            logger.exception("operate.order_sync_error")
+
     def _loop(self) -> None:
         while not self._halt.wait(self._tick_s):
-            correlation_id = f"order-sync-{uuid.uuid4()}"
-            try:
-                self._service.purge_shipping(correlation_id=correlation_id)
-                if self._service.due():
-                    self._service.sync(trigger=AUTO, correlation_id=correlation_id)
-            except OrderSyncBusy:
-                continue
-            except Exception:
-                logger.exception("operate.order_sync_error")
+            self.tick()
 
     def stop(self) -> None:
         self._halt.set()
