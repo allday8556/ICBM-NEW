@@ -301,6 +301,20 @@ class SupplierCommonImageService:
             )
         return tuple(sorted(found, key=lambda image: (-image.product_count, image.sha256)))
 
+    def require_shown(self, supplier_key: str, sha256: str) -> None:
+        """Refuse unless ``sha256`` is a file this supplier has shown among the CONFIRMED detail
+        images of one of its products (Issue #231): the same checks a decision makes, and nothing
+        is written. The verdict does not matter — an operator previews a file to decide it."""
+        if len(sha256) != 64 or not set(sha256) <= _SHA:
+            raise _refusal("PRODUCTS_COMMON_IMAGE_SHA_INVALID", "a SHA-256 is 64 hex characters")
+        with self._db.read() as session:
+            self._known_supplier(session, supplier_key)
+            if not _product_counts(session, supplier_key, [sha256]):
+                raise NotFoundError(
+                    "PRODUCTS_COMMON_IMAGE_UNSEEN",
+                    "the supplier has shown no CONFIRMED detail image with that SHA-256",
+                )
+
     def decide(
         self,
         supplier_key: str,

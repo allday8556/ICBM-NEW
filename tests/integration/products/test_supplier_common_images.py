@@ -216,3 +216,37 @@ def test_a_synthetic_copy_reads_its_template_supplier_and_never_counts(
             .all()
         )
         assert copies and all(effective_supplier(session, copy) == SUPPLIER for copy in copies)
+
+
+def test_a_shown_file_previews_as_its_stored_bytes_and_nothing_else_does(
+    client: TestClient, config: AppConfig
+) -> None:
+    """Issue #231: the read-only preview of one file a supplier has shown."""
+    shown = _stored(client, config, "shown-once")
+    unseen = _stored(client, config, "stored-but-never-shown")
+    _collect(client, config, "p1", shown)
+    other = "other-supplier"
+    tables = ("supplier_common_image_decisions", "audit_events", "source_assets")
+    before = {table: count(config, table) for table in tables}
+    path = "/api/v1/products/supplier-common-images"
+    preview = client.get(f"{path}/{SUPPLIER}/{shown}/image")
+    assert preview.status_code == 200, preview.text
+    assert preview.content == PNG + b"shown-once"
+    assert preview.headers["content-type"].startswith("image/png")
+    assert preview.headers["cache-control"] == "no-store"
+    assert preview.headers["x-content-type-options"] == "nosniff"
+    # Shown once is enough to preview: the verdict (here none) does not matter.
+    refused = {
+        f"{path}/{SUPPLIER}/{unseen}/image": "PRODUCTS_COMMON_IMAGE_UNSEEN",
+        f"{path}/{SUPPLIER}/{'0' * 64}/image": "PRODUCTS_COMMON_IMAGE_UNSEEN",
+        f"{path}/{SUPPLIER}/{shown.upper()}/image": "PRODUCTS_COMMON_IMAGE_SHA_INVALID",
+        f"{path}/{SUPPLIER}/{shown[:-1]}/image": "PRODUCTS_COMMON_IMAGE_SHA_INVALID",
+        f"{path}/{other}/{shown}/image": "PRODUCTS_COMMON_IMAGE_SUPPLIER_UNKNOWN",
+        f"{path}/icbm-synthetic/{shown}/image": "PRODUCTS_COMMON_IMAGE_SUPPLIER_SYNTHETIC",
+    }
+    for url, code in refused.items():
+        answer = client.get(url)
+        assert answer.status_code in (404, 422), (url, answer.status_code)
+        assert answer.json()["error"]["code"] == code, url
+    # Read-only: nothing was written.
+    assert {table: count(config, table) for table in tables} == before

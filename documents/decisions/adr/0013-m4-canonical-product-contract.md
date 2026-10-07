@@ -456,8 +456,12 @@ DerivedImageArtifact       immutable, content-addressed apart from source assets
 > decisions only — never an image's content — and it alters no source asset or reference. A
 > synthetic test product reads its template supplier's verdicts and never counts towards
 > detection. The operator reads and decides through
-> `GET/POST /api/v1/products/supplier-common-images/{supplier_key}[/{sha256}]`. This owner decides
-> no selection by itself.
+> `GET/POST /api/v1/products/supplier-common-images/{supplier_key}[/{sha256}]`, and previews a
+> file through the read-only `GET /api/v1/products/supplier-common-images/{supplier_key}/{sha256}/image`
+> (Issue #231). That route serves the stored bytes of a file the supplier has shown among its
+> CONFIRMED detail images, whatever its verdict, and nothing else. It applies a decision's own checks
+> (SHA-256 shape, known and non-synthetic supplier, shown), writes nothing and asks no supplier or
+> marketplace. This owner decides no selection by itself.
 
 > **Amendment note (image auto-selection; Issue #219, owner decision 2026-10-03).** This
 > amends "nothing is selected by default" above, the operator image API note's "nothing is
