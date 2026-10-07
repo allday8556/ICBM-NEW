@@ -43,6 +43,7 @@ from app.capabilities.review.products_producer import ProductsReviewProducer
 from app.capabilities.review.reconciler import ReviewReconciler
 from app.capabilities.review.register_producer import RegisterReviewProducer
 from app.capabilities.review.service import ReviewService
+from app.capabilities.review.stock_producer import StockReviewProducer
 from app.config import AppConfig
 from app.interface.screens.register_fixes import RegisterFixService
 from app.interface.screens.service import ScreenService
@@ -108,6 +109,7 @@ from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.service import OperateService
+from app.stages.operate.stock import StockRecheckScheduler, StockRecheckService
 from app.stages.products.atomic_sku_economics_store import AtomicSKUEconomicsStore
 from app.stages.products.atomic_sku_item_store import AtomicSKUItemStore
 from app.stages.products.atomic_sku_store import AtomicSKUStore
@@ -262,6 +264,9 @@ class Container:
     # M6-A (ADR-0023 §3): the read-only listing-state sync and its periodic pass.
     listing_sync: ListingSyncService
     listing_sync_scheduler: ListingSyncScheduler
+    # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
+    stock_recheck: StockRecheckService
+    stock_recheck_scheduler: StockRecheckScheduler
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
@@ -831,17 +836,33 @@ def build_container(
         clock=clock,
         schema_head=head_revision,
     )
+
     # Gate 2 (ADR-0016): the durable ReviewItem owner (G2-A) with its producers: COLLECT / M3
     # (G2-B), M4 base readiness, REGISTER execution and REGISTER preparations (G2-C). Each
     # process run has its own identity:
     # coverage is current only after a complete full pass in this run (§7). The review owner
     # reads these owners; none of them reads it.
+    def _source_identity(item_id: str) -> tuple[str, str] | None:
+        with product_store.reading() as unit:
+            return unit.source_identity_of_item(item_id)
+
+    stock_recheck = StockRecheckService(
+        db=db,
+        clock=clock,
+        registrations=registrations,
+        source_identity=_source_identity,
+        collector=collection,
+        revisions=revisions,
+        interval_s=config.operate_stock_recheck_interval_s,
+        cap=config.operate_stock_recheck_cap,
+    )
     review_items = ReviewItemStore(
         db,
         clock,
         audit,
         producers=[
             CollectReviewProducer(revisions),
+            StockReviewProducer(stock_recheck, revisions),
             ProductsReviewProducer(product_readiness),
             RegisterReviewProducer(registrations, clock),
             PreflightReviewProducer(
@@ -922,6 +943,8 @@ def build_container(
     )
     return Container(
         listing_sync=listing_sync,
+        stock_recheck=stock_recheck,
+        stock_recheck_scheduler=StockRecheckScheduler(stock_recheck),
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,
         common_images=common_images,

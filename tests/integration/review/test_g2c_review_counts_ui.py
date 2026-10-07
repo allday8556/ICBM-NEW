@@ -23,7 +23,7 @@ def test_the_dashboard_shows_each_kind_as_the_server_states_it(
     config: AppConfig,
 ) -> None:
     with served(config, UnclearShop()) as api:
-        collect_unclear(api, "4242")  # one COLLECT STOCK item, known but not a count
+        collect_unclear(api, "4242")  # one COLLECT STOCK item; both STOCK producers current
         writes: list[tuple[str, str]] = []
         with _page(browser, api, writes) as page:
             page.goto(f"{LOCAL}/#/dashboard")
@@ -37,7 +37,7 @@ def test_the_dashboard_shows_each_kind_as_the_server_states_it(
                 )
                 for row in table.locator("tbody tr").all()
             }
-            assert rows["STOCK"] == ("NOT_WIRED", "확인된 1건 이상")
+            assert rows["STOCK"] == ("CURRENT", "1건")
             for kind in ("COMPLIANCE", "FULFILLMENT", "SOURCE_CHANGE", "COLLECT_EVIDENCE"):
                 state, text = rows[kind]
                 assert state == "NOT_WIRED" and "0건" not in text, (kind, text)
@@ -45,19 +45,19 @@ def test_the_dashboard_shows_each_kind_as_the_server_states_it(
             assert writes == []  # rendering reads only
 
 
-def test_soldout_never_says_there_is_nothing_to_check_on_a_stock_count_it_cannot_make(
+def test_soldout_says_nothing_to_check_only_on_an_authoritative_zero(
     browser: Browser,  # noqa: F811
     config: AppConfig,
 ) -> None:
+    # Since M6-B both STOCK producers are wired; with both current and nothing open the count is
+    # an authoritative zero, so the approved empty card is shown — beside the recheck panel.
     with served(config, UnclearShop()) as api:
         writes: list[tuple[str, str]] = []
         with _page(browser, api, writes) as page:
             page.goto(f"{LOCAL}/#/soldout")
-            panel = page.locator("[data-role='soldout-review']")
-            panel.wait_for(timeout=15_000)
-            assert panel.get_attribute("data-state") == "NOT_WIRED"
-            assert page.locator("[data-role='soldout-not-authoritative']").count() == 1
-            # The approved empty card ("확인할 재고 항목이 없습니다") is not shown, and no zero.
-            assert page.locator("#content .empty-state").count() == 0
-            assert "0건" not in panel.inner_text()
+            page.locator("#content .empty-state").wait_for(timeout=15_000)
+            assert page.locator("[data-role='soldout-not-authoritative']").count() == 0
+            recheck = page.locator("[data-role='stock-recheck']")
+            recheck.locator("[data-stock-recheck='READY']").wait_for(timeout=15_000)
+            assert "판매 중인 등록 상품이 없습니다" in recheck.inner_text()
             assert writes == []

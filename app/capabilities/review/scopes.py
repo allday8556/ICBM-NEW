@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping
 from typing import Final
 
 from app.capabilities.review.collect_producer import COLLECT_PRODUCER
+from app.capabilities.review.counts import OPERATE_STOCK_PRODUCER
 from app.capabilities.review.preflight_producer import PREFLIGHT_PRODUCER
 from app.capabilities.review.products_producer import PRODUCTS_PRODUCER
 from app.capabilities.review.register_producer import REGISTER_PRODUCER
@@ -30,7 +31,8 @@ _REGISTER: Final = (REGISTER_PRODUCER, PREFLIGHT_PRODUCER)
 
 # Every scope shape an owner screen may read, and the producers whose items it names.
 SCOPE_SHAPES: Final[Mapping[frozenset[str], tuple[str, ...]]] = {
-    frozenset({"supplier_key", "source_product_id"}): (COLLECT_PRODUCER,),
+    # The source identity: COLLECT's own conditions and M6-B's listed-source stock (operate).
+    frozenset({"supplier_key", "source_product_id"}): (COLLECT_PRODUCER, OPERATE_STOCK_PRODUCER),
     frozenset({"product_group_id"}): (PRODUCTS_PRODUCER,),
     frozenset({"product_group_id", "item_id"}): (PRODUCTS_PRODUCER,),
     frozenset(_ACCOUNT): _REGISTER,

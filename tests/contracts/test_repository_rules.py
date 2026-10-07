@@ -3710,6 +3710,7 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # M6-A (ADR-0023 §3): the listing-state sync runs and their append-only observations.
         "operate_listing_sync_runs",
         "operate_listing_observations",
+        "operate_stock_rechecks",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

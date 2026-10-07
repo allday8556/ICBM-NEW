@@ -1,6 +1,7 @@
 import { contractPage } from './contract-page.js';
 import { h } from '../core/dom.js';
 import { countText, reviewCountTable } from '../components/review-counts.js';
+import { stockRecheckPanel } from '../components/stock-recheck.js';
 
 // READY: the STOCK review count as the server states it. Until every producer that can emit STOCK
 // is wired and current, it is not a count, and this screen never says there is nothing to check.
@@ -34,4 +35,6 @@ export default contractPage({
     to: { page: 'collect', params: { view: 'jobs' } },
   },
   ready,
+  // M6-B: the listed source products' supplier stock and its recheck.
+  extra: () => stockRecheckPanel(),
 });

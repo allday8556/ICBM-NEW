@@ -172,8 +172,9 @@ CANONICAL_TABLES = (
     "registration_bulk_items",
     "operate_listing_sync_runs",
     "operate_listing_observations",
+    "operate_stock_rechecks",
 )
-HEAD = "0048_m6_listing_sync"
+HEAD = "0049_m6_stock_recheck"
 
 
 def _url(path: Path) -> str:

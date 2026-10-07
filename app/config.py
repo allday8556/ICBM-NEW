@@ -106,6 +106,8 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "review_reconcile_interval_s": ("ICBM_REVIEW_RECONCILE_INTERVAL_S", float),
     "operate_listing_sync_interval_s": ("ICBM_OPERATE_LISTING_SYNC_INTERVAL_S", float),
     "smartstore_auto_renew": ("ICBM_SMARTSTORE_AUTO_RENEW", _parse_bool),
+    "operate_stock_recheck_interval_s": ("ICBM_OPERATE_STOCK_RECHECK_INTERVAL_S", float),
+    "operate_stock_recheck_cap": ("ICBM_OPERATE_STOCK_RECHECK_CAP", int),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
 }
 
@@ -148,6 +150,9 @@ class AppConfig:
     # Owner decision 2026-10-07: the session keeper renews the SmartStore token automatically
     # (AUTH §15, §17 Case B). It acts only with a configured renewal margin and a bound account.
     smartstore_auto_renew: bool = True
+    # M6-B (ADR-0023 §4): the supplier stock recheck cadence (0 disables it) and per-round cap.
+    operate_stock_recheck_interval_s: float = 21600.0
+    operate_stock_recheck_cap: int = 20
     review_coverage_max_age_s: float = 900.0
 
     def __post_init__(self) -> None:

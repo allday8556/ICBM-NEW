@@ -233,7 +233,9 @@ SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
 ATOMIC_SKU_ECONOMICS = "0047_atomic_sku_economics"
 # M6-A (ADR-0023 §3): the listing-state sync runs and observations, after M5's acceptance.
 M6_LISTING_SYNC = "0048_m6_listing_sync"
-SCHEMA_HEAD = M6_LISTING_SYNC
+# M6-B (ADR-0023 §4): the supplier stock rechecks.
+M6_STOCK_RECHECK = "0049_m6_stock_recheck"
+SCHEMA_HEAD = M6_STOCK_RECHECK
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -263,6 +265,7 @@ AFTER_M5 = (
     SEQUENTIAL_BULK,
     ATOMIC_SKU_ECONOMICS,
     M6_LISTING_SYNC,
+    M6_STOCK_RECHECK,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
