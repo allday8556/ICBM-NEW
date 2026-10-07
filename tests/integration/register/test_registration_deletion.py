@@ -66,9 +66,13 @@ class FakeSender:
 
 
 class FakeReadback:
-    def __init__(self, status: str | None = None, *, available: bool = True) -> None:
+    def __init__(
+        self, status: str | None = None, *, available: bool = True, not_found: bool = False
+    ) -> None:
         self.status = status
         self.is_available = available
+        # The provider's HTTP 404 for the product, as the adopted caller reports it.
+        self.not_found = not_found
         self.reads: list[str] = []
 
     def available(self) -> bool:
@@ -76,6 +80,8 @@ class FakeReadback:
 
     def read(self, *, marketplace_product_id: str) -> Mapping[str, Any]:
         self.reads.append(marketplace_product_id)
+        if self.not_found:
+            raise AppError("SMARTSTORE_HTTP_404", "gone", details={"http_status": 404})
         if self.status is None:
             raise AppError("SMARTSTORE_HTTP_404", "not readable")
         return {"originProduct": {"statusType": self.status}}
@@ -280,6 +286,27 @@ def test_a_failed_read_back_records_nothing(container: Container, registration: 
     _release(container)
     record = _delete(_service(container, FakeSender(APPLIED), FakeReadback(None)), registration)
     assert record.state is DeletionState.APPLIED_PROVEN and record.verification is None
+
+
+def test_a_404_after_a_proven_deletion_confirms_it(container: Container, registration: str) -> None:
+    # Owner decision 6031580064 (ADR-0018 §3.5 amendment): once removed, the product reads 404.
+    _grant(container, registration)
+    _release(container)
+    gone = FakeReadback(not_found=True)
+    record = _delete(_service(container, FakeSender(APPLIED), gone), registration)
+    assert record.state is DeletionState.APPLIED_PROVEN
+    assert record.verification is DeletionVerification.DELETE_CONFIRMED and record.deleted
+
+
+def test_a_404_after_an_unknown_deletion_still_proves_nothing(
+    container: Container, registration: str
+) -> None:
+    _grant(container, registration)
+    _release(container)
+    gone = FakeReadback(not_found=True)
+    record = _delete(_service(container, FakeSender(UNKNOWN), gone), registration)
+    assert record.state is DeletionState.UNKNOWN and record.verification is None
+    assert record.open and not record.deleted
 
 
 def test_a_precluded_deletion_is_not_open_and_may_be_granted_again(

@@ -15,6 +15,12 @@ listing still there, no new grant is issued and no new attempt starts.
 session exists. The documented sale status ``DELETE`` confirms the deletion; any other documented
 sale status shows the listing still there; a failed or unreadable read-back records nothing. For an
 unknown attempt, only that read-back can resolve it, and only it can open the way to a new grant.
+
+**A 404 after a proven deletion** (owner decision 2026-10-07, Issue #219 ``6031580064``; ADR-0018
+§3.5 amendment). Once the provider removes the product, the origin-product read answers HTTP 404
+instead of a ``DELETE`` sale status. After an ``APPLIED_PROVEN`` deletion that 404 confirms it.
+After an ``UNKNOWN`` attempt it still proves nothing, because a 404 then has another possible
+cause.
 """
 
 from collections.abc import Callable, Mapping
@@ -37,6 +43,8 @@ from app.stages.register.store import DeletionRecord, RegistrationRecord, Regist
 
 # The one sale status that confirms a deletion (the documented ``statusType`` enumeration).
 DELETED_SALE_STATUS = "DELETE"
+# The read-back status that confirms a proven deletion (owner decision 2026-10-07).
+NOT_FOUND_STATUS = 404
 
 
 @dataclass(frozen=True)
@@ -197,8 +205,16 @@ class RegistrationDeletionService:
             return None
         try:
             retained = self._readback.read(marketplace_product_id=record.marketplace_product_id)
-        except AppError:
-            # A read-back that fails proves nothing either way; the attempt stays as it is.
+        except AppError as failed:
+            if record.state is DeletionState.APPLIED_PROVEN and _not_found(failed):
+                # The proven deletion's own product is gone at the provider (owner decision
+                # 6031580064): the read answers 404 instead of a DELETE sale status.
+                verification = DeletionVerification.DELETE_CONFIRMED
+                with self._registrations.transaction() as unit:
+                    return unit.record_deletion_verification(
+                        record.deletion_id, verification=verification, correlation_id=correlation_id
+                    )
+            # Any other failed read-back proves nothing either way; the attempt stays as it is.
             return None
         status = self._sale_status(retained)
         if status is None:
@@ -218,6 +234,11 @@ class RegistrationDeletionService:
         if registration is None:
             raise NotFoundError("REGISTER_REGISTRATION_NOT_FOUND", "no such registration")
         return registration
+
+
+def _not_found(failed: AppError) -> bool:
+    """Whether a failed read-back was the provider's HTTP 404 for the product."""
+    return failed.details.get("http_status") == NOT_FOUND_STATUS
 
 
 __all__ = [
