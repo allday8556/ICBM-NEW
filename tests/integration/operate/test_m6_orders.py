@@ -308,6 +308,13 @@ def test_paging_reads_the_whole_window_and_the_cursor_overlaps(
     assert container.clock.now() - first_since == timedelta(days=3)
     assert (source.windows[1][0], source.windows[1][2]) == (more_from, "seq-2")
     assert source.detail_calls == [("po-1", "po-2")]
+    # The next window of the same pass starts an overlap before the last one ended.
+    window_starts = [since for since, _until, sequence in source.windows if sequence is None]
+    window_ends = [until for _since, until, sequence in source.windows if sequence is None]
+    assert len(window_starts) == 4  # 3 days of 24-hour windows, each overlapping the last
+    for previous_end, start in zip(window_ends, window_starts[1:], strict=False):
+        assert start == previous_end - OVERLAP
+    assert window_ends[-1] == container.clock.now()
     synced = run.synced_until  # type: ignore[attr-defined]
     assert synced is not None
     source.windows.clear()

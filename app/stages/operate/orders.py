@@ -488,13 +488,16 @@ class OrderSyncService:
                 registrations = self._registrations.marketplace_registrations(self._marketplace_key)
                 window_from = start
                 for _ in range(MAX_WINDOWS):
-                    if window_from >= now:
-                        break
                     window_to = min(window_from + WINDOW, now)
                     self._window(
                         run_id, window_from, window_to, registrations, totals, correlation_id
                     )
-                    synced = window_from = window_to
+                    synced = window_to
+                    if window_to >= now:
+                        break
+                    # Every window overlaps the last one, inside a pass as across passes, so a
+                    # change reported late is never missed (ADR-0023 §5; GPT audit, PR #250).
+                    window_from = window_to - OVERLAP
             except _Stop as stop:
                 return self._finish(run_id, stop.outcome, synced, totals, stop.error_code)
             except BaseException:
