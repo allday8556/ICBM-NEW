@@ -33,6 +33,8 @@ from playwright.sync_api import Error as PlaywrightError
 
 from app.config import AppConfig
 from app.container import Container
+from app.stages.collect.assets import SourceAssetStore
+from app.stages.collect.facts import FieldStatus, ImageReference, ImageRole
 from tests.conftest import LOCAL
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_submit_support import (
@@ -45,7 +47,9 @@ from tests.support.collect_submit_support import (
     product_url,
     served,
 )
-from tests.support.product_support import Collections, raw
+from tests.support.collect_support import PNG
+from tests.support.jobs_support import FakeClock
+from tests.support.product_support import Collections, FakeDecoder, raw
 
 pytestmark = pytest.mark.integration
 
@@ -801,3 +805,100 @@ def test_each_image_reason_is_the_recorded_code_worded_and_nothing_more(
         assert image_table.count() == 0
         assert image_toggle.get_attribute("aria-expanded") == "false"
     assert len(wire.posts()) == 1
+
+
+# --------------------------------- A-NEXT2b: the bound Item's common-image notes, read-only
+
+
+def test_the_run_shows_the_bound_items_common_image_notes_and_nothing_before_it(
+    browser: Browser, config: AppConfig
+) -> None:
+    wire = Wire()
+    with served(config, ScriptedShop()) as client:
+        served_container: Container = client.app.state.container  # type: ignore[attr-defined]
+        # Recorded with no materializer behind it: no Item is bound to this revision yet. The page
+        # showed one description image besides its representative one.
+        assets = SourceAssetStore(
+            config.source_assets_dir, served_container.db, FakeDecoder(), FakeClock()
+        )
+        detail = ImageReference(
+            role=ImageRole.DETAIL,
+            ordinal=1,
+            host="img.shop.example",
+            provenance=".detail img:nth-of-type(1)",
+            status=FieldStatus.CONFIRMED,
+            sha256=assets.put(PNG + b"a-next2b-detail").sha256,
+        )
+        run_id, _ = Collections.of(served_container, config).collect(
+            source_product_id="5252", extra_images=(detail,)
+        )
+        with _page(browser, client, wire, url=f"{JOBS}&run={run_id}") as page:
+            _outcome(page, "RECORDED", run_id)
+            summary = page.locator("[data-role='common-image-summary']")
+            summary.wait_for()
+            assert summary.get_attribute("data-selection") == "NOT_MATERIALIZED"
+            page.locator("[data-action='toggle-images']").click()
+            headers = page.locator("[data-role='image-refs'] th")
+            assert "자동 선택" not in [headers.nth(i).inner_text() for i in range(headers.count())]
+            # Once the Product DB binds an Item to this revision, its own notes are shown.
+            served_container.materializer.materialize_run(run_id)
+            page.locator("[data-action='recheck-product']").click()
+            page.wait_for_selector("[data-role='common-image-summary'][data-selection='READY']")
+            run = served_container.collection.run(run_id)
+            group = served_container.products.product_of_source("kmretail", "5252")
+            item = next(
+                i
+                for i in client.get(
+                    f"/api/v1/products/{group.product_group_id}",
+                    headers={"X-ICBM-Client": "pytest"},
+                ).json()["items"]
+                if (i["current_binding"] or {}).get("provenance_revision_id") == run.revision_id
+            )
+            candidates = f"/api/v1/products/items/{item['item_id']}/image-candidates"
+            preview = client.get(candidates, headers={"X-ICBM-Client": "pytest"}).json()
+            # This synthetic page's role rules are not KM's, so the owner's rule makes no
+            # selection; the page says exactly that, with the owner's own code.
+            assert preview["source_revision_id"] == run.revision_id
+            assert preview["auto_selection"]["blocked"] == "ROLE_RULE_UNKNOWN"
+            summary = page.locator("[data-role='common-image-summary']")
+            assert "ROLE_RULE_UNKNOWN" in summary.inner_text()
+
+            # The notes an Item would carry are put into the owner's preview as the owner records
+            # them, to show how each is worded; the page decides none of them.
+            revision = client.get(
+                f"/api/v1/collect/revisions/{run.revision_id}", headers={"X-ICBM-Client": "pytest"}
+            ).json()
+            keys = [(i["role"], i["ordinal"]) for i in revision["images"]]
+            notes = {
+                keys[0]: "REPRESENTATIVE",
+                (detail.role.value, detail.ordinal): "COMMON_IMAGE_BLOCKED",
+            }
+
+            def crafted(route: Route) -> None:
+                body = client.get(candidates, headers={"X-ICBM-Client": "pytest"}).json()
+                body["auto_selection"] = {
+                    "blocked": None,
+                    "detail": None,
+                    "outputs": [],
+                    "notes": [
+                        {"source_role": role, "source_ordinal": ordinal, "note": note}
+                        for (role, ordinal), note in notes.items()
+                    ],
+                }
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+            page.route(f"**{candidates}", crafted)
+            page.reload()
+            page.wait_for_selector("[data-role='common-image-summary'][data-blocked='1']")
+            assert (
+                page.locator("[data-role='common-image-summary']").get_attribute("data-undecided")
+                == "0"
+            )
+            page.locator("[data-action='toggle-images']").click()
+            blocked = page.locator("[data-role='image-refs'] td[data-note='COMMON_IMAGE_BLOCKED']")
+            assert blocked.inner_text() == "공통 이미지(차단)라 제외"
+            assert blocked.get_attribute("data-common") == "true"
+            first = page.locator("[data-role='image-refs'] td[data-note='REPRESENTATIVE']")
+            assert first.inner_text() == "대표 이미지"
+            _no_browser_truth(page)
+    assert wire.posts() == []
