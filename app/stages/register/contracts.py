@@ -41,6 +41,8 @@ class RegisterAction(StrEnum):
     CREATE_ENQUEUE = "CREATE_ENQUEUE"
     BULK_CREATE_ENQUEUE = "BULK_CREATE_ENQUEUE"
     RECONCILE = "RECONCILE"
+    # An UNKNOWN the provider rejected with HTTP 400, settled on machine evidence (2026-10-07).
+    SETTLE_REJECTION = "SETTLE_REJECTION"
     VERIFY = "VERIFY"
     RESUME_SCOPE = "RESUME_SCOPE"
 

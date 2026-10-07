@@ -863,11 +863,21 @@ class SmartStoreEndpointCaller:
                         if contract.endpoint_id is _PRODUCT_CREATE
                         else None
                     )
+                    provider_code = _marker(fields.get("code"))
+                    rejection = (
+                        classify.create_rejection(status, provider_code)
+                        if contract.endpoint_id is _PRODUCT_CREATE
+                        else None
+                    )
                     error = SmartStoreCallError(
                         endpoint,
-                        classify.response(status, _marker(fields.get("code"))),
+                        rejection or classify.response(status, provider_code),
                         Phase.RESPONSE_RECEIVED,
-                        remote_outcome(Phase.RESPONSE_RECEIVED),
+                        # A definitive CREATE rejection proves nothing was applied; every other
+                        # received failure is UNKNOWN (ADR-0014 §28.3 as amended 2026-10-07).
+                        RemoteOutcome.NOT_APPLIED_PROVEN
+                        if rejection is not None
+                        else remote_outcome(Phase.RESPONSE_RECEIVED),
                         http_status=status,
                         provider_message=provider_message,
                         provider_invalid_input=provider_invalid_input,

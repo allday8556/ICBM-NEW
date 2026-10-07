@@ -147,6 +147,27 @@ def response(status: int, provider_code: str | None) -> Classification:
     )
 
 
+def create_rejection(status: int, provider_code: str | None) -> Classification | None:
+    """A CREATE the provider definitively rejected, or ``None`` (owner decision 2026-10-07,
+    Issue #219 ``6031580064``; ADR-0014 §28.3 amendment).
+
+    Only an HTTP 400 carrying the provider's own error body (a non-gateway ``code``) qualifies: the
+    API server validated the request and refused it, so nothing was registered. It is ``FATAL``
+    — the same document is never retried automatically — and the Attempt is
+    ``NOT_APPLIED_PROVEN``. Every other status, a gateway code or a body without a code keeps the
+    ordinary classification and stays ``UNKNOWN``.
+    """
+    if status != 400 or not provider_code or provider_code.startswith("GW."):
+        return None
+    return Classification(
+        ErrorClass.FATAL,
+        FailureLayer.API_SERVER_DOMAIN,
+        Basis.ENDPOINT_SPECIFIC,
+        "SMARTSTORE_CREATE_REJECTED",
+        provider_code,
+    )
+
+
 def _gateway(provider_code: str) -> Classification:
     if provider_code in _RATE_LIMIT_GATEWAY_CODES:
         # ERRORS §9.4, §9.5.

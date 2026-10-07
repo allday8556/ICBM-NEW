@@ -760,6 +760,17 @@ class RegisterService:
             verification_state=result.verification,
         )
 
+    def settle_rejection(self, intent_id: str, *, correlation_id: str) -> ActionResult:
+        """Settle an UNKNOWN the provider rejected with HTTP 400 as not applied (machine proof)."""
+        execution = self._require_execution()
+        result = execution.settle_rejection(intent_id, correlation_id=correlation_id)
+        return ActionResult(
+            action=RegisterAction.SETTLE_REJECTION,
+            intent_id=intent_id,
+            intent_state=result.intent_state,
+            verification_state=result.verification,
+        )
+
     def verify(self, intent_id: str, *, correlation_id: str) -> ActionResult:
         """Read the applied listing back and compare it with its immutable Snapshot (§11)."""
         execution = self._require_execution()
