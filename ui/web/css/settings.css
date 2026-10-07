@@ -239,7 +239,6 @@
 
 .common-image-card {
   min-width: 0;
-  overflow: hidden;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
   background: var(--color-panel-subtle);
@@ -252,6 +251,7 @@
   overflow: hidden;
   background: var(--color-control-subtle);
   border-bottom: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .common-image-preview img {
