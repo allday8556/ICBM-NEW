@@ -211,6 +211,12 @@ function editor(view, onSaved) {
   const label = (book) =>
     `${book.name || '(이름 없음)'} · ${ADDRESS_TYPE_LABEL[book.address_type] ?? book.address_type} · ${book.address_book_no}`;
   const applyAddressBooks = (books) => {
+    addressList.setAttribute('data-address-books', String(books.length));
+    if (!books.length) {
+      // Nothing to choose from: the number fields stay for manual entry.
+      addressList.textContent = '네이버 주소록에 등록된 주소가 없습니다.';
+      return;
+    }
     for (const [input, type] of [
       [shippingAddress.input, 'RELEASE'],
       [returnAddress.input, 'REFUND_OR_EXCHANGE'],
@@ -243,10 +249,7 @@ function editor(view, onSaved) {
       input.hidden = true;
       input.after(select);
     }
-    addressList.setAttribute('data-address-books', String(books.length));
-    addressList.textContent = books.length
-      ? `네이버 주소록 ${books.length}개를 불러왔습니다.`
-      : '네이버 주소록에 등록된 주소가 없습니다.';
+    addressList.textContent = `네이버 주소록 ${books.length}개를 불러왔습니다.`;
   };
   const fetchAddressBooks = async ({ quiet }) => {
     loadAddresses.disabled = true;
