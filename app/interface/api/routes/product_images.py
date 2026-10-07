@@ -252,6 +252,22 @@ def supplier_common_images(supplier_key: str, container: ContainerDep) -> dict[s
     }
 
 
+@router.get("/api/v1/products/supplier-common-images/{supplier_key}/{sha256}/image")
+def supplier_common_image(supplier_key: str, sha256: str, container: ContainerDep) -> Response:
+    """The stored bytes of one file the supplier has shown, for the operator's preview (Issue
+    #231). Read-only: nothing is written and no supplier or marketplace is asked. Another
+    supplier's asset, an unseen or malformed SHA-256 and the synthetic supplier are refused."""
+    container.common_images.require_shown(supplier_key, sha256)
+    stored = container.source_assets.get(sha256)
+    if stored is None:
+        raise NotFoundError("COLLECT_ASSET_UNKNOWN", "no source asset has that checksum")
+    return Response(
+        content=container.source_assets.read(sha256),
+        media_type=stored.mime_type,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.post("/api/v1/products/supplier-common-images/{supplier_key}/{sha256}")
 def decide_supplier_common_image(
     supplier_key: str, sha256: str, request: CommonImageDecisionRequest, container: ContainerDep
