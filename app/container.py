@@ -587,7 +587,9 @@ def build_container(
     )
     # Issue #219: the operator's BLOCK / KEEP decisions on supplier common images and their
     # detection over each supplier's collection history.
-    common_images = SupplierCommonImageService(db, audit, clock)
+    common_images = SupplierCommonImageService(
+        db, audit, clock, configured_suppliers=collection.supplier_keys
+    )
     # Issue #219: the image auto-selection rule over each supplier's own published role rules, and
     # its automatic QA. An operator's selection always supersedes it.
     auto_images = ImageAutoSelector(

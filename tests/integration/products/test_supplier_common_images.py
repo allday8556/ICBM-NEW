@@ -250,3 +250,20 @@ def test_a_shown_file_previews_as_its_stored_bytes_and_nothing_else_does(
         assert answer.json()["error"]["code"] == code, url
     # Read-only: nothing was written.
     assert {table: count(config, table) for table in tables} == before
+
+
+def test_a_configured_supplier_that_collected_nothing_has_no_common_images(
+    client: TestClient,
+) -> None:
+    """The 수집관리 supplier card reads the list on a fresh install: a configured supplier
+    with no collection yet answers an empty list, never "unknown"; an unconfigured one is still
+    unknown."""
+    configured = _services(client).collection.supplier_keys()
+    assert configured
+    for key in configured:
+        listed = client.get(f"/api/v1/products/supplier-common-images/{key}")
+        assert listed.status_code == 200, (key, listed.text)
+        assert listed.json()["images"] == []
+    unknown = client.get("/api/v1/products/supplier-common-images/not-a-configured-supplier")
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "PRODUCTS_COMMON_IMAGE_SUPPLIER_UNKNOWN"

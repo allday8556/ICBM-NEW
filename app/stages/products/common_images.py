@@ -24,7 +24,7 @@ This owner decides nothing about a selection. The image auto-selection reads its
 """
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -209,6 +209,17 @@ def _current_decisions(
     return current
 
 
+def _collected(session: Session, supplier_key: str) -> bool:
+    return (
+        session.scalar(
+            select(ProductFactsRevision.revision_id)
+            .where(ProductFactsRevision.supplier_key == supplier_key)
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def _product_counts(
     session: Session, supplier_key: str, shas: Iterable[str] | None = None
 ) -> dict[str, int]:
@@ -256,10 +267,20 @@ def verdicts(
 class SupplierCommonImageService:
     """The operator's supplier common images: what is detected and decided, and a new decision."""
 
-    def __init__(self, db: Database, audit: AuditLog, clock: Clock) -> None:
+    def __init__(
+        self,
+        db: Database,
+        audit: AuditLog,
+        clock: Clock,
+        *,
+        configured_suppliers: Callable[[], Iterable[str]] = tuple,
+    ) -> None:
         self._db = db
         self._audit = audit
         self._clock = clock
+        # The suppliers COLLECT is configured for (its public ``supplier_keys``): one that has
+        # collected nothing yet is known and simply has no common images.
+        self._configured = configured_suppliers
 
     @staticmethod
     def _known_supplier(session: Session, supplier_key: str) -> None:
@@ -282,6 +303,11 @@ class SupplierCommonImageService:
         """Every decided file and every detection candidate of one supplier, the most widely
         repeated first."""
         with self._db.read() as session:
+            if supplier_key in set(self._configured()) and not _collected(session, supplier_key):
+                # A configured supplier that has collected nothing has no common image yet: an
+                # empty list, never "unknown" (the 수집관리 supplier card reads it on a fresh
+                # install).
+                return ()
             self._known_supplier(session, supplier_key)
             decided = _current_decisions(session, supplier_key)
             counts = _product_counts(session, supplier_key)
