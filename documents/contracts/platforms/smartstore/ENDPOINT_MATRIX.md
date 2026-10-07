@@ -429,7 +429,7 @@ is unchanged. Evidence: `SOURCES.md` §5.6 (`NAVER-P0-ORDER-READ-2901`, Commerce
 
 | Field | `SMARTSTORE_ORDER_CHANGES` | `SMARTSTORE_ORDER_DETAILS` |
 | --- | --- | --- |
-| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, group `주문 판매자` (`ORDER_READ.md`; the reference page names none) | same |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, group `주문 판매자` (`ORDER_READ.md`; the reference page names none); OPERATE reads only while the operator's current attestation includes it (ADR-0023 §5) | same |
 | Method / path | `GET /v1/pay-order/seller/product-orders/last-changed-statuses` | `POST /v1/pay-order/seller/product-orders/query` |
 | Request | query `lastChangedFrom` and `lastChangedTo` (both sent, KST `yyyy-MM-dd'T'HH:mm:ss.SSS+09:00`, from ≤ to), `limitCount` 1..300, and `moreSequence` only as the provider's own continuation with its `moreFrom` | `application/json` body `{"productOrderIds": [...]}`, 1..300 distinct ids; `quantityClaimCompatibility` is not sent |
 | Timeouts / redirect | connect `5s`, read `30s`; `NO_FOLLOW` | same |

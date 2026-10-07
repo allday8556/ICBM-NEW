@@ -49,8 +49,8 @@ def upgrade() -> None:
         sa.CheckConstraint("trigger IN ('AUTO', 'OPERATOR')", name="trigger_valid"),
         sa.CheckConstraint("state IN ('RUNNING', 'FINISHED')", name="state_valid"),
         sa.CheckConstraint(
-            "outcome IS NULL OR outcome IN ('COMPLETED', 'SESSION_UNAVAILABLE', 'RATE_LIMITED',"
-            " 'FAILED', 'INTERRUPTED')",
+            "outcome IS NULL OR outcome IN ('COMPLETED', 'NOT_ATTESTED', 'SESSION_UNAVAILABLE',"
+            " 'RATE_LIMITED', 'FAILED', 'INTERRUPTED')",
             name="outcome_valid",
         ),
         sa.CheckConstraint(

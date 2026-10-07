@@ -571,7 +571,8 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
     ),
     # ---- M6-C (ADR-0023 §5, §6; Commerce API 2.90.1 read 2026-10-07). The two order reads,
     # read-only. The page names no API group; the operator-attested 주문 판매자 group of
-    # ``ORDER_READ.md`` is recorded, and only a successful read proves the capability.
+    # ``ORDER_READ.md`` is recorded; OPERATE reads only while the operator's current
+    # attestation includes it (ADR-0023 §5).
     EndpointId.SMARTSTORE_ORDER_CHANGES: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_ORDER_CHANGES,
         method=Method.GET,

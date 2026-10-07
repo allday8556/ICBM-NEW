@@ -62,6 +62,7 @@ def orders(container: ContainerDep) -> dict[str, Any]:
     overview = container.order_sync.overview()
     return {
         "capability": overview.capability,
+        "attested": overview.attested,
         "interval_s": overview.interval_s,
         "synced_until": overview.synced_until,
         "total": overview.total,

@@ -121,7 +121,10 @@ def registration(
 
 
 def _service(
-    container: Container, source: FakeSource, retention_days: int = 90
+    container: Container,
+    source: FakeSource,
+    retention_days: int = 90,
+    attested: bool = True,
 ) -> OrderSyncService:
     def identity(item_id: str) -> tuple[str, str] | None:
         with container.product_store.reading() as unit:
@@ -138,6 +141,7 @@ def _service(
         interval_s=600,
         initial_lookback_s=3 * 86400,
         retention_days=retention_days,
+        order_read_attested=lambda: attested,
         marketplace_key=MARKET,
     )
 
@@ -470,6 +474,11 @@ def test_the_orders_screen_counts_only_once_an_order_read_succeeded(
         pages=[ChangePage((_change(container),))], facts={"po-1": _facts()}
     )
     container.order_sync._marketplace_key = MARKET
+    # No attestation is recorded in this container: nothing is read, still no count.
+    run = container.order_sync.sync(trigger=OPERATOR, correlation_id=CID)
+    assert run.outcome == "NOT_ATTESTED"
+    assert container.screens.orders().orders_total is None
+    container.order_sync._attested = lambda: True
     container.order_sync.sync(trigger=OPERATOR, correlation_id=CID)
     after = container.screens.orders()
     assert (after.orders_total, after.order_read) == (1, CONNECTED)
@@ -542,3 +551,24 @@ def test_retention_starts_only_at_a_change_that_reported_the_terminal_status(
     assert service.purge_shipping(correlation_id=CID) == 0
     (order,) = service.overview().orders
     assert order.shipping_state == STORED
+
+
+def test_without_the_attested_order_group_nothing_is_read(
+    container: Container, registration: str
+) -> None:
+    """ADR-0023 §5: the operator-attested 주문 판매자 group gates ingest."""
+    source = FakeSource(pages=[ChangePage((_change(container),))], facts={"po-1": _facts()})
+    service = _service(container, source, attested=False)
+    run = _sync(service)
+    assert (run.outcome, run.synced_until) == ("NOT_ATTESTED", None)  # type: ignore[attr-defined]
+    assert source.windows == [] and source.detail_calls == []
+    assert service.capability() == NOT_CONNECTED
+    assert service.overview().attested is False
+
+
+def test_the_order_group_is_attested_only_by_a_current_valid_attestation(
+    container: Container,
+) -> None:
+    """The gate reads the M2 attestation owner: no attestation attests no group."""
+    assert container.permission_attestation.attested_groups("smartstore") == frozenset()
+    assert container.order_sync.attested() is False

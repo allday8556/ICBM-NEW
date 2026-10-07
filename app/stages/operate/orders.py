@@ -77,7 +77,9 @@ STORED: Final = "STORED"
 NONE: Final = "NONE"
 DELETED: Final = "DELETED"
 
-# ADR-0023 §5: the order read capability is proven by a read, never declared.
+# ADR-0023 §5: the operator-attested 주문 판매자 group gates ingest; with it, a completely
+# read change window makes the channel CONNECTED.
+NOT_ATTESTED: Final = "NOT_ATTESTED"
 NOT_CONNECTED: Final = "NOT_CONNECTED"
 CONNECTED: Final = "CONNECTED"
 
@@ -241,6 +243,8 @@ class OrderView:
 class OrdersOverview:
     # NOT_CONNECTED until one change read has succeeded (ADR-0023 §5): no count is a zero then.
     capability: str
+    # Whether the operator attested the 주문 판매자 group (Settings > SmartStore permissions).
+    attested: bool
     interval_s: float
     last_run: OrderRunView | None
     synced_until: datetime | None
@@ -330,6 +334,7 @@ class OrderSyncService:
         interval_s: float,
         initial_lookback_s: float,
         retention_days: int,
+        order_read_attested: Callable[[], bool],
         marketplace_key: str = "smartstore",
     ) -> None:
         self._db = db
@@ -343,6 +348,7 @@ class OrderSyncService:
         self._lookback = timedelta(seconds=initial_lookback_s)
         self._retention = timedelta(days=retention_days)
         self._marketplace_key = marketplace_key
+        self._attested = order_read_attested
         self._lock = threading.Lock()
 
     @property
@@ -351,8 +357,15 @@ class OrderSyncService:
 
     # ------------------------------------------------------------------ reads
 
+    def attested(self) -> bool:
+        """Whether the current, valid operator attestation includes the 주문 판매자 group."""
+        return bool(self._attested())
+
     def capability(self) -> str:
-        """``CONNECTED`` once any pass has read a change window successfully."""
+        """``CONNECTED`` while the 주문 판매자 group is attested and a pass has read a change
+        window completely; otherwise ``NOT_CONNECTED`` (ADR-0023 §5)."""
+        if not self.attested():
+            return NOT_CONNECTED
         with self._db.read() as session:
             proven = session.scalar(
                 select(func.count())
@@ -379,6 +392,7 @@ class OrderSyncService:
             total = int(session.scalar(select(func.count()).select_from(ProductOrder)) or 0)
             return OrdersOverview(
                 capability=capability,
+                attested=self.attested(),
                 interval_s=self._interval_s,
                 last_run=None if last is None else _run_view(last),
                 synced_until=self._cursor(session),
@@ -484,6 +498,9 @@ class OrderSyncService:
             synced: datetime | None = None
             totals = [0, 0]
             try:
+                # ADR-0023 §5: without the attested 주문 판매자 group nothing is read.
+                if not self.attested():
+                    return self._finish(run_id, NOT_ATTESTED, None, totals)
                 if not self._source.available():
                     return self._finish(run_id, SESSION_UNAVAILABLE, None, totals)
                 window_from = start

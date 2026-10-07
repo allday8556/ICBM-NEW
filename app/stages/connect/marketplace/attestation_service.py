@@ -197,6 +197,20 @@ class PermissionAttestationService:
             invalidations=tuple(sorted(evaluation.invalidations)),
         )
 
+    def attested_groups(self, marketplace_key: str) -> frozenset[ApiGroup]:
+        """The API groups the operator attested as granted, only while that attestation is still
+        valid now (same application, current mapping revision, not expired). An invalid or
+        missing attestation attests nothing. ADR-0023 §5: OPERATE's order ingest is gated on
+        ``ORDER_SELLER`` being among them."""
+        with self._db.read() as session:
+            row = self._latest(session, marketplace_key)
+        if row is None:
+            return frozenset()
+        record, evaluation = self._evaluate(row, self.context(marketplace_key))
+        if record is None or evaluation.invalidations:
+            return frozenset()
+        return record.observed_groups
+
     # ------------------------------------------------------------------ read and record
 
     def attestation(self, marketplace_key: str) -> PermissionAttestationView:

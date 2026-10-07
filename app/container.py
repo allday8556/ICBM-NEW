@@ -95,6 +95,7 @@ from app.stages.collect.sourceassets import SourceAssetRecorder
 from app.stages.collect.synthetic import SyntheticTestProductService
 from app.stages.connect.accounts import MarketplaceAccountStore
 from app.stages.connect.credentials import SupplierCredentialStore
+from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.service import MarketplaceCapabilityService
@@ -945,6 +946,10 @@ def build_container(
         interval_s=config.operate_order_sync_interval_s,
         initial_lookback_s=config.operate_order_initial_lookback_s,
         retention_days=config.operate_order_shipping_retention_days,
+        # ADR-0023 §5: the operator-attested 주문 판매자 group gates order ingest.
+        order_read_attested=lambda: (
+            ApiGroup.ORDER_SELLER in permission_attestation.attested_groups("smartstore")
+        ),
     )
     screens = ScreenService(
         clock=clock,

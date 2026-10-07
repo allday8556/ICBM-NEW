@@ -31,6 +31,7 @@ const RESOLUTION = {
 };
 const OUTCOME = {
   COMPLETED: '완료',
+  NOT_ATTESTED: '주문 판매자 권한 미확인',
   SESSION_UNAVAILABLE: '스마트스토어 세션 없음',
   RATE_LIMITED: '호출 한도로 중단',
   FAILED: '실패',
@@ -122,7 +123,9 @@ export function orderListPanel() {
             { class: 'mini', 'data-order-capability': found.capability },
             found.capability === 'CONNECTED'
               ? `주문 ${found.total}건 · ${found.synced_until ? `${dotDateTime(found.synced_until)}까지 동기화` : ''}`
-              : '아직 주문을 읽은 적이 없습니다 (주문 조회 권한 미확인)',
+              : found.attested
+                ? '아직 주문을 읽은 적이 없습니다'
+                : '주문 판매자 권한 확인이 필요합니다 (설정 › 스마트스토어 › 권한 확인에서 주문 판매자 그룹 선택)',
           ),
           h('span', { class: 'mini' }, minutes > 0 ? `자동 동기화 ${minutes}분마다` : '자동 동기화 꺼짐'),
           last ? h('span', { class: 'mini', 'data-order-last-run': last.outcome ?? last.state }, `마지막: ${OUTCOME[last.outcome] ?? last.state}${last.error_code ? ` · ${last.error_code}` : ''}`) : null,
