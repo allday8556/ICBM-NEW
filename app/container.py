@@ -104,7 +104,9 @@ from app.stages.connect.sessions import (
     SESSIONS_DIR_NAME,
     SupplierSessionStore,
 )
+from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
+from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.service import OperateService
 from app.stages.products.atomic_sku_economics_store import AtomicSKUEconomicsStore
 from app.stages.products.atomic_sku_item_store import AtomicSKUItemStore
@@ -257,6 +259,9 @@ class Container:
     # The operator's upload run (`icbm live upload-assets`, owner decision 5975217061).
     asset_upload_run: AssetUploadRun
     registration_deletions: RegistrationDeletionService
+    # M6-A (ADR-0023 §3): the read-only listing-state sync and its periodic pass.
+    listing_sync: ListingSyncService
+    listing_sync_scheduler: ListingSyncScheduler
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
@@ -267,6 +272,8 @@ class Container:
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
+    # Owner decision 2026-10-07: automatic token renewal through CONNECT's own pass.
+    smartstore_keeper: SmartStoreSessionKeeper
     review_items: ReviewItemStore
     review_reconciler: ReviewReconciler
     adaptive_profiles: AdaptiveProfileStore
@@ -888,6 +895,17 @@ def build_container(
         # B-PREVIEW: the frozen-Snapshot preview reads the same wire projection the sender uses.
         preview_projection=smartstore_product.project,
     )
+    listing_sync = ListingSyncService(
+        db=db,
+        clock=clock,
+        registrations=registrations,
+        reader=SmartStoreReadback(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=committed_bearer,
+        ),
+        normalize=smartstore_readback.normalize,
+        interval_s=config.operate_listing_sync_interval_s,
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -903,6 +921,8 @@ def build_container(
         collection_suppliers=collection.supplier_keys(),
     )
     return Container(
+        listing_sync=listing_sync,
+        listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,
         common_images=common_images,
         config=config,
@@ -971,6 +991,7 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
+        smartstore_keeper=SmartStoreSessionKeeper(smartstore, enabled=config.smartstore_auto_renew),
         review_items=review_items,
         review_reconciler=review_reconciler,
         adaptive_profiles=adaptive_profiles,

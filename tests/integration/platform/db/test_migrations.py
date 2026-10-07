@@ -170,8 +170,10 @@ CANONICAL_TABLES = (
     # One-at-a-time bulk CREATE orchestration and its ordered members.
     "registration_bulk_runs",
     "registration_bulk_items",
+    "operate_listing_sync_runs",
+    "operate_listing_observations",
 )
-HEAD = "0047_atomic_sku_economics"
+HEAD = "0048_m6_listing_sync"
 
 
 def _url(path: Path) -> str:

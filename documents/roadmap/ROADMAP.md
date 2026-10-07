@@ -718,8 +718,8 @@ M0 Foundation                                   ACCEPTED 2026-09-13
 → M2 SmartStore CONNECT                          ACCEPTED 2026-09-15
 → M3 one-product COLLECT → ProductFactsRevision  ACCEPTED 2026-09-18
 → M4 canonical Product DB + image pipeline + pricing/readiness foundations  ACCEPTED 2026-09-19
-→ M5 SmartStore REGISTER idempotency/reconcile/read-back  CURRENT
-→ M6 OPERATE read-back + stock + order ingest
+→ M5 SmartStore REGISTER idempotency/reconcile/read-back  ACCEPTED 2026-10-07
+→ M6 OPERATE read-back + stock + order ingest  CURRENT (ADR-0023)
 → M6.5 fulfillment record + tracking
 → FIRST VERTICAL two consecutive passes in fresh sessions
 ```
@@ -845,7 +845,7 @@ Next, in order:
 
    **PR-F delivered the offline harness only.** The bounded real canary campaign it was once listed beside was not delivered and is not authorized. At the current main the canary is `BLOCKED`: product CREATE and the positive-only reconcile search were adopted by their own later slices, which are contracts and not calls, the provider-evidence review's `INSUFFICIENT` verdict stands unchanged (Issue #89 `5768312853`, `5768347233`), `product_registration.write` stays `UNVERIFIED`, execution stays `DRY_RUN`, and the measured outbound marketplace mutation count is 0.
 
-   M5 is accepted only by an acceptance run on the exact merged main SHA, recorded in `documents/acceptance/milestones/M5.md` and accepted by the architect. That document stays `PENDING`.
+   M5 is accepted only by an acceptance run on the exact merged main SHA, recorded in `documents/acceptance/milestones/M5.md` and accepted by the architect. *(Amendment note 2026-10-07: that run is recorded in M5.md §10 on main `0a91156`, and the owner accepted it in the architect role, Issue #219 `6033126992`. M5 is ACCEPTED.)*
 
 2. **Gate 1 — the application path** (Issue #89 kickoff `5784108069`; contract `documents/decisions/adr/0015-gate1-registration-target-policy-and-category-metadata.md`). It closes the local owner and path gaps below, provider-zero, one separately authorized slice at a time: G1-A the durable target policy and its Settings write path, G1-B the operator-reviewed category metadata, then G1-C the product DB workflow and G1-E the COLLECT submit, and last G1-D the Draft command path. `ReviewItem` moves to Gate 2; `ComplianceGate` and the bounded LIVE authorization move to later pre-LIVE gates. **Gate 1 is accepted** (Issue #89 `5804516180`) on the exact-main closeout of `48129070`; that evidence is not M5 acceptance.
 3. **Gate 2 — the human review path** (Issue #89 kickoff `5804605624`; contract `documents/decisions/adr/0016-gate2-human-review-path-and-review-item-owner.md`). It gives `ReviewItem` a durable owner that indexes review conditions production owners already derive, never a second truth, one separately authorized slice at a time: G2-A the owner, its migration and audited lifecycle, G2-B the COLLECT / M3 producer, G2-C the M4 and REGISTER (execution and preparation) indexing with durable counts and `NOT_WIRED` semantics. `ComplianceGate`, LIVE authorization and M6 stay out. **Gate 2 is accepted** (GPT `5818393660`, independent cross-audit `5818648647`) on the exact-main closeout of `c031f5ad` (evidence `5818068828`; exact-main CI `35987718944`, 6/6); that evidence is not M5 acceptance. At Gate 2 close:

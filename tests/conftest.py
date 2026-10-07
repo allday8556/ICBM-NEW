@@ -69,6 +69,9 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
         "job_max_attempts": 3,
         "job_backoff_base_s": 0.05,
         "job_backoff_max_s": 1.0,
+        # No background provider pass in tests: each test drives CONNECT and sync itself.
+        "smartstore_auto_renew": False,
+        "operate_listing_sync_interval_s": 0.0,
     }
     values.update(overrides)
     return AppConfig(**values)  # type: ignore[arg-type]

@@ -671,6 +671,11 @@ class RegistrationStore:
         with self.reading() as unit:
             return unit.registrations(limit=limit)
 
+    def marketplace_registrations(self, marketplace_key: str) -> tuple[RegistrationRecord, ...]:
+        """Every registration of one marketplace, whatever its lifecycle, never capped (M6-A)."""
+        with self.reading() as unit:
+            return unit.marketplace_registrations(marketplace_key)
+
     def open_draft_count(self) -> int:
         with self.reading() as unit:
             return unit.open_draft_count()
@@ -936,6 +941,18 @@ class RegistrationUnit:
                 MarketplaceRegistration.registration_id,
             )
             .limit(limit)
+        ).all()
+        found = [self.registration(registration_id) for registration_id in rows]
+        return tuple(record for record in found if record is not None)
+
+    def marketplace_registrations(self, marketplace_key: str) -> tuple[RegistrationRecord, ...]:
+        rows = self.session.scalars(
+            select(MarketplaceRegistration.registration_id)
+            .where(MarketplaceRegistration.marketplace_key == marketplace_key)
+            .order_by(
+                MarketplaceRegistration.created_at.desc(),
+                MarketplaceRegistration.registration_id,
+            )
         ).all()
         found = [self.registration(registration_id) for registration_id in rows]
         return tuple(record for record in found if record is not None)

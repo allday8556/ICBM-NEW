@@ -32,6 +32,7 @@ from app.stages.connect.marketplace.capability import (
 )
 from app.stages.connect.marketplace.service import MarketplaceCapabilityService
 from app.stages.connect.sessions import MARKETPLACE_SESSIONS_DIR_NAME, SupplierSessionStore
+from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import KEY, CommittedSession
 from integrations.marketplaces.smartstore.caller import (
     SmartStoreCallError,
@@ -657,3 +658,48 @@ def test_smartstore_connect_makes_no_external_attempt(p: Container) -> None:
     after = EGRESS.snapshot()
     assert after["external_attempts"] == before["external_attempts"]
     assert after["granted_events"] == before["granted_events"]
+
+
+# ---------------------------------------------------------------- automatic renewal (2026-10-07)
+
+
+def test_the_session_keeper_renews_only_a_bound_account_through_connect(
+    p: Container, provider: Provider, clock: FakeClock
+) -> None:
+    # Owner decision 2026-10-07 (AUTH §15, §17 Case B): the keeper runs CONNECT's own pass when
+    # no current committed bearer answers, and only for a bound account with credentials.
+    keeper = SmartStoreSessionKeeper(p.smartstore, enabled=True)
+    assert keeper.check() is False and provider.calls == []  # nothing configured yet
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+    assert keeper.check() is False and provider.calls == []  # not bound: the operator binds first
+    p.smartstore.connect()
+    p.smartstore.bind_account(UID_A, actor=ACTOR)
+    assert p.smartstore.committed_bearer() is not None
+    calls = len(provider.calls)
+    # A current session needs nothing.
+    assert keeper.check() is False and len(provider.calls) == calls
+    # Inside the renewal margin the keeper renews: a new token, then the identity proof.
+    clock.advance(10800 - MARGIN_S)
+    assert p.smartstore.committed_bearer() is None
+    assert keeper.check() is True
+    assert provider.calls[calls:] == ["TOKEN", "ACCOUNT"]
+    bearer = p.smartstore.committed_bearer()
+    assert bearer is not None and bearer.session_generation == 2
+
+
+def test_the_session_keeper_stops_on_a_mismatch_and_backs_off(
+    p: Container, provider: Provider, clock: FakeClock
+) -> None:
+    _current(p)
+    p.smartstore.save_credentials(CLIENT_ID, SECRET, actor=ACTOR)
+    p.smartstore.connect()
+    p.smartstore.bind_account(UID_A, actor=ACTOR)
+    keeper = SmartStoreSessionKeeper(p.smartstore, enabled=True)
+    clock.advance(10800)
+    provider.account_uid = UID_B  # the provider now answers another account
+    keeper.check()
+    calls = len(provider.calls)
+    # The mismatch opened an AUTHENTICATION review: the keeper waits for the operator.
+    assert p.smartstore.auto_renewal_due() is False
+    assert keeper.check() is False and len(provider.calls) == calls

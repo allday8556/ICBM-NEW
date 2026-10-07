@@ -46,7 +46,13 @@ CODE_ROOTS = ("app", "integrations", "automation")
 # compare and guard evidence. They never write them; `test_the_evidence_readers_only_read` in
 # tests/contracts/test_repository_rules.py proves it.
 EVIDENCE_READERS = frozenset(
-    {"app/capabilities/live_safety/drill.py", "app/capabilities/live_safety/retention.py"}
+    {
+        "app/capabilities/live_safety/drill.py",
+        "app/capabilities/live_safety/retention.py",
+        # M6-A: a listing observation names its registration by foreign key only; every
+        # registration write still goes through the registration store.
+        "app/stages/operate/listing_models.py",
+    }
 )
 
 
@@ -225,7 +231,9 @@ ATOMIC_SKUS = "0044_source_proven_atomic_skus"
 ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
 SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
 ATOMIC_SKU_ECONOMICS = "0047_atomic_sku_economics"
-SCHEMA_HEAD = ATOMIC_SKU_ECONOMICS
+# M6-A (ADR-0023 §3): the listing-state sync runs and observations, after M5's acceptance.
+M6_LISTING_SYNC = "0048_m6_listing_sync"
+SCHEMA_HEAD = M6_LISTING_SYNC
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -254,6 +262,7 @@ AFTER_M5 = (
     ATOMIC_SKU_ITEMS,
     SEQUENTIAL_BULK,
     ATOMIC_SKU_ECONOMICS,
+    M6_LISTING_SYNC,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
@@ -1717,11 +1726,15 @@ M5_PLAN = (
 )
 
 
-def test_the_m5_acceptance_plan_is_pending_and_bounded() -> None:
+def test_the_m5_acceptance_plan_is_accepted_on_its_exact_main_record_and_bounded() -> None:
+    # 2026-10-07: accepted only on the exact-main record of §10, by the owner in the architect role.
     text = M5_MD.read_text("utf-8")
     header = text.split("\n## ", 1)[0]
-    assert "Status: **PENDING**" in header
-    assert "Status: **ACCEPTED**" not in header
+    assert "Status: **ACCEPTED**" in header and "6033126992" in header
+    assert "Status: **PENDING**" not in header
+    record = text.split("\n## 10. Exact-main acceptance record", 1)[1]
+    assert "0a91156b12fff783130814ddf98941c5ae467bf4" in record and "65 / 65" in record
+    assert "REGISTER_INTENT_NOT_SENDABLE" in record
     assert ADR_PATH in header
     normalized = _normalized(text)
     for phrase in M5_PLAN:
