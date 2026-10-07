@@ -163,13 +163,17 @@ CANONICAL_TABLES = (
     "current_atomic_sku_set_moves",
     # Additive Item identities qualified by stable AtomicSKU identity.
     "atomic_sku_product_items",
+    # C-P2: exact source economics and immutable pricing for AtomicSKU-qualified Items.
+    "atomic_sku_source_bindings",
+    "atomic_sku_pricing_snapshots",
+    "current_atomic_sku_pricing_snapshot_moves",
     # One-at-a-time bulk CREATE orchestration and its ordered members.
     "registration_bulk_runs",
     "registration_bulk_items",
     "operate_listing_sync_runs",
     "operate_listing_observations",
 )
-HEAD = "0047_m6_listing_sync"
+HEAD = "0048_m6_listing_sync"
 
 
 def _url(path: Path) -> str:

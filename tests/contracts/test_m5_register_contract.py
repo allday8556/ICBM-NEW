@@ -230,8 +230,9 @@ COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
 ATOMIC_SKUS = "0044_source_proven_atomic_skus"
 ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
 SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
+ATOMIC_SKU_ECONOMICS = "0047_atomic_sku_economics"
 # M6-A (ADR-0023 §3): the listing-state sync runs and observations, after M5's acceptance.
-M6_LISTING_SYNC = "0047_m6_listing_sync"
+M6_LISTING_SYNC = "0048_m6_listing_sync"
 SCHEMA_HEAD = M6_LISTING_SYNC
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -260,6 +261,7 @@ AFTER_M5 = (
     ATOMIC_SKUS,
     ATOMIC_SKU_ITEMS,
     SEQUENTIAL_BULK,
+    ATOMIC_SKU_ECONOMICS,
     M6_LISTING_SYNC,
 )
 REGISTRATION_STATE = re.compile(

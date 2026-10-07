@@ -80,16 +80,21 @@ The AtomicSKU-qualified Product Item identity slice added two PRODUCT DB modules
 C-P1 adds one provider-neutral REGISTER module plus contract and unit suites for structure-only
 marketplace compatibility and canonical read-only rendering. It has no migration, price, provider
 payload or external call.
+C-P2 adds `atomic_sku_economics_models.py`, `atomic_sku_economics_store.py` and migration `0047`.
+The existing pricing/readiness services expose the additive AtomicSKU-qualified path; the store
+does not calculate. Its integration suite covers per-configuration cost/price, missing-delta and
+composed-fulfillment refusal, stale propagation and immutable snapshot pinning. It has no provider
+payload or external call and leaves legacy Item economics unchanged.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 295 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 298 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 43 | supporting capabilities: audit, jobs, review, live_safety |
 | `app/interface/` | 25 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 77 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 145 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 78 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 147 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -111,11 +116,11 @@ payload or external call.
 | `integrations/` | 44 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 23 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 282 | tests |
+| `tests/` | 283 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 112 | integration tests by runtime owner |
+| `tests/integration/` | 113 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 103 | unit tests by runtime owner |
 | `ui/` | 57 | operator clients: the served web client and the capture extension |

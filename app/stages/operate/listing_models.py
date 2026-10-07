@@ -1,4 +1,4 @@
-"""The M6-A listing-state sync rows (ADR-0023 §3; migration 0047)."""
+"""The M6-A listing-state sync rows (ADR-0023 §3; migration 0048)."""
 
 from datetime import datetime
 

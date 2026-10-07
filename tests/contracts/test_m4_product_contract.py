@@ -156,6 +156,14 @@ def pointer_name_problems(decision: str) -> list[str]:
 # revision are one unit of work, and only the product store writes membership.
 MEMBERSHIP_OWNER = "app/stages/products/store.py"
 MEMBERSHIP_MODELS = "app/stages/products/models.py"
+MEMBERSHIP_REFERENCE_MODELS = frozenset(
+    {
+        MEMBERSHIP_MODELS,
+        # C-P2 has read-only foreign keys to the member and immutable membership revision. Its
+        # repository has no membership mutation API; the canonical store remains the only writer.
+        "app/stages/products/atomic_sku_economics_models.py",
+    }
+)
 MEMBERSHIP_CLASSES = frozenset({"GroupMember", "GroupMembershipRevision"})
 MEMBERSHIP_TABLES = re.compile(r"\bgroup_members\b|\bgroup_membership_revisions\b")
 APPEND_REVISION = "_append_membership_revision"
@@ -167,7 +175,11 @@ def membership_writer_problems(sources: Iterable[tuple[str, str]]) -> list[str]:
     membership models or tables, and so could change membership without its revision."""
     offenders = []
     for where, source in sources:
-        if where in (MEMBERSHIP_OWNER, MEMBERSHIP_MODELS) or "/migrations/" in where:
+        if (
+            where == MEMBERSHIP_OWNER
+            or where in MEMBERSHIP_REFERENCE_MODELS
+            or "/migrations/" in where
+        ):
             continue
         for node in ast.walk(ast.parse(source)):
             named = (

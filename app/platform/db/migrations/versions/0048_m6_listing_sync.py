@@ -1,7 +1,7 @@
 """M6-A listing-state sync: the sync runs and their append-only listing observations (ADR-0023 §3).
 
-Revision ID: 0047_m6_listing_sync
-Revises: 0046_sequential_bulk_registration
+Revision ID: 0048_m6_listing_sync
+Revises: 0047_atomic_sku_economics
 Create Date: 2026-10-07
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0047_m6_listing_sync"
-down_revision: str | None = "0046_sequential_bulk_registration"
+revision: str = "0048_m6_listing_sync"
+down_revision: str | None = "0047_atomic_sku_economics"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
