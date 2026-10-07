@@ -424,3 +424,20 @@ def test_a_second_running_pass_is_refused_as_busy(container: Container, registra
     with pytest.raises(OrderSyncBusy):
         _sync(service)
     assert source.windows == []
+
+
+def test_the_orders_screen_counts_only_once_an_order_read_succeeded(
+    container: Container, registration: str
+) -> None:
+    before = container.screens.orders()
+    assert (before.orders_total, before.order_read) == (None, NOT_CONNECTED)
+    assert before.meta.empty_reason == "NO_CONNECTIONS"
+    # The container's own owner, reading through a fake source instead of the provider.
+    container.order_sync._source = FakeSource(
+        pages=[ChangePage((_change(container),))], facts={"po-1": _facts()}
+    )
+    container.order_sync._marketplace_key = MARKET
+    container.order_sync.sync(trigger=OPERATOR, correlation_id=CID)
+    after = container.screens.orders()
+    assert (after.orders_total, after.order_read) == (1, CONNECTED)
+    assert after.meta.empty_reason is None

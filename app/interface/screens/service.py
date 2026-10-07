@@ -184,7 +184,7 @@ class ScreenService:
             empty = EmptyReason.NO_ORDERS if orders == 0 else None
         return OrdersView(
             meta=self._meta(ScreenKey.ORDERS, empty),
-            orders_total=orders,
+            orders_total=orders if order_read == "CONNECTED" else None,
             order_read=order_read,
             marketplaces_connected=self._connect.connected_marketplace_count(),
         )

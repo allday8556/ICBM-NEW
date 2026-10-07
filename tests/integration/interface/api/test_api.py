@@ -73,6 +73,14 @@ def test_every_screen_contract_reports_empty(client: TestClient, screen: str, re
     assert meta["milestone"] == "M6"
 
 
+def test_the_orders_screen_states_no_count_before_an_order_read_succeeded(
+    client: TestClient,
+) -> None:
+    # ADR-0023 §5: an unconnected channel's order count is unknown, never a zero.
+    view = client.get("/api/v1/screens/orders").json()
+    assert (view["orders_total"], view["order_read"]) == (None, "NOT_CONNECTED")
+
+
 def test_the_review_counted_screens_are_never_empty_on_a_count_that_is_not_authoritative(
     client: TestClient,
 ) -> None:

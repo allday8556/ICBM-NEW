@@ -126,7 +126,8 @@ class OrdersView(BaseModel):
     the screen says the channel is not connected, never that there are no orders (ADR-0023 §5)."""
 
     meta: ScreenMeta
-    orders_total: int
+    # ``None`` until an order read has succeeded: an unconnected channel's count is unknown.
+    orders_total: int | None
     order_read: str
     marketplaces_connected: int
 
