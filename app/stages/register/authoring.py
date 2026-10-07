@@ -430,6 +430,10 @@ class RegistrationPreparationService:
                 marketplace_account_id=preparation.marketplace_account_id,
                 preparation_revision_id=preparation.current.preparation_revision_id,
                 candidate_fingerprint=candidate.candidate_fingerprint,
+                selected_artifacts=tuple(
+                    image.key for item in candidate.resolved.items for image in item.images
+                ),
+                asset_profile=candidate.resolved.target.asset_policy.profile,
             )
         return self.freeze(
             preparation_id,

@@ -821,11 +821,20 @@ class RegistrationExecutionService:
             return self.verify(intent.intent_id, correlation_id=correlation_id)
         if outcome is RemoteOutcome.UNKNOWN:
             # §10: never retried automatically, whatever the cause was.
+            provider_reason = handoff.details.get("provider_message") or handoff.details.get(
+                "provider_invalid_input"
+            )
             raise AttemptFailed(
                 "REGISTER_OUTCOME_UNKNOWN",
-                "the CREATE outcome is unproven; reconcile before any resend",
+                str(provider_reason)
+                if provider_reason
+                else "the CREATE outcome is unproven; reconcile before any resend",
                 error_class=ErrorClass.REVIEW_REQUIRED,
-                details={"intent_id": intent.intent_id, "attempt_id": attempt.attempt_id},
+                details={
+                    "intent_id": intent.intent_id,
+                    "attempt_id": attempt.attempt_id,
+                    **dict(handoff.details),
+                },
             )
         # NOT_APPLIED_PROVEN: only now may the provider's own class decide a job retry (§9).
         raise AttemptFailed(

@@ -836,7 +836,17 @@ def _wire_document(listing_identity: str) -> smartstore_product.CreateDocument:
                         "sellerManagementCode": smartstore_product.seller_management_code(
                             listing_identity
                         )
-                    }
+                    },
+                    # The CREATE endpoint's required detail attributes (wire v8/v9).
+                    "afterServiceInfo": {
+                        "afterServiceTelephoneNumber": "02-000-0000",
+                        "afterServiceGuideContent": smartstore_product.AFTER_SERVICE_GUIDE_CONTENT,
+                    },
+                    "originAreaInfo": {
+                        "originAreaCode": smartstore_product.ORIGIN_AREA_DETAIL_CODE
+                    },
+                    "minorPurchasable": smartstore_product.REGISTRATION_MINOR_PURCHASABLE,
+                    "customsTaxType": smartstore_product.REGISTRATION_CUSTOMS_TAX_TYPE,
                 },
             },
         },

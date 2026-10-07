@@ -5,8 +5,8 @@ It is the only production entry point of :class:`~app.capabilities.live_safety.a
 AssetUploadService`. It runs in the ``icbm live`` process, which owns the data directory (the
 server is stopped), and composes existing owners only — it decides nothing itself:
 
-1. the grant's own artifacts, from the grant owner; an artifact already ``APPLIED_PROVEN`` under the
-   grant's exact preparation revision and candidate is not uploaded again;
+1. the grant's own artifacts, from the grant owner; exact bytes already ``APPLIED_PROVEN`` for the
+   same canonical account and image endpoint are reused and never uploaded again;
 2. a bounded LIVE window of this process through the execution-mode owner: at most
    ``LIVE_WINDOW_MAX_S``, opened only while a live grant exists, and closed again when the run
    ends — whatever happens — or when the process exits. Nothing reaches a provider before it;
@@ -14,8 +14,9 @@ server is stopped), and composes existing owners only — it decides nothing its
    source answers in this process;
 4. each artifact's exact local bytes, read from the M4 lineage store that holds it, uploaded once
    through the upload owner: every layer of the send-time stack still decides, and the grant's
-   budget is spent by the owner. The run stops at the first upload that is not ``APPLIED_PROVEN``
-   — an ``UPLOAD_UNKNOWN`` is never retried, and a refusal is the owner's own.
+   budget is spent by the owner. A terminal failure is recorded for that artifact and the run
+   continues with the next artifact; an ``UPLOAD_UNKNOWN`` is never retried, and a safety-stack
+   refusal still stops the run because the mutation boundary itself is no longer valid.
 """
 
 from collections.abc import Callable, Sequence
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from app.capabilities.live_safety.assets import AssetUploadRequest, AssetUploadService
-from app.capabilities.live_safety.model import MutationStage, UploadAttemptState
+from app.capabilities.live_safety.model import MutationStage
 from app.capabilities.live_safety.store import ArtifactRef, GrantRecord, LiveAuthorityStore
 from app.platform.core.errors import AppError, InputValidationError, NotFoundError
 from app.platform.core.execution import ExecutionMode
@@ -108,25 +109,27 @@ class AssetUploadRun:
         self, grant_id: str, *, window_s: int, actor: str, correlation_id: str
     ) -> UploadRunResult:
         grant = self._grant(grant_id)
-        applied = {
+        reusable = {
             attempt.artifact_sha256: attempt
-            for attempt in self._store.applied_uploads(
-                grant.preparation_revision_id or "", grant.candidate_fingerprint or ""
+            for attempt in self._store.applied_uploads_for_account(
+                grant.marketplace_key, grant.marketplace_account_id
             )
+            if attempt.asset_profile == grant.asset_profile
         }
-        pending = [a for a in grant.artifacts if a.sha256 not in applied]
+        pending = [a for a in grant.artifacts if a.sha256 not in reusable]
         # Every artifact's bytes are read before anything reaches a provider: a missing one stops
         # the run before CONNECT, the window or any upload.
         contents = {artifact.sha256: self._content(artifact) for artifact in pending}
+        selected = {artifact.sha256: artifact for artifact in grant.artifacts}
         items: list[UploadRunItem] = [
             UploadRunItem(
                 sha256=sha,
-                asset_kind=attempt.asset_kind.value,
+                asset_kind=selected[sha].asset_kind.value,
                 outcome="ALREADY_APPLIED",
                 attempt_id=attempt.attempt_id,
                 provider_asset_ref=attempt.provider_asset_ref,
             )
-            for sha, attempt in applied.items()
+            for sha, attempt in reusable.items()
             if any(a.sha256 == sha for a in grant.artifacts)
         ]
         if pending:
@@ -181,9 +184,6 @@ class AssetUploadRun:
                     provider_asset_ref=result.attempt.provider_asset_ref,
                 )
             )
-            if result.attempt.state is not UploadAttemptState.APPLIED_PROVEN:
-                # Never retried, never followed by another send in this run.
-                break
         return items
 
     def _grant(self, grant_id: str) -> GrantRecord:

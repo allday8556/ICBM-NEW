@@ -297,6 +297,8 @@ def policy_sources(account: str) -> tuple[StaticRegistrationPolicy, StaticRegist
         category_mapping_revision="m5-acceptance-mapping-1",
         detail_composition_revision="m5-acceptance-detail-1",
         templates={"shipping": "m5-shipping-template", "returns": "m5-returns-template"},
+        # The account's A/S contact the CREATE projection sends (wire v8); invented.
+        after_service_telephone="02-000-0000",
     )
     metadata = CategoryMetadata(
         taxonomy_revision=TAXONOMY,

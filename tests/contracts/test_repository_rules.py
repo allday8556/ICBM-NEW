@@ -1284,7 +1284,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         "started under**",
         "a proof that\n  inspects only the current candidate's or profile's attempts "
         "proves nothing",
-        "upload-attempt state of the whole replay-conflict scope for ASSET",
+        "selected replay-key identities for ASSET",
     ):
         assert element in drill, element
     assert "never discarded" in invariants["G3-17"]
@@ -1320,7 +1320,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         ("G3-25", "never proof that no unresolved upload exists"),
         ("G3-25", "only APPLIED_PROVEN yields a known provider asset identity"),
         ("G3-26", "ASSET_MUTATION_READY requires that durable owner"),
-        ("G3-26", "no started or unresolved UPLOAD_UNKNOWN attempt in the replay-conflict scope"),
+        ("G3-26", "a started or unresolved UPLOAD_UNKNOWN blocks that exact key"),
         ("G3-26", "never depends on an ADR-0014 §26 scope row"),
         ("G3-27", "needs a new CREATE grant and a fresh restore proof"),
         ("G3-16", "never an ADR-0014 §26 row"),
@@ -1367,16 +1367,16 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
             "artifact kind, file name, MIME or type metadata, local profile or contract/adoption "
             "label change, restart or batch",
         ),
-        ("G3-29", "inspect the whole scope, never only the current candidate's attempts"),
+        ("G3-29", "replay fence inspects the whole exact-key scope"),
         ("G3-29", "only NOT_APPLIED_PROVEN clears it for a retry"),
         (
             "G3-29",
-            "an APPLIED_PROVEN in that scope keeps a fresh upload with the same key blocked, "
-            "whatever file name, MIME or type metadata, candidate, derivation, local artifact "
-            "kind, profile or contract label asks, until a separately adopted reuse/rebind path "
-            "exists",
+            "an APPLIED_PROVEN keeps a fresh upload with that key blocked, while its "
+            "sanitizer-safe provider identity may be locally rebound without a provider request "
+            "only when canonical account, endpoint, exact content SHA-256 and asset profile all "
+            "match",
         ),
-        ("G3-16", "upload-attempt state over the whole replay-conflict scope"),
+        ("G3-16", "upload-attempt state over every selected replay-conflict scope"),
     ):
         assert element in invariants[key], (key, element)
     provenance, fence = owner.split(
@@ -1431,12 +1431,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
         "a new candidate fingerprint",
         "Changing local provenance never erases an unresolved remote-mutation ambiguity.",
         "A `NOT_APPLIED_PROVEN` attempt may clear that ambiguity for a retry",
-        "fresh ASSET restore proof",
+        "ASSET restore proof remains valid",
         "**The same key governs `APPLIED_PROVEN`.**",
         "**keeps a fresh upload with that key blocked**",
         "**never re-sent merely because the file name, MIME or type metadata, derivation, local "
         "artifact kind, candidate, preparation, grant, profile or local contract label changed**",
-        "until one is adopted a fresh upload in that scope stays blocked",
+        "The adopted local rebind path may reuse its sanitizer-safe provider identity",
     ):
         assert element in flat_fence, element
     # The liveness cost of the conservative key is recorded, never used to narrow it.
@@ -1449,7 +1449,7 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     grant = _section(adr, r"^3\.2 What a grant binds")
     assert "**A grant's exact unit is authorization provenance, never a replay boundary.**" in grant
     for element in (
-        "bound to a target state digest and stale once that state changes",
+        "one ASSET proof binds the immutable inputs of its exact selected-artifact batch",
         "taken after the freeze",
         "which it may never record as absent",
         "a pre-freeze proof never gates a CREATE",
@@ -1465,13 +1465,12 @@ def test_the_live_authorization_contract_is_recorded_and_pinned() -> None:
     assert "None of them is implemented at this main" not in adr
     assert "A later slice that implements a grant or the brake adds a migration" not in adr
     assert "added migration `0026_g3_live_authority`" in " ".join(adr.split())
-    assert "proven from that owner and never from row absence" in stages
-    assert "**no started or unresolved `UPLOAD_UNKNOWN` attempt in the replay-conflict scope**" in (
-        stages
+    assert "each artifact is judged on its own replay-conflict scope" in stages
+    assert "a started or unresolved `UPLOAD_UNKNOWN` blocks that exact key" in stages
+    assert (
+        "**The ASSET readiness queries the whole replay-conflict scope of each artifact**" in stages
     )
-    assert "whatever grant, preparation revision, candidate fingerprint or local profile" in stages
-    assert "**The ASSET readiness queries the whole replay-conflict scope**" in stages
-    assert "a readiness that does is not\n  `ASSET_MUTATION_READY`" in stages
+    assert "another selected key remains independently uploadable" in stages
     safety = _section(adr, r"^4\.3 The whole safety stack")
     assert "the stage's mutation readiness is `READY`" in safety
     assert "**for the CREATE stage only**" in safety

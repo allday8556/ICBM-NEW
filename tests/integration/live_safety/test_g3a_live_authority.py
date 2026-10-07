@@ -33,7 +33,6 @@ from app.capabilities.live_safety.model import (
 )
 from app.capabilities.live_safety.stack import (
     REPLAY_DUPLICATE_IN_UNIT,
-    REPLAY_UNRESOLVED_IN_UNIT,
     CandidateState,
     SafetyStack,
     Verdict,
@@ -607,7 +606,8 @@ def test_the_same_binary_selected_twice_in_one_unit_names_the_liveness_limit(
     reasons = sorted(str(a.reason_code) for a in readiness.artifacts)
     assert reasons == sorted(["None", REPLAY_DUPLICATE_IN_UNIT])
     assert service.upload(request(grant_id, DERIVED_A)).prepared is not None
-    # The second slot cannot be filled by a fresh upload, and reuse/rebind is not adopted.
+    # The second slot cannot be filled by a fresh upload. Rebinding is a separate local read path,
+    # never another call through the upload mutation owner.
     refused(
         live_model.REPLAY_APPLIED_REUSE_NOT_ADOPTED,
         lambda: service.upload(request(grant_id, SOURCE_A)),
@@ -714,28 +714,28 @@ def test_an_unrecordable_or_raising_sender_result_is_unknown_never_applied(
     )
 
 
-def test_an_unresolved_selected_artifact_holds_the_whole_asset_stage(
+def test_an_unresolved_selected_artifact_does_not_hold_an_independent_image(
     container: Container, account: str
 ) -> None:
-    # G3-26 (review 5827063895 B2): A+B selected, B UPLOAD_UNKNOWN, A otherwise open.
+    # B remains fenced and is never retried; A has a different replay key and continues.
     grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
     release(container)
-    service, sender = uploads(container, sender=ScriptedSender(script=[RuntimeError("reset")]))
+    service, sender = uploads(
+        container, sender=ScriptedSender(script=[RuntimeError("reset"), applied()])
+    )
     assert (
         service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).attempt.state
         is UploadAttemptState.UPLOAD_UNKNOWN
     )
     readiness = service.readiness(grant_id)
-    assert readiness.verdict is Verdict.BLOCKED
-    assert REPLAY_UNRESOLVED_IN_UNIT in readiness.missing
+    assert readiness.verdict is Verdict.READY
     spent = store_of(container).grant_record(grant_id)
     assert spent is not None
-    refused(REPLAY_UNRESOLVED_IN_UNIT, lambda: service.upload(request(grant_id, DERIVED_A)))
-    # A started nothing and spent nothing; only B's one attempt was ever sent.
-    assert [row[1] for row in attempts(container)] == [SHA_B]
+    assert service.upload(request(grant_id, DERIVED_A)).prepared is not None
+    assert [row[1] for row in attempts(container)] == [SHA_B, SHA_A]
     after = store_of(container).grant_record(grant_id)
-    assert after is not None and after.budget_used == spent.budget_used == 1
-    assert len(sender.calls) == 1
+    assert after is not None and after.budget_used == spent.budget_used + 1 == 2
+    assert len(sender.calls) == 2
 
 
 def test_an_applied_selected_artifact_stays_artifact_local(
@@ -910,10 +910,11 @@ def _only_key(container: Container) -> str:
 # ---------------------------------------------------------------- restore targets (§7)
 
 
-def test_a_proven_non_application_changes_the_asset_restore_target(
+def test_a_terminal_attempt_does_not_invalidate_the_batch_restore_target(
     container: Container, account: str
 ) -> None:
-    # Review 5827905179 control 1: the proof taken for state S0 never admits the retry.
+    # The one batch proof survives terminal per-image results. The replay fence still owns
+    # whether this exact image may be retried.
     grant_id = grant(container, account, [DERIVED_A], budget=2)
     release(container)
     recording = ProvenProofs()
@@ -926,27 +927,23 @@ def test_a_proven_non_application_changes_the_asset_restore_target(
         UploadAttemptState.NOT_APPLIED_PROVEN
     )
     before = recording.restore_targets[-1]
-    stale, sender = uploads(
+    retried, sender = uploads(
         container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={before})
     )
-    refused(live_model.RESTORE_PROOF_ABSENT, lambda: stale.upload(request(grant_id, DERIVED_A)))
-    assert sender.calls == []
+    assert retried.upload(request(grant_id, DERIVED_A)).prepared is not None
+    assert len(sender.calls) == 1
     now = ProvenProofs()
     reader, _ = uploads(container, proofs=now)
     reader.readiness(grant_id)
     after = now.restore_targets[-1]
-    assert after != before
-    fresh, fresh_sender = uploads(
-        container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={after})
-    )
-    assert fresh.upload(request(grant_id, DERIVED_A)).prepared is not None
-    assert len(fresh_sender.calls) == 1
+    assert after == before
 
 
-def test_another_selected_artifacts_replay_state_stales_the_asset_restore_target(
+def test_another_selected_artifacts_replay_state_does_not_stop_an_independent_image(
     container: Container, account: str
 ) -> None:
-    # Review 5827905179 control 2: B's new replay state stales the target taken before A.
+    # B's result remains local to B's replay key. It neither invalidates the batch proof nor
+    # prevents A from being attempted.
     grant_id = grant(container, account, [DERIVED_A, DERIVED_B])
     release(container)
     # The target of an admission of A itself, taken while the execution mode still refuses it.
@@ -956,11 +953,11 @@ def test_another_selected_artifacts_replay_state_stales_the_asset_restore_target
     before = recording.restore_targets[-1]
     service, _ = uploads(container, sender=ScriptedSender(script=[applied(REF_B)]))
     assert service.upload(request(grant_id, DERIVED_B, BYTES_B, file_name="b.png")).prepared
-    stale, sender = uploads(
+    continued, sender = uploads(
         container, sender=ScriptedSender(script=[applied()]), proofs=ProvenProofs(accept={before})
     )
-    refused(live_model.RESTORE_PROOF_ABSENT, lambda: stale.upload(request(grant_id, DERIVED_A)))
-    assert sender.calls == []
+    assert continued.upload(request(grant_id, DERIVED_A)).prepared is not None
+    assert len(sender.calls) == 1
 
 
 def test_an_unreadable_attempt_owner_yields_no_restore_target(

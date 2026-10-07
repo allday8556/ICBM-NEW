@@ -66,7 +66,6 @@ from app.capabilities.live_safety.model import (
     RECONCILE_PATH_NOT_ADOPTED,
     REPLAY_APPLIED_REUSE_NOT_ADOPTED,
     REPLAY_KEY_UNDETERMINABLE,
-    REPLAY_UNRESOLVED,
     RESIDUAL_RISK_UNACCEPTED,
     RESTORE_PROOF_ABSENT,
     RETENTION_UNPROVEN,
@@ -99,8 +98,6 @@ from app.stages.register.store import IntentRecord, RegistrationRecord, ScopeRec
 REPLAY_DUPLICATE_IN_UNIT = "LIVE_ASSET_REPLAY_DUPLICATE_IN_UNIT_REUSE_NOT_ADOPTED"
 # The upload's provenance is not the unit its grant names (profile, artifact, revision, candidate).
 PROVENANCE_NOT_GRANTED = "LIVE_ASSET_PROVENANCE_NOT_GRANTED"
-# Another selected artifact of the grant is STARTED or UPLOAD_UNKNOWN: the stage is held (G3-26).
-REPLAY_UNRESOLVED_IN_UNIT = "LIVE_ASSET_REPLAY_UNRESOLVED_IN_UNIT"
 
 
 class Verdict(StrEnum):
@@ -526,9 +523,6 @@ class SafetyStack:
                 )
         if owner_unreadable:
             layers.append(_layer(Layer.ATTEMPT_OWNER, False, ATTEMPT_OWNER_UNREADABLE))
-        if any(a.reason_code == REPLAY_UNRESOLVED for a in artifacts):
-            # G3-26: one unresolved selected artifact holds the whole stage.
-            layers.append(_layer(Layer.REPLAY_FENCE, False, REPLAY_UNRESOLVED_IN_UNIT))
         if not any(a.uploadable for a in artifacts):
             reason = artifacts[0].reason_code if artifacts else GRANT_MISSING
             layers.append(_layer(Layer.REPLAY_FENCE, False, reason or GRANT_MISSING))
@@ -578,15 +572,11 @@ class SafetyStack:
         if fence:
             try:
                 blocked = _fence(unit, target.key)
-                unresolved = _unresolved_elsewhere(unit, target.key, grant)
             except SQLAlchemyError:
                 layers.append(_layer(Layer.ATTEMPT_OWNER, False, ATTEMPT_OWNER_UNREADABLE))
             else:
                 layers.append(_layer(Layer.ATTEMPT_OWNER, True, None))
                 layers.append(_layer(Layer.REPLAY_FENCE, blocked is None, blocked or ""))
-                # G3-26: a STARTED or UPLOAD_UNKNOWN of **any** selected artifact holds the whole
-                # stage. An APPLIED_PROVEN stays artifact-local (cross-audit 7 item 1).
-                layers.append(_layer(Layer.REPLAY_FENCE, not unresolved, REPLAY_UNRESOLVED_IN_UNIT))
         candidate = target.candidate
         layers.append(
             _layer(
@@ -732,19 +722,6 @@ def _fence(unit: LiveUnit, key: ReplayKey) -> str | None:
     return unit.fence(key)
 
 
-def _unresolved_elsewhere(unit: LiveUnit, key: ReplayKey, grant: GrantRecord | None) -> bool:
-    """Whether any **other** selected artifact of the grant has a STARTED or UPLOAD_UNKNOWN attempt
-    under the same account and wire endpoint: the whole-set read G3-26 requires before a start."""
-    if grant is None:
-        return False
-    for artifact in grant.artifacts:
-        if artifact.sha256 == key.content_sha256:
-            continue
-        if _fence(unit, replace(key, content_sha256=artifact.sha256)) == REPLAY_UNRESOLVED:
-            return True
-    return False
-
-
 def _create_digest(intent: IntentRecord, attempt_no: int, scope: ScopeRecord) -> str:
     """The CREATE restore target (§7): the Snapshot, the Intent with its state and idempotency
     key, the attempt it would open, and ADR-0014 §26's execution-scope brake with its state and
@@ -774,23 +751,21 @@ def _create_digest(intent: IntentRecord, attempt_no: int, scope: ScopeRecord) ->
 
 
 def _asset_digest(unit: LiveUnit, target: "AssetTarget", grant: GrantRecord | None) -> str:
-    """The ASSET restore target (§7): the preparation revision, candidate, artifact set and
-    profile, and **for every selected artifact** its replay key with the durable attempt history
-    of its whole replay-conflict scope — whatever grant, candidate or profile each attempt was
-    started under. A readable owner with no attempt records an explicit empty history; an
-    unreadable owner raises, and no target exists at all."""
+    """The ASSET restore target (§7): the immutable input boundary of one upload batch.
+
+    Attempt rows are deliberately not part of this digest. The drill proves the pre-run backup,
+    schema, selected bytes and replay scopes once; appending a terminal result for one image must
+    not invalidate that proof before the next independent image is attempted. Replay safety is
+    still enforced from the durable attempt owner for each exact key at admission time.
+    """
     artifacts = () if grant is None else grant.artifacts
     endpoint = target.key.endpoint
     scopes: dict[str, Any] = {}
     for artifact in artifacts or (target.artifact,):
         key = replace(target.key, content_sha256=artifact.sha256)
-        scopes[key.digest] = {
-            "content_sha256": key.content_sha256,
-            "attempts": [
-                [a.attempt_id, a.attempt_no, a.state.value, a.finished_at]
-                for a in unit.attempts(key.digest)
-            ],
-        }
+        # Force a read of the durable owner. An unreadable owner still means no restore target.
+        unit.attempts(key.digest)
+        scopes[key.digest] = {"content_sha256": key.content_sha256}
     return _digest(
         {
             "preparation_revision_id": target.candidate.preparation_revision_id,

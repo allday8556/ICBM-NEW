@@ -82,6 +82,10 @@ SAFE_FIELDS: frozenset[str] = frozenset(
         "predicate_revision",
         "provider_code",
         "provider_trace_id",
+        # A provider rejection's narrow, length-bounded diagnostic leaves only the documented
+        # message and invalid-input field summaries; never the response body or submitted value.
+        "provider_message",
+        "provider_invalid_input",
         "failure_layer",
         "classification_basis",
         "transmission_phase",

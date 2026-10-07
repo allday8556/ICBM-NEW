@@ -88,9 +88,18 @@ def payload(**overrides: Any) -> dict[str, Any]:
             "fields": {
                 "material": {"value": "면 100%", "provenance": "SOURCE_FACT"},
                 "manufacturer": {"detail_page_reference": True, "provenance": "SOURCE_FACT"},
+                "customerServicePhoneNumber": {
+                    "value": "02-000-0000",
+                    "provenance": "OPERATOR_CONFIRMED",
+                },
             },
         },
-        "policy": {"policy_revision": "policy-1", "templates": {}},
+        # The account's operator-confirmed A/S phone (CREATE afterServiceInfo, wire v8).
+        "policy": {
+            "policy_revision": "policy-1",
+            "templates": {},
+            "after_service_telephone": "02-000-0000",
+        },
         "detail": {"composition_revision": "detail-1", "sections": ["BODY"], "body": "본문"},
         "items": [_item(KEY_A, 19900)],
     }
@@ -140,7 +149,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v7"
+    assert projected.encoding_version == "smartstore-register-wire/v9"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -162,14 +171,26 @@ def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None
             # Required on registration (packet 5862400626); the value is the operator-reviewed
             # category id the Snapshot froze, emitted verbatim.
             "leafCategoryId": "cat-1",
-            "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
+            "detailAttribute": {
+                "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE},
+                "afterServiceInfo": {
+                    "afterServiceTelephoneNumber": "02-000-0000",
+                    "afterServiceGuideContent": "상품 문의 및 A/S는 고객센터로 연락해 주세요.",
+                },
+                "originAreaInfo": {"originAreaCode": "03"},
+                "minorPurchasable": True,
+                "customsTaxType": "NOT_APPLICABLE",
+            },
         },
     }
     assert projected.image_references == (REF_MAIN, REF_DETAIL)
     # The reviewed notice the Snapshot owns is kept as evidence. Its type has no captured child
     # in the pinned table, so nothing of it is placed on the wire.
     assert projected.notice_type == "Wear2023"
-    assert projected.notice_fields == {"material": "면 100%"}
+    assert projected.notice_fields == {
+        "customerServicePhoneNumber": "02-000-0000",
+        "material": "면 100%",
+    }
     assert not projected.sendable
     assert projected.gaps == (product.GAP_NOTICE_TYPE_CHILD,)
 
@@ -223,6 +244,26 @@ def test_the_channel_members_carry_the_owned_values_only() -> None:
     assert options.sendable is False
 
 
+def test_the_customs_tax_type_is_required_and_fixed_to_the_canary_terms() -> None:
+    projected = product.project(payload())
+    detail = projected.document.mapping()["originProduct"]["detailAttribute"]
+    assert detail["customsTaxType"] == "NOT_APPLICABLE"
+    assert product.REGISTRATION_CUSTOMS_TAX_TYPE == "NOT_APPLICABLE"
+
+    for other in (None, "INCLUDED", "EXCLUDED", ""):
+        body = projected.document.mapping()
+        body["originProduct"]["detailAttribute"]["customsTaxType"] = other
+        with pytest.raises(product.WireContractError) as refused:
+            product.create_document(IDENTITY, body)
+        assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID", other
+
+    body = projected.document.mapping()
+    del body["originProduct"]["detailAttribute"]["customsTaxType"]
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == "WIRE_DOCUMENT_FIELD_MISSING"
+
+
 def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> None:
     projected = product.project(payload()).document
     text = projected.canonical_json
@@ -231,10 +272,9 @@ def test_the_projection_never_emits_a_value_the_evidence_does_not_carry() -> Non
         "windowChannelProduct",
         # The reviewed type of this Snapshot has no captured child: no notice at all.
         "productInfoProvidedNotice",
-        # Unowned optional structures are omitted rather than defaulted (delivery, A/S, origin).
+        # An account delivery policy remains optional; the provider-required A/S and origin
+        # attributes are now owned by the frozen first-vertical projection.
         "deliveryInfo",
-        "afterServiceInfo",
-        "originAreaInfo",
         # Unowned optional channel members.
         "channelProductName",
         "bbsSeq",
@@ -247,6 +287,7 @@ def test_operator_confirmed_delivery_policy_is_projected_exactly() -> None:
     delivery = {
         "delivery_type": "DELIVERY",
         "delivery_attribute_type": "NORMAL",
+        "delivery_company": "CJGLS",
         "delivery_fee_type": "PAID",
         "base_fee_krw": 3000,
         "delivery_fee_pay_type": "PREPAID",
@@ -266,6 +307,7 @@ def test_operator_confirmed_delivery_policy_is_projected_exactly() -> None:
     assert projected.document.mapping()["originProduct"]["deliveryInfo"] == {
         "deliveryType": "DELIVERY",
         "deliveryAttributeType": "NORMAL",
+        "deliveryCompany": "CJGLS",
         "deliveryFee": {
             "deliveryFeeType": "PAID",
             "baseFee": 3000,
@@ -296,6 +338,7 @@ def test_delivery_policy_outside_the_adopted_shape_is_refused(field: str, value:
     delivery = {
         "delivery_type": "DELIVERY",
         "delivery_attribute_type": "NORMAL",
+        "delivery_company": "CJGLS",
         "delivery_fee_type": "PAID",
         "base_fee_krw": 3000,
         "delivery_fee_pay_type": "PREPAID",
@@ -1091,3 +1134,19 @@ def test_a_detail_body_image_is_never_sent_as_a_gallery_image() -> None:
     with pytest.raises(product.WireContractError) as refused:
         product.project(payload(items=[item]))
     assert refused.value.code == "WIRE_DETAIL_IMAGE_NOT_PLACEABLE"
+
+
+def test_the_after_service_phone_is_the_accounts_and_never_guessed() -> None:
+    # The account's operator-confirmed A/S phone, frozen with the policy, is what is sent.
+    projected = product.project(payload())
+    after_service = projected.document.mapping()["originProduct"]["detailAttribute"][
+        "afterServiceInfo"
+    ]
+    assert after_service["afterServiceTelephoneNumber"] == "02-000-0000"
+    # Without it, and without one in the notice, the projection is refused — never guessed.
+    bare = payload(policy={"policy_revision": "policy-1", "templates": {}})
+    bare["notice"]["fields"].pop("customerServicePhoneNumber", None)
+    bare["notice"]["fields"].pop("afterServiceDirector", None)
+    with pytest.raises(product.WireContractError) as refused:
+        product.project(bare)
+    assert refused.value.code == "WIRE_AFTER_SERVICE_PHONE_MISSING"

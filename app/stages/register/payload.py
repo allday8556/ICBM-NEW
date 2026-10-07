@@ -144,6 +144,7 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         else {
             "delivery_type": delivery.delivery_type,
             "delivery_attribute_type": delivery.delivery_attribute_type,
+            "delivery_company": delivery.delivery_company,
             "delivery_fee_type": delivery.delivery_fee_type,
             "base_fee_krw": delivery.base_fee_krw,
             "delivery_fee_pay_type": delivery.delivery_fee_pay_type,
@@ -179,6 +180,12 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
             "policy_revision": target.policy_revision,
             "templates": business["templates"],
             "delivery_policy": business["delivery_policy"],
+            # Named only when the policy holds one, so an earlier payload shape is unchanged.
+            **(
+                {}
+                if target.after_service_telephone is None
+                else {"after_service_telephone": target.after_service_telephone}
+            ),
         },
         "detail": business["detail"],
         "items": payload_items,

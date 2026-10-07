@@ -332,6 +332,8 @@ class SmartStoreCallError(AppError):
         outcome: RemoteOutcome,
         *,
         http_status: int | None = None,
+        provider_message: str | None = None,
+        provider_invalid_input: str | None = None,
     ) -> None:
         super().__init__(
             classification.code,
@@ -344,6 +346,8 @@ class SmartStoreCallError(AppError):
                 "remote_outcome": outcome.value,
                 "http_status": http_status,
                 "provider_code": classification.provider_code,
+                "provider_message": provider_message,
+                "provider_invalid_input": provider_invalid_input,
             },
         )
         self.error_class = classification.error_class
@@ -352,6 +356,8 @@ class SmartStoreCallError(AppError):
         self.phase = phase
         self.remote_outcome = outcome
         self.http_status = http_status
+        self.provider_message = provider_message
+        self.provider_invalid_input = provider_invalid_input
 
 
 class _Preflight(Exception):
@@ -572,6 +578,39 @@ def _marker(value: object) -> str | None:
     return value if isinstance(value, str) and _PROVIDER_MARKER.fullmatch(value) else None
 
 
+def _diagnostic_text(value: object, *, forbidden: tuple[str, ...] = ()) -> str | None:
+    """Retain one provider diagnostic, never the body or an echoed submitted value."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    lowered = text.lower()
+    secret_markers = ("bearer ", "access_token", "client_secret")
+    if (
+        not text
+        or any(marker in lowered for marker in secret_markers)
+        or any(secret and secret in text for secret in forbidden)
+    ):
+        return None
+    return text[:200]
+
+
+def _invalid_input(fields: Mapping[str, object], *, forbidden: tuple[str, ...] = ()) -> str | None:
+    values = fields.get("invalidInputs")
+    if not isinstance(values, list):
+        return None
+    summaries: list[str] = []
+    for value in values[:3]:
+        if not isinstance(value, dict):
+            continue
+        name = _marker(value.get("name"))
+        kind = _marker(value.get("type"))
+        message = _diagnostic_text(value.get("message"), forbidden=forbidden)
+        parts = [part for part in (name, kind, message) if part]
+        if parts:
+            summaries.append(": ".join(parts))
+    return _diagnostic_text("; ".join(summaries), forbidden=forbidden)
+
+
 _Result = (
     TokenGrant
     | SellerAccount
@@ -762,12 +801,30 @@ class SmartStoreEndpointCaller:
                 if contract.success_predicate(status, body):
                     result = _result(contract, request, body, status)
                 else:
+                    forbidden = (
+                        (request.access_token,)
+                        if isinstance(request, ProductCreateRequest)
+                        and contract.endpoint_id is _PRODUCT_CREATE
+                        else ()
+                    )
+                    provider_message = (
+                        _diagnostic_text(fields.get("message"), forbidden=forbidden)
+                        if contract.endpoint_id is _PRODUCT_CREATE
+                        else None
+                    )
+                    provider_invalid_input = (
+                        _invalid_input(fields, forbidden=forbidden)
+                        if contract.endpoint_id is _PRODUCT_CREATE
+                        else None
+                    )
                     error = SmartStoreCallError(
                         endpoint,
                         classify.response(status, _marker(fields.get("code"))),
                         Phase.RESPONSE_RECEIVED,
                         remote_outcome(Phase.RESPONSE_RECEIVED),
                         http_status=status,
+                        provider_message=provider_message,
+                        provider_invalid_input=provider_invalid_input,
                     )
         credential_generation, session_generation = _generations(request)
         logger.info(
@@ -789,6 +846,8 @@ class SmartStoreEndpointCaller:
                 result_class="SUCCEEDED" if error is None else error.code,
                 http_status=status,
                 provider_trace_id=trace_id,
+                provider_message=error.provider_message if error else None,
+                provider_invalid_input=error.provider_invalid_input if error else None,
                 error_class=error.error_class if error else None,
                 provider_code=error.classification.provider_code if error else None,
                 failure_layer=error.classification.layer if error else None,

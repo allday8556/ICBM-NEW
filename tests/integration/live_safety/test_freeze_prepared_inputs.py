@@ -7,14 +7,14 @@ final preflight needs two inputs the application already owns:
 - when the target policy requires duplicate proof, the admissible evidence of the
   provider-neutral duplicate-evidence owner seam — the same evidence the ASSET stage and the first
   CREATE copy consume (D4);
-- when the policy needs provider asset identities, the provider assets the durable ASSET
-  upload-attempt owner holds as ``APPLIED_PROVEN`` for exactly this preparation revision and this
-  candidate fingerprint.
+- when the policy needs provider asset identities, sanitizer-safe provider references already
+  ``APPLIED_PROVEN`` for the same account, endpoint, exact bytes and asset profile, rebound to the
+  current selected artifact and candidate without another upload.
 
 The ASSET stage runs for real here — grant, permitted stack, a scripted sender that applies — so
 the freeze consumes what that stage produced, and ASSET and CREATE bind one candidate. Missing
-evidence, missing assets and a preparation revised after the upload each refuse, freeze nothing
-and open no Intent. Nothing reaches a provider.
+evidence and missing exact-byte assets refuse, freeze nothing and open no Intent. Nothing reaches
+a provider.
 """
 
 from datetime import timedelta
@@ -228,7 +228,7 @@ def test_a_freeze_without_admissible_duplicate_evidence_freezes_nothing(
     assert count(container.config, "registration_snapshots") == 0
 
 
-def test_assets_prepared_for_an_earlier_revision_never_freeze_a_later_one(
+def test_exact_uploaded_bytes_are_reused_for_a_later_revision_without_reupload(
     api: TestClient,  # noqa: F811
     container: Container,  # noqa: F811
     config: AppConfig,
@@ -245,20 +245,24 @@ def test_assets_prepared_for_an_earlier_revision_never_freeze_a_later_one(
             authored_by=OPERATOR,
             correlation_id=CID,
         )
-    # The applied uploads belong to the earlier revision: none is taken for this one.
+    # The applied uploads belong to the same account, endpoint, bytes and profile. They are rebound
+    # to the current candidate without another provider request.
     revised = container.registrations.preparation(preparation_id)
     assert revised is not None
     stage = container.registration_preparations.stage_candidate(preparation_id)
-    assert (
-        container.registration_preparations._prepared_assets.prepared_assets(
-            marketplace_key=revised.marketplace_key,
-            marketplace_account_id=revised.marketplace_account_id,
-            preparation_revision_id=revised.current.preparation_revision_id,
-            candidate_fingerprint=stage.candidate_fingerprint,
-        )
-        == ()
+    prepared = container.registration_preparations._prepared_assets.prepared_assets(
+        marketplace_key=revised.marketplace_key,
+        marketplace_account_id=revised.marketplace_account_id,
+        preparation_revision_id=revised.current.preparation_revision_id,
+        candidate_fingerprint=stage.candidate_fingerprint,
+        selected_artifacts=tuple(
+            image.key for item in stage.resolved.items for image in item.images
+        ),
+        asset_profile=stage.resolved.target.asset_policy.profile,
+    )
+    assert prepared and all(
+        asset.candidate_fingerprint == stage.candidate_fingerprint for asset in prepared
     )
     response = _freeze(api, preparation_id)
-    assert response.status_code == 422
-    assert "REGISTER_PREFLIGHT_NOT_READY" in response.text
-    assert count(container.config, "registration_snapshots") == 0
+    assert response.status_code == 200, response.text
+    assert count(container.config, "registration_snapshots") == 1

@@ -79,7 +79,16 @@ ORIGIN: dict[str, Any] = {
     # The registration seed (architect resolution 5915900049 D2.2).
     "stockQuantity": 1,
     "leafCategoryId": "cat-1",
-    "detailAttribute": {"sellerCodeInfo": {"sellerManagementCode": SELLER_CODE}},
+    "detailAttribute": {
+        "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE},
+        "afterServiceInfo": {
+            "afterServiceTelephoneNumber": "02-000-0000",
+            "afterServiceGuideContent": "상품 문의 및 A/S는 고객센터로 연락해 주세요.",
+        },
+        "originAreaInfo": {"originAreaCode": "03"},
+        "minorPurchasable": True,
+        "customsTaxType": "NOT_APPLICABLE",
+    },
 }
 # The channel members ICBM owns (architect resolution 5915900049 D1, D2.1).
 CHANNEL: dict[str, Any] = {
@@ -94,6 +103,11 @@ FROZEN = product.create_document(IDENTITY, DOCUMENT)
 
 def _origin(**changes: Any) -> dict[str, Any]:
     """One request body with the named origin-product fields replaced or removed."""
+    if isinstance(changes.get("detailAttribute"), dict):
+        changes["detailAttribute"] = {
+            **deepcopy(ORIGIN["detailAttribute"]),
+            **changes["detailAttribute"],
+        }
     origin = {**deepcopy(ORIGIN), **changes}
     return {
         "originProduct": {key: value for key, value in origin.items() if value is not None},
@@ -694,6 +708,33 @@ def test_every_response_after_handoff_is_unknown_never_proven_not_applied(status
     assert handoff.marketplace_product_id is None
     assert handoff.response_status == status
     assert handoff.details["transmission_phase"] == "RESPONSE_RECEIVED"
+
+
+def test_create_failure_keeps_only_bounded_provider_diagnostics() -> None:
+    body = {
+        "code": "BAD_REQUEST",
+        "message": "배송 택배사 코드는 필수입니다.",
+        "invalidInputs": [
+            {
+                "name": "originProduct.deliveryInfo.deliveryCompany",
+                "type": "NotBlank",
+                "message": "must not be blank",
+                "rejectedValue": "never retained",
+            }
+        ],
+    }
+    handoff = _send(Provider(httpx.Response(400, json=body)))
+    assert handoff.details["provider_message"] == "배송 택배사 코드는 필수입니다."
+    assert handoff.details["provider_invalid_input"] == (
+        "originProduct.deliveryInfo.deliveryCompany: NotBlank: must not be blank"
+    )
+    assert "never retained" not in str(handoff.details)
+
+
+def test_create_failure_drops_a_provider_message_that_echoes_the_bearer() -> None:
+    handoff = _send(Provider(httpx.Response(400, json={"code": "BAD_REQUEST", "message": BEARER})))
+    assert handoff.details["provider_message"] is None
+    assert BEARER not in str(handoff.details)
 
 
 @pytest.mark.parametrize("status", [301, 302, 307, 308])
