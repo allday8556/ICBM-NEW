@@ -188,17 +188,19 @@ function editor(view, onSaved) {
     ...on,
     name: 'exchange_delivery_fee_krw',
   });
-  const shippingAddress = field('출고지 주소록 번호', delivery ? String(delivery.shipping_address_id) : '', {
+  const shippingAddress = field('출고지', delivery ? String(delivery.shipping_address_id) : '', {
     ...on,
     name: 'shipping_address_id',
   });
-  const returnAddress = field('반품·교환지 주소록 번호', delivery ? String(delivery.return_address_id) : '', {
+  const returnAddress = field('반품·교환지', delivery ? String(delivery.return_address_id) : '', {
     ...on,
     name: 'return_address_id',
   });
-  // 네이버 주소록 불러오기: the connected account's address book becomes the choices of the two
-  // number fields. A field already holding a number keeps it; an empty one takes the first entry
-  // of its type. The server still validates whatever is saved.
+  // 네이버 주소록: the connected account's address book turns the two number fields into
+  // dropdowns of named entries. It loads by itself when the editor opens and again on the button;
+  // without a CONNECT session the number fields stay as they are. A field holding a number keeps
+  // it (shown even when the book no longer lists it); an empty one takes the first entry of its
+  // type. The server still validates whatever is saved.
   const addressList = h('div', { class: 'mini', 'data-address-books': 'NOT_LOADED' });
   const loadAddresses = h(
     'button',
@@ -206,47 +208,66 @@ function editor(view, onSaved) {
     '네이버 주소록 불러오기',
   );
   loadAddresses.disabled = !editable;
-  loadAddresses.addEventListener('click', async () => {
+  const label = (book) =>
+    `${book.name || '(이름 없음)'} · ${ADDRESS_TYPE_LABEL[book.address_type] ?? book.address_type} · ${book.address_book_no}`;
+  const applyAddressBooks = (books) => {
+    addressList.setAttribute('data-address-books', String(books.length));
+    if (!books.length) {
+      // Nothing to choose from: the number fields stay for manual entry.
+      addressList.textContent = '네이버 주소록에 등록된 주소가 없습니다.';
+      return;
+    }
+    for (const [input, type] of [
+      [shippingAddress.input, 'RELEASE'],
+      [returnAddress.input, 'REFUND_OR_EXCHANGE'],
+    ]) {
+      const name = input.getAttribute('data-policy-field');
+      // A second load replaces the earlier dropdown instead of stacking another one.
+      input.parentElement?.querySelector(`select[data-address-select='${name}']`)?.remove();
+      if (!input.value.trim()) {
+        const first = books.find((book) => book.address_type === type);
+        if (first) input.value = String(first.address_book_no);
+      }
+      // Entries of the field's own type first, then the rest, each group in the book's order.
+      const ordered = [
+        ...books.filter((book) => book.address_type === type),
+        ...books.filter((book) => book.address_type !== type),
+      ];
+      const current = input.value.trim();
+      const options = ordered.map((book) => h('option', { value: String(book.address_book_no) }, label(book)));
+      if (current && !ordered.some((book) => String(book.address_book_no) === current)) {
+        options.unshift(h('option', { value: current }, `${current} · 주소록에 없는 번호`));
+      }
+      if (!current) options.unshift(h('option', { value: '' }, '주소를 고르세요'));
+      const select = h('select', { 'data-address-select': name }, options);
+      select.value = current;
+      select.disabled = !editable;
+      select.addEventListener('change', () => {
+        input.value = select.value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      input.hidden = true;
+      input.after(select);
+    }
+    addressList.textContent = `네이버 주소록 ${books.length}개를 불러왔습니다.`;
+  };
+  const fetchAddressBooks = async ({ quiet }) => {
     loadAddresses.disabled = true;
     try {
       const found = await getJson(ADDRESS_BOOKS);
-      const books = found.address_books ?? [];
-      const label = (book) =>
-        `${book.address_book_no} · ${book.name || '(이름 없음)'} · ${ADDRESS_TYPE_LABEL[book.address_type] ?? book.address_type}`;
-      for (const [input, type] of [
-        [shippingAddress.input, 'RELEASE'],
-        [returnAddress.input, 'REFUND_OR_EXCHANGE'],
-      ]) {
-        // A second load replaces the earlier choices instead of stacking another list.
-        const previous = input.getAttribute('list');
-        if (previous) document.getElementById(previous)?.remove();
-        sequence += 1;
-        const listId = `target-policy-${sequence}`;
-        input.setAttribute('list', listId);
-        input.after(
-          h(
-            'datalist',
-            { id: listId },
-            books.map((book) => h('option', { value: String(book.address_book_no) }, label(book))),
-          ),
-        );
-        if (!input.value.trim()) {
-          const first = books.find((book) => book.address_type === type);
-          if (first) input.value = String(first.address_book_no);
-        }
-      }
-      addressList.setAttribute('data-address-books', String(books.length));
-      addressList.replaceChildren(
-        ...(books.length
-          ? books.map((book) => h('div', { 'data-address-book': String(book.address_book_no) }, label(book)))
-          : [h('div', {}, '네이버 주소록에 등록된 주소가 없습니다.')]),
-      );
+      applyAddressBooks(found.address_books ?? []);
     } catch (error) {
-      toast(`주소록을 불러오지 못했습니다: ${errorText(error)}`);
+      if (quiet) {
+        addressList.textContent = '스마트스토어 연결 후 주소록을 불러올 수 있습니다 (API 관리 › 계정 확인).';
+      } else {
+        toast(`주소록을 불러오지 못했습니다: ${errorText(error)}`);
+      }
     } finally {
       loadAddresses.disabled = !editable;
     }
-  });
+  };
+  loadAddresses.addEventListener('click', () => fetchAddressBooks({ quiet: false }));
+  if (editable) fetchAddressBooks({ quiet: true });
   sequence += 1;
   const templatesId = `target-policy-${sequence}`;
   const templates = h('textarea', { id: templatesId, rows: '3', spellcheck: 'false', 'data-policy-field': 'templates' });
