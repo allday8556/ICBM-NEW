@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Sequence
@@ -24,6 +25,7 @@ from app.interface.api.routes import (
     collect_extension,
     connect,
     diagnostics,
+    operate,
     product_images,
     products,
     register,
@@ -139,11 +141,14 @@ def create_app(
             # Gate 2 (ADR-0016 §4): every review producer's startup full reconciliation, before
             # the application serves, then its bounded periodic pass.
             await services.review_reconciler.start()
+            # M6-A (ADR-0023 §3): the periodic read-only listing-state sync.
+            services.listing_sync_scheduler.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})
         try:
             yield
         finally:
+            await asyncio.to_thread(services.listing_sync_scheduler.stop)
             await services.review_reconciler.stop()
             await services.worker.stop()
             services.db.dispose()
@@ -165,6 +170,7 @@ def create_app(
     app.include_router(system.router)
     app.include_router(diagnostics.router)
     app.include_router(screens.router)
+    app.include_router(operate.router)
     app.include_router(connect.router)
     app.include_router(collect.router)
     app.include_router(collect_extension.router)

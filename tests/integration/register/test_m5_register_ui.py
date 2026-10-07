@@ -475,3 +475,21 @@ def test_the_unit_workspace_edits_images_through_the_image_owner(
     after = container.images.current_selection(item.item_id)
     assert after is not None and after.revision_no == before.revision_no + 1
     assert after.outputs == ()
+
+
+def test_the_listing_state_panel_reads_the_server_and_syncs_on_request(
+    browser: Browser,
+    client: TestClient,
+    container: Container,
+) -> None:
+    # M6-A (ADR-0023 §3, §8): the panel shows the server's listing-state overview, and its one
+    # action runs the read-only pass. With no CONNECT session the pass reads nothing and says so.
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        panel = page.locator("[data-role='listing-sync']")
+        panel.locator("[data-listing-sync='READY']").wait_for(timeout=15_000)
+        assert panel.locator("[data-sync-outcome='NONE']").count() == 1
+        assert writes == []
+        panel.locator("button[data-action='sync-listings']").click()
+        panel.locator("[data-sync-outcome='SESSION_UNAVAILABLE']").wait_for(timeout=15_000)
+        assert writes == [("POST", "/api/v1/operate/listings/sync")]

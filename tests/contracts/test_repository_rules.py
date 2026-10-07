@@ -1752,8 +1752,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     container = _read(REPO_ROOT / "app" / "container.py")
     assert "committed_bearer = smartstore.committed_bearer" in container
     # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
-    # (ADR-0018 §3.5), and the notice-schema capture (notice coverage S0): seven seams, one source.
-    assert container.count("bearer=committed_bearer") == 7
+    # (ADR-0018 §3.5), the notice-schema capture (notice coverage S0) and the M6-A listing-state
+    # sync's read-back (ADR-0023 §3): eight seams, one source.
+    assert container.count("bearer=committed_bearer") == 8
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
@@ -3706,6 +3707,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "marketplace_category_catalog_entries",
         "registration_bulk_runs",
         "registration_bulk_items",
+        # M6-A (ADR-0023 §3): the listing-state sync runs and their append-only observations.
+        "operate_listing_sync_runs",
+        "operate_listing_observations",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

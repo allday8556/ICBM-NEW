@@ -104,6 +104,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "smartstore_a0_max_age_days": ("ICBM_SMARTSTORE_A0_MAX_AGE_DAYS", int),
     "smartstore_renewal_margin_s": ("ICBM_SMARTSTORE_RENEWAL_MARGIN_S", int),
     "review_reconcile_interval_s": ("ICBM_REVIEW_RECONCILE_INTERVAL_S", float),
+    "operate_listing_sync_interval_s": ("ICBM_OPERATE_LISTING_SYNC_INTERVAL_S", float),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
 }
 
@@ -141,6 +142,8 @@ class AppConfig:
     # while the process runs, and how old its last complete pass may be before its coverage stops
     # being current. The bound is always longer than the interval and never unbounded.
     review_reconcile_interval_s: float = 300.0
+    # M6-A (ADR-0023 §3): the listing-state sync cadence; 0 disables the periodic pass.
+    operate_listing_sync_interval_s: float = 1800.0
     review_coverage_max_age_s: float = 900.0
 
     def __post_init__(self) -> None:

@@ -46,7 +46,13 @@ CODE_ROOTS = ("app", "integrations", "automation")
 # compare and guard evidence. They never write them; `test_the_evidence_readers_only_read` in
 # tests/contracts/test_repository_rules.py proves it.
 EVIDENCE_READERS = frozenset(
-    {"app/capabilities/live_safety/drill.py", "app/capabilities/live_safety/retention.py"}
+    {
+        "app/capabilities/live_safety/drill.py",
+        "app/capabilities/live_safety/retention.py",
+        # M6-A: a listing observation names its registration by foreign key only; every
+        # registration write still goes through the registration store.
+        "app/stages/operate/listing_models.py",
+    }
 )
 
 
@@ -224,7 +230,9 @@ COMMON_OPTION_FACT_MAPPING = "0043_common_option_fact_mapping"
 ATOMIC_SKUS = "0044_source_proven_atomic_skus"
 ATOMIC_SKU_ITEMS = "0045_atomic_sku_product_items"
 SEQUENTIAL_BULK = "0046_sequential_bulk_registration"
-SCHEMA_HEAD = SEQUENTIAL_BULK
+# M6-A (ADR-0023 §3): the listing-state sync runs and observations, after M5's acceptance.
+M6_LISTING_SYNC = "0047_m6_listing_sync"
+SCHEMA_HEAD = M6_LISTING_SYNC
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -252,6 +260,7 @@ AFTER_M5 = (
     ATOMIC_SKUS,
     ATOMIC_SKU_ITEMS,
     SEQUENTIAL_BULK,
+    M6_LISTING_SYNC,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

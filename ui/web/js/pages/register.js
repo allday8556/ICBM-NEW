@@ -21,6 +21,7 @@ import { reviewItemsBlock } from '../components/review-items.js';
 import { KIND_LABEL } from '../components/review-counts.js';
 import { READ_STATE_TONE } from '../components/registration-status.js';
 import { itemImagesEditor } from '../components/item-images.js';
+import { listingSyncPanel } from '../components/listing-sync.js';
 
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
@@ -1305,6 +1306,7 @@ export default {
       return fragment(
         head,
         statusPanel,
+        listingSyncPanel(),
         canaryPanel(canary),
         livePanel(live),
         emptyState({
@@ -1343,6 +1345,7 @@ export default {
       readinessBlock,
       fixesPanel(fixes, ctx),
       statusPanel,
+      listingSyncPanel(),
       canaryPanel(canary),
       livePanel(live),
       ...reviews,
