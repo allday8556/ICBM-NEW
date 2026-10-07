@@ -6,7 +6,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (M6-C, read-only) | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` + `RUNTIME_EVIDENCE` | `PARTIAL` | `ADOPTED` (M6-C, read-only) | `PARTIAL` (change listing: empty windows and `429`, 2026-10-08) |
 | Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |

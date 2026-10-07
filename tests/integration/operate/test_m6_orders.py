@@ -144,6 +144,7 @@ def _service(
         retention_days=retention_days,
         order_read_attested=lambda: attested,
         marketplace_key=MARKET,
+        pause_s=0.0,
     )
 
 
@@ -475,6 +476,7 @@ def test_the_orders_screen_counts_only_once_an_order_read_succeeded(
         pages=[ChangePage((_change(container),))], facts={"po-1": _facts()}
     )
     container.order_sync._marketplace_key = MARKET
+    container.order_sync._pause_s = 0.0
     # No attestation is recorded in this container: nothing is read, still no count.
     run = container.order_sync.sync(trigger=OPERATOR, correlation_id=CID)
     assert run.outcome == "NOT_ATTESTED"
@@ -618,3 +620,30 @@ def test_retention_runs_even_when_the_ingest_is_disabled(
         assert runs is not None and runs.trigger == OPERATOR
     finally:
         scheduler.stop()
+
+
+def test_provider_calls_of_a_pass_are_paced(container: Container, registration: str) -> None:
+    """Runtime evidence 2026-10-08: unpaced calls met 429 every few calls, so each provider
+    call of a pass waits out the pause after the previous one."""
+    waits: list[float] = []
+    source = FakeSource()
+    service = OrderSyncService(
+        db=container.db,
+        clock=container.clock,
+        registrations=container.registrations,
+        source_identity=lambda item_id: None,
+        source=source,
+        cipher=ShippingCipher(container.secrets),
+        audit=container.audit,
+        interval_s=600,
+        initial_lookback_s=3 * 86400,
+        retention_days=90,
+        order_read_attested=lambda: True,
+        marketplace_key=MARKET,
+        pause_s=1.0,
+        sleep=waits.append,
+    )
+    _sync(service)
+    # Four windows: the first call is not paced, each later one is.
+    assert len(source.windows) == 4
+    assert len(waits) == 3 and all(0 < wait <= 1.0 for wait in waits)
