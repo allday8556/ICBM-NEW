@@ -233,6 +233,20 @@ export const SUBTABS = {
       ],
     },
     {
+      key: 'common-images',
+      label: '공통 이미지',
+      blocks: [
+        {
+          card: {
+            title: '공급처 공통 이미지',
+            full: true,
+            help: '공급처가 여러 상품에서 반복해 보여 준 이미지를 확인하고 차단 또는 유지로 판정합니다.',
+            items: [{ supplierCommonImages: true }],
+          },
+        },
+      ],
+    },
+    {
       key: 'ai',
       label: 'AI / Prompt',
       blocks: [

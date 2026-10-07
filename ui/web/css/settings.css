@@ -191,6 +191,154 @@
   flex: 1;
 }
 
+/* ---------- Supplier common images (A-NEXT2a) ---------- */
+.supplier-common-images {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.common-image-toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.common-image-toolbar label {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  color: var(--color-text-sub);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.common-image-toolbar input,
+.common-image-body input {
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  padding: 9px 10px;
+  color: var(--color-text-body);
+}
+
+.common-image-status,
+.common-image-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.common-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.common-image-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel-subtle);
+}
+
+.common-image-preview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 8;
+  overflow: hidden;
+  background: var(--color-control-subtle);
+  border-bottom: 1px solid var(--color-line-soft);
+}
+
+.common-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.common-image-preview-fallback {
+  color: var(--color-text-sub);
+  font-size: var(--fs-sm);
+}
+
+.common-image-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.common-image-title,
+.common-image-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.common-image-title {
+  justify-content: space-between;
+}
+
+.common-image-title b {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+}
+
+.common-image-sha {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--color-text-sub);
+  font-size: var(--fs-2xs);
+}
+
+.common-image-history {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.common-image-history b {
+  color: var(--color-text-body);
+  font-size: var(--fs-sm);
+}
+
+.common-image-actions .btn {
+  flex: 1;
+}
+
+.common-image-decision.bad {
+  border-color: var(--color-bad);
+  color: var(--color-bad);
+}
+
+.common-image-decision.good {
+  border-color: var(--color-good);
+  color: var(--color-good);
+}
+
+.common-image-empty {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1280px), (orientation: portrait) {
+  .common-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .common-image-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .common-image-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- Prompt registry (visual shell only in M0) ---------- */
 .registry-section {
   margin-top: var(--space-6);

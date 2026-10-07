@@ -22,6 +22,7 @@ import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './se
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './settings/smartstore-operator.js';
 import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
+import { supplierCommonImagesPanel } from './settings/supplier-common-images.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
@@ -213,6 +214,7 @@ function renderItem(item, state) {
   }
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
+  if (item.supplierCommonImages) return supplierCommonImagesPanel(state.params.get('supplier'));
   if (item.usersTable) return usersTable();
   if (item.registry) return registry(item.registry);
   return null;
@@ -265,6 +267,7 @@ export default {
       values: view.policy_values,
       connections: new Map(view.marketplace_connections.map((c) => [c.marketplace_key, c.connection_state])),
       capabilities: new Map(capabilities.map((c) => [c.marketplace_key, c])),
+      params: ctx.params,
     };
     const truths = new Map();
     state.truth = (key) => {

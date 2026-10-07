@@ -234,6 +234,7 @@ def test_the_contract_pins_the_required_surfaces_and_viewports() -> None:
         "soldout",
         "settings-policy",
         "settings-metadata",
+        "settings-common-images",
     }
     register = next(t for t in visual.REQUIRED_TARGETS if t.name == "register")
     for state in ("data-preflight", "data-scope-state", "data-brake-state", "data-grant-state"):

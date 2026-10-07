@@ -3,11 +3,12 @@
 Everything here is invented and provider-zero. The state is written through the application's own
 owners and routes, exactly as production does, over a dedicated root the run owns:
 
-- **수집관리**: two durably RECORDED collection runs — one whose facts are CONFIRMED, one whose
-  shipping fact is REVIEW_REQUIRED, so a COLLECT review item exists;
+- **수집관리**: three durably RECORDED collection runs — one whose facts are CONFIRMED, one whose
+  shipping fact is REVIEW_REQUIRED, so a COLLECT review item exists, and all three carrying the
+  same detail image so its supplier-owned REVIEW verdict is detected;
 - **통합DB**: their Products and Items, the first with its image selection, a QA PASS and a price;
-- **Settings**: the account's durable target policy (G1-A) and one reviewed category's metadata
-  (G1-B);
+- **Settings**: the account's durable target policy (G1-A), one reviewed category's metadata
+  (G1-B), and the supplier common-image REVIEW candidate (A-NEXT2a);
 - **등록관리**: a Draft of the first Item, priced under that policy, and its authored preparation —
   its candidate preflight reports what the durable policy still lacks, so a REGISTER review item
   exists; four more frozen units in one registration batch, one in each ADR-0014 §28.5 read state
@@ -32,6 +33,7 @@ owners and routes, exactly as production does, over a dedicated root the run own
   this acceptance only, and every read state shown is the server's own partition of them.
 """
 
+import base64
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -68,6 +70,9 @@ TAXONOMY: Final = "g3-visual-taxonomy-1"
 CATEGORY: Final = "g3-visual-category-1"
 REVIEW_REF: Final = "5843380581"
 DECLARED_SEAMS: Final = ("connect_binding", "live_grants", "registration_outcomes")
+COMMON_IMAGE_PNG: Final = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,9 @@ class Populated:
             "soldout": "#/soldout",
             "settings-policy": "#/settings?tab=smartstore&sub=policy",
             "settings-metadata": "#/settings?tab=smartstore&sub=product",
+            "settings-common-images": (
+                f"#/settings?tab=common&sub=common-images&supplier={synthetic.SUPPLIER}"
+            ),
         }
 
 
@@ -113,7 +121,14 @@ def _owners(container: Container) -> Any:
     )
 
 
-def _record(owners: Any, product: str, *, sequence: int, shipping_needs_review: bool) -> Any:
+def _record(
+    owners: Any,
+    product: str,
+    *,
+    sequence: int,
+    shipping_needs_review: bool,
+    common_sha: str | None = None,
+) -> Any:
     """Append one durably RECORDED revision through COLLECT's own stores (as the M5 helper does),
     optionally with its shipping fact REVIEW_REQUIRED."""
     found = fields(synthetic.BASE_FACTS)
@@ -157,6 +172,20 @@ def _record(owners: Any, product: str, *, sequence: int, shipping_needs_review: 
                     provenance=".m5-representative img:nth-of-type(1)",
                     status=FieldStatus.CONFIRMED,
                     sha256=stored.sha256,
+                ),
+                *(
+                    (
+                        ImageReference(
+                            role=ImageRole.DETAIL,
+                            ordinal=1,
+                            host=synthetic.IMAGE_HOST,
+                            provenance=".g3-common-image img:nth-of-type(1)",
+                            status=FieldStatus.CONFIRMED,
+                            sha256=common_sha,
+                        ),
+                    )
+                    if common_sha
+                    else ()
                 ),
             ),
         )
@@ -370,15 +399,33 @@ def populate(container: Container, api: TestClient) -> Populated:
     synthetic.authenticate(owners, uid="g3-visual-uid-1")
     _policy(api, account)
     _metadata(api)
+    common_sha = owners.source_assets.put(COMMON_IMAGE_PNG).sha256
     confirmed_run, confirmed = _record(
-        owners, "g3-visual-product-1", sequence=0, shipping_needs_review=False
+        owners,
+        "g3-visual-product-1",
+        sequence=0,
+        shipping_needs_review=False,
+        common_sha=common_sha,
     )
     materialized = container.materializer.materialize_run(confirmed_run)
     if materialized.item_id is None or materialized.product_group_id is None:
         raise RuntimeError("scenario step refused: materialize the first product")
     synthetic.select_and_pass(owners, materialized.item_id, confirmed)
-    review_run, _ = _record(owners, "g3-visual-product-2", sequence=1, shipping_needs_review=True)
+    review_run, _ = _record(
+        owners,
+        "g3-visual-product-2",
+        sequence=1,
+        shipping_needs_review=True,
+        common_sha=common_sha,
+    )
     container.materializer.materialize_run(review_run)
+    _record(
+        owners,
+        "g3-visual-product-3",
+        sequence=2,
+        shipping_needs_review=False,
+        common_sha=common_sha,
+    )
     policy = container.registration_preflight.target_policy(MARKET, account)
     if policy is None:
         raise RuntimeError("scenario step refused: the durable target policy")

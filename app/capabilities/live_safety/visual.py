@@ -109,6 +109,11 @@ REQUIRED_TARGETS: Final[tuple[Target, ...]] = (
     Target("soldout", "soldout", ('[data-role="soldout-review"] tr[data-kind][data-state]',)),
     Target("settings-policy", "settings", (".target-policy[data-account] [data-policy-state]",)),
     Target("settings-metadata", "settings", (".category-metadata [data-metadata-key]",)),
+    Target(
+        "settings-common-images",
+        "settings",
+        (".supplier-common-images[data-supplier] [data-common-image-verdict]",),
+    ),
 )
 
 # Every element carrying server-owned state: each one rendered must be visible, untruncated,
@@ -131,6 +136,7 @@ STATE_SELECTORS: Final[tuple[str, ...]] = (
     "[data-missing]",
     "[data-coverage]",
     "[data-read-state]",
+    "[data-common-image-verdict]",
     ".chip",
     ".note",
 )
