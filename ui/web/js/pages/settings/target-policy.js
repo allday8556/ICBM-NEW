@@ -217,6 +217,9 @@ function editor(view, onSaved) {
         [shippingAddress.input, 'RELEASE'],
         [returnAddress.input, 'REFUND_OR_EXCHANGE'],
       ]) {
+        // A second load replaces the earlier choices instead of stacking another list.
+        const previous = input.getAttribute('list');
+        if (previous) document.getElementById(previous)?.remove();
         sequence += 1;
         const listId = `target-policy-${sequence}`;
         input.setAttribute('list', listId);

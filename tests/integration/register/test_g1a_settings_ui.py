@@ -251,3 +251,45 @@ def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
             assert field.input_value() == "5"
     assert len(writes) == 1
     assert _counts(config) == dict.fromkeys(TABLES, 0)
+
+
+ADDRESS_BOOKS = "/api/v1/connect/marketplaces/smartstore/addressbooks"
+
+
+def test_the_naver_address_book_fills_only_empty_address_fields_as_choices(
+    browser: Browser, config: AppConfig
+) -> None:
+    # The address book is a provider read; here the page's request is answered with a fixture so
+    # no provider is reached, and the save still goes through the real server.
+    books = {
+        "address_books": [
+            {"address_book_no": 200401837, "name": "반품지", "address_type": "REFUND_OR_EXCHANGE"},
+            {"address_book_no": 200441202, "name": "출고지", "address_type": "RELEASE"},
+        ]
+    }
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            page.route(
+                f"**{ADDRESS_BOOKS}",
+                lambda route: route.fulfill(status=200, json=books),
+            )
+            editor = page.locator(_editor(account))
+            editor.locator("[data-policy-field='return_address_id']").fill("123")
+            button = editor.locator("button[data-action='load-address-books']")
+            for _ in range(2):  # a second load replaces the choices, it never stacks them
+                button.click()
+                page.wait_for_selector(f"{_editor(account)} [data-address-books='2']")
+            shipping = editor.locator("[data-policy-field='shipping_address_id']")
+            returns = editor.locator("[data-policy-field='return_address_id']")
+            # The empty field takes the first entry of its type; a typed number is kept.
+            assert shipping.input_value() == "200441202"
+            assert returns.input_value() == "123"
+            for field in (shipping, returns):
+                listed = editor.locator(f"datalist#{field.get_attribute('list')} option")
+                assert listed.count() == 2
+            assert editor.locator("datalist").count() == 2
+            assert "출고지" in editor.locator("[data-address-books]").inner_text()
+    assert writes == []
