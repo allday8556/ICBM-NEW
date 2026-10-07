@@ -256,7 +256,7 @@ def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
 ADDRESS_BOOKS = "/api/v1/connect/marketplaces/smartstore/addressbooks"
 
 
-def test_the_naver_address_book_fills_only_empty_address_fields_as_choices(
+def test_the_naver_address_book_becomes_named_dropdowns_and_the_choice_is_saved(
     browser: Browser, config: AppConfig
 ) -> None:
     # The address book is a provider read; here the page's request is answered with a fixture so
@@ -265,6 +265,7 @@ def test_the_naver_address_book_fills_only_empty_address_fields_as_choices(
         "address_books": [
             {"address_book_no": 200401837, "name": "반품지", "address_type": "REFUND_OR_EXCHANGE"},
             {"address_book_no": 200441202, "name": "출고지", "address_type": "RELEASE"},
+            {"address_book_no": 200583581, "name": "KM 출고반품지", "address_type": "GENERAL"},
         ]
     }
     writes: list[tuple[str, str]] = []
@@ -272,24 +273,42 @@ def test_the_naver_address_book_fills_only_empty_address_fields_as_choices(
         served: Container = client.app.state.container  # type: ignore[attr-defined]
         account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
         with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
-            page.route(
-                f"**{ADDRESS_BOOKS}",
-                lambda route: route.fulfill(status=200, json=books),
-            )
             editor = page.locator(_editor(account))
-            editor.locator("[data-policy-field='return_address_id']").fill("123")
+            # Without a CONNECT session the editor's own load is refused quietly: the number
+            # fields stay, with a hint instead of an error.
+            hint = editor.locator("[data-address-books='NOT_LOADED']")
+            hint.filter(has_text="스마트스토어 연결 후").wait_for(timeout=10_000)
+            assert editor.locator("select[data-address-select]").count() == 0
+            _fill(page, account, {**VALUES, "shipping_address_id": "", "return_address_id": "123"})
+            page.route(f"**{ADDRESS_BOOKS}", lambda route: route.fulfill(status=200, json=books))
             button = editor.locator("button[data-action='load-address-books']")
-            for _ in range(2):  # a second load replaces the choices, it never stacks them
+            for _ in range(2):  # a second load replaces the dropdowns, it never stacks them
                 button.click()
-                page.wait_for_selector(f"{_editor(account)} [data-address-books='2']")
-            shipping = editor.locator("[data-policy-field='shipping_address_id']")
-            returns = editor.locator("[data-policy-field='return_address_id']")
-            # The empty field takes the first entry of its type; a typed number is kept.
+                page.wait_for_selector(f"{_editor(account)} [data-address-books='3']")
+            assert editor.locator("select[data-address-select]").count() == 2
+            shipping = editor.locator("select[data-address-select='shipping_address_id']")
+            returns = editor.locator("select[data-address-select='return_address_id']")
+            # The empty field takes the first entry of its type; a kept number the book does not
+            # list is shown as such, never silently replaced.
             assert shipping.input_value() == "200441202"
             assert returns.input_value() == "123"
-            for field in (shipping, returns):
-                listed = editor.locator(f"datalist#{field.get_attribute('list')} option")
-                assert listed.count() == 2
-            assert editor.locator("datalist").count() == 2
-            assert "출고지" in editor.locator("[data-address-books]").inner_text()
-    assert writes == []
+            assert "주소록에 없는 번호" in returns.locator("option").first.inner_text()
+            # The field's own type comes first, every entry is named.
+            assert returns.locator("option").all_inner_texts()[1:] == [
+                "반품지 · 반품·교환지 · 200401837",
+                "출고지 · 출고지 · 200441202",
+                "KM 출고반품지 · 일반 · 200583581",
+            ]
+            assert editor.locator("[data-policy-field='return_address_id']").is_hidden()
+            returns.select_option("200583581")
+            page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
+            page.wait_for_selector(
+                f"{_editor(account)} [data-policy-state='saved']", timeout=10_000
+            )
+        target = served.registration_preflight.target_policy(MARKETPLACE, account)
+        assert target is not None and target.delivery_policy is not None
+        assert target.delivery_policy.shipping_address_id == 200441202
+        assert target.delivery_policy.return_address_id == 200583581
+    assert writes == [
+        ("POST", f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions")
+    ]
