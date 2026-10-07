@@ -143,6 +143,8 @@ def create_app(
             await services.review_reconciler.start()
             # M6-A (ADR-0023 §3): the periodic read-only listing-state sync.
             services.listing_sync_scheduler.start()
+            # M6-B (ADR-0023 §4): the periodic supplier stock recheck.
+            services.stock_recheck_scheduler.start()
             # Owner decision 2026-10-07: renew the SmartStore session automatically.
             services.smartstore_keeper.start()
         else:
@@ -151,6 +153,7 @@ def create_app(
             yield
         finally:
             await asyncio.to_thread(services.smartstore_keeper.stop)
+            await asyncio.to_thread(services.stock_recheck_scheduler.stop)
             await asyncio.to_thread(services.listing_sync_scheduler.stop)
             await services.review_reconciler.stop()
             await services.worker.stop()

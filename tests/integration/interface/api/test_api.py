@@ -28,8 +28,9 @@ SCREENS = {
 # Gate 2 G2-C (ADR-0016 §7): a dashboard or 품절 "empty" may rest on review counts only when every
 # kind they count is WIRED, current and zero. Kinds whose producer does not exist yet are
 # NOT_WIRED, so on a fresh database both are READY and say so; neither ever shows a fake 0.
-REVIEW_COUNTED = ("dashboard", "soldout")
-NOT_WIRED_KINDS = ("collect_evidence", "stock", "source_change", "compliance", "fulfillment")
+REVIEW_COUNTED = ("dashboard",)
+# STOCK is wired by M6-B (ADR-0023 §4): with both of its producers current it is a count.
+NOT_WIRED_KINDS = ("collect_evidence", "source_change", "compliance", "fulfillment")
 
 
 def _wait_for(predicate, timeout_s: float = 10.0):  # type: ignore[no-untyped-def]
@@ -88,12 +89,19 @@ def test_the_review_counted_screens_are_never_empty_on_a_count_that_is_not_autho
         "CURRENT",
         0,
     )
-    stock = client.get("/api/v1/screens/soldout").json()["stock_review"]
-    assert (stock["state"], stock["open"]) == ("NOT_WIRED", None)
+    # STOCK (M6-B): both of its producers are wired and their startup passes completed, so its
+    # zero is authoritative and 품절 may say there is nothing to check.
+    soldout = client.get("/api/v1/screens/soldout").json()
+    stock = soldout["stock_review"]
+    assert (stock["state"], stock["open"]) == ("CURRENT", 0)
     assert [(e["producer"], e["wired"]) for e in stock["emitters"]] == [
         ("collect.facts", True),
-        ("operate.stock", False),
+        ("operate.stock", True),
     ]
+    assert (soldout["meta"]["state"], soldout["meta"]["empty_reason"]) == (
+        "EMPTY",
+        "NO_STOCK_REVIEW_ITEMS",
+    )
 
 
 def test_settings_contract_has_no_connections_and_is_read_only(client: TestClient) -> None:

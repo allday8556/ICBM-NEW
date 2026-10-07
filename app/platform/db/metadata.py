@@ -16,6 +16,7 @@ from app.stages.connect import models as _connect_models  # noqa: F401
 from app.stages.connect.marketplace import models as _marketplace_models  # noqa: F401
 from app.stages.connect.smartstore import models as _smartstore_models  # noqa: F401
 from app.stages.operate import listing_models as _operate_listing_models  # noqa: F401
+from app.stages.operate import stock_models as _operate_stock_models  # noqa: F401
 from app.stages.products import (
     atomic_sku_economics_models as _atomic_sku_economics_models,  # noqa: F401
 )

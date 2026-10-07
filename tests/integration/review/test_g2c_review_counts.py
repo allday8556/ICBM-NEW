@@ -34,7 +34,6 @@ from app.capabilities.review.counts import (
     EMITTERS,
     OPERATE_STOCK_PRODUCER,
     REVIEW_PRODUCER_NO_FULL_PASS,
-    REVIEW_PRODUCER_NOT_IMPLEMENTED,
     ReviewCounts,
 )
 from app.capabilities.review.coverage import (
@@ -437,12 +436,12 @@ def test_counts_come_from_durable_rows_and_not_wired_is_never_zero(
     container.review_reconciler.full_passes()
     found = counts(container)
     stock = found[ReviewKind.STOCK]
-    # COLLECT's STOCK item is durable and known, and COLLECT is wired and current; but OPERATE's
-    # stock workflow can emit STOCK too and has no producer, so there is no count.
-    assert (stock.state, stock.open, stock.open_known) == (CountState.NOT_WIRED, None, 1)
+    # COLLECT's STOCK item is durable and known; since M6-B (ADR-0023 §4) OPERATE's stock producer
+    # is wired too, and with both current the STOCK count is authoritative.
+    assert (stock.state, stock.open, stock.open_known) == (CountState.CURRENT, 1, 1)
     assert [(e.producer, e.wired, e.current, e.reason) for e in stock.emitters] == [
         (COLLECT_PRODUCER, True, True, None),
-        (OPERATE_STOCK_PRODUCER, False, False, REVIEW_PRODUCER_NOT_IMPLEMENTED),
+        (OPERATE_STOCK_PRODUCER, True, True, None),
     ]
     for kind in (ReviewKind.COMPLIANCE, ReviewKind.FULFILLMENT, ReviewKind.SOURCE_CHANGE):
         assert (found[kind].state, found[kind].open) == (CountState.NOT_WIRED, None)
@@ -452,18 +451,24 @@ def test_counts_come_from_durable_rows_and_not_wired_is_never_zero(
     # The screens rest no verdict on a count that is not authoritative.
     soldout = container.screens.soldout()
     assert (soldout.meta.state, soldout.meta.empty_reason) == (ScreenState.READY, None)
-    assert (soldout.stock_review.state, soldout.stock_review.open) == (CountState.NOT_WIRED, None)
+    assert (soldout.stock_review.state, soldout.stock_review.open) == (CountState.CURRENT, 1)
     assert container.screens.dashboard().meta.state is ScreenState.READY
 
 
-def test_stock_is_never_authoritative_on_collect_coverage_alone(container: Container) -> None:
+def test_stock_is_authoritative_only_with_both_of_its_producers_current(
+    container: Container,
+) -> None:
+    # Before any pass, neither producer is current: no count, and 품절 says nothing is empty.
+    assert counts(container)[ReviewKind.STOCK].authoritative_zero is False
+    assert container.screens.soldout().meta.empty_reason is None
     container.review_reconciler.full_passes()
     stock = counts(container)[ReviewKind.STOCK]
     assert coverage_of(container, COLLECT_PRODUCER).current is True
-    assert (stock.state, stock.open, stock.open_known) == (CountState.NOT_WIRED, None, 0)
-    assert stock.authoritative_zero is False
+    assert coverage_of(container, OPERATE_STOCK_PRODUCER).current is True
+    assert (stock.state, stock.open, stock.open_known) == (CountState.CURRENT, 0, 0)
+    assert stock.authoritative_zero is True
     assert EMITTERS[ReviewKind.STOCK] == (COLLECT_PRODUCER, OPERATE_STOCK_PRODUCER)
-    assert container.screens.soldout().meta.empty_reason is None
+    assert container.screens.soldout().meta.empty_reason == "NO_STOCK_REVIEW_ITEMS"
 
 
 def test_not_wired_and_not_current_are_distinct(config: AppConfig, clock: FakeClock) -> None:
@@ -561,8 +566,11 @@ def test_a_requested_pass_runs_promptly_whatever_the_periodic_interval(config: A
         }
 
 
-def test_the_collect_review_list_carries_only_collect_coverage(config: AppConfig) -> None:
-    """Another producer's coverage says nothing about whether a COLLECT source's list is current."""
+def test_the_source_review_list_carries_only_its_own_producers_coverage(
+    config: AppConfig,
+) -> None:
+    """Only the producers of the source-identity shape — COLLECT and, since M6-B, OPERATE's stock
+    — say whether a source's list is current; no other producer's coverage does."""
     with served(config, UnclearShop()) as api:
         collect_unclear(api, "4242")
         listed = api.get(
@@ -570,7 +578,10 @@ def test_the_collect_review_list_carries_only_collect_coverage(config: AppConfig
             params={"supplier_key": "fakeshop", "source_product_id": "4242"},
             headers={"X-ICBM-Client": "pytest"},
         ).json()
-    assert [c["producer"] for c in listed["coverage"]] == [COLLECT_PRODUCER]
+    assert [c["producer"] for c in listed["coverage"]] == [
+        COLLECT_PRODUCER,
+        OPERATE_STOCK_PRODUCER,
+    ]
 
 
 def test_whole_owner_churn_makes_progress_but_never_publishes_current(

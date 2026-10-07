@@ -205,8 +205,10 @@ def test_production_wires_exactly_the_gate2_producers(app: Container) -> None:
     # G2-B wires COLLECT / M3, G2-C M4 base readiness and REGISTER (execution and preparations),
     # and nothing else
     # (ADR-0016 §6). Their counts are G2-C's (tests/integration/review/test_g2c_review_counts.py).
+    # M6-B (ADR-0023 §4) adds OPERATE's listed-source stock producer.
     assert app.review_items.producers == (
         "collect.facts",
+        "operate.stock",
         "products.readiness",
         "register.execution",
         "register.preflight",
@@ -719,6 +721,7 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "registration_bulk_items",
         "operate_listing_sync_runs",
         "operate_listing_observations",
+        "operate_stock_rechecks",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

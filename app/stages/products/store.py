@@ -933,6 +933,21 @@ class ProductFoundationUnit:
         ).first()
         return None if row is None else _binding_record(row)
 
+    def source_identity_of_item(self, item_id: str) -> tuple[str, str] | None:
+        """The ``(supplier_key, source_product_id)`` the Item's open binding names, or ``None``.
+
+        Read-only. M6-B (ADR-0023 §4) rechecks the supplier stock of exactly this source product
+        for an Item a confirmed registration sells.
+        """
+        row = self.session.execute(
+            select(SourceProduct.supplier_key, SourceProduct.source_product_id)
+            .join(GroupMember, GroupMember.source_product_uid == SourceProduct.source_product_uid)
+            .join(SourceBinding, SourceBinding.group_member_id == GroupMember.member_id)
+            .where(SourceBinding.item_id == item_id, SourceBinding.valid_to.is_(None))
+            .limit(1)
+        ).first()
+        return None if row is None else (str(row[0]), str(row[1]))
+
     def close_binding(self, binding_id: str) -> None:
         """Close one open binding's validity window. A binding is closed, never edited."""
         row = self.session.get(SourceBinding, binding_id)
