@@ -4,7 +4,9 @@ Everything here is invented and provider-zero. The state is written through the 
 owners and routes, exactly as production does, over a dedicated root the run owns:
 
 - **수집관리**: two durably RECORDED collection runs — one whose facts are CONFIRMED, one whose
-  shipping fact is REVIEW_REQUIRED, so a COLLECT review item exists;
+  shipping and stock facts are REVIEW_REQUIRED, so COLLECT review items exist, among them a STOCK
+  one (since M6-B both STOCK producers are wired, so 품절 counts it: without one, its authoritative
+  zero is the approved empty state, not a populated screen);
 - **통합DB**: their Products and Items, the first with its image selection, a QA PASS and a price;
 - **Settings**: the account's durable target policy (G1-A) and one reviewed category's metadata
   (G1-B);
@@ -115,17 +117,18 @@ def _owners(container: Container) -> Any:
 
 def _record(owners: Any, product: str, *, sequence: int, shipping_needs_review: bool) -> Any:
     """Append one durably RECORDED revision through COLLECT's own stores (as the M5 helper does),
-    optionally with its shipping fact REVIEW_REQUIRED."""
+    optionally with its shipping and stock facts REVIEW_REQUIRED."""
     found = fields(synthetic.BASE_FACTS)
     if shipping_needs_review:
-        evidence = (
-            Evidence(
-                kind=EvidenceKind.DOM_TEXT,
-                locator=".m4-delivery",
-                status=FieldStatus.REVIEW_REQUIRED,
-            ),
-        )
-        found["shipping"] = FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+        for key, locator in (("shipping", ".m4-delivery"), ("stock", ".m4-buy")):
+            evidence = (
+                Evidence(
+                    kind=EvidenceKind.DOM_TEXT,
+                    locator=locator,
+                    status=FieldStatus.REVIEW_REQUIRED,
+                ),
+            )
+            found[key] = FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
     stored = owners.source_assets.put(png(f"{product}-{sequence}"))
     source_url = synthetic.SOURCE_URL.format(product=product)
     correlation = f"{CID}-{product}"
