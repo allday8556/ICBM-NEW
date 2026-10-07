@@ -1707,3 +1707,173 @@ td.no-data {
   border-left: 2px solid var(--color-info);
   background: var(--color-info-bg);
 }
+
+/* v29 대시보드 (owner decision 2026-10-07): the cards, the three panels, today's inflow and the
+   two bottom panels. A slot with no source reads 데이터 없음; the ring holds no breakdown. */
+.dashboard-panels {
+  display: grid;
+  grid-template-columns: 1.25fr 1.05fr 0.85fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.dashboard-bottom {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.inline-link {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-sub);
+  font: inherit;
+  font-size: var(--fs-lg);
+  cursor: pointer;
+}
+
+.inline-link:hover {
+  color: var(--color-info);
+}
+
+.prod {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.thumb {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #e9edf0, #c9d1d8);
+  color: #44515d;
+  font-size: 14px;
+}
+
+.prod-title {
+  max-width: 240px;
+  overflow: hidden;
+  font-weight: var(--fw-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.donut-wrap {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin: var(--space-4) 0;
+}
+
+.donut {
+  position: relative;
+  flex: 0 0 auto;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: var(--color-neutral-bg);
+}
+
+.donut::after {
+  content: '';
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: var(--color-panel);
+}
+
+.donut-label {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+.donut-label b {
+  font-size: 20px;
+}
+
+.legend {
+  display: grid;
+  flex: 1;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.legend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+}
+
+.dashboard-order-counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.alert-list {
+  display: grid;
+}
+
+.dashboard-traffic .traffic-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.traffic-mini-grid > div {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+}
+
+.dashboard-chart {
+  display: grid;
+  place-items: center;
+  height: 175px;
+  margin-top: var(--space-4);
+  border-bottom: 1px solid var(--color-line-soft);
+  border-left: 1px solid var(--color-line-soft);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .dashboard-panels {
+    grid-template-columns: 1.6fr 1fr;
+  }
+
+  .dashboard-panels > .panel:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1280px) and (orientation: landscape), (max-width: 900px) {
+  .dashboard-panels,
+  .dashboard-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-traffic .traffic-mini-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.dashboard-order-counts b.no-data,
+.traffic-mini-grid b.no-data {
+  font-size: var(--fs-lg);
+}

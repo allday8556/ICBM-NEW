@@ -273,6 +273,21 @@ Small additions beside the approved boards, in their existing visual language:
 
 The same rule as the 수집 layout applies here. v29's composition is reproduced (ADR-0003). A slot with no source keeps its place and reads `데이터 없음`. A v29 control with no contract is `markInert` and sends nothing. No screen-contract API changes, and every existing panel keeps its function and markup.
 
+### 대시보드
+
+- **Cards.** v29's five cards, each a way into its screen.
+  - `전체 수집` is the collection runs' server total.
+  - `판매 대기` is `registration_candidates_total`.
+  - `판매 완료 / 등록 가능 / 확인 필요` and every `전일 대비` read `데이터 없음`.
+- **`최근 수집 현황`.** The newest five runs, as the server lists them. A RECORDED run's revision names the product.
+- **`플랫폼별 등록 현황`.** The ring holds the server's `registrations_total`. No read breaks registrations down by marketplace, so each marketplace keeps its place in the legend with `데이터 없음` and the ring shows no split.
+- **`주문/알림 요약`.**
+  - `품절 확인 필요`, `등록 오류` and `가격 변동 알림` are the STOCK, REGISTRATION_ERROR and SOURCE_CHANGE review counts, shown only when the server states them as current.
+  - The order counts, `재고 부족 상품` and `시스템 알림` read `데이터 없음`.
+- **`오늘 상품 유입`, `일별 수집/등록 추이` and `주요 카테고리 TOP 5`** read `데이터 없음`.
+- **The review-count table and the connection summary follow as before.**
+- The breakpoints follow v29's own: three panels on a wide landscape screen, `1.6fr 1fr` with the last panel full width on a portrait screen, one column on a narrow one. The 수집 list and its preview sit side by side in portrait from 1200px, not v29's 901px, because the work list has more columns than v29's. 통합DB's detail and 등록관리's settings move under their list as one wide card of columns in portrait, as v29 does.
+
 ### 통합DB
 
 - **Cards.** v29's five cards: `전체상품 / 등록가능 / 확인필요 / 품절 / 금지상품`. `전체상품` is the server's `products_total`; the other four have no owner yet and read `데이터 없음`.
