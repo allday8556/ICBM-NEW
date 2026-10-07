@@ -1126,9 +1126,10 @@ td.no-data {
 }
 
 .filter-chip {
+  gap: var(--space-1);
   border: 0;
   cursor: pointer;
-  font: inherit;
+  font-family: inherit;
 }
 
 @media (max-width: 1280px), (orientation: portrait) {

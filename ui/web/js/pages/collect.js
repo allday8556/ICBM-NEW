@@ -670,7 +670,6 @@ function jobsView(view, ctx) {
       onclick: () => goFilter(noRevisionKey),
     },
     noRevisionLabel,
-    ' ',
     noRevisionCount,
   );
   const runsPanel = h(
