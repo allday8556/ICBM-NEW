@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -96,6 +97,8 @@ OVERLAP: Final = timedelta(minutes=10)
 MAX_WINDOWS: Final = 10
 MAX_PAGES: Final = 50
 DETAIL_BATCH: Final = 300
+# The pause between two provider calls of one pass (ICBM policy; no rate is documented).
+PROVIDER_PAUSE_S: Final = 1.0
 UNREADABLE: Final = "OPERATE_ORDER_UNREADABLE"
 PAGES_EXCEEDED: Final = "OPERATE_ORDER_PAGES_EXCEEDED"
 DETAIL_MISSING: Final = "OPERATE_ORDER_DETAIL_MISSING"
@@ -336,6 +339,8 @@ class OrderSyncService:
         retention_days: int,
         order_read_attested: Callable[[], bool],
         marketplace_key: str = "smartstore",
+        pause_s: float = PROVIDER_PAUSE_S,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -349,6 +354,9 @@ class OrderSyncService:
         self._retention = timedelta(days=retention_days)
         self._marketplace_key = marketplace_key
         self._attested = order_read_attested
+        self._pause_s = pause_s
+        self._sleep = sleep
+        self._last_call: float | None = None
         self._lock = threading.Lock()
 
     @property
@@ -591,6 +599,12 @@ class OrderSyncService:
             raise _Stop(FAILED, DETAIL_MISSING)
 
     def _read(self, call: Callable[[], _T]) -> _T:
+        # ICBM pacing (no rate is documented): consecutive calls without a pause met 429 every
+        # few calls in the 2026-10-08 runtime read, so each provider call waits out the pause.
+        if self._last_call is not None:
+            waited = time.monotonic() - self._last_call
+            if waited < self._pause_s:
+                self._sleep(self._pause_s - waited)
         try:
             return call()
         except AppError as exc:
@@ -600,6 +614,8 @@ class OrderSyncService:
         except Exception as exc:
             logger.warning("operate.order_read_failed", exc_info=True)
             raise _Stop(FAILED, UNREADABLE) from exc
+        finally:
+            self._last_call = time.monotonic()
 
     def _ingest(
         self,

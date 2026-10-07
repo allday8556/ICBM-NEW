@@ -24,6 +24,7 @@ from integrations.marketplaces.smartstore.caller import (
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource, kst
 from integrations.marketplaces.smartstore.registry import (
     EndpointId,
+    empty_window_answer,
     order_changes_succeeded,
     order_details_succeeded,
     resolve,
@@ -330,7 +331,7 @@ def test_the_reader_itself_refuses_an_answer_that_names_no_window(retained: obje
 
     class Answer:
         def call(self, endpoint_id: object, request: object) -> Any:
-            return SimpleNamespace(retained=retained, http_status=200)
+            return SimpleNamespace(retained=retained, http_status=200, empty_window=False)
 
     source = SmartStoreOrderSource(Answer(), _bearer)  # type: ignore[arg-type]
     with pytest.raises(PolicyBlockedError) as refused:
@@ -338,3 +339,23 @@ def test_the_reader_itself_refuses_an_answer_that_names_no_window(retained: obje
             since=datetime(2026, 10, 7, tzinfo=UTC), until=datetime(2026, 10, 8, tzinfo=UTC)
         )
     assert refused.value.code == "SMARTSTORE_ORDER_RESPONSE_INVALID"
+
+
+def test_the_proven_empty_window_answer_is_an_empty_page() -> None:
+    """Runtime evidence 2026-10-08: a window with no change answers HTTP 200 with only the
+    envelope's ``timestamp`` and ``traceId``. That answer, and only that one, is empty."""
+    proven = {"timestamp": "2026-10-08T05:20:00.000+09:00", "traceId": "trace-0"}
+    assert empty_window_answer(proven) is True
+    assert order_changes_succeeded(200, proven) is True
+    page = SmartStoreOrderSource(_caller(proven), _bearer).changes(  # type: ignore[arg-type]
+        since=datetime(2026, 10, 7, tzinfo=UTC), until=datetime(2026, 10, 8, tzinfo=UTC)
+    )
+    assert page.changes == () and page.more_from is None
+    for answer in (
+        {"traceId": "trace-0"},
+        {"timestamp": "t", "traceId": ""},
+        {"timestamp": "t", "traceId": "trace-0", "code": "GW.RATE_LIMIT"},
+        {"timestamp": "t", "traceId": "trace-0", "message": "x"},
+        {"timestamp": "t"},
+    ):
+        assert order_changes_succeeded(200, answer) is False, answer

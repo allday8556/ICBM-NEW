@@ -222,13 +222,18 @@ def order_changes_succeeded(status: int, body: object) -> bool:
 
     ``data`` must carry the required integer ``count`` and the required ``lastChangeStatuses``
     array, each entry naming its product order and its change; a ``more`` continuation, when
-    present, names both ``moreFrom`` and ``moreSequence``. ``data`` is not badged required on the
-    envelope, but an answer without it proves no window was read, so it is never taken as an
-    empty one (GPT audit, PR #250): only a documented page moves the cursor. If the provider is
-    later proven to omit ``data`` for an empty window, that evidence changes this predicate.
+    present, names both ``moreFrom`` and ``moreSequence``.
+
+    A window with no change is answered without ``data`` at all: exactly the envelope's
+    ``timestamp`` and its required ``traceId`` (runtime evidence 2026-10-08, Issue #219
+    ``6048219909``: every window without a change answered HTTP 200 with only those two members;
+    ``empty_window_answer``). That answer, and only that one, is an empty window: a body with an
+    error ``code``, without its ``traceId``, or with any other member is not (GPT audit, PR #250).
     """
     if status != 200 or not isinstance(body, dict):
         return False
+    if "data" not in body:
+        return empty_window_answer(body)
     data = body.get("data")
     if not isinstance(data, dict):
         return False
@@ -255,6 +260,18 @@ def order_changes_succeeded(status: int, body: object) -> bool:
                 and _text_member(more, "moreSequence", required=True)
             )
         )
+    )
+
+
+def empty_window_answer(body: object) -> bool:
+    """The proven answer to a change window with no change: the envelope's ``timestamp`` and
+    its non-empty ``traceId``, and nothing else."""
+    return (
+        isinstance(body, dict)
+        and set(body) == {"timestamp", "traceId"}
+        and isinstance(body.get("traceId"), str)
+        and bool(body["traceId"])
+        and isinstance(body.get("timestamp"), str)
     )
 
 
@@ -585,7 +602,7 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         required_groups=frozenset({ORDER_GROUP}),
         mutating=False,
         success_predicate=order_changes_succeeded,
-        predicate_revision="m6-order-changes-r1",
+        predicate_revision="m6-order-changes-r2",
         safe_query_keys=frozenset(
             {"lastChangedFrom", "lastChangedTo", "moreSequence", "limitCount"}
         ),
