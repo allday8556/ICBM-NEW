@@ -71,6 +71,7 @@ from app.stages.register.preparation import (
     ResolvedItem,
     ResolvedUnit,
     UnitRequest,
+    _after_service_reasons,
     evaluate,
     listing_identity,
     resolve_unit,
@@ -1049,6 +1050,27 @@ def test_category_metadata_drives_the_rules_and_fails_closed() -> None:
 
 
 # ---------------------------------------------------------------- options and units (§2, R3)
+
+
+def _phone_reasons(target_policy: TargetPolicy, notices: dict[str, FieldValue]) -> list[str]:
+    listing = replace(LISTING, notices={**LISTING.notices, **notices})
+    return [r.code for r in _after_service_reasons(request(listing=listing), target_policy)]
+
+
+def test_a_smartstore_unit_without_any_after_service_phone_is_never_ready() -> None:
+    """The wire refuses a CREATE without an A/S phone; preflight says so first (2026-10-07)."""
+    smartstore = target(marketplace_key="smartstore", after_service_telephone=None)
+    assert _phone_reasons(smartstore, {}) == ["POLICY_AFTER_SERVICE_PHONE_MISSING"]
+    assert "POLICY_AFTER_SERVICE_PHONE_MISSING" in REASON_CODES
+    # The policy's phone, else the reviewed notice's, exactly as the wire takes them.
+    assert _phone_reasons(replace(smartstore, after_service_telephone="02-000-0000"), {}) == []
+    assert _phone_reasons(smartstore, {"customerServicePhoneNumber": FieldValue("1588-0000")}) == []
+    director = {"afterServiceDirector": FieldValue("invented maker 02-123-4567")}
+    assert _phone_reasons(smartstore, director) == []
+    no_phone = {"afterServiceDirector": FieldValue("invented maker, see detail")}
+    assert _phone_reasons(smartstore, no_phone) == ["POLICY_AFTER_SERVICE_PHONE_MISSING"]
+    # Another marketplace's CREATE has no such requirement.
+    assert _phone_reasons(target(after_service_telephone=None), {}) == []
 
 
 def test_option_compatibility_is_decided_by_metadata_never_forced() -> None:

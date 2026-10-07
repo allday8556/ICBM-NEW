@@ -138,6 +138,7 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "OPTION_DIMENSIONS_EXCEEDED": (_X, None),
     "OPTION_VALUES_NOT_DISTINCT": (_F, _PREP),
     "POLICY_TEMPLATE_MISSING": (_F, _POLICY),
+    "POLICY_AFTER_SERVICE_PHONE_MISSING": (_F, _POLICY),
     "DETAIL_COMPOSITION_MISSING": (_F, _PREP),
     "DETAIL_BODY_EMPTY": (_F, _PREP),
     # The authoring revisions are stamped by a target-policy save, then authored again.
