@@ -73,7 +73,8 @@ from app.stages.register.policy import (
 )
 from app.stages.register.target_policy import EditableSurface
 
-CONTENT_VERSION: Final = "registration-category-metadata/v1"
+CONTENT_VERSION_V1: Final = "registration-category-metadata/v1"
+CONTENT_VERSION: Final = "registration-category-metadata/v2"
 MAX_RULES: Final = 200
 
 CATEGORY_METADATA_INVALID: Final = "CATEGORY_METADATA_INVALID"
@@ -140,6 +141,29 @@ class OptionPolicyView(_Strict):
     max_dimensions: StrictInt
 
 
+class MarketplaceOptionRequirementView(_Strict):
+    """One adopted provider rule, kept distinct from Product/Common Option ownership.
+
+    ``provider_label`` is evidence/display text only.  ``semantic_key`` and the value/unit
+    semantics are the reviewed, provider-neutral interpretation used by C-P3; no mapper may infer
+    them from the label.  An unknown or contradictory provider enum is retained in
+    ``provider_requiredness`` with ``interpretation_state=REVIEW_REQUIRED``.
+    """
+
+    provider_rule_key: StrictStr
+    provider_label: StrictStr
+    role: Literal["PURCHASE_OPTION", "SEARCH_ATTRIBUTE", "PRODUCT_INFORMATION_NOTICE"]
+    provider_requiredness: StrictStr
+    requiredness: Literal["REQUIRED", "OPTIONAL"] | None
+    provider_semantics: StrictStr
+    semantic_key: StrictStr | None
+    value_semantics: Literal["MEASURE", "COUNT_PER_UNIT", "SELLING_BUNDLE_QUANTITY", "ENUM", "TEXT"]
+    basic_unit: StrictStr | None
+    usable_units: list[StrictStr] = Field(default_factory=list)
+    allowed_values: list[StrictStr] = Field(default_factory=list)
+    interpretation_state: Literal["CONFIRMED", "REVIEW_REQUIRED"]
+
+
 class CategoryMetadataContentView(_Strict):
     """Everything the existing ``CategoryMetadata`` contract carries, beyond its identity, its
     ``metadata_revision`` and ``reviewed`` — which the server owns."""
@@ -151,6 +175,14 @@ class CategoryMetadataContentView(_Strict):
     notice: NoticePolicyView | None
     options: OptionPolicyView
     required_templates: list[StrictStr]
+    option_requirements: list[MarketplaceOptionRequirementView] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _without_legacy_empty_requirements(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if not data.get("option_requirements"):
+            data.pop("option_requirements", None)
+        return data
 
 
 class RecordRevisionRequest(_Strict):
@@ -219,6 +251,13 @@ def _identifier(value: str, field: str) -> str:
     if not _IDENTIFIER.fullmatch(value):
         raise _invalid("a plain identifier: letters, digits, '.', '_' or '-'", field)
     return value
+
+
+def _text(value: str, field: str, *, maximum: int = 300) -> str:
+    normalized = value.strip()
+    if not normalized or len(normalized) > maximum:
+        raise _invalid(f"text must contain 1 to {maximum} characters", field)
+    return normalized
 
 
 def _rules(rules: list[FieldRuleView], field: str) -> list[dict[str, Any]]:
@@ -296,8 +335,85 @@ def encode_content(
     if len(set(templates)) != len(templates):
         raise _invalid("a required template is listed twice", "required_templates")
     notice = content.notice
+    requirements: list[dict[str, Any]] = []
+    if len(content.option_requirements) > MAX_RULES:
+        raise _invalid("too many marketplace option requirements", "option_requirements")
+    seen_rule_keys: set[str] = set()
+    for ordinal, requirement in enumerate(content.option_requirements):
+        field = f"option_requirements[{ordinal}]"
+        rule_key = _identifier(requirement.provider_rule_key, f"{field}.provider_rule_key")
+        if rule_key in seen_rule_keys:
+            raise _invalid("a provider rule key is listed twice", "option_requirements")
+        seen_rule_keys.add(rule_key)
+        provider_label = _text(requirement.provider_label, f"{field}.provider_label", maximum=100)
+        provider_requiredness = _label(
+            requirement.provider_requiredness, f"{field}.provider_requiredness"
+        )
+        provider_semantics = _text(requirement.provider_semantics, f"{field}.provider_semantics")
+        semantic_key = requirement.semantic_key
+        if semantic_key is not None:
+            semantic_key = _identifier(semantic_key, f"{field}.semantic_key")
+            if semantic_key.lower() != semantic_key:
+                raise _invalid("semantic_key must be lowercase", f"{field}.semantic_key")
+        if requirement.interpretation_state == "CONFIRMED" and (
+            requirement.requiredness is None or semantic_key is None
+        ):
+            raise _invalid(
+                "a confirmed interpretation requires requiredness and semantic_key",
+                field,
+            )
+        if requirement.value_semantics == "SELLING_BUNDLE_QUANTITY" and semantic_key not in (
+            None,
+            "selling_bundle_quantity",
+        ):
+            raise _invalid(
+                "selling-bundle quantity uses semantic_key selling_bundle_quantity",
+                f"{field}.semantic_key",
+            )
+        basic_unit = (
+            None
+            if requirement.basic_unit is None
+            else _identifier(requirement.basic_unit, f"{field}.basic_unit")
+        )
+        usable_units = [
+            _identifier(unit, f"{field}.usable_units") for unit in requirement.usable_units
+        ]
+        if len(set(usable_units)) != len(usable_units):
+            raise _invalid("a usable unit is listed twice", f"{field}.usable_units")
+        if basic_unit is not None and basic_unit not in usable_units:
+            raise _invalid("basic_unit must be included in usable_units", field)
+        if requirement.value_semantics in {"MEASURE", "COUNT_PER_UNIT"} and (
+            basic_unit is None or not usable_units
+        ):
+            raise _invalid("measure/count semantics require reviewed unit semantics", field)
+        if requirement.value_semantics in {"ENUM", "TEXT"} and (
+            basic_unit is not None or usable_units
+        ):
+            raise _invalid("enum/text semantics are unitless", field)
+        allowed_values = [
+            _text(value, f"{field}.allowed_values", maximum=200)
+            for value in requirement.allowed_values
+        ]
+        if len(set(allowed_values)) != len(allowed_values):
+            raise _invalid("an allowed value is listed twice", f"{field}.allowed_values")
+        requirements.append(
+            {
+                "provider_rule_key": rule_key,
+                "provider_label": provider_label,
+                "role": requirement.role,
+                "provider_requiredness": provider_requiredness,
+                "requiredness": requirement.requiredness,
+                "provider_semantics": provider_semantics,
+                "semantic_key": semantic_key,
+                "value_semantics": requirement.value_semantics,
+                "basic_unit": basic_unit,
+                "usable_units": usable_units,
+                "allowed_values": allowed_values,
+                "interpretation_state": requirement.interpretation_state,
+            }
+        )
     document: dict[str, Any] = {
-        "content_version": CONTENT_VERSION,
+        "content_version": CONTENT_VERSION if requirements else CONTENT_VERSION_V1,
         "marketplace_key": marketplace_key,
         "taxonomy_revision": taxonomy_revision,
         "category_id": category_id,
@@ -320,6 +436,9 @@ def encode_content(
         },
         "required_templates": sorted(templates),
     }
+    # Preserve the historical no-positive-option document shape and fingerprint.
+    if requirements:
+        document["option_requirements"] = requirements
     try:
         sanitize.require_clean(document, "category_metadata")
     except sanitize.PayloadSanitationError as refused:
@@ -333,7 +452,7 @@ def encode_content(
 
 def content_of(document: Mapping[str, Any]) -> CategoryMetadataContentView:
     return CategoryMetadataContentView.model_validate(
-        {key: document[key] for key in CategoryMetadataContentView.model_fields}
+        {key: document[key] for key in CategoryMetadataContentView.model_fields if key in document}
     )
 
 
@@ -592,7 +711,7 @@ class CategoryMetadataStore:
                         "marketplace_key": marketplace_key,
                         "taxonomy_revision": taxonomy_revision,
                         "category_id": category_id,
-                        "content_version": CONTENT_VERSION,
+                        "content_version": str(content.get("content_version", CONTENT_VERSION_V1)),
                     },
                     correlation_id=correlation_id,
                 ),
