@@ -46,7 +46,7 @@ Date: 2026-10-09
 **The provider.** A `CLIPROXYAPI` provider profile and its adapter. The adapter is an OpenAI-compatible `POST /v1/chat/completions` on a loopback endpoint, behind the ADR-0012 checks:
 - the approved executable identity of the process actually serving the endpoint;
 - the approved routing identity;
-- the credential in the OS secret store;
+- the sidecar's own client key, read from its configuration per call and never stored (§2 amendment);
 - the owner's data-transfer approval;
 - a daily call cap.
 
