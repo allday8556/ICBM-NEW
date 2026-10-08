@@ -334,7 +334,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - A unit's ref moves when it is authored and again when it is frozen. The editor follows the one unit of the Draft that holds the same Items. Two units holding them are never guessed between.
 - **Six steps.** Phase 1 places the register page's own pieces by step and adds no route:
   1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category and the name.
-  2. `대표이미지`: the Item image editor. The bulk `리사이즈 / 이미지 편집` are inert. `자동 선택 다시 실행` is the image owner's own.
+  2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
   5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The top and bottom notices read `데이터 없음`. The body is the authoring form's. `미리보기` opens the snapshot preview.
@@ -346,7 +346,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - red: a BLOCKED or DUPLICATE reason;
   - grey: no preflight yet.
   - Hovering a step lists its reasons; clicking it moves to that step.
-- **AI controls are not rendered.** This covers `배경 이미지 제거`, `이미지 자동번역`, and the name and tag suggestions. Each one appears only once a server owner exists for it (ROADMAP, Issue #127). Until then the editor shows neither a disabled placeholder nor a reason.
+- **AI controls are inert placeholders.** This covers `배경 이미지 제거` and `이미지 자동번역` in 대표이미지 and `이미지 자동번역` in 상세페이지, under owner decision 2026-10-08 (Issue #219 comment `6054956408`; ROADMAP, Issue #127). Each keeps its approved position, disabled and marked 준비 중, and sends nothing. It becomes active only with its server owner.
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
 
