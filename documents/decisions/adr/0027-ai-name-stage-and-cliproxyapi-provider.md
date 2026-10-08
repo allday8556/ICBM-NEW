@@ -8,7 +8,7 @@ Decision owners:
   - connect the provider through the local CLIProxyAPI sidecar;
   - approve the binary on the operator's desktop, the transfer of product data through the operator's existing CLIProxyAPI logins, and subscription billing;
   - have Track A run the live test itself.
-- **Model:** the owner, in Issue #219 comment `6068149898`. The default model is **Claude Opus 5.5** (`claude-opus-5-5`), through the operator's Claude login. Changing it is the owner's decision.
+- **Model:** the owner, in Issue #219 comment `6068160917`, which supersedes `6068149898`. The default model is **GPT 5.6 sol** (`gpt-5.6-sol`), through the operator's Codex (ChatGPT) login. Changing it is the owner's decision.
 - **Already decided by canon:**
   - ADR-0012: the provider-neutral port, the optional local sidecar, the approved executable identity, routing approval, provenance, billing, readiness and failure isolation;
   - ADR-0026: the foundation;
@@ -67,7 +67,7 @@ One profile store, `ai_provider_profiles`, with append-only revisions and a curr
 | --- | --- |
 | `provider_type` | `CLIPROXYAPI`; only an adopted adapter's type is accepted |
 | `endpoint` | `http://127.0.0.1:<port>`, loopback only |
-| `requested_model` | the model the profile asks for: `claude-opus-5-5`, the owner's choice (`6068149898`). A profile revision that changes it needs the owner's decision, recorded with the revision |
+| `requested_model` | the model the profile asks for: `gpt-5.6-sol`, the owner's choice (`6068160917`). A profile revision that changes it needs the owner's decision, recorded with the revision |
 | `credential_ref` | the OS secret-store name of the sidecar client key (ADR-0007 §3); the key never enters the database, a log, an audit record or a fingerprint |
 | `approved_executable` | path, version and SHA-256 of the approved binary (ADR-0012 §3) |
 | `approved_routing` | the routing identity: a SHA-256 of the sidecar's routing-relevant configuration with every secret removed, plus `-local-model` (§5) |
@@ -202,5 +202,5 @@ AIS-05  ICBM never downloads, installs, updates, starts or stops the sidecar in 
 AIS-06  provenance is copied from the response; unknown cost is null, never 0
 AIS-07  a seed upgrade never overwrites an operator's edit
 AIS-08  a recommendation is shown and applied only by the operator, as AI_SUGGESTION; no AI_INITIAL
-AIS-09  the requested model is the owner's choice (claude-opus-5-5); changing it is the owner's decision
+AIS-09  the requested model is the owner's choice (gpt-5.6-sol); changing it is the owner's decision
 ```
