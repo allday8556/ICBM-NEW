@@ -174,7 +174,7 @@ from. A reset appends a revision whose field equals the seed's. History is never
 
 **Seeds.** Seeds are the prototype's texts, verbatim (`app/capabilities/ai/seed_v29.json`), as
 revision 1 with `origin = SEED` and `seed_version = v29`.
-- Migration 0053 only creates the stores, because every canonical table starts empty (M0
+- Migration 0054 only creates the stores, because every canonical table starts empty (M0
   acceptance).
 - The application writes the seed when it starts on a database that lacks it, in one unit of work.
   A restart writes nothing.

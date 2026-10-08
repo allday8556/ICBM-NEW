@@ -201,7 +201,7 @@ def test_an_order_of_a_registered_product_resolves_to_its_item_and_source(
     assert order.item_id and order.registration_item_key
     assert order.supplier_key and order.source_product_id == "1234"
     # Any label is ICBM's own registration name; no provider product name is kept.
-    assert not hasattr(order, "product_name") and not hasattr(order, "tracking_number")
+    assert not hasattr(order, "product_name") and order.tracking_number is None
     assert (order.status, order.quantity, order.total_payment_amount) == ("PAYED", 1, 25000)
     assert (order.recipient_masked, order.phone_masked) == ("가*다", "010-****-1234")
     assert order.shipping_state == STORED

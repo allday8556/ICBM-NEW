@@ -5,7 +5,7 @@ owner planned: one global rule set, six roles, four platform policies and fiftee
 catalog names each entry, its layer, its display title and, for a task, the screen that calls it
 and the role it composes with — exactly as the prototype pairs them. It holds no prompt text:
 every prompt is read from the PromptTemplate or PlatformPolicy store, whose revision 1 is the
-prototype's text (migration 0053).
+prototype's text (``seed_v29.json``, written by the application at startup).
 """
 
 from dataclasses import dataclass

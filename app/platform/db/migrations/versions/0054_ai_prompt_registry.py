@@ -1,7 +1,7 @@
 """ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores.
 
-Revision ID: 0053_ai_prompt_registry
-Revises: 0052_m65_supplier_orders
+Revision ID: 0054_ai_prompt_registry
+Revises: 0053_m65_delivery_readback
 Create Date: 2026-10-08
 
 ADR-0026 §3 and its AIF-1 amendment (owner decision Issue #219 `6057252039`). It adds six tables in
@@ -35,8 +35,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0053_ai_prompt_registry"
-down_revision: str | None = "0052_m65_supplier_orders"
+revision: str = "0054_ai_prompt_registry"
+down_revision: str | None = "0053_m65_delivery_readback"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

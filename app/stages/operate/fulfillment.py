@@ -12,6 +12,10 @@ supplier and records the supplier's order number and the purchase amount here.
 of the marketplace's documented codes, injected by the composition root so OPERATE never imports a
 marketplace adapter; any other code is refused before anything is stored.
 
+**Delivery read-back** (§6, M6.5-B). Once the order read shows a tracking number the order is
+``DISPATCHED``, and ``DELIVERED`` once it shows the delivery completed; the view compares that
+tracking with the one captured here, and a wrong-tracking flag is shown for the operator.
+
 **Revisions** (M65-09). Every write carries the revision it read; a stale one is refused. Every
 write appends a history entry and is audited by product-order id, never by content.
 """
@@ -21,7 +25,7 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -47,6 +51,11 @@ NOT_PAYED: Final = "NOT_PAYED"
 AWAITING_SUPPLIER_ORDER: Final = "AWAITING_SUPPLIER_ORDER"
 SUPPLIER_ORDERED: Final = "SUPPLIER_ORDERED"
 TRACKING_CAPTURED: Final = "TRACKING_CAPTURED"
+DISPATCHED: Final = "DISPATCHED"
+DELIVERED: Final = "DELIVERED"
+# The documented delivery state and order statuses that mean the parcel arrived (packet D).
+DELIVERY_COMPLETED: Final = "DELIVERY_COMPLETION"
+ARRIVED_STATUSES: Final = frozenset({"DELIVERED", "PURCHASE_DECIDED"})
 
 RECORDED: Final = "RECORDED"
 AMENDED: Final = "AMENDED"
@@ -102,6 +111,16 @@ class FulfillmentView:
     tracking_captured_at: datetime | None = None
     revision: int | None = None
     history: tuple[SupplierOrderEntryView, ...] = ()
+    # ADR-0025 §6: the delivery as the order read shows it.
+    delivery_company: str | None = None
+    delivery_company_name: str | None = None
+    delivery_tracking_number: str | None = None
+    delivery_status: str | None = None
+    sent_at: datetime | None = None
+    delivered_at: datetime | None = None
+    wrong_tracking_number: bool | None = None
+    # Whether the read tracking is the one captured here; None until both exist.
+    tracking_matches: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +147,9 @@ def _payable(order: ProductOrder) -> bool:
 
 
 def _state(order: ProductOrder, identity: _Identity | None, record: SupplierOrder | None) -> str:
+    if identity is not None and order.tracking_number:
+        arrived = order.delivery_status == DELIVERY_COMPLETED or order.status in ARRIVED_STATUSES
+        return DELIVERED if arrived else DISPATCHED
     if record is not None:
         return TRACKING_CAPTURED if record.tracking_number else SUPPLIER_ORDERED
     if identity is None:
@@ -409,6 +431,17 @@ class FulfillmentService:
             NOT_FULFILLABLE: "OPERATE_ORDER_NOT_FULFILLABLE",
             NOT_PAYED: "OPERATE_ORDER_NOT_PAYED",
         }.get(state)
+        delivery: dict[str, Any] = {
+            "delivery_company": order.delivery_company,
+            "delivery_company_name": None
+            if order.delivery_company is None
+            else self._carriers.get(order.delivery_company),
+            "delivery_tracking_number": order.tracking_number,
+            "delivery_status": order.delivery_status,
+            "sent_at": order.sent_at,
+            "delivered_at": order.delivered_at,
+            "wrong_tracking_number": order.wrong_tracking_number,
+        }
         if record is None:
             return FulfillmentView(
                 product_order_id=order.product_order_id,
@@ -418,6 +451,7 @@ class FulfillmentService:
                 item_id=None if identity is None else identity.item_id,
                 supplier_key=None if identity is None else identity.supplier_key,
                 source_product_id=None if identity is None else identity.source_product_id,
+                **delivery,
             )
         history = tuple(
             SupplierOrderEntryView(
@@ -457,4 +491,9 @@ class FulfillmentService:
             tracking_captured_at=record.tracking_captured_at,
             revision=record.revision,
             history=history,
+            tracking_matches=None
+            if not (order.tracking_number and record.tracking_number)
+            else (order.tracking_number, order.delivery_company)
+            == (record.tracking_number, record.carrier_code),
+            **delivery,
         )

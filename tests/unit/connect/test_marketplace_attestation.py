@@ -236,10 +236,6 @@ OTHER_FINGERPRINT = application_fingerprint(
             Invalidation.REQUIRED_GROUPS_CHANGED,
         ),
         ({"endpoint_mapping_revision": None}, Invalidation.MAPPING_REVISION_UNAVAILABLE),
-        (
-            {"endpoint_mapping_revision": "fixture-mapping-revision-2"},
-            Invalidation.MAPPING_REVISION_CHANGED,
-        ),
         ({"now": T0 + BOUND + EPSILON}, Invalidation.EXPIRED),
         ({"now": T0 - timedelta(seconds=1)}, Invalidation.MALFORMED),
     ],

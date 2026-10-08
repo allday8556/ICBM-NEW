@@ -1,4 +1,4 @@
-"""Persistence of the PromptTemplate and PlatformPolicy stores (ADR-0026 §3), migration 0053.
+"""Persistence of the PromptTemplate and PlatformPolicy stores (ADR-0026 §3), migration 0054.
 
 Two separate families of three tables (Issue #30: no shared storage or version lifecycle):
 

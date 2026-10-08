@@ -22,6 +22,8 @@ from app.platform.core.errors import InputValidationError, NotFoundError
 from app.stages.operate.fulfillment import (
     ADOPTION,
     AWAITING_SUPPLIER_ORDER,
+    DELIVERED,
+    DISPATCHED,
     NOT_FULFILLABLE,
     NOT_PAYED,
     RESOLUTION,
@@ -63,10 +65,15 @@ def _fulfillment(container: Container) -> FulfillmentService:
     )
 
 
-def _ingest(container: Container, *facts: object) -> None:
+def _ingest(container: Container, *facts: object, kind: str = "PAYED", minutes: int = 5) -> None:
     source = FakeSource(
         pages=[
-            ChangePage(tuple(_change(container, f.product_order_id) for f in facts))  # type: ignore[attr-defined]
+            ChangePage(
+                tuple(
+                    _change(container, f.product_order_id, kind=kind, minutes=minutes)  # type: ignore[attr-defined]
+                    for f in facts
+                )
+            )
         ],
         facts={f.product_order_id: f for f in facts},  # type: ignore[attr-defined]
     )
@@ -306,3 +313,118 @@ def test_the_identity_and_the_history_cannot_be_rewritten_or_removed(
         ):
             with pytest.raises(sqlite3.IntegrityError):
                 raw.execute(statement)
+
+
+def test_the_delivery_read_back_shows_the_dispatch_and_the_delivery(
+    container: Container,
+    registration: str,  # noqa: F811
+) -> None:
+    """ADR-0025 §6 (M6.5-B): the order read's delivery is kept on the order and on each change it
+    was observed with; the order is DISPATCHED, then DELIVERED, and the read tracking is compared
+    with the one captured here."""
+    _ingest(container, _facts())
+    service = _fulfillment(container)
+    _record(service)
+    service.capture_tracking(
+        "po-1",
+        carrier_code="CJGLS",
+        tracking_number="6000-1111",
+        expected_revision=1,
+        actor="operator",
+        correlation_id=CID,
+    )
+    sent = container.clock.now() - timedelta(minutes=3)
+    _ingest(
+        container,
+        _facts(
+            status="DELIVERING",
+            delivery_company="CJGLS",
+            tracking_number="6000-1111",
+            delivery_status="DELIVERING",
+            sent_at=sent,
+            wrong_tracking_number=False,
+        ),
+        kind="DISPATCHED",
+        minutes=3,
+    )
+    view = service.view("po-1")
+    assert (view.state, view.tracking_matches, view.delivery_company_name) == (
+        DISPATCHED,
+        True,
+        "CJ대한통운",
+    )
+    assert (view.delivery_tracking_number, view.delivery_status, view.sent_at) == (
+        "6000-1111",
+        "DELIVERING",
+        sent,
+    )
+    (listed,) = _service(container, FakeSource()).overview().orders
+    assert (listed.tracking_number, listed.delivery_status) == ("6000-1111", "DELIVERING")
+    _ingest(
+        container,
+        _facts(
+            status="DELIVERED",
+            delivery_company="CJGLS",
+            tracking_number="6000-1111",
+            delivery_status="DELIVERY_COMPLETION",
+            delivered_at=container.clock.now(),
+        ),
+        kind="DELIVERED",
+        minutes=1,
+    )
+    assert service.view("po-1").state == DELIVERED
+    with sqlite3.connect(container.config.database_path) as raw:
+        rows = raw.execute(
+            "SELECT change_type, tracking_number, delivery_status FROM"
+            " operate_order_status_history ORDER BY changed_at"
+        ).fetchall()
+    assert rows == [
+        ("PAYED", None, None),
+        ("DISPATCHED", "6000-1111", "DELIVERING"),
+        ("DELIVERED", "6000-1111", "DELIVERY_COMPLETION"),
+    ]
+
+
+def test_a_read_tracking_that_differs_or_is_flagged_wrong_is_shown(
+    container: Container,
+    registration: str,  # noqa: F811
+) -> None:
+    _ingest(container, _facts())
+    service = _fulfillment(container)
+    _record(service)
+    service.capture_tracking(
+        "po-1",
+        carrier_code="CJGLS",
+        tracking_number="6000-1111",
+        expected_revision=1,
+        actor="operator",
+        correlation_id=CID,
+    )
+    _ingest(
+        container,
+        _facts(
+            status="DELIVERING",
+            delivery_company="HANJIN",
+            tracking_number="9999",
+            delivery_status="WRONG_INVOICE",
+            wrong_tracking_number=True,
+        ),
+        kind="DISPATCHED",
+        minutes=2,
+    )
+    view = service.view("po-1")
+    assert (view.state, view.tracking_matches, view.wrong_tracking_number) == (
+        DISPATCHED,
+        False,
+        True,
+    )
+    # The order moved on: the tracking captured here can no longer change.
+    with pytest.raises(OrderNotFulfillable):
+        service.capture_tracking(
+            "po-1",
+            carrier_code="HANJIN",
+            tracking_number="9999",
+            expected_revision=2,
+            actor="operator",
+            correlation_id=CID,
+        )

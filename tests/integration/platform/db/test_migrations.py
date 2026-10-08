@@ -188,7 +188,7 @@ CANONICAL_TABLES = (
     "ai_platform_policy_revisions",
     "ai_platform_policy_current",
 )
-HEAD = "0053_ai_prompt_registry"
+HEAD = "0054_ai_prompt_registry"
 
 
 def _url(path: Path) -> str:

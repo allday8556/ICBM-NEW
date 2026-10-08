@@ -106,7 +106,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m6-orders-r1"
+M5_MAPPING_REVISION = "m65-delivery-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -246,8 +246,10 @@ M6_ORDERS = "0050_m6_orders"
 M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
 # M6.5-A (ADR-0025 §3, §4): supplier orders placed by hand, their tracking and history.
 M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
-# ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores, seeded with the v29 registry.
-AI_PROMPT_REGISTRY = "0053_ai_prompt_registry"
+# M6.5-B (ADR-0025 §6): the order's delivery read-back columns.
+M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
+# ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores (seeded by the application).
+AI_PROMPT_REGISTRY = "0054_ai_prompt_registry"
 SCHEMA_HEAD = AI_PROMPT_REGISTRY
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -282,6 +284,7 @@ AFTER_M5 = (
     M6_ORDERS,
     M6_ADOPTED_LISTINGS,
     M65_SUPPLIER_ORDERS,
+    M65_DELIVERY_READBACK,
     AI_PROMPT_REGISTRY,
 )
 REGISTRATION_STATE = re.compile(

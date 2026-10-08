@@ -117,7 +117,15 @@ function row(order, reload, opened) {
     ),
     h('td', {}, order.quantity ?? '—'),
     h('td', {}, won(order.total_payment_amount)),
-    h('td', { 'data-status': order.status ?? 'UNKNOWN' }, STATUS[order.status] ?? order.status ?? '—', order.claim_status ? h('span', { class: 'mini' }, order.claim_status) : null),
+    h(
+      'td',
+      { 'data-status': order.status ?? 'UNKNOWN' },
+      STATUS[order.status] ?? order.status ?? '—',
+      order.claim_status ? h('span', { class: 'mini' }, order.claim_status) : null,
+      // ADR-0025 §6: the tracking the order read shows.
+      order.tracking_number ? h('span', { class: 'mini', 'data-role': 'order-tracking' }, `송장 ${order.tracking_number}`) : null,
+      order.wrong_tracking_number ? h('span', { class: 'chip warn' }, '오류 송장') : null,
+    ),
     h('td', {}, order.recipient_masked ?? '—', order.phone_masked ? h('span', { class: 'mini' }, order.phone_masked) : null),
     h('td', {}, shippingButton(order)),
     fulfillmentCell(order, reload, opened),
