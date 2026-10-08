@@ -108,7 +108,7 @@ The SmartStore dispatch is a marketplace write. It follows ADR-0018 exactly as t
   - issued only by a protected operator command, `icbm live issue-dispatch-grant`, like every grant (ADR-0018 §3.2);
   - it binds the exact product order and the supplier order revision whose carrier and tracking number it will send;
   - it has a finite window and a budget of exactly 1;
-  - it is refused while any dispatch of that order is in flight, applied, or unknown without a read-back that shows it undispatched.
+  - it is refused while any dispatch of that order is in flight, `APPLIED_PROVEN`, confirmed, in `CONFLICT`, or `UNKNOWN`; after a `REJECTED` attempt, only as §5's verification allows.
 - **The layers, checked at send time** in the one unit that opens the attempt and spends the grant:
   - the execution mode is `LIVE`;
   - the brake is `RELEASED`;
@@ -121,13 +121,15 @@ The SmartStore dispatch is a marketplace write. It follows ADR-0018 exactly as t
 - **The durable attempt owner:** `operate_dispatch_attempts`, append-only.
   - An attempt is opened `STARTED` before any byte is sent, and ended exactly once.
   - **`APPLIED_PROVEN`:** only when the documented `200` answer lists the product order in `successProductOrderIds`.
-  - **`REJECTED`:** when it is listed in `failProductOrderInfos`, with its documented code kept. This is the provider's per-order refusal. It is still verified by a read-back before a new grant (below).
+  - **`REJECTED`:** when the documented `200` answer lists the product order in `failProductOrderInfos` (and not in `successProductOrderIds`), with its documented code kept. This is the provider's own per-order statement that this request failed. It is still verified by a read-back before a new grant (below).
   - **`NOT_APPLIED_PROVEN`:** only on the transmission-precluded whitelist.
   - **`UNKNOWN`:** everything else, for example another status, a `200` without the order in either list, a timeout or a redirect.
-  - **An `UNKNOWN` dispatch is never resent.**
+  - **An `UNKNOWN` dispatch is never resent, and no new grant is ever issued for its order** (GPT audit, PR #262). The reference states no idempotency or re-dispatch contract, so nothing observed after it — a missing tracking number or a `PAYED` status included — can prove that it was not applied: the provider may not yet show an applied dispatch.
 - **Verification:** after any attempt that was not `NOT_APPLIED_PROVEN`, the product order is read back through the adopted detail read (§6).
   - The delivery's carrier and tracking number equal the attempt's: this confirms the dispatch (`DISPATCH_CONFIRMED`).
-  - No tracking number, and the status still `PAYED`: the order is undispatched. Only this result opens the way to a new grant.
+  - No tracking number, and the status still `PAYED`:
+    - after a `REJECTED` attempt, the provider's per-order failure and this read-back together show the order undispatched. Only this opens the way to a new grant;
+    - after an `UNKNOWN` attempt, it proves nothing and records nothing. The order stays `확인 필요` until a read-back shows a tracking number (the attempt's, which confirms it, or another, which is `CONFLICT`). The operator finishes such an order in the SmartStore seller center, and ICBM only reads the result.
   - Any other carrier or tracking number: `CONFLICT`, shown for the operator, never repaired.
   - A failed or unreadable read-back records nothing.
 - **What it never does:** it never changes the order's resolution, the supplier order's identity or any evidence, and it never deletes local data.
@@ -151,8 +153,9 @@ What the packet reports as **NOT STATED**:
 
 The adoption pins none of these. Its rules stand on what is stated:
 - one attempt per grant;
-- `UNKNOWN` is never resent;
-- only a read-back resolves.
+- `UNKNOWN` is never resent and opens no new grant;
+- only a read-back that shows a tracking number resolves an `UNKNOWN` attempt;
+- only a documented per-order failure plus a read-back that shows the order undispatched opens a new grant.
 
 The group is taken as 주문 판매자 (the reference files the page under 주문 > 발주/발송 처리), and the first runtime answer is recorded as `R0` evidence. Whether a place-order confirmation (발주 확인) must precede a dispatch is not stated either (codes `104442`, `104443`). If runtime evidence shows it must, its adoption is a separate amendment. M6.5 does not guess it.
 
@@ -229,7 +232,7 @@ M65-02  ICBM never writes to a supplier: the supplier order is placed by hand an
 M65-03  a carrier code is one of the documented codes; a tracking number exists only on a recorded supplier order
 M65-04  carrier and tracking freeze when a dispatch attempt opens
 M65-05  a dispatch is a protected write: LIVE, brake RELEASED, the exact DISPATCH grant (budget 1), the adopted endpoint, retention proven, the order group attested
-M65-06  one product order per dispatch call; an UNKNOWN dispatch is never resent; only a read-back opens a new grant
+M65-06  one product order per dispatch call; an UNKNOWN dispatch is never resent and opens no new grant; a new grant follows only a documented per-order failure confirmed undispatched by a read-back
 M65-07  only the delivery members of §6 are added to the order allow-list; the shipping record and its lifecycle are unchanged
 M65-08  the shipping record's plaintext is opened only by the audited route and never stored or logged by fulfillment
 M65-09  every supplier order and tracking write is revisioned, appended to history and audited by id
