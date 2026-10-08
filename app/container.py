@@ -9,7 +9,10 @@ from datetime import timedelta
 from pathlib import Path
 
 import integrations.suppliers as supplier_packages
+from app.capabilities.ai.composer import PromptComposer
+from app.capabilities.ai.execution import AIExecution
 from app.capabilities.ai.prompts import PromptRegistryService, PromptRegistryStore
+from app.capabilities.ai.provider import NoAIProvider
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -255,6 +258,10 @@ class Container:
     target_policies: TargetPolicyService
     # ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores (Settings' AI Prompt Registry).
     prompt_registry: PromptRegistryService
+    # ADR-0026 AIF-2: the prompt composer and the provider port's execution. No provider is bound
+    # (NoAIProvider): the ai capability reads NOT_CONFIGURED and every execution is refused.
+    ai_composer: PromptComposer
+    ai_execution: AIExecution
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -437,6 +444,12 @@ def build_container(
     diagnostics = DiagnosticsService(
         enabled=config.diagnostics_enabled, db=db, jobs=jobs, audit=audit
     )
+    # ADR-0026 AIF-1, AIF-2: the prompt stores, the composer over them and the provider port. ICBM
+    # runs with no AI provider (ADR-0012 §1): the ai capability never fails core readiness.
+    prompt_store = PromptRegistryStore(db, clock, audit)
+    prompt_registry = PromptRegistryService(prompt_store)
+    ai_composer = PromptComposer(prompt_store)
+    ai_execution = AIExecution(NoAIProvider())
     readiness = ReadinessService(
         db=db,
         worker=worker,
@@ -446,7 +459,7 @@ def build_container(
         clock=clock,
         head_revision=head_revision(),
         ownership=ownership,
-        capabilities=connect.capabilities,
+        capabilities=lambda: [*connect.capabilities(), ai_execution.capability()],
     )
 
     # COLLECT source truth: the content-addressed asset path and the immutable revisions over
@@ -673,7 +686,6 @@ def build_container(
     authoring_revisions = AuthoringRevisionStore(db, clock, audit)
     target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
     target_policies = TargetPolicyService(target_policy_store, accounts)
-    prompt_registry = PromptRegistryService(PromptRegistryStore(db, clock, audit))
     # Official SmartStore leaf-category catalog (owner decision 2026-10-04): one read-only provider
     # capture becomes an immutable local snapshot. Its digest is the taxonomy revision used by the
     # target policy and category metadata.
@@ -1083,6 +1095,8 @@ def build_container(
         authoring_revisions=authoring_revisions,
         target_policies=target_policies,
         prompt_registry=prompt_registry,
+        ai_composer=ai_composer,
+        ai_execution=ai_execution,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(

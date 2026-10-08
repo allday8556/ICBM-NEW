@@ -72,6 +72,13 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
         assert registry.locator(".registry-grid.policies .registry-item").count() == 3
         assert registry.locator(".registry-grid.tasks .registry-item").count() == 6
         assert _card(page, BUNDLE) == "v1 · 기본값"
+        # AIF-2: the AI 기본 설정 card reads the ai capability from readiness: no provider.
+        chip = page.locator("[data-role='ai-capability']")
+        page.wait_for_function(
+            "() => document.querySelector('[data-role=ai-capability]')?.dataset.status"
+        )
+        assert chip.get_attribute("data-status") == "NOT_CONFIGURED"
+        assert chip.inner_text() == "미설정 · AI 공급자 없음"
 
         registry.locator(f".registry-grid.tasks [data-prompt-key='{BUNDLE}']").click()
         editor = page.locator("[data-role='prompt-editor']")

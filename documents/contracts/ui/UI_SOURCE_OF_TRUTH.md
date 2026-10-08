@@ -360,6 +360,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - `현재 계층 저장` and `↺ 현재 계층 초기화` write one revision of the current tab only.
   - The preview is the server's composition of the saved layers.
 - **Other entry points.** Each marketplace tab's `Policy 편집` button opens its platform policy. AI 쇼핑 인사이트's `✨ Shopping Insight Agent 설정` opens its role and task. Both only edit prompts.
+- **AI 공급자 row.** The "AI 기본 설정" card shows a row that reads the readiness `ai` capability (ADR-0026 AIF-2). With no provider it reads `미설정 · AI 공급자 없음`.
 - **Still inert.** The "AI 기본 설정" toggles stay inert placeholders until their stage. No control runs an AI call, because no provider exists.
 
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)

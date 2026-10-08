@@ -331,6 +331,16 @@ Each slice is provider-zero and its own PR, under the Track A loop.
    - the apply command on the register Preparation with the lock and the expected revision.
    - It touches the register owner, so a handoff to Track B precedes it.
 
+**Amendment (2026-10-08, AIF-2).** The `enrich.tasks` job lands with AIF-3, not AIF-2. A job is
+only useful with its result owner, and before AIF-3 it would write nothing. AIF-2 therefore lands:
+- the port and `NoAIProvider`;
+- the `ai` capability in readiness (and in Settings' AI 기본 설정 card);
+- the composer, which adds runtime data and owner-referenced limits, and records the
+  `prompt_version` and `policy_version` it read;
+- the execution, which keeps provenance and classifies every failure.
+
+The limit sources are wired per policy by the stage that first needs them; none is wired yet.
+
 A real provider, the `AIProviderProfile` store, a vendor adapter, and the egress rule amendments a direct adapter would need are **not** in this order. They wait for the owner decisions listed above.
 
 ## 10. Acceptance

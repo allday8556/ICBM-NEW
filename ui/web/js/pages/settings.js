@@ -25,6 +25,7 @@ import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
+const READINESS = '/api/ready';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
 const CAPABILITY = (key) => `/api/v1/connect/marketplaces/${key}/capability`;
 
@@ -123,6 +124,26 @@ function connectionChip(key, state) {
   return h('span', { class: 'chip warn' }, '확인 불가');
 }
 
+// ADR-0026 AIF-2: the ai capability as readiness reports it. No AI provider is configured, so it
+// reads 미설정; this row only shows the server's state.
+function aiCapabilityRow() {
+  const chip = h('span', { class: 'chip', 'data-role': 'ai-capability' }, '확인 중');
+  getJson(READINESS)
+    .then((view) => view.capabilities.find((item) => item.key === 'ai'))
+    .catch(() => null)
+    .then((ai) => {
+      if (!ai) {
+        chip.textContent = '확인 불가';
+        chip.className = 'chip warn';
+        return;
+      }
+      chip.dataset.status = ai.status;
+      chip.textContent = ai.status === 'READY' ? '연결됨' : '미설정 · AI 공급자 없음';
+      chip.className = ai.status === 'READY' ? 'chip good' : 'chip';
+    });
+  return h('div', { class: 'kv' }, h('span', {}, 'AI 공급자'), chip);
+}
+
 function usersTable() {
   return h(
     'table',
@@ -171,6 +192,7 @@ function renderItem(item, state) {
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.usersTable) return usersTable();
+  if (item.aiCapability) return aiCapabilityRow();
   if (item.registry) return promptRegistry(item.registry);
   if (item.promptEditor) {
     const { label, ...context } = item.promptEditor;
