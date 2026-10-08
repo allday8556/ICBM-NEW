@@ -136,3 +136,43 @@ def test_the_executable_hash_is_read_again_every_time(tmp_path: Path) -> None:
     assert exe.stat().st_size == before.st_size
     assert exe.stat().st_mtime_ns == before.st_mtime_ns
     assert sidecar.file_sha256(str(exe)) != first
+
+
+SPREAD = """host: "127.0.0.1"
+port: 8317
+api-keys:
+  - "first-SECRET-1"
+
+  # a comment between the items
+  - "second-SECRET-2"
+claude-api-key:
+  - api-key: "sk-SECRET-3"
+    base-url: "https://example.invalid"
+
+remote-management:
+  secret-key: "SECRET-4"  # trailing
+  disable-auto-update-panel: true
+debug: false # note SECRET-5
+"""
+
+
+def test_every_secret_is_removed_however_it_is_spread_and_from_the_arguments(
+    tmp_path: Path,
+) -> None:
+    """GPT audit of #273: blank and comment lines inside a secret list, a nested mapping under a
+    secret key, comments, and secret-named launch arguments never reach the fingerprint."""
+    kept = sidecar._without_secrets(SPREAD)
+    assert "SECRET" not in kept
+    assert "port: 8317" in kept and "debug: false" in kept
+    assert "disable-auto-update-panel: true" in kept
+    args = " -local-model -password=SECRET-6 --token SECRET-7 -config-name x"
+    redacted = sidecar._redacted_args(sidecar._arguments(f'"exe"{args}'))
+    assert not any("SECRET" in arg for arg in redacted)
+    assert "-local-model" in redacted and "x" in redacted
+    first = sidecar.routing(_process(tmp_path, SPREAD, args))
+    other = sidecar.routing(
+        _process(tmp_path, SPREAD.replace("SECRET", "OTHER"), args.replace("SECRET", "OTHER"))
+    )
+    assert first is not None and other is not None
+    assert first.fingerprint == other.fingerprint
+    assert first.panel_auto_update_disabled is True

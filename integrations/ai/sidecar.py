@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Final, Protocol
 
 _SECRET_LINE: Final = re.compile(r"(keys?|secrets?|tokens?|passwords?)\s*:", re.IGNORECASE)
-_LIST_ITEM: Final = re.compile(r"^\s*-\s")
+_SECRET_NAME: Final = re.compile(r"(key|secret|token|password|auth)", re.IGNORECASE)
 _PANEL_OFF: Final = re.compile(r"^\s*disable-auto-update-panel\s*:\s*true\s*$", re.MULTILINE)
 _LOCAL_MODEL_FLAGS: Final = frozenset({"-local-model", "--local-model"})
 
@@ -128,20 +128,53 @@ def config_path(process: ServingProcess) -> Path:
     return Path(process.path).parent / "config.yaml"
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" 	"))
+
+
 def _without_secrets(text: str) -> str:
-    """The configuration with every secret line removed: a key, secret, token or password, and
-    every list item under such a key."""
+    """The configuration with every secret removed: a key, secret, token or password line, and
+    everything nested under it (list items, mappings, blank and comment lines between them), until
+    the next line at the same or a shallower indentation. Comments are dropped as well, so no
+    secret written in one ever reaches the fingerprint."""
     kept: list[str] = []
-    in_secret_list = False
+    secret_indent: int | None = None
     for line in text.splitlines():
-        if in_secret_list and _LIST_ITEM.match(line):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        in_secret_list = False
-        if _SECRET_LINE.search(line.split("#", 1)[0]):
-            in_secret_list = line.rstrip().endswith(":")
+        if secret_indent is not None:
+            if _indent(line) > secret_indent or (
+                _indent(line) == secret_indent and stripped.startswith("- ")
+            ):
+                continue
+            secret_indent = None
+        content = line.split(" #", 1)[0].rstrip()
+        if _SECRET_LINE.search(content):
+            secret_indent = _indent(line)
             continue
-        kept.append(line.rstrip())
+        kept.append(content)
     return "\n".join(kept).strip()
+
+
+def _redacted_args(args: list[str]) -> list[str]:
+    """The launch arguments with the value of every secret-named flag replaced."""
+    redacted: list[str] = []
+    hide_next = False
+    for arg in args:
+        if hide_next and not arg.startswith("-"):
+            redacted.append("<redacted>")
+            hide_next = False
+            continue
+        hide_next = False
+        name, sep, _ = arg.partition("=")
+        if arg.startswith("-") and _SECRET_NAME.search(name):
+            if sep:
+                redacted.append(f"{name}=<redacted>")
+                continue
+            hide_next = True
+        redacted.append(arg)
+    return redacted
 
 
 def routing(process: ServingProcess) -> RoutingObservation | None:
@@ -149,9 +182,12 @@ def routing(process: ServingProcess) -> RoutingObservation | None:
         text = config_path(process).read_text(encoding="utf-8")
     except OSError:
         return None
-    args = sorted(_arguments(process.command_line))
+    # Redacted in their own order (a flag's value follows it), then sorted.
+    args = _arguments(process.command_line)
     payload = json.dumps(
-        {"config": _without_secrets(text), "args": args}, ensure_ascii=False, sort_keys=True
+        {"config": _without_secrets(text), "args": sorted(_redacted_args(args))},
+        ensure_ascii=False,
+        sort_keys=True,
     )
     return RoutingObservation(
         fingerprint=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
