@@ -91,7 +91,10 @@ export function aiProviderPanel() {
     );
     const approvedExe = content.approved_executable;
     const approvedRouting = content.approved_routing;
-    const exeMatches = Boolean(approvedExe && observed?.sha256 === approvedExe.sha256);
+    // The served executable is the approved one only at the same path and with the same bytes.
+    const exeMatches = Boolean(
+      approvedExe && observed?.sha256 === approvedExe.sha256 && observed?.path?.toLowerCase() === approvedExe.path?.toLowerCase(),
+    );
     const routingMatches = Boolean(approvedRouting && observed?.routing_fingerprint === approvedRouting.fingerprint);
     host.replaceChildren(
       h(

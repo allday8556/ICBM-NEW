@@ -27,8 +27,8 @@ _FIELD: Final = re.compile(
 )
 _SECRET_NAME: Final = re.compile(r"(key|secret|token|password)", re.IGNORECASE)
 _SECRET_FLAG: Final = re.compile(r"(key|secret|token|password|auth)", re.IGNORECASE)
-_PANEL_OFF: Final = re.compile(r"^\s*disable-auto-update-panel\s*:\s*true\s*$", re.MULTILINE)
 _LOCAL_MODEL_FLAGS: Final = frozenset({"-local-model", "--local-model"})
+_TRUE: Final = frozenset({"true", "1", "t"})
 
 
 @dataclass(frozen=True)
@@ -208,6 +208,44 @@ def _redacted_args(args: list[str]) -> list[str]:
     return redacted
 
 
+def _local_model(args: list[str]) -> bool:
+    """Whether ``-local-model`` is in effect: a Go boolean flag, where the last occurrence wins and
+    ``-local-model=false`` turns it off again."""
+    effective = False
+    for arg in args:
+        name, sep, value = arg.partition("=")
+        if name in _LOCAL_MODEL_FLAGS:
+            effective = not sep or value.strip().lower() in _TRUE
+    return effective
+
+
+def _panel_off(text: str) -> bool:
+    """Whether the panel auto-update is off, read strictly: exactly one top-level
+    ``remote-management:`` mapping holding exactly one ``disable-auto-update-panel: true``, and no
+    such key anywhere else. A shadowed, duplicated or misplaced setting is never taken as off."""
+    sections: list[str] = []
+    found: list[tuple[str | None, str]] = []
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        field = _FIELD.match(line)
+        if field is None:
+            continue
+        name = field.group(2).strip("\"'")
+        if _indent(line) == 0 and not field.group(1).strip():
+            sections.append(name)
+            continue
+        if name == "disable-auto-update-panel":
+            value = (field.group(3) or "").strip().strip("\"'").lower()
+            found.append((sections[-1] if sections else None, value))
+    return (
+        sections.count("remote-management") == 1
+        and len(found) == 1
+        and found[0] == ("remote-management", "true")
+    )
+
+
 def routing(process: ServingProcess) -> RoutingObservation | None:
     try:
         text = config_path(process).read_text(encoding="utf-8")
@@ -222,6 +260,6 @@ def routing(process: ServingProcess) -> RoutingObservation | None:
     )
     return RoutingObservation(
         fingerprint=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
-        local_model=bool(_LOCAL_MODEL_FLAGS & set(args)),
-        panel_auto_update_disabled=bool(_PANEL_OFF.search(text)),
+        local_model=_local_model(args),
+        panel_auto_update_disabled=_panel_off(text),
     )

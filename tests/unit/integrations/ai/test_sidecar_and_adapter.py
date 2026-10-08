@@ -207,3 +207,19 @@ def test_an_http_error_from_the_sidecar_is_never_retried_automatically(
     finally:
         server.server_close()
     assert (answer.error_kind, answer.error_code) == ("UNKNOWN", "AI_SIDECAR_HTTP_ERROR")
+
+
+def test_the_update_switches_are_read_as_they_take_effect() -> None:
+    """GPT audit of #273: a shadowed, duplicated or misplaced panel setting is never "off", and a
+    later ``-local-model=false`` turns the flag off again."""
+    good = "port: 1\nremote-management:\n  allow-remote: false\n  disable-auto-update-panel: true\n"
+    assert sidecar._panel_off(good) is True
+    assert sidecar._panel_off(good + "  disable-auto-update-panel: false\n") is False
+    assert sidecar._panel_off(good + "remote-management:\n  allow-remote: true\n") is False
+    assert sidecar._panel_off("other:\n  disable-auto-update-panel: true\n") is False
+    assert sidecar._panel_off("disable-auto-update-panel: true\n") is False
+    assert sidecar._panel_off(good.replace("true\n", "false\n")) is False
+    assert sidecar._local_model(["-local-model"]) is True
+    assert sidecar._local_model(["-local-model", "-local-model=false"]) is False
+    assert sidecar._local_model(["--local-model=true"]) is True
+    assert sidecar._local_model([]) is False
