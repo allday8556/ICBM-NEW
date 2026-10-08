@@ -1193,9 +1193,20 @@ td.no-data {
   font-family: inherit;
 }
 
-@media (max-width: 1280px), (orientation: portrait) {
+/* v29's own bands: a landscape screen narrower than 1280px stacks the list and its side panel;
+   a portrait screen wider than 900px keeps them side by side. */
+@media (max-width: 1280px) and (orientation: landscape), (max-width: 1199px) {
   .section-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* v29 keeps the list and its side panel together from 901px in portrait; the work list here has
+   more columns than v29's, so it does so from 1200px, where the list still fits its half. */
+@media (orientation: portrait) and (min-width: 1200px) {
+  .section-grid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.75fr);
+    gap: var(--space-3);
   }
 }
 
@@ -1331,6 +1342,64 @@ td.no-data {
   align-items: center;
   margin-bottom: var(--space-5);
   padding: var(--space-4);
+}
+
+/* v29 통합DB (owner decision 2026-10-07): the five cards, the filter row and the detail's
+   thumbnail title. Slots with no source read 데이터 없음. */
+.page-kpis {
+  margin-bottom: var(--space-4);
+}
+
+.db-toolbar .field {
+  min-width: 140px;
+  height: 36px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  background: var(--color-input);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: var(--fs-lg);
+}
+
+.db-toolbar select[data-inert] {
+  cursor: pointer;
+}
+
+.db-list .db-row-meta {
+  margin-top: 2px;
+}
+
+/* The detail stays within one screen (its state is judged scrolled into view below the sticky
+   topbar); v29's price, channel and tag groups are their own card under it. */
+.db-side {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Room below the workspace for the fixed registration status card (ADR-0014 §28.5): the detail's
+   last rows can always be scrolled above it, so the card covers nothing. */
+.db-workspace {
+  padding-bottom: 140px;
+}
+
+.kpi strong.no-data {
+  color: var(--color-text-faint);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-regular);
+}
+
+.db-detail-title {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.db-detail-title .db-detail-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .db-toolbar input[type='search'] {
@@ -1481,4 +1550,330 @@ td.no-data {
   .db-pager {
     padding: var(--space-4);
   }
+}
+
+/* v29 등록관리 (owner decision 2026-10-07): the cards, the 등록 이력 row, the 등록 대기 목록 beside
+   플랫폼별 등록 설정, then each section on screen in v29's order. */
+.register-utility-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.register-layout {
+  margin-bottom: var(--space-4);
+}
+
+.register-queue .register-queue-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.register-queue .register-readiness {
+  margin-top: var(--space-5);
+}
+
+.register-settings .register-platform-tabs {
+  margin-bottom: var(--space-3);
+}
+
+.register-settings .toggle[data-inert] {
+  cursor: pointer;
+}
+
+.register-section {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.register-section-title {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-title);
+}
+
+/* v29 portrait (its own rules for 통합DB and 등록관리): the list takes the full width and the
+   detail or settings move under it as one wide card of columns. */
+@media (orientation: portrait) {
+  .register-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .db-detail[data-state='ready'] {
+    display: grid;
+    grid-template-columns: minmax(250px, 1.1fr) repeat(3, minmax(180px, 1fr));
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .db-detail[data-state='ready'] > h3,
+  .db-detail[data-state='ready'] > .db-items,
+  .db-detail[data-state='ready'] > [data-role='product-review'],
+  .db-detail[data-state='ready'] > .db-selection,
+  .db-detail[data-state='ready'] > .detail-actions,
+  .db-detail[data-state='ready'] > .db-target,
+  .db-detail[data-state='ready'] > .db-draft-form {
+    grid-column: 1 / -1;
+  }
+
+  .db-detail[data-state='ready'] > .detail-title {
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    border-bottom: 0;
+  }
+
+  .db-detail[data-state='ready'] > .detail-group:not(.db-items):not(.db-draft-form):not([data-role='product-review']) {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .db-v29-groups {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .db-v29-groups > h3,
+  .db-v29-groups > .detail-actions {
+    grid-column: 1 / -1;
+  }
+
+  .db-v29-groups > .detail-group {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .db-v29-groups > .detail-group:first-of-type {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .db-v29-groups > .detail-actions {
+    justify-content: flex-end;
+    border-top: 1px solid var(--color-line-soft);
+    padding-top: var(--space-5);
+  }
+
+  .register-settings {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.75fr) minmax(220px, 1fr) minmax(220px, 1fr);
+    gap: 0 18px;
+    align-items: start;
+  }
+
+  .register-settings > h3 {
+    grid-column: 1 / -1;
+  }
+
+  .register-settings > .register-platform-tabs {
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    flex-direction: column;
+    align-items: stretch;
+    margin: 0;
+    border: 0;
+    border-right: 1px solid var(--color-line-soft);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .register-settings > .detail-group {
+    border-bottom: 0;
+    border-left: 1px solid var(--color-line-soft);
+    padding: var(--space-3) 0 var(--space-3) 18px;
+  }
+
+  .register-settings > .note {
+    grid-column: 2 / -1;
+    margin-top: var(--space-3);
+  }
+}
+
+.register-platform-tabs button {
+  text-align: left;
+}
+
+.register-platform-tabs button[aria-selected='true'] {
+  border-left: 2px solid var(--color-info);
+  background: var(--color-info-bg);
+}
+
+/* v29 대시보드 (owner decision 2026-10-07): the cards, the three panels, today's inflow and the
+   two bottom panels. A slot with no source reads 데이터 없음; the ring holds no breakdown. */
+.dashboard-panels {
+  display: grid;
+  grid-template-columns: 1.25fr 1.05fr 0.85fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.dashboard-bottom {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.inline-link {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-sub);
+  font: inherit;
+  font-size: var(--fs-lg);
+  cursor: pointer;
+}
+
+.inline-link:hover {
+  color: var(--color-info);
+}
+
+.prod {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.thumb {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #e9edf0, #c9d1d8);
+  color: #44515d;
+  font-size: 14px;
+}
+
+.prod-title {
+  max-width: 240px;
+  overflow: hidden;
+  font-weight: var(--fw-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.donut-wrap {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin: var(--space-4) 0;
+}
+
+.donut {
+  position: relative;
+  flex: 0 0 auto;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: var(--color-neutral-bg);
+}
+
+.donut::after {
+  content: '';
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: var(--color-panel);
+}
+
+.donut-label {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+.donut-label b {
+  font-size: 20px;
+}
+
+.legend {
+  display: grid;
+  flex: 1;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.legend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+}
+
+.dashboard-order-counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.alert-list {
+  display: grid;
+}
+
+.dashboard-traffic .traffic-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.traffic-mini-grid > div {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+}
+
+.dashboard-chart {
+  display: grid;
+  place-items: center;
+  height: 175px;
+  margin-top: var(--space-4);
+  border-bottom: 1px solid var(--color-line-soft);
+  border-left: 1px solid var(--color-line-soft);
+}
+
+@media (orientation: portrait) and (min-width: 901px) {
+  .dashboard-panels {
+    grid-template-columns: 1.6fr 1fr;
+  }
+
+  .dashboard-panels > .panel:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1280px) and (orientation: landscape), (max-width: 900px) {
+  .dashboard-panels,
+  .dashboard-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-traffic .traffic-mini-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.dashboard-order-counts b.no-data,
+.traffic-mini-grid b.no-data {
+  font-size: var(--fs-lg);
 }
