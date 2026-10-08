@@ -19,6 +19,7 @@ rate limit ends the run without failing any registration.
 
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -52,6 +53,8 @@ NOT_FOUND: Final = "NOT_FOUND"
 READ_FAILED: Final = "READ_FAILED"
 # A provider answer the normalizer could not read, or a local failure while recording it.
 UNREADABLE: Final = "OPERATE_LISTING_UNREADABLE"
+# The pause between two provider reads of one pass (ICBM policy; no rate is documented).
+PROVIDER_PAUSE_S: Final = 1.0
 DELETED_SALE_STATUS: Final = "DELETE"
 NOT_FOUND_STATUS: Final = 404
 ACTOR: Final = "operate.listing_sync"
@@ -202,6 +205,8 @@ class ListingSyncService:
         marketplace_key: str = "smartstore",
         seller_code: Callable[[str], str] | None = None,
         adoptions: Any = None,
+        pause_s: float = PROVIDER_PAUSE_S,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -215,6 +220,9 @@ class ListingSyncService:
         self._seller_code = seller_code or (lambda identity: identity)
         # M6-E (ADR-0024 §4): the adopted listings, read back in the same pass.
         self._adoptions = adoptions
+        self._pause_s = pause_s
+        self._sleep = sleep
+        self._last_read: float | None = None
         # The marketplace whose read-back this reader is (only SmartStore is wired).
         self._marketplace_key = marketplace_key
         self._lock = threading.Lock()
@@ -310,7 +318,7 @@ class ListingSyncService:
         written = False
         try:
             try:
-                retained = self._reader.read(marketplace_product_id=record.marketplace_product_id)
+                retained = self._read(record.marketplace_product_id)
             except AppError as exc:
                 if exc.error_class is ErrorClass.RATE_LIMITED:
                     return RATE_LIMITED
@@ -343,6 +351,18 @@ class ListingSyncService:
                 self._observe(run_id, record, READ_FAILED, error_code=UNREADABLE)
             return READ_FAILED
 
+    def _read(self, marketplace_product_id: str) -> Mapping[str, Any]:
+        """One paced provider read: it waits out the pause after the previous read (ICBM policy,
+        as order ingest; unpaced reads met 429 after 16 listings on 2026-10-08)."""
+        if self._last_read is not None:
+            waited = time.monotonic() - self._last_read
+            if waited < self._pause_s:
+                self._sleep(self._pause_s - waited)
+        try:
+            return self._reader.read(marketplace_product_id=marketplace_product_id)
+        finally:
+            self._last_read = time.monotonic()
+
     def _visit_adopted(self, run_id: str, adoption: Any, correlation_id: str) -> str:
         """Read one adopted listing back (ADR-0024 §4): OBSERVED, NOT_FOUND, READ_FAILED or
         RATE_LIMITED. Provider evidence of removal ends the adoption; nothing is ever written to
@@ -351,7 +371,7 @@ class ListingSyncService:
         written = False
         try:
             try:
-                retained = self._reader.read(marketplace_product_id=adoption.marketplace_product_id)
+                retained = self._read(adoption.marketplace_product_id)
             except AppError as exc:
                 if exc.error_class is ErrorClass.RATE_LIMITED:
                     return RATE_LIMITED
