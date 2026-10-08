@@ -536,6 +536,12 @@ ADAPTIVE_TABLES = (
     "operate_order_adoption_links",
     "operate_supplier_orders",
     "operate_supplier_order_history",
+    "ai_prompt_templates",
+    "ai_prompt_template_revisions",
+    "ai_prompt_template_current",
+    "ai_platform_policies",
+    "ai_platform_policy_revisions",
+    "ai_platform_policy_current",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

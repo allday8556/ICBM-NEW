@@ -119,6 +119,82 @@ Each registry task names the role it composes with. The foundation stores and ed
 - `prompt_version` is the tuple of every composed layer's revision. `policy_version` is the PlatformPolicy revision plus the revisions of the canonical owners it referenced.
 - This resolves the ADR-0012 §6 note that prompt_version covers every composed layer.
 
+### 3.1 Amendment (2026-10-08, AIF-1): the registry is the v29 prototype's own
+
+The owner asked that the foundation be built as already planned. That plan is the layered prompt
+system of the approved v29 prototype (`design/prototypes/icbm_redesign_test_v29_final.html`):
+- `ICBM_GLOBAL_RULES_V2`
+- `ROLE_REGISTRY`
+- `PLATFORM_POLICY_REGISTRY`
+- `TASK_REGISTRY`
+- the `promptModal` editor and its `composePromptPreview`
+
+The Settings card listed in §3 is one view of that system. This amendment supersedes three parts of
+§3: the registry table, the split of `통합 상품 추천` into four prompts, and the seed and audit
+wording.
+
+**Entries.** The store keys are the prototype's ids (`app/capabilities/ai/registry.py`):
+
+| Kind | Count | Notes |
+| --- | --- | --- |
+| Global rule set | 1 | `ICBM_GLOBAL_RULES_V2` |
+| Roles | 6 | including `ROLE_SHOPPING_INSIGHT_V1` |
+| Platform policies | 4 | including `POLICY_COMMON_MARKET_V1`, the policy of a task with no marketplace yet |
+| Tasks | 15 | |
+
+- Each task names the role it composes with, as the prototype's buttons pair them. Two tasks that
+  no prototype button calls have no role.
+- Settings shows the entries v29 shows there: the global rules, 5 roles, 3 platform policies and
+  6 tasks.
+- The AI 쇼핑 인사이트 header button opens its role and task. Each marketplace tab's `Policy 편집`
+  button opens its policy.
+
+**Tasks.** A task revision holds the prototype's four fields:
+- `mode`, the task's name, which is never edited;
+- `prompt`;
+- `variables`, the input contract;
+- `output`, the OUTPUT_SCHEMA.
+
+**The bundle task.** `TASK_PRODUCT_RECOMMEND_BUNDLE_V1` stays one prompt. Its output schema already
+returns `product_name`, `tags`, `category` and `options` as separate objects. AIF-3 records each
+object as its own task state, so the four tasks share one request and keep independent states
+(Canonical §7.1).
+
+**Editing.** The editor has the prototype's seven tabs:
+- 공통 규칙
+- 역할
+- 플랫폼 Policy
+- 작업
+- 출력 형식
+- 입력 변수
+- 조립 미리보기
+
+Each tab saves or resets only its own field, as a new revision against the revision it was read
+from. A reset appends a revision whose field equals the seed's. History is never deleted.
+
+**Seeds.** Seeds are the prototype's texts, verbatim (`app/capabilities/ai/seed_v29.json`), as
+revision 1 with `origin = SEED` and `seed_version = v29`.
+- Migration 0054 only creates the stores, because every canonical table starts empty (M0
+  acceptance).
+- The application writes the seed when it starts on a database that lacks it, in one unit of work.
+  A restart writes nothing.
+- A seed is starting data, not an operator action, so it writes no audit event. Each seed revision
+  names its origin (`SEED`), its seed version and `system:seed`.
+- Runtime reads the stores, never the seed file.
+- Every operator save (`OPERATOR`) and reset (`RESET`) is audited without its text.
+
+**Composition.** The composition is the prototype's preview layout. The global rules come first,
+then these sections in order:
+- `ROLE_PROFILE`
+- `PLATFORM_POLICY`
+- `TASK_MODE`, followed by the task prompt
+- `INPUT_VARIABLES`
+- `OUTPUT_SCHEMA`
+- `RUNTIME_DATA`
+
+AIF-1 composes the saved layers with the runtime-data placeholder. AIF-2 fills that placeholder and
+adds the platform limits a policy references.
+
 ## 4. The provider port and its execution
 
 **The port.** This is the `AIProvider` port of ADR-0012 §1.

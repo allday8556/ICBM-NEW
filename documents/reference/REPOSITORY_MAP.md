@@ -67,6 +67,11 @@ The supplier common-image screen (A-NEXT2a, Issue #231) added the 수집관리 c
 `ui/web/js/components/common-images.js`.
 The registration editor (owner decision 2026-10-08, phase 1) added the 등록관리 page
 `ui/web/js/pages/register-editor.js` and one integration suite.
+The AI authoring foundation's AIF-1 (ADR-0026) added the AI capability `app/capabilities/ai/` (the v29 prompt
+registry catalog and its seed `seed_v29.json`, the PromptTemplate and PlatformPolicy stores and their
+models), the routes
+`app/interface/api/routes/ai.py`, migration `0054`, the Settings component
+`ui/web/js/components/prompt-registry.js` and two integration suites under `tests/integration/ai/`.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -94,10 +99,10 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 314 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 44 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 25 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 83 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/` | 321 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 49 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/interface/` | 26 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 84 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 157 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -120,13 +125,13 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 47 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 26 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 291 | tests |
+| `tests/` | 294 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 119 | integration tests by runtime owner |
+| `tests/integration/` | 122 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 105 | unit tests by runtime owner |
-| `ui/` | 62 | operator clients: the served web client and the capture extension |
+| `ui/` | 63 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 53 | the served web client |
+| `ui/web/` | 54 | the served web client |

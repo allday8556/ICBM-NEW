@@ -350,6 +350,18 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
 
+### 설정 › AI / Prompt (ADR-0026 AIF-1)
+
+- **AI Prompt Registry.** The card keeps v29's four sections: 공통 규칙, 역할, 플랫폼 정책 and 작업.
+  - Each entry reads its current revision from the server's PromptTemplate or PlatformPolicy store and shows it as `v{n} · 기본값` or `v{n} · 사용자 수정본`.
+  - Clicking an entry opens the v29 layered prompt editor on that entry's role × policy × task.
+- **Editor.** The editor has v29's seven tabs: 공통 규칙, 역할 Role, 플랫폼 Policy, 작업 Task, 출력 형식, 입력 변수 and 조립 미리보기.
+  - The state chip reads 기본값, 사용자 수정본 or 저장되지 않은 변경.
+  - `현재 계층 저장` and `↺ 현재 계층 초기화` write one revision of the current tab only.
+  - The preview is the server's composition of the saved layers.
+- **Other entry points.** Each marketplace tab's `Policy 편집` button opens its platform policy. AI 쇼핑 인사이트's `✨ Shopping Insight Agent 설정` opens its role and task. Both only edit prompts.
+- **Still inert.** The "AI 기본 설정" toggles stay inert placeholders until their stage. No control runs an AI call, because no provider exists.
+
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 
 v29 has no board for Issue #219's supplier common images; they live with the supplier they belong

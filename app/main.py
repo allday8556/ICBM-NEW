@@ -21,6 +21,7 @@ from app.container import build_container
 from app.interface.api.errors import install_error_handlers
 from app.interface.api.middleware import ClientHeaderGuard, RequestContextMiddleware
 from app.interface.api.routes import (
+    ai,
     collect,
     collect_extension,
     connect,
@@ -137,6 +138,12 @@ def create_app(
                 services.shadow_evidence.on_startup()
             except Exception:
                 logger.exception("app.shadow_startup_failed")
+            # ADR-0026 AIF-1: the v29 prompt registry seed of every entry the stores lack. A
+            # failure is logged and never keeps the application from serving.
+            try:
+                services.prompt_registry.seed_on_startup()
+            except Exception:
+                logger.exception("app.ai_prompt_seed_failed")
             await services.worker.start()
             # Gate 2 (ADR-0016 §4): every review producer's startup full reconciliation, before
             # the application serves, then its bounded periodic pass.
@@ -188,6 +195,7 @@ def create_app(
     app.include_router(product_images.router)
     app.include_router(register.router)
     app.include_router(settings.router)
+    app.include_router(ai.router)
     app.include_router(review.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.

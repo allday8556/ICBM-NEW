@@ -78,6 +78,8 @@ HARD_ZERO_MODULES = (
     "azure.cognitiveservices",
     # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
+    # ADR-0026 (AIF-02): the AI capability, its prompt registry and later its provider port.
+    "app.capabilities.ai",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace",

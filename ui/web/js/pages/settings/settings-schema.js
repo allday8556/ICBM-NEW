@@ -16,26 +16,32 @@ const field = (label, id, extra = {}) => ({ field: label, id, ...extra });
 const toggle = (label, id) => ({ toggle: label, id });
 const note = (text) => ({ note: text });
 
+// The v29 AI Prompt Registry as Settings shows it (ADR-0026 §3, §8). Each card opens the layered
+// prompt editor on the role, platform policy and task the prototype pairs it with; the text and
+// revision of every entry come from the server's prompt stores.
+const MD = 'ROLE_PRODUCT_MD_V1';
+const BUNDLE = 'TASK_PRODUCT_RECOMMEND_BUNDLE_V1';
+const REMATCH = 'TASK_CATEGORY_REMATCH_V1';
 const REGISTRY = {
   roles: [
-    ['수집 검증 AI', 'DOM·가격·배송비·옵션 근거 검증'],
-    ['상품/MD AI', '상품명·태그·카테고리·옵션 정리'],
-    ['커머스 운영 AI', '주문 상태·다음 처리·운영 안내'],
-    ['CS 응대 AI', '문의 분석·고객 답변 초안'],
-    ['판매상태 검증 AI', 'BUY/CART·품절 근거 교차검증'],
+    { label: '수집 검증 AI', help: 'DOM·가격·배송비·옵션 근거 검증', role: 'ROLE_DATA_VALIDATOR_V1', task: 'TASK_EXTRACT_CORRECT_V1' },
+    { label: '상품/MD AI', help: '상품명·태그·카테고리·옵션 정리', role: MD, task: BUNDLE },
+    { label: '커머스 운영 AI', help: '주문 상태·다음 처리·운영 안내', role: 'ROLE_COMMERCE_OPS_V1', task: 'TASK_ORDER_RESPONSE_ASSIST_V1' },
+    { label: 'CS 응대 AI', help: '문의 분석·고객 답변 초안', role: 'ROLE_CS_V1', task: 'TASK_INQUIRY_REPLY_V1' },
+    { label: '판매상태 검증 AI', help: 'BUY/CART·품절 근거 교차검증', role: 'ROLE_STOCK_VALIDATOR_V1', task: 'TASK_SOLDOUT_JUDGMENT_V1' },
   ],
   policies: [
-    ['스마트스토어 정책', '추천/제외 태그 ID · SEO · 공식 데이터 우선'],
-    ['쿠팡 정책', '카테고리 추천 → AI 재검증 · 필수 옵션 확인'],
-    ['11번가 정책', '실제 카테고리 ID 범위 · 등록 정책'],
+    { label: '스마트스토어 정책', help: '추천/제외 태그 ID · SEO · 공식 데이터 우선', policy: 'POLICY_NAVER_V1', role: MD, task: BUNDLE },
+    { label: '쿠팡 정책', help: '카테고리 추천 → AI 재검증 · 필수 옵션 확인', policy: 'POLICY_COUPANG_V1', role: MD, task: REMATCH },
+    { label: '11번가 정책', help: '실제 카테고리 ID 범위 · 등록 정책', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH },
   ],
   tasks: [
-    ['추출 보정', '수집관리'],
-    ['통합 상품 추천', '통합DB'],
-    ['카테고리 재추천', '등록관리'],
-    ['주문 운영 보조', '주문관리'],
-    ['문의 답변', '문의관리'],
-    ['품절 판정', '품절확인'],
+    { label: '추출 보정', help: '수집관리', role: 'ROLE_DATA_VALIDATOR_V1', task: 'TASK_EXTRACT_CORRECT_V1' },
+    { label: '통합 상품 추천', help: '통합DB', role: MD, task: BUNDLE },
+    { label: '카테고리 재추천', help: '등록관리', role: MD, task: REMATCH },
+    { label: '주문 운영 보조', help: '주문관리', role: 'ROLE_COMMERCE_OPS_V1', task: 'TASK_ORDER_RESPONSE_ASSIST_V1' },
+    { label: '문의 답변', help: '문의관리', role: 'ROLE_CS_V1', task: 'TASK_INQUIRY_REPLY_V1' },
+    { label: '품절 판정', help: '품절확인', role: 'ROLE_STOCK_VALIDATOR_V1', task: 'TASK_SOLDOUT_JUDGMENT_V1' },
   ],
 };
 
@@ -369,7 +375,7 @@ export const SUBTABS = {
               items: [
                 toggle('실제 네이버 categoryId 범위 제한', 'smartstore.category_limit'),
                 toggle('AI 카테고리 검증', 'smartstore.category_ai'),
-                { button: '네이버 Policy 편집', variant: 'ai' },
+                { promptEditor: { label: '네이버 Policy 편집', policy: 'POLICY_NAVER_V1', role: MD, task: REMATCH } },
               ],
             },
           ],
@@ -455,7 +461,7 @@ export const SUBTABS = {
                 toggle('쿠팡 카테고리 추천 결과 사용', 'coupang.category_recommend'),
                 toggle('ProductFacts AI 재검증', 'coupang.ai_validate'),
                 toggle('저신뢰 자동확정 금지', 'coupang.low_confidence_block'),
-                { button: '쿠팡 Policy 편집', variant: 'ai' },
+                { promptEditor: { label: '쿠팡 Policy 편집', policy: 'POLICY_COUPANG_V1', role: MD, task: REMATCH } },
               ],
             },
           ],
@@ -538,7 +544,7 @@ export const SUBTABS = {
           cards: [
             {
               title: '상품 / 카테고리',
-              items: [toggle('실제 categoryId 후보 내 선택', 'st11.category_limit'), { button: '11번가 Policy 편집', variant: 'ai' }],
+              items: [toggle('실제 categoryId 후보 내 선택', 'st11.category_limit'), { promptEditor: { label: '11번가 Policy 편집', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH } }],
             },
           ],
         },

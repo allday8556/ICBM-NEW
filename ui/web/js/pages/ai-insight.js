@@ -1,7 +1,7 @@
 import { h } from '../core/dom.js';
 import { dotDate } from '../core/format.js';
-import { markInert } from '../core/inert.js';
 import { datePill } from '../components/page-head.js';
+import { openPromptEditor } from '../components/prompt-registry.js';
 import { contractPage } from './contract-page.js';
 
 export default contractPage({
@@ -12,7 +12,18 @@ export default contractPage({
   icon: '✨',
   help: '홈쇼핑 방송 일정, 검색 데이터, 추천 아이템을 한 화면에서 보고 소싱·등록 전략을 빠르게 결정하세요.',
   headActions: (view) => [
-    markInert(h('button', { type: 'button', class: 'btn ai' }, '✨ Shopping Insight Agent 설정')),
+    // Opens the agent's role and task in the prompt editor (ADR-0026 AIF-1), as v29 does. It edits
+    // prompts only: no AI provider exists, and nothing here runs an analysis.
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn ai',
+        'data-prompt-key': 'ROLE_SHOPPING_INSIGHT_V1',
+        onclick: () => openPromptEditor({ role: 'ROLE_SHOPPING_INSIGHT_V1', task: 'TASK_TREND_ANALYSIS_V1', layer: 'role' }),
+      },
+      '✨ Shopping Insight Agent 설정',
+    ),
     datePill(`${dotDate(view.meta.generated_at)}　오늘 기준`),
   ],
   empty: {

@@ -181,8 +181,14 @@ CANONICAL_TABLES = (
     "operate_order_adoption_links",
     "operate_supplier_orders",
     "operate_supplier_order_history",
+    "ai_prompt_templates",
+    "ai_prompt_template_revisions",
+    "ai_prompt_template_current",
+    "ai_platform_policies",
+    "ai_platform_policy_revisions",
+    "ai_platform_policy_current",
 )
-HEAD = "0053_m65_delivery_readback"
+HEAD = "0054_ai_prompt_registry"
 
 
 def _url(path: Path) -> str:
