@@ -80,12 +80,23 @@ AI_PROFILE_MISSING: Final = "AI_PROFILE_MISSING"
 AI_EXECUTABLE_NOT_SERVING: Final = "AI_EXECUTABLE_NOT_SERVING"
 AI_EXECUTABLE_MISMATCH: Final = "AI_EXECUTABLE_MISMATCH"
 AI_ROUTING_MISMATCH: Final = "AI_ROUTING_MISMATCH"
+AI_ROUTING_UNREADABLE: Final = "AI_ROUTING_UNREADABLE"
 AI_ROUTING_UPDATES_ON: Final = "AI_ROUTING_UPDATES_ON"
 AI_DATA_TRANSFER_NOT_APPROVED: Final = "AI_DATA_TRANSFER_NOT_APPROVED"
 AI_DAILY_CAP_REACHED: Final = "AI_DAILY_CAP_REACHED"
 AI_SIDECAR_KEY_UNREADABLE: Final = "AI_SIDECAR_KEY_UNREADABLE"
 
 Action = Literal["CONFIGURE", "APPROVE_EXECUTABLE", "APPROVE_ROUTING", "DATA_TRANSFER"]
+
+# The ADR-0012 §8 runtime state of a fully approved profile, by the reason a call is refused.
+# A reached daily cap is the profile's policy, not the sidecar's state: the runtime stays
+# AVAILABLE while the capability is DEGRADED (ADR-0027 §7).
+_RUNTIME_STATE: Final = {
+    AI_EXECUTABLE_NOT_SERVING: "UNAVAILABLE",
+    AI_ROUTING_UNREADABLE: "UNAVAILABLE",
+    AI_EXECUTABLE_MISMATCH: "VERSION_MISMATCH",
+    AI_ROUTING_MISMATCH: "ROUTING_CONFIG_MISMATCH",
+}
 
 
 def _canonical(value: Any) -> str:
@@ -338,12 +349,19 @@ class ProfiledProvider:
             approved["sha256"],
         ):
             return AI_EXECUTABLE_MISMATCH
-        if (
-            observed.routing is None
-            or observed.routing.fingerprint != content["approved_routing"]["fingerprint"]
-        ):
+        if observed.routing is None:
+            return AI_ROUTING_UNREADABLE
+        if observed.routing.fingerprint != content["approved_routing"]["fingerprint"]:
             return AI_ROUTING_MISMATCH
         return None
+
+    def runtime_state(self) -> str:
+        """``NOT_CONFIGURED`` until every approval exists, then ADR-0012 §8's runtime state."""
+        current = self._store.current()
+        if current is None or _missing(current.content):
+            return "NOT_CONFIGURED"
+        problem = self._problem(current.content, self.observe(_port(current.content["endpoint"])))
+        return "AVAILABLE" if problem is None else _RUNTIME_STATE[problem]
 
     def _today(self) -> str:
         return self._clock.now().date().isoformat()
@@ -464,6 +482,7 @@ class ObservedView(BaseModel):
 
 class ProviderView(BaseModel):
     capability: CapabilityReport
+    runtime_state: str
     current_revision: str | None
     revision_no: int | None
     content: dict[str, Any] | None
@@ -495,6 +514,7 @@ class ProviderProfileService:
             )
         return ProviderView(
             capability=self._provider.capability_report(),
+            runtime_state=self._provider.runtime_state(),
             current_revision=None if current is None else current.revision_id,
             revision_no=None if current is None else current.revision_no,
             content=None if current is None else dict(current.content),

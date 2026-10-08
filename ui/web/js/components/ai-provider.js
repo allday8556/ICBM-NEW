@@ -17,6 +17,7 @@ const DETAIL_COPY = {
   AI_EXECUTABLE_NOT_SERVING: '승인한 실행 파일이 지금 실행 중이 아닙니다',
   AI_EXECUTABLE_MISMATCH: '지금 실행 중인 파일이 승인한 파일과 다릅니다',
   AI_ROUTING_MISMATCH: '지금 라우팅 설정이 승인한 설정과 다릅니다',
+  AI_ROUTING_UNREADABLE: '실행 중인 CLIProxyAPI의 설정 파일을 읽을 수 없습니다',
   AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
 };
 const MISSING_COPY = { executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송' };
@@ -95,6 +96,7 @@ export function aiProviderPanel() {
         h('span', {}, '상태'),
         h('span', { class: `chip ${ready ? 'good' : 'warn'}`, 'data-role': 'ai-provider-state', 'data-status': view.capability.status }, stateText(view.capability)),
       ),
+      row('런타임 상태', h('span', { 'data-role': 'ai-provider-runtime' }, view.runtime_state)),
       row('오늘 호출', `${view.calls_today} / ${content.daily_call_cap ?? '—'}`),
       h(
         'form',

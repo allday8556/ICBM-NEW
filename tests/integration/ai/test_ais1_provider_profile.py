@@ -146,8 +146,9 @@ def test_a_profile_is_ready_only_after_every_approval(world: dict[str, Any]) -> 
     assert view.capability.status is CapabilityStatus.NOT_CONFIGURED
     assert view.capability.detail == "not approved: executable, routing, data_transfer"
     assert world["provider"].requested_identity() is None
+    assert view.runtime_state == "NOT_CONFIGURED"
     ready = _approve_all(service, view)
-    assert ready.capability.status is CapabilityStatus.READY
+    assert (ready.capability.status, ready.runtime_state) == (CapabilityStatus.READY, "AVAILABLE")
     identity = world["provider"].requested_identity()
     assert identity is not None
     assert (identity.requested_provider, identity.requested_model) == ("cliproxyapi", "gpt-5.6-sol")
@@ -259,24 +260,36 @@ def test_a_mismatch_unserved_sidecar_or_reached_cap_refuses_before_anything_is_s
     _approve_all(service)
     complete: FakeComplete = world["complete"]
     approved = world["probe"].process
-    for process, code in (
-        (_serving(world["tmp"], body=b"another binary"), "AI_EXECUTABLE_MISMATCH"),
-        (None, "AI_EXECUTABLE_NOT_SERVING"),
+    for process, code, state in (
+        (
+            _serving(world["tmp"], body=b"another binary"),
+            "AI_EXECUTABLE_MISMATCH",
+            "VERSION_MISMATCH",
+        ),
+        (None, "AI_EXECUTABLE_NOT_SERVING", "UNAVAILABLE"),
+        (
+            _serving(world["tmp"], args=" -local-model -debug"),
+            "AI_ROUTING_MISMATCH",
+            "ROUTING_CONFIG_MISMATCH",
+        ),
+        (
+            _serving(world["tmp"], args=' -local-model -config "missing.yaml"'),
+            "AI_ROUTING_UNREADABLE",
+            "UNAVAILABLE",
+        ),
     ):
         world["probe"].process = process
         with pytest.raises(AppError) as refused:
             provider.execute(TaskRequest("TASK_X", "t", "c"))
-        assert refused.value.code == code
+        assert (refused.value.code, refused.value.error_class.value) == (code, "POLICY_BLOCKED")
         assert provider.capability_report().detail == code
-    world["probe"].process = _serving(world["tmp"], args=" -local-model -debug")
-    with pytest.raises(AppError) as routed:
-        provider.execute(TaskRequest("TASK_X", "t", "c"))
-    assert routed.value.code == "AI_ROUTING_MISMATCH"
+        assert provider.runtime_state() == state
     assert complete.calls == []
     world["probe"].process = approved
     for _ in range(3):
         provider.execute(TaskRequest("TASK_X", "t", "c"))
     assert provider.capability_report().detail == "AI_DAILY_CAP_REACHED"
+    assert provider.runtime_state() == "AVAILABLE"
     with pytest.raises(AppError) as capped:
         provider.execute(TaskRequest("TASK_X", "t", "c"))
     assert capped.value.code == "AI_DAILY_CAP_REACHED"
