@@ -269,6 +269,63 @@ Small additions beside the approved boards, in their existing visual language:
   one submit path and its server rules (the target check and the same-product interval included);
   the failed run stays as recorded. `NO_REVISION` and `RECORDED` runs offer no such control.
 
+## Product DB and Registration Management — the v29 layout (owner decision 2026-10-07)
+
+The same rule as the 수집 layout applies here. v29's composition is reproduced (ADR-0003). A slot with no source keeps its place and reads `데이터 없음`. A v29 control with no contract is `markInert` and sends nothing. No screen-contract API changes, and every existing panel keeps its function and markup.
+
+### 대시보드
+
+- **Cards.** v29's five cards, each a way into its screen.
+  - `전체 수집` is the collection runs' server total.
+  - `판매 대기` is `registration_candidates_total`.
+  - `판매 완료 / 등록 가능 / 확인 필요` and every `전일 대비` read `데이터 없음`.
+- **`최근 수집 현황`.** The newest five runs, as the server lists them. A RECORDED run's revision names the product.
+- **`플랫폼별 등록 현황`.** The ring holds the server's `registrations_total`. No read breaks registrations down by marketplace, so each marketplace keeps its place in the legend with `데이터 없음` and the ring shows no split.
+- **`주문/알림 요약`.**
+  - `품절 확인 필요`, `등록 오류` and `가격 변동 알림` are the STOCK, REGISTRATION_ERROR and SOURCE_CHANGE review counts, shown only when the server states them as current.
+  - The order counts, `재고 부족 상품` and `시스템 알림` read `데이터 없음`.
+- **`오늘 상품 유입`, `일별 수집/등록 추이` and `주요 카테고리 TOP 5`** read `데이터 없음`.
+- **The review-count table and the connection summary follow as before.**
+- The breakpoints follow v29's own: three panels on a wide landscape screen, `1.6fr 1fr` with the last panel full width on a portrait screen, one column on a narrow one. The 수집 list and its preview sit side by side in portrait from 1200px, not v29's 901px, because the work list has more columns than v29's. 통합DB's detail and 등록관리's settings move under their list as one wide card of columns in portrait, as v29 does.
+
+### 통합DB
+
+- **Cards.** v29's five cards: `전체상품 / 등록가능 / 확인필요 / 품절 / 금지상품`. `전체상품` is the server's `products_total`; the other four have no owner yet and read `데이터 없음`.
+- **Filter row.**
+  - The search field and `검색` keep their server search.
+  - v29's `카테고리 / 플랫폼 / 공급처 / 가격기준` filters and `✨ AI 추천` are inert.
+- **List columns.**
+  - The columns are v29's: `상품명 / 공급처 / 원가 / 배송비 / 최저판매가 / 가격기준 / 네이버 / 쿠팡 / 11번가 / 상태 / 등록유형`.
+  - The name cell keeps the Product's id, member and Item counts, membership revision and creation time on its second line.
+  - The supplier and the status come from the row. The price columns and `등록유형` read `데이터 없음`.
+- **Detail panel.**
+  - The title shows the representative image through the bound Item's own image read, the member's confirmed name, the id and the status.
+  - v29's groups follow: `브랜드` from the member's facts; `카테고리 / 카테고리 추천 신뢰도 / 가격 정보 / 채널별 판매가 / 마진율 / 태그 / AI 상태` read `데이터 없음`.
+  - `✨ AI 추천` and `상세 편집` are inert.
+  - The membership, the members' facts, the Items, the review items, the target check and the Draft form follow as before.
+
+### 등록관리
+
+- **Cards.** v29's five cards, each a count the server holds:
+  - `등록 대기` = `registration_candidates_total`;
+  - `등록 완료` = `registrations_total`;
+  - the registration status's own `등록실패` and `재확인필요`, with its labels;
+  - `카테고리 확인` = the readiness summary's `CATEGORY` area.
+  - A count no read states reads `데이터 없음`.
+- **Cards bring their section into view instead of switching tabs.** v29 switches 등록 대기 / 등록상품 / 실패 / 등록 이력 as tabs. Here every section stays on screen, because the Gate 3 surface reads all of them on one route (ADR-0018 §9).
+- **`등록 이력` row.** It sits beside `중단된 범위 n` and brings 실패 / 재시도 into view.
+- **`등록 대기 목록` beside `플랫폼별 등록 설정`.**
+  - One row per unit, as the server read it: the unit, its marketplace, its category id, its preparation and its read state. `옵션 상태 / 이미지 상태 / 진행률` read `데이터 없음`. `열기` brings the unit's own workspace into view.
+  - v29's list tools are inert.
+  - The readiness summary sits under the list.
+  - The settings panel's defaults read `데이터 없음`. Its three toggles stay the visual shell the architect ruling on registration automation controls requires.
+- **Sections, then, in v29's order.**
+  - `등록상품 관리` holds the M6-A `판매 상태 동기화` panel, unchanged.
+  - `실패 / 재시도` holds `고칠 것` and the registration status panel.
+  - `실등록 안전장치` holds the canary and live panels.
+  - `검토 항목`.
+  - `등록 단위 작업 공간` holds each unit's own workspace, unchanged.
+
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 
 v29 has no board for Issue #219's supplier common images; they live with the supplier they belong

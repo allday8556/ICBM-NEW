@@ -15,6 +15,8 @@ import { fragment, h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
+import { markInert } from '../core/inert.js';
+import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
@@ -1259,6 +1261,167 @@ function livePanel(live) {
   );
 }
 
+// ---------------------------------------------------------------- v29 layout (2026-10-07)
+//
+// v29's 등록관리 composition: five cards, the 등록 이력 row, the 등록 대기 목록 beside 플랫폼별 등록
+// 설정, then 등록상품 관리, 실패 / 재시도 and the safety panels, each unit's own workspace last.
+// v29 switches these as tabs; here every section stays on screen (the Gate 3 surface reads them on
+// one route) and a card brings its section into view. A v29 slot the system has no source for
+// keeps its place and reads 데이터 없음 (owner decision, option 가); a v29 control with no contract is
+// markInert and sends nothing.
+const NO_DATA = '데이터 없음';
+
+function noDataCell(label) {
+  return h('td', { class: 'no-data', 'data-no-data': label }, NO_DATA);
+}
+
+function noDataKv(label) {
+  return h('div', { class: 'kv', 'data-no-data': label }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
+}
+
+function goTo(section) {
+  document.querySelector(`[data-section='${section}']`)?.scrollIntoView({ block: 'start' });
+}
+
+// Each card is a count the server holds, or 데이터 없음 when no read states it.
+function registerCards(screen, status, readiness) {
+  const category = (readiness?.areas ?? []).find((area) => area.area === 'CATEGORY');
+  const cards = [
+    ['waiting', '◷', '등록 대기', screen.registration_candidates_total, 'pending'],
+    ['registered', '✓', '등록 완료', screen.registrations_total, 'products'],
+    // The status's own labels; without a status read the cards keep v29's titles.
+    ['failed', '×', status?.labels?.FAILED ?? '실패', status?.counts?.failed, 'failed'],
+    ['recheck', '↻', status?.labels?.RECHECK_REQUIRED ?? '재시도 필요', status?.counts?.recheck_required, 'failed'],
+    ['category', '◇', '카테고리 확인', category?.units, 'pending'],
+  ];
+  return h(
+    'div',
+    { class: 'grid5 page-kpis', 'data-role': 'register-cards' },
+    ...cards.map(([key, icon, label, count, section]) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: key === 'waiting' ? 'kpi state-card active' : 'kpi state-card',
+          'data-card': key,
+          onclick: () => goTo(section),
+        },
+        h('span', { class: 'kpi-top' }, h('span', { class: 'kicon', 'aria-hidden': 'true' }, icon), label),
+        typeof count === 'number'
+          ? h('strong', { 'data-total': String(count) }, count.toLocaleString('ko-KR'))
+          : h('strong', { class: 'no-data', 'data-no-data': label }, NO_DATA),
+      ),
+    ),
+  );
+}
+
+function utilityRow(overview) {
+  return h(
+    'div',
+    { class: 'register-utility-row' },
+    h('span', { class: 'mini', 'data-role': 'paused-scopes' }, `중단된 범위 ${overview.paused_scopes.length}`),
+    h('button', { type: 'button', class: 'btn', 'data-action': 'open-history', onclick: () => goTo('failed') }, '등록 이력'),
+  );
+}
+
+// One row per unit, as the server read it; 열기 brings that unit's own workspace into view.
+function queueRow(unit) {
+  const read = unit.intent?.read_state;
+  return h(
+    'tr',
+    { 'data-queue-unit': unit.unit_ref },
+    h('td', {}, h('b', {}, unit.unit_ref), h('div', { class: 'mini mono' }, `초안 ${unit.draft_id.slice(0, 8)}`)),
+    h('td', {}, platformTag(unit.marketplace_key)),
+    unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
+    noDataCell('옵션 상태'),
+    noDataCell('이미지 상태'),
+    h('td', {}, chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation)),
+    noDataCell('진행률'),
+    h('td', {}, read ? h('span', { class: `chip ${READ_STATE_TONE[read.state] ?? ''}`.trim() }, read.label) : '-'),
+    h(
+      'td',
+      {},
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn',
+          'data-action': 'open-unit',
+          onclick: () => document.querySelector(`.register-unit[data-unit='${CSS.escape(unit.unit_ref)}']`)?.scrollIntoView({ block: 'start' }),
+        },
+        '열기',
+      ),
+    ),
+  );
+}
+
+function queuePanel(units, readinessBlock, empty) {
+  return h(
+    'section',
+    { class: 'panel register-queue', 'data-role': 'register-queue', 'data-section': 'pending' },
+    h('div', { class: 'supplier-head-row' }, h('h3', { class: 'panel-title' }, '등록 대기 목록'), h('span', { class: 'mini' }, `총 ${units.length}건`)),
+    h(
+      'div',
+      { class: 'toolbar register-queue-tools' },
+      markInert(h('button', { type: 'button', class: 'btn dark' }, '▶ 대량 등록'), '대량 등록'),
+      markInert(h('button', { type: 'button', class: 'btn' }, '↻ 선택 재시도'), '선택 재시도'),
+      markInert(h('button', { type: 'button', class: 'btn ai-btn' }, '✨ AI 카테고리 재추천'), 'AI 카테고리 재추천'),
+      markInert(h('button', { type: 'button', class: 'btn' }, '⇩ 엑셀 내보내기'), '엑셀 내보내기'),
+    ),
+    units.length
+      ? table(['상품', '대상 플랫폼', '카테고리', '옵션 상태', '이미지 상태', '등록 상태', '진행률', '최종 결과', ''], units.map(queueRow))
+      : empty,
+    readinessBlock,
+  );
+}
+
+// v29's 플랫폼별 등록 설정: no read here states these defaults, and its toggles stay a visual shell
+// (UI_SOURCE_OF_TRUTH architect ruling on the registration automation controls: zero writes).
+function settingsPanel() {
+  return h(
+    'aside',
+    { class: 'side-detail register-settings', 'data-role': 'register-settings' },
+    h('h3', {}, '플랫폼별 등록 설정'),
+    h(
+      'div',
+      { class: 'inner-tabs register-platform-tabs' },
+      h('button', { type: 'button', 'aria-selected': 'true', 'aria-label': '스마트스토어' }, platformTag('smartstore')),
+      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '쿠팡' }, platformTag('coupang')), '쿠팡'),
+      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '11번가' }, platformTag('st11')), '11번가'),
+    ),
+    h('div', { class: 'detail-group' }, noDataKv('기본 배송비'), noDataKv('기본 출고일'), noDataKv('상품 상태')),
+    h(
+      'div',
+      { class: 'detail-group' },
+      ...['자동 가격조정', '카테고리 자동매칭', '등록 실패 자동 재시도'].map((label) =>
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', {}, label),
+          markInert(h('span', { class: 'toggle off', role: 'switch', 'aria-checked': 'false', 'aria-label': label }), label),
+        ),
+      ),
+    ),
+    h('div', { class: 'note' }, '수집 → 검증 → 가격확정 → 등록준비 → 등록완료'),
+  );
+}
+
+// A bare block placed as its own card in a section; the block itself is unchanged.
+function panelOf(block) {
+  return block ? h('section', { class: 'panel register-fixes-panel' }, block) : null;
+}
+
+function sectionWrap(section, title, ...children) {
+  const shown = children.filter(Boolean);
+  if (!shown.length) return null;
+  return h(
+    'div',
+    { class: 'register-section', 'data-section': section },
+    h('h2', { class: 'register-section-title' }, title),
+    ...shown,
+  );
+}
+
 export default {
   key: 'register',
   title: TITLE,
@@ -1302,18 +1465,29 @@ export default {
     if (statusPanel && ctx.params.get('status') === 'open') {
       window.setTimeout(() => statusPanel.scrollIntoView({ block: 'start' }), 0);
     }
+    const cards = registerCards(screen, overview.registration_status, readiness?.unavailable ? null : readiness);
     if (!overview.units.length) {
       return fragment(
         head,
-        statusPanel,
-        listingSyncPanel(),
-        canaryPanel(canary),
-        livePanel(live),
-        emptyState({
-          title: '등록 후보가 없습니다',
-          copy: '통합DB에서 등록 가능한 상품을 선택하면 Preflight를 거쳐 등록할 수 있습니다.',
-          action: { label: '통합DB 보기', onSelect: () => ctx.navigate('db') },
-        }),
+        cards,
+        utilityRow(overview),
+        h(
+          'div',
+          { class: 'section-grid register-layout' },
+          queuePanel(
+            [],
+            readinessBlock,
+            emptyState({
+              title: '등록 후보가 없습니다',
+              copy: '통합DB에서 등록 가능한 상품을 선택하면 Preflight를 거쳐 등록할 수 있습니다.',
+              action: { label: '통합DB 보기', onSelect: () => ctx.navigate('db') },
+            }),
+          ),
+          settingsPanel(),
+        ),
+        sectionWrap('products', '등록상품 관리', listingSyncPanel()),
+        sectionWrap('failed', '실패 / 재시도', statusPanel),
+        sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
       );
     }
     // Opened from the Product DB with the Draft it just created (Gate 1 G1-D): that Draft's
@@ -1335,21 +1509,14 @@ export default {
     }
     return fragment(
       head,
-      h(
-        'div',
-        { class: 'register-summary' },
-        kv('등록 후보', String(screen.registration_candidates_total)),
-        kv('등록 완료', String(screen.registrations_total)),
-        kv('중단된 범위', String(overview.paused_scopes.length)),
-      ),
-      readinessBlock,
-      fixesPanel(fixes, ctx),
-      statusPanel,
-      listingSyncPanel(),
-      canaryPanel(canary),
-      livePanel(live),
-      ...reviews,
-      ...panels,
+      cards,
+      utilityRow(overview),
+      h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessBlock, null), settingsPanel()),
+      sectionWrap('products', '등록상품 관리', listingSyncPanel()),
+      sectionWrap('failed', '실패 / 재시도', panelOf(fixesPanel(fixes, ctx)), statusPanel),
+      sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
+      sectionWrap('reviews', '검토 항목', ...reviews),
+      sectionWrap('units', '등록 단위 작업 공간', ...panels),
     );
   },
 };
