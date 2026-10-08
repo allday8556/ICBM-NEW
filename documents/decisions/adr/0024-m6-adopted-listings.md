@@ -9,6 +9,9 @@ Decision owners:
     sale, not on a new LIVE test registration (original choice "이미 판매 중인 KM홀딩 상품 사용").
   - Those listings carry the seller product code `km` followed by the KM통상 product number,
     exactly ("상품코드 km으로 시작해", format confirmed as `km287`).
+  - **Correction** (Issue #219 `6051294742`, runtime evidence): the listings carry upper-case
+    `KM` (`KM88`, `KM190`), and the provider's seller-code search matches it case-sensitively.
+    The convention is therefore `KM` + the KM통상 product number.
 - **Implementation choices:** the implementation agent, under ADR-0022 and rule 14.
 
 What it authorizes:
@@ -45,11 +48,11 @@ ADR-0023 (M6), `ENDPOINT_MATRIX.md` §4.1.2 (search) and §4 (origin read).
 
 | Supplier | Convention | Example |
 | --- | --- | --- |
-| `kmretail` | `km` + the source product id, exactly | source `287` → `km287` |
+| `kmretail` | `KM` + the source product id, exactly | source `287` → `KM287` |
 
 - A convention is owner-declared. A new one needs an owner decision recorded in Issue #219.
 - The code ICBM searches for is the convention applied to the source product id. It must match
-  `^[a-z]{2,8}[0-9]{1,15}$`; anything else is refused before any provider call.
+  `^[A-Za-z]{2,8}[0-9]{1,15}$`; anything else is refused before any provider call.
 
 ## 3. Proof of one adoption
 

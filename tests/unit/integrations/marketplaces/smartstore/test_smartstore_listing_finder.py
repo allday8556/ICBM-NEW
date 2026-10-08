@@ -86,7 +86,7 @@ def _bearer() -> Any:
     return SimpleNamespace(access_token="token", credential_generation=3, session_generation=5)
 
 
-def _find(caller: Caller, code: str = "km287") -> Any:
+def _find(caller: Caller, code: str = "KM287") -> Any:
     pauses: list[int] = []
     finder = SmartStoreListingFinder(caller, _bearer, pause=lambda: pauses.append(1))  # type: ignore[arg-type]
     result = finder.find(code)
@@ -95,7 +95,7 @@ def _find(caller: Caller, code: str = "km287") -> Any:
 
 
 def test_one_exact_storefarm_candidate_with_a_matching_read_back_is_found() -> None:
-    caller = Caller(_page((9001, 7001, "STOREFARM", "km287")), _read("km287"))
+    caller = Caller(_page((9001, 7001, "STOREFARM", "KM287")), _read("KM287"))
     found = _find(caller)
     assert (found.outcome, found.origin_product_no, found.channel_product_no) == (
         FOUND,
@@ -113,23 +113,23 @@ def test_one_exact_storefarm_candidate_with_a_matching_read_back_is_found() -> N
     ("page", "outcome"),
     (
         (_page(), NOT_FOUND),
-        (_page((9001, 7001, "STOREFARM", "km2870")), NOT_FOUND),
-        (_page((9001, 7001, "WINDOW", "km287")), NOT_FOUND),
-        (_page((9001, 7001, "STOREFARM", "km287"), (9002, 7002, "STOREFARM", "km287")), AMBIGUOUS),
+        (_page((9001, 7001, "STOREFARM", "KM2870")), NOT_FOUND),
+        (_page((9001, 7001, "WINDOW", "KM287")), NOT_FOUND),
+        (_page((9001, 7001, "STOREFARM", "KM287"), (9002, 7002, "STOREFARM", "KM287")), AMBIGUOUS),
     ),
 )
 def test_only_one_exact_storefarm_candidate_is_ever_read_back(page: Any, outcome: str) -> None:
-    caller = Caller(page, _read("km287"))
+    caller = Caller(page, _read("KM287"))
     assert _find(caller).outcome == outcome
     assert caller.calls == [EndpointId.SMARTSTORE_PRODUCT_SEARCH]
 
 
 @pytest.mark.parametrize(
     ("read", "outcome"),
-    ((_read("km288"), MISMATCH), (_read("km287", status="DELETE"), DELETED), ({}, MISMATCH)),
+    ((_read("KM288"), MISMATCH), (_read("KM287", status="DELETE"), DELETED), ({}, MISMATCH)),
 )
 def test_the_read_back_must_carry_the_code_and_not_delete(read: Any, outcome: str) -> None:
-    caller = Caller(_page((9001, 7001, "STOREFARM", "km287")), read)
+    caller = Caller(_page((9001, 7001, "STOREFARM", "KM287")), read)
     assert _find(caller).outcome == outcome
 
 
@@ -157,10 +157,10 @@ def test_a_failure_adopts_nothing() -> None:
     assert _find(Caller({"contents": "x"})).outcome == FAILED
     finder = SmartStoreListingFinder(Caller(_page()), lambda: None)  # type: ignore[arg-type]
     assert finder.available() is False
-    assert finder.find("km287").outcome == UNAVAILABLE
+    assert finder.find("KM287").outcome == UNAVAILABLE
 
 
-@pytest.mark.parametrize("code", ["km287", "abc1"])
+@pytest.mark.parametrize("code", ["KM287", "km287", "abc1"])
 def test_an_adoption_code_may_be_searched(code: str) -> None:
     import httpx
 
@@ -178,7 +178,7 @@ def test_an_adoption_code_may_be_searched(code: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "code", ["KM287", "km", "287", "km-287", "k287", "km287 ", "km" + "1" * 16]
+    "code", ["KM", "287", "KM-287", "K287", "KM287 ", "KM" + "1" * 16, "킴287"]
 )
 def test_any_other_code_is_refused_before_transport(code: str) -> None:
     import httpx

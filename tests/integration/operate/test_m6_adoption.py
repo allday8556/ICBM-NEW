@@ -119,7 +119,7 @@ def _run(service: AdoptionService) -> dict[str, Any]:
 
 
 def test_the_convention_code_names_the_source_product() -> None:
-    assert seller_code_of("kmretail", "287") == "km287"
+    assert seller_code_of("kmretail", "287") == "KM287"
     assert seller_code_of("another-supplier", "287") is None
 
 
@@ -128,17 +128,17 @@ def test_a_proven_listing_is_adopted_once_and_audited(
     sources: Collections,  # noqa: F811
 ) -> None:
     item_id = _collected(container, sources, "287")
-    finder = FakeFinder({"km287": _found("9001")})
+    finder = FakeFinder({"KM287": _found("9001")})
     service = _service(container, finder)
     first = _run(service)["287"]
     assert (first.outcome, first.marketplace_product_id) == (ADOPTED, "9001")
     (record,) = service.active()
-    assert (record.item_id, record.seller_code, record.supplier_key) == (item_id, "km287", SUPPLIER)
-    assert finder.asked == ["km287"]
+    assert (record.item_id, record.seller_code, record.supplier_key) == (item_id, "KM287", SUPPLIER)
+    assert finder.asked == ["KM287"]
     # A second pass finds it adopted and asks the provider nothing.
     second = _run(service)["287"]
     assert (second.outcome, second.adoption_id) == (ALREADY_ADOPTED, record.adoption_id)
-    assert finder.asked == ["km287"]
+    assert finder.asked == ["KM287"]
     with sqlite3.connect(container.config.database_path) as raw:
         (audits,) = raw.execute(
             "SELECT COUNT(*) FROM audit_events WHERE event_type = 'LISTING_ADOPTED'"
@@ -157,7 +157,7 @@ def test_nothing_unproven_is_adopted(
     answer: str,
 ) -> None:
     _collected(container, sources, "287")
-    service = _service(container, FakeFinder({"km287": FoundListing(answer, "9001")}))
+    service = _service(container, FakeFinder({"KM287": FoundListing(answer, "9001")}))
     assert _run(service)["287"].outcome == answer
     assert service.active() == ()
 
@@ -168,11 +168,11 @@ def test_a_rate_limit_ends_the_pass(
 ) -> None:
     for source in ("287", "288", "289"):
         _collected(container, sources, source)
-    finder = FakeFinder({"km287": FoundListing(RATE_LIMITED, error_code="SMARTSTORE_RATE_LIMITED")})
+    finder = FakeFinder({"KM287": FoundListing(RATE_LIMITED, error_code="SMARTSTORE_RATE_LIMITED")})
     outcomes = _run(_service(container, finder))
     assert outcomes["287"].outcome == RATE_LIMITED
     assert {outcomes["288"].outcome, outcomes["289"].outcome} == {NOT_REACHED}
-    assert finder.asked == ["km287"]
+    assert finder.asked == ["KM287"]
 
 
 def test_a_source_icbm_registered_is_never_adopted(
@@ -185,7 +185,7 @@ def test_a_source_icbm_registered_is_never_adopted(
     intent = _intent(store, _freeze(store, [item]).registration_snapshot_id)
     _finish(store, intent, RemoteOutcome.APPLIED_PROVEN, "mp-icbm-1")
     _confirm(store, intent)
-    finder = FakeFinder({"km287": _found("9001")})
+    finder = FakeFinder({"KM287": _found("9001")})
     assert _run(_service(container, finder))["287"].outcome == REGISTERED_BY_ICBM
     assert finder.asked == []
 
@@ -196,7 +196,7 @@ def test_a_source_with_more_than_one_bound_item_is_not_adopted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _collected(container, sources, "287")
-    finder = FakeFinder({"km287": _found("9001")})
+    finder = FakeFinder({"KM287": _found("9001")})
     service = _service(container, finder)
     monkeypatch.setattr(service, "_bound_items", lambda supplier: {"287": ("i-1", "i-2")})
     assert _run(service)["287"].outcome == NOT_SINGLE_ITEM
@@ -216,7 +216,7 @@ class Reader:
         return self.answer
 
 
-def _listing_body(status: str = "SALE", code: str = "km287") -> dict[str, Any]:
+def _listing_body(status: str = "SALE", code: str = "KM287") -> dict[str, Any]:
     return {
         "originProduct": {"statusType": status, "salePrice": 25000, "stockQuantity": 3},
         "smartstoreChannelProduct": {
@@ -244,7 +244,7 @@ def test_the_listing_sync_reads_an_adopted_listing_and_only_provider_evidence_en
     sources: Collections,  # noqa: F811
 ) -> None:
     _collected(container, sources, "287")
-    adoptions = _service(container, FakeFinder({"km287": _found("9001")}))
+    adoptions = _service(container, FakeFinder({"KM287": _found("9001")}))
     _run(adoptions)
     reader = Reader()
     reader.answer = _listing_body()
@@ -275,7 +275,7 @@ def test_stock_recheck_lists_the_adopted_source(
     sources: Collections,  # noqa: F811
 ) -> None:
     _collected(container, sources, "287")
-    adoptions = _service(container, FakeFinder({"km287": _found("9001")}))
+    adoptions = _service(container, FakeFinder({"KM287": _found("9001")}))
     _run(adoptions)
     container.stock_recheck._adoptions = adoptions  # the container's owner, this test's adoptions
     container.stock_recheck._marketplace_key = MARKET
@@ -295,11 +295,11 @@ def test_an_order_of_an_adopted_listing_stays_unmatched_and_is_linked(
     from tests.integration.operate.test_m6_orders import FakeSource, _change, _facts
 
     item_id = _collected(container, sources, "287")
-    adoptions = _service(container, FakeFinder({"km287": _found("9001")}))
+    adoptions = _service(container, FakeFinder({"KM287": _found("9001")}))
     _run(adoptions)
     source = FakeSource(
         pages=[ChangePage((_change(container),))],
-        facts={"po-1": _facts(original_product_id="9001", seller_product_code="km287")},
+        facts={"po-1": _facts(original_product_id="9001", seller_product_code="KM287")},
     )
     orders = OrderSyncService(
         db=container.db,
@@ -329,7 +329,7 @@ def test_an_order_of_an_adopted_listing_stays_unmatched_and_is_linked(
     # the order resolution falls back to the channel product id.
     source.pages = [ChangePage((_change(container, "po-2", minutes=1),))]
     source.facts["po-2"] = _facts(
-        "po-2", original_product_id=None, channel_product_id="c-1", seller_product_code="km287"
+        "po-2", original_product_id=None, channel_product_id="c-1", seller_product_code="KM287"
     )
     orders.sync(trigger=OPERATOR, correlation_id=CID)
     by_id = {o.product_order_id: o for o in orders.overview().orders}
@@ -347,7 +347,7 @@ def test_register_sees_the_adopted_item(
 ) -> None:
     """ADR-0024 §5: the source REGISTER's preflight reads for a second listing of an Item."""
     item_id = _collected(container, sources, "287")
-    adoptions = _service(container, FakeFinder({"km287": _found("9001")}))
+    adoptions = _service(container, FakeFinder({"KM287": _found("9001")}))
     _run(adoptions)
     (record,) = adoptions.active()
     assert adoptions.adopted_items(MARKET, [item_id, "other"]) == (record.adoption_id,)

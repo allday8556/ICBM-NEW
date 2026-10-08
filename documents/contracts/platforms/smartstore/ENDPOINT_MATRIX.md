@@ -352,7 +352,7 @@ Adopted search contract, in the registry and pinned by tests:
 | --- | --- |
 | Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF` unchanged, group `상품` |
 | Method / path | `POST /v1/products/search` |
-| Request media type | `application/json`; the body is exactly the documented seller-code search: `searchKeywordType` `SELLER_CODE`, `sellerManagementCode` — the `smartstore-seller-management-code/v1` projection of an ICBM listing identity (30 lowercase hex characters, ruling R1), or, for M6-E adoption only, an owner-declared adoption code (`^[a-z]{2,8}[0-9]{1,15}$`, e.g. `km287`; ADR-0024 §2) — `page` from 1 and `size` at most 500. No other filter is invented, and a request outside this shape is refused before any transport |
+| Request media type | `application/json`; the body is exactly the documented seller-code search: `searchKeywordType` `SELLER_CODE`, `sellerManagementCode` — the `smartstore-seller-management-code/v1` projection of an ICBM listing identity (30 lowercase hex characters, ruling R1), or, for M6-E adoption only, an owner-declared adoption code (`^[A-Za-z]{2,8}[0-9]{1,15}$`, e.g. `KM287`; ADR-0024 §2) — `page` from 1 and `size` at most 500. No other filter is invented, and a request outside this shape is refused before any transport |
 | Timeouts | connect `5s`, read `15s` (ICBM policy; no endpoint-specific timeout is documented) |
 | Redirect | `NO_FOLLOW` |
 | Mutation | **No** — a read |
