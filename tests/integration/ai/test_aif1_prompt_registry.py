@@ -310,8 +310,8 @@ def test_a_migrated_database_starts_empty_and_the_application_seeds_it_once(
     tables = ("ai_prompt_templates", "ai_prompt_template_revisions", "ai_platform_policy_revisions")
     with sqlite3.connect(database_path(config.data_dir)) as raw:
         assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables] == [0, 0, 0]
-    # The application's startup pass writes the v29 seed, one audit record for it, and a restart
-    # writes nothing more.
+    # The application's startup pass writes the v29 seed and no audit event, and a restart writes
+    # nothing more.
     for _ in range(2):
         with TestClient(create_app(config), base_url=LOCAL) as client:
             assert len(_registry(client)) == len(CATALOG)
@@ -321,11 +321,11 @@ def test_a_migrated_database_starts_empty_and_the_application_seeds_it_once(
             22,
             4,
         ]
-        seeded = raw.execute(
-            "SELECT details_json FROM audit_events WHERE event_type = ?",
-            (AuditEventType.AI_PROMPT_REGISTRY_SEEDED,),
+        assert raw.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] == 0
+        origins = raw.execute(
+            "SELECT DISTINCT origin, seed_version, authored_by FROM ai_prompt_template_revisions"
         ).fetchall()
-    assert [json.loads(row[0]) for row in seeded] == [{"seed_version": "v29", "entries": 26}]
+    assert origins == [("SEED", "v29", "system:seed")]
 
 
 def test_the_seed_file_is_the_catalog(client: TestClient) -> None:

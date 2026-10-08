@@ -153,7 +153,8 @@ class PromptRegistryStore:
     def seed_missing(self, *, correlation_id: str) -> int:
         """Write the v29 seed of every catalog entry the stores lack, as its revision 1, in one
         unit of work, and return how many were written. An entry that exists is never touched, so
-        a restart writes nothing."""
+        a restart writes nothing. A seed is starting data, not an operator action: it writes no
+        audit event, and each seed revision names its origin, seed version and ``system:seed``."""
         seed = load_seed()
         now = self._clock.now()
         written = 0
@@ -197,19 +198,6 @@ class PromptRegistryStore:
                     )
                 )
                 written += 1
-            if written:
-                session.flush()
-                self._audit.append(
-                    AuditEntry(
-                        event_type=AuditEventType.AI_PROMPT_REGISTRY_SEEDED,
-                        action="AI_PROMPT_REGISTRY_SEEDED",
-                        actor=SEED_ACTOR,
-                        outcome=AuditOutcome.RECORDED,
-                        details={"seed_version": seed["seed_version"], "entries": written},
-                        correlation_id=correlation_id,
-                    ),
-                    session=session,
-                )
         return written
 
     def entry(self, key: str) -> EntryRecord:

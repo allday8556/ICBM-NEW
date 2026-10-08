@@ -176,8 +176,10 @@ from. A reset appends a revision whose field equals the seed's. History is never
 revision 1 with `origin = SEED` and `seed_version = v29`.
 - Migration 0053 only creates the stores, because every canonical table starts empty (M0
   acceptance).
-- The application writes the seed when it starts on a database that lacks it, in one unit of work
-  with one `AI_PROMPT_REGISTRY_SEEDED` audit record. A restart writes nothing.
+- The application writes the seed when it starts on a database that lacks it, in one unit of work.
+  A restart writes nothing.
+- A seed is starting data, not an operator action, so it writes no audit event. Each seed revision
+  names its origin (`SEED`), its seed version and `system:seed`.
 - Runtime reads the stores, never the seed file.
 - Every operator save (`OPERATOR`) and reset (`RESET`) is audited without its text.
 
