@@ -478,7 +478,8 @@ Before the first vertical closes:
   This restates repository-canonical M5 requirements: ADR-0014 §18 says M5 registers with no AI
   provider configured, and `documents/acceptance/milestones/M5.md` §2 repeats that AI is outside M5 acceptance.
 
-Do **not** implement an interim AI path merely to make those controls active. In particular, do not
+Do **not** implement an interim AI path merely to make those controls active. Apart from the
+provider-zero AI authoring foundation of ADR-0026 (§12, Issue #219 comment `6057252039`), do not
 pull forward AI-provider execution, PromptTemplate runtime execution, SearchSignalAdapter, platform
 metadata endpoint adoption solely for AI, Coupang/11st AI authoring, multi-product AI orchestration
 or seasonal-keyword runtime. Those use the post-first-vertical sequence in §12. Owner decision
@@ -761,7 +762,12 @@ AI authoring foundation
 ```
 
 This is a dependency order for the registration/AI lane, not permission to start any of those
-slices before the first vertical is accepted.
+slices before the first vertical is accepted. One owner exception applies (Issue #219 comment
+`6057252039`): the **AI authoring foundation**, and only that stage, starts before the first vertical
+is accepted, in parallel with M6.5. It is provider-zero, under its contract
+`documents/decisions/adr/0026-ai-authoring-foundation.md`. A real AI provider call, the provider and
+model, a credential, a cost cap, a transfer of product data to an external AI and AI_INITIAL timing
+each still need the owner's decision. The later stages keep this order and this gate.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
 
