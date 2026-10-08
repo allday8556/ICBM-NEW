@@ -8,9 +8,10 @@ behind
 **Identity** (M6E-02, M6E-03). The convention gives the one code a source product's listing would
 carry (``kmretail`` 287 → ``km287``). Only an exact ``STOREFARM`` candidate whose origin read-back
 carries the same code and is not ``DELETE`` is adopted, for a source product with exactly one
-open-bound Item. Never by name. An adoption is never rewritten; it ends only as
-``EXTERNALLY_REMOVED`` on provider evidence. A source product an ``ACTIVE`` ICBM registration sells
-is never adopted (M6E-04).
+open-bound Item. Never by name. At most one ``ACTIVE`` adoption per source and per listing; an
+adoption is never rewritten, it ends only as ``EXTERNALLY_REMOVED`` on provider evidence and stays
+as history, and a later re-adoption is a new row proven the same way. A source product an
+``ACTIVE`` ICBM registration sells is never adopted (M6E-04).
 """
 
 import logging

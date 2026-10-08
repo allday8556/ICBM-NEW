@@ -36,7 +36,7 @@ ADR-0023 (M6), `ENDPOINT_MATRIX.md` §4.1.2 (search) and §4 (origin read).
 - An adopted listing is the pair *(SmartStore origin product, ICBM source product)*.
   - The source product is a COLLECT source identity (`supplier_key`, `source_product_id`).
   - Its canonical Item is the Item that source product's open binding names.
-  - One listing per source product, and one source product per listing.
+  - At most one `ACTIVE` adoption per source product, and one per SmartStore listing. An adoption that provider evidence ended stays as history; a later pass may adopt that source again as a new row, only through the same proof (§3).
 - The link is made only by a **declared seller-code convention** (§2), never by a name.
 - A source product that an `ACTIVE`, not ICBM-deleted registration already sells is not
   adopted: ICBM's own registration is the listing (`REGISTERED_BY_ICBM`).
@@ -124,8 +124,9 @@ covers it the same way.
 M6E-01  ICBM never writes an adopted listing; adoption is read-only provider work
 M6E-02  a listing is adopted only by an owner-declared seller-code convention, an exact STOREFARM
         candidate, and an origin read-back carrying the same code and not DELETE — never by name
-M6E-03  one adopted listing per source product and per origin product; an adoption is never
-        rewritten, only ended as EXTERNALLY_REMOVED on provider evidence
+M6E-03  at most one ACTIVE adoption per source product and per origin product; an adoption is
+        never rewritten, only ended as EXTERNALLY_REMOVED on provider evidence, and an ended one
+        stays as history (a re-adoption is a new row, proven again)
 M6E-04  a source product an ACTIVE ICBM registration sells is never adopted
 M6E-05  an adopted listing is never a REGISTER registration, and an order's ADR-0023 resolution is
         never rewritten by an adoption link

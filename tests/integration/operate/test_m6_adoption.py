@@ -263,6 +263,11 @@ def test_the_listing_sync_reads_an_adopted_listing_and_only_provider_evidence_en
     assert adoptions.active() == ()
     (record,) = adoptions.all()
     assert record.state == EXTERNALLY_REMOVED
+    # The ended adoption stays as history; a later pass may adopt the source again only as a
+    # new row proven the same way (M6E-03: at most one ACTIVE adoption).
+    again = _run(adoptions)["287"]
+    assert again.outcome == ADOPTED and again.adoption_id != record.adoption_id
+    assert [r.state for r in adoptions.all()] == [EXTERNALLY_REMOVED, "ACTIVE"]
 
 
 def test_stock_recheck_lists_the_adopted_source(
