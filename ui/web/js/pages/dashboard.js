@@ -168,6 +168,8 @@ function ordersPanel(ctx, view) {
     h(
       'div',
       { class: 'alert-list' },
+      // ADR-0025 §8: 발송 대기 is shown only while the order owner is connected.
+      h('div', { class: 'alert-row', 'data-role': 'awaiting-dispatch' }, h('span', {}, '발송 대기'), typeof view.orders_awaiting_dispatch === 'number' ? h('b', {}, `${view.orders_awaiting_dispatch}건`) : noData()),
       h('div', { class: 'alert-row' }, h('span', {}, '재고 부족 상품'), noData()),
       h('div', { class: 'alert-row' }, h('span', {}, '품절 확인 필요'), reviewCount(counts.stock)),
       h('div', { class: 'alert-row' }, h('span', {}, '등록 오류'), reviewCount(counts.registration_error)),

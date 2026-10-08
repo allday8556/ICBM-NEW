@@ -43,6 +43,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.capabilities.live_safety.model import (
     CREATE_BUDGET,
     DELETE_BUDGET,
+    DISPATCH_BUDGET,
     FENCING_UPLOAD_STATES,
     BrakeState,
     GrantState,
@@ -93,6 +94,14 @@ _DELETE_BOUND = (
     " AND preparation_revision_id IS NULL AND candidate_fingerprint IS NULL"
     " AND artifact_set_json IS NULL AND artifact_set_digest IS NULL AND asset_profile IS NULL"
 )
+# ADR-0025 §5: a DISPATCH grant binds one product order, its supplier order revision, carrier
+# and tracking number in ``live_grant_dispatch_bindings``; it names none of the columns above.
+_DISPATCH_BOUND = (
+    "registration_snapshot_id IS NULL AND intent_id IS NULL"
+    " AND idempotency_key IS NULL AND create_attempt_no IS NULL"
+    " AND preparation_revision_id IS NULL AND candidate_fingerprint IS NULL"
+    " AND artifact_set_json IS NULL AND artifact_set_digest IS NULL AND asset_profile IS NULL"
+)
 # Restore drills exist for the two canary stages only; a DELETE has none (§3.5).
 _DRILL_STAGES = (MutationStage.ASSET, MutationStage.CREATE)
 
@@ -110,7 +119,8 @@ class LiveGrant(Base):
         # One stage, one unit: the binding of the other stage is empty (§3.2, G3-21).
         CheckConstraint(
             f"(stage = 'ASSET' AND {_ASSET_BOUND}) OR (stage = 'CREATE' AND {_CREATE_BOUND})"
-            f" OR (stage = 'DELETE' AND {_DELETE_BOUND})",
+            f" OR (stage = 'DELETE' AND {_DELETE_BOUND})"
+            f" OR (stage = 'DISPATCH' AND {_DISPATCH_BOUND})",
             name="stage_binding_exact",
         ),
         CheckConstraint(
@@ -133,6 +143,10 @@ class LiveGrant(Base):
         ),
         CheckConstraint(
             f"stage <> 'DELETE' OR budget_max = {DELETE_BUDGET}", name="delete_budget_is_one"
+        ),
+        CheckConstraint(
+            f"stage <> 'DISPATCH' OR budget_max = {DISPATCH_BUDGET}",
+            name="dispatch_budget_is_one",
         ),
         CheckConstraint("budget_used >= 0 AND budget_used <= budget_max", name="budget_bounded"),
         CheckConstraint("expires_at > not_before", name="window_finite"),
@@ -182,6 +196,27 @@ class LiveGrant(Base):
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ended_by: Mapped[str | None] = mapped_column(String(64))
     end_reason: Mapped[str | None] = mapped_column(String(64))
+
+
+class LiveGrantDispatchBinding(Base):
+    """The exact unit of one DISPATCH grant (ADR-0025 §5; migration 0054): one product order, the
+    supplier order revision whose carrier and tracking number it may send. Written with its grant
+    in the same unit; append-only (triggers)."""
+
+    __tablename__ = "live_grant_dispatch_bindings"
+    __table_args__ = (
+        CheckConstraint("product_order_id <> ''", name="product_order_present"),
+        CheckConstraint("supplier_order_revision >= 1", name="revision_positive"),
+        CheckConstraint("carrier_code <> '' AND tracking_number <> ''", name="tracking_present"),
+    )
+
+    grant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("live_grants.grant_id"), primary_key=True
+    )
+    product_order_id: Mapped[str] = mapped_column(String(40))
+    supplier_order_revision: Mapped[int] = mapped_column(Integer)
+    carrier_code: Mapped[str] = mapped_column(String(40))
+    tracking_number: Mapped[str] = mapped_column(String(50))
 
 
 class ProtectedWriteBrake(Base):

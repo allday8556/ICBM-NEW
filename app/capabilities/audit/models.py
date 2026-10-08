@@ -138,6 +138,8 @@ class AuditEventType(StrEnum):
     # amended, and its carrier and tracking number captured. By product-order id only.
     SUPPLIER_ORDER_RECORDED = "SUPPLIER_ORDER_RECORDED"
     ORDER_TRACKING_CAPTURED = "ORDER_TRACKING_CAPTURED"
+    # M6.5-C (ADR-0025 §5): one dispatch attempt opened, ended or verified. Ids and codes only.
+    ORDER_DISPATCH_RECORDED = "ORDER_DISPATCH_RECORDED"
 
 
 class AuditOutcome(StrEnum):

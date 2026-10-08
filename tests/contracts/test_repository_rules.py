@@ -321,9 +321,9 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     adopted = set(re.findall(r"^\| `(SMARTSTORE_[A-Z0-9_]+)` \| `ADOPTED` \|", matrix, re.M))
     # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
     # the DELETE slice (ADR-0018 §3.5), the leaf-category read and the two notice reads
-    # (notice coverage S0), the address-book read (Settings delivery policy), and the two M6-C
-    # order reads
-    assert len(adopted) == 14, adopted
+    # (notice coverage S0), the address-book read (Settings delivery policy), the two M6-C
+    # order reads and the M6.5-C dispatch (ADR-0025 §5.1)
+    assert len(adopted) == 15, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -1754,8 +1754,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "committed_bearer = smartstore.committed_bearer" in container
     # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
     # (ADR-0018 §3.5), the notice-schema capture (notice coverage S0) and the M6-A listing-state
-    # sync's read-back (ADR-0023 §3): eight seams, one source.
-    assert container.count("bearer=committed_bearer") == 8
+    # sync's read-back (ADR-0023 §3) and the M6.5-C dispatch sender (ADR-0025 §5): nine seams,
+    # one source.
+    assert container.count("bearer=committed_bearer") == 9
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
@@ -3720,6 +3721,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "operate_order_adoption_links",
         "operate_supplier_orders",
         "operate_supplier_order_history",
+        "live_grant_dispatch_bindings",
+        "operate_dispatch_attempts",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

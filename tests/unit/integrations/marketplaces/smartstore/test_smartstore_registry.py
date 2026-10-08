@@ -63,6 +63,7 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
         EndpointId.SMARTSTORE_ORDER_CHANGES,
         EndpointId.SMARTSTORE_ORDER_DETAILS,
+        EndpointId.SMARTSTORE_ORDER_DISPATCH,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -138,11 +139,20 @@ def test_em5_the_adopted_group_union_and_the_only_adopted_mutation() -> None:
     )
     assert resolve(TOKEN).required_groups == frozenset()
     assert resolve(ORIGIN_READ).required_groups == frozenset({"상품"})
-    # The three adopted mutations — the image upload, CREATE and the DELETE of one confirmed
-    # listing (ADR-0018 §3.5). Adoption is never LIVE authority: the send-time safety stack
-    # refuses each outside a bounded LIVE window and without its exact grant.
+    # The four adopted mutations — the image upload, CREATE, the DELETE of one confirmed
+    # listing (ADR-0018 §3.5) and the dispatch of one product order (ADR-0025 §5.1). Adoption is
+    # never LIVE authority: the send-time safety stack refuses each outside a bounded LIVE window
+    # and without its exact grant.
     assert sorted(c.endpoint_id for c in ADOPTED.values() if c.mutating) == sorted(
-        [CREATE, IMAGE_UPLOAD, EndpointId.SMARTSTORE_PRODUCT_DELETE_V2]
+        [
+            CREATE,
+            IMAGE_UPLOAD,
+            EndpointId.SMARTSTORE_PRODUCT_DELETE_V2,
+            EndpointId.SMARTSTORE_ORDER_DISPATCH,
+        ]
+    )
+    assert resolve(EndpointId.SMARTSTORE_ORDER_DISPATCH).required_groups == frozenset(
+        {"주문 판매자"}
     )
 
 
@@ -392,7 +402,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m65-delivery-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m65-dispatch-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -408,6 +418,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "settings-addressbook-r1",
         "m6-orders-r1",
         "m65-delivery-r1",
+        "m65-dispatch-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

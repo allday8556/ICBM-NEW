@@ -96,6 +96,8 @@ M5_ADOPTED = frozenset(
         # M6-C (ADR-0023 §5, §6): the two read-only order reads.
         "SMARTSTORE_ORDER_CHANGES",
         "SMARTSTORE_ORDER_DETAILS",
+        # M6.5-C (ADR-0025 §5.1): the dispatch of one product order, a mutation.
+        "SMARTSTORE_ORDER_DISPATCH",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -106,7 +108,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m65-delivery-r1"
+M5_MAPPING_REVISION = "m65-dispatch-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -127,10 +129,12 @@ def test_only_the_adopted_m5_contracts_resolve_and_the_rest_fail_locally() -> No
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_the_image_upload_the_create_and_the_delete_are_the_only_adopted_mutations() -> None:
+def test_the_image_upload_the_create_the_delete_and_the_dispatch_are_the_only_mutations() -> None:
     from integrations.marketplaces.smartstore import registry
 
+    # M6.5-C (ADR-0025 §5.1) adds the dispatch of one product order to the three M5 mutations.
     assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_ORDER_DISPATCH",
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_DELETE_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
@@ -248,7 +252,9 @@ M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
 M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
 # M6.5-B (ADR-0025 §6): the order's delivery read-back columns.
 M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
-SCHEMA_HEAD = M65_DELIVERY_READBACK
+# M6.5-C (ADR-0025 §5): the DISPATCH stage, its grant bindings and the dispatch attempts.
+M65_DISPATCH_STAGE = "0054_m65_dispatch_stage"
+SCHEMA_HEAD = M65_DISPATCH_STAGE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -283,6 +289,7 @@ AFTER_M5 = (
     M6_ADOPTED_LISTINGS,
     M65_SUPPLIER_ORDERS,
     M65_DELIVERY_READBACK,
+    M65_DISPATCH_STAGE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

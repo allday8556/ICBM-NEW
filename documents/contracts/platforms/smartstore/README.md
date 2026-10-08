@@ -56,7 +56,9 @@ schema), and the seller address-book read `SMARTSTORE_ADDRESSBOOK_LIST` (read on
 Settings delivery policy's 출고지 / 반품·교환지 choice; only each entry's number, label and type
 are kept), and the two M6-C order reads `SMARTSTORE_ORDER_CHANGES` and
 `SMARTSTORE_ORDER_DETAILS` (read only, `ENDPOINT_MATRIX.md` §4.1.4; inside the ADR-0023 §7
-order allow-list). `ENDPOINT_MATRIX.md` §4 owns the adopted set. Every other SmartStore endpoint
+order allow-list), and `SMARTSTORE_ORDER_DISPATCH` (the M6.5-C dispatch of one product order, a
+mutation only through the DISPATCH stage, `ENDPOINT_MATRIX.md` §4.1.5). `ENDPOINT_MATRIX.md` §4 owns
+the adopted set. Every other SmartStore endpoint
 remains:
 
 `NOT_ADOPTED`

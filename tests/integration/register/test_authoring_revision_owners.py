@@ -547,6 +547,8 @@ def test_0032_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "operate_order_adoption_links",
         "operate_supplier_orders",
         "operate_supplier_order_history",
+        "live_grant_dispatch_bindings",
+        "operate_dispatch_attempts",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

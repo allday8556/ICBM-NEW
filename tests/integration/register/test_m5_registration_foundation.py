@@ -536,6 +536,8 @@ ADAPTIVE_TABLES = (
     "operate_order_adoption_links",
     "operate_supplier_orders",
     "operate_supplier_order_history",
+    "live_grant_dispatch_bindings",
+    "operate_dispatch_attempts",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (
