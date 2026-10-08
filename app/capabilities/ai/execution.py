@@ -43,20 +43,35 @@ class Execution:
 
 
 def _unknown(identity: RequestedIdentity) -> AIExecutionProvenance:
-    """The provenance of a call whose answer reported nothing: the request only."""
+    """The provenance of a call whose answer reported nothing: what the request asked for, and
+    ``None`` or ``UNKNOWN`` for everything only the answer could have told."""
     return AIExecutionProvenance(
         requested_provider=identity.requested_provider,
         requested_model=identity.requested_model,
         actual_provider=None,
         actual_model=None,
-        proxy=None,
-        alias_or_fallback=None,
+        proxy_name=None,
+        proxy_version=identity.proxy_version,
+        proxy_binary_sha256=None,
+        routing_config_version=identity.routing_config_version,
+        alias_applied=None,
+        fallback_applied=None,
         billing_mode=BillingMode.UNKNOWN,
         tokens_in=None,
         tokens_out=None,
         vendor_cost=None,
         estimated_cost=None,
+        allocated_cost=None,
         latency_ms=None,
+    )
+
+
+def _requested(provenance: AIExecutionProvenance) -> tuple[str, str, str | None, str | None]:
+    return (
+        provenance.requested_provider,
+        provenance.requested_model,
+        provenance.routing_config_version,
+        provenance.proxy_version,
     )
 
 
@@ -93,11 +108,15 @@ class AIExecution:
                 error_code=AI_PROVIDER_FAILED,
                 details={"exception": type(error).__name__},
             )
-        provenance = outcome.provenance
-        if (provenance.requested_provider, provenance.requested_model) != (
+        # An answer is trusted only for the exact identity it was asked under: the provider, the
+        # model, the routing configuration and the proxy version (ADR-0012 §6).
+        asked = (
             identity.requested_provider,
             identity.requested_model,
-        ):
+            identity.routing_config_version,
+            identity.proxy_version,
+        )
+        if _requested(outcome.provenance) != asked:
             outcome = replace(
                 outcome,
                 ok=False,

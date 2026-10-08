@@ -41,20 +41,32 @@ class RequestedIdentity:
 
 @dataclass(frozen=True)
 class AIExecutionProvenance:
-    """What answered, as the provider reported it (ADR-0012 §6). It is copied from the outcome,
-    never inferred or fabricated; an unknown value stays ``None``. No secret is ever here."""
+    """What answered, as the provider reported it: exactly ADR-0012 §6's record. It is copied from
+    the outcome, never inferred or fabricated; an unknown value stays ``None`` (an unmeasured cost
+    is never 0, §7). ``allocated_cost`` is an internal allocation, never vendor-billed cost. No
+    secret is ever here."""
 
     requested_provider: str
     requested_model: str
+
     actual_provider: str | None
     actual_model: str | None
-    proxy: str | None
-    alias_or_fallback: str | None
+
+    proxy_name: str | None
+    proxy_version: str | None
+    proxy_binary_sha256: str | None
+    routing_config_version: str | None
+
+    alias_applied: bool | None
+    fallback_applied: bool | None
+
     billing_mode: BillingMode
     tokens_in: int | None
     tokens_out: int | None
     vendor_cost: str | None
     estimated_cost: str | None
+    allocated_cost: str | None
+
     latency_ms: int | None
 
 

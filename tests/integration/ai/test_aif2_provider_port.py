@@ -39,13 +39,18 @@ def _provenance(identity: RequestedIdentity = IDENTITY, **overrides: Any) -> AIE
         "requested_model": identity.requested_model,
         "actual_provider": "fake-provider",
         "actual_model": "fake-model-1-0101",
-        "proxy": None,
-        "alias_or_fallback": None,
+        "proxy_name": None,
+        "proxy_version": identity.proxy_version,
+        "proxy_binary_sha256": None,
+        "routing_config_version": identity.routing_config_version,
+        "alias_applied": False,
+        "fallback_applied": False,
         "billing_mode": BillingMode.SUBSCRIPTION,
         "tokens_in": 120,
         "tokens_out": 40,
         "vendor_cost": None,
         "estimated_cost": None,
+        "allocated_cost": None,
         "latency_ms": 85,
     }
     values.update(overrides)
@@ -214,6 +219,13 @@ def test_an_outcome_keeps_the_providers_provenance_and_classifies_every_failure(
     )
     failed = AIExecution(mismatched).run(composed, correlation_id="c-5").outcome
     assert (failed.ok, failed.error_code, failed.value) == (False, "AI_PROVENANCE_MISMATCH", None)
+    # So is one answered under another routing configuration or proxy version.
+    for changed in ({"routing_config_version": "routing-2"}, {"proxy_version": "proxy-9"}):
+        rerouted = FakeProvider(
+            outcome=ProviderOutcome(ok=True, provenance=_provenance(**changed), value=value)
+        )
+        outcome = AIExecution(rerouted).run(composed, correlation_id="c-5b").outcome
+        assert outcome.error_code == "AI_PROVENANCE_MISMATCH", changed
 
     # A non-object answer is a failed task.
     listed = FakeProvider(outcome=ProviderOutcome(ok=True, provenance=_provenance(), value=None))
@@ -226,11 +238,17 @@ def test_an_outcome_keeps_the_providers_provenance_and_classifies_every_failure(
     execution = limited.run(composed, correlation_id="c-7")
     assert (execution.outcome.error_class, execution.retryable) == (ErrorClass.RATE_LIMITED, True)
     unknown = execution.outcome.provenance
-    assert (unknown.actual_model, unknown.tokens_in, unknown.billing_mode) == (
-        None,
-        None,
-        BillingMode.UNKNOWN,
-    )
+    assert (
+        unknown.actual_model,
+        unknown.tokens_in,
+        unknown.vendor_cost,
+        unknown.allocated_cost,
+        unknown.alias_applied,
+        unknown.fallback_applied,
+        unknown.billing_mode,
+    ) == (None, None, None, None, None, None, BillingMode.UNKNOWN)
+    # What the request itself named is known before the call and kept.
+    assert (unknown.routing_config_version, unknown.proxy_version) == ("routing-1", "proxy-none")
 
     # An adapter fault is a failed task, never a crash, and never retried.
     crashed = AIExecution(FakeProvider(raises=RuntimeError("boom"))).run(
