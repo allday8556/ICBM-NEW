@@ -185,8 +185,9 @@ capability/owner. The UI must not manufacture a result, perform or simulate the 
 unadopted platform endpoint, or create an interim client-owned enrichment store merely to make the
 control active.
 
-When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
-Issue #30 contracts:
+When registration AI is implemented, it reuses the Canonical v3.1 §7 and Issue #30 contracts. Its
+foundation starts before the first vertical is accepted, by owner exception and provider-zero only,
+under ADR-0026; every later stage waits for the first vertical:
 - tasks remain independent (`recommended_name`, `recommended_tags`, category validation,
   required-option mapping and fact review), with platform-specific name/tag projections where the
   canonical contract already defines them;

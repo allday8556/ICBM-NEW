@@ -111,7 +111,7 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
-| `documents/decisions/` | 27 | ADRs and architect review records |
+| `documents/decisions/` | 28 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
