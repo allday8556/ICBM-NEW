@@ -165,6 +165,7 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     # A CREATE whose outcome is unknown is re-checked by a read-only reconcile.
     "UNRESOLVED_CREATE_CONFLICT": (_R, _ACT),
     "LIVE_REGISTRATION_EXISTS": (_X, None),
+    "ADOPTED_LISTING_EXISTS": (_X, None),
     "PROVIDER_DUPLICATE_FOUND": (_X, None),
     "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_X, None),
     # No provider duplicate lookup is adopted yet.

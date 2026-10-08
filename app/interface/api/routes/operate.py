@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import new_correlation_id
@@ -100,3 +101,26 @@ def order_shipping(product_order_id: str, container: ContainerDep) -> JSONRespon
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+class AdoptionRunRequest(BaseModel):
+    supplier_key: str = Field(min_length=1, max_length=40)
+
+
+@router.get("/adoptions")
+def adoptions(container: ContainerDep) -> dict[str, Any]:
+    """The SmartStore listings ICBM did not create but adopted (ADR-0024)."""
+    return {"adoptions": [asdict(record) for record in container.adoptions.all()]}
+
+
+@router.post("/adoptions/run")
+async def run_adoptions(request: AdoptionRunRequest, container: ContainerDep) -> dict[str, Any]:
+    """One adoption pass over a supplier's source products by its owner-declared seller-code
+    convention (ADR-0024 §3). Read-only towards the marketplace."""
+    run = await asyncio.to_thread(
+        container.adoptions.run,
+        request.supplier_key,
+        actor="operator",
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(run)

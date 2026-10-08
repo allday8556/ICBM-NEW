@@ -84,6 +84,10 @@ function row(order) {
       {},
       h('span', { class: `chip ${tone}`.trim(), 'data-resolution': order.resolution ?? 'PENDING' }, label),
       order.supplier_key ? h('span', { class: 'mini' }, `${order.supplier_key} · ${order.source_product_id}`) : null,
+      // ADR-0024 §4: an order of an adopted listing, linked to it beside its UNMATCHED resolution.
+      order.adoption_id
+        ? h('span', { class: 'chip good', 'data-role': 'adoption-link' }, `가져온 상품 · ${order.adopted_supplier_key} · ${order.adopted_source_product_id}`)
+        : null,
     ),
     h('td', {}, order.quantity ?? '—'),
     h('td', {}, won(order.total_payment_amount)),

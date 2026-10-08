@@ -288,3 +288,39 @@ def test_an_escaping_failure_still_finishes_the_run(
     last = service.overview().last_run
     assert last is not None and last.outcome == "INTERRUPTED"
     assert _sync(_service(container, reader)).outcome == COMPLETED
+
+
+def test_the_seller_code_is_compared_as_the_provider_carries_it(
+    container: Container, registration: str
+) -> None:
+    """The read-back carries the provider projection of the listing identity, never the identity
+    itself: the comparison is made on the projection (M6-E fix)."""
+    from integrations.marketplaces.smartstore.product import seller_management_code
+
+    (record,) = [
+        r
+        for r in container.registrations.marketplace_registrations(MARKET)
+        if r.registration_id == registration
+    ]
+    projected = seller_management_code(record.seller_product_code)
+    reader = FakeReader()
+    body = _listing()
+    body["smartstoreChannelProduct"]["sellerManagementCode"] = projected
+    reader.answer = body
+    service = ListingSyncService(
+        db=container.db,
+        clock=container.clock,
+        registrations=container.registrations,
+        reader=reader,
+        normalize=smartstore_readback.normalize,
+        interval_s=1800,
+        marketplace_key=MARKET,
+        seller_code=seller_management_code,
+    )
+    _sync(service)
+    (state,) = service.overview().listings
+    assert "SELLER_CODE_MISMATCH" not in state.drift
+    body["smartstoreChannelProduct"]["sellerManagementCode"] = "0" * 30
+    _sync(service)
+    (state,) = service.overview().listings
+    assert "SELLER_CODE_MISMATCH" in state.drift

@@ -108,6 +108,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
+from app.stages.operate.adoption import AdoptionService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.orders import OrderSyncScheduler, OrderSyncService, ShippingCipher
 from app.stages.operate.service import OperateService
@@ -149,6 +150,7 @@ from app.stages.register.execution import (
     RegistrationExecutionService,
     create_job_definition,
 )
+from app.stages.register.model import RegistrationLifecycle
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.service import RegisterService
 from app.stages.register.store import RegistrationStore
@@ -174,6 +176,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreReadback,
     SmartStoreReconcileLookup,
 )
+from integrations.marketplaces.smartstore.listing_finder import SmartStoreListingFinder
 from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
 from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
@@ -270,6 +273,8 @@ class Container:
     # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
     stock_recheck: StockRecheckService
     stock_recheck_scheduler: StockRecheckScheduler
+    # M6-E (ADR-0024): SmartStore listings ICBM did not create, adopted by seller-code convention.
+    adoptions: AdoptionService
     # M6-C/D (ADR-0023 §5-§7): the read-only order ingest and its periodic pass.
     order_sync: OrderSyncService
     order_sync_scheduler: OrderSyncScheduler
@@ -617,6 +622,42 @@ def build_container(
     # The only bearer source for provider metadata reads as well as REGISTER execution. Reading it
     # never renews or commits a token and authorizes no mutation.
     committed_bearer = smartstore.committed_bearer
+
+    # M6-E (ADR-0024): SmartStore listings ICBM did not create, adopted by the owner-declared
+    # seller-code convention and proven by a read-back. REGISTER refuses a second listing of an
+    # adopted Item; OPERATE reads them back, rechecks their source and links their orders.
+    def _item_source(item_id: str) -> tuple[str, str] | None:
+        with product_store.reading() as unit:
+            return unit.source_identity_of_item(item_id)
+
+    def _bound_items(supplier_key: str) -> Mapping[str, tuple[str, ...]]:
+        with product_store.reading() as unit:
+            return unit.bound_items_of_supplier(supplier_key)
+
+    def _registered_sources() -> set[tuple[str, str]]:
+        found: set[tuple[str, str]] = set()
+        for record in registrations.marketplace_registrations("smartstore"):
+            if record.lifecycle_state is not RegistrationLifecycle.ACTIVE:
+                continue
+            if any(d.deleted for d in registrations.deletions(record.registration_id)):
+                continue
+            snapshot = registrations.snapshot(record.registration_snapshot_id)
+            for item in () if snapshot is None else snapshot.items:
+                identity = _item_source(item.item_id)
+                if identity is not None:
+                    found.add(identity)
+        return found
+
+    adoptions = AdoptionService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        finder_factory=lambda pause: SmartStoreListingFinder(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer, pause=pause
+        ),
+        bound_items=_bound_items,
+        registered_sources=_registered_sources,
+    )
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
     # revision still fails closed with REGISTER_TARGET_POLICY_MISSING.
@@ -660,6 +701,8 @@ def build_container(
         policies=DurableRegistrationPolicy(target_policy_store),
         # B-DETAIL: the detail-composition profile each target names.
         detail_profiles=authoring_revisions,
+        # M6-E (ADR-0024 §5): no second listing of an adopted Item.
+        adopted_items=adoptions.adopted_items,
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4
@@ -863,6 +906,7 @@ def build_container(
         revisions=revisions,
         interval_s=config.operate_stock_recheck_interval_s,
         cap=config.operate_stock_recheck_cap,
+        adoptions=adoptions,
     )
     review_items = ReviewItemStore(
         db,
@@ -934,6 +978,9 @@ def build_container(
         ),
         normalize=smartstore_readback.normalize,
         interval_s=config.operate_listing_sync_interval_s,
+        # The provider code an ICBM listing identity is sent as, compared on read-back.
+        seller_code=smartstore_product.seller_management_code,
+        adoptions=adoptions,
     )
     order_sync = OrderSyncService(
         db=db,
@@ -948,6 +995,7 @@ def build_container(
         interval_s=config.operate_order_sync_interval_s,
         initial_lookback_s=config.operate_order_initial_lookback_s,
         retention_days=config.operate_order_shipping_retention_days,
+        adoptions=adoptions,
         # ADR-0023 §5: the operator-attested 주문 판매자 group gates order ingest.
         order_read_attested=lambda: (
             ApiGroup.ORDER_SELLER in permission_attestation.attested_groups("smartstore")
@@ -974,6 +1022,7 @@ def build_container(
         stock_recheck=stock_recheck,
         stock_recheck_scheduler=StockRecheckScheduler(stock_recheck),
         order_sync=order_sync,
+        adoptions=adoptions,
         order_sync_scheduler=OrderSyncScheduler(order_sync),
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,

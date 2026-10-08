@@ -130,6 +130,10 @@ class AuditEventType(StrEnum):
     ORDER_SHIPPING_STORED = "ORDER_SHIPPING_STORED"
     ORDER_SHIPPING_OPENED = "ORDER_SHIPPING_OPENED"
     ORDER_SHIPPING_DELETED = "ORDER_SHIPPING_DELETED"
+    # M6-E (ADR-0024): a SmartStore listing ICBM did not create was adopted by its seller-code
+    # convention, or provider evidence ended an adoption. Identifiers only.
+    LISTING_ADOPTED = "LISTING_ADOPTED"
+    ADOPTED_LISTING_REMOVED = "ADOPTED_LISTING_REMOVED"
 
 
 class AuditOutcome(StrEnum):

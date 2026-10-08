@@ -2,6 +2,9 @@
 // marketplace. Read-only towards the marketplace: the panel shows what the server observed and the
 // drift it sees, and its one action — 지금 동기화 — runs the same read-only pass the periodic job
 // runs. Nothing here repairs a listing.
+// M6-E (ADR-0024): listings ICBM did not create but adopted by the owner-declared seller-code
+// convention (KM: km + KM상품번호) are listed beside ICBM's own, marked 가져온 상품. KM 상품
+// 가져오기 runs one read-only adoption pass; nothing is attached by name.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
@@ -10,6 +13,23 @@ import { toast } from '../core/toast.js';
 
 const LISTINGS = '/api/v1/operate/listings';
 const SYNC = '/api/v1/operate/listings/sync';
+const ADOPT = '/api/v1/operate/adoptions/run';
+const ADOPT_SUPPLIER = 'kmretail';
+const ADOPTION_LABEL = {
+  ADOPTED: '가져옴',
+  ALREADY_ADOPTED: '이미 가져옴',
+  REGISTERED_BY_ICBM: 'ICBM 등록 상품',
+  NOT_SINGLE_ITEM: '옵션 상품(제외)',
+  NOT_FOUND: '네이버에 없음',
+  AMBIGUOUS: '같은 코드 여러 개',
+  MISMATCH: '코드 불일치',
+  DELETED: '삭제된 상품',
+  LISTING_TAKEN: '다른 상품에 연결됨',
+  RATE_LIMITED: '호출 한도로 중단',
+  NOT_REACHED: '중단으로 미확인',
+  UNAVAILABLE: '확인 불가',
+  FAILED: '확인 실패',
+};
 
 const STATUS_LABEL = {
   SALE: '판매중',
@@ -53,13 +73,19 @@ function stateCell(listing) {
 }
 
 function row(listing) {
+  const adopted = listing.kind === 'ADOPTED';
   return h(
     'tr',
-    { 'data-registration': listing.registration_id },
-    h('td', {}, listing.product_name ?? '—'),
+    adopted ? { 'data-adoption': listing.adoption_id, 'data-listing-kind': 'ADOPTED' } : { 'data-registration': listing.registration_id },
+    h(
+      'td',
+      {},
+      listing.product_name ?? (adopted ? listing.seller_product_code : '—'),
+      adopted ? h('span', { class: 'chip', 'data-role': 'adopted-mark' }, '가져온 상품') : null,
+    ),
     h('td', {}, listing.marketplace_product_id),
     h('td', {}, stateCell(listing)),
-    h('td', {}, won(listing.sale_price), h('span', { class: 'mini' }, `등록 ${won(listing.snapshot_sale_price)}`)),
+    h('td', {}, won(listing.sale_price), adopted ? null : h('span', { class: 'mini' }, `등록 ${won(listing.snapshot_sale_price)}`)),
     h('td', {}, listing.stock_quantity ?? '—'),
     h('td', {}, listing.observed_at ? dotDateTime(listing.observed_at) : '—'),
     h(
@@ -85,6 +111,25 @@ function body(found, reload) {
       button.disabled = false;
     }
   });
+  const adopt = h('button', { type: 'button', class: 'btn', 'data-action': 'adopt-listings' }, 'KM 상품 가져오기');
+  adopt.addEventListener('click', async () => {
+    adopt.disabled = true;
+    try {
+      const run = await sendJson('POST', ADOPT, { supplier_key: ADOPT_SUPPLIER });
+      const tally = {};
+      for (const outcome of run.outcomes) tally[outcome.outcome] = (tally[outcome.outcome] ?? 0) + 1;
+      const summary = Object.entries(tally)
+        .map(([code, count]) => `${ADOPTION_LABEL[code] ?? code} ${count}`)
+        .join(' · ');
+      toast('KM 상품 가져오기', summary || '대상 상품 없음');
+      await reload();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast('KM 상품 가져오기', code === 'OPERATE_ADOPTION_RUNNING' ? '이미 가져오는 중입니다.' : String(error?.message ?? error));
+    } finally {
+      adopt.disabled = false;
+    }
+  });
   const minutes = Math.round((found.interval_s ?? 0) / 60);
   return [
     h(
@@ -98,6 +143,7 @@ function body(found, reload) {
             `마지막 확인 ${dotDateTime(last.started_at)} · ${OUTCOME_LABEL[last.outcome] ?? last.outcome ?? '진행 중'}`,
           )
         : h('span', { class: 'mini', 'data-sync-outcome': 'NONE' }, '아직 확인한 적 없음'),
+      adopt,
       button,
     ),
     found.listings.length

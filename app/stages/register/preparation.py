@@ -168,6 +168,8 @@ PREPARED_ASSET_REF_UNSAFE: Final = "PREPARED_ASSET_REF_UNSAFE"
 PREPARED_ASSET_UNEXPECTED: Final = "PREPARED_ASSET_UNEXPECTED"
 UNRESOLVED_CREATE_CONFLICT: Final = "UNRESOLVED_CREATE_CONFLICT"
 LIVE_REGISTRATION_EXISTS: Final = "LIVE_REGISTRATION_EXISTS"
+# M6-E (ADR-0024 §5): a listing ICBM did not create but adopted already sells an Item of the unit.
+ADOPTED_LISTING_EXISTS: Final = "ADOPTED_LISTING_EXISTS"
 PROVIDER_DUPLICATE_FOUND: Final = "PROVIDER_DUPLICATE_FOUND"
 PROVIDER_DUPLICATE_WEAK_SIGNAL: Final = "PROVIDER_DUPLICATE_WEAK_SIGNAL"
 DUPLICATE_EVIDENCE_MISSING: Final = "DUPLICATE_EVIDENCE_MISSING"
@@ -249,6 +251,7 @@ REASON_CODES: Final = frozenset(
         PREPARED_ASSET_UNEXPECTED,
         UNRESOLVED_CREATE_CONFLICT,
         LIVE_REGISTRATION_EXISTS,
+        ADOPTED_LISTING_EXISTS,
         PROVIDER_DUPLICATE_FOUND,
         PROVIDER_DUPLICATE_WEAK_SIGNAL,
         DUPLICATE_EVIDENCE_MISSING,
@@ -690,6 +693,8 @@ class ResolvedUnit:
     # The DETAIL_COMPOSITION profile the target names, as its owner holds it (B-DETAIL), or None
     # when the target names none or no profile source is wired: then the composition is BODY-only.
     detail_profile: DetailProfile | None = None
+    # M6-E (ADR-0024 §5): the ACTIVE adopted listings that already sell an Item of the unit.
+    adopted_listings: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------- the result
@@ -1262,6 +1267,10 @@ def _duplicate_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Re
             Reason(LIVE_REGISTRATION_EXISTS, _D, f"registration:{live.registration_id}")
             for live in unit.live_registrations
         )
+        reasons.extend(
+            Reason(ADOPTED_LISTING_EXISTS, _D, f"adoption:{adoption_id}")
+            for adoption_id in unit.adopted_listings
+        )
     evidence = request.duplicate_evidence
     if evidence is None:
         if target.duplicate_proof_required:
@@ -1526,6 +1535,10 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
                 (unit.marketplace_key, unit.marketplace_account_id, unit.listing_identity)
             ),
             "live_registrations": sorted(r.registration_id for r in unit.live_registrations),
+            # Only when present, so a unit with no adopted listing keeps its earlier fingerprint.
+            **(
+                {"adopted_listings": sorted(unit.adopted_listings)} if unit.adopted_listings else {}
+            ),
         },
         "conflicts": sorted([c.intent_id, c.state] for c in unit.conflicts),
     }
