@@ -1877,3 +1877,521 @@ td.no-data {
 .traffic-mini-grid b.no-data {
   font-size: var(--fs-lg);
 }
+
+/* 상품 편집기 (2026-10-08 owner UX, phase 1): its own tab, six steps, and the one-line 등록 준비
+   strip. The application chrome is not drawn around it. */
+body.bare-page .sidebar,
+body.bare-page .topbar {
+  display: none;
+}
+
+body.bare-page .app {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.bare-page .content {
+  padding: 0;
+}
+
+.register-queue-row {
+  cursor: pointer;
+}
+
+.register-queue-row:hover td {
+  background: #f8fbff;
+}
+
+.unit-choice .choice-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+
+.unit-choice .choice-card {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-7);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  background: var(--color-panel);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.unit-choice .choice-card:hover:not([disabled]) {
+  border-color: #9ec1ff;
+  background: #f8fbff;
+}
+
+.unit-choice .choice-card[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.unit-choice .choice-card b {
+  color: var(--color-text-strong);
+  font-size: var(--fs-title);
+}
+
+.register-editor .editor-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  height: var(--topbar-height);
+  padding: 0 20px;
+  background: var(--gradient-topbar);
+  color: #fff;
+}
+
+.register-editor .editor-top .title {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-heavy);
+}
+
+.register-editor .editor-top .btn {
+  color: var(--color-text-strong);
+}
+
+.register-editor .editor-banner {
+  margin: var(--space-5) 20px 0;
+}
+
+.register-editor .editor-body {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+  padding: 18px 20px 90px;
+}
+
+.register-editor .stepper {
+  position: sticky;
+  top: calc(var(--topbar-height) + 16px);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.register-editor .step {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.register-editor .step .no {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-neutral-bg);
+  font-size: 12px;
+  font-weight: var(--fw-heavy);
+}
+
+.register-editor .step.on {
+  border-color: #c9dbff;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.register-editor .step.on .no {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.register-editor .step b {
+  display: block;
+  color: var(--color-text-strong);
+  font-size: 13px;
+}
+
+.register-editor .step small {
+  color: var(--color-text-faint);
+  font-size: var(--fs-md);
+}
+
+.register-editor .dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #c3ccd5;
+}
+
+.register-editor .dot.good {
+  background: var(--color-good);
+}
+
+.register-editor .dot.warn {
+  background: #e2a33b;
+}
+
+.register-editor .dot.bad {
+  background: var(--color-bad);
+}
+
+.register-editor .editor-main {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.register-editor .editor-pane[hidden] {
+  display: none;
+}
+
+.register-editor .editor-pane > .panel {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.register-editor .editor-pane .panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.register-editor .row,
+.register-editor .stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.register-editor .stack {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.register-editor .spacer {
+  flex: 1;
+}
+
+.register-editor .hero {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.register-editor .bigthumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 150px;
+  height: 150px;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, #f2f4f6, #d4dbe1);
+}
+
+.register-editor .bigthumb .chip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+
+.register-editor .bigthumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.register-editor .pf-tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.register-editor .pf-tabs button {
+  padding: 9px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.register-editor .pf-tabs button.on {
+  border-bottom-color: var(--color-primary);
+}
+
+.register-editor .field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.register-editor .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 7px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+}
+
+.register-editor .tag {
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-bg);
+  font-size: var(--fs-lg);
+}
+
+.register-editor .bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel-subtle);
+}
+
+.register-editor .bulk .count {
+  margin-right: var(--space-1);
+  color: var(--color-text-sub);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+}
+
+.register-editor .calc {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.register-editor .calc .box {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-input);
+}
+
+.register-editor .mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.register-editor .mode-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.register-editor .mode-card.on {
+  border-color: var(--color-primary);
+  background: #f4f8ff;
+}
+
+.register-editor .editor-foot {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 9px 18px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  box-shadow: 0 -6px 20px rgba(20, 35, 50, 0.06);
+  white-space: nowrap;
+}
+
+.register-editor .editor-foot .btn {
+  padding: 6px 10px;
+  font-size: 11.5px;
+}
+
+.register-editor .editor-foot .register-action .mini {
+  display: none;
+}
+
+.register-editor .ready-label {
+  color: #4b5965;
+  font-size: 11px;
+  font-weight: var(--fw-heavy);
+}
+
+.register-editor .ready-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.register-editor .ready-item {
+  position: relative;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.register-editor .ready-item .dot {
+  width: 7px;
+  height: 7px;
+}
+
+.register-editor .ready-item.good {
+  border-color: #bfe9d4;
+  background: var(--color-good-bg);
+  color: var(--color-good);
+}
+
+.register-editor .ready-item.warn {
+  border-color: #f3d9a8;
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+}
+
+.register-editor .ready-item.bad {
+  border-color: #f6c4c4;
+  background: var(--color-bad-bg);
+  color: var(--color-bad);
+}
+
+.register-editor .ready-item.none {
+  border-color: var(--color-line);
+  background: var(--color-neutral-bg);
+  color: var(--color-neutral);
+}
+
+.register-editor .ready-item .tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  display: none;
+  min-width: 260px;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: #17212b;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: var(--fw-regular);
+  line-height: 1.55;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.25);
+}
+
+.register-editor .ready-item .tip b {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.register-editor .ready-item .tip ul {
+  margin: 0 0 6px;
+  padding-left: 16px;
+}
+
+.register-editor .ready-item .tip-sub {
+  color: #9fb3c8;
+}
+
+.register-editor .ready-item:hover .tip,
+.register-editor .ready-item:focus-visible .tip {
+  display: block;
+}
+
+@media (max-width: 1100px) {
+  .register-editor .editor-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .register-editor .stepper {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .register-editor .calc {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Editor polish: the form shell carries no visible part; the global status card stays out of the
+   editor's own footer; marks and inputs at editor size. */
+.register-editor form.editor-form {
+  display: none;
+}
+
+body.bare-page #registrationStatus {
+  display: none !important;
+}
+
+.register-editor .pf-logo {
+  height: 18px;
+}
+
+.register-editor .editor-foot .pf-logo {
+  height: 14px;
+}
+
+.register-editor .editor-pane label.kv {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: center;
+}
+
+.register-editor .editor-pane label.kv input,
+.register-editor .editor-pane label.kv select,
+.register-editor .editor-pane label.kv textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font: inherit;
+}
+
+.register-editor .no-data,
+.register-editor .calc .box b {
+  font-size: var(--fs-lg);
+}
+.register-editor .step small{word-break:keep-all}
+.register-editor [data-role='editor-actions']{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:var(--space-4);align-items:start}
+.register-editor [data-role='editor-actions'] .register-action{display:grid;gap:var(--space-2);align-content:start}
+.register-editor [data-role='editor-actions'] .register-action .btn{width:100%}
+.register-editor [data-role='editor-actions'] .register-action .mini{white-space:normal;word-break:keep-all;line-height:1.45}
+.register-editor .item-images select{width:100%;padding:5px 8px;border:1px solid var(--color-line);border-radius:var(--radius-md);background:var(--color-input);font:inherit;font-size:var(--fs-md)}
