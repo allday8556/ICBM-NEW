@@ -7,10 +7,11 @@
 // preflight with its area-classified reasons, the snapshot preview and the unit's own actions. A v29
 // slot no owner fills yet keeps its place and reads 데이터 없음 or 준비 중 (owner decision 가); a
 // control without a contract is markInert. The bottom 등록 준비 strip colours each step from the
-// server's preflight reasons only: nothing here judges readiness. An AI control (image translation,
-// background removal, name and tag suggestions) is not rendered at all until a server owner exists
-// for it (ROADMAP, Issue #127). 상품수정 is read-only in phase 1: no contract edits a registered
-// listing yet, and a unit with a Snapshot or an Intent is never authored here.
+// server's preflight reasons only: nothing here judges readiness. An AI control (background
+// removal, image translation) keeps its approved place as an inert 준비 중 placeholder that sends
+// nothing until its server owner exists (owner decision 2026-10-08, Issue #219 comment 6054956408;
+// ROADMAP, Issue #127). 상품수정 is read-only in phase 1: no contract edits a registered listing yet,
+// and a unit with a Snapshot or an Intent is never authored here.
 
 import { getJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -60,6 +61,11 @@ function noData(label) {
 
 function pending(label, copy) {
   return markInert(h('button', { type: 'button', class: 'btn' }, label), copy ?? label);
+}
+
+// An AI control ahead of its server owner: its place only, inert, sending nothing.
+function aiPending(label) {
+  return markInert(h('button', { type: 'button', class: 'btn ai', 'data-ai-placeholder': label }, `✨ ${label}`), `${label} · 준비 중`);
 }
 
 // The server's preflight reasons, grouped by step. Without a preflight the step is not judged.
@@ -204,8 +210,10 @@ function editor(unit, ctx, labels, mode, step) {
         'div',
         { class: 'bulk', 'data-role': 'image-bulk' },
         h('span', { class: 'count' }, '선택한 이미지에'),
+        aiPending('배경 이미지 제거'),
         pending('리사이즈', '리사이즈는 준비 중'),
         pending('이미지 편집', '이미지 편집은 준비 중'),
+        aiPending('이미지 자동번역'),
       ),
       editable ? null : h('div', { class: 'note' }, '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다.'),
       ...unit.items.map((item) =>
@@ -237,7 +245,7 @@ function editor(unit, ctx, labels, mode, step) {
       h('div', { class: 'mode-switch' }, h('button', { type: 'button', class: 'mode-card on' }, h('b', {}, '이미지 에디터 방식'), h('span', { class: 'mini' }, '상세 이미지는 대표이미지 단계에서 「상세」로 고릅니다')), markInert(h('button', { type: 'button', class: 'mode-card' }, h('b', {}, 'HTML 방식'), h('span', { class: 'mini' }, '준비 중')), 'HTML 방식은 준비 중')),
       h('div', { class: 'detail-group' }, h('h4', {}, '상단 공지'), noData('상단 공지'), pending('＋ 공지 추가', '상·하단 공지는 준비 중')),
       parts ? parts.detail : h('div', { class: 'kv' }, h('span', {}, '상세 본문'), h('b', {}, unit.authored?.inputs?.detail_body ?? '—')),
-      h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
+      h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), aiPending('이미지 자동번역'), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
       h('div', { class: 'detail-group' }, h('h4', {}, '하단 공지'), noData('하단 공지')),
     ),
     pane(

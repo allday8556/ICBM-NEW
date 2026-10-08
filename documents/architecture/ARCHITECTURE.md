@@ -177,12 +177,13 @@ capability unavailable. This restates repository-canonical M5 requirements: ADR-
 registers with no AI provider configured, and `documents/acceptance/milestones/M5.md` §2 keeps AI outside M5
 acceptance. It is not a new AI availability requirement introduced here.
 
-Before that vertical is accepted, the approved/prototype UX may reserve an AI control's final
-position, but the production runtime must not render that control at all until an authoritative
-server capability/owner exists. A disabled placeholder with no authoritative reason is not a valid
-runtime state. If no server owner can state why the capability is unavailable, the client must not
-invent or hardcode that reason. The UI must not manufacture a result, call an unadopted platform
-endpoint, or create an interim client-owned enrichment store merely to make the control active.
+The approved/prototype UX may reserve an AI control's final position. Owner decision 2026-10-08
+(Issue #219 comment `6054956408`) lets the production runtime render that control ahead of its server owner.
+It may do so only as an inert placeholder: disabled, named for its feature and marked 준비 중. It
+sends nothing and calls no AI provider. It becomes active only through an authoritative server
+capability/owner. The UI must not manufacture a result, perform or simulate the AI operation, call an
+unadopted platform endpoint, or create an interim client-owned enrichment store merely to make the
+control active.
 
 When registration AI is implemented after the first vertical, it reuses the Canonical v3.1 §7 and
 Issue #30 contracts:

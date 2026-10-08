@@ -85,12 +85,19 @@ def test_a_queue_row_opens_the_editor_and_the_editor_saves_through_the_preparati
         assert page.locator(".editor-pane:not([hidden])").get_attribute("data-pane") == "4"
         # A slot without an owner keeps its place and is inert.
         bulk = page.locator("[data-role='image-bulk'] .btn")
-        assert bulk.count() == 2
+        assert bulk.count() == 4
         assert all(b.get_attribute("aria-disabled") == "true" for b in bulk.all())
-        # An AI control is not rendered at all until a server owner exists (Issue #127).
-        assert page.locator("[data-role='register-editor'] .btn.ai").count() == 0
-        text = editor.text_content() or ""
-        assert "자동번역" not in text and "배경 이미지 제거" not in text
+        # An AI control keeps its place ahead of its server owner, inert (owner decision
+        # 2026-10-08, Issue #219 comment 6054956408): pressing one sends nothing.
+        ai = page.locator("[data-ai-placeholder]")
+        assert sorted(a.get_attribute("data-ai-placeholder") or "" for a in ai.all()) == [
+            "배경 이미지 제거",
+            "이미지 자동번역",
+            "이미지 자동번역",
+        ]
+        assert all(a.get_attribute("aria-disabled") == "true" for a in ai.all())
+        page.locator(".stepper .step[data-step='images']").click()
+        page.locator("[data-role='image-bulk'] [data-ai-placeholder]").first.click(force=True)
         assert writes == []
 
         # The operator authors the unit across the steps; the save is the register page's own.
